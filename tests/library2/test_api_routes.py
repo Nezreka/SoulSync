@@ -4621,6 +4621,47 @@ def test_the_old_track_delete_route_can_delete_the_file(api, tmp_path, monkeypat
     assert list((tmp_path / "Transfer" / ".deleted").rglob(path.name))
 
 
+def test_the_old_album_delete_route_reports_what_it_removed(api, tmp_path, monkeypatch):
+    """the artist page's album delete toast reads tracks_deleted / files_deleted
+    / files_failed, as the 3.6.1 route answered: it always said (0 tracks)."""
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "song.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        album_id = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?",
+                                (ids["album_track"],)).fetchone()[0]
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(path), ids["album_track"]))
+        conn.commit()
+    monkeypatch.setattr("core.library2.file_delete._library_roots", lambda _config=None: [str(root)])
+    body = client.delete(f"/api/library/album/{album_id}?delete_files=true").get_json()
+    assert body["success"] is True
+    assert body["tracks_deleted"] >= 1 and body["files_deleted"] >= 1
+    assert body["files_failed"] == 0
+
+
+def test_the_old_track_delete_route_blacklists_when_asked(api, tmp_path, monkeypatch):
+    """?blacklist=true keeps the file's name from coming back, as in 3.6.1."""
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "rejected.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(path), ids["album_track"]))
+        conn.commit()
+    monkeypatch.setattr("core.library2.file_delete._library_roots", lambda _config=None: [str(root)])
+    blocked = []
+    monkeypatch.setattr(db, "add_to_blacklist", lambda **kw: blocked.append(kw) or True, raising=False)
+    body = client.delete(
+        f"/api/library/track/{ids['album_track']}?delete_file=true&blacklist=true").get_json()
+    assert body["success"] is True and body["blacklisted"] is True
+    assert [b["blocked_filename"] for b in blocked] == ["rejected.flac"]
+
+
 def test_the_old_track_delete_route_answers_404_for_an_unknown_track(api):
     client, _db, _ids = api
     assert client.delete("/api/library/track/999999").status_code == 404

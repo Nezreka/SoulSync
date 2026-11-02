@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -4372,7 +4373,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except FileDeleteError as exc:
             return _fail(str(exc), exc.status)
 
-    def _legacy_delete(entity: str, eid: int, track_id: Optional[int], delete_files: bool):
+    def _legacy_delete(entity: str, eid: int, track_id: Optional[int], delete_files: bool,
+                       add_blacklist: bool = False):
         """The artist page's and the songs view's delete, on the journaled
         ADR-05 path: remove the library record and keep the file, or move the
         file to the deleted-files folder. A track is its album's files narrowed
@@ -4383,6 +4385,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         )
         db = get_database()
         file_ids = None
+        blacklist_entry = None
         if track_id is not None:
             with closing(db._get_connection()) as conn:
                 row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?",
@@ -4390,6 +4393,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 if not row:
                     return _fail("Track not found", 404)
                 eid = int(row[0])
+                if add_blacklist:
+                    # 3.6.1's "delete and blacklist": the file's name is kept
+                    # from coming back from the same source
+                    hit = conn.execute(
+                        "SELECT t.title, COALESCE(ar.name,''), f.path FROM lib2_tracks t "
+                        "JOIN lib2_albums al ON al.id=t.album_id "
+                        "LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id "
+                        "LEFT JOIN lib2_track_files f ON f.track_id=t.id "
+                        "AND COALESCE(f.file_state,'active')<>'deleted' "
+                        "WHERE t.id=? ORDER BY f.is_primary DESC LIMIT 1", (int(track_id),)).fetchone()
+                    if hit and hit[2]:
+                        blacklist_entry = (hit[0] or "", hit[1] or "",
+                                           os.path.basename(str(hit[2]).replace("\\", "/")))
                 file_ids = [int(r[0]) for r in conn.execute(
                     "SELECT id FROM lib2_track_files WHERE track_id=? "
                     "AND COALESCE(file_state,'active')<>'deleted'", (int(track_id),))]
@@ -4401,8 +4417,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     db, entity=entity, entity_id=eid, file_ids=file_ids,
                     actor="user", actor_profile_id=_profile())
                 _reproject_after_file_removal(operation.get("track_ids") or [])
-                return jsonify({"success": True, "deleted_count": len(operation.get("track_ids") or []),
-                                "file_deleted": False, "blacklisted": False})
+                count = len(operation.get("track_ids") or [])
+                return jsonify({"success": True, "deleted_count": count, "tracks_deleted": count,
+                                "file_deleted": False, "files_deleted": 0, "files_failed": 0,
+                                "blacklisted": _blacklist(db, blacklist_entry)})
             preview = preview_entity_files(db, entity=entity, entity_id=eid, file_ids=file_ids)
             from core.imports.paths import docker_resolve_path
             from core.library.deleted_quarantine import quarantine_mover
@@ -4412,20 +4430,39 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 file_ids=file_ids, actor="user", actor_profile_id=_profile(),
                 unlink=quarantine_mover(transfer, "library_delete"), mode="quarantine")
             _reproject_after_file_removal(operation.get("track_ids") or [])
-            result = {"success": True, "deleted_count": len(operation.get("track_ids") or []),
-                      "file_deleted": bool(preview.get("deletable_count")), "blacklisted": False}
+            count = len(operation.get("track_ids") or [])
+            items = operation.get("items") or []
+            # the album route's own keys too: the artist page's album delete
+            # reads tracks_deleted / files_deleted / files_failed
+            result = {"success": True, "deleted_count": count, "tracks_deleted": count,
+                      "file_deleted": bool(preview.get("deletable_count")),
+                      "files_deleted": sum(1 for i in items if i.get("status") == "deleted"),
+                      "files_failed": sum(1 for i in items if i.get("status") == "failed"),
+                      "blacklisted": _blacklist(db, blacklist_entry)}
             if not preview.get("deletable_count"):
                 result["file_error"] = "The file couldn't be reached, so only the library record was removed"
             return jsonify(result)
         except FileDeleteError as exc:
             return _fail(str(exc), exc.status)
 
+    def _blacklist(db, entry) -> bool:
+        if not entry:
+            return False
+        try:
+            return bool(db.add_to_blacklist(track_title=entry[0], track_artist=entry[1],
+                                            blocked_filename=entry[2], blocked_username="",
+                                            reason="user_rejected"))
+        except Exception as exc:  # noqa: BLE001 - the delete already happened
+            logger.debug("blacklist after delete failed: %s", exc)
+            return False
+
     @_route("/api/library/track/<int:track_id>", methods=["DELETE"])
     def lib2_legacy_delete_track(track_id):
-        """DELETE /api/library/track/<id>[?delete_file=true], the route the
-        artist page and the songs view have always called."""
+        """DELETE /api/library/track/<id>[?delete_file=true][&blacklist=true],
+        the route the artist page and the songs view have always called."""
         return _legacy_delete("albums", 0, track_id,
-                              request.args.get("delete_file", "false").lower() == "true")
+                              request.args.get("delete_file", "false").lower() == "true",
+                              add_blacklist=request.args.get("blacklist", "false").lower() == "true")
 
     @_route("/api/library/album/<int:album_id>", methods=["DELETE"])
     def lib2_legacy_delete_album(album_id):
