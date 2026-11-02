@@ -222,12 +222,13 @@ def ensure_unmatched_match_schema(cursor) -> None:
 def _stored_rows(conn, file_ids: List[int]) -> Dict[int, Any]:
     if not file_ids:
         return {}
-    marks = ",".join("?" for _ in file_ids)
     try:
+        # one json parameter: a placeholder per file broke past ~32k files
         rows = conn.execute(
-            f"SELECT file_id, file_key, status, fingerprint_status, best_confidence, "
-            f"result_json, identified_at FROM lib2_unmatched_matches WHERE file_id IN ({marks})",
-            [int(i) for i in file_ids]).fetchall()
+            "SELECT file_id, file_key, status, fingerprint_status, best_confidence, "
+            "result_json, identified_at FROM lib2_unmatched_matches"
+            " WHERE file_id IN (SELECT value FROM json_each(?))",
+            [json.dumps([int(i) for i in file_ids])]).fetchall()
     except sqlite3.OperationalError:
         # a read never creates the table: nothing identified yet
         return {}

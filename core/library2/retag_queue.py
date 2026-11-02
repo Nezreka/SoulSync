@@ -14,6 +14,7 @@ the shape the API docs describe, so a script built on them keeps working:
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import closing
 from typing import Any, Dict, List, Optional
@@ -96,12 +97,13 @@ def retag_group(db, album_id: int) -> Optional[Dict[str, Any]]:
 def _dismiss(db, finding_ids: List[int]) -> int:
     if not finding_ids:
         return 0
-    marks = ",".join("?" * len(finding_ids))
     with closing(db._get_connection()) as conn:
+        # one json parameter: dismiss-all on a big library passed ~32k ids
         cur = conn.execute(
-            f"UPDATE repair_findings SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,"
-            f" updated_at = CURRENT_TIMESTAMP WHERE status = 'pending' AND id IN ({marks})",
-            finding_ids)
+            "UPDATE repair_findings SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,"
+            " updated_at = CURRENT_TIMESTAMP WHERE status = 'pending'"
+            " AND id IN (SELECT value FROM json_each(?))",
+            [json.dumps([int(i) for i in finding_ids])])
         conn.commit()
         return cur.rowcount
 

@@ -138,8 +138,15 @@ def _rows(conn, sql: str, params: Sequence[Any]) -> List[Any]:
     return conn.execute(sql, params).fetchall()
 
 
-def _in_clause(values: Sequence[int]) -> str:
-    return ",".join("?" * len(values))
+def _in_clause(values: Sequence[Any]) -> str:
+    """The inside of an ``IN (...)`` for ``values``, bound as ONE parameter
+    (``_in_param``): a placeholder per id broke past SQLite's variable limit
+    on an artist with a big catalogue, and the history went silently empty."""
+    return "SELECT value FROM json_each(?)"
+
+
+def _in_param(values: Sequence[Any]) -> str:
+    return json.dumps(list(values))
 
 
 def _album_ids_for_artists(conn, artist_ids: Sequence[int]) -> List[int]:
@@ -151,7 +158,7 @@ def _album_ids_for_artists(conn, artist_ids: Sequence[int]) -> List[int]:
         conn,
         f"SELECT DISTINCT album_id FROM lib2_album_artists "
         f"WHERE artist_id IN ({_in_clause(artist_ids)})",
-        artist_ids,
+        [_in_param(artist_ids)],
     )
     return [int(r[0]) for r in rows]
 
@@ -162,7 +169,7 @@ def _edition_ids_for_albums(conn, album_ids: Sequence[int]) -> List[int]:
     rows = _rows(
         conn,
         f"SELECT id FROM lib2_release_editions WHERE release_group_id IN ({_in_clause(album_ids)})",
-        album_ids,
+        [_in_param(album_ids)],
     )
     return [int(r[0]) for r in rows]
 
@@ -174,7 +181,7 @@ def _recording_ids_for_editions(conn, edition_ids: Sequence[int]) -> List[int]:
         conn,
         "SELECT DISTINCT recording_id FROM lib2_release_tracks "
         f"WHERE release_edition_id IN ({_in_clause(edition_ids)})",
-        edition_ids,
+        [_in_param(edition_ids)],
     )
     return [int(r[0]) for r in rows]
 
@@ -192,7 +199,7 @@ def _track_ids_for_albums(conn, album_ids: Sequence[int]) -> List[int]:
     if not album_ids:
         return []
     rows = _rows(
-        conn, f"SELECT id FROM lib2_tracks WHERE album_id IN ({_in_clause(album_ids)})", album_ids
+        conn, f"SELECT id FROM lib2_tracks WHERE album_id IN ({_in_clause(album_ids)})", [_in_param(album_ids)]
     )
     from core.library2.catalogue_identity import merged_entity_ids
     return merged_entity_ids(conn, "track", [int(r[0]) for r in rows])
@@ -212,16 +219,16 @@ def _acquisition_request_ids(
         clauses.append(
             f"(scope='artist_missing' AND entity_id IN ({_in_clause(artist_ids)}))"
         )
-        params.extend(artist_ids)
+        params.append(_in_param(artist_ids))
     if album_ids:
         clauses.append(f"(scope='release_group' AND entity_id IN ({_in_clause(album_ids)}))")
-        params.extend(album_ids)
+        params.append(_in_param(album_ids))
     if edition_ids:
         clauses.append(f"(scope='release_edition' AND entity_id IN ({_in_clause(edition_ids)}))")
-        params.extend(edition_ids)
+        params.append(_in_param(edition_ids))
     if recording_ids:
         clauses.append(f"(scope='recording' AND entity_id IN ({_in_clause(recording_ids)}))")
-        params.extend(recording_ids)
+        params.append(_in_param(recording_ids))
     if not clauses:
         return []
     try:
@@ -247,7 +254,7 @@ def _acquisition_events(conn, request_ids: Sequence[str], limit: int) -> List[Di
             f"""SELECT event_type, reason_code, message, payload_json, created_at
                   FROM acquisition_history WHERE request_id IN ({_in_clause(request_ids)})
                  ORDER BY created_at DESC, rowid DESC LIMIT ?""",
-            (*request_ids, limit),
+            (_in_param(request_ids), limit),
         )
     except Exception:  # noqa: BLE001
         return []
@@ -343,7 +350,7 @@ def _entity_history_events(conn, track_ids: Sequence[int], limit: int) -> List[D
                     OR (from_entity_type='track' AND from_entity_id IN ({ph}))
                     OR (to_entity_type='track' AND to_entity_id IN ({ph}))
                  ORDER BY id DESC LIMIT ?""",
-            (*track_ids, *track_ids, *track_ids, limit),
+            (_in_param(track_ids), _in_param(track_ids), _in_param(track_ids), limit),
         )
     except Exception:  # noqa: BLE001
         return []
@@ -376,13 +383,13 @@ def _file_delete_events(
             f"(entity_type IN ('artist','artists') "
             f"AND entity_id IN ({_in_clause(artist_ids)}))"
         )
-        params.extend(artist_ids)
+        params.append(_in_param(artist_ids))
     if album_ids:
         clauses.append(
             f"(entity_type IN ('release_group','albums') "
             f"AND entity_id IN ({_in_clause(album_ids)}))"
         )
-        params.extend(album_ids)
+        params.append(_in_param(album_ids))
     if not clauses:
         return []
     try:
@@ -445,7 +452,7 @@ def _track_file_delete_events(
                         JOIN lib2_track_files tf ON tf.id = CAST(fid.value AS INTEGER)
                        WHERE tf.track_id IN ({_in_clause(track_ids)}))
                  ORDER BY COALESCE(o.completed_at, o.created_at) DESC LIMIT ?""",
-            (*track_ids, limit),
+            (_in_param(track_ids), limit),
         )
     except Exception:  # noqa: BLE001
         return []
@@ -479,7 +486,7 @@ def _manual_skip_events(conn, track_ids: Sequence[int], limit: int) -> List[Dict
                   JOIN lib2_track_files tf ON tf.path = s.file_path AND tf.is_primary=1
                  WHERE tf.track_id IN ({_in_clause(track_ids)})
                  ORDER BY s.id DESC LIMIT ?""",
-            (*track_ids, limit),
+            (_in_param(track_ids), limit),
         )
     except Exception:  # noqa: BLE001
         return []
@@ -512,13 +519,13 @@ def _maintenance_events(
     params: List[Any] = []
     if artist_ids:
         clauses.append(f"e.lib2_artist_id IN ({_in_clause(artist_ids)})")
-        params.extend(artist_ids)
+        params.append(_in_param(artist_ids))
     if album_ids:
         clauses.append(f"e.lib2_album_id IN ({_in_clause(album_ids)})")
-        params.extend(album_ids)
+        params.append(_in_param(album_ids))
     if track_ids:
         clauses.append(f"e.lib2_track_id IN ({_in_clause(track_ids)})")
-        params.extend(track_ids)
+        params.append(_in_param(track_ids))
     if not clauses:
         return []
     try:
@@ -686,7 +693,7 @@ def _track_download_events(
                   FROM lib2_tracks t
                   LEFT JOIN lib2_track_files tf ON tf.track_id=t.id AND tf.is_primary=1
                  WHERE t.id IN ({ph})""",
-            track_ids,
+            [_in_param(track_ids)],
         )
     except Exception:  # noqa: BLE001
         return [], set()
@@ -702,7 +709,7 @@ def _track_download_events(
                            status, created_at
                       FROM track_downloads WHERE track_id IN ({_in_clause(legacy_ids)})
                      ORDER BY id DESC LIMIT ?""",
-                (*legacy_ids, limit),
+                (_in_param(legacy_ids), limit),
             )
             rows.extend(legacy_rows)
             matched_legacy_ids = {r["track_id"] for r in legacy_rows}
@@ -722,7 +729,7 @@ def _track_download_events(
                            status, created_at
                       FROM track_downloads WHERE file_path IN ({_in_clause(fallback_paths)})
                      ORDER BY id DESC LIMIT ?""",
-                (*fallback_paths, limit),
+                (_in_param(fallback_paths), limit),
             )
             rows.extend(path_rows)
         except Exception:  # noqa: BLE001, S110 — the legacy-id pass above already succeeded

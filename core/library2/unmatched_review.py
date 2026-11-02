@@ -16,6 +16,7 @@ this lists the files with the evidence a person would use:
 
 from __future__ import annotations
 
+import json
 import ntpath
 import posixpath
 import re
@@ -94,12 +95,12 @@ def _filing(conn, track_ids: List[int]) -> Dict[int, Dict[str, str]]:
     """the files already re-identified and waiting for the import pass"""
     if not track_ids:
         return {}
-    marks = ",".join("?" for _ in track_ids)
     try:
+        # one json parameter: a placeholder per track broke past ~32k tracks
         rows = conn.execute(
-            f"SELECT replace_track_id, album_name, artist_name, staged_path FROM rematch_hints "
-            f"WHERE status = 'pending' AND replace_track_id IN ({marks})",
-            [int(t) for t in track_ids],
+            "SELECT replace_track_id, album_name, artist_name, staged_path FROM rematch_hints "
+            "WHERE status = 'pending' AND replace_track_id IN (SELECT value FROM json_each(?))",
+            [json.dumps([int(t) for t in track_ids])],
         ).fetchall()
     except Exception:  # noqa: BLE001 - no hints table, nothing waiting
         return {}
