@@ -212,7 +212,10 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         results = await prowlarr_track_search(
             self._prowlarr, query, "torrent", timeout=timeout,
         )
-        return self._project_results(results)
+        # off the shared loop: projecting writes two candidate-store rows per
+        # release (a SQLite transaction each), and ~100 releases of that on
+        # the loop thread stalled every page and worker waiting on it
+        return await run_blocking(self._project_results, results)
 
     def _project_results(
         self, results: List[ProwlarrSearchResult], *, release_evidence=None
