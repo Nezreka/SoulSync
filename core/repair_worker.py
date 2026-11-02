@@ -5889,44 +5889,10 @@ class RepairWorker:
         return result
 
     def _move_refiled_track(self, track_id) -> str:
-        """dev's Fix Unknown Artists "reorganize files": the re-filed track moves
-        into its artist/album folder. Library Reorganize does the move. Only a
-        file inside SoulSync's own folders moves (the transfer folder, an own
-        library); a media server's library file stays where the server keeps
-        it (upstream test_repair_worker_unknown_artist_path)."""
-        if not track_id:
-            return 'skipped'
-        from contextlib import closing
-        from core.library2.paths import resolve_lib2_path
-        from core.repair_jobs.base import all_library_roots
-        with closing(self.db._get_connection()) as conn:
-            row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (int(track_id),)).fetchone()
-            paths = [r[0] for r in conn.execute(
-                "SELECT path FROM lib2_track_files WHERE track_id=?"
-                " AND COALESCE(file_state,'active')='active'", (int(track_id),))]
-        if not row or not paths:
-            return 'skipped'
-
-        def _key(path):
-            return os.path.normcase(os.path.realpath(path))
-
-        roots = [_key(r) for r in all_library_roots(self) if r]
-        inside = False
-        for path in paths:
-            resolved = resolve_lib2_path(path, config_manager=self._config_manager) or path
-            here = _key(resolved)
-            if any(here == root or here.startswith(root.rstrip(os.sep) + os.sep) for root in roots):
-                inside = True
-                break
-        if not inside:
-            return 'kept_in_place'
-        try:
-            from core.library2.reorganize_bridge import enqueue_album_reorganize
-            enqueue_album_reorganize(self.db, int(row[0]))
-        except Exception as exc:  # noqa: BLE001 - the re-file stands; the move is a follow-up
-            logger.warning("Unknown Artist: reorganize for album %s not queued: %s", row[0], exc)
-            return 'not_queued'
-        return 'queued'
+        """The approve path's "reorganize files" (upstream
+        test_repair_worker_unknown_artist_path); the scheduled auto-fix shares it."""
+        from core.repair_jobs.unknown_artist_recovery import move_refiled_track
+        return move_refiled_track(self, track_id, config_manager=self._config_manager)
 
     def _fix_album_release_year_mismatch(self, entity_type, entity_id, file_path, details):
         """Align album and track release years to canonical release dates and rename folder."""
