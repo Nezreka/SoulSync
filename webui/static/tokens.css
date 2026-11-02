@@ -164,6 +164,7 @@
     /* ── Z-index (mapped onto the values the app already uses) ──────── */
     --z-sticky: 10;
     --z-dropdown: 100;
+    --z-card-overlay: 101;
     --z-overlay: 1000;
     --z-modal: 10000;
     /* DialogFrame's own backdrop and popup sit just above --z-modal, and a
