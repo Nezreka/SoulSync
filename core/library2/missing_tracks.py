@@ -82,7 +82,10 @@ def materialize_missing_track(
         """INSERT INTO lib2_tracks(album_id, title, track_number, disc_number,
                monitored, quality_profile_id)
            VALUES(?,?,?,?,0,?)""",
-        (album_id, (title or "").strip() or None, track_number, disc_number, profile_id),
+        # title is NOT NULL: a slot no tracklist names gets the "Track N"
+        # placeholder the rest of the catalogue already reads as untitled
+        (album_id, (title or "").strip() or f"Track {track_number}", track_number, disc_number,
+         profile_id),
     )
     track_id = cur.lastrowid
     if al["primary_artist_id"]:
