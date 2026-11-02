@@ -150,3 +150,31 @@ def test_deprecated_disable_flag_does_not_gate_scan(imported_conn, tmp_path):
     result = QualityInfoBackfillJob().scan(context)
 
     assert result.scanned == 2
+
+
+def test_a_file_the_probe_cant_read_is_not_probed_every_run(imported_conn, tmp_path, monkeypatch):
+    """ape/wv (no probe branch) or a damaged file came back empty and was a
+    candidate again on every run. it waits now until the file changes."""
+    conn = imported_conn
+    db_path = _db_path(conn)
+    real_file = tmp_path / "song.ape"
+    real_file.write_bytes(b"not real audio")
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(real_file))
+    monkeypatch.setattr("core.imports.file_ops.probe_audio_quality", lambda _path: None)
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: {"error": "unreadable"})
+    conn.execute("UPDATE lib2_track_files SET size=100")
+    conn.commit()
+    file_id = conn.execute("SELECT id FROM lib2_track_files WHERE path='/m/01.flac'").fetchone()[0]
+    context = JobContext(db=_DB(db_path), transfer_folder=str(tmp_path),
+                         config_manager=_Config(library_v2=True))
+
+    QualityInfoBackfillJob().scan(context)
+    conn.execute("UPDATE lib2_track_files SET size=100")  # the rescan measured the stub
+    conn.execute("UPDATE lib2_quality_probe_misses SET size=100")
+    conn.commit()
+    assert file_id not in _candidate_file_ids(conn)
+
+    conn.execute("UPDATE lib2_track_files SET size=200 WHERE id=?", (file_id,))
+    conn.commit()
+    assert file_id in _candidate_file_ids(conn)  # the file changed: worth another look
+

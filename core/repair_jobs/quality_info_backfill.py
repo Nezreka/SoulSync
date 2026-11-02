@@ -44,21 +44,52 @@ logger = get_logger("repair_job.quality_info_backfill")
 # never resolve.
 _LOSSLESS_FORMATS = ("flac", "wav", "aiff", "alac", "dsf")
 
-_CANDIDATE_QUERY = f"""
-    SELECT id FROM lib2_track_files
-     WHERE path IS NOT NULL AND path <> ''
-       AND COALESCE(file_state,'active') = 'active'
-       AND (
+_GAPS = f"""
             sample_rate IS NULL
          OR format IS NULL OR format = ''
          OR (LOWER(format) IN ({','.join('?' for _ in _LOSSLESS_FORMATS)}) AND bit_depth IS NULL)
-       )
-     ORDER BY id
+"""
+
+# a file the reader came back empty on (ape, wv, a damaged file) is not
+# probed again every run, only once it changes: same size, same answer
+_MISSES_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_quality_probe_misses (
+    file_id INTEGER PRIMARY KEY,
+    size INTEGER,
+    probed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+_CANDIDATE_QUERY = f"""
+    SELECT f.id FROM lib2_track_files f
+     WHERE f.path IS NOT NULL AND f.path <> ''
+       AND COALESCE(f.file_state,'active') = 'active'
+       AND ({_GAPS})
+       AND NOT EXISTS (SELECT 1 FROM lib2_quality_probe_misses m
+                        WHERE m.file_id = f.id AND m.size IS f.size)
+     ORDER BY f.id
 """
 
 
 def _candidate_file_ids(conn) -> list:
+    conn.execute(_MISSES_DDL)
     return [row[0] for row in conn.execute(_CANDIDATE_QUERY, _LOSSLESS_FORMATS)]
+
+
+def _record_misses(db, file_ids: list) -> int:
+    """Files of this batch the probe still left a gap on: remembered at their
+    size, so the next run skips them until the file changes."""
+    import json
+
+    with closing(db._get_connection()) as conn:
+        conn.execute(_MISSES_DDL)
+        cur = conn.execute(
+            f"""INSERT OR REPLACE INTO lib2_quality_probe_misses(file_id, size)
+                SELECT id, size FROM lib2_track_files
+                 WHERE id IN (SELECT value FROM json_each(?)) AND ({_GAPS})""",
+            (json.dumps([int(i) for i in file_ids]), *_LOSSLESS_FORMATS))
+        conn.commit()
+        return max(int(cur.rowcount or 0), 0)
 
 
 @register_job
@@ -123,6 +154,10 @@ class QualityInfoBackfillJob(RepairJob):
                 break
             chunk = file_ids[start:start + batch]
             stats = rescan_files(context.db, file_ids=chunk)
+            try:
+                _record_misses(context.db, chunk)
+            except Exception as e:  # noqa: BLE001 - worst case it probes again next run
+                logger.debug("Quality info backfill: could not record misses: %s", e)
             updated += stats.get("updated", 0)
             result.scanned += stats.get("scanned", 0) + stats.get("missing", 0)
             if context.update_progress:
