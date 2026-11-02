@@ -1,7 +1,6 @@
 """Rename-only reorganize carries the album's own files and undoes cleanly.
 
-A rename moved the tracks and left cover.jpg, the cue sheet and the playlist in
-the old folder: the new folder had no cover and the old one never emptied, so
+A rename moved the tracks and left cover.jpg and the cue sheet in the old folder: the new folder had no cover and the old one never emptied, so
 it was never pruned.
 """
 
@@ -13,7 +12,7 @@ from unittest.mock import MagicMock
 from core.library_reorganize import reorganize_album_rename_only
 
 
-def _album(tmp_path, *, extras=("cover.jpg", "album.cue", "album.m3u"), keep_audio=False):
+def _album(tmp_path, *, extras=("cover.jpg", "album.cue", "rip.log"), keep_audio=False):
     old = tmp_path / "music" / "Artist" / "Old Name"
     new = tmp_path / "music" / "Artist" / "New Name (2001)"
     old.mkdir(parents=True)
@@ -38,14 +37,23 @@ def _run(tmp_path, preview, **kw):
         update_track_path_fn=kw.pop("update", MagicMock()), preview_fn=lambda **_: preview, **kw)
 
 
-def test_cover_cue_and_playlist_follow_the_album_and_the_old_folder_goes(tmp_path):
+def test_cover_cue_and_log_follow_the_album_and_the_old_folder_goes(tmp_path):
     old, new, preview = _album(tmp_path)
 
     assert _run(tmp_path, preview)["moved"] == 2
 
     assert sorted(os.listdir(new)) == sorted(
-        ["01 - Song 1.flac", "02 - Song 2.flac", "cover.jpg", "album.cue", "album.m3u"])
+        ["01 - Song 1.flac", "02 - Song 2.flac", "cover.jpg", "album.cue", "rip.log"])
     assert not old.exists()
+
+
+def test_a_playlist_stays_where_it_is(tmp_path):
+    """an .m3u is a playlist the reorganize rewrites in place, not album art"""
+    old, _new, preview = _album(tmp_path, extras=("cover.jpg", "Mix.m3u"))
+
+    _run(tmp_path, preview)
+
+    assert (old / "Mix.m3u").exists()
 
 
 def test_a_cover_already_at_the_destination_is_never_overwritten(tmp_path):

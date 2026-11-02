@@ -1027,10 +1027,11 @@ def mark_album_placed(db, album_id, fingerprint=None) -> bool:
 _DISC_DIR_RE = re.compile(r'^(disc|disk|cd|vol|volume)\s*\.?\s*\d+$', re.IGNORECASE)
 
 
-# the album's own files beside its tracks: artwork, cue sheets, playlists,
-# rip logs, booklets. a track's .lrc/.txt goes with the track itself
+# the album's own files beside its tracks: artwork, cue sheets, rip logs,
+# booklets. a track's .lrc/.txt goes with the track itself, and an .m3u stays:
+# it's a playlist the reorganize rewrites in place to point at the new paths
 _ALBUM_FILE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp',
-                    '.cue', '.m3u', '.m3u8', '.nfo', '.log', '.pdf'}
+                    '.cue', '.nfo', '.log', '.pdf'}
 _AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.aac', '.ogg', '.opus', '.wav',
                '.aiff', '.aif', '.alac', '.ape', '.wv', '.wma', '.dsf', '.dff'}
 
