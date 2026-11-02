@@ -90,6 +90,11 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
                 and str(getattr(status, "state", "") or "").lower() == "queued") \
                 or (source == "usenet" and getattr(status, "waiting_in_queue", False) is True):
             patch["_client_queued"] = True
+        # still fetching the NZB (SAB's 'Grabbing' placeholder): the job is about
+        # to drop out of sight while the client adds its files, so the monitor
+        # keeps its new-job grace open instead of treating this as the first report
+        if source == "usenet" and getattr(status, "fetching_nzb", False) is True:
+            patch["_client_adding"] = True
         return patch
     # Completed → locate THIS job's finished video file, then import. Prefer the client's
     # exact content_path (this torrent's own file/folder) — the reliable anti-cross-attribution
