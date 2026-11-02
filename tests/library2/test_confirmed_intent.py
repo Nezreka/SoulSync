@@ -130,7 +130,7 @@ def test_non_spotify_ids_are_not_written_to_legacy_spotify_columns(imported_conn
 @pytest.mark.parametrize(
     "tracks, message",
     [
-        ([{"name": "No Context"}], "requires artist, album and track metadata"),
+        ([{"name": "No Context"}], "requires artist and track metadata"),
         (["not an object"], "must be an object"),
     ],
 )
@@ -155,3 +155,20 @@ def test_rejects_unknown_quality_profile(imported_conn):
             }],
             explicit_profile_id=999_999,
         )
+
+
+def test_a_search_hit_with_no_album_downloads_as_a_single(imported_conn):
+    """a global search track result often has no album; the admin's download
+    used to be refused with a 400 before the batch was made. 3.6.1 downloaded
+    it, and it files as a single of its own name."""
+    profile_id = _default_profile_id(imported_conn)
+    result = materialize_confirmed_search_tracks(
+        imported_conn,
+        [{"id": "77", "name": "Loose Track", "source": "deezer",
+          "artists": [{"id": "78", "name": "Someone"}], "album": {"name": ""}}],
+        explicit_profile_id=profile_id,
+    )[0]
+    row = imported_conn.execute(
+        "SELECT al.title, al.album_type FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id "
+        "WHERE t.title='Loose Track'").fetchone()
+    assert result and tuple(row) == ("Loose Track", "single")
