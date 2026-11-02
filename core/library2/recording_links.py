@@ -78,7 +78,9 @@ def owned_by_recording_sql(conn: Any, track_alias: str = "t") -> str:
 
     Same recording (``lib2_release_tracks`` — merged on hard ids only) AND
     the same folded title, because providers hand live cuts the studio take's
-    ISRC (see the module docstring).
+    ISRC (see the module docstring). The file must be one this library has,
+    like ``reference_owners``: unscoped, another profile owning the recording
+    hid this profile's wanted track from Missing for good.
     """
     key = _title_key_sql("{col}", ensure_sql_helpers(conn))
     return f"""
@@ -93,8 +95,7 @@ def owned_by_recording_sql(conn: Any, track_alias: str = "t") -> str:
           JOIN lib2_track_files f ON f.track_id = other.id
          WHERE mine.track_id = {track_alias}.id
            AND f.path IS NOT NULL AND f.path <> ''
-           AND COALESCE(f.file_state,'active')
-               NOT IN ('missing_confirmed','deleted')
+           AND {_active_file('f')}
            AND {key.format(col='other.title')}
              = {key.format(col=track_alias + '.title')}
     )
