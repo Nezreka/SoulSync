@@ -332,3 +332,23 @@ def test_unreadable_playlists_at_apply_keep_the_scans_playlist_protection(librar
     result = apply(library, candidate, approved=True, keep_file_id=bf, server_source="plex")
     assert result["success"] is True and result["removed_file_ids"] == []
     assert pa.exists() and states(library)[af] == "active"
+
+
+def test_keep_best_still_sees_a_hardlink_under_another_name(library):
+    """applying one finding no longer walks every file in the library, only
+    the rows that could be the same physical file: a hardlink under another
+    name still protects it."""
+    import os
+    _a, af, pa = copy(library)
+    _b, bf, pb = copy(library, album="Other", bit_depth=24)
+    candidate = review(library)[0]
+    alias = pa.parent / "renamed alias.flac"
+    os.link(pa, alias)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,owner_profile_id,size) VALUES(?,?,9,?)",
+                     (_b, str(alias), os.path.getsize(pa)))
+        conn.commit()
+    result = apply(library, candidate, approved=True, keep_file_id=bf)
+    assert result["success"] is True
+    assert pa.exists()
+    assert states(library)[af] == "active"
