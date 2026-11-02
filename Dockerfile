@@ -152,8 +152,11 @@ EXPOSE 8008
 # restarted mid-upgrade by autoheal and friends), and 503 only when startup
 # failed. Deliberate trade-off: this is a liveness probe (the process answers
 # HTTP), it does not exercise template rendering.
+# --max-time: Docker does not reliably kill a check that outruns --timeout, so
+# a slow answer left one curl (and its connection) behind every 30s until the
+# worker ran out of threads and file descriptors
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8008/api/startup-status || exit 1
+    CMD curl -f --max-time 5 http://localhost:8008/api/startup-status || exit 1
 
 # Set environment variables
 ENV PYTHONPATH=/app

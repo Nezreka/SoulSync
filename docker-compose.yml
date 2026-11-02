@@ -165,7 +165,9 @@ services:
       # steady idle-CPU cost, #1905). Answered before every auth gate, and 200
       # while SoulSync is still starting (a big library's upgrade can take a
       # while), so the container isn't restarted halfway through it.
-      test: [ "CMD", "curl", "-f", "http://localhost:8008/api/startup-status" ]
+      # --max-time: Docker does not reliably kill a check that outruns its
+      # timeout, and stuck curls pile up connections until the worker starves
+      test: [ "CMD", "curl", "-f", "--max-time", "5", "http://localhost:8008/api/startup-status" ]
       interval: 30s
       timeout: 10s
       retries: 3

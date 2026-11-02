@@ -431,6 +431,8 @@ def test_healthchecks_use_lightweight_endpoint():
     assert "curl -f http://localhost:8008/" not in dockerfile.replace(
         "http://localhost:8008/api/startup-status", "")
     assert '"http://localhost:8008/"' not in compose
+    # a stuck probe must end on its own: Docker doesn't reliably kill it
+    assert "--max-time" in dockerfile and '"--max-time"' in compose
     assert '"http://localhost:8008"' not in compose
 
 
