@@ -1775,21 +1775,24 @@ class MetadataCache:
                         album['in_library'] = _presence_key(
                             album['name'], album['artist_name']) in lib_set
 
-                # Step 6: Resolve library artist IDs for navigation (batched).
-                # The id stays the LEGACY one — it is handed to the artist-detail
-                # route, which resolves a bare numeric id against the legacy table
-                # by contract. A native-only artist has none and is left without a
-                # link rather than with one that opens nothing.
+                # Step 6: which artists are in the library, for the "In
+                # Library" badge (the card links out by entity_id). An artist
+                # with a release of their own on disk counts, the way the
+                # media server's artist list did; a legacy id is no test, an
+                # artist SoulSync imported itself never had one.
                 if artists:
+                    # any library: the dive is cached per genre, not per profile,
+                    # same as the album check above
+                    from core.library2.sql_util import ANY_OWNER, owned_sql
                     keys = [_name_key(a['name']) for a in artists]
                     lib_name_placeholders = ','.join(['?'] * len(keys))
                     try:
                         cursor.execute(f"""
-                            SELECT legacy_artist_id, name_key FROM lib2_artists
-                            WHERE name_key IN ({lib_name_placeholders})
-                              AND legacy_artist_id IS NOT NULL
+                            SELECT ar.id, ar.name_key FROM lib2_artists ar
+                            WHERE ar.name_key IN ({lib_name_placeholders})
+                              AND {owned_sql('release_artist', 'ar', scope=ANY_OWNER)}
                         """, keys)
-                        lib_id_map = {r['name_key']: r['legacy_artist_id']
+                        lib_id_map = {r['name_key']: r['id']
                                       for r in cursor.fetchall()}
                     except Exception:
                         lib_id_map = {}

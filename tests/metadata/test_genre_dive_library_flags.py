@@ -99,6 +99,7 @@ def cache(tmp_path, monkeypatch):
     conn.close()
 
     instance = MetadataCache()
+    instance._genre_dive_cache.clear()  # a class-wide cache: no answer from another test
     monkeypatch.setattr(instance, "_get_db", lambda: database)
     return instance
 
@@ -129,14 +130,33 @@ class TestOwnership:
         assert _album_flag(_dive(cache), 'Phantom') is False
 
 
-class TestTheArtistLink:
-    def test_a_linked_artist_gets_its_legacy_id(self, cache):
-        """The id goes to the artist-detail route, which resolves a bare numeric
-        id against the legacy table by contract — so it must be that id."""
-        assert _artist_link(_dive(cache), 'Björk') == 4242
+class TestTheInLibraryBadge:
+    """``library_id`` only drives the "In Library" badge (the card links out by
+    entity_id). It used to be the legacy id, so an artist SoulSync imported
+    itself, with no legacy row, never showed as in the library."""
 
-    def test_a_native_artist_gets_no_link_rather_than_a_dead_one(self, cache):
+    def test_an_owned_artist_is_in_the_library(self, cache):
+        assert _artist_link(_dive(cache), 'Björk') == _lib2_id(cache, 'Björk')
+
+    def test_a_native_artist_with_a_release_on_disk_is_in_the_library(self, cache):
+        db = cache._get_db()
+        with db._get_connection() as conn:
+            artist = conn.execute("SELECT id FROM lib2_artists WHERE name='Native Only'").fetchone()[0]
+            album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'Own')",
+                                 (artist,)).lastrowid
+            track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'Own')", (album,)).lastrowid
+            conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,'/music/own.flac')", (track,))
+            conn.commit()
+        cache._genre_dive_cache.clear()
+        assert _artist_link(_dive(cache), 'Native Only') == artist
+
+    def test_an_artist_with_nothing_on_disk_is_not(self, cache):
         assert _artist_link(_dive(cache), 'Native Only') is None
 
-    def test_an_unknown_artist_gets_no_link(self, cache):
+    def test_an_unknown_artist_is_not(self, cache):
         assert _artist_link(_dive(cache), 'Unknown Artist') is None
+
+
+def _lib2_id(cache, name):
+    with cache._get_db()._get_connection() as conn:
+        return conn.execute("SELECT id FROM lib2_artists WHERE name=?", (name,)).fetchone()[0]
