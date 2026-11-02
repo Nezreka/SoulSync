@@ -27,7 +27,7 @@ def preserve_legacy_reviews(conn):
             continue
         if details.get('legacy_review_required'):
             continue
-        successor = 'Album Edition Review' if row[1] == 'canonical_version_resolve' else 'Duplicate Review'
+        successor = 'Album Edition Review' if row[1] == 'canonical_version_resolve' else 'Duplicate Detector'
         message = (f'Historical review retained. Its original catalogue IDs cannot safely be applied '
                    f'to Library v2. Run {successor} to review the current native files; '
                    'this original finding remains available until you dismiss it.')
