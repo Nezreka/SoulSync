@@ -53,3 +53,17 @@ def plex_linked_profiles() -> List[Tuple[int, str]]:
         if link and link.get("token"):
             out.append((int(pid), link["token"]))
     return out
+
+
+def profile_names() -> Tuple[dict, Optional[str]]:
+    """({profile id: name}, the admin profile's name) -- labels for jobs that
+    say WHO did something. Empty and None when the profiles can't be read."""
+    try:
+        profiles = _db().get_all_profiles() or []
+    except Exception:   # noqa: BLE001
+        logger.debug("listing profiles failed", exc_info=True)
+        return {}, None
+    names = {int(p["id"]): p.get("name") or f"profile {p['id']}"
+             for p in profiles if p.get("id") is not None}
+    admins = sorted(int(p["id"]) for p in profiles if p.get("id") is not None and p.get("is_admin"))
+    return names, (names.get(admins[0]) if admins else None)

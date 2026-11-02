@@ -8358,12 +8358,47 @@ class VideoDatabase:
         try:
             return [dict(r) for r in conn.execute(
                 "SELECT m.id AS movie_id, m.tmdb_id, m.title, m.year, "
-                "m.play_count, m.last_viewed_at, m.added_at, "
+                "m.play_count, m.last_viewed_at, m.view_offset_ms, m.added_at, "
                 "f.relative_path, f.size_bytes "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1 "
                 "AND f.id = (SELECT f2.id FROM media_files f2 WHERE f2.movie_id = m.id "
                 "            ORDER BY f2.size_bytes DESC LIMIT 1)")]
+        finally:
+            conn.close()
+
+    def repair_movie_watch_by_profile(self) -> dict:
+        """{movie_id: {profile_id: {play_count, last_viewed_at, view_offset_ms}}}
+        from every profile's own watch state -- what Watched Cleanup weighs
+        beside the owner's shared columns (#1941)."""
+        conn = self._get_connection()
+        try:
+            out: dict = {}
+            for r in conn.execute(
+                    "SELECT profile_id, item_id, play_count, last_viewed_at, view_offset_ms "
+                    "FROM video_watch_state WHERE kind = 'movie'"):
+                out.setdefault(r["item_id"], {})[r["profile_id"]] = {
+                    "play_count": r["play_count"], "last_viewed_at": r["last_viewed_at"],
+                    "view_offset_ms": r["view_offset_ms"]}
+            return out
+        finally:
+            conn.close()
+
+    def watch_last_activity(self, profile_ids=()) -> dict:
+        """When each viewer last watched ANY movie or episode: ``owner`` from the
+        shared columns, plus each of ``profile_ids`` from its own rows. None when
+        nothing carries a date."""
+        conn = self._get_connection()
+        try:
+            owner = conn.execute(
+                "SELECT MAX(d) FROM (SELECT MAX(last_viewed_at) AS d FROM movies "
+                "UNION ALL SELECT MAX(last_viewed_at) FROM episodes)").fetchone()[0]
+            out = {"owner": owner, "profiles": {}}
+            for pid in profile_ids:
+                out["profiles"][int(pid)] = conn.execute(
+                    "SELECT MAX(last_viewed_at) FROM video_watch_state WHERE profile_id = ?",
+                    (int(pid),)).fetchone()[0]
+            return out
         finally:
             conn.close()
 
