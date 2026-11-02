@@ -6,7 +6,8 @@ from core.library2.maintenance_subjects import active_file_subjects
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
 from core.repair_jobs.base import (
-    JobContext, JobResult, RepairJob, drop_hand_tagged, get_scope_artist, scoped_file_subjects,
+    JobContext, JobResult, RepairJob, artist_scoped_subjects, drop_hand_tagged, get_scope_artist,
+    scoped_file_subjects,
 )
 from utils.logging_config import get_logger
 
@@ -56,12 +57,12 @@ class MetadataGapFillerJob(RepairJob):
         scope_key = scope_artist.casefold() if scope_artist else None
 
         subjects: Dict[int, Dict[str, Any]] = {}
-        for subject in drop_hand_tagged(context, scoped_file_subjects(
+        # an artist run takes the artist page's files (its aliases and the
+        # songs it guests on); an exact lead-credit name check dropped both
+        for subject in drop_hand_tagged(context, artist_scoped_subjects(
                 context, active_file_subjects(context.db, context.config_manager))):
             track_id = int(subject["track_id"])
             if track_id in subjects and not subject.get("is_primary"):
-                continue
-            if scope_key and str(subject.get("artist_name") or "").casefold() != scope_key:
                 continue
             missing_isrc = fill_isrc and not str(subject.get("isrc") or "").strip()
             missing_mbid = fill_mb_id and not str(
