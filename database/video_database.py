@@ -88,9 +88,39 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 61   # v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 62   # v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
+
+
+def _watch_cols(alias: str, kind: str, watcher):
+    """(join, play_count, last_viewed_at, view_offset_ms) SQL for reading one
+    table alias's watch state (#1941).
+
+    ``watcher`` None reads the shared columns, which the scan fills through the
+    server account, so they are the server owner's own. A profile id reads that
+    profile's rows in video_watch_state instead; a profile with no rows reads
+    as nothing watched. The id is an int, so it is inlined rather than bound,
+    which keeps every caller's parameter order as it was."""
+    if watcher is None:
+        return ("", f"{alias}.play_count", f"{alias}.last_viewed_at",
+                f"{alias}.view_offset_ms")
+    w = f"ws_{alias}"
+    join = (f" LEFT JOIN video_watch_state {w} ON {w}.profile_id = {int(watcher)} "
+            f"AND {w}.kind = '{kind}' AND {w}.item_id = {alias}.id")
+    return join, f"{w}.play_count", f"{w}.last_viewed_at", f"{w}.view_offset_ms"
+
+
+def _show_watched_sql(alias: str, watcher) -> str:
+    """how many of a show's episodes count as watched: the stored roll-up for
+    the shared state, a count of the profile's own episode rows otherwise."""
+    if watcher is None:
+        return f"{alias}.watched_episodes"
+    return ("(SELECT COUNT(*) FROM video_watch_state ws JOIN episodes we ON we.id = ws.item_id "
+            f"WHERE ws.profile_id = {int(watcher)} AND ws.kind = 'episode' "
+            f"AND we.show_id = {alias}.id AND ws.play_count > 0)")
+
+
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
 
 # Init runs once per database path per process (same guard style as music).
@@ -4613,7 +4643,7 @@ class VideoDatabase:
         return off >= min(VideoDatabase.CONTINUE_MIN_START_MS,
                           total * VideoDatabase.CONTINUE_START_RATIO)
 
-    def continue_watching(self, server_source=None, limit=20) -> list:
+    def continue_watching(self, server_source=None, limit=20, watcher=None) -> list:
         """What you are part-way through, newest first — the dashboard's resume row.
 
         Two things belong here and they are not the same:
@@ -4629,8 +4659,13 @@ class VideoDatabase:
         I" is a single card.
 
         Only OWNED rows (``has_file``): you cannot resume what you do not have.
+
+        ``watcher``: whose watch state to read (None = the shared columns, a
+        profile id = that profile's own rows, see _watch_cols).
         """
         limit = max(1, min(50, int(limit)))
+        join_m, _pc_m, lv_m, vo_m = _watch_cols("m", "movie", watcher)
+        join_e, _pc_e, lv_e, _vo_e = _watch_cols("e", "episode", watcher)
         conn = self._get_connection()
         try:
             conn.row_factory = sqlite3.Row
@@ -4644,11 +4679,12 @@ class VideoDatabase:
             # ── movies in progress ───────────────────────────────────────────
             for r in conn.execute(f"""
                 SELECT m.id, m.title, m.year, m.poster_url, m.backdrop_url,
-                       m.runtime_minutes, m.view_offset_ms, m.last_viewed_at, m.tmdb_id
-                FROM movies m
-                WHERE m.has_file = 1 AND COALESCE(m.view_offset_ms, 0) > 0
-                      AND m.last_viewed_at IS NOT NULL{scope_m}
-                ORDER BY m.last_viewed_at DESC LIMIT 200
+                       m.runtime_minutes, {vo_m} AS view_offset_ms,
+                       {lv_m} AS last_viewed_at, m.tmdb_id
+                FROM movies m{join_m}
+                WHERE m.has_file = 1 AND COALESCE({vo_m}, 0) > 0
+                      AND {lv_m} IS NOT NULL{scope_m}
+                ORDER BY {lv_m} DESC LIMIT 200
             """, args_m):
                 if not self._resumable(r["view_offset_ms"], r["runtime_minutes"]):
                     continue
@@ -4681,13 +4717,13 @@ class VideoDatabase:
             # this a resume rail rather than a list of everything you own.
             for r in conn.execute(f"""
                 SELECT s.id, s.title, s.poster_url, s.backdrop_url, s.tmdb_id,
-                       MAX(e.last_viewed_at) AS seen_at
-                FROM shows s JOIN episodes e ON e.show_id = s.id
-                WHERE e.last_viewed_at IS NOT NULL{scope_s}
+                       MAX({lv_e}) AS seen_at
+                FROM shows s JOIN episodes e ON e.show_id = s.id{join_e}
+                WHERE {lv_e} IS NOT NULL{scope_s}
                 GROUP BY s.id
                 ORDER BY seen_at DESC LIMIT 100
             """, args_s):
-                nxt = self.show_next_up(r["id"])
+                nxt = self.show_next_up(r["id"], watcher=watcher)
                 if not nxt:
                     continue        # caught up, or nothing owned: no card
                 ep = conn.execute(
@@ -6910,9 +6946,11 @@ class VideoDatabase:
             f"WHERE lt.{owner_col}=? ORDER BY g.name", (owner_id,)).fetchall()
         return [r["name"] for r in rows]
 
-    def show_detail(self, show_id: int) -> dict | None:
+    def show_detail(self, show_id: int, watcher=None) -> dict | None:
         """Full TV-show detail: the show + its seasons → episodes tree, with
-        owned/total roll-ups. Drives the (isolated) video show-detail page."""
+        owned/total roll-ups. Drives the (isolated) video show-detail page.
+        ``watcher``: whose watch state to read (see _watch_cols)."""
+        join, pc, lv, vo = _watch_cols("e", "episode", watcher)
         conn = self._get_connection()
         try:
             show = conn.execute("SELECT * FROM shows WHERE id=?", (show_id,)).fetchone()
@@ -6925,16 +6963,16 @@ class VideoDatabase:
                 "(poster_url IS NOT NULL AND poster_url<>'') AS has_poster "
                 "FROM seasons WHERE show_id=? ORDER BY season_number", (show_id,)).fetchall()
             eps = conn.execute(
-                "SELECT id, season_number, episode_number, title, overview, air_date, "
-                "runtime_minutes, rating, monitored, has_file, added_at, "
-                "play_count, last_viewed_at, view_offset_ms, "
-                "(still_url IS NOT NULL AND still_url<>'') AS has_still, "
+                "SELECT e.id, e.season_number, e.episode_number, e.title, e.overview, e.air_date, "
+                "e.runtime_minutes, e.rating, e.monitored, e.has_file, e.added_at, "
+                f"{pc} AS play_count, {lv} AS last_viewed_at, {vo} AS view_offset_ms, "
+                "(e.still_url IS NOT NULL AND e.still_url<>'') AS has_still, "
                 # A server may hold several COPIES of one episode — surface them.
-                "(SELECT COUNT(*) FROM media_files f WHERE f.episode_id=episodes.id) AS versions, "
-                "(SELECT f.resolution FROM media_files f WHERE f.episode_id=episodes.id "
+                "(SELECT COUNT(*) FROM media_files f WHERE f.episode_id=e.id) AS versions, "
+                "(SELECT f.resolution FROM media_files f WHERE f.episode_id=e.id "
                 "  ORDER BY f.size_bytes DESC LIMIT 1) AS resolution "
-                "FROM episodes WHERE show_id=? "
-                "ORDER BY season_number, episode_number", (show_id,)).fetchall()
+                f"FROM episodes e{join} WHERE e.show_id=? "
+                "ORDER BY e.season_number, e.episode_number", (show_id,)).fetchall()
         finally:
             conn.close()
 
@@ -6983,6 +7021,8 @@ class VideoDatabase:
 
         total = len(eps)
         owned_total = sum(1 for e in eps if e["has_file"])
+        watched_eps = (show["watched_episodes"] or 0) if watcher is None else \
+            sum(1 for e in eps if (e["play_count"] or 0) > 0)
         return {
             "kind": "show", "id": show["id"], "title": show["title"], "year": show["year"],
             "sort_title": show["sort_title"],
@@ -6992,8 +7032,8 @@ class VideoDatabase:
             # is actually set rather than a blank form
             **self.title_overrides("show", show["id"]),
             "locked_fields": sorted(self._parse_locked(show["locked_fields"])),
-            "watched": (show["watched_episodes"] or 0) >= total > 0,
-            "watched_episodes": show["watched_episodes"] or 0,   # raw count for "N of M watched"
+            "watched": watched_eps >= total > 0,
+            "watched_episodes": watched_eps,   # raw count for "N of M watched"
             # Enriched-but-never-surfaced facts (detail BIC P3)
             "awards": show["awards"],
             "mediastinger": bool(show["mediastinger"] or 0),
@@ -7020,23 +7060,25 @@ class VideoDatabase:
             "seasons": out_seasons,
             # Continue Watching: the episode to play next (None until something
             # has actually been watched — a fresh show has no 'continue' story)
-            "next_up": self.show_next_up(show_id),
+            "next_up": self.show_next_up(show_id, watcher=watcher),
         }
 
-    def show_next_up(self, show_id: int) -> dict | None:
+    def show_next_up(self, show_id: int, watcher=None) -> dict | None:
         """The episode to watch NEXT (the Netflix 'Next Up' slot): the most
         recently started-but-unfinished OWNED episode wins (resume), else the
         first unwatched owned episode in airing order (specials sort last).
         Returns None when nothing is owned, nothing has been watched yet, or
         everything owned is already watched — the hero CTA then stays a plain
-        'Play on <server>'."""
+        'Play on <server>'. ``watcher``: whose watch state (see _watch_cols)."""
+        join, pc, lv, vo = _watch_cols("e", "episode", watcher)
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT season_number, episode_number, title, server_id, "
-                "view_offset_ms, runtime_minutes, play_count, last_viewed_at "
-                "FROM episodes WHERE show_id=? AND has_file=1 "
-                "ORDER BY (season_number=0), season_number, episode_number",
+                "SELECT e.season_number, e.episode_number, e.title, e.server_id, "
+                f"{vo} AS view_offset_ms, e.runtime_minutes, {pc} AS play_count, "
+                f"{lv} AS last_viewed_at "
+                f"FROM episodes e{join} WHERE e.show_id=? AND e.has_file=1 "
+                "ORDER BY (e.season_number=0), e.season_number, e.episode_number",
                 (show_id,)).fetchall()
         finally:
             conn.close()
@@ -7111,11 +7153,16 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def set_watch_state(self, kind: str, item_id: int, watched: bool) -> bool:
+    def set_watch_state(self, kind: str, item_id: int, watched: bool, watcher=None) -> bool:
         """Reflect a played/unplayed toggle locally (the server push happens in
         core.video.metadata) so 'watched' smart rules react without waiting for
         the next scan. Movies flip play_count; shows set watched_episodes to the
-        full episode count (matching what the server does on markPlayed)."""
+        full episode count (matching what the server does on markPlayed).
+
+        ``watcher`` set: the toggle is that profile's, so it lands in its own
+        rows and the shared columns are left alone (#1941)."""
+        if watcher is not None:
+            return self._set_profile_watch_state(int(watcher), kind, item_id, watched)
         conn = self._get_connection()
         try:
             if kind == "movie":
@@ -7156,6 +7203,112 @@ class VideoDatabase:
                 return False
             conn.commit()
             return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    # ── per-profile watch state (#1941) ──────────────────────────────────────
+    def _set_profile_watch_state(self, profile_id: int, kind: str, item_id: int,
+                                 watched: bool) -> bool:
+        """A profile's own played/unplayed toggle. A show, season or episode
+        marks the episodes the server holds, as markPlayed does on the server;
+        the resume point goes either way, like the shared toggle."""
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                if not conn.execute("SELECT 1 FROM movies WHERE id=?", (item_id,)).fetchone():
+                    return False
+                targets = [("movie", int(item_id))]
+            elif kind in ("show", "season", "episode"):
+                col = {"show": "show_id", "season": "season_id", "episode": "id"}[kind]
+                held = "" if kind == "episode" else " AND server_id IS NOT NULL"
+                ids = [r[0] for r in conn.execute(
+                    f"SELECT id FROM episodes WHERE {col}=?{held}", (item_id,))]
+                if not ids:
+                    exists = {"show": "shows", "season": "seasons", "episode": "episodes"}[kind]
+                    return bool(conn.execute(f"SELECT 1 FROM {exists} WHERE id=?",
+                                             (item_id,)).fetchone())
+                targets = [("episode", i) for i in ids]
+            else:
+                return False
+            conn.executemany(
+                "INSERT INTO video_watch_state (profile_id, kind, item_id, play_count, "
+                "view_offset_ms) VALUES (?, ?, ?, ?, 0) "
+                "ON CONFLICT(profile_id, kind, item_id) DO UPDATE SET "
+                "play_count = CASE WHEN excluded.play_count > 0 "
+                "THEN MAX(video_watch_state.play_count, 1) ELSE 0 END, view_offset_ms = 0",
+                [(profile_id, k, i, 1 if watched else 0) for k, i in targets])
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def watch_item_ids(self, kind: str, server_source: str, server_ids) -> dict:
+        """{server_id: library row id} for movies or episodes on one server --
+        how a profile's watch state from the server finds its library rows."""
+        tbl = {"movie": "movies", "episode": "episodes"}.get(kind)
+        ids = [str(x) for x in (server_ids or []) if x is not None and str(x)]
+        if not tbl or not ids:
+            return {}
+        out = {}
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                q = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT server_id, id FROM {tbl} "   # noqa: S608 - tbl from a fixed map
+                        f"WHERE server_source = ? AND server_id IN ({q})",
+                        [server_source] + chunk):
+                    out[str(r[0])] = int(r[1])
+        finally:
+            conn.close()
+        return out
+
+    def save_profile_watch_state(self, profile_id: int, rows, replace_kinds=()) -> int:
+        """Store a profile's watch state as read from its own server account.
+
+        ``rows``: (kind, item_id, play_count, last_viewed_at, view_offset_ms).
+        ``replace_kinds``: kinds read IN FULL this time ('movie', 'episode'):
+        the profile's other rows of those kinds go, since the server no longer
+        counts them as touched. Everything else is an upsert (a delta read).
+        One transaction, so a reader never sees a half-replaced set."""
+        rows = list(rows or [])
+        conn = self._get_connection()
+        try:
+            for kind in replace_kinds:
+                conn.execute("DELETE FROM video_watch_state WHERE profile_id=? AND kind=?",
+                             (int(profile_id), kind))
+            conn.executemany(
+                "INSERT INTO video_watch_state (profile_id, kind, item_id, play_count, "
+                "last_viewed_at, view_offset_ms) VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(profile_id, kind, item_id) DO UPDATE SET "
+                "play_count = excluded.play_count, last_viewed_at = excluded.last_viewed_at, "
+                "view_offset_ms = excluded.view_offset_ms",
+                [(int(profile_id), k, int(i), int(pc or 0), lv, int(vo or 0))
+                 for k, i, pc, lv, vo in rows])
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+
+    def has_profile_watch_state(self, profile_id: int, kinds=("movie", "episode")) -> bool:
+        """Whether a profile has rows of its own yet for EVERY one of ``kinds``."""
+        conn = self._get_connection()
+        try:
+            return all(conn.execute(
+                "SELECT 1 FROM video_watch_state WHERE profile_id=? AND kind=? LIMIT 1",
+                (int(profile_id), k)).fetchone() is not None for k in kinds)
+        finally:
+            conn.close()
+
+    def clear_profile_watch_state(self, profile_id: int) -> int:
+        """Drop a profile's own watch state (its server account was unlinked)."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_watch_state WHERE profile_id=?",
+                               (int(profile_id),))
+            conn.commit()
+            return int(cur.rowcount or 0)
         finally:
             conn.close()
 
@@ -8205,12 +8358,47 @@ class VideoDatabase:
         try:
             return [dict(r) for r in conn.execute(
                 "SELECT m.id AS movie_id, m.tmdb_id, m.title, m.year, "
-                "m.play_count, m.last_viewed_at, m.added_at, "
+                "m.play_count, m.last_viewed_at, m.view_offset_ms, m.added_at, "
                 "f.relative_path, f.size_bytes "
                 "FROM movies m JOIN media_files f ON f.movie_id = m.id "
                 "WHERE m.has_file = 1 "
                 "AND f.id = (SELECT f2.id FROM media_files f2 WHERE f2.movie_id = m.id "
                 "            ORDER BY f2.size_bytes DESC LIMIT 1)")]
+        finally:
+            conn.close()
+
+    def repair_movie_watch_by_profile(self) -> dict:
+        """{movie_id: {profile_id: {play_count, last_viewed_at, view_offset_ms}}}
+        from every profile's own watch state -- what Watched Cleanup weighs
+        beside the owner's shared columns (#1941)."""
+        conn = self._get_connection()
+        try:
+            out: dict = {}
+            for r in conn.execute(
+                    "SELECT profile_id, item_id, play_count, last_viewed_at, view_offset_ms "
+                    "FROM video_watch_state WHERE kind = 'movie'"):
+                out.setdefault(r["item_id"], {})[r["profile_id"]] = {
+                    "play_count": r["play_count"], "last_viewed_at": r["last_viewed_at"],
+                    "view_offset_ms": r["view_offset_ms"]}
+            return out
+        finally:
+            conn.close()
+
+    def watch_last_activity(self, profile_ids=()) -> dict:
+        """When each viewer last watched ANY movie or episode: ``owner`` from the
+        shared columns, plus each of ``profile_ids`` from its own rows. None when
+        nothing carries a date."""
+        conn = self._get_connection()
+        try:
+            owner = conn.execute(
+                "SELECT MAX(d) FROM (SELECT MAX(last_viewed_at) AS d FROM movies "
+                "UNION ALL SELECT MAX(last_viewed_at) FROM episodes)").fetchone()[0]
+            out = {"owner": owner, "profiles": {}}
+            for pid in profile_ids:
+                out["profiles"][int(pid)] = conn.execute(
+                    "SELECT MAX(last_viewed_at) FROM video_watch_state WHERE profile_id = ?",
+                    (int(pid),)).fetchone()[0]
+            return out
         finally:
             conn.close()
 
@@ -8360,32 +8548,36 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def show_library_meta(self, show_id) -> dict | None:
-        """the show-level management fields the library tab reads."""
+    def show_library_meta(self, show_id, watcher=None) -> dict | None:
+        """the show-level management fields the library tab reads.
+        ``watcher``: whose watched count (see _watch_cols)."""
         conn = self._get_connection()
         try:
-            r = conn.execute("SELECT watched_episodes, series_type, monitored, quality_profile_id "
-                             "FROM shows WHERE id = ?", (int(show_id),)).fetchone()
+            r = conn.execute(f"SELECT {_show_watched_sql('s', watcher)} AS watched_episodes, "
+                             "s.series_type, s.monitored, s.quality_profile_id "
+                             "FROM shows s WHERE s.id = ?", (int(show_id),)).fetchone()
             return dict(r) if r else None
         except (sqlite3.Error, TypeError, ValueError):
             return None
         finally:
             conn.close()
 
-    def library_show_episodes(self, show_id) -> list:
+    def library_show_episodes(self, show_id, watcher=None) -> list:
         """every episode row of one show, owned or not, for the library tab's
-        season breakdown. ordered by season, then episode."""
+        season breakdown. ordered by season, then episode. ``watcher``: whose
+        watch state (see _watch_cols)."""
         try:
             show_id = int(show_id)
         except (TypeError, ValueError):
             return []
+        join, pc, _lv, vo = _watch_cols("e", "episode", watcher)
         conn = self._get_connection()
         try:
             return [dict(r) for r in conn.execute(
                 "SELECT e.id, e.season_number, e.episode_number, e.title, e.air_date, "
-                "e.has_file, e.monitored, e.play_count, e.view_offset_ms, e.runtime_minutes, "
-                "COALESCE(se.monitored, 1) AS season_monitored "
-                "FROM episodes e LEFT JOIN seasons se ON se.id = e.season_id "
+                f"e.has_file, e.monitored, {pc} AS play_count, {vo} AS view_offset_ms, "
+                "e.runtime_minutes, COALESCE(se.monitored, 1) AS season_monitored "
+                f"FROM episodes e LEFT JOIN seasons se ON se.id = e.season_id{join} "
                 "WHERE e.show_id = ? ORDER BY e.season_number, e.episode_number", (show_id,))]
         except sqlite3.Error:
             logger.exception("library_show_episodes failed for %s", show_id)
@@ -11769,12 +11961,16 @@ class VideoDatabase:
             "page": page, "total_pages": total_pages, "total_count": total,
             "has_prev": page > 1, "has_next": page < total_pages}}
 
-    def movie_detail(self, movie_id: int) -> dict | None:
+    def movie_detail(self, movie_id: int, watcher=None) -> dict | None:
         """Full movie detail: the movie + owned/file info. Drives the (isolated)
-        video movie-detail page."""
+        video movie-detail page. ``watcher``: whose watch state (see _watch_cols)."""
+        join, pc, lv, vo = _watch_cols("m", "movie", watcher)
         conn = self._get_connection()
         try:
-            m = conn.execute("SELECT * FROM movies WHERE id=?", (movie_id,)).fetchone()
+            m = conn.execute(
+                f"SELECT m.*, {pc} AS w_play_count, {lv} AS w_last_viewed_at, "
+                f"{vo} AS w_view_offset_ms FROM movies m{join} WHERE m.id=?",
+                (movie_id,)).fetchone()
             if not m:
                 return None
             genres = self._genres_for(conn, "movie_genres", "movie_id", movie_id)
@@ -11792,11 +11988,11 @@ class VideoDatabase:
             "quality_profile_id": m["quality_profile_id"] or 0,
             **self.title_overrides("movie", m["id"]),
             "locked_fields": sorted(self._parse_locked(m["locked_fields"])),
-            "watched": (m["play_count"] or 0) > 0,
+            "watched": (m["w_play_count"] or 0) > 0,
             # Continue Watching raw state (v45): last watched + resume position
-            "play_count": m["play_count"] or 0,
-            "last_viewed_at": m["last_viewed_at"],
-            "view_offset_ms": m["view_offset_ms"] or 0,
+            "play_count": m["w_play_count"] or 0,
+            "last_viewed_at": m["w_last_viewed_at"],
+            "view_offset_ms": m["w_view_offset_ms"] or 0,
             # Enriched-but-never-surfaced facts (detail BIC P3)
             "awards": m["awards"],
             "mediastinger": bool(m["mediastinger"] or 0),
@@ -11823,7 +12019,7 @@ class VideoDatabase:
     def query_library(self, kind: str, *, search=None, letter=None, sort="title",
                       include_size=True,
                       status="all", genre=None, resolution=None, page=1, limit=75,
-                      server_source=None) -> dict:
+                      server_source=None, watcher=None) -> dict:
         """One page of movies/shows with search + A–Z + sort + owned/wanted/
         watched + genre filtering done in SQL. Scoped to ``server_source`` (the
         active video server) so Plex and Jellyfin libraries never commingle —
@@ -11834,7 +12030,10 @@ class VideoDatabase:
         size-on-disk surfaces Radarr/Sonarr users expect. Extra filters:
         ``status='missing'`` (shows: partially owned — the classic 'wanted'
         view) and ``resolution`` (movies: any file at that resolution).
-        Returns {items, total_size_bytes, pagination:{...}}."""
+        Returns {items, total_size_bytes, pagination:{...}}.
+
+        ``watcher``: whose watch state the watched/unwatched filters and the
+        play counts read (see _watch_cols)."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(500, int(limit or 75)))
@@ -11843,6 +12042,13 @@ class VideoDatabase:
         is_shows = kind == "shows"
         alias = "s" if is_shows else "m"
         tbl = "shows" if is_shows else "movies"
+        if is_shows:
+            join, m_pc = "", None
+            s_watched = _show_watched_sql("s", watcher)
+        else:
+            join, m_pc, _lv, _vo = _watch_cols("m", "movie", watcher)
+            s_watched = None
+        src = f"{tbl} {alias}{join}"
 
         where, params = [], []
         if server_source:
@@ -11869,10 +12075,10 @@ class VideoDatabase:
             elif status in ("wanted", "missing"):
                 where.append("m.has_file = 0")
             elif status == "watched":
-                where.append("COALESCE(m.play_count, 0) > 0")
+                where.append(f"COALESCE({m_pc}, 0) > 0")
             elif status == "unwatched":
                 # owned-but-untouched — the "what should I put on tonight" filter
-                where.append("m.has_file = 1 AND COALESCE(m.play_count, 0) = 0")
+                where.append(f"m.has_file = 1 AND COALESCE({m_pc}, 0) = 0")
             if resolution:
                 where.append("EXISTS (SELECT 1 FROM media_files mf WHERE mf.movie_id=m.id "
                              "AND mf.resolution = ? COLLATE NOCASE)")
@@ -11888,9 +12094,9 @@ class VideoDatabase:
                 where.append("EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) "
                              "AND EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=0)")
             elif status == "watched":
-                where.append("COALESCE(s.watched_episodes, 0) > 0")
+                where.append(f"COALESCE({s_watched}, 0) > 0")
             elif status == "unwatched":
-                where.append("COALESCE(s.watched_episodes, 0) = 0 AND "
+                where.append(f"COALESCE({s_watched}, 0) = 0 AND "
                              "EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1)")
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
@@ -11913,23 +12119,23 @@ class VideoDatabase:
 
         if is_shows:
             select = ("SELECT s.id, s.title, s.year, s.tmdb_id, s.status, "
-                      f"{rating_key} AS rating, s.watched_episodes, "
+                      f"{rating_key} AS rating, {s_watched} AS watched_episodes, "
                       "(s.poster_url IS NOT NULL AND s.poster_url <> '') AS has_poster, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count, "
                       f"{size_sub} AS size_bytes "
-                      "FROM shows s")
+                      f"FROM {src}")
         else:
             select = ("SELECT m.id, m.title, m.year, m.has_file, m.tmdb_id, "
-                      f"{rating_key} AS rating, m.play_count, "
+                      f"{rating_key} AS rating, {m_pc} AS play_count, "
                       "(m.poster_url IS NOT NULL AND m.poster_url <> '') AS has_poster, "
                       "(SELECT mf.resolution FROM media_files mf WHERE mf.movie_id=m.id LIMIT 1) AS resolution, "
                       f"{size_sub} AS size_bytes "
-                      "FROM movies m")
+                      f"FROM {src}")
 
         conn = self._get_connection()
         try:
-            total = conn.execute(f"SELECT COUNT(*) FROM {tbl} {alias}{where_sql}", params).fetchone()[0]
+            total = conn.execute(f"SELECT COUNT(*) FROM {src}{where_sql}", params).fetchone()[0]
             # The size-on-disk total sums a correlated media_files subquery
             # over the WHOLE filtered set — measured 3-3.7s on the shows tab
             # (perf sweep, Aug 2026). Callers that only want rows (the chat
@@ -11937,7 +12143,7 @@ class VideoDatabase:
             total_size = 0
             if include_size:
                 total_size = conn.execute(
-                    f"SELECT COALESCE(SUM({size_sub}), 0) FROM {tbl} {alias}{where_sql}",
+                    f"SELECT COALESCE(SUM({size_sub}), 0) FROM {src}{where_sql}",
                     params).fetchone()[0]
             rows = conn.execute(
                 f"{select}{where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
