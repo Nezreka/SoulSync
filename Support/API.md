@@ -97,7 +97,7 @@ Keys are generated as `sk_` followed by a random token. Only the SHA-256 hash is
 
 ## Rate Limiting
 
-Requests are rate-limited to **60 per minute** per IP address.
+Requests with a valid API key are rate-limited to **600 per minute**, counted per key. Requests with no key or an invalid key are rate-limited to **60 per minute** per IP address.
 
 Exceeding the limit returns `429 RATE_LIMITED`.
 

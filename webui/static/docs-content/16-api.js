@@ -37,7 +37,7 @@ The \`Authorization: Bearer <key>\` header is preferred — a key in the query s
 
 **Key metadata.** Each stored key records a \`label\`, a \`scope\`, a visible \`key_prefix\` (\`sk_\` plus the first 8 characters of the raw key), \`created_at\`, and \`last_used_at\`. \`last_used_at\` is refreshed on every authenticated request (persisted to disk at most once every 15 minutes per key, so heavy polling does not rewrite the config file constantly).
 
-**Rate limiting.** The whole \`/api/v1\` blueprint is limited to 60 requests per minute per client IP (Flask-Limiter, keyed on remote address). Exceeding it returns \`429\` with code \`RATE_LIMITED\`.
+**Rate limiting.** The whole \`/api/v1\` blueprint is rate-limited (Flask-Limiter). A request with a valid API key gets 600 requests per minute, counted per key. A request with no key or an invalid key gets 60 per minute per client IP — a bogus key never earns the bigger bucket. Exceeding the limit returns \`429\` with code \`RATE_LIMITED\`.
 
 **Response envelope.** Every response — success or failure — uses the same shape:
 
@@ -372,8 +372,8 @@ curl -H "Authorization: Bearer sk_..." http://localhost:8008/api/v1/system/stats
 > at \`http://localhost:8008\`. Every response uses the standard envelope
 > \`{"success": true|false, "data": {...}|null, "error": {"code","message"}|null,
 > "pagination": {...}|null}\`. \`pagination\` is populated only on paginated
-> endpoints (noted per endpoint); elsewhere it is \`null\`. Rate limit: 60
-> requests/minute per IP (\`429\`, code \`RATE_LIMITED\`).
+> endpoints (noted per endpoint); elsewhere it is \`null\`. Rate limit: 600 requests/minute per valid API key; 60/minute per IP when
+> the key is missing or invalid (\`429\`, code \`RATE_LIMITED\`).
 
 ## Endpoint reference
 
@@ -1018,7 +1018,7 @@ All endpoints live under \`/api/v1\` and require an API key: send it as an
 \`Authorization: Bearer sk_...\` header (preferred) or as an \`?api_key=sk_...\`
 query parameter. Every response uses the standard envelope
 \`{"success": bool, "data": ..., "error": {"code","message"}|null, "pagination": ...|null}\`.
-Rate limit: 60 requests/minute per IP (\`429\` / \`RATE_LIMITED\`).
+Rate limit: 600 requests/minute per valid API key; 60/minute per IP when the key is missing or invalid (\`429\` / \`RATE_LIMITED\`).
 These endpoints do not support \`?fields=\` or \`?page=\` — they take their
 parameters in the JSON body as documented below.
 
@@ -1200,7 +1200,7 @@ All endpoints live under \`/api/v1\` and require an API key: send it as an
 \`Authorization: Bearer sk_...\` header (preferred) or as an \`?api_key=sk_...\`
 query parameter. Every response uses the standard envelope
 \`{"success": bool, "data": ..., "error": {"code","message"}|null, "pagination": ...|null}\`.
-Rate limit: 60 requests/minute per IP (\`429\` / \`RATE_LIMITED\`).
+Rate limit: 600 requests/minute per valid API key; 60/minute per IP when the key is missing or invalid (\`429\` / \`RATE_LIMITED\`).
 These endpoints do not support \`?fields=\`. \`GET /downloads\` paginates with
 \`limit\`/\`offset\`, not \`page\`.
 
@@ -1457,8 +1457,9 @@ not apply.
 
 Cross-cutting facts:
 
-- **Rate limit:** 60 requests/minute per IP; exceeding it returns \`429\` with
-  code \`RATE_LIMITED\`.
+- **Rate limit:** 600 requests/minute per valid API key; 60/minute per IP
+  when the key is missing or invalid. Exceeding it returns \`429\` with code
+  \`RATE_LIMITED\`.
 
 ### \`GET /api/v1/playlists\`
 
@@ -1667,8 +1668,9 @@ Cross-cutting parameters on these endpoints:
   non-numeric values fall back to 1 (\`api/helpers.py:parse_profile_id\`).
 - **Field selection:** \`?fields=artist_name,source\` trims each returned artist
   object to the named fields (\`api/helpers.py:parse_fields\`).
-- **Rate limit:** 60 requests/minute per IP; exceeding it returns \`429\` with
-  code \`RATE_LIMITED\`.
+- **Rate limit:** 600 requests/minute per valid API key; 60/minute per IP
+  when the key is missing or invalid. Exceeding it returns \`429\` with code
+  \`RATE_LIMITED\`.
 
 ### \`GET /api/v1/watchlist\`
 
@@ -1939,8 +1941,9 @@ Cross-cutting parameters on these endpoints:
 - **Pagination:** \`?page=\` (default 1, minimum 1) and \`?limit=\` (default 50,
   minimum 1, maximum 200). Non-numeric values fall back to the defaults
   (\`api/helpers.py:parse_pagination\`).
-- **Rate limit:** 60 requests/minute per IP; exceeding it returns \`429\` with
-  code \`RATE_LIMITED\`.
+- **Rate limit:** 600 requests/minute per valid API key; 60/minute per IP
+  when the key is missing or invalid. Exceeding it returns \`429\` with code
+  \`RATE_LIMITED\`.
 
 ### \`GET /api/v1/wishlist\`
 
@@ -2144,7 +2147,7 @@ All endpoints live under \`/api/v1\` and require an API key: send it as an
 \`Authorization: Bearer sk_...\` header (preferred) or as an \`?api_key=sk_...\`
 query parameter. Every response uses the standard envelope
 \`{"success": bool, "data": ..., "error": {"code","message"}|null, "pagination": ...|null}\`.
-Rate limit: 60 requests/minute per IP (\`429\` / \`RATE_LIMITED\`).
+Rate limit: 600 requests/minute per valid API key; 60/minute per IP when the key is missing or invalid (\`429\` / \`RATE_LIMITED\`).
 These endpoints do not support \`?fields=\`.
 
 This is the inbound music-request flow used by external sources (Discord
@@ -2301,7 +2304,7 @@ curl http://localhost:8008/api/v1/request/3fa85f64-5717-4562-b3fc-2c963f66afa6 \
             body: `
 # Discover API — draft documentation
 
-Base: \`/api/v1\`. All endpoints require an API key (\`Authorization: Bearer sk_...\` header or \`?api_key=\` query parameter). All responses use the standard envelope \`{"success", "data", "error", "pagination"}\`. Rate limit: 60 requests/minute per IP (\`429\` / \`RATE_LIMITED\`).
+Base: \`/api/v1\`. All endpoints require an API key (\`Authorization: Bearer sk_...\` header or \`?api_key=\` query parameter). All responses use the standard envelope \`{"success", "data", "error", "pagination"}\`. Rate limit: 600 requests/minute per valid API key; 60/minute per IP when the key is missing or invalid (\`429\` / \`RATE_LIMITED\`).
 
 The five \`GET\` endpoints that read per-profile discovery state (\`/discover/pool\`, \`/discover/similar-artists\`, \`/discover/recent-releases\`, \`/discover/pool/metadata\`, \`/discover/bubbles\`, \`/discover/bubbles/<snapshot_type>\`) are profile-scoped: send an \`X-Profile-Id\` header or \`?profile_id=\` query parameter (defaults to profile 1 when omitted).
 
@@ -2635,8 +2638,8 @@ curl -H "Authorization: Bearer sk_..." \\
 > at \`http://localhost:8008\`. Every response uses the standard envelope
 > \`{"success": true|false, "data": {...}|null, "error": {"code","message"}|null,
 > "pagination": {...}|null}\`. \`pagination\` is \`null\` on all profile endpoints
-> (none are paginated). Rate limit: 60 requests/minute per IP (\`429\`, code
-> \`RATE_LIMITED\`).
+> (none are paginated). Rate limit: 600 requests/minute per valid API key; 60/minute per IP when
+> the key is missing or invalid (\`429\`, code \`RATE_LIMITED\`).
 
 ## Endpoint reference
 
@@ -3067,8 +3070,8 @@ curl -X PATCH http://localhost:8008/api/v1/settings \\
 > at \`http://localhost:8008\`. Every response uses the standard envelope
 > \`{"success": true|false, "data": {...}|null, "error": {"code","message"}|null,
 > "pagination": {...}|null}\`. \`pagination\` is \`null\` on all retag endpoints
-> (none are paginated). Rate limit: 60 requests/minute per IP (\`429\`, code
-> \`RATE_LIMITED\`).
+> (none are paginated). Rate limit: 600 requests/minute per valid API key; 60/minute per IP when
+> the key is missing or invalid (\`429\`, code \`RATE_LIMITED\`).
 
 ## Endpoint reference
 
@@ -3347,7 +3350,7 @@ curl -H "Authorization: Bearer $API_KEY" \\
             body: `
 # Cache API — draft documentation
 
-Base: \`/api/v1\`. All endpoints require an API key (\`Authorization: Bearer sk_...\` header or \`?api_key=\` query parameter). All responses use the standard envelope \`{"success", "data", "error", "pagination"}\`. Rate limit: 60 requests/minute per IP (\`429\` / \`RATE_LIMITED\`).
+Base: \`/api/v1\`. All endpoints require an API key (\`Authorization: Bearer sk_...\` header or \`?api_key=\` query parameter). All responses use the standard envelope \`{"success", "data", "error", "pagination"}\`. Rate limit: 600 requests/minute per valid API key; 60/minute per IP when the key is missing or invalid (\`429\` / \`RATE_LIMITED\`).
 
 These endpoints are diagnostic: inspect what SoulSync has cached from MusicBrainz lookups and discovery-provider matching. They are **read-only** — all four are \`GET\` and none of them clear, purge, or otherwise modify the caches. They are not profile-scoped.
 
@@ -3548,7 +3551,7 @@ curl -H "Authorization: Bearer sk_..." \\
             body: `
 # ListenBrainz API — draft documentation
 
-Base: \`/api/v1\`. All endpoints require an API key (\`Authorization: Bearer sk_...\` header or \`?api_key=\` query parameter). All responses use the standard envelope \`{"success", "data", "error", "pagination"}\`. Rate limit: 60 requests/minute per IP (\`429\` / \`RATE_LIMITED\`).
+Base: \`/api/v1\`. All endpoints require an API key (\`Authorization: Bearer sk_...\` header or \`?api_key=\` query parameter). All responses use the standard envelope \`{"success", "data", "error", "pagination"}\`. Rate limit: 600 requests/minute per valid API key; 60/minute per IP when the key is missing or invalid (\`429\` / \`RATE_LIMITED\`).
 
 These endpoints read the ListenBrainz playlists SoulSync has imported or generated. They are not profile-scoped. \`playlist_id\` on the detail endpoint accepts either the internal integer ID or the MusicBrainz playlist MBID.
 
@@ -3687,7 +3690,7 @@ curl -H "Authorization: Bearer sk_..." \\
             body: `
 # MetaSync Export API — draft documentation
 
-Base: \`/api/v1\`. Requires an API key (\`Authorization: Bearer sk_...\` header or \`?api_key=\` query parameter). Responses use the standard envelope \`{"success", "data", "error", "pagination"}\`. Rate limit: 60 requests/minute per IP (\`429\` / \`RATE_LIMITED\`).
+Base: \`/api/v1\`. Requires an API key (\`Authorization: Bearer sk_...\` header or \`?api_key=\` query parameter). Responses use the standard envelope \`{"success", "data", "error", "pagination"}\`. Rate limit: 600 requests/minute per valid API key; 60/minute per IP when the key is missing or invalid (\`429\` / \`RATE_LIMITED\`).
 
 MetaSync is a peer-to-peer metadata network that runs as a SoulSync sidecar. This endpoint is how it reads SoulSync's library: a **read-only**, cursor-paged walk of resolved metadata (artists, albums, tracks). It is not profile-scoped.
 
@@ -3811,8 +3814,8 @@ curl -H "Authorization: Bearer sk_..." \\
 
 All endpoints live under \`/api/v1\` and require an API key, sent as an
 \`Authorization: Bearer sk_...\` header or as the \`?api_key=\` query parameter.
-An API key acts with **admin rights**. Rate limit: 60 requests/minute per IP
-(\`429\` with code \`RATE_LIMITED\`).
+An API key acts with **admin rights**. Rate limit: 600 requests/minute per valid API key; 60/minute per IP when
+the key is missing or invalid (\`429\` with code \`RATE_LIMITED\`).
 
 ## How the video surface works
 
