@@ -814,6 +814,8 @@ def reorganize_album_rename_only(
     tracks = preview.get('tracks', [])
     summary['total'] = len(tracks)
     src_dirs_touched: Set[str] = set()
+    # where each old folder's tracks went, for the album's own files after
+    dest_dirs: Dict[str, Set[str]] = {}
 
     for t in tracks:
         if stop_check and stop_check():
@@ -924,11 +926,18 @@ def reorganize_album_rename_only(
                 continue
         if current_abs:
             src_dirs_touched.add(os.path.dirname(current_abs))
+            dest_dirs.setdefault(os.path.dirname(current_abs), set()).add(os.path.dirname(new_abs))
         summary['moved'] += 1
         _emit(moved=summary['moved'],
               processed=summary['moved'] + summary['skipped'] + summary['failed'])
 
     for src_dir in src_dirs_touched:
+        targets = dest_dirs.get(src_dir) or set()
+        if len(targets) == 1:
+            try:
+                _carry_album_files(src_dir, next(iter(targets)))
+            except Exception as e:  # noqa: BLE001 - the tracks moved; the extras stay put
+                logger.warning("[Reorganize/rename] album files in %s stayed: %s", src_dir, e)
         if cleanup_empty_dir_fn:
             try:
                 cleanup_empty_dir_fn(src_dir)
@@ -1016,6 +1025,48 @@ def mark_album_placed(db, album_id, fingerprint=None) -> bool:
 
 # A disc subfolder inside an album: "Disc 1", "CD 2", "Disk 01", "Vol. 3", etc.
 _DISC_DIR_RE = re.compile(r'^(disc|disk|cd|vol|volume)\s*\.?\s*\d+$', re.IGNORECASE)
+
+
+# the album's own files beside its tracks: artwork, cue sheets, playlists,
+# rip logs, booklets. a track's .lrc/.txt goes with the track itself
+_ALBUM_FILE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp',
+                    '.cue', '.m3u', '.m3u8', '.nfo', '.log', '.pdf'}
+_AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.aac', '.ogg', '.opus', '.wav',
+               '.aiff', '.aif', '.alac', '.ape', '.wv', '.wma', '.dsf', '.dff'}
+
+
+def _carry_album_files(src_dir: str, dst_dir: str) -> List[str]:
+    """Move the album's own files after its tracks, once every track has left
+    ``src_dir`` for the one folder ``dst_dir``. A rename moved the tracks and
+    left cover.jpg and the cue sheet behind, so the old folder was never empty
+    enough to prune and the new one had no cover. A file already at the
+    destination wins: nothing is overwritten. Returns the moved paths."""
+    if not src_dir or not dst_dir or os.path.normcase(src_dir) == os.path.normcase(dst_dir):
+        return []
+    try:
+        names = os.listdir(src_dir)
+    except OSError:
+        return []
+    if any(os.path.splitext(n)[1].lower() in _AUDIO_EXTS for n in names):
+        return []  # tracks still live here: the folder is not the album's alone
+    moved = []
+    for name in names:
+        src = os.path.join(src_dir, name)
+        if not os.path.isfile(src) or os.path.splitext(name)[1].lower() not in _ALBUM_FILE_EXTS:
+            continue
+        dst = os.path.join(dst_dir, name)
+        if os.path.lexists(dst):
+            continue
+        try:
+            os.rename(src, dst)
+        except OSError as e:
+            if getattr(e, 'errno', None) != errno.EXDEV:
+                raise
+            shutil.move(src, dst)
+        moved.append(dst)
+    if moved:
+        logger.info("[Reorganize/rename] carried %d album file(s) to %s", len(moved), dst_dir)
+    return moved
 
 
 def _rmdir_if_empty(dir_path: str) -> bool:
