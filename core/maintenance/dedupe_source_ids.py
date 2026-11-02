@@ -131,6 +131,18 @@ def clear_corrupt_source_ids(database: Any, dry_run: bool = True) -> dict:
     return report
 
 
+def _legacy_genius_fix_applied(conn) -> bool:
+    """Whether the legacy library ran its one-time genius search reset."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                    " AND name='_genius_search_fix_applied'").fetchone():
+        return True
+    try:
+        return conn.execute("SELECT 1 FROM schema_migrations WHERE name='genius_search_fix'"
+                            ).fetchone() is not None
+    except Exception:  # noqa: BLE001 - no ledger: nothing says it ran
+        return False
+
+
 def repair_imported_state(database: Any) -> dict:
     """Apply one-time corruption repairs after legacy rows reached Library v2."""
     with database._get_connection() as conn:
@@ -146,7 +158,11 @@ def repair_imported_state(database: Any) -> dict:
         conn.commit()
     report = clear_corrupt_source_ids(database, dry_run=False)
     with database._get_connection() as conn:
-        if 'lib2_genius_search_fix' not in markers:
+        if 'lib2_genius_search_fix' not in markers and _legacy_genius_fix_applied(conn):
+            # 3.6.1 already reset the bad genius matches once and the worker
+            # re-matched them with the fixed search: what came across is good
+            conn.execute("INSERT INTO lib2_upgrade_repairs(name) VALUES('lib2_genius_search_fix')")
+        elif 'lib2_genius_search_fix' not in markers:
             for table in ('lib2_artists', 'lib2_tracks'):
                 conn.execute(
                     f"UPDATE {table} SET external_ids=json_remove(external_ids,'$.genius'), "

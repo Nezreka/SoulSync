@@ -203,3 +203,23 @@ def test_post_import_repair_resets_old_genius_and_artist_soul_ids_once(db):
 
     dd.repair_imported_state(db)
     assert _get(db, "1", "genius_id") == "new"
+
+
+@pytest.mark.parametrize("signal", ["marker_table", "ledger"])
+def test_genius_matches_3_6_1_already_reset_are_kept(db, signal):
+    """3.6.1 reset the bad genius matches once and re-matched them with the
+    fixed search. the upgrade wiped those good matches a second time."""
+    _insert(db, artist_id="1", name="Artist")
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_artists SET external_ids=? WHERE id=1", ('{"genius":"good"}',))
+        if signal == "marker_table":
+            conn.execute("CREATE TABLE _genius_search_fix_applied (applied_at TIMESTAMP)")
+        else:
+            conn.execute("INSERT OR IGNORE INTO schema_migrations(name) VALUES('genius_search_fix')")
+        conn.commit()
+
+    report = dd.repair_imported_state(db)
+
+    assert 'genius_reset' not in report
+    assert _get(db, "1", "genius_id") == "good"
+
