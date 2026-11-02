@@ -39,15 +39,15 @@ logger = get_logger("repair.monitored_discography_refresh")
 @register_job
 class Lib2DiscographyRefreshJob(RepairJob):
     job_id = "monitored_discography_refresh"
-    display_name = "Monitored Discography Refresh"
-    description = "Re-fetch monitored artists' provider catalogs so new releases become wanted."
+    display_name = "Watchlist Discography Refresh"
+    description = "Re-fetch watchlist artists' provider catalogs so new releases go on the Wishlist."
     help_text = (
-        "Re-expands the provider discography of every monitored library "
+        "Re-expands the provider discography of every watchlist "
         "artist, including one never manually expanded before — its first "
         "fetch happening here instead of an 'Update Discography' click "
-        "changes nothing (an artist's very first fetch never auto-monitors "
+        "changes nothing (an artist's very first fetch never wishlists "
         "its back catalog either way). Releases discovered since the last "
-        "expansion are auto-monitored when the artist's 'monitor new items' "
+        "expansion are wishlisted when the artist's new-releases "
         "setting is 'all'; 'new' only accepts a dated release newer than the "
         "previously newest known release. Their tracklist is materialized "
         "and mirrored into the Wishlist, so the normal download pipeline "

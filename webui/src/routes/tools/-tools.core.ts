@@ -274,7 +274,7 @@ export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   missing_lossy_copy: 'Convert',
   acoustid_mismatch: 'Fix',
   quality_upgrade: 'Upgrade',
-  quality_upgrade_review: 'Monitor & Upgrade',
+  quality_upgrade_review: 'Wishlist & Upgrade',
   quality_format_not_targeted: 'Leave As-is',
   quality_unknown: 'Leave As-is',
   missing_discography_track: 'Add to Wishlist',

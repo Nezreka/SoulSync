@@ -149,7 +149,7 @@ FINDING_TYPE_META = {
     'suspect_album_tag':        {'label': 'Suspect Album Tags', 'verb': 'Re-identify'},
     'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
     'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
-    'quality_upgrade_review':   {'label': 'Quality Upgrade Review', 'verb': 'Monitor & Upgrade'},
+    'quality_upgrade_review':   {'label': 'Quality Upgrade Review', 'verb': 'Wishlist & Upgrade'},
     'quality_format_not_targeted': {'label': 'Format Not in Profile', 'verb': 'Leave As-is'},
     'quality_unknown':          {'label': 'Quality Unknown', 'verb': 'Leave As-is'},
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},

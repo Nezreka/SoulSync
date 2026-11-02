@@ -119,9 +119,9 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
           <div className="watch-all-header-content">
             <div className="watch-all-header-icon">👁</div>
             <div>
-              <h2 className="watch-all-title">Monitor All Unmonitored</h2>
+              <h2 className="watch-all-title">Watch All Unwatched</h2>
               <p className="watch-all-subtitle">
-                Start monitoring every unmonitored artist that has a {sourceName} ID
+                Add every unwatched artist that has a {sourceName} ID to your Watchlist
               </p>
             </div>
           </div>
@@ -190,7 +190,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
                   <div className="watch-all-stat-value">
                     {data.eligible.length + data.ineligible.length}
                   </div>
-                  <div className="watch-all-stat-label">Total unmonitored</div>
+                  <div className="watch-all-stat-label">Total unwatched</div>
                 </div>
               </div>
 
@@ -209,7 +209,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
 
               {data.eligible.length > 0 ? (
                 <>
-                  <div className="watch-all-section-label">Artists to be monitored</div>
+                  <div className="watch-all-section-label">Artists to be watched</div>
                   <div className="watch-all-grid" id="watch-all-eligible-grid">
                     {visibleEligible.map((artist, index) => (
                       <WatchAllCell artist={artist} key={index} />
@@ -260,7 +260,8 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
         <div className="watch-all-footer">
           {armed && !result ? (
             <span className="watch-all-confirm-hint" role="status">
-              This monitors {data?.eligible.length ?? 0} artists at once. Click again to confirm.
+              This adds {data?.eligible.length ?? 0} artists to your Watchlist at once. Click again
+              to confirm.
             </span>
           ) : null}
           <button

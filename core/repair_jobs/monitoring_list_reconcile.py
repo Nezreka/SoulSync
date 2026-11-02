@@ -16,7 +16,7 @@ class MonitoringListReconcileJob(RepairJob):
     """Reassert definitive monitoring and drain crash-surviving mirror ops."""
 
     job_id = "monitoring_list_reconcile"
-    display_name = "Monitoring List Reconcile"
+    display_name = "Watchlist & Wishlist Reconcile"
     description = "Repair Artist↔Watchlist and wanted Track↔Wishlist drift."
     help_text = (
         "Retries pending Watchlist/Wishlist mirror operations, reconciles "
