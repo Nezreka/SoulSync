@@ -334,11 +334,21 @@ def dispatch_import_to_main_pipeline(
             if isinstance(item, Mapping)
         }
         work = []
+        errors = []
         for match in record.matches:
             key = (str(match.get("relative_path") or ""), int(match.get("track_id") or 0))
             if key in processed:
                 continue
-            work.append((dict(match), _pipeline_context(conn, record, match, source=source)))
+            # one file whose track row is gone fails alone: unguarded it
+            # raised out of the whole import, which retried forever and never
+            # imported the files that were fine
+            try:
+                work.append((dict(match), _pipeline_context(conn, record, match, source=source)))
+            except Exception as exc:  # noqa: BLE001 - one file must not hide others
+                safe_error = redact_sensitive_text(exc)
+                logger.warning("Main-pipeline context failed for %s/%s: %s",
+                               import_id, key[0], safe_error)
+                errors.append(f"{key[0]}: {safe_error}")
         resolved_path = record.resolved_path
 
     from core.imports.paths import docker_resolve_path
@@ -346,7 +356,6 @@ def dispatch_import_to_main_pipeline(
         str(config_get("soulseek.transfer_path", "./Transfer") or "./Transfer"))
     dispatched = []
     waiting = []
-    errors = []
     for match, context in work:
         relative = str(match.get("relative_path") or "")
         task_id = f"acq-{import_id}-{int(match.get('track_id') or 0)}"

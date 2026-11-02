@@ -377,3 +377,30 @@ def test_another_imports_marker_does_not_authorise_a_replacement(tmp_path):
         _stage_working_copy(
             source, transfer_dir=str(transfer), import_id="import-5",
             track_id=505, copier=lambda *_args: True)
+
+
+def test_a_file_whose_track_row_is_gone_fails_alone_instead_of_the_import(tmp_path):
+    """one missing track row raised out of the whole dispatch, so the import
+    retried forever and the files that were fine never imported"""
+    source_root = tmp_path / "client"
+    source_root.mkdir()
+    (source_root / "01.flac").write_bytes(b"audio")
+    factory, importing, _request = _seed_import(tmp_path / "db.sqlite", source_root)
+    conn = factory()
+    conn.execute("DELETE FROM lib2_tracks WHERE id=101")
+    conn.commit()
+    conn.close()
+    called = []
+
+    result = dispatch_import_to_main_pipeline(
+        factory, importing.id,
+        config_get=lambda key, default=None: (
+            str(tmp_path / "transfer") if key == "soulseek.transfer_path" else default),
+        processor=lambda *a, **k: called.append(a), runtime=object(),
+        copier=lambda source, destination: bool(shutil.copy2(source, destination)),
+    )
+
+    assert called == []
+    assert result.dispatched == ()
+    assert len(result.errors) == 1 and result.errors[0].startswith("01.flac:")
+
