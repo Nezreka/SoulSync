@@ -70,6 +70,45 @@ from utils.logging_config import get_logger
 logger = get_logger("download_plugins.usenet")
 
 
+def _remove_completed_mode() -> str:
+    """The music side's Remove Completed setting (off / history / files)."""
+    from core.downloads import remove_completed
+    try:
+        from core.settings import config_manager
+        return remove_completed.normalize(
+            config_manager.get('usenet_client.remove_completed', 'off'))
+    except Exception:  # noqa: BLE001 - no config means the old behavior
+        return remove_completed.OFF
+
+
+def remove_imported_usenet_job(download_id: str) -> bool:
+    """Remove Completed for a single-track grab: once post-processing has
+    copied the matching file out of the job, take the job out of the client
+    per ``usenet_client.remove_completed``. The client job id comes from the
+    grab row (written at submit, so it survives a restart). Best-effort: a
+    job left in the client is the old behavior, never an error."""
+    from core.downloads import remove_completed
+    mode = _remove_completed_mode()
+    if mode == remove_completed.OFF or not download_id:
+        return False
+    conn = _grabs_conn()
+    if conn is None:
+        return False
+    try:
+        from core.acquisition.grabs import get_grab
+        grab = get_grab(conn, str(download_id))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("remove completed: grab lookup failed for %s: %s", download_id, e)
+        return False
+    finally:
+        conn.close()
+    if not grab or str(grab.get('source') or '') != 'usenet':
+        return False
+    return remove_completed.remove_imported_job(
+        grab.get('external_job_id'), mode, run=run_async,
+        adapter=get_active_usenet_adapter(), label=str(grab.get('title') or ''))
+
+
 def _grabs_conn():
     """Best-effort connection to the app DB for grab correlation (ADR-07).
 
@@ -1157,6 +1196,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         logger.info("[Usenet album] Staged %d audio files for '%s'", len(copied), album_name)
         _emit('staged', count=len(copied))
         self._update_grab(grab_id, status=STATUS_COMPLETED, output_path=str(local_path))
+        # Remove Completed: the import works from the staged copies, so the
+        # client's job (and, per the setting, its folder) is done with.
+        from core.downloads import remove_completed
+        remove_completed.remove_imported_job(
+            job_id, _remove_completed_mode(), run=run_async, adapter=adapter,
+            label=picked.title)
         result['success'] = True
         result['files'] = copied
         return result

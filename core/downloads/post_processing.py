@@ -113,6 +113,15 @@ def _copy_release_audio_to_transfer(source_path: str, transfer_dir: str) -> Opti
         return None
 
 
+def _remove_imported_usenet_job(download_id: str) -> None:
+    """Best-effort Remove Completed for a single-track usenet grab."""
+    try:
+        from core.download_plugins.usenet import remove_imported_usenet_job
+        remove_imported_usenet_job(download_id)
+    except Exception as exc:  # noqa: BLE001 - client cleanup never breaks an import
+        logger.warning("[Post-Processing] Remove completed failed for %s: %s", download_id, exc)
+
+
 @dataclass
 class PostProcessDeps:
     """Bundle of dependencies the post-processing worker needs.
@@ -339,6 +348,11 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                             found_file = copied_path
                             file_location = 'download'
                             release_album = (release_files, selected)
+                            if task.get('username') == 'usenet':
+                                # Remove Completed: this task's file is copied
+                                # out; nothing else reads its job (one job per
+                                # track grab). Torrents keep seeding.
+                                _remove_imported_usenet_job(actual_download_id)
                     if not found_file:
                         with tasks_lock:
                             if task_id in download_tasks:

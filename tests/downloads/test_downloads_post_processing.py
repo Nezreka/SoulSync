@@ -808,3 +808,69 @@ def test_failed_album_tracks_import_keeps_the_request_completed(tmp_path, monkey
     pp.run_post_processing_worker('t1', 'b1', deps)
     assert download_tasks['t1']['status'] == 'completed'
     assert not any(call[0] == 'on_complete' and call[1][-1] is False for call in rec.calls)
+
+
+# ── Remove Completed: a usenet track grab hands its job over once copied out ──
+
+def _release_task(tmp_path, source, *, matching=True):
+    release_dir = tmp_path / 'release'
+    release_dir.mkdir()
+    right = release_dir / '02 - Money.flac'
+    other = release_dir / '01 - Intro.flac'
+    other.write_bytes(b'intro')
+    files = [str(other)]
+    if matching:
+        right.write_bytes(b'right')
+        files.append(str(right))
+    filename = 'candidate||Artist - Album'
+    download_tasks['t1'] = {
+        'status': 'post_processing', 'filename': filename, 'username': source,
+        'download_id': 'release-9',
+        'track_info': {'name': 'Money', 'artists': [{'name': 'Artist'}]},
+    }
+
+    class _Client:
+        def get_download_status(self, download_id):
+            from types import SimpleNamespace
+            assert download_id == 'release-9'
+            return SimpleNamespace(file_path=files[0], audio_files=files)
+
+    deps, _ = _build_deps(
+        config=_FakeConfig({'soulseek.transfer_path': str(tmp_path / 'transfer')}),
+        download_orchestrator=_Client(),
+        run_async=lambda status: status,
+    )
+    return deps
+
+
+@pytest.mark.parametrize('source', ['torrent', 'usenet'])
+def test_a_usenet_track_copied_out_hands_its_job_to_remove_completed(tmp_path, monkeypatch, source):
+    import core.download_plugins.usenet as usenet
+    handed = []
+    monkeypatch.setattr(usenet, 'remove_imported_usenet_job', lambda dl_id: handed.append(dl_id) or True)
+    deps = _release_task(tmp_path, source)
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert (tmp_path / 'transfer' / '02 - Money.flac').exists()
+    # one job per usenet track grab; a torrent keeps seeding and is never handed over
+    assert handed == (['release-9'] if source == 'usenet' else [])
+
+
+def test_a_usenet_track_with_no_matching_file_keeps_its_job(tmp_path, monkeypatch):
+    import core.download_plugins.usenet as usenet
+    handed = []
+    monkeypatch.setattr(usenet, 'remove_imported_usenet_job', lambda dl_id: handed.append(dl_id) or True)
+    deps = _release_task(tmp_path, 'usenet', matching=False)
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert download_tasks['t1']['status'] == 'failed'
+    assert handed == []
+
+
+def test_a_remove_completed_error_never_breaks_the_import(tmp_path, monkeypatch):
+    import core.download_plugins.usenet as usenet
+
+    def boom(dl_id):
+        raise RuntimeError('client down')
+    monkeypatch.setattr(usenet, 'remove_imported_usenet_job', boom)
+    deps = _release_task(tmp_path, 'usenet')
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert (tmp_path / 'transfer' / '02 - Money.flac').exists()
