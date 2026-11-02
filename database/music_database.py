@@ -22783,8 +22783,8 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT * FROM lib2_albums WHERE primary_artist_id = ? "
-                "ORDER BY year, title",
+                "SELECT al.* FROM lib2_albums al WHERE al.primary_artist_id = ? "
+                f"AND {_owned_sql('album', 'al')} ORDER BY al.year, al.title",
                 (artist_id,),
             )
             return self._api_project_lib2(conn, 'album', cursor.fetchall())
@@ -22806,9 +22806,9 @@ class MusicDatabase:
                 LEFT JOIN lib2_track_files f
                        ON f.track_id = t.id AND f.is_primary = 1
                       AND COALESCE(f.file_state, 'active') <> 'deleted'
-                WHERE t.album_id = ?
+                WHERE t.album_id = ? AND {owned}
                 ORDER BY t.track_number, t.title
-            """, (album_id,))
+            """.format(owned=_owned_sql("track", "t")), (album_id,))
             return self._api_project_lib2(conn, 'track', cursor.fetchall())
         except Exception as e:
             logger.error(f"API: Error getting tracks for album {album_id}: {e}")
@@ -22932,10 +22932,11 @@ class MusicDatabase:
         if table not in ("artists", "albums"):
             return []
         catalogue_table = "lib2_artists" if table == "artists" else "lib2_albums"
+        owned = _owned_sql("artist" if table == "artists" else "album", "g")
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute(f"SELECT genres FROM {catalogue_table}")
+            cursor.execute(f"SELECT g.genres FROM {catalogue_table} g WHERE {owned}")
             genre_counts: Dict[str, int] = {}
             for row in cursor.fetchall():
                 raw = row["genres"]
@@ -24594,8 +24595,11 @@ class MusicDatabase:
                     ORDER BY COALESCE(e.added_at, e.updated_at) DESC LIMIT ?
                 """, (limit,))
                 return self._api_project_lib2(conn, 'track', cursor.fetchall())
+            # what came INTO the library: a discography fetch adds release rows
+            # with added_at = now, and those are no one's recent additions
+            owned = _owned_sql(entity_type.rstrip('s'), "e")
             cursor.execute(
-                f"SELECT e.* FROM {table} e{f' WHERE {visible}' if visible else ''}"
+                f"SELECT e.* FROM {table} e WHERE {owned}{f' AND {visible}' if visible else ''}"
                 " ORDER BY e.added_at DESC LIMIT ?", (limit,))
             return self._api_project_lib2(conn, entity_type.rstrip('s'), cursor.fetchall())
         except Exception as e:
@@ -24778,7 +24782,10 @@ class MusicDatabase:
             conn = self._get_connection()
             cursor = conn.cursor()
 
-            where_parts = []
+            # the albums you have, in the caller's library: lib2_albums also
+            # holds discography and wishlist releases, and 3.6.1's list was
+            # the owned library by construction, scoped to the caller
+            where_parts = [_owned_sql("album", "al")]
             params: list = []
 
             if search:

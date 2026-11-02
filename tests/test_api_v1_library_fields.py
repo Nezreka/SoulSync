@@ -463,6 +463,9 @@ def _seed(db):
                 " server_id, server_path) VALUES ('track', 1, 'plex', 'k1', '/music/song-one.flac')")
     cur.execute("INSERT INTO lib2_tracks (id, album_id, title, server_source)"
                 " VALUES (99, 77, 'Numeric Song', 'plex')")
+    # the v1 library lists what you have: the numeric album has a file too
+    cur.execute("INSERT INTO lib2_track_files (track_id, path, size, is_primary, file_state)"
+                " VALUES (99, '/Media/Music/numeric-song.flac', 1000, 1, 'active')")
     cur.executemany(
         "INSERT INTO lib2_provider_attempts (entity_type, entity_id, service, status,"
         " last_attempted_at) VALUES (?, ?, ?, ?, ?)",
@@ -707,3 +710,20 @@ def test_an_old_id_two_rows_answer_to_is_refused_not_guessed(db, client):
     resp = client.get("/api/v1/library/artists/dup")
     assert resp.status_code == 409
     assert resp.get_json()["error"]["code"] == "AMBIGUOUS_ID"
+
+
+def test_the_library_lists_only_albums_you_have(client, db):
+    """lib2_albums also holds discography and wishlist releases; the v1
+    library (and its recently added) lists the owned library, as 3.6.1 did."""
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, server_source, added_at)"
+                 " VALUES (500, 42, 'Discography Only', 'plex', '2099-01-01 00:00:00')")
+    conn.commit()
+    conn.close()
+    listed = {a["title"] for a in client.get("/api/v1/library/albums").get_json()["data"]["albums"]}
+    assert "Discography Only" not in listed and "Numeric Album" in listed
+    by_artist = client.get("/api/v1/library/albums?artist_id=42").get_json()["data"]["albums"]
+    assert [a["title"] for a in by_artist] == ["Numeric Album"]
+    recent = client.get("/api/v1/library/recently-added?type=albums").get_json()["data"]
+    items = recent.get("items") or recent.get("albums") or recent
+    assert "Discography Only" not in {a.get("title") for a in items}
