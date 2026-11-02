@@ -36,6 +36,16 @@ def worker(db):
     return VideoRepairWorker(db)
 
 
+@pytest.fixture(autouse=True)
+def _no_linked_profiles(monkeypatch):
+    """the job finds linked profiles in the MUSIC database, which a test
+    process shares: a profile another test linked to Plex (and left) turned
+    these single-viewer tests into per-viewer runs that flagged nothing. A
+    test that wants linked profiles says so with the ``linked`` fixture."""
+    from core import media_accounts
+    monkeypatch.setattr(media_accounts, "plex_linked_profiles", lambda: [])
+
+
 def _days_ago(n):
     return (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d %H:%M:%S")
 

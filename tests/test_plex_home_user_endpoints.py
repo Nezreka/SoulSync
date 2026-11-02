@@ -45,7 +45,10 @@ def as_kid(client):
     pid = db.create_profile(name=f'kid_{os.urandom(3).hex()}')
     with client.session_transaction() as sess:
         sess['profile_id'] = pid
-    return pid
+    yield pid
+    # hermetic: a Plex Home link left on a profile in the shared database made
+    # every later Watched Cleanup test in the process a per-viewer run
+    db.delete_profile(pid)
 
 
 @pytest.fixture
@@ -142,7 +145,10 @@ def test_in_login_mode_a_member_can_still_unlink(client, as_kid, plex, login_mod
 def test_in_login_mode_an_admin_still_links(client, plex, login_mode):
     db = web_server.get_database()
     boss = db.create_profile(name=f'boss_{os.urandom(3).hex()}', is_admin=True)
-    _signed_in(client, boss)
-    assert [u['title'] for u in client.get('/api/profiles/me/plex-home-users').get_json()['users']] == ['Kids', 'Annie']
-    r = client.post('/api/profiles/me/plex-home-user', json={'user_id': '1'})
-    assert r.status_code == 200 and r.get_json()['title'] == 'Kids'
+    try:
+        _signed_in(client, boss)
+        assert [u['title'] for u in client.get('/api/profiles/me/plex-home-users').get_json()['users']] == ['Kids', 'Annie']
+        r = client.post('/api/profiles/me/plex-home-user', json={'user_id': '1'})
+        assert r.status_code == 200 and r.get_json()['title'] == 'Kids'
+    finally:
+        db.delete_profile(boss)  # hermetic, as as_kid
