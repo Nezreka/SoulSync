@@ -33,6 +33,7 @@ from api import create_api_blueprint, limiter
 from core import metasync_depot as depot
 from core.soulid_worker import generate_soul_id
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 NOW = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
 RAW_KEY = "sk_metasync_test_key"
@@ -131,8 +132,6 @@ def test_local_values_are_stored_but_never_candidates(db):
         "isrc": _field([_value("NET")], local_values=["MINE"])}), now=NOW)
     ok, leg = depot.promotion_verdict(db, subject, "isrc", "MINE", now=NOW)
     assert (ok, leg) == (False, None)
-    status = depot.promote_field(db, "track", subject, "isrc", now=NOW)
-    assert status["status"] in ("below_floor", "no_library_row")
 
 
 def test_depot_is_bounded(db, monkeypatch):
@@ -330,27 +329,26 @@ def test_lone_claim_with_no_anchor_is_not_a_survivor(db):
 
 # ── invalidation: flags, never rewrites ───────────────────────────
 
-def _seed_library_parents(db):
-    """The FK parents (artist ar1, album a1) library-row seeds need."""
+def _seed_lib2(db, *, artist="Artist", album="Album", title="Song"):
+    """A library v2 artist + album + track, seeded the way dev's
+    own export tests seed the catalogue. Returns
+    (artist_id, album_id, track_id) — lib2 integer ids."""
     conn = db._get_connection()
-    conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar1', 'Artist')")
-    conn.execute(
-        "INSERT OR IGNORE INTO albums (id, artist_id, title) "
-        "VALUES ('a1', 'ar1', 'Album')")
+    artist_id = seed_artist(conn, server_id="ar1", name=artist)
+    album_id = seed_album(conn, server_id="al1", title=album,
+                          artist_id=artist_id)
+    track_id = seed_track(conn, server_id="tr1", title=title,
+                          album_id=album_id, artist_id=artist_id)
     conn.commit()
+    return artist_id, album_id, track_id
 
 
-def _seed_promoted_track(db):
-    """A library track whose spotify id was depot-promoted."""
+def _mark_promoted_track(db):
+    """The depot-side state of a track whose spotify id was
+    depot-promoted: the §2.4 mark. The library side of that
+    promotion lives in the export rows the tests build, which is
+    where network_fields_for_export reads it from."""
     subject = generate_soul_id("track", "Artist", "Song")
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-        "spotify_track_id, spotify_match_status) "
-        "VALUES ('t1', 'a1', 'ar1', 'Song', ?, 'sp1', 'matched')",
-        (subject,))
-    conn.commit()
     depot.record_mark(db, "track", subject, "spotify_id", "sp1")
     return subject
 
@@ -383,13 +381,20 @@ def test_subject_invalidation_and_status(db):
 
 
 def test_invalidation_never_rewrites_library_values(db):
-    subject = _seed_promoted_track(db)
+    subject = generate_soul_id("track", "Artist", "Song")
+    _artist_id, _album_id, track_id = _seed_lib2(db)
+    conn = db._get_connection()
+    conn.execute(
+        "UPDATE lib2_tracks SET soul_id = ?, spotify_id = 'sp1' "
+        "WHERE id = ?", (subject, track_id))
+    conn.commit()
+    depot.record_mark(db, "track", subject, "spotify_id", "sp1")
     depot.apply_invalidation(db, {"kind": "subjects",
                                   "subjects": [subject],
                                   "reason": "revocation"})
-    conn = db._get_connection()
     row = conn.execute(
-        "SELECT spotify_track_id FROM tracks WHERE id = 't1'").fetchone()
+        "SELECT spotify_id FROM lib2_tracks WHERE id = ?",
+        (track_id,)).fetchone()
     assert row[0] == "sp1"  # flagged in the depot, untouched in the library
 
 
@@ -434,77 +439,18 @@ def test_collect_subjects_deposits_answers(db, monkeypatch):
 # ── marks and the export bit ──────────────────────────────────────
 
 def test_export_bit_follows_the_marked_value(db):
-    subject = _seed_promoted_track(db)
+    subject = _mark_promoted_track(db)
     # the export row is the row being served (id + its own values),
     # which is how api/metasync.py calls this
     assert depot.network_fields_for_export(
         db, "track", {"id": "t1", "soul_id": subject,
                       "spotify_track_id": "sp1"}) == ["spotify_id"]
-    # the value is replaced by the user's own matching: the mark
-    # stops applying instead of mislabelling fresh data
-    conn = db._get_connection()
-    conn.execute("UPDATE tracks SET spotify_track_id = 'sp_other' "
-                 "WHERE id = 't1'")
-    conn.commit()
+    # the value is replaced by the user's own matching (the served
+    # row now carries their value): the mark stops applying instead
+    # of mislabelling fresh data
     assert depot.network_fields_for_export(
         db, "track", {"id": "t1", "soul_id": subject,
                       "spotify_track_id": "sp_other"}) == []
-
-
-def test_promote_field_fills_empty_only_and_marks(db):
-    subject = generate_soul_id("album", "Artist", "Album")
-    conn = db._get_connection()
-    _seed_library_parents(db)
-    conn.execute(
-        "INSERT INTO albums (id, artist_id, title, soul_id, year) "
-        "VALUES ('alb1', 'ar1', 'Album', ?, NULL)", (subject,))
-    conn.commit()
-    depot.store_record(db, _record(subject, "album", {
-        "year": _field([_strong(1991, support="1-2")])}), now=NOW)
-    result = depot.promote_field(db, "album", subject, "year", now=NOW)
-    assert result["status"] == "promoted" and result["leg"] == "a"
-    row = conn.execute("SELECT year FROM albums WHERE id = 'alb1'").fetchone()
-    assert row[0] == 1991
-    assert depot.network_fields_for_export(
-        db, "album", {"id": "alb1", "soul_id": subject,
-                      "year": 1991}) == ["year"]
-    again = depot.promote_field(db, "album", subject, "year", now=NOW)
-    assert again["status"] == "already_filled"
-
-
-def test_promote_field_below_floor_writes_nothing(db):
-    subject = generate_soul_id("album", "Artist", "Album")
-    conn = db._get_connection()
-    _seed_library_parents(db)
-    conn.execute(
-        "INSERT INTO albums (id, artist_id, title, soul_id, year) "
-        "VALUES ('alb1', 'ar1', 'Album', ?, NULL)", (subject,))
-    conn.commit()
-    depot.store_record(db, _record(subject, "album", {
-        "year": _field([_value(1991, support="3+")])}), now=NOW)
-    result = depot.promote_field(db, "album", subject, "year", now=NOW)
-    assert result["status"] == "below_floor"
-    row = conn.execute("SELECT year FROM albums WHERE id = 'alb1'").fetchone()
-    assert row[0] is None
-
-
-def test_promote_genres_writes_only_floor_passing_genres(db):
-    subject = generate_soul_id("artist", "Artist")
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO artists (id, name, soul_id, genres) "
-        "VALUES ('ar1', 'Artist', ?, NULL)", (subject,))
-    conn.commit()
-    depot.store_record(db, _record(subject, "artist", {
-        "genres": _field([_strong("Rock"),
-                          _value("Noise", support="none")])}), now=NOW)
-    result = depot.promote_field(db, "artist", subject, "genres", now=NOW)
-    assert result["status"] == "promoted"
-    row = conn.execute("SELECT genres FROM artists WHERE id = 'ar1'").fetchone()
-    assert json.loads(row[0]) == ["Rock"]
-    assert depot.network_fields_for_export(
-        db, "artist", {"id": "ar1", "soul_id": subject,
-                       "genres": ["Rock"]}) == ["genres"]
 
 
 # ── the tagging consult (core/metadata/source.py) ─────────────────
@@ -629,12 +575,16 @@ def test_push_invalidate_and_records_roundtrip(client, db):
 
 
 def test_export_carries_network_fields_and_release_group_id(client, db):
-    subject = _seed_promoted_track(db)
+    subject = _mark_promoted_track(db)
     conn = db._get_connection()
+    artist_id, album_id, track_id = _seed_lib2(db)
     conn.execute(
-        "INSERT INTO albums (id, artist_id, title, soul_id, "
-        "musicbrainz_release_group_id, musicbrainz_match_status) "
-        "VALUES ('alb9', 'ar1', 'Album', 'soul_album_x', 'rg-1', 'matched')")
+        "UPDATE lib2_tracks SET soul_id = ?, spotify_id = 'sp1' "
+        "WHERE id = ?", (subject, track_id))
+    conn.execute(
+        "UPDATE lib2_albums SET soul_id = 'soul_album_x', "
+        "musicbrainz_release_group_id = 'rg-1' WHERE id = ?",
+        (album_id,))
     conn.commit()
     resp = client.get("/api/v1/metasync/export?entity=track",
                       headers=_auth())
@@ -877,11 +827,12 @@ def test_steered_deezer_year_is_marked(db, monkeypatch):
     album_sid = generate_soul_id("album", "The Artist", "The Album")
     depot.store_record(db, _record(track_sid, "track", {
         "deezer_id": _field([_strong("555")])}), now=NOW)
-    _seed_library_parents(db)
+    _artist_id, album_id, _track_id = _seed_lib2(
+        db, artist="The Artist", album="The Album", title="The Song")
     conn = db._get_connection()
     conn.execute(
-        "INSERT INTO albums (id, artist_id, title, soul_id, year) "
-        "VALUES ('alb1', 'ar1', 'The Album', ?, 1991)", (album_sid,))
+        "UPDATE lib2_albums SET soul_id = ?, year = 1991 WHERE id = ?",
+        (album_sid, album_id))
     conn.commit()
 
     def enrich(source_name, pp, metadata, cfg, runtime, track_title,
@@ -894,7 +845,7 @@ def test_steered_deezer_year_is_marked(db, monkeypatch):
     _run_embed(db, monkeypatch, enrich=enrich)
     assert "year" in depot.marks_for(db, "album", album_sid)
     assert depot.network_fields_for_export(
-        db, "album", {"id": "alb1", "soul_id": album_sid,
+        db, "album", {"id": album_id, "soul_id": album_sid,
                       "year": 1991}) == ["year"]
 
 
@@ -919,64 +870,6 @@ def test_one_bad_mark_does_not_drop_the_rest(db, monkeypatch):
     assert "spotify_id" not in marks
 
 
-# ── SF: promote_field — atomic fill+mark, compare-and-swap ────────
-
-def _seed_album_year(db, subject, year=None):
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO albums (id, artist_id, title, soul_id, year) "
-        "VALUES ('alb1', 'ar1', 'Album', ?, ?)", (subject, year))
-    conn.commit()
-
-
-def test_promote_field_mark_failure_rolls_back_the_fill(db, monkeypatch):
-    """Fill and mark commit together or not at all: if the mark
-    write fails, the library column must NOT be left filled — a
-    filled-but-unmarked value is a laundered value."""
-    subject = generate_soul_id("album", "Artist", "Album")
-    _seed_album_year(db, subject)
-    depot.store_record(db, _record(subject, "album", {
-        "year": _field([_strong(1991, support="1-2")])}), now=NOW)
-
-    def boom(*a, **kw):
-        raise RuntimeError("mark store down")
-
-    monkeypatch.setattr(depot, "record_mark", boom)
-    with pytest.raises(RuntimeError):
-        depot.promote_field(db, "album", subject, "year", now=NOW)
-    conn = db._get_connection()
-    row = conn.execute(
-        "SELECT year FROM albums WHERE id = 'alb1'").fetchone()
-    assert row[0] is None
-    assert depot.marks_for(db, "album", subject) == {}
-
-
-def test_promote_field_compare_and_swap_loser_writes_no_mark(
-        db, monkeypatch):
-    """Two promotions racing one empty field: the loser's UPDATE
-    matches no row (the column is no longer empty), it reports
-    already_filled, and it writes NO mark — a mark naming the
-    losing value would mislabel the winner's. The pre-read is
-    neutralised here so only the UPDATE guard can save us."""
-    subject = generate_soul_id("album", "Artist", "Album")
-    _seed_album_year(db, subject)
-    monkeypatch.setattr(depot, "_is_empty", lambda current, field: True)
-    first = depot._fill_library_field(
-        db, "album", subject, "year", "albums", "year", None, 1991)
-    assert first["status"] == "promoted"
-    second = depot._fill_library_field(
-        db, "album", subject, "year", "albums", "year", None, 1992)
-    assert second["status"] == "already_filled"
-    conn = db._get_connection()
-    row = conn.execute(
-        "SELECT year FROM albums WHERE id = 'alb1'").fetchone()
-    assert row[0] == 1991
-    marked = [json.loads(k) for k in
-              depot.marks_for(db, "album", subject)["year"]]
-    assert marked == [1991]
-
-
 # ── SF: export bit — merged genre lists, cosmetic ID changes ──────
 
 def test_export_genres_bit_survives_a_merged_library_list(db):
@@ -985,20 +878,12 @@ def test_export_genres_bit_survives_a_merged_library_list(db):
     marked genre is still in the library's list — whole-list
     equality almost never held, so genres exported as own data."""
     subject = generate_soul_id("artist", "Artist")
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO artists (id, name, soul_id, genres) "
-        "VALUES ('ar1', 'Artist', ?, ?)",
-        (subject, json.dumps(["Rock", "Local Addition"])))
-    conn.commit()
     depot.record_mark(db, "artist", subject, "genres", ["Rock"])
     assert depot.network_fields_for_export(
         db, "artist", {"id": "ar1", "soul_id": subject,
                        "genres": ["Rock", "Local Addition"]}) == ["genres"]
-    # the last marked genre leaves the list: the bit goes with it
-    conn.execute("UPDATE artists SET genres = ? WHERE id = 'ar1'",
-                 (json.dumps(["Local Addition"]),))
-    conn.commit()
+    # the last marked genre leaves the served list: the bit goes
+    # with it
     assert depot.network_fields_for_export(
         db, "artist", {"id": "ar1", "soul_id": subject,
                        "genres": ["Local Addition"]}) == []
@@ -1008,11 +893,7 @@ def test_export_bit_survives_recasing_of_an_id(db):
     """A later writer's cosmetic re-case/trim of the same promoted
     ID must not drop the network bit while the value is still the
     promoted one."""
-    subject = _seed_promoted_track(db)
-    conn = db._get_connection()
-    conn.execute("UPDATE tracks SET spotify_track_id = ' SP1 ' "
-                 "WHERE id = 't1'")
-    conn.commit()
+    subject = _mark_promoted_track(db)
     assert depot.network_fields_for_export(
         db, "track", {"id": "t1", "soul_id": subject,
                       "spotify_track_id": " SP1 "}) == ["spotify_id"]
@@ -1237,16 +1118,16 @@ def test_tagging_soul_ids_match_the_workers(db):
     from core.soulid_worker import SoulIDWorker
 
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', 'The Artist')")
-    conn.execute(
-        "INSERT INTO albums (id, artist_id, title) "
-        "VALUES ('a1', 'ar1', 'The Album')")
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title) "
-        "VALUES ('t1', 'a1', 'ar1', 'The Song')")
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title) "
-        "VALUES ('t2', 'a1', 'ar1', 'The Song (feat. Guest)')")
+    ar1 = seed_artist(conn, server_id="ar1", name="The Artist")
+    a1 = seed_album(conn, server_id="a1", title="The Album",
+                    artist_id=ar1)
+    t1 = seed_track(conn, server_id="t1", title="The Song",
+                    album_id=a1, artist_id=ar1,
+                    file_path="/music/the-song.flac")
+    t2 = seed_track(conn, server_id="t2",
+                    title="The Song (feat. Guest)",
+                    album_id=a1, artist_id=ar1,
+                    file_path="/music/the-song-feat.flac")
     conn.commit()
 
     worker = SoulIDWorker.__new__(SoulIDWorker)
@@ -1260,10 +1141,14 @@ def test_tagging_soul_ids_match_the_workers(db):
     worker._process_albums()
     worker._process_tracks()
 
-    stored = dict(conn.execute(
-        "SELECT id, soul_id FROM artists UNION ALL "
-        "SELECT id, soul_id FROM albums UNION ALL "
-        "SELECT id, soul_id FROM tracks").fetchall())
+    stored = {}
+    for table, row_id, key in (("lib2_artists", ar1, "ar1"),
+                               ("lib2_albums", a1, "a1"),
+                               ("lib2_tracks", t1, "t1"),
+                               ("lib2_tracks", t2, "t2")):
+        stored[key] = conn.execute(
+            f"SELECT soul_id FROM {table} WHERE id = ?",
+            (row_id,)).fetchone()[0]
     # the seam's computation, from the tagging pipeline's names
     assert stored["ar1"] == generate_soul_id("artist", "The Artist")
     assert stored["a1"] == generate_soul_id(
@@ -1290,42 +1175,37 @@ def test_export_bit_is_checked_against_the_exported_row(db):
     fetchone-by-soul_id) lets the user's own row shadow the
     promoted one, and the network ISRC exports unmarked."""
     subject = generate_soul_id("track", "Artist", "Song")
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-        "isrc) VALUES ('t_own', 'a1', 'ar1', 'Song', ?, 'OWNISRC')",
-        (subject,))
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-        "isrc) VALUES ('t_net', 'a1', 'ar1', 'Song', ?, 'NETISRC')",
-        (subject,))
-    conn.commit()
     depot.record_mark(db, "track", subject, "isrc", "NETISRC")
     own_row = {"id": "t_own", "soul_id": subject, "isrc": "OWNISRC"}
     net_row = {"id": "t_net", "soul_id": subject, "isrc": "NETISRC"}
     assert depot.network_fields_for_export(db, "track", net_row) == ["isrc"]
     assert depot.network_fields_for_export(db, "track", own_row) == []
-    # a row carrying only its id resolves through THAT id — still
-    # never through a same-soul_id sibling
+    # a row that does not carry the value gets no bit — the export
+    # walk always serves the value columns, so there is nothing to
+    # resolve a value FROM, and guessing (by id, by soul_id) is
+    # exactly the shadowing this test exists to forbid
     assert depot.network_fields_for_export(
-        db, "track", {"id": "t_net", "soul_id": subject}) == ["isrc"]
+        db, "track", {"id": "t_net", "soul_id": subject}) == []
     assert depot.network_fields_for_export(
         db, "track", {"id": "t_own", "soul_id": subject}) == []
 
 
 def test_export_route_bits_are_per_row(client, db):
     subject = generate_soul_id("track", "Artist", "Song")
-    _seed_library_parents(db)
     conn = db._get_connection()
+    artist_id = seed_artist(conn, server_id="ar1", name="Artist")
+    album_id = seed_album(conn, server_id="al1", title="Album",
+                          artist_id=artist_id)
+    own_id = seed_track(conn, server_id="t_own", title="Song",
+                        album_id=album_id, artist_id=artist_id)
+    net_id = seed_track(conn, server_id="t_net", title="Song",
+                        album_id=album_id, artist_id=artist_id)
     conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-        "isrc) VALUES ('t_own', 'a1', 'ar1', 'Song', ?, 'OWNISRC')",
-        (subject,))
+        "UPDATE lib2_tracks SET soul_id = ?, isrc = 'OWNISRC' "
+        "WHERE id = ?", (subject, own_id))
     conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-        "isrc) VALUES ('t_net', 'a1', 'ar1', 'Song', ?, 'NETISRC')",
-        (subject,))
+        "UPDATE lib2_tracks SET soul_id = ?, isrc = 'NETISRC' "
+        "WHERE id = ?", (subject, net_id))
     conn.commit()
     depot.record_mark(db, "track", subject, "isrc", "NETISRC")
     resp = client.get("/api/v1/metasync/export?entity=track",
@@ -1342,41 +1222,37 @@ def test_export_route_bits_are_per_row(client, db):
 # ── nit: a mapped column the table does not carry fails closed ──
 
 def test_export_bit_fails_closed_for_a_column_the_table_lacks(db):
-    """tracks has no discogs_id column (Discogs enrichment is
-    artist/album level), but _LIBRARY_COLUMNS maps the field and
-    promote_field could write the mark. A row carrying only its
-    id forces the by-id fallback, which used to run
-    SELECT discogs_id FROM tracks — sqlite raises, and the export
-    route 500s. It must fail closed: no raise, no bit."""
+    """The export never serves a discogs_id on track rows (Discogs
+    enrichment is artist/album level), but a mark can still exist
+    for the field. The bit reads the served row only — a value the
+    row does not carry cannot match, and asking must fail closed:
+    no raise, no bit. (The pre-v2 code resolved the value by id
+    against the library table; the column wasn't there, sqlite
+    raised, and the export route 500'd.)"""
     subject = generate_soul_id("track", "Artist", "Song")
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id) "
-        "VALUES ('t1', 'a1', 'ar1', 'Song', ?)", (subject,))
-    conn.commit()
     depot.record_mark(db, "track", subject, "discogs_id", "1234567")
     row = {"id": "t1", "soul_id": subject}
     assert depot.network_fields_for_export(db, "track", row) == []
 
 
-def test_promote_field_fails_closed_for_a_column_the_table_lacks(db):
-    """The same phantom column on the write side: the fill used
-    to run UPDATE tracks SET discogs_id ... and raise. It must
-    refuse (no_library_column), and write no mark."""
-    subject = generate_soul_id("track", "Artist", "Song")
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id) "
-        "VALUES ('t1', 'a1', 'ar1', 'Song', ?)", (subject,))
-    conn.commit()
-    depot.store_record(db, _record(subject, "track", {
-        "discogs_id": _field([_strong("1234567")])}), now=NOW)
-    result = depot.promote_field(db, "track", subject, "discogs_id",
-                                 now=NOW)
-    assert result["status"] == "no_library_column"
-    assert depot.marks_for(db, "track", subject) == {}
+def test_export_value_columns_match_the_export_lists():
+    """The bit fails CLOSED when a served row doesn't carry the
+    mapped column — so a mapped name the export never serves is a
+    bit that can never fire, and the value would export as the
+    user's own (the laundering direction). Pin every mapped name
+    against the export's own column lists. The one stated
+    exception: track discogs_id, which the export deliberately
+    never serves (Discogs is artist/album level) — its fail-closed
+    behaviour is pinned above."""
+    import database.music_database as mdb
+
+    lists = {"artist": mdb._EXPORT_ARTIST_COLUMNS,
+             "album": mdb._EXPORT_ALBUM_COLUMNS,
+             "track": mdb._EXPORT_TRACK_COLUMNS}
+    for (kind, field), column in depot._EXPORT_VALUE_COLUMNS.items():
+        if (kind, field) == ("track", "discogs_id"):
+            continue
+        assert column in lists[kind], (kind, field, column)
 
 
 # ── MF-2: marks are keyed by value, not one slot per field ───────
@@ -1400,13 +1276,6 @@ def test_marks_are_keyed_by_value(db):
 
 def test_export_bit_survives_a_second_marked_value(db):
     subject = generate_soul_id("track", "Artist", "Song")
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-        "isrc) VALUES ('t1', 'a1', 'ar1', 'Song', ?, 'ISRC-A')",
-        (subject,))
-    conn.commit()
     depot.record_mark(db, "track", subject, "isrc", "ISRC-A")
     depot.record_mark(db, "track", subject, "isrc", "ISRC-B",
                       via="fetched_via_promoted_id")
@@ -1420,13 +1289,6 @@ def test_genre_marks_from_two_paths_coexist(db):
     MusicBrainz returned by way of a promoted MBID are two marks
     on one field; neither may evict the other."""
     subject = generate_soul_id("album", "Artist", "Album")
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO albums (id, artist_id, title, soul_id, genres) "
-        "VALUES ('alb1', 'ar1', 'Album', ?, ?)",
-        (subject, json.dumps(["Rock", "Jazz"])))
-    conn.commit()
     depot.record_mark(db, "album", subject, "genres", ["Rock"])
     depot.record_mark(db, "album", subject, "genres", ["Jazz"],
                       via="fetched_via_promoted_id")
@@ -1502,52 +1364,6 @@ def test_leg_b_response_must_be_fetched_by_the_candidate(db):
         response, local, fetched_id="999", fetched_for="555")
     assert depot.confirmation_key_check(
         response, local, fetched_id="555", fetched_for="555")
-
-
-def test_promote_field_confirmation_spends_on_one_candidate(db):
-    """promote_field used to loop candidates over ONE shared
-    response: whichever it tried first passed. Now the response
-    confirms only the candidate whose ID fetched it."""
-    subject = generate_soul_id("track", "Artist", "Song")
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id) "
-        "VALUES ('t1', 'a1', 'ar1', 'Song', ?)", (subject,))
-    conn.commit()
-    depot.store_record(db, _record(subject, "track", {
-        "deezer_id": _field([_value("111", support="1-2"),
-                             _value("222", support="1-2")])}), now=NOW)
-    result = depot.promote_field(
-        db, "track", subject, "deezer_id", now=NOW,
-        confirmation_response={"isrc": "USRC10000001"},
-        confirmation_fetched_id="222",
-        local_keys={"isrc": "USRC10000001"})
-    assert result["status"] == "promoted" and result["leg"] == "b"
-    assert result["value"] == "222"
-    row = conn.execute(
-        "SELECT deezer_id FROM tracks WHERE id = 't1'").fetchone()
-    assert row[0] == "222"
-
-
-def test_promote_genres_cannot_ride_a_confirmation_fetch(db):
-    """One fetch is never about each genre: the genres path is not
-    offered leg (b) at all, so a key-agreeing response promotes
-    no genre that lacks (a) or (c)."""
-    subject = generate_soul_id("artist", "Artist")
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO artists (id, name, soul_id, genres) "
-        "VALUES ('ar1', 'Artist', ?, NULL)", (subject,))
-    conn.commit()
-    depot.store_record(db, _record(subject, "artist", {
-        "genres": _field([_value("Rock", support="1-2")])}), now=NOW)
-    result = depot.promote_field(
-        db, "artist", subject, "genres", now=NOW,
-        confirmation_response={"isrc": "USRC10000001"},
-        confirmation_fetched_id="555",
-        local_keys={"isrc": "USRC10000001"})
-    assert result["status"] == "below_floor"
 
 
 # ── SF-5: unknown tiers/buckets fail closed at ingest ────────────
@@ -1757,19 +1573,6 @@ def test_gated_mb_values_are_marked(db, monkeypatch):
     assert [json.loads(k) for k in album_marks["genres"]] == [["Rock"]]
 
     # and the bits fire on the rows those values land in
-    _seed_library_parents(db)
-    conn = db._get_connection()
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-        "musicbrainz_recording_id, isrc, year) VALUES "
-        "('gt1', 'a1', 'ar1', 'Gate Song', ?, 'rec-gated', "
-        "'ISRCGATED1', 1999)", (track_sid,))
-    conn.execute(
-        "INSERT INTO albums (id, artist_id, title, soul_id, "
-        "musicbrainz_release_group_id, year, genres) VALUES "
-        "('ga1', 'ar1', 'Gate Album', ?, 'rg-1', 1999, ?)",
-        (album_sid, json.dumps(["Rock"])))
-    conn.commit()
     track_row = {"id": "gt1", "soul_id": track_sid,
                  "musicbrainz_recording_id": "rec-gated",
                  "isrc": "ISRCGATED1", "year": 1999}
@@ -1806,15 +1609,15 @@ def test_steered_year_marks_the_track_too(db, monkeypatch):
     album_sid = generate_soul_id("album", "The Artist", "The Album")
     depot.store_record(db, _record(track_sid, "track", {
         "deezer_id": _field([_strong("555")])}), now=NOW)
-    _seed_library_parents(db)
+    _artist_id, album_id, track_id = _seed_lib2(
+        db, artist="The Artist", album="The Album", title="The Song")
     conn = db._get_connection()
     conn.execute(
-        "INSERT INTO albums (id, artist_id, title, soul_id, year) "
-        "VALUES ('alb1', 'ar1', 'The Album', ?, 1991)", (album_sid,))
+        "UPDATE lib2_albums SET soul_id = ?, year = 1991 WHERE id = ?",
+        (album_sid, album_id))
     conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, soul_id, "
-        "year) VALUES ('t9', 'alb1', 'ar1', 'The Song', ?, 1991)",
-        (track_sid,))
+        "UPDATE lib2_tracks SET soul_id = ? WHERE id = ?",
+        (track_sid, track_id))
     conn.commit()
 
     def enrich(source_name, pp, metadata, cfg, runtime, track_title,
@@ -1827,7 +1630,7 @@ def test_steered_year_marks_the_track_too(db, monkeypatch):
     _run_embed(db, monkeypatch, enrich=enrich)
     track_marks = depot.marks_for(db, "track", track_sid)
     assert [json.loads(k) for k in track_marks["year"]] == ["1991"]
-    row = {"id": "t9", "soul_id": track_sid, "year": 1991}
+    row = {"id": track_id, "soul_id": track_sid, "year": 1991}
     assert depot.network_fields_for_export(db, "track", row) == ["year"]
 
 
@@ -1898,3 +1701,119 @@ def test_collect_memoizes_found_false_subjects(db, monkeypatch):
         db, _node_cfg, {"track": ["soul_track_miss"]}, now=NOW)
     assert calls == [("track", ["soul_track_miss"])]  # asked once
     assert first["stored"] == 1 and second["stored"] == 0
+
+
+# ── e2e: depot -> tags -> download import -> export ─────────────
+
+def test_promoted_value_round_trips_to_the_export(client, db, monkeypatch):
+    """The whole promotion loop, production code at every hop:
+
+    depot candidate -> the tagging consult fills the tag value and
+    the pipeline's marks block writes the §2.4 mark -> the SAME
+    import context embed_source_ids filled carries the tag set
+    into the download import (link_download_into_library_v2 reads
+    SPOTIFY_TRACK_ID out of it and writes it onto the lib2 track
+    it creates) -> the real SoulID worker mints the row's soul_id
+    from the row's own names -> the export route serves the value
+    back byte-identical, with the network bit on.
+
+    Nothing is represented by hand: the value crosses every seam
+    in the form production passes it in."""
+    import core.library2.autolink as autolink
+    import core.metadata.source as source_mod
+    from core.soulid_worker import SoulIDWorker
+
+    monkeypatch.setattr(autolink, "_warm_new_artwork",
+                        lambda *a, **kw: None)
+
+    track_sid = generate_soul_id("track", "The Artist", "The Song")
+    depot.store_record(db, _record(track_sid, "track", {
+        "spotify_id": _field([_strong("spE2E")])}), now=NOW)
+
+    # tagging: _run_embed's stubs, except the tag writer captures
+    # the pp it is handed — that pp IS the tag set written to the
+    # file in production. The context dict is kept: embed_source_ids
+    # publishes the final tag set back into it for the import.
+    captured = {}
+
+    def capture_write(audio_file, metadata, pp, cfg, symbols):
+        captured["pp"] = pp
+
+    monkeypatch.setattr(source_mod, "get_database", lambda: db)
+    monkeypatch.setattr(
+        source_mod, "get_config_manager",
+        lambda: _Cfg({"metadata_enhancement.post_process_order":
+                      ["deezer"]}))
+    monkeypatch.setattr(source_mod, "get_mutagen_symbols",
+                        lambda: object())
+    monkeypatch.setattr(source_mod, "_collect_source_ids",
+                        lambda metadata, cfg: {})
+    monkeypatch.setattr(source_mod, "_write_embedded_metadata",
+                        capture_write)
+    monkeypatch.setattr(source_mod, "_process_source_enrichment",
+                        lambda *a, **kw: None)
+    metadata = {"title": "The Song", "artist": "The Artist",
+                "album_artist": "The Artist", "album": "The Album",
+                "track_number": 1, "disc_number": 1}
+    embed_context = {}
+    source_mod.embed_source_ids(object(), metadata,
+                                context=embed_context, runtime=None)
+
+    tag_value = captured["pp"]["id_tags"]["SPOTIFY_TRACK_ID"]
+    assert tag_value == "spE2E"
+    assert embed_context["_embedded_id_tags"]["SPOTIFY_TRACK_ID"] == "spE2E"
+    # the mark was written by the pipeline's own marks block
+    assert depot.marks_for(db, "track", track_sid)["spotify_id"]
+
+    # download import: the context the pipeline hands the import,
+    # with the tag set embed_source_ids published into it. No
+    # track_info id on purpose: the Spotify ID can only arrive
+    # from the embedded tags.
+    import_context = {
+        "_final_processed_path":
+            "/music/The Artist/The Album/01 The Song.flac",
+        "username": "test",
+        "track_info": {
+            "name": "The Song",
+            "artists": [{"name": "The Artist"}],
+            "album": {"name": "The Album", "total_tracks": 1,
+                      "album_type": "album"},
+            "track_number": 1,
+            "provider": "spotify",
+        },
+        "_embedded_id_tags": embed_context["_embedded_id_tags"],
+    }
+    file_id = autolink.link_download_into_library_v2(import_context)
+    assert file_id is not None
+    conn = db._get_connection()
+    track_id, stored = conn.execute(
+        "SELECT t.id, t.spotify_id FROM lib2_track_files tf "
+        "JOIN lib2_tracks t ON t.id = tf.track_id WHERE tf.id = ?",
+        (file_id,)).fetchone()
+    assert stored == "spE2E"  # written by the import, from the tags
+
+    # identity: the real worker mints the row's soul_id from its
+    # own names — the agreement the mark lookup depends on
+    worker = SoulIDWorker.__new__(SoulIDWorker)
+    worker.db = db
+    worker.batch_size = 100
+    worker.should_stop = False
+    worker.current_item = None
+    worker.stats = {"artists_processed": 0, "albums_processed": 0,
+                    "tracks_processed": 0, "errors": 0, "pending": 0}
+    worker._process_artists()
+    worker._process_albums()
+    worker._process_tracks()
+    minted = conn.execute(
+        "SELECT soul_id FROM lib2_tracks WHERE id = ?",
+        (track_id,)).fetchone()[0]
+    assert minted == track_sid
+
+    # export: the real route serves the value back, still marked
+    resp = client.get("/api/v1/metasync/export?entity=track",
+                      headers=_auth())
+    assert resp.status_code == 200
+    mine = [i for i in resp.get_json()["data"]["items"]
+            if i["soul_id"] == track_sid]
+    assert mine and mine[0]["spotify_track_id"] == "spE2E"
+    assert mine[0]["network_fields"] == ["spotify_id"]

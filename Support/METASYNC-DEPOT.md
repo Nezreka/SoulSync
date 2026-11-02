@@ -52,6 +52,24 @@ support) can only ever promote under (a) — your node's own check.
 Promotion fills **empty fields only**. The network never overwrites
 your data.
 
+Promotion means one concrete thing today: the tagging pipeline
+fills a file's tags from the depot. From the tags, a value reaches
+the catalogue on the paths that read tags: the download import
+takes the track's Spotify ID straight from the tag set it is
+handed, the other provider IDs a tag carries (Spotify, iTunes,
+MusicBrainz, Deezer, Tidal and friends) land through the separate
+embedded-ID reconcile pass, and a few depot fields — the
+release-group ID among them — have no catalogue writer yet and
+stay tag-only for now. A value that never reaches the catalogue
+never exports either, marked or not. There is **no direct
+depot-to-library write** — the depot never updates a library
+record itself. A direct library-write promotion existed in an
+earlier build of this step, aimed at the pre-v2 library tables;
+it was removed in this update rather than ported blind. A
+library-v2 port (through the catalogue's own provider-ID write
+path) comes when something actually needs to promote outside
+tagging.
+
 ## The network mark
 
 Every promoted value is marked in SoulSync's data as
@@ -114,6 +132,10 @@ dependency.
 
 ## Known limits of this step
 
+- **No direct library promotion.** Depot values reach the
+  catalogue only through tagging + import, as described above.
+  Nothing promotes a value straight into an existing library
+  record.
 - **Duration** is held in the depot but not promoted into library
   records yet: the network's unit is milliseconds and SoulSync's
   stored durations have mixed-unit history, so a wrong-unit

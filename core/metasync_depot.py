@@ -39,11 +39,14 @@ What the depot guarantees:
   the node and drops whatever the node's live view no longer holds:
   pushes are the fast path, the node's view is the truth.
 * **Promotion happens only above §8's floor, at promotion time.**
-  ``promotion_verdict()`` is the floor, and every promotion path in
-  SoulSync (the tagging processor in core/metadata/source.py, and
-  ``promote_field()`` for library records) goes through it. Peer
-  agreement — the support bucket — never promotes anything by
-  itself; counting is display-only, exactly as §9 says.
+  ``promotion_verdict()`` is the floor, and the one promotion path
+  in SoulSync — the tagging processor in core/metadata/source.py —
+  goes through it. There is deliberately NO direct depot-to-library
+  write: a promoted value reaches the catalogue the way tagged
+  values do, through the file's tags, on the import paths that
+  read them. Peer agreement —
+  the support bucket — never promotes anything by itself; counting
+  is display-only, exactly as §9 says.
 * **Promoted values are marked, forever (§2.4).** A promotion writes
   a row in ``metasync_network_marks`` keyed by (kind, soul_id,
   field, value). The MetaSync export emits those fields in each
@@ -177,37 +180,41 @@ PROMOTABLE_FIELDS = {
 _STRUCTURAL_FIELDS = {"album_track", "duration_ms"}
 _FIELD_VOCABULARY = set().union(*PROMOTABLE_FIELDS.values()) | _STRUCTURAL_FIELDS
 
-# claim field -> (library table, value column, provider match-status column
-# or None). Fill-empty-only writes, mirroring the enrichment workers.
-# Filling a provider ID also sets its ``<provider>_match_status`` to
-# 'matched': the export only publishes IDs whose status is 'matched',
-# and the network mark (network_fields) is what keeps a promoted ID
-# honest on the way out — the two ship together, never one alone.
-_LIBRARY_COLUMNS: Dict[Tuple[str, str], Tuple[str, str, Optional[str]]] = {
-    ("artist", "spotify_id"): ("artists", "spotify_artist_id", "spotify_match_status"),
-    ("artist", "deezer_id"): ("artists", "deezer_id", "deezer_match_status"),
-    ("artist", "tidal_id"): ("artists", "tidal_id", "tidal_match_status"),
-    ("artist", "itunes_id"): ("artists", "itunes_artist_id", "itunes_match_status"),
-    ("artist", "discogs_id"): ("artists", "discogs_id", "discogs_match_status"),
-    ("artist", "artist_mbid"): ("artists", "musicbrainz_id", "musicbrainz_match_status"),
-    ("artist", "genres"): ("artists", "genres", None),
-    ("album", "spotify_id"): ("albums", "spotify_album_id", "spotify_match_status"),
-    ("album", "deezer_id"): ("albums", "deezer_id", "deezer_match_status"),
-    ("album", "tidal_id"): ("albums", "tidal_id", "tidal_match_status"),
-    ("album", "itunes_id"): ("albums", "itunes_album_id", "itunes_match_status"),
-    ("album", "discogs_id"): ("albums", "discogs_id", "discogs_match_status"),
-    ("album", "release_group_mbid"): ("albums", "musicbrainz_release_group_id", "musicbrainz_match_status"),
-    ("album", "year"): ("albums", "year", None),
-    ("album", "genres"): ("albums", "genres", None),
-    ("album", "label"): ("albums", "label", None),
-    ("track", "spotify_id"): ("tracks", "spotify_track_id", "spotify_match_status"),
-    ("track", "deezer_id"): ("tracks", "deezer_id", "deezer_match_status"),
-    ("track", "tidal_id"): ("tracks", "tidal_id", "tidal_match_status"),
-    ("track", "itunes_id"): ("tracks", "itunes_track_id", "itunes_match_status"),
-    ("track", "discogs_id"): ("tracks", "discogs_id", "discogs_match_status"),
-    ("track", "recording_mbid"): ("tracks", "musicbrainz_recording_id", "musicbrainz_match_status"),
-    ("track", "isrc"): ("tracks", "isrc", None),
-    ("track", "year"): ("tracks", "year", None),
+# claim field -> the column name an export row carries the field's
+# current value under. network_fields_for_export reads the CURRENT
+# value off the export row itself — never a by-id or by-soul_id
+# lookup: soul_ids are shared between rows on purpose, and the
+# catalogue behind these names is library v2's now, which the depot
+# does not read. The names are the legacy wire names the export
+# projects lib2 rows back under (the _EXPORT_*_COLUMNS lists in
+# database/music_database.py), which is why they look pre-v2. A
+# field whose value the row does not carry gets no network bit:
+# fail closed rather than guess from another row or a dead table.
+_EXPORT_VALUE_COLUMNS: Dict[Tuple[str, str], str] = {
+    ("artist", "spotify_id"): "spotify_artist_id",
+    ("artist", "deezer_id"): "deezer_id",
+    ("artist", "tidal_id"): "tidal_id",
+    ("artist", "itunes_id"): "itunes_artist_id",
+    ("artist", "discogs_id"): "discogs_id",
+    ("artist", "artist_mbid"): "musicbrainz_id",
+    ("artist", "genres"): "genres",
+    ("album", "spotify_id"): "spotify_album_id",
+    ("album", "deezer_id"): "deezer_id",
+    ("album", "tidal_id"): "tidal_id",
+    ("album", "itunes_id"): "itunes_album_id",
+    ("album", "discogs_id"): "discogs_id",
+    ("album", "release_group_mbid"): "musicbrainz_release_group_id",
+    ("album", "year"): "year",
+    ("album", "genres"): "genres",
+    ("album", "label"): "label",
+    ("track", "spotify_id"): "spotify_track_id",
+    ("track", "deezer_id"): "deezer_id",
+    ("track", "tidal_id"): "tidal_id",
+    ("track", "itunes_id"): "itunes_track_id",
+    ("track", "discogs_id"): "discogs_id",
+    ("track", "recording_mbid"): "musicbrainz_recording_id",
+    ("track", "isrc"): "isrc",
+    ("track", "year"): "year",
 }
 
 # The provider a disambiguation settlement key names for a field
@@ -984,9 +991,8 @@ def record_mark(db: Any, kind: str, soul_id: str, field: str, value: Any,
     its row.
 
     With ``conn`` given, the mark is written on the caller's
-    connection inside the caller's transaction — promote_field's
-    fill uses this so the fill and the mark commit together or not
-    at all (the module's "the two ship together" contract). That
+    connection inside the caller's transaction, for a caller that
+    needs the mark to commit or roll back with its own write. That
     path does NOT re-run ensure_schema: the caller ensured it
     before opening its transaction, and reaching for the DDL on a
     second connection mid-transaction is a self-inflicted
@@ -1035,31 +1041,20 @@ _ID_FIELDS = {"spotify_id", "deezer_id", "tidal_id", "itunes_id",
               "recording_mbid", "isrc"}
 
 
-def _table_columns(conn: Any, table: str) -> set:
-    """The columns a library table actually carries. The static
-    _LIBRARY_COLUMNS map can name a column the table does not have
-    (tracks has no discogs_id — Discogs enrichment is artist/album
-    level), and SQL naming a missing column raises; callers check
-    membership here first and fail closed. Table names come only
-    from the static map, never from input."""
-    return {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
-
-
 def network_fields_for_export(db: Any, kind: str, row: Dict[str, Any]) -> List[str]:
     """The §5.1 G1 export bit: claim fields of THIS library row
     whose CURRENT value is a marked (network-derived) one. A mark
     whose value no longer matches what the row holds contributes
     nothing — the bit describes the value, not the field's history.
 
-    The current value comes from the export row itself whenever the
-    row carries it (the export walk reads the mapped column for
-    every row it serves, under its library name): soul_ids are NOT
-    unique — a track's is artist+title by design, shared between a
-    single and the album version — so resolving "the current value"
-    by soul_id can fetch a DIFFERENT row's value, and the promoted
-    row's bit silently drops. When the row lacks the value (a
-    hand-built row), the fallback lookup is by the row's own ``id``
-    — still this row, never an arbitrary same-soul_id sibling.
+    The current value comes from the export row itself (the export
+    walk reads the mapped column for every row it serves, under
+    its wire name): soul_ids are NOT unique — a track's is
+    artist+title by design, shared between a single and the album
+    version — so resolving "the current value" from anywhere but
+    this row can fetch a DIFFERENT row's value, and the promoted
+    row's bit silently drops. A row that does not carry the value
+    gets no bit for that field: fail closed rather than guess.
 
     Marks are per value, so a scalar field is network-marked while
     ANY of its marked values matches the row's current value.
@@ -1076,243 +1071,69 @@ def network_fields_for_export(db: Any, kind: str, row: Dict[str, Any]) -> List[s
     if not marks:
         return []
     out: List[str] = []
-    with db._get_connection() as conn:
-        for field, value_keys in marks.items():
-            target = _LIBRARY_COLUMNS.get((kind, field))
-            if target is None:
-                continue
-            table, column, _status = target
-            if column in row:
-                current = row.get(column)
-            elif row.get("id") is not None:
-                if column not in _table_columns(conn, table):
-                    # The map names a column this table does not
-                    # carry (tracks / discogs_id): there is no
-                    # stored value to match the mark against, and
-                    # asking SQLite for the column raises — an
-                    # export 500. Fail closed: no bit.
-                    continue
-                found = conn.execute(
-                    f"SELECT {column} FROM {table} WHERE id = ?",
-                    (row["id"],)).fetchone()
-                if found is None:
-                    continue
-                current = found[0]
-            else:
-                # No identity to resolve THIS row with: fail closed
-                # (no bit) rather than guess from a sibling row.
-                continue
-            if field == "genres":
-                if isinstance(current, str):
-                    try:
-                        current = json.loads(current)
-                    except ValueError:
-                        current = []
-                current = {str(g).strip().lower()
-                           for g in (current or [])}
-                hit = False
-                for value_key in value_keys:
-                    try:
-                        marked = json.loads(value_key)
-                    except ValueError:
-                        continue
-                    marked_values = (marked if isinstance(marked, list)
-                                     else [marked])
-                    if any(str(g).strip().lower() in current
-                           for g in marked_values):
-                        hit = True
-                        break
-                if hit:
-                    out.append(field)
-                continue
-            if current is None:
-                continue
+    for field, value_keys in marks.items():
+        column = _EXPORT_VALUE_COLUMNS.get((kind, field))
+        if column is None or column not in row:
+            continue
+        current = row.get(column)
+        if field == "genres":
+            if isinstance(current, str):
+                try:
+                    current = json.loads(current)
+                except ValueError:
+                    current = []
+            current = {str(g).strip().lower()
+                       for g in (current or [])}
+            hit = False
             for value_key in value_keys:
                 try:
                     marked = json.loads(value_key)
                 except ValueError:
                     continue
-                # str() on both sides: a provider ID may sit in
-                # the library as an int and in the mark as a string
-                # (or the reverse) depending on which writer filled
-                # it. ID-shaped values compare normalized, so a
-                # cosmetic re-case or trim by a later writer keeps
-                # the bit; other scalars (year, label) compare
-                # exactly.
-                if field in _ID_FIELDS:
-                    if _norm_key(marked) and \
-                            _norm_key(marked) == _norm_key(current):
-                        out.append(field)
-                        break
-                elif str(marked) == str(current):
+                marked_values = (marked if isinstance(marked, list)
+                                 else [marked])
+                if any(str(g).strip().lower() in current
+                       for g in marked_values):
+                    hit = True
+                    break
+            if hit:
+                out.append(field)
+            continue
+        if current is None:
+            continue
+        for value_key in value_keys:
+            try:
+                marked = json.loads(value_key)
+            except ValueError:
+                continue
+            # str() on both sides: a provider ID may sit in
+            # the library as an int and in the mark as a string
+            # (or the reverse) depending on which writer filled
+            # it. ID-shaped values compare normalized, so a
+            # cosmetic re-case or trim by a later writer keeps
+            # the bit; other scalars (year, label) compare
+            # exactly.
+            if field in _ID_FIELDS:
+                if _norm_key(marked) and \
+                        _norm_key(marked) == _norm_key(current):
                     out.append(field)
                     break
+            elif str(marked) == str(current):
+                out.append(field)
+                break
     return sorted(out)
 
 
 # ---------------------------------------------------------------------------
-# Promotion into a library record — fill empty fields only (§2.1)
-# ---------------------------------------------------------------------------
-
-def promote_field(db: Any, kind: str, soul_id: str, field: str, *,
-                  entity_id: Any = None,
-                  now: Optional[datetime] = None,
-                  confirmation_response: Any = None,
-                  confirmation_fetched_id: Any = None,
-                  local_keys: Any = None,
-                  album_subject: Optional[str] = None,
-                  disc: Any = None, position: Any = None) -> Dict[str, Any]:
-    """Promote one depot candidate into its library record.
-
-    The library row is found by soul_id (or entity_id when given).
-    Only an EMPTY column is filled — promotion never overwrites the
-    user's data (§2.1) — and a successful fill commits together
-    with its §2.4 mark, in one transaction on one connection:
-    neither can land without the other. Returns a status dict; a
-    refusal is a status, not an exception.
-
-    A confirmation response is spent on ONE candidate: pass
-    ``confirmation_fetched_id`` (the ID the response was fetched
-    by) and leg (b) can only ever confirm that candidate. For
-    genres — where one fetch is never about each value — leg (b)
-    is not offered at all; each genre clears (a) or (c) on its own.
-    """
-    now = now or _utcnow()
-    target = _LIBRARY_COLUMNS.get((kind, field))
-    if target is None:
-        return {"status": "unsupported_field", "field": field}
-    table, column, status_column = target
-    candidates = [r for r in get_fields(db, soul_id, field, now=now)
-                  if not r["is_local"]]
-    if not candidates:
-        return {"status": "no_candidate", "field": field}
-    if field == "genres":
-        # Genre claims are per-genre values; the library column is
-        # the whole list. Each genre must clear the floor on its own
-        # (§8: disputed genres are never promoted on agreement
-        # alone), and the column is filled with exactly the genres
-        # that cleared it. The confirmation response is deliberately
-        # NOT passed: it was fetched by one ID, and letting every
-        # genre ride on it would promote values the fetch never
-        # spoke about.
-        passing: List[str] = []
-        leg = None
-        for row in candidates:
-            ok, via = promotion_verdict(
-                db, soul_id, field, row["value"], now=now,
-                local_keys=local_keys, album_subject=album_subject,
-                disc=disc, position=position)
-            if ok:
-                passing.append(str(row["value"]))
-                leg = leg or via
-        if not passing:
-            return {"status": "below_floor", "field": field}
-        return _fill_library_field(
-            db, kind, soul_id, field, table, column, status_column,
-            passing, entity_id=entity_id, leg=leg)
-    # The strongest candidate first (get_fields ordering); a set-valued
-    # field promotes only the candidate the floor passes for — try
-    # each in order, floor per candidate (§8's disambiguation is
-    # inside the floor: leg (c) fails when >1 candidate survives).
-    chosen = None
-    leg = None
-    for row in candidates:
-        ok, via = promotion_verdict(
-            db, soul_id, field, row["value"], now=now,
-            confirmation_response=confirmation_response,
-            confirmation_fetched_id=confirmation_fetched_id,
-            local_keys=local_keys, album_subject=album_subject,
-            disc=disc, position=position)
-        if ok:
-            chosen, leg = row, via
-            break
-    if chosen is None:
-        return {"status": "below_floor", "field": field}
-    return _fill_library_field(
-        db, kind, soul_id, field, table, column, status_column,
-        chosen["value"], entity_id=entity_id, leg=leg)
-
-
-def _fill_library_field(db: Any, kind: str, soul_id: str, field: str,
-                        table: str, column: str,
-                        status_column: Optional[str], value: Any, *,
-                        entity_id: Any = None,
-                        leg: Optional[str] = None) -> Dict[str, Any]:
-    """The fill-empty-only write + mark, shared by the scalar and
-    genres paths. Table/column names come only from the static
-    _LIBRARY_COLUMNS map.
-
-    The write is a compare-and-swap: the UPDATE only lands while
-    the column is still empty, so two promotions racing the same
-    field cannot both win — the loser's UPDATE matches no row, it
-    reports already_filled, and it writes NO mark (a mark naming a
-    value the library does not hold would mislabel the winner's).
-    The fill and the mark are written on this one connection and
-    committed together: a crash between them is impossible, and if
-    the mark write itself fails the fill rolls back with it."""
-    ensure_schema(db)
-    with db._get_connection() as conn:
-        columns = _table_columns(conn, table)
-        if column not in columns or \
-                (status_column and status_column not in columns):
-            # The static map names a column this table does not
-            # carry (tracks / discogs_id): the promotion has
-            # nowhere to write, so it refuses — it never raises
-            # against a missing column, and it writes no mark.
-            return {"status": "no_library_column", "field": field}
-        if entity_id is None:
-            row = conn.execute(
-                f"SELECT id, {column} FROM {table} WHERE soul_id = ?",
-                (soul_id,)).fetchone()
-        else:
-            row = conn.execute(
-                f"SELECT id, {column} FROM {table} WHERE id = ?",
-                (entity_id,)).fetchone()
-        if row is None:
-            return {"status": "no_library_row", "field": field}
-        row_id, current = row[0], row[1]
-        if not _is_empty(current, field):
-            return {"status": "already_filled", "field": field}
-        stored = (json.dumps(value, ensure_ascii=False)
-                  if field == "genres" else value)
-        sets = f"{column} = ?, updated_at = CURRENT_TIMESTAMP"
-        params: List[Any] = [stored]
-        if status_column:
-            sets += f", {status_column} = 'matched'"
-        guard = (f"({column} IS NULL OR TRIM({column}) = '' "
-                 f"OR {column} = '[]')" if field == "genres"
-                 else f"({column} IS NULL OR {column} = 0 "
-                      f"OR TRIM({column}) = '')")
-        cur = conn.execute(
-            f"UPDATE {table} SET {sets} WHERE id = ? AND {guard}",
-            (*params, row_id))
-        if cur.rowcount == 0:
-            conn.rollback()
-            return {"status": "already_filled", "field": field}
-        record_mark(db, kind, soul_id, field, value,
-                    via="promoted", conn=conn)
-        conn.commit()
-    return {"status": "promoted", "field": field, "leg": leg,
-            "value": value}
-
-
-def _is_empty(current: Any, field: str) -> bool:
-    if current is None:
-        return True
-    if field == "genres":
-        if isinstance(current, str):
-            try:
-                parsed = json.loads(current)
-            except ValueError:
-                return not current.strip()
-            return not parsed
-        return not current
-    if isinstance(current, str):
-        return current.strip() in ("", "0")
-    return current == 0
-
-
-# ---------------------------------------------------------------------------
+# There is no depot -> library write path, deliberately. Promotion
+# reaches the catalogue through the tagging pipeline: the consult
+# (core/metadata/source.py) fills the file's tags above the floor,
+# and tagged values reach library v2 on the paths that read tags. A
+# direct fill-empty-only library write lived here until the v2
+# overhaul retired the tables it wrote to; it had no production
+# caller, and a lib2 port belongs with the caller that needs it
+# (through core/library2/provider_writes.claim_provider_id).
+#
 # Invalidation pushes (node -> SoulSync) and reconcile (SoulSync -> node)
 # ---------------------------------------------------------------------------
 
