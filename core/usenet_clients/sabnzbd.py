@@ -371,7 +371,10 @@ class SABnzbdAdapter:
             save_path=save_path,
             incomplete_path=incomplete_path,
             category=slot.get('category'),
-            error=slot.get('fail_message') if is_failed else None,
+            error=(slot.get('fail_message') or (
+                'Deleted in SABnzbd' if (slot.get('status') or '').lower() == 'deleted' else None)
+            ) if is_failed else None,
+            removed_by_user=(slot.get('status') or '').lower() == 'deleted',
         )
 
     # SAB version differences: ``storage`` is the documented final-path

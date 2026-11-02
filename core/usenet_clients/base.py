@@ -64,6 +64,9 @@ class UsenetStatus:
     # adds them, so a gap right after this is expected. Adapters that can't
     # tell leave it False.
     fetching_nzb: bool = False
+    # True when a person removed the job in the client (SAB's ``Deleted``):
+    # it ends the grab, but says nothing bad about the release itself
+    removed_by_user: bool = False
 
 
 @runtime_checkable
