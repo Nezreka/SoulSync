@@ -1198,7 +1198,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         # every row, so after a full ANALYZE the planner judged it useless and
         # scanned the catalogue once per playlist row (the mirrored-count
         # budget test). an id lookup "expr = ?" still uses the partial index.
-        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes'):
+        # audiodb and jiosaavn too: the external-id ownership check
+        # (core/library/track_identity) ORs every id a source carries, and one
+        # unindexed arm makes the whole OR a scan
+        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'jiosaavn'):
             name = f"idx_lib2_tracks_ext_{service}"
             expression = external_id_sql('external_ids', service)
             row = cursor.execute(
@@ -1215,6 +1218,11 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
             cursor.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_lib2_albums_ext_{service} "
                 f"ON lib2_albums({expression}) WHERE {expression} IS NOT NULL")
+        # a recording's MusicBrainz id, for the same ownership check: partial,
+        # most tracks carry none
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_mbid ON lib2_tracks(musicbrainz_id) "
+            "WHERE musicbrainz_id IS NOT NULL")
     except Exception as e:  # noqa: BLE001
         logger.error("external_ids index failed (will retry next start): %s", e)
     # iss29-D13 normalized artist key. Index first, then backfill — also AFTER
