@@ -386,9 +386,9 @@ def test_number_scan_retries_after_catalogue_becomes_complete(library, monkeypat
 
 
 @pytest.mark.parametrize('number,total,legacy_total', [
-    ('7', None, None), ('7/1', '13', '13'), ('7/13', '13', '1'),
+    ('7/1', '13', '13'), ('7/13', '13', '1'),
 ])
-def test_number_scan_detects_missing_or_conflicting_totals(library, number, total, legacy_total):
+def test_number_scan_detects_conflicting_totals(library, number, total, legacy_total):
     from core.repair_jobs.track_number_repair import _check_single_track, _edition_tracklists
     db, path, _ = library
     audio = FLAC(path)
@@ -404,6 +404,21 @@ def test_number_scan_detects_missing_or_conflicting_totals(library, number, tota
     finding = _check_single_track(str(path), path.name, editions[1], .8)
     assert finding and not finding['details']['tag_ok']
     assert finding['details']['total_tracks'] == 13
+
+
+def test_a_missing_total_is_not_a_finding(library):
+    """most files carry "7", not "7/13". 3.6.1 accepted that, and flagging it
+    put a finding on nearly every track of a library every day."""
+    from core.repair_jobs.track_number_repair import _check_single_track, _edition_tracklists
+    db, path, _ = library
+    audio = FLAC(path)
+    audio['tracknumber'] = ['7']
+    for key in ('tracktotal', 'totaltracks'):
+        audio.pop(key, None)
+    audio.save()
+    with closing(db._get_connection()) as conn:
+        editions, _ = _edition_tracklists(conn, 1)
+    assert _check_single_track(str(path), path.name, editions[1], .8) is None
 
 
 @pytest.mark.parametrize('complete', [False, True])
