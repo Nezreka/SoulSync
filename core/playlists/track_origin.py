@@ -69,18 +69,30 @@ def library_ids(db: Any, title: str, artist: str) -> Dict[str, str]:
         artist_key = normalize_name(artist or '')
         if not title or not artist_key:
             return {}
+        from core.library2.recording_links import normalize_title
+
+        # the artist narrows through the indexed name_key; the title compares
+        # here with a real casefold. `LOWER(t.title) = LOWER(?)` read every
+        # track of the library and only folded ASCII, so "Björk"-style titles
+        # never matched
+        columns = ', '.join(LIBRARY_ID_COLUMNS.values())
         with db._get_connection() as conn:
             rows = conn.execute(
-                f"SELECT {', '.join(LIBRARY_ID_COLUMNS.values())} FROM lib2_tracks t "
-                "WHERE LOWER(t.title) = LOWER(?) AND ("
-                " EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_artists ar ON ar.id = al.primary_artist_id"
-                "          WHERE al.id = t.album_id AND ar.name_key = ?)"
-                " OR EXISTS (SELECT 1 FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id"
-                "             WHERE ta.track_id = t.id AND ar.name_key = ?)) LIMIT 5",
-                (title, artist_key, artist_key),
+                f"""SELECT t.title, {columns} FROM lib2_tracks t
+                      JOIN lib2_albums al ON al.id = t.album_id
+                      JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                     WHERE ar.name_key = ?
+                    UNION
+                    SELECT t.title, {columns} FROM lib2_tracks t
+                      JOIN lib2_track_artists ta ON ta.track_id = t.id
+                      JOIN lib2_artists ar ON ar.id = ta.artist_id
+                     WHERE ar.name_key = ?""",
+                (artist_key, artist_key),
             ).fetchall()
-        for row in rows:
-            for service, value in zip(LIBRARY_ID_COLUMNS, row, strict=True):
+        wanted = normalize_title(title)
+        matches = [row for row in rows if normalize_title(row[0]) == wanted][:5]
+        for row in matches:
+            for service, value in zip(LIBRARY_ID_COLUMNS, tuple(row)[1:], strict=True):
                 if value and service not in found:
                     found[service] = str(value)
     except Exception as e:  # noqa: BLE001 - no ids just means identify searches
