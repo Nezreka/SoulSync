@@ -213,6 +213,7 @@ def test_watch_item_ids_maps_server_ids_on_one_server(db):
 
 # ── who reads what ───────────────────────────────────────────────────────────
 def test_watcher_for(monkeypatch):
+    monkeypatch.setattr(watch_scope, "_video_server", lambda: "plex")
     monkeypatch.setattr(watch_scope, "_plex_link",
                         lambda pid: {"id": "u", "title": "U", "token": "tok"} if pid == MEMBER else None)
     assert watch_scope.watcher_for(MEMBER, False) == watch_scope.Watcher(rows=MEMBER, token="tok")
@@ -221,6 +222,20 @@ def test_watcher_for(monkeypatch):
     assert watch_scope.watcher_for(None, False) == watch_scope.SHARED              # no profile
     # an admin linked to an account of its own reads that account's state
     assert watch_scope.watcher_for(MEMBER, True).rows == MEMBER
+
+
+def test_off_plex_every_profile_keeps_the_shared_state(monkeypatch):
+    """only a Plex scan fills a profile's own rows. on Jellyfin (or no video
+    server) a member reads the shared state like before #1941 and its click
+    stays in SoulSync, instead of losing watch state and the toggle, and a
+    profile linked to a Plex account doesn't read rows nothing ever fills."""
+    monkeypatch.setattr(watch_scope, "_video_server", lambda: "jellyfin")
+    monkeypatch.setattr(watch_scope, "_plex_link",
+                        lambda pid: {"id": "u", "title": "U", "token": "tok"} if pid == MEMBER else None)
+    assert watch_scope.watcher_for(1, True) == watch_scope.SHARED
+    member = watch_scope.watcher_for(8, False)
+    assert member.rows is None and member.can_mark and member.push is False
+    assert watch_scope.watcher_for(MEMBER, False).rows is None
 
 
 # ── the watched click ────────────────────────────────────────────────────────
