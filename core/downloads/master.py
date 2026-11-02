@@ -1837,6 +1837,21 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     ):
                         _upgrade_intent = issue_upgrade_intent(
                             _upgrade_source['lib2_track_id'], origin='wishlist')
+                    elif (
+                        isinstance(_upgrade_source, dict)
+                        and _upgrade_source.get('job') in ('quality_upgrade', 'quality_upgrade_scan')
+                        and _upgrade_source.get('original_file_path')
+                    ):
+                        # a quality upgrade queued before Library v2, or by a
+                        # migrated finding: the file it replaces names the
+                        # track. without an intent the import treated it as a
+                        # plain download (same format: thrown away as already
+                        # there; a new format: both copies kept)
+                        _upgrade_track = _lib2_track_for_path(
+                            db, _upgrade_source['original_file_path'])
+                        if _upgrade_track:
+                            _upgrade_intent = issue_upgrade_intent(
+                                _upgrade_track, origin='wishlist')
 
                 download_tasks[task_id] = {
                     'status': 'pending', 'track_info': track_info,
@@ -1887,3 +1902,16 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         if is_auto_batch and playlist_id == 'wishlist':
             logger.error("[Auto-Wishlist] Master worker error - resetting auto-processing flag")
             deps.reset_wishlist_auto_processing()
+
+
+def _lib2_track_for_path(db, path):
+    """The Library v2 track whose live file is ``path``, or None."""
+    from contextlib import closing
+    try:
+        with closing(db._get_connection()) as conn:
+            row = conn.execute(
+                "SELECT track_id FROM lib2_track_files WHERE path=? "
+                "AND COALESCE(file_state,'active')='active' LIMIT 1", (str(path),)).fetchone()
+    except Exception:  # noqa: BLE001 - no catalogue: no upgrade authority
+        return None
+    return int(row[0]) if row else None
