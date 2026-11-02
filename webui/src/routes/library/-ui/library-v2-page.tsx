@@ -2198,7 +2198,7 @@ export function MonitoringModal({
       </div>
       {futureReleasesMutation.isPending ? (
         <div className={styles.mutationFeedback} role="status">
-          Saving future-release monitoring…
+          Saving the new-release setting…
         </div>
       ) : futureReleasesMutation.isError ? (
         <div className={styles.mutationError} role="alert">
@@ -2351,7 +2351,8 @@ export function ArtistSettingsModal({
           <section className={styles.artistSettingsSection}>
             <h4>Quality profile</h4>
             <p className={styles.muted}>
-              What this artist’s downloads and upgrades must meet. It does not enable monitoring.
+              What this artist’s downloads and upgrades must meet. It does not add anything to the
+              Wishlist.
             </p>
             <fieldset className={styles.settingsPlain} disabled={!canWrite}>
               <QualityProfilePicker
@@ -2368,8 +2369,8 @@ export function ArtistSettingsModal({
             <section className={styles.artistSettingsSection}>
               <h4>Future releases</h4>
               <p className={styles.muted}>
-                Monitor the artist to put it on the Watchlist: then new releases are discovered
-                here, with release types, lookback and auto-download set in this dialog.
+                Add the artist to the Watchlist: then new releases are discovered here, with release
+                types, lookback and auto-download set in this dialog.
               </p>
             </section>
           ) : settingsQuery.isError ? (
@@ -3770,9 +3771,9 @@ export function MaintenanceModal({
   return (
     <ModalShell title="Library Health & Repair" wide onClose={onClose}>
       <p className={styles.qpSubtitle}>
-        Review and repair catalog links, monitoring and file metadata. Every tool states whether it
-        is limited to <strong>{artistName}</strong> or scans the entire library. Progress remains
-        visible under Stats → Repair jobs.
+        Review and repair catalog links, Watchlist and Wishlist state and file metadata. Every tool
+        states whether it is limited to <strong>{artistName}</strong> or scans the entire library.
+        Progress remains visible under Stats → Repair jobs.
       </p>
       <div className={styles.maintenanceGrid}>
         <section className={styles.maintenanceSection}>
@@ -3978,10 +3979,10 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
   return (
     <>
       <p className={styles.qpSubtitle}>
-        The same recording released as a single and on an album. Unmonitor the version you don't
-        want kept up to date; <strong>Move file</strong> re-homes all source file links onto the
-        other version (disk untouched — run Rename / Organize after). Physical files you no longer
-        need can then be removed from the <strong>Files</strong> tab.
+        The same recording released as a single and on an album. Take the version you don't want
+        kept up to date off the Wishlist; <strong>Move file</strong> re-homes all source file links
+        onto the other version (disk untouched — run Rename / Organize after). Physical files you no
+        longer need can then be removed from the <strong>Files</strong> tab.
       </p>
       {rowError ? <div className={styles.searchError}>{rowError}</div> : null}
       <div className={styles.resultsWrap}>
@@ -4003,9 +4004,13 @@ export function ManageTracksDuplicatesTab({ artistId }: { artistId: number }) {
               <tr>
                 <th>Title</th>
                 <th>Single version</th>
-                <th className={styles.colMonitor}>Mon.</th>
+                <th className={styles.colMonitor} title="On the Wishlist">
+                  Wish
+                </th>
                 <th>Album version</th>
-                <th className={styles.colMonitor}>Mon.</th>
+                <th className={styles.colMonitor} title="On the Wishlist">
+                  Wish
+                </th>
                 <th className={styles.colActions}></th>
               </tr>
             </thead>
@@ -4468,7 +4473,7 @@ export function UnifiedFileRemovalDialog({
   return (
     <ModalShell title={heading} className={styles.fileRemovalDialog} onClose={onCancel}>
       <p>
-        Choose what should happen to <strong>{subject}</strong>. Monitored tracks that lose their
+        Choose what should happen to <strong>{subject}</strong>. Wishlisted tracks that lose their
         file are downloaded again unless you tick &quot;Don&apos;t download again&quot;.
       </p>
       {preview.isLoading ? <p className={styles.muted}>Building file summary…</p> : null}
@@ -5366,7 +5371,8 @@ const SONG_SORT_LABELS: Record<LibraryV2SongSort, string> = {
 function songSearch(search: LibraryV2Search): LibrarySearch {
   return {
     q: search.q,
-    letter: 'all',
+    // the alphabet bar filters songs too, as on 3.6.1's library page
+    letter: search.letter || 'all',
     page: search.page,
     sort: search.songSort === 'title' ? '' : search.songSort,
     dupes: search.dupes,
@@ -5426,7 +5432,8 @@ function SongIndexView() {
     failed = true;
   }
   const q = search.q.trim();
-  const filtered = Boolean(q) || search.dupes || Boolean(search.quality);
+  const filtered =
+    Boolean(q) || search.dupes || Boolean(search.quality) || (search.letter || 'all') !== 'all';
   const setSongs = (patch: Partial<Pick<LibraryV2Search, 'songSort' | 'dupes' | 'quality'>>) =>
     void navigate({ search: (p) => ({ ...p, ...patch, page: 1 }) });
 
@@ -5489,6 +5496,9 @@ function SongIndexView() {
               : 'Songs across all artists'}
           </p>
         </div>
+        <div className={styles.headerActions}>
+          <LibraryRadioButton />
+        </div>
       </header>
 
       <div className={styles.toolbar}>
@@ -5549,6 +5559,8 @@ function SongIndexView() {
         </div>
       </div>
 
+      <LibraryAlphabetBar />
+
       {songsQuery.isPending ? (
         <LibrarySongSkeleton />
       ) : failed ? (
@@ -5562,6 +5574,7 @@ function SongIndexView() {
       ) : songs.length === 0 ? (
         <div className={styles.emptyState}>
           <h2>{filtered ? 'No songs match this view' : 'No songs yet'}</h2>
+          <LibrarySearchFallback noun="songs" />
         </div>
       ) : (
         <LibrarySongList
@@ -6073,7 +6086,9 @@ function ArtistTable({
       <table className={`${styles.table} ${styles.artistTable}`} id="library-artists-grid">
         <thead>
           <tr>
-            <th className={styles.colMonitor}>Mon.</th>
+            <th className={styles.colMonitor} title="On the Wishlist">
+              Wish
+            </th>
             <th>Artist</th>
             <th className={styles.colNum}>Albums</th>
             <th className={styles.colNum}>Singles</th>
@@ -7764,7 +7779,8 @@ function artistEyebrow(artist: LibraryV2ArtistDetail) {
     [...artist.albums, ...(artist.eps ?? []), ...artist.singles].some(
       (a) => a.monitored || (a.monitored_tracks ?? 0) > 0,
     );
-  if (artist.in_library && ownIntent) return 'Monitored in your library';
+  if (artist.in_library && ownIntent)
+    return artist.monitored ? 'On your Watchlist' : 'On your Wishlist';
   // in only through a wanted track of another artist's (Rockwell on a
   // Michael Jackson compilation): appears on lists it
   if (artist.in_library) return 'Featured in your library';
@@ -8066,8 +8082,8 @@ function ProviderArtistView({
                 </button>
               </div>
               <span className={styles.releasesHint}>
-                Full discography from the metadata provider. Monitor or download a release to add it
-                to your library.
+                Full discography from the metadata provider. Wishlist or download a release to add
+                it to your library.
               </span>
             </div>
 
@@ -9277,8 +9293,8 @@ function ReleasesEmptyState({
         <>
           <p className={styles.releasesEmptyTitle}>No releases in your library yet</p>
           <p className={styles.releasesEmptyBody}>
-            Nothing here is owned or monitored. Check the full discography to pick releases to
-            monitor, or run Refresh &amp; Scan if the files are already on disk.
+            Nothing here is owned or on your Wishlist. Check the full discography to pick releases
+            to wishlist, or run Refresh &amp; Scan if the files are already on disk.
           </p>
           <button type="button" className={styles.releasesEmptyAction} onClick={onShowAll}>
             Show all releases
@@ -10767,7 +10783,8 @@ export function TrackTableBulkBar({
               className={styles.inlineRetry}
               // a retry needs what the action it retries needed
               disabled={
-                busy !== null || !(/^(Un)?[Mm]onitor$/.test(retry.label) ? canWish : canWrite)
+                busy !== null ||
+                !(/^(Add to|Remove from) Wishlist$/.test(retry.label) ? canWish : canWrite)
               }
               onClick={() =>
                 void run(`Retry ${retry.label}`, () => fanOut(retry.label, retry.ids, retry.apply))

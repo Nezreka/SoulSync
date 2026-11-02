@@ -6084,10 +6084,16 @@ textarea.searchInput {
     [data-column='profile'],
     [data-column='bpm'],
     [data-column='disc'],
-    [data-column='file_path'],
-    [data-column='play']
+    [data-column='file_path']
   ) {
   display: none;
+}
+/* the row's own play button stays, on the name's line: it is the only way to
+   play one track from a stacked row, and 3.6.1's phone table kept it */
+.trackTableStacked.trackTableStacked.trackTable tbody tr > td[data-column='play'] {
+  order: 0;
+  flex: 0 0 auto;
+  margin-left: 0;
 }
 .trackTableStacked tr > td[data-column]:not([data-column='title']) {
   /* under the title: past the checkbox, bookmark and number */
@@ -9565,8 +9571,9 @@ textarea.searchInput {
     font-size: 13px;
   }
 
-  /* a track row is its name and its actions */
-  .trackTable.trackTableStacked td[data-column]:not([data-column='title']),
+  /* a track row is its play button, its name and its actions */
+  .trackTable.trackTableStacked
+    td[data-column]:not([data-column='title']):not([data-column='play']),
   .trackTableStacked tr::after {
     display: none;
   }
