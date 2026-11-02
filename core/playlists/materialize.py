@@ -250,12 +250,91 @@ def rebuild_playlist_folder(
             playlist_identity=playlist_identity)
 
 
+_IDENTITY_KEYS = ("profile_id", "source", "identity_kind", "identity_ref")
+
+
+def _same_playlist(a: Optional[dict], b: Optional[dict]) -> bool:
+    return bool(a and b) and all(str(a.get(k)) == str(b.get(k)) for k in _IDENTITY_KEYS)
+
+
+def _folder_for_identity(playlists_root: str, identity: dict) -> Optional[str]:
+    """The folder a manifest already records for this playlist, if any."""
+    directory = os.path.join(os.path.abspath(playlists_root), MANIFEST_DIR)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return None
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(directory, name), encoding="utf-8") as stream:
+                value = json.load(stream)
+        except (OSError, ValueError, UnicodeError):
+            continue
+        if isinstance(value, dict) and _same_playlist(value.get("playlist"), identity):
+            folder = os.path.join(os.path.abspath(playlists_root), str(value.get("folder") or ""))
+            if value.get("folder") and os.path.isdir(folder):
+                return folder
+    return None
+
+
+def _resolve_playlist_dir(playlists_root: str, playlist_name: str,
+                          identity: Optional[dict]) -> str:
+    """Where this playlist's folder is: its name, like 3.6.1.
+
+    With a stable identity the folder a manifest already records for it wins
+    (a renamed playlist keeps its folder), and a hashed folder from before is
+    renamed to the name when that name is free. A name another playlist
+    already holds gets a short suffix from the identity."""
+    desired = playlist_dir_for(playlists_root, playlist_name)
+    if not identity or identity.get("identity_kind") == "name":
+        return desired
+    existing = _folder_for_identity(playlists_root, identity)
+    if existing and os.path.abspath(existing) != os.path.abspath(desired):
+        if not os.path.lexists(desired) and os.path.basename(existing).startswith("profile-"):
+            try:
+                old_manifest = load_manifest(playlists_root, existing)
+                os.rename(existing, desired)
+                old_manifest["folder"] = os.path.basename(desired)
+                save_manifest(playlists_root, desired, old_manifest)
+                try:
+                    from core.playlists.managed_artifacts import manifest_path
+                    os.unlink(manifest_path(playlists_root, existing, create=False))
+                except OSError:
+                    pass
+                return desired
+            except OSError:
+                return existing
+        return existing
+    if existing:
+        return existing
+    held = load_manifest(playlists_root, desired).get("playlist") if os.path.isdir(desired) else None
+    if held and not _same_playlist(held, identity):
+        suffix = str(identity.get("identity_digest") or "")[:6] or "2"
+        return playlist_dir_for(playlists_root, f"{playlist_name} ({suffix})")
+    return desired
+
+
+def _adoptable(real: str, dest: str, mode: str) -> bool:
+    """A 3.6.1 entry that is exactly what this rebuild would make: a link to
+    the source, or (copy mode) a current copy. Never an original file."""
+    try:
+        if os.path.islink(dest):
+            return os.path.realpath(dest) == os.path.realpath(real)
+        if mode != "copy" or os.path.samefile(real, dest):
+            return False
+    except OSError:
+        return False
+    return _copy_is_current(real, dest)
+
+
 def _rebuild_playlist_folder(
     playlists_root, playlist_name, real_paths, mode, *, dest_names, prune_stale,
     symlink_fn, copy_fn, playlist_identity,
 ):
     mode = normalize_mode(mode)
-    pdir = playlist_dir_for(playlists_root, playlist_name)
+    pdir = _resolve_playlist_dir(playlists_root, playlist_name, playlist_identity)
     summary = RebuildSummary(playlist_dir=pdir, mode_requested=mode)
     safe_output_dir(playlists_root, pdir)
     manifest = load_manifest(playlists_root, pdir)
@@ -302,6 +381,11 @@ def _rebuild_playlist_folder(
             # Keep the fingerprint verified before the freshness check; re-reading
             # it here would adopt an edit made in between.
             owned[name] = {**record, "source": real}
+        elif outcome == "unchanged" and not record and _adoptable(real, dest, mode):
+            # a 3.6.1 folder's entry: what this rebuild would have written, so
+            # it is recorded and managed from now on (replaced when its track
+            # moves, pruned when it leaves the playlist) instead of failing
+            owned[name] = {"source": real, "fingerprint": artifact_fingerprint(dest)}
 
     if prune_stale:
         # Only a complete, unchanged ownership record authorizes deletion.
