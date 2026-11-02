@@ -739,9 +739,11 @@ class AniListWorker(VideoBackfillWorker):
 
     def record_empty(self, item):
         self.db.backfill_mark("anilist", item["kind"], item["id"], "not_found")
+        self.db.anime_touch_synced(item["kind"], item["id"])
 
     def record_error(self, item):
         self.db.backfill_mark("anilist", item["kind"], item["id"], "error")
+        self.db.anime_touch_synced(item["kind"], item["id"])
 
     def breakdown(self):
         return self.db.backfill_breakdown("anilist")

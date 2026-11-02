@@ -1380,6 +1380,19 @@ class VideoDatabase:
         slim = lambda r: {k: r.get(k) for k in self._ANIME_PUBLIC}   # noqa: E731
         return {"main": slim(main), "entries": [slim(r) for r in rows]}
 
+    def anime_touch_synced(self, kind: str, item_id: int) -> None:
+        """an airing refresh that came back empty or failed still counts as a
+        look: without it the same show is due again on the very next tick"""
+        conn = self._get_connection()
+        try:
+            conn.execute("UPDATE video_anime SET synced_at=CURRENT_TIMESTAMP WHERE kind=? AND item_id=?",
+                         (kind, int(item_id)))
+            conn.commit()
+        except (sqlite3.Error, ValueError, TypeError):
+            pass
+        finally:
+            conn.close()
+
     def anime_airing_due(self, days: int) -> dict | None:
         """a releasing show whose AniList facts are older than ``days``: the
         next episode's countdown moves on"""

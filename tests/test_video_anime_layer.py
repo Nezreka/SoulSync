@@ -188,3 +188,29 @@ def test_v61_turns_anilist_on_once_and_looks_at_every_show_again(tmp_path):
     video_database._initialized_paths.discard(str(path.resolve()))
     db = VideoDatabase(database_path=str(path))
     assert db.get_setting("anilist_enabled") == "0"
+
+
+@pytest.mark.parametrize("outcome", ["empty", "error"])
+def test_an_airing_refresh_that_comes_back_empty_is_not_due_again(db, outcome):
+    """the releasing show's facts never moved on an empty answer, so it was
+    due again on the next tick: a request every couple of seconds, forever"""
+    from core.video.enrichment import backfill
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Jujutsu Kaisen",
+                                       "tmdb_id": 95479, "tvdb_id": 377543, "seasons": []})
+    rows = [{**e, **anilist.media_row(_media(e["anilist_id"], "JJK", "JJK", status="RELEASING"))}
+            for e in anime_map.parse_entries(JJK_MAP) if e["format"] == "TV"]
+    db.save_anime_entries("show", sid, rows)
+    conn = db._get_connection()
+    try:
+        conn.execute("UPDATE video_anime SET synced_at=datetime('now','-30 days')")
+        conn.commit()
+    finally:
+        conn.close()
+    item = db.anime_airing_due(backfill.AniListWorker.AIRING_REFRESH_DAYS)
+    assert item and item["id"] == sid
+
+    worker = backfill.AniListWorker(db)
+    (worker.record_empty if outcome == "empty" else worker.record_error)(item)
+
+    assert db.anime_airing_due(backfill.AniListWorker.AIRING_REFRESH_DAYS) is None
+
