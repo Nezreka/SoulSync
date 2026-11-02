@@ -1090,6 +1090,14 @@ def _quality_profile_refresh_inline(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_reconciler_name_misses():
+    """the reconciler believes a file-name miss for a few minutes; each test
+    starts without one from another test"""
+    from core.acquisition import reconciler
+    reconciler._NAME_MISSES.clear()
+
+
+@pytest.fixture(autouse=True)
 def _no_media_server_delete_roots(monkeypatch):
     """a delete preview counts the media server's music folders as roots. in
     tests no server is asked; the tests for that rule turn it back on."""
