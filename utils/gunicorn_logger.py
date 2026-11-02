@@ -40,12 +40,13 @@ class FilteredGunicornLogger(GunicornLogger):
     )
 
     # Paths the Docker healthcheck probes with curl — skipped so the
-    # 30s probe doesn't flood the access log. /api/setup/status is the
-    # current probe (#1905); / is the pre-#1905 one, kept for installs
-    # still running an old compose/Dockerfile probe.
+    # 30s probe doesn't flood the access log. /api/startup-status is the
+    # current probe; /api/setup/status (#1905) and / are older ones, kept
+    # for installs still running an old compose/Dockerfile probe.
     _HEALTHCHECK_PATHS = (
         "/",
         "/api/setup/status",
+        "/api/startup-status",
     )
 
     def _should_skip_access_log(self, environ) -> bool:

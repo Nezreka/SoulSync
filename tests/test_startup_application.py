@@ -73,3 +73,26 @@ def test_status_carries_the_running_phase_and_its_numbers():
     finally:
         release.set()
         app.wait(5)
+
+
+def test_the_healthcheck_probe_is_healthy_while_starting_and_once_up():
+    # docker's healthcheck probes /api/startup-status. while a big library's
+    # backup and upgrade run, every other /api path is 503 (the old probe,
+    # /api/setup/status, was one of them), which marked the container
+    # unhealthy and got it restarted mid-upgrade by autoheal and friends
+    from core.startup_application import StartupApplication
+    release = threading.Event()
+
+    def load():
+        assert release.wait(5)
+        return lambda env, start: (start('200 OK', []), [b'normal app'])[1]
+
+    app = StartupApplication(load)
+    try:
+        assert _request(app, '/api/startup-status')[0] == '200 OK'
+        assert _request(app, '/api/setup/status')[0] == '503 Service Unavailable'
+    finally:
+        release.set()
+        assert app.wait(5)
+    status, body = _request(app, '/api/startup-status')
+    assert status == '200 OK' and b'"ready"' in body

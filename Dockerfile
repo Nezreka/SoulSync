@@ -143,13 +143,17 @@ RUN chmod +x /entrypoint.sh
 # Expose port
 EXPOSE 8008
 
-# Health check — a lightweight JSON endpoint, NOT / : rendering the index
-# template on every probe was a steady idle-CPU cost (#1905). The endpoint
-# is allowlisted by the login / launch-PIN gates, so it answers 200 in
-# every auth mode. Deliberate trade-off: this is a liveness probe (the
-# process answers HTTP) — it no longer exercises template rendering.
+# Health check: /api/startup-status, a lightweight JSON endpoint, NOT / :
+# rendering the index template on every probe was a steady idle-CPU cost
+# (#1905). It is answered by wsgi's startup wrapper before any auth gate, so
+# it is 200 in every auth mode, 200 while SoulSync is still starting (a big
+# library's backup and upgrade can take a long while, and every other /api
+# path answers 503 then, which marked the container unhealthy and got it
+# restarted mid-upgrade by autoheal and friends), and 503 only when startup
+# failed. Deliberate trade-off: this is a liveness probe (the process answers
+# HTTP), it does not exercise template rendering.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8008/api/setup/status || exit 1
+    CMD curl -f http://localhost:8008/api/startup-status || exit 1
 
 # Set environment variables
 ENV PYTHONPATH=/app
