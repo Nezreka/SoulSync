@@ -23,7 +23,7 @@ from core.library2.duplicate_relationship import (
 )
 from core.library2.maintenance_subjects import active_file_subjects
 from core.library2.media_mappings import track_server_playlists
-from core.library2.track_files import quality_order
+from core.library2.track_files import quality_order, quality_tier_columns
 from core.repair_jobs.base import (
     hand_tagged_path_keys, is_hand_tagged_path, scoped_file_subjects,
 )
@@ -119,8 +119,16 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
     hand_tags = hand_tagged_path_keys(database)
     companion_exts = lossy_companion_exts(config_manager, database)
     with closing(database._get_connection()) as conn:
-        order = {int(r[0]): i for i, r in enumerate(conn.execute(
-            f"SELECT id FROM lib2_track_files ORDER BY {quality_order()}"))}
+        # the quality order, and a tier that two files of the same quality
+        # share (every sort column but the id), so a tie can go to the album
+        order, tiers = {}, {}
+        last, tier = None, -1
+        for i, r in enumerate(conn.execute(
+                f"SELECT id, {quality_tier_columns()} FROM lib2_track_files"
+                f" ORDER BY {quality_order()}")):
+            if tuple(r[1:]) != last:
+                last, tier = tuple(r[1:]), tier + 1
+            order[int(r[0])], tiers[int(r[0])] = i, tier
         # All owners participate in reference protection, including files
         # outside this scan's allowlist or library scope.
         references = [dict(r) for r in conn.execute(
@@ -181,6 +189,7 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         names = credits.get(tid) or [subject["artist_name"]]
         subject["artist_names"] = [str(n).casefold().strip() for name in names for n in split_artist_credits(name or "") if n]
         subject["quality_order"] = order[fid]
+        subject["quality_tier"] = tiers[fid]
         subject["playlists"] = playlists.get(tid, [])
         reasons = []
         if subject.get("primary_manual"):
@@ -273,8 +282,15 @@ def _similar_tags(a: dict, b: dict, settings: dict) -> bool:
 
 def _recommended(files: list[dict]) -> dict:
     # Retain upstream's playlist-first selection, then preserve native manual
-    # picks, then use the existing native quality/profile file picker order.
-    return min(files, key=lambda f: (not bool(f["playlists"]), not bool(f.get("primary_manual")), f["quality_order"]))
+    # picks, then the native quality/profile order. Between two copies of the
+    # same quality the album's wins over the single's (3.6.1's Single/Album
+    # Dedup kept the album version): the album keeps the track numbering and
+    # the song's place in the record. A better single is never given up for it.
+    from core.library2.recording_links import _home_rank
+    return min(files, key=lambda f: (
+        not bool(f["playlists"]), not bool(f.get("primary_manual")),
+        f.get("quality_tier", f["quality_order"]), -_home_rank(f.get("album_type")),
+        f["quality_order"]))
 
 
 def find_duplicate_candidates(database, config_manager=None, *, settings=None, scope=None,

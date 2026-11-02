@@ -36,7 +36,7 @@ from the schema-ensure step and repairs installs that predate the columns.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.quality.lossless import LOSSLESS_FORMATS as _CANONICAL_LOSSLESS
 from core.quality.lossless import (
@@ -77,15 +77,28 @@ def quality_order(alias: str = "") -> str:
     unranked files fall back to lossless first.
     """
     p = f"{alias}." if alias else ""
-    return (
-        f"CASE WHEN COALESCE({p}file_state,'active')='active' THEN 0 ELSE 1 END, "
-        f"COALESCE({p}profile_rank, 2147483647), "
-        f"CASE WHEN lower(COALESCE({p}format,'')) IN {_LOSSLESS_FORMATS} THEN 0 ELSE 1 END, "
-        f"COALESCE({p}bit_depth,0) DESC, "
-        f"COALESCE({p}sample_rate,0) DESC, "
-        f"COALESCE({p}bitrate,0) DESC, "
-        f"{p}id DESC"
-    )
+    return ", ".join(
+        f"{expr} DESC" if desc else expr for expr, desc in _quality_columns(alias)
+    ) + f", {p}id DESC"
+
+
+def _quality_columns(alias: str = "") -> List[Tuple[str, bool]]:
+    """``quality_order``'s sort keys before the id tie-break, as (expr, desc)."""
+    p = f"{alias}." if alias else ""
+    return [
+        (f"CASE WHEN COALESCE({p}file_state,'active')='active' THEN 0 ELSE 1 END", False),
+        (f"COALESCE({p}profile_rank, 2147483647)", False),
+        (f"CASE WHEN lower(COALESCE({p}format,'')) IN {_LOSSLESS_FORMATS} THEN 0 ELSE 1 END", False),
+        (f"COALESCE({p}bit_depth,0)", True),
+        (f"COALESCE({p}sample_rate,0)", True),
+        (f"COALESCE({p}bitrate,0)", True),
+    ]
+
+
+def quality_tier_columns(alias: str = "") -> str:
+    """The columns two files of the same quality share under ``quality_order``
+    (everything but the id), for telling a tie from a better file."""
+    return ", ".join(expr for expr, _desc in _quality_columns(alias))
 
 
 def primary_order(alias: str = "") -> str:

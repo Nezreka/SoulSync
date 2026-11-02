@@ -245,8 +245,12 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | ReplayGain Filler | Finds tracks with no ReplayGain loudness tag, analyzes them, and writes the tags |
 | Zero-Length AAC Fixer | Finds AAC files that play but show 0:00 and can't seek (Tidal AAC saved by older versions), and fixes them in place: the audio is copied, not re-encoded, and every tag is kept. Fix All does the whole library; rescan your media server after |
 | Preview Clip Cleanup | Detects ~30s preview clips (some sources deliver samples instead of full songs), compares against the expected length from the metadata source, and re-fetches the full track |
+| Discography Backfill | Walks every artist you own a release by, fetches their full discography and files a finding for each song you don't have (Add to Wishlist on each, or turn on auto add). Release types, live/remix/acoustic/compilation/instrumental filters, and a per-run artist limit that rotates through the library |
+| Watchlist Discography Refresh | Re-fetches watchlist artists' discographies so new releases go on the Wishlist |
+| Album Completeness | Finds albums you mostly own and wishlists the missing tracks (Fill Album). A song you already have on its single is never downloaded again |
+| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's |
 
-Library v2 handles catalogue identity, duplicate review, release completeness, and wanted quality upgrades directly. The retired Duplicate Detector, Album Completeness, Quality Upgrade Finder, Quality Check, Single/Album Dedup, and Fix Unknown Artists jobs are not offered. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Monitoring List Reconcile**; there is no **Apply Quality Upgrades** automation action.
+Library v2 handles catalogue identity and wanted quality upgrades directly. The retired Quality Upgrade Finder and Quality Check jobs are not offered, and Single/Album Dedup lives on as the Duplicate Detector's album-first keeper. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Monitoring List Reconcile**; there is no **Apply Quality Upgrades** automation action.
 
 > [!WARNING]
 > **Mass orphan safety:** when the orphan detector's mass-orphan guard trips (over half the scanned files look like orphans — usually a DB↔filesystem path mismatch, not real orphans), the scan refuses to create any findings at all, so there's nothing to bulk-delete. The **"Witness Me"** type-the-phrase confirmation exists for bulk orphan deletes, but it can't trigger while the guard refuses findings.

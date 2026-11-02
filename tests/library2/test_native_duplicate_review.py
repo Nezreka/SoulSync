@@ -352,3 +352,37 @@ def test_keep_best_still_sees_a_hardlink_under_another_name(library):
     assert result["success"] is True
     assert pa.exists()
     assert states(library)[af] == "active"
+
+
+def _typed(library, tid, album_type):
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET album_type=? WHERE id=(SELECT album_id FROM lib2_tracks WHERE id=?)",
+                     (album_type, tid))
+        conn.commit()
+
+
+@pytest.mark.parametrize("single_first", [True, False])
+def test_the_album_copy_is_kept_over_the_single_of_the_same_quality(library, single_first):
+    """3.6.1's Single/Album Dedup kept the album version. Same quality, so
+    nothing is lost, and the album keeps its numbering whichever row is newer."""
+    order = [("Song - Single", "single"), ("Album", "album")]
+    if not single_first:
+        order.reverse()
+    made = {}
+    for album, kind in order:
+        tid, fid, _ = copy(library, album=album, fmt="flac", bit_depth=16, sample_rate=44100)
+        _typed(library, tid, kind)
+        made[kind] = fid
+    candidates = review(library)
+    assert len(candidates) == 1
+    assert candidates[0]["recommended_file_id"] == made["album"]
+
+
+def test_a_better_single_is_never_given_up_for_the_album(library):
+    single, single_fid, _ = copy(library, album="Song - Single", fmt="flac", bit_depth=24, sample_rate=96000)
+    album, album_fid, _ = copy(library, album="Album", fmt="flac", bit_depth=16, sample_rate=44100)
+    _typed(library, single, "single")
+    _typed(library, album, "album")
+    candidates = review(library)
+    assert candidates[0]["recommended_file_id"] == single_fid
+
