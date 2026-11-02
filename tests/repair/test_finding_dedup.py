@@ -72,3 +72,26 @@ def test_failed_library_sync_keeps_successful_physical_fix_pending(
         assert conn.execute(
             "SELECT status FROM repair_findings WHERE id=?", (finding_id,)
         ).fetchone()[0] == "pending"
+
+
+def test_two_combined_artists_on_one_artist_are_two_findings(tmp_path):
+    """'A, B' and 'A, C' can both land on A's id; keyed on the entity alone the
+    second overwrote the first, so one split was never offered."""
+    database = MusicDatabase(str(tmp_path / "comma.sqlite"))
+    worker = RepairWorker(database)
+
+    def create(name):
+        return worker._create_finding(
+            job_id="comma_artist_splitter", finding_type="comma_artist_split",
+            severity="warning", entity_type="artist", entity_id="lib2:5", file_path=None,
+            title=f"Combined artist: {name}", description="test",
+            details={"combined_name": name, "split_artists": name.split(", ")})
+
+    assert create("A, B") is True
+    assert create("A, C") is True
+    assert create("A, B") is False  # the same credit again refreshes its own row
+    with closing(database._get_connection()) as conn:
+        titles = sorted(r[0] for r in conn.execute(
+            "SELECT title FROM repair_findings WHERE job_id='comma_artist_splitter'"))
+    assert titles == ["Combined artist: A, B", "Combined artist: A, C"]
+

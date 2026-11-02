@@ -1696,6 +1696,13 @@ class RepairWorker:
                     # file changes which member is recommended as the survivor.
                     subject_clause = " AND entity_type=? AND CASE WHEN json_valid(details_json) THEN json_extract(details_json,'$.pair_key') END=?"
                     subject_params = (entity_type, enriched_details['pair_key'])
+                elif finding_type == 'comma_artist_split' and enriched_details.get('combined_name'):
+                    # One combined credit is one finding. Two of them can share
+                    # the first artist id ("A, B" and "A, C" on A's tracks), and
+                    # keyed on the entity alone the second overwrote the first.
+                    subject_clause = (" AND entity_type=? AND entity_id=? AND CASE WHEN json_valid(details_json)"
+                                      " THEN json_extract(details_json,'$.combined_name') END=?")
+                    subject_params = (entity_type, entity_id, enriched_details['combined_name'])
                 cursor.execute(f"""
                     SELECT id, status, resolved_at, details_json
                     FROM repair_findings
