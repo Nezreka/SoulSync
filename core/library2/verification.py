@@ -65,20 +65,40 @@ def mark_file_verification_status(
         # which on an ordinary setup is never.
         from core.library2.paths import resolve_lib2_path
 
-        for row in conn.execute(
+        # a mapped path keeps its file name: narrow to rows ending in one of
+        # the candidates' names in SQL (a string scan, no filesystem) so the
+        # resolver -- a stat and a suffix walk per row -- only runs on those.
+        # it walked every file row, 300k network stats on one Approve click
+        names = sorted({os.path.basename(c) for c in candidates if os.path.basename(c)})
+        if not names:
+            names = [""]
+        like = " OR ".join("path LIKE ? ESCAPE '\\'" for _ in names)
+        patterns = ["%" + n.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    for n in names]
+        def _resolve_rows(rows):
+            for row in rows:
+                raw_path = str(row["path"])
+                raw_norm = os.path.normcase(os.path.abspath(raw_path))
+                matches = raw_norm in candidates
+                if not matches:
+                    resolved = resolve_lib2_path(raw_path, config_manager=config_manager)
+                    if resolved:
+                        resolved_norm = os.path.normcase(os.path.abspath(str(resolved)))
+                        matches = resolved_norm in candidates
+                if matches:
+                    updated_ids.add(int(row["id"]))
+
+        _resolve_rows(conn.execute(
             "SELECT id, path FROM lib2_track_files "
-            "WHERE path IS NOT NULL AND path != ''"
-        ).fetchall():
-            raw_path = str(row["path"])
-            raw_norm = os.path.normcase(os.path.abspath(raw_path))
-            matches = raw_norm in candidates
-            if not matches:
-                resolved = resolve_lib2_path(raw_path, config_manager=config_manager)
-                if resolved:
-                    resolved_norm = os.path.normcase(os.path.abspath(str(resolved)))
-                    matches = resolved_norm in candidates
-            if matches:
-                updated_ids.add(int(row["id"]))
+            f"WHERE path IS NOT NULL AND path != '' AND ({like})", patterns,
+        ).fetchall())
+        if not updated_ids:
+            # a resolver that renames as well (a synthesized name): the whole
+            # walk, as before, but only when the file's own name found nothing
+            _resolve_rows(conn.execute(
+                "SELECT id, path FROM lib2_track_files "
+                "WHERE path IS NOT NULL AND path != ''"
+            ).fetchall())
 
     if updated_ids:
         marks = ",".join("?" for _ in updated_ids)
