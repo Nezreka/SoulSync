@@ -234,7 +234,11 @@ class AlbumTagConsistencyJob(RepairJob):
         try:
             groups = {}
             for subject in subjects:
-                key = (*split_group_key(subject.get('artist_name'), subject.get('album_title')), subject.get('owner_profile_id'))
+                # one album split across rows shares its ALBUM artist; the
+                # first track credit differs on every guest spot and split
+                # the album's tracks into groups that never compared
+                album_artist = subject.get('album_artist_name') or subject.get('artist_name')
+                key = (*split_group_key(album_artist, subject.get('album_title')), subject.get('owner_profile_id'))
                 if key[0] and key[1]:
                     groups.setdefault(key, []).append(subject)
             for subjects in groups.values():
@@ -254,7 +258,8 @@ class AlbumTagConsistencyJob(RepairJob):
                 inconsistencies = _detect_inconsistencies(tags, check_album, check_artist, check_mbid)
                 if not inconsistencies or not context.create_finding:
                     continue
-                album_title, artist_name = subjects[0].get('album_title'), subjects[0].get('artist_name')
+                album_title = subjects[0].get('album_title')
+                artist_name = subjects[0].get('album_artist_name') or subjects[0].get('artist_name')
                 files = sorted({t['file_id'] for t in tags})
                 inserted = context.create_finding(job_id=self.job_id, finding_type='album_tag_inconsistency',
                     severity='warning', entity_type='album', entity_id=f'lib2:{album_ids[0]}', file_path=None,

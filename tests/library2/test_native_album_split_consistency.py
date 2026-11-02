@@ -161,3 +161,19 @@ def test_a_file_gone_since_the_scan_does_not_fail_the_rest_of_the_album(record):
     record.paths[1].unlink()
     assert _apply(record, finding)['success']
     assert FLAC(record.paths[0])['album'] == ['Record']
+
+
+def test_a_split_album_whose_second_track_is_led_by_a_guest_still_groups(split):
+    """the group key was the track's first credit, so a guest-led track went
+    into a group of its own and the split was never reviewed"""
+    s = split
+    guest = s.conn.execute("INSERT INTO lib2_artists(name) VALUES('Guest Star')").lastrowid
+    s.conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) VALUES(?,?,'primary',0)",
+                   (s.tracks[1], guest))
+    s.conn.commit()
+
+    result, findings = _scan(s)
+
+    assert result.findings_created == 1
+    assert findings[0]['details']['artist_name'] == 'Split Artist'
+
