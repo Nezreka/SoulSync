@@ -1395,6 +1395,30 @@ button.statusWarn:disabled {
   color: rgb(245, 158, 11);
 }
 
+/* TrackQualityProfileBadge: one dot per quality state, the title says which */
+.qualityStatusDotRed,
+.qualityStatusDotOrange,
+.qualityStatusDotBlue {
+  display: inline-block;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+  flex: 0 0 auto;
+}
+
+.qualityStatusDotRed {
+  background: rgb(239, 68, 68);
+}
+
+.qualityStatusDotOrange {
+  background: rgb(245, 158, 11);
+}
+
+.qualityStatusDotBlue {
+  background: rgb(96, 165, 250);
+}
+
 /* --- releases toggle (My Library / All Releases) --- */
 .releasesBar {
   display: flex;
