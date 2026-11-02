@@ -36,3 +36,54 @@ def test_disabled_job_is_not_reenabled():
 
 def test_unavailable_worker_is_skipped():
     assert auto_complete_incomplete_albums({}, SimpleNamespace())['status'] == 'skipped'
+
+
+class _Db:
+    def __init__(self, path):
+        import sqlite3
+        self.path = path
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE repair_findings (id INTEGER PRIMARY KEY, job_id TEXT, "
+                     "finding_type TEXT, status TEXT, entity_id TEXT)")
+        conn.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, legacy_album_id INTEGER)")
+        for i, entity in enumerate(("lib2:5", "lib2:6", "lib2:7", "lib2:8"), start=1):
+            conn.execute("INSERT INTO repair_findings VALUES (?, 'album_completeness', "
+                         "'incomplete_album', 'pending', ?)", (i, entity))
+        conn.execute("INSERT INTO repair_findings VALUES (9, 'album_completeness', "
+                     "'incomplete_album', 'resolved', 'lib2:9')")
+        conn.execute("INSERT INTO lib2_albums VALUES (7, 311)")
+        conn.commit()
+        conn.close()
+
+    def _get_connection(self):
+        import sqlite3
+        return sqlite3.connect(self.path)
+
+
+_DONE = {'job_id': 'album_completeness', 'run_status': 'completed', 'errors': 0}
+
+
+def test_a_completed_scan_applies_its_pending_findings_like_361(tmp_path):
+    """3.6.1 automations fire on Album Completeness finishing: the missing
+    tracks of up to max_albums incomplete albums go on the wishlist. for a
+    while this skipped every time, so they did nothing at all."""
+    fixed = []
+    db = _Db(str(tmp_path / 'm.db'))
+    deps = SimpleNamespace(
+        get_database=lambda: db,
+        bulk_fix_repair_findings=lambda ids: fixed.append(ids) or {'fixed': len(ids)},
+        run_repair_job_now=lambda *a, **kw: pytest.fail('never re-runs the job on its own event'))
+    result = auto_complete_incomplete_albums({'_event_data': _DONE, 'max_albums': 2}, deps)
+    assert result['status'] == 'completed' and result['applied'] == 2
+    assert fixed == [[1, 2]]
+
+
+def test_a_saved_361_album_id_still_targets_its_album(tmp_path):
+    fixed = []
+    db = _Db(str(tmp_path / 'm.db'))
+    deps = SimpleNamespace(
+        get_database=lambda: db,
+        bulk_fix_repair_findings=lambda ids: fixed.append(ids) or {'fixed': len(ids)})
+    result = auto_complete_incomplete_albums(
+        {'_event_data': _DONE, 'target_album_id': '311'}, deps)
+    assert result['applied'] == 1 and fixed == [[3]]  # legacy album 311 is lib2 album 7
