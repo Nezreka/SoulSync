@@ -10813,6 +10813,20 @@ class MusicDatabase:
         """Insert or update track from Plex track object - DEPRECATED: Use insert_or_update_media_track instead"""
         return self.insert_or_update_media_track(plex_track, album_id, artist_id, server_source='plex')
     
+    def _log_scanned_import(self, track_obj, file_path, server_source) -> None:
+        """Library History's import: a song that reached the server outside
+        SoulSync and the scan just took into the library, as 3.6.1 logged for
+        every new track a scan found. SoulSync's own downloads log their own."""
+        try:
+            from core.library2.media_server_sync import server_track_names
+            names = server_track_names(track_obj)
+            self.add_library_history_entry(
+                event_type='import', title=names.get('name') or '',
+                artist_name=names.get('artist'), album_name=names.get('album'),
+                server_source=server_source, file_path=file_path)
+        except Exception as exc:  # noqa: BLE001 - history never fails a scan
+            logger.debug("history logging: %s", exc)
+
     def insert_or_update_media_track(self, track_obj, album_id: str, artist_id: str, server_source: str = 'plex'):
         """Map a server song ID/technical facts onto an imported track.
 
@@ -10927,6 +10941,7 @@ class MusicDatabase:
                     if len(candidates) != 1:
                         if adopt_scanned_file(cursor, file_path, server_path, server_source,
                                               server_info=server_track_names(track_obj)):
+                            self._log_scanned_import(track_obj, file_path, server_source)
                             return self.insert_or_update_media_track(
                                 track_obj, album_id, artist_id, server_source)
                         logger.warning(
@@ -11003,6 +11018,7 @@ class MusicDatabase:
                 if catalogue_track_id is None:
                     if adopt_scanned_file(cursor, file_path, server_path, server_source,
                                           server_info=server_track_names(track_obj)):
+                        self._log_scanned_import(track_obj, file_path, server_source)
                         return self.insert_or_update_media_track(
                             track_obj, album_id, artist_id, server_source)
                     logger.info("Media track %s skipped: no active imported file row", title)
