@@ -764,6 +764,27 @@ class JellyfinClient(MediaServerBase):
                 self.api_key is not None and 
                 self.user_id is not None and 
                 self.music_library_id is not None)
+
+    def get_music_library_locations(self) -> List[str]:
+        """the folders behind the music library, as jellyfin sees them.
+        the selected library when one is set, every music library otherwise"""
+        if not self.ensure_connection():
+            return []
+        try:
+            folders = self._make_request('/Library/VirtualFolders') or []
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("jellyfin library folders lookup failed: %s", exc)
+            return []
+        music = [f for f in folders if isinstance(f, dict)
+                 and str(f.get('CollectionType') or '').lower() == 'music']
+        picked = [f for f in music if self.music_library_id
+                  and str(f.get('ItemId') or '') == str(self.music_library_id)]
+        locations: List[str] = []
+        for folder in picked or music:
+            for loc in folder.get('Locations') or []:
+                if loc and str(loc) not in locations:
+                    locations.append(str(loc))
+        return locations
     
     def as_user(self, user_id: str, library_id: Optional[str] = None) -> 'JellyfinUserView':
         """this client, acting as one jellyfin user (see JellyfinUserView)."""

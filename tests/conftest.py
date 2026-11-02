@@ -1090,6 +1090,15 @@ def _quality_profile_refresh_inline(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_media_server_delete_roots(monkeypatch):
+    """a delete preview counts the media server's music folders as roots. in
+    tests no server is asked; the tests for that rule turn it back on."""
+    from core.library2 import file_delete
+    monkeypatch.setattr(file_delete, "MEDIA_SERVER_FOLDERS", False)
+    file_delete._server_folders_cache.update(key=None, at=0.0, folders=[])
+
+
+@pytest.fixture(autouse=True)
 def _fresh_fold_index():
     """the folded-text index (database/fold_index) lives per database path for
     the process. tests reseed the same path, so each one starts with it empty."""

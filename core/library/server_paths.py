@@ -88,6 +88,26 @@ def _from_learned(normalized: str) -> Optional[str]:
     return None
 
 
+def local_folder_for(server_folder: Any) -> Optional[str]:
+    """SoulSync's own path for a library folder the server reported, or None.
+    Only an exact folder or a learned mount counts here, never a guess: the
+    answer decides where a delete may reach."""
+    if not isinstance(server_folder, str) or not server_folder.strip():
+        return None
+    folder = server_folder.strip()
+    if os.path.isdir(folder):
+        return os.path.abspath(folder)
+    normalized = folder.replace('\\', '/').rstrip('/')
+    with _lock:
+        pairs = list(_learned.items())
+    for server_prefix, local_prefix in pairs:
+        if normalized == server_prefix or normalized.startswith(server_prefix + '/'):
+            candidate = local_prefix + normalized[len(server_prefix):]
+            if candidate and os.path.isdir(candidate):
+                return os.path.abspath(candidate)
+    return None
+
+
 def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str]:
     """SoulSync's own path for a file the server reported, or None when it
     can't be found from here. Never raises."""
