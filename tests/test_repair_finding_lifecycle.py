@@ -20,6 +20,7 @@ user complaint about findings being unworkable:
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -523,3 +524,57 @@ def test_bulk_progress_tallies_per_type(worker):
     per_type = worker._bulk_fix_state['per_type']
     assert per_type['missing_lyrics'] == {'fixed': 1, 'failed': 0}
     assert per_type['missing_cover_art'] == {'fixed': 0, 'failed': 1}
+
+
+# ── a dismissal survives a tag write, not a new file ──────────────────────────
+
+def _file_finding(worker, path, **over):
+    return _raise(worker, file_path=str(path), entity_type='file', entity_id=None, **over)
+
+
+def test_a_dismissal_survives_an_in_place_tag_write(worker, tmp_path):
+    """the fingerprint stamped the file's size and mtime, so ReplayGain, lyrics
+    or BPM writing a tag brought every dismissed finding on that file back."""
+    song = tmp_path / "song.flac"
+    song.write_bytes(b"fLaC" + b"\0" * 64)
+    _file_finding(worker, song)
+    worker.db._conn.execute("UPDATE repair_findings SET status = 'dismissed'")
+    worker.db._conn.commit()
+    with open(song, "r+b") as handle:  # a tag write: same file, new bytes
+        handle.seek(10)
+        handle.write(b"REPLAYGAIN")
+    os.utime(song, ns=(1, 2))
+    assert _file_finding(worker, song) is False
+    assert [r[1] for r in _rows(worker)] == ['dismissed']
+
+
+def test_a_replaced_file_may_surface_again(worker, tmp_path):
+    song = tmp_path / "song.flac"
+    song.write_bytes(b"old")
+    _file_finding(worker, song)
+    worker.db._conn.execute("UPDATE repair_findings SET status = 'dismissed'")
+    worker.db._conn.commit()
+    replacement = tmp_path / "new.flac"
+    replacement.write_bytes(b"a new download")
+    keep = tmp_path / "keep.flac"  # hold the old inode so it can't be reused
+    os.link(song, keep)
+    os.replace(replacement, song)
+    assert _file_finding(worker, song) is True
+
+
+def test_a_dismissal_fingerprinted_the_old_way_still_holds(worker, tmp_path):
+    import hashlib
+    song = tmp_path / "song.flac"
+    song.write_bytes(b"audio")
+    _file_finding(worker, song)
+    stat = os.stat(song)
+    details = json.loads(_rows(worker)[0][3])
+    payload = {k: v for k, v in details.items() if not k.startswith('_')}
+    payload["_file_stat"] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    old = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':'),
+                                    default=str).encode()).hexdigest()
+    details["_dedup_fingerprint"] = old
+    worker.db._conn.execute("UPDATE repair_findings SET status='dismissed', details_json=?",
+                            (json.dumps(details),))
+    worker.db._conn.commit()
+    assert _file_finding(worker, song) is False
