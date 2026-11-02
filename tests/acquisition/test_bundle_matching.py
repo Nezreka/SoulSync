@@ -246,6 +246,27 @@ def test_load_release_group_without_default_edition_is_empty(catalog_conn):
     assert load_expected_tracks(catalog_conn, "release_group", 404) == ()
 
 
+def test_an_album_without_editions_expects_its_own_tracks(catalog_conn):
+    """editions never materialized left the tracklist empty, and every bundle
+    for the album sat in needs_review however well its files matched"""
+    catalog_conn.execute(
+        """CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY, album_id INTEGER, title TEXT,
+               track_number INTEGER, disc_number INTEGER, duration INTEGER,
+               canonical_track_id INTEGER)""")
+    catalog_conn.executemany(
+        "INSERT INTO lib2_tracks(id, album_id, title, track_number, disc_number, duration)"
+        " VALUES(?,?,?,?,?,?)",
+        [(11, 9, "Two", 2, 1, 200000), (10, 9, "One", 1, 1, 180000), (12, 8, "Other", 1, 1, 0)])
+
+    expected = load_expected_tracks(catalog_conn, "release_group", 9)
+
+    assert [(t.track_number, t.title, t.track_id) for t in expected] == [(1, "One", 10), (2, "Two", 11)]
+    assert len({t.key for t in expected}) == 2  # each its own key, no collision
+    edition = _seed_edition(catalog_conn, release_group_id=9, is_default=0, tracks=[])
+    assert [t.title for t in load_expected_tracks(catalog_conn, "release_edition", edition)] == [
+        "One", "Two"]
+
+
 def test_load_recording_scope(catalog_conn):
     edition = _seed_edition(catalog_conn, tracks=[
         (1, 1, "The Song", 210_000, 9, None)])
