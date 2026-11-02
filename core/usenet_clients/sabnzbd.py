@@ -76,6 +76,12 @@ class SABnzbdAdapter:
     """SABnzbd REST API adapter (v2+)."""
 
     DEFAULT_TIMEOUT = 15
+    # Adding a job waits longer. SAB holds an addurl/addfile request while it
+    # is building another job -- adding that job's files one by one, which on a
+    # busy SAB took up to 129 s for an 82-file job -- and answers once the build
+    # is done. At 15 s the call timed out, the grab was reported as refused, and
+    # SAB queued the job anyway, so the next search grabbed it again.
+    ADD_TIMEOUT = 180
 
     def __init__(self) -> None:
         self._load_config()
@@ -127,7 +133,7 @@ class SABnzbdAdapter:
             for value in categories
         )
 
-    def _call_sync(self, mode: str, **extra) -> Optional[dict]:
+    def _call_sync(self, mode: str, _timeout: Optional[float] = None, **extra) -> Optional[dict]:
         if not self.is_configured():
             return None
         params = {
@@ -137,7 +143,8 @@ class SABnzbdAdapter:
         }
         params.update(extra)
         try:
-            resp = http_requests.get(f"{self._url}/api", params=params, timeout=self.DEFAULT_TIMEOUT)
+            resp = http_requests.get(f"{self._url}/api", params=params,
+                                     timeout=_timeout or self.DEFAULT_TIMEOUT)
             if not resp.ok:
                 logger.warning("SABnzbd mode=%s returned HTTP %s", mode, resp.status_code)
                 return None
@@ -150,7 +157,8 @@ class SABnzbdAdapter:
             logger.error("SABnzbd mode=%s response was not JSON (%s)", mode, type(e).__name__)
             return None
 
-    def _post_sync(self, mode: str, files=None, **extra) -> Optional[dict]:
+    def _post_sync(self, mode: str, files=None, _timeout: Optional[float] = None,
+                   **extra) -> Optional[dict]:
         if not self.is_configured():
             return None
         params = {
@@ -161,7 +169,7 @@ class SABnzbdAdapter:
         params.update(extra)
         try:
             resp = http_requests.post(f"{self._url}/api", params=params, files=files,
-                                      timeout=self.DEFAULT_TIMEOUT)
+                                      timeout=_timeout or self.DEFAULT_TIMEOUT)
             if not resp.ok:
                 logger.warning("SABnzbd POST mode=%s returned HTTP %s", mode, resp.status_code)
                 return None
@@ -191,9 +199,9 @@ class SABnzbdAdapter:
         cat = category or self._category
         if isinstance(url_or_bytes, bytes):
             files = {'name': ('soulsync.nzb', url_or_bytes, 'application/x-nzb')}
-            data = self._post_sync('addfile', files=files, cat=cat)
+            data = self._post_sync('addfile', files=files, _timeout=self.ADD_TIMEOUT, cat=cat)
         else:
-            data = self._call_sync('addurl', name=url_or_bytes, cat=cat)
+            data = self._call_sync('addurl', _timeout=self.ADD_TIMEOUT, name=url_or_bytes, cat=cat)
         if not data or not data.get('status'):
             return None
         ids = data.get('nzo_ids') or []
