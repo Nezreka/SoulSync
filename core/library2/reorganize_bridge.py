@@ -110,19 +110,22 @@ def catalogue_preview_fn(
 def preview_album_reorganize(
     db: Any, config_manager: Any, lib2_album_id: int,
     *, source: Optional[str] = None, mode: str = "api",
+    transfer_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Preview the reorganize plan for one lib2 album (docs §50).
 
     ``source``/``mode`` are inert since reorganize stopped consulting a
     provider; they stay in the signature so an older client's request body is
-    accepted rather than rejected.
+    accepted rather than rejected. ``transfer_dir`` lets a caller that already
+    resolved the owning profile's library root (#1504) plan against it, instead
+    of the configured default.
     """
     from core.imports.paths import build_final_path_for_track
 
     result = catalogue_preview_fn(
         album_id=lib2_album_id,
         db=db,
-        transfer_dir=_transfer_dir(config_manager),
+        transfer_dir=transfer_dir or _transfer_dir(config_manager),
         resolve_file_path_fn=_resolve_file_path_fn(config_manager),
         build_final_path_fn=build_final_path_for_track,
     )

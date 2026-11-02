@@ -10186,27 +10186,22 @@ def reorganize_album_sources(album_id):
 
 @app.route('/api/library/album/<album_id>/reorganize/preview', methods=['POST'])
 def reorganize_album_preview(album_id):
-    """Preview file reorganization for an album — returns current vs
-    proposed paths without moving anything. Implementation lives in
-    :mod:`core.library_reorganize` and shares the planning logic with
-    the apply endpoint, so the preview is guaranteed to match what
-    apply would actually produce.
+    """Preview file reorganization for an album — current vs proposed paths,
+    without moving anything.
 
-    Optional body params:
-        source: when provided, only that metadata source is queried
-            (no fallback chain).
-        mode: 'api' (default — query metadata source) or 'tags' (read
-            embedded file tags as the source of truth, issue #592)."""
+    The artist page still calls this legacy route, but the plan comes from the
+    same catalogue planner the library-v2 page and the queue runner use
+    (:func:`core.library2.reorganize_bridge.preview_album_reorganize`), so the
+    preview cannot disagree with what a move would do. Body params ``source``
+    and ``mode`` are accepted for older clients and ignored: a destination path
+    no longer consults a metadata provider or embedded tags."""
+    from core.library2.reorganize_bridge import (
+        ReorganizeBridgeError,
+        preview_album_reorganize,
+    )
+    from core.library_reorganize import resolve_album_profile_id
+    from core.imports.paths import library_root_for_profile
     try:
-        from core.library_reorganize import preview_album_reorganize, resolve_album_profile_id
-        from core.imports.paths import library_root_for_profile
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
         db = get_database()
         # #1504: resolve the owning profile so preview destinations are
         # computed against the right library root, not the shared folder.
@@ -10222,21 +10217,11 @@ def reorganize_album_preview(album_id):
                 config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
         )
         result = preview_album_reorganize(
-            album_id=album_id,
-            db=db,
-            transfer_dir=transfer_dir,
-            resolve_file_path_fn=_resolve_library_file_path,
-            build_final_path_fn=_build_final_path_for_track,
-            primary_source=chosen_source,
-            strict_source=bool(chosen_source),
-            metadata_source=metadata_source,
-            profile_id=profile_id,
+            db, config_manager, int(album_id), transfer_dir=transfer_dir,
         )
-        if result.get('status') == 'no_album':
-            return jsonify({"success": False, "error": "Album not found"}), 404
-        if result.get('status') == 'no_tracks':
-            return jsonify({"success": False, "error": "No tracks found for this album"}), 404
         return jsonify(result)
+    except ReorganizeBridgeError as e:
+        return jsonify({"success": False, "error": str(e)}), e.status
     except Exception as e:
         logger.error(f"Reorganize preview error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

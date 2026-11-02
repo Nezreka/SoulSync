@@ -65,8 +65,14 @@ class _StubQueue:
 @pytest.fixture
 def guarded(monkeypatch, profiles):
     sam, _alex, _album_id = profiles
-    # the album belongs to sam; skip the real metadata planning
+    # the album belongs to sam; skip the real planning. Preview plans from the
+    # catalogue (core.library2.reorganize_bridge), apply still goes through the
+    # legacy orchestrator, so each gets its own stub.
     monkeypatch.setattr(lr, 'resolve_album_profile_id', lambda *a, **k: sam)
+    monkeypatch.setattr(
+        'core.library2.reorganize_bridge.preview_album_reorganize',
+        lambda *a, **k: {'success': True, 'status': 'planned', 'tracks': []},
+    )
     monkeypatch.setattr(lr, 'preview_album_reorganize', lambda **k: {'status': 'ok'})
     monkeypatch.setattr(rq, 'get_queue', lambda: _StubQueue())
 
