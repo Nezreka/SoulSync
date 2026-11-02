@@ -15,6 +15,7 @@ queued when its file is a genuine upgrade candidate.
 
 from __future__ import annotations
 
+import threading
 from contextlib import closing
 from typing import Any, Dict, List, Optional
 
@@ -326,11 +327,7 @@ def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
         return 0
     conn.commit()
     drain(db)
-    marks = ",".join("?" for _ in outbox_ids)
-    row = conn.execute(
-        f"SELECT COUNT(*) FROM lib2_mirror_outbox "
-        f"WHERE id IN ({marks}) AND status='done'", outbox_ids).fetchone()
-    return int(row[0]) if row else 0
+    return _done_count(conn, outbox_ids)
 
 
 def mirror_projected_tracks_wishlist(
@@ -353,12 +350,7 @@ def mirror_projected_tracks_wishlist(
         return 0
     conn.commit()
     drain(db)
-    marks = ",".join("?" for _ in outbox_ids)
-    row = conn.execute(
-        f"SELECT COUNT(*) FROM lib2_mirror_outbox "
-        f"WHERE id IN ({marks}) AND status='done'", outbox_ids
-    ).fetchone()
-    return int(row[0]) if row else 0
+    return _done_count(conn, outbox_ids)
 
 
 def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
@@ -436,13 +428,71 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
     return sorted(candidates)
 
 
+def _done_count(conn, outbox_ids: List[int]) -> int:
+    """How many of ``outbox_ids`` the drain finished, in chunks: a profile
+    refresh enqueues one row per wanted track, past SQLite's variable limit."""
+    done = 0
+    for start in range(0, len(outbox_ids), 900):
+        chunk = outbox_ids[start:start + 900]
+        marks = ",".join("?" for _ in chunk)
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM lib2_mirror_outbox WHERE id IN ({marks}) AND status='done'",
+            chunk).fetchone()
+        done += int(row[0]) if row else 0
+    return done
+
+
+# a full projection walk, committed per chunk so the write lock is held a
+# chunk at a time instead of for the whole library (iss32-M05)
+_REFRESH_BATCH = 2000
+# the Quality page's routes hand the refresh to a thread (RUN_INLINE: tests)
+RUN_INLINE = False
+_refresh_lock = threading.Lock()
+_refresh_running: set = set()
+_refresh_again: set = set()
+
+
+def schedule_quality_profile_refresh(db, quality_profile_id: int, *, profile_id: int = 1) -> None:
+    """Refresh the wishlist for an edited profile off the request thread.
+
+    Saving, applying, renaming or deleting a profile used to run the whole
+    projection walk and a wishlist payload per wanted track inside the HTTP
+    request: minutes on a big library, with the write lock held. Asks while
+    one is running for the same profile fold into one more pass after it."""
+    key = (int(quality_profile_id), int(profile_id))
+    if RUN_INLINE:
+        refresh_quality_profile_wishlist(db, key[0], profile_id=key[1])
+        return
+    with _refresh_lock:
+        if key in _refresh_running:
+            _refresh_again.add(key)
+            return
+        _refresh_running.add(key)
+
+    def _run():
+        while True:
+            try:
+                refresh_quality_profile_wishlist(db, key[0], profile_id=key[1])
+            except Exception:  # noqa: BLE001 - a background refresh logs, it never raises
+                logger.exception("quality profile %s wishlist refresh failed", key[0])
+            with _refresh_lock:
+                if key in _refresh_again:
+                    _refresh_again.discard(key)
+                    continue
+                _refresh_running.discard(key)
+                return
+
+    threading.Thread(target=_run, daemon=True, name="quality-profile-refresh").start()
+
+
 def refresh_quality_profile_wishlist(db, quality_profile_id: int, *,
                                      profile_id: int = 1) -> int:
     """Re-evaluate every Library-v2 track using an edited profile."""
     from core.library2.wanted import recompute_wanted
 
     with closing(db._get_connection()) as conn:
-        recompute_wanted(conn, profile_id=profile_id)
+        recompute_wanted(conn, profile_id=profile_id, batch_size=_REFRESH_BATCH,
+                         on_batch=lambda _done, _total: conn.commit())
         rows = conn.execute(
             "SELECT track_id, wanted FROM lib2_wanted_tracks "
             "WHERE profile_id=? AND effective_profile_id=?",
@@ -465,4 +515,5 @@ __all__ = [
     "track_wishlist_payload",
     "upgrade_candidate_track_ids",
     "refresh_quality_profile_wishlist",
+    "schedule_quality_profile_refresh",
 ]
