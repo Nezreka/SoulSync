@@ -59,7 +59,17 @@ def filesystem_audio_files(
     include_indexed: bool = False,
     extensions: Iterable[str] = AUDIO_EXTENSIONS,
 ) -> list[str]:
-    """Walk repair roots and return audio paths, excluding indexed files by default."""
+    """Walk repair roots and return audio paths, excluding indexed files by default.
+
+    A scoped run (one artist, one album) keeps to its exact file allowlist:
+    the lossy converter, ReplayGain and the AAC fixer all added every
+    unindexed file on disk to a run asked for one artist, with Fix All
+    applying them (the converter with the default profile's delete-original).
+    A loose file the allowlist names itself still counts."""
+    from core.repair_jobs.base import file_path_in_scope, get_scope_file_paths
+    scoped = get_scope_file_paths(context)
+    if scoped is not None and not scoped:
+        return []
     allowed = {str(ext).lower() for ext in extensions}
     indexed_exact: set[str] = set()
     indexed_suffixes: set[str] = set()
@@ -101,6 +111,8 @@ def filesystem_audio_files(
                 if not include_indexed and (
                     key in indexed_exact or _suffix_key(path) in indexed_suffixes
                 ):
+                    continue
+                if not file_path_in_scope(path, scoped):
                     continue
                 found.append(path)
     return found
