@@ -10,8 +10,8 @@ A failed count is never cached, and a failed refresh backs off to the TTL
 instead of retrying on every ask.
 
 The class is resolved through the module at call time (_cls()), never
-bound with a from-import: tests/test_provenance_id_persistence.py reloads
-database.music_database per test, which replaces the class object — a
+bound with a from-import: a test that reloads database.music_database
+(test_provenance_id_persistence.py used to) replaces the class object — a
 binding captured at collection time would keep pointing at the old class
 while the reloaded module's methods write the new class's caches, and
 every lifecycle assertion here would fail in the full suite while passing
