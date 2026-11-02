@@ -107,3 +107,31 @@ def test_a_scoped_reorganize_run_never_touches_the_checkpoint(monkeypatch):
     assert _reorganize(monkeypatch, config, [10, 11, 12],
                        scope={"file_paths": ["/music/a.flac"]}) == [10, 11, 12]
     assert config.store[KEY] == saved
+
+
+def test_a_pause_holds_between_albums_and_a_stop_while_paused_ends_the_run(monkeypatch):
+    """the job never looked at the pause, so Pause did nothing until it finished"""
+    planned = []
+    monkeypatch.setattr("core.library2.reorganize_bridge.preview_album_reorganize",
+                        lambda _db, _cm, album_id, mode="api": planned.append(album_id) or
+                        {"status": "planned", "tracks": []})
+    monkeypatch.setattr(LibraryReorganizeJob, "_albums",
+                        staticmethod(lambda _ctx: [{"id": a, "title": "", "artist_name": ""}
+                                                   for a in (1, 2, 3)]))
+    stopped = {"value": False}
+    paused_checks = []
+
+    def is_paused():
+        paused_checks.append(len(planned))
+        if len(planned) >= 1:
+            stopped["value"] = True  # the user stops while it waits
+            return True
+        return False
+
+    ctx = JobContext(db=None, transfer_folder="/music", config_manager=_Config(),
+                     should_stop=lambda: stopped["value"], is_paused=is_paused)
+    LibraryReorganizeJob().scan(ctx)
+
+    assert planned == [1]
+    assert paused_checks  # the pause was looked at between albums
+

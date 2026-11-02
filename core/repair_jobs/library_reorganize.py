@@ -123,9 +123,16 @@ class LibraryReorganizeJob(RepairJob):
         start = self.resume_index(context, [a["id"] for a in albums], scan_key) if library_wide else 0
         if start:
             logger.info("Reorganize: resuming at album %d of %d", start + 1, len(albums))
-        for index in range(start, len(albums)):
+        total = len(albums)
+        if context.update_progress:
+            context.update_progress(start, total)
+        for index in range(start, total):
             album = albums[index]
-            stopping = context.check_stop()
+            # a pause waits here, between albums; a stop while paused ends the run
+            stopping = context.check_stop() or context.wait_if_paused()
+            if index % 5 == 0 and context.report_progress:
+                context.report_progress(scanned=index, total=total,
+                                        phase=f"Checking album {index + 1} of {total}")
             if library_wide and index > start and (stopping or (index - start) % 25 == 0):
                 self.save_checkpoint(context, albums[index - 1]["id"], scan_key)
             if stopping:
