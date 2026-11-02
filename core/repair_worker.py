@@ -5467,6 +5467,29 @@ class RepairWorker:
         stale = _stale_legacy_subject(track_id)
         if stale:
             return stale
+        album_files = details.get('album_files')
+        if isinstance(album_files, list) and album_files:
+            # scope "albums": the finding names every file of the album, and
+            # the catalogue retires exactly those (details.library_v2.file_ids)
+            deleted = 0
+            for entry in album_files:
+                path = (entry or {}).get('file_path')
+                if not path:
+                    continue
+                removed = self._remove_native_repair_file(
+                    path, {**details, 'file_path': path}, reason='unwanted_content')
+                if not removed.get('success'):
+                    return {**removed, 'error': (
+                        f"{removed.get('error') or 'Could not remove a file'}"
+                        f" ({deleted} of {len(album_files)} removed, the rest left in place)")}
+                deleted += 1 if removed.get('deleted_file') else 0
+            return {
+                'success': True,
+                'action': 'removed_content',
+                'message': f'{type_label} album removed from Library v2 ({deleted} file(s) deleted)',
+                'library_v2_file_deleted': True,
+                'repair_intent': 'remove',
+            }
         removed = self._remove_native_repair_file(track_path, details, reason='unwanted_content')
         if not removed.get('success'):
             return removed
