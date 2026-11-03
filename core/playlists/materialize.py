@@ -117,6 +117,9 @@ def _symlink_is_current(dest: str, rel_target: str) -> bool:
         return False
 
 
+_MTIME_SLACK_NS = 2_000_000_000
+
+
 def _copy_is_current(real_path: str, dest_path: str) -> bool:
     """True when an existing copied entry still matches the source.
 
@@ -131,7 +134,13 @@ def _copy_is_current(real_path: str, dest_path: str) -> bool:
         dst = os.stat(dest_path)
     except OSError:
         return False
-    return (src.st_size == dst.st_size) and (src.st_mtime_ns == dst.st_mtime_ns)
+    # within the coarsest common timestamp step: FAT keeps 2 s, exFAT 10 ms,
+    # some network shares and WSL's drvfs whole seconds, so copy2's exact
+    # time comes back rounded there and an exact match never held: every
+    # rebuild re-copied every file. a retag or a replaced file moves the time
+    # by far more than this (or changes the size)
+    return (src.st_size == dst.st_size
+            and abs(src.st_mtime_ns - dst.st_mtime_ns) <= _MTIME_SLACK_NS)
 
 
 def _remove_entry(path: str) -> None:
