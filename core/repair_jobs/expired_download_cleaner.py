@@ -31,7 +31,7 @@ from core.library.expired_cleanup import (
 from core.downloads.origin import is_hand_picked
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, stop_or_pause
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.expired_download_cleaner")
@@ -640,7 +640,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
             context.update_progress(0, len(expired))
 
         for i, entry in enumerate(expired):
-            if context.check_stop():
+            if stop_or_pause(context):
                 return result
             if not dry_run:
                 try:

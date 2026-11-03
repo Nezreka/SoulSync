@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import closing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from utils.logging_config import get_logger
 
@@ -124,6 +124,37 @@ def upgrade_opted_in(conn, track_id: int, profile_id: int = 1) -> bool:
         logger.debug("upgrade opt-in lookup failed for track %s: %s", track_id, exc)
         return True
     return not (row and str(row[0] or "") in _IMPORTED_BASELINE_REASONS)
+
+
+def intent_profile_ids(conn, *, track_ids: Iterable[int] = (),
+                       album_ids: Iterable[int] = (),
+                       artist_ids: Iterable[int] = ()) -> Set[int]:
+    """Every profile with a wish or a rule on these rows.
+
+    Each profile's wishlist holds its own row for a track, so taking rows out
+    of the catalogue has to withdraw them for each of these profiles, not only
+    for whoever clicked. The ids go in as one json parameter, an artist with a
+    big catalogue would pass SQLite's variable limit otherwise.
+    """
+    groups = (("track", [int(i) for i in track_ids]),
+              ("album", [int(i) for i in album_ids]),
+              ("artist", [int(i) for i in artist_ids]))
+    profiles: Set[int] = set()
+    for entity_type, ids in groups:
+        if not ids:
+            continue
+        payload = json.dumps(ids)
+        rows = conn.execute(
+            """SELECT profile_id FROM lib2_monitor_rules
+                WHERE entity_type=? AND entity_id IN (SELECT value FROM json_each(?))""",
+            (entity_type, payload)).fetchall()
+        if entity_type == "track":
+            rows += conn.execute(
+                """SELECT profile_id FROM lib2_wanted_tracks
+                    WHERE track_id IN (SELECT value FROM json_each(?))""",
+                (payload,)).fetchall()
+        profiles.update(int(r[0]) for r in rows if r[0] is not None)
+    return profiles
 
 
 def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
@@ -643,5 +674,6 @@ def _ids_superseding_stuck_rows(conn) -> set:
 
 __all__ = [
     "enqueue_tracks", "enqueue_projected_tracks", "enqueue_artist_watchlist", "drain",
+    "intent_profile_ids",
     "outbox_status", "retry_failed", "prune_done", "MAX_ATTEMPTS",
 ]

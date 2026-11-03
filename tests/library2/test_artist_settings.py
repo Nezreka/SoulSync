@@ -160,3 +160,35 @@ def test_a_follower_gets_the_defaults_until_it_gets_rules_of_its_own(imported_co
     updated = update_artist_settings(imported_conn, artist_id, {"follow_defaults": False})
     assert updated["follow_defaults"] is False
     assert (updated["include_eps"], updated["include_singles"], updated["include_live"]) == (True, True, True)
+
+
+def _add_profile_row(conn, profile_id, include_singles):
+    conn.execute(
+        "INSERT INTO watchlist_artists(spotify_artist_id, artist_name, include_singles, "
+        "profile_id) VALUES('sp1', 'Member Copy', ?, ?)",
+        (include_singles, profile_id))
+    conn.commit()
+
+
+def test_every_profile_watching_the_artist_is_found(imported_conn):
+    from core.library2.artist_settings import watching_profile_ids
+
+    _seed_watchlist(imported_conn)
+    _add_profile_row(imported_conn, 3, 1)
+
+    assert watching_profile_ids(imported_conn, _artist_id(imported_conn)) == [1, 3]
+
+
+def test_new_release_filters_are_the_wishing_profiles_own(imported_conn):
+    """the admin turned singles off for the artist, profile 3 kept them on. a
+    refresh that wishes for profile 3 reads profile 3's row, it always read
+    the admin's. a profile without a row of its own reads the admin's."""
+    from core.library2.discography import _artist_content_filters
+
+    _seed_watchlist(imported_conn)
+    _add_profile_row(imported_conn, 3, 1)
+    artist_id = _artist_id(imported_conn)
+
+    assert _artist_content_filters(imported_conn, artist_id)["include_singles"] is False
+    assert _artist_content_filters(imported_conn, artist_id, 3)["include_singles"] is True
+    assert _artist_content_filters(imported_conn, artist_id, 4)["include_singles"] is False
