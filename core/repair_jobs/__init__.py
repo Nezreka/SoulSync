@@ -192,6 +192,10 @@ JOB_ID_MIGRATIONS = {
     # being folded into an unrelated job's enabled/interval.
     'canonical_version_resolve': 'album_edition_review',
     'duplicate_detector': 'native_duplicate_detector',
+    # 3.6.1's Single/Album Dedup: the native detector keeps the album's copy
+    # over the single's, so this is its successor too (its settings keys,
+    # title/artist similarity, are the detector's own)
+    'single_album_dedup': 'native_duplicate_detector',
     'lib2_skips_cleanup': 'skip_audit_cleanup',
     'lib2_discography_refresh': 'monitored_discography_refresh',
     # The two transitional jobs return as one neutral, complete invariant

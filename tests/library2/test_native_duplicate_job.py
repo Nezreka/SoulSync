@@ -155,3 +155,63 @@ def test_full_worker_fix_keeps_keeper_active_and_failed_approval_pending(library
         assert conn.execute('SELECT file_state FROM lib2_track_files WHERE id=?', (af,)).fetchone()[0] == 'active'
         assert conn.execute('SELECT file_state FROM lib2_track_files WHERE id=?', (bf,)).fetchone()[0] == 'deleted'
         assert conn.execute('SELECT status FROM repair_findings WHERE id=?', (fid,)).fetchone()[0] == 'resolved'
+
+
+class _Saved:
+    def __init__(self, values):
+        self.values = dict(values)
+
+    def get(self, key, default=None):
+        return self.values.get(key, default)
+
+    def set(self, key, value):
+        self.values[key] = value
+
+
+def test_single_album_dedup_users_keep_a_running_dedup():
+    """found in the second #1062 review: 3.6.1's Single/Album Dedup was
+    retired with no successor, so a user who ran it weekly got no dedup at
+    all after the upgrade and its automation was skipped as "retired"."""
+    from core.repair_jobs import JOB_ID_MIGRATIONS
+    from core.repair_worker import RepairWorker
+    assert JOB_ID_MIGRATIONS['single_album_dedup'] == 'native_duplicate_detector'
+
+    only_single = _Saved({'repair.jobs.single_album_dedup': {
+        'enabled': True, 'interval_hours': 168, 'settings': {'title_similarity': 0.9}}})
+    RepairWorker.__new__(RepairWorker)._migrate_legacy_job_configs(only_single)
+    assert only_single.values['repair.jobs.native_duplicate_detector']['enabled'] is True
+
+
+def test_a_second_retired_job_switches_the_successor_on_once_and_keeps_its_settings():
+    from core.repair_worker import RepairWorker
+    both = _Saved({
+        'repair.jobs.duplicate_detector': {'enabled': False, 'settings': {'artist_similarity': 0.7}},
+        'repair.jobs.single_album_dedup': {'enabled': True, 'settings': {'title_similarity': 0.9}},
+    })
+    worker = RepairWorker.__new__(RepairWorker)
+    worker._migrate_legacy_job_configs(both)
+    native = both.values['repair.jobs.native_duplicate_detector']
+    assert native['enabled'] is True and native['settings'] == {'artist_similarity': 0.7}
+
+    # the user switches it off later: the next start leaves it off
+    both.values['repair.jobs.native_duplicate_detector'] = {**native, 'enabled': False}
+    worker._migrate_legacy_job_configs(both)
+    assert both.values['repair.jobs.native_duplicate_detector']['enabled'] is False
+
+
+def test_an_automation_running_single_album_dedup_runs_its_successor():
+    """a saved "Run Maintenance Job: single_album_dedup" automation queues the
+    detector instead of being skipped as retired"""
+    from core.automation.handlers.run_repair import auto_run_repair_job
+    queued = []
+
+    class Deps:
+        def update_progress(self, *a, **k):
+            pass
+
+        def run_repair_job_now(self, job_id, respect_enabled=True):
+            queued.append(job_id)
+            return True
+
+    result = auto_run_repair_job({"job_id": "single_album_dedup"}, Deps())
+    assert result["status"] == "completed" and queued == ["native_duplicate_detector"]

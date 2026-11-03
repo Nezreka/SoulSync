@@ -623,6 +623,25 @@ class RepairWorker:
             if new_cfg is None and isinstance(old_cfg, dict):
                 config_manager.set(f'repair.jobs.{new_id}', old_cfg)
 
+        # Two retired jobs share one successor. The copy above takes the first
+        # one's config; a second retired job that was switched ON still has to
+        # switch the successor on, once, without touching its settings (a
+        # Single/Album Dedup user must not end up with no dedup at all). The
+        # marker keeps a later "off" from being undone on the next start.
+        for old_id, new_id in JOB_ID_MIGRATIONS.items():
+            old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
+            if not isinstance(old_cfg, dict) or not old_cfg.get('enabled'):
+                continue
+            marker = f'repair.job_migrations.{old_id}_enabled_carried_to'
+            if config_manager.get(marker, None):
+                continue
+            new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
+            if isinstance(new_cfg, dict) and not new_cfg.get('enabled'):
+                config_manager.set(f'repair.jobs.{new_id}', {**new_cfg, 'enabled': True})
+                logger.info("Repair job %s was on at 3.6.1: its successor %s is switched on",
+                            old_id, new_id)
+            config_manager.set(marker, new_id)
+
     def set_metadata_enhancer(self, enhance_fn):
         """Inject the metadata enhancement function from web_server.py.
 
