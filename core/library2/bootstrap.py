@@ -721,6 +721,9 @@ def run_deferred_backfills(database: Any, *,
             from core.maintenance.library_history_dedupe import dedupe_scan_import_history
             stats["history_repeats_removed"] = dedupe_scan_import_history(
                 database, should_stop=should_stop)["removed"]
+            # 3.6.1 genre-cleanup locks the import left behind
+            from core.library2.legacy_locks import carry_legacy_genre_locks
+            stats["genre_locks_carried"] = sum(carry_legacy_genre_locks(conn).values())
             # the Songs tab's artist/album/year/recent sorts walk these
             # (a pass over every track the first time, then nothing)
             from core.library2.queries import ensure_song_sort_indexes
