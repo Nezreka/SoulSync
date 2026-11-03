@@ -120,12 +120,15 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
         )
     except RuntimeError:
         # Upgrade path for rows created before the projection was complete.
-        recompute_wanted(conn, track_ids=[from_track_id])
+        recompute_wanted(conn, profile_id=wishlist_profile_id, track_ids=[from_track_id])
         source_unmonitored = track_is_wanted(
             conn, from_track_id, profile_id=wishlist_profile_id
         )
-    conn.execute("UPDATE lib2_tracks SET monitored=0, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-                 (from_track_id,))
+    # the row's monitored column is profile 1's; another profile's choice
+    # lives in its rule alone
+    if int(wishlist_profile_id or 1) == 1:
+        conn.execute("UPDATE lib2_tracks SET monitored=0, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                     (from_track_id,))
     from core.library2.monitor_rules import PROVENANCE_USER, record_rule
     record_rule(
         conn,
@@ -135,7 +138,8 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
         PROVENANCE_USER,
         profile_id=wishlist_profile_id,
     )
-    recompute_wanted(conn, track_ids=[from_track_id])
+    # the profile acting: its wanted row is the one the mirror below reads
+    recompute_wanted(conn, profile_id=wishlist_profile_id, track_ids=[from_track_id])
     conn.commit()
 
     unmirrored = 0
