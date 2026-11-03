@@ -1604,11 +1604,13 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
         conn.execute(f"DELETE FROM lib2_album_artists WHERE album_id IN ({marks})", albums)
         conn.execute(f"DELETE FROM lib2_albums WHERE id IN ({marks})", albums)
         _rehome_and_delete_combined(conn, gid, components[0], components)
+        # one ghost, one transaction: this runs on every start (the short
+        # credit pass) and committing once at the end held the write lock
+        # across every candidate's checks
+        conn.commit()
         logger.info("cleared collaboration ghost %r: %d untouched catalogue album(s) dropped",
                     name, len(albums))
         cleared += 1
-    if cleared:
-        conn.commit()
     return cleared
 
 
