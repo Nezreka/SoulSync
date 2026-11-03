@@ -281,7 +281,12 @@ def test_a_newer_op_supersedes_an_older_pending_one_for_the_same_entity(db):
     flaky.fail_adds = False
     second = MO.drain(flaky)
 
-    assert second["superseded"] == 1, "the stale add must not be replayed"
+    # the newer row supersedes the stale add as it is queued (or, for rows an
+    # older build left, at the drain): either way it is never replayed
+    assert conn.execute(
+        "SELECT status FROM lib2_mirror_outbox WHERE op='wishlist_add'"
+    ).fetchone()[0] == "superseded", "the stale add must not be replayed"
+    assert second["done"] == 1
     assert flaky.adds == [], "a superseded add must never reach the legacy table"
     assert len(flaky.removes) == 1
     assert MO.drain(flaky)["done"] == 0, "nothing may remain queued"

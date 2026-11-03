@@ -266,7 +266,7 @@ def demonitor_lib2_artists_for_removed_watchlist(
             ))
         conn.commit()
         if outbox_ids:
-            drain(db)
+            drain(db, ids=outbox_ids)
         mirrored = _completed_outbox_count(conn, outbox_ids)
         logger.info(
             "watchlist→library demonitor: %d matched, %d demonitored, %d tracks mirrored",
@@ -561,7 +561,7 @@ def demonitor_lib2_tracks_for_removed_wishlist(
         )
         conn.commit()
         if outbox_ids:
-            drain(db)
+            drain(db, ids=outbox_ids)
         stats["tracks_mirrored"] = _completed_outbox_count(conn, outbox_ids)
         logger.info("wishlist→library release: %s", stats)
         return stats
@@ -937,7 +937,7 @@ def reconcile_artist_watchlist(
             stats["track_mirrors"] = len(track_ops)
         conn.commit()
         if outbox_ids:
-            drain(db)
+            drain(db, ids=outbox_ids)
         stats["mirrored"] = _completed_outbox_count(conn, outbox_ids)
         logger.info(
             "artist/watchlist reconcile: %d scanned, %d flags changed, %d mirrors",

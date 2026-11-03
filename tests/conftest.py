@@ -1135,6 +1135,9 @@ def _fresh_fold_index():
     from core.library2 import worker_queue
     saved_ttl, worker_queue.PROGRESS_SNAPSHOT_TTL = worker_queue.PROGRESS_SNAPSHOT_TTL, 0.0
     saved_pending_ttl, worker_queue.PENDING_COUNT_TTL = worker_queue.PENDING_COUNT_TTL, 0.0
+    # the mirror outbox's background drainer would outlive the test's database
+    from core.library2 import mirror_outbox as _mirror_outbox
+    saved_bg_drain, _mirror_outbox.BACKGROUND_DRAIN = _mirror_outbox.BACKGROUND_DRAIN, False
     worker_queue._reset_progress_snapshots()
     worker_queue._NEW_CURSOR.clear()
     worker_queue._NEW_IDLE.clear()
@@ -1161,6 +1164,7 @@ def _fresh_fold_index():
     fold_index.CHECK_SECONDS = saved
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
     worker_queue.PENDING_COUNT_TTL = saved_pending_ttl
+    _mirror_outbox.BACKGROUND_DRAIN = saved_bg_drain
     MusicDatabase._OWNED_GENRES_TTL = saved_genres_ttl
     metadata_cache._TOUCH_FLUSH_SECONDS = saved_touch
     _artist_facts.ONLINE_LOOKUP = saved_online

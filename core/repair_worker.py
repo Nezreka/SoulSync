@@ -3629,14 +3629,14 @@ class RepairWorker:
             if profile_id == 1:
                 conn.executemany('UPDATE lib2_tracks SET monitored=1 WHERE id=?', [(t,) for t in live])
             recompute_wanted(conn, profile_id=profile_id, track_ids=live)
-            enqueue_projected_tracks(conn, live, profile_id=profile_id, user_initiated=True)
+            outbox_ids = enqueue_projected_tracks(conn, live, profile_id=profile_id, user_initiated=True)
             conn.commit()
         except Exception as exc:  # noqa: BLE001
             conn.rollback()
             return {'success': False, 'error': str(exc)}
         finally:
             conn.close()
-        drain(self.db)
+        drain(self.db, ids=outbox_ids)
         return {'success': True, 'action': 'monitored_missing',
                 'message': f'Monitoring {len(live)} missing track{"s" if len(live) != 1 else ""}'}
 
@@ -3730,7 +3730,7 @@ class RepairWorker:
                     conn, [tid], profile_id=owner, user_initiated=not scheduled,
                 )
                 conn.commit()
-            drain(self.db)
+            drain(self.db, ids=outbox_ids)
             if not outbox_ids:
                 return {'success': False, 'error': 'No upgrade could be queued'}
             marks = ','.join('?' for _ in outbox_ids)

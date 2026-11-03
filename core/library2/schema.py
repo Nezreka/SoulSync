@@ -659,7 +659,83 @@ _ADDED_COLUMNS = (
     # without own-library profiles is.
     ("lib2_track_files", "owner_profile_id",
      "ALTER TABLE lib2_track_files ADD COLUMN owner_profile_id INTEGER"),
+    # Which wishlist/watchlist entry (and profile) an outbox row asserts state
+    # for, the same key ``mirror_outbox._row_key`` reads. Filled by
+    # trg_lib2_mirror_outbox_key; see _ensure_mirror_outbox_keys.
+    ("lib2_mirror_outbox", "entity_key",
+     "ALTER TABLE lib2_mirror_outbox ADD COLUMN entity_key TEXT"),
 )
+
+
+def _mirror_outbox_key_sql(op: str, payload: str, profile: str) -> str:
+    """The outbox row's entity key as SQL over the given column expressions.
+
+    ``wishlist|<release key>|<profile>`` or ``watchlist|<ext>|<profile>``, NULL
+    when the row names no entity (an unknown op, a payload without a target, or
+    a payload that isn't JSON). Mirrors ``mirror_outbox._entity_key``: the
+    release ``key`` first, then the bare track id an older build queued."""
+    return f"""CASE WHEN json_valid({payload}) THEN CASE
+        WHEN {op} IN ('wishlist_add', 'wishlist_remove') THEN
+            'wishlist|' || COALESCE(json_extract({payload}, '$.key'),
+                CASE WHEN {op} = 'wishlist_add'
+                     THEN json_extract({payload}, '$.payload.id')
+                     ELSE json_extract({payload}, '$.id') END)
+            || '|' || COALESCE({profile}, 1)
+        WHEN {op} IN ('watchlist_add', 'watchlist_remove') THEN
+            'watchlist|' || json_extract({payload}, '$.ext') || '|' || COALESCE({profile}, 1)
+        END END"""
+
+
+def _ensure_mirror_outbox_keys(cursor: Any) -> None:
+    """Key every outbox row and keep one pending row per entity.
+
+    Ops are absolute assertions ("this track is wishlisted" / "it is not"), so
+    only the newest row for an entity matters and every older PENDING row for it
+    is obsolete. The drain found those by json-parsing every row newer than the
+    oldest pending one, on every call: with a backlog that was the whole
+    backlog, and request handlers drain inline. On an install with 98k pending
+    rows (~3 KB of JSON each) every drain parsed ~290 MB while holding the drain
+    lock, and pages stopped loading (Nov 3 2026). Repeated reconcile runs also
+    queued the same intent again and again, which is how the backlog grew.
+
+    Now each row carries its key (indexed), and a newer row supersedes the older
+    pending ones for its key the moment it is inserted, so the pending queue
+    holds at most one row per entity. The one-time backfill does the same for
+    a backlog an older build left."""
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lib2_mirror_outbox_key "
+        "ON lib2_mirror_outbox(entity_key, id)")
+    new_key = _mirror_outbox_key_sql("NEW.op", "NEW.payload", "NEW.profile_id")
+    cursor.execute(f"""
+        CREATE TRIGGER IF NOT EXISTS trg_lib2_mirror_outbox_key
+        AFTER INSERT ON lib2_mirror_outbox
+        FOR EACH ROW
+        BEGIN
+            UPDATE lib2_mirror_outbox SET entity_key = {new_key} WHERE id = NEW.id;
+            UPDATE lib2_mirror_outbox
+               SET status = 'superseded', last_error = NULL,
+                   processed_at = CURRENT_TIMESTAMP
+             WHERE status = 'pending' AND id < NEW.id
+               AND entity_key = (SELECT entity_key FROM lib2_mirror_outbox WHERE id = NEW.id);
+        END
+    """)
+    if cursor.execute(
+            "SELECT 1 FROM lib2_mirror_outbox WHERE entity_key IS NULL LIMIT 1").fetchone():
+        cursor.execute(
+            "UPDATE lib2_mirror_outbox SET entity_key = "
+            + _mirror_outbox_key_sql("op", "payload", "profile_id")
+            + " WHERE entity_key IS NULL")
+        collapsed = cursor.execute("""
+            UPDATE lib2_mirror_outbox
+               SET status = 'superseded', last_error = NULL,
+                   processed_at = CURRENT_TIMESTAMP
+             WHERE status = 'pending' AND entity_key IS NOT NULL
+               AND id < (SELECT MAX(o.id) FROM lib2_mirror_outbox o
+                          WHERE o.entity_key = lib2_mirror_outbox.entity_key)
+        """).rowcount
+        if collapsed:
+            logger.info("mirror outbox: %d queued op(s) were already overridden by a "
+                        "newer one for the same entry and are skipped", collapsed)
 
 
 def _migrate_lib2_profiles_to_app_wide(cursor: Any) -> None:
@@ -1132,6 +1208,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         """)
     except Exception as e:  # noqa: BLE001
         logger.debug("release group trigger skipped: %s", e)
+    try:
+        _ensure_mirror_outbox_keys(cursor)
+    except Exception as e:  # noqa: BLE001 - the drain still works on unkeyed rows
+        logger.warning("mirror outbox keys not set up: %s", e)
     _migrate_lib2_profiles_to_app_wide(cursor)
     _migrate_quality_profile_constraints(cursor)
     _backfill_quality_profile_provenance(cursor)
