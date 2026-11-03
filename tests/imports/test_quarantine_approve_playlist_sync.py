@@ -87,3 +87,16 @@ def test_the_playlist_registration_resolves_the_approved_track(monkeypatch):
 
     assert ids == [42] and seen == [("pl-1", "Christmas", 2)]
     assert [(p["mirrored_playlist_id"], p["profile_id"]) for p in pending] == [(42, 2)]
+
+
+def test_the_approve_url_still_runs_the_approve_view():
+    """the helper once landed between the route decorator and the view, so
+    the approve url called it with an entry id and every approve failed"""
+    from flask import Flask
+
+    app = Flask(__name__)
+    app.register_blueprint(q.bp)
+    endpoint, args = app.url_map.bind('localhost').match('/api/quarantine/abc/approve', method='POST')
+
+    assert app.view_functions[endpoint] is q.approve_quarantine_item
+    assert args == {'entry_id': 'abc'}

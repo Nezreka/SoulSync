@@ -211,7 +211,6 @@ def delete_quarantine_item(entry_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@bp.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
 def _after_approved_import(context, batch):
     """What a finished batch does for its tracks, for one approved later.
 
@@ -250,6 +249,7 @@ def _after_approved_import(context, batch):
         logger.warning("[Quarantine] Post-approval media scan failed: %s", scan_exc)
 
 
+@bp.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
 def approve_quarantine_item(entry_id):
     """One-click approve: restore the file and re-run post-process with the
     quarantine gates skipped for this explicit user-approved pass."""
