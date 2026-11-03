@@ -18,6 +18,7 @@ when actually needed.
 """
 
 import ipaddress
+import json
 import math as _math
 import os
 import re as _re
@@ -1079,7 +1080,20 @@ def create_blueprint() -> Blueprint:
         conn = None
         try:
             from core.library2.track_files import primary_order
+            from core.library2 import song_search
             conn = db._get_connection()
+            # the Songs tab's search index reads the matches, not the library:
+            # the folded LIKE over every track ran per keystroke. without the
+            # index (not built yet, under three letters) the query below runs
+            hits = song_search.matching_ids(conn, song_search.fold(query))
+            if hits is not None:
+                where = "t.id IN (SELECT value FROM json_each(:ids))"
+                params = {"ids": json.dumps(hits)}
+            else:
+                where = ("unidecode_lower(t.title) LIKE :like ESCAPE '\\'"
+                         " OR unidecode_lower(COALESCE(credited.name, '')) LIKE :like ESCAPE '\\'"
+                         " OR unidecode_lower(COALESCE(album_artist.name, '')) LIKE :like ESCAPE '\\'")
+                params = {"like": _library_like(query)}
             rows = conn.execute(
                 f"""SELECT t.id, t.title, tf.path, tf.size,
                           COALESCE(credited.name, album_artist.name, '') AS artist,
@@ -1099,11 +1113,9 @@ def create_blueprint() -> Blueprint:
                          WHERE ta.track_id = t.id
                          ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
                                   ta.position, ta.artist_id LIMIT 1)
-                   WHERE unidecode_lower(t.title) LIKE :like ESCAPE '\\'
-                      OR unidecode_lower(COALESCE(credited.name, '')) LIKE :like ESCAPE '\\'
-                      OR unidecode_lower(COALESCE(album_artist.name, '')) LIKE :like ESCAPE '\\'
+                   WHERE {where}
                    ORDER BY t.title LIMIT 20""",
-                {"like": _library_like(query)}).fetchall()
+                params).fetchall()
             return jsonify({"tracks": [
                 {"id": r["id"], "title": r["title"], "artist": r["artist"],
                  "album": r["album"], "size": r["size"]}
