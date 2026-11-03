@@ -11072,6 +11072,11 @@ def _library_match_request(clear: bool):
     finally:
         conn.close()
 
+    if not clear:
+        # the new release's guests (the worker never revisits a manual match)
+        from core.library2.provider_credits import schedule_match_credits
+        schedule_match_credits(database, entity_type, int(entity_id), str(service).lower(),
+                               service_id)
     artist_id = (data.get('artist_id', entity_id) if entity_type == 'artist'
                  else _get_artist_id_for_entity(database, entity_type, entity_id))
     updated = database.get_artist_full_detail(artist_id)

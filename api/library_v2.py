@@ -2499,6 +2499,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # blocking provider HTTP calls, so it runs *after* the commit and off
         # the request thread — inside the request it reliably blew through the
         # web client's 10s timeout and made a successful match look failed.
+        if request.method == "PUT":
+            # the new release's guests (the worker never revisits a manual match)
+            from core.library2.provider_credits import schedule_match_credits
+            schedule_match_credits(get_database(), entity_type, entity_id, service, service_id)
         if request.method == "PUT" and entity_type in ("artist", "artists"):
             try:
                 from core.library2 import native_enrich

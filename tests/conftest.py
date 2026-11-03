@@ -1090,6 +1090,14 @@ def _quality_profile_refresh_inline(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_match_credit_fetch(monkeypatch):
+    """a manual match fetches the new release's credits on a thread. in tests
+    no provider is asked; the tests for that turn it back on."""
+    from core.library2 import provider_credits
+    monkeypatch.setattr(provider_credits, "ONLINE_REFRESH", False)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_reconciler_name_misses():
     """the reconciler believes a file-name miss for a few minutes; each test
     starts without one from another test"""

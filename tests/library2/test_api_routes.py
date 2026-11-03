@@ -4476,6 +4476,24 @@ def test_a_forced_import_still_runs_over_a_converged_library(api, monkeypatch):
         time.sleep(0.01)
 
 
+def test_a_manual_match_fetches_the_new_releases_credits(api, monkeypatch):
+    """3.6.1 queued a credit refetch on a rematch; the native route asks for
+    the new match's guests after it commits, and a clear asks for nothing."""
+    from core.library2 import provider_credits
+    client, _db, ids = api
+    calls = []
+    monkeypatch.setattr(provider_credits, "schedule_match_credits",
+                        lambda database, *a: calls.append(a))
+
+    assert client.put(f"/api/library/v2/albums/{ids['views']}/manual-match",
+                      json={"service": "spotify", "service_id": "sp-views-2"}
+                      ).status_code == 200
+    assert client.delete(f"/api/library/v2/albums/{ids['views']}/manual-match",
+                         json={"service": "spotify"}).status_code == 200
+
+    assert calls == [("albums", ids["views"], "spotify", "sp-views-2")]
+
+
 def test_a_manual_album_match_pins_and_locks_that_release(api):
     """#758 on the native route: the album the user matched is the canonical
     release every tool reads, and the default edition names it (A01)."""
