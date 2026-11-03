@@ -87,6 +87,47 @@ def _artist_identity_matches(
     )
 
 
+def _clean_ids(ids: Mapping[str, Any]) -> Dict[str, str]:
+    return {str(source).lower(): str(value).strip()
+            for source, value in (ids or {}).items() if str(value or "").strip()}
+
+
+class _WatchlistIndex:
+    """``_artist_identity_matches`` against every watchlist entry at once.
+
+    The reconcile asked it once per (artist, entry) pair while holding the
+    write lock: 20k artists times 2k watchlist rows is 40M comparisons an
+    hour. Same answer, through two lookups: a shared provider id, or the same
+    normalized name with no contradicting id in a shared namespace."""
+
+    def __init__(self, entries) -> None:
+        from core.library2.importer import normalize_name
+
+        self._normalize = normalize_name
+        self._by_id: Dict[tuple, int] = {}
+        self._by_name: Dict[str, List[Dict[str, str]]] = {}
+        for entry in entries or ():
+            ids = _clean_ids(entry.get("provider_ids") or {})
+            for pair in ids.items():
+                self._by_id[pair] = 1
+            key = normalize_name(entry.get("name"))
+            if key:
+                self._by_name.setdefault(key, []).append(ids)
+
+    def matches(self, name: Optional[str], ids: Mapping[str, Any]) -> bool:
+        candidate = _clean_ids(ids)
+        if any(pair in self._by_id for pair in candidate.items()):
+            return True
+        key = self._normalize(name)
+        if not key:
+            return False
+        for watched in self._by_name.get(key, ()):
+            if not any(candidate[source] != watched[source]
+                       for source in set(candidate) & set(watched)):
+                return True
+        return False
+
+
 def _match_lib2_artists(
     conn, external_ids: Any, name: Optional[str]
 ) -> List[int]:
@@ -822,6 +863,7 @@ def reconcile_artist_watchlist(
         affected_tracks: set[int] = set()
         outbox_ids: List[int] = []
         shared_intent = int(profile_id) == 1
+        watchlist_index = _WatchlistIndex(watchlist_entries)
         for row in rows:
             artist_id = int(row["id"])
             ids = source_ids_from_values(
@@ -829,11 +871,7 @@ def reconcile_artist_watchlist(
                 musicbrainz_id=row["musicbrainz_id"],
                 external_ids=row["external_ids"],
             )
-            on_watchlist = any(
-                _artist_identity_matches(
-                    row["name"], ids, entry["name"], entry["provider_ids"])
-                for entry in watchlist_entries
-            )
+            on_watchlist = watchlist_index.matches(row["name"], ids)
             explicit = row["rule_provenance"] == PROVENANCE_USER
             desired = bool(row["rule_monitored"]) if explicit else on_watchlist
 
