@@ -569,3 +569,75 @@ def test_the_auto_disambiguation_setting_still_decides(imported_conn, monkeypatc
 
     assert _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path, auto=False),
                          tmp_path) == "Views"
+
+
+# --- 3.6.1 lossy-copy twins an upgraded library never catalogued ---------------
+
+
+def _lossy_copy(monkeypatch, enabled=True, codec="opus"):
+    from core.settings import config_manager
+    real = config_manager.get
+    monkeypatch.setattr(config_manager, "get", lambda key, default=None: (
+        enabled if key == "lossy_copy.enabled" else codec if key == "lossy_copy.codec"
+        else real(key, default)))
+
+
+def _twin_on_disk(tmp_path, twin_ext=".opus"):
+    from tests.test_album_consistency_adopt import _make_flac
+    folder = tmp_path / "old" / "Views"
+    folder.mkdir(parents=True)
+    song = folder / "01 - One Dance.flac"
+    _make_flac(song, {})
+    twin = folder / f"01 - One Dance{twin_ext}"
+    twin.write_bytes(b"lossy copy")
+    return song, twin
+
+
+def _siblings(conn, album_id, monkeypatch, tmp_path, song):
+    plan = reorganize_plan.plan_album_reorganize(
+        conn, album_id, build_final_path_fn=_plain_builder(monkeypatch, tmp_path),
+        transfer_dir=str(tmp_path), resolve_file_path_fn=lambda _p: str(song))
+    return plan["tracks"][0]["sibling_files"]
+
+
+def test_the_lossy_copy_no_row_knows_travels_with_its_track(imported_conn, monkeypatch, tmp_path):
+    """an upgraded 3.6.1 library catalogued the flac only; its opus copy
+    stayed in the old folder and the folder never emptied (Foxxify)"""
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    song, twin = _twin_on_disk(tmp_path)
+    _lossy_copy(monkeypatch)
+
+    siblings = _siblings(conn, album_id, monkeypatch, tmp_path, song)
+
+    assert siblings == [{"file_id": None, "source_db_path": None,
+                         "current_path_abs": str(twin), "uncatalogued": True}]
+
+
+def test_a_same_named_file_the_lossy_copy_does_not_explain_stays(imported_conn, monkeypatch, tmp_path):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    song, _twin = _twin_on_disk(tmp_path, twin_ext=".mp3")
+    _lossy_copy(monkeypatch, codec="opus")      # an mp3 is no opus copy
+    assert _siblings(conn, album_id, monkeypatch, tmp_path, song) == []
+
+    _lossy_copy(monkeypatch, enabled=False)     # no lossy copy at all
+    assert _siblings(conn, album_id, monkeypatch, tmp_path, song) == []
+
+
+def test_another_tracks_file_is_never_carried_as_a_twin(imported_conn, monkeypatch, tmp_path):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, tracks=(("One Dance", 1, 1), ("Hype", 2, 1)))
+    song, twin = _twin_on_disk(tmp_path)
+    other = conn.execute("SELECT id FROM lib2_tracks WHERE title='Hype'").fetchone()[0]
+    conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                 ("/server/Views/01 - One Dance.opus", other))
+    conn.commit()
+    _lossy_copy(monkeypatch)
+
+    plan = reorganize_plan.plan_album_reorganize(
+        conn, album_id, build_final_path_fn=_plain_builder(monkeypatch, tmp_path),
+        transfer_dir=str(tmp_path),
+        resolve_file_path_fn=lambda p: str(twin) if p.endswith(".opus") else str(song))
+    first = next(t for t in plan["tracks"] if t["title"] == "One Dance")
+    assert first["sibling_files"] == []

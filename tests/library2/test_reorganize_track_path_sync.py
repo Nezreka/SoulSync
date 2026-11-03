@@ -182,3 +182,46 @@ def test_update_track_path_without_lib2_schema_fails_closed(monkeypatch, tmp_pat
     row = conn.execute("SELECT file_path FROM tracks WHERE id=100").fetchone()
     conn.close()
     assert row[0] == '/old/path.flac'
+
+
+def test_an_uncatalogued_lossy_twin_moves_without_a_row_to_repoint(
+    monkeypatch, tmp_path, imported_legacy_db
+):
+    """the planner hands over a 3.6.1 lossy-copy twin with no file row
+    (file_id None): the catalogue update repoints the track's own row and
+    accepts the twin's move instead of calling it an unplanned file"""
+    with closing(imported_legacy_db._get_connection()) as conn:
+        primary = conn.execute(
+            "SELECT id, track_id, path FROM lib2_track_files WHERE legacy_track_id=100"
+        ).fetchone()
+        rows_before = conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0]
+    twin = primary['path'].rsplit('.', 1)[0] + '.opus'
+
+    def fake_reorganize_album(*, update_track_path_fn, **kwargs):
+        update_track_path_fn(
+            primary['track_id'], '/library/Drake/Views/01 One Dance.flac', file_id=primary['id'],
+            source_db_path=primary['path'], current_path_abs=primary['path'],
+            sibling_files=[{'file_id': None, 'source_db_path': None,
+                            'current_path_abs': twin, 'uncatalogued': True}],
+            moved_paths={primary['path']: '/library/Drake/Views/01 One Dance.flac',
+                         twin: '/library/Drake/Views/01 One Dance.opus'},
+        )
+        return {'status': 'completed', 'source': None, 'total': 1, 'moved': 1,
+                'skipped': 0, 'failed': 0, 'errors': []}
+
+    monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
+                        fake_reorganize_album, raising=True)
+    runner = build_runner(
+        get_database=lambda: imported_legacy_db,
+        resolve_file_path_fn=lambda p: p,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
+        get_config_manager=lambda: _EnabledConfig(),
+        build_final_path_fn=lambda *a, **k: (None, True),
+    )
+    assert runner(_make_item())['status'] == 'completed'
+    with closing(imported_legacy_db._get_connection()) as conn:
+        assert conn.execute("SELECT path FROM lib2_track_files WHERE id=?",
+                            (primary['id'],)).fetchone()[0] == '/library/Drake/Views/01 One Dance.flac'
+        assert conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0] == rows_before

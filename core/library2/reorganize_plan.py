@@ -110,6 +110,80 @@ def _filing(album_row: Any, album: Dict[str, Any]) -> Dict[str, Any]:
             "disambiguation": recorded}
 
 
+def _lossy_companion_exts(conn) -> set:
+    """The extensions any enabled lossy-copy setting writes (global or a
+    quality profile), read through this connection."""
+    from core.library.duplicate_rules import LOSSY_CODEC_EXTS
+    exts: set = set()
+    try:
+        from core.settings import config_manager
+        if config_manager.get("lossy_copy.enabled", False):
+            codec = str(config_manager.get("lossy_copy.codec", "mp3")).lower()
+            exts.add(LOSSY_CODEC_EXTS.get(codec, ".mp3"))
+    except Exception:  # noqa: BLE001 - optional
+        pass
+    try:
+        for (codec,) in conn.execute(
+                "SELECT lossy_copy_codec FROM quality_profiles WHERE lossy_copy_enabled = 1"):
+            exts.add(LOSSY_CODEC_EXTS.get(str(codec or "mp3").lower(), ".mp3"))
+    except Exception:  # noqa: BLE001 - an older schema has no profiles
+        pass
+    return exts
+
+
+def _uncatalogued_lossy_twins(conn, resolved: str, planned: list,
+                              resolve_file_path_fn=None) -> list:
+    """Same-named files beside ``resolved`` that no file row knows and that
+    the lossy-copy setting explains as the lossless/lossy pair of it. They
+    move with the track and keep no catalogue row (``file_id`` None)."""
+    from core.library.duplicate_rules import is_lossy_companion_pair
+    from core.library_reorganize import _AUDIO_EXTS
+    exts = _lossy_companion_exts(conn)
+    if not exts or not resolved:
+        return []
+    folder = os.path.dirname(resolved)
+    stem = os.path.splitext(os.path.basename(resolved))[0]
+    taken = {os.path.normcase(os.path.abspath(f["current_path_abs"])) for f in planned}
+    taken.add(os.path.normcase(os.path.abspath(resolved)))
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    twins = []
+    for name in sorted(names):
+        candidate = os.path.join(folder, name)
+        cand_stem, cand_ext = os.path.splitext(name)
+        if (cand_stem.lower() != stem.lower() or cand_ext.lower() not in _AUDIO_EXTS
+                or os.path.normcase(os.path.abspath(candidate)) in taken
+                or not os.path.isfile(candidate)
+                or not is_lossy_companion_pair(resolved, candidate, exts)):
+            continue
+        if _catalogued(conn, candidate, name, resolve_file_path_fn):
+            continue  # some track's file: never ours to move as a twin
+        twins.append({"file_id": None, "source_db_path": None,
+                      "current_path_abs": candidate, "uncatalogued": True})
+    return twins
+
+
+def _catalogued(conn, local_path: str, name: str, resolve_file_path_fn) -> bool:
+    """Whether any file row resolves to ``local_path``. Stored paths are the
+    server's view (a Windows drive path, a container path), so the rows ending
+    in the same file name are resolved and compared, as the planner resolves
+    its own."""
+    escaped = name.replace(BACK, BACK + BACK).replace("%", BACK + "%").replace("_", BACK + "_")
+    target = os.path.normcase(os.path.abspath(local_path))
+    for (path,) in conn.execute(
+            "SELECT path FROM lib2_track_files WHERE path LIKE ? ESCAPE ?",
+            (f"%{escaped}", BACK)):
+        resolved = resolve_file_path_fn(path) if resolve_file_path_fn else path
+        if resolved and os.path.normcase(os.path.abspath(resolved)) == target:
+            return True
+    return False
+
+
+BACK = chr(92)  # the LIKE escape character (a backslash)
+
+
 def _tagged_disambiguation(tracks: List[Dict[str, Any]],
                            resolve_file_path_fn: Callable[[Optional[str]], Optional[str]]) -> str:
     """The release disambiguation off the album's own files (MusicBrainz's
@@ -373,6 +447,14 @@ def plan_album_reorganize(
                     'file_id': sibling['id'], 'source_db_path': sibling['path'],
                     'current_path_abs': sibling_abs,
                 })
+        # 3.6.1's lossy copy kept the lossless file beside the copy it made,
+        # and an upgraded library often catalogued only one of them: the other
+        # stayed behind in the old folder and the folder never emptied. Only
+        # a pair the lossy-copy setting itself explains is carried; any other
+        # same-named audio is someone else's recording and stays put.
+        item['sibling_files'].extend(
+            _uncatalogued_lossy_twins(conn, resolved, item['sibling_files'],
+                                      resolve_file_path_fn))
 
         artists = _credited_artists(conn, track["id"]) or [artist_name]
         context = _build_post_process_context(

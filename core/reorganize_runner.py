@@ -151,6 +151,8 @@ def build_runner(
                 row_new_path = moved_paths.get(planned_file['current_path_abs'])
                 if row_new_path is None:
                     continue
+                if planned_file.get('uncatalogued') and planned_file.get('file_id') is None:
+                    continue  # a lossy-copy twin no row knows: it moves, nothing to repoint
                 old_row_path = planned_file['source_db_path']
                 changed = conn.execute(
                     f"""UPDATE lib2_track_files
