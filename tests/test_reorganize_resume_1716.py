@@ -135,3 +135,34 @@ def test_a_pause_holds_between_albums_and_a_stop_while_paused_ends_the_run(monke
     assert planned == [1]
     assert paused_checks  # the pause was looked at between albums
 
+
+
+def _restart_lines(monkeypatch):
+    import core.repair_jobs.base as base
+    lines = []
+    real = base.logger.info
+    monkeypatch.setattr(base.logger, "info",
+                        lambda msg, *a, **k: lines.append(msg % a) or real(msg, *a, **k))
+    return lines
+
+
+def test_a_restart_says_the_naming_settings_changed(monkeypatch):
+    """3.6.1 said which setting reset the scan, so a reorganize that "started
+    over by itself" could be traced; v2 said only "the scan settings changed\""""
+    import core.library_reorganize as lr
+
+    config = _Config()
+    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "before")
+    _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)
+    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "after")
+    lines = _restart_lines(monkeypatch)
+    _reorganize(monkeypatch, config, [10, 11, 12])
+    assert any("naming settings changed since the last scan" in line for line in lines), lines
+    assert not any("dry run" in line for line in lines)
+
+
+def test_a_restart_names_every_part_that_changed(monkeypatch):
+    job = LibraryReorganizeJob()
+    assert job._changed_scan_parts("dry|0|a", "live|1|a") == "dry run, recheck placed"
+    assert job._changed_scan_parts(None, "live|1|a") == "dry run, recheck placed, naming settings"
+    assert job._changed_scan_parts("x", "only-one-part") == "the scan settings"

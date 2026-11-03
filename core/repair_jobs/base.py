@@ -530,6 +530,10 @@ class RepairJob(ABC):
     # config key, resumes right after it, and clears it at the end. ``scan_key``
     # names what the pass ran under (mode, naming...); a different one starts
     # over, and so does a checkpoint item that is gone.
+    #
+    # ``scan_key_fields`` names the "|"-separated parts of a job's scan key, so
+    # a pass that starts over says which one changed (3.6.1's reorganize did).
+    scan_key_fields: tuple = ()
 
     def resume_index(self, context: JobContext, ids: List[Any], scan_key: str = '') -> int:
         try:
@@ -541,7 +545,8 @@ class RepairJob(ABC):
         if not isinstance(saved, dict):
             return 0
         if saved.get('scan') != scan_key:
-            logger.info("[%s] starting at the top, the scan settings changed", self.job_id)
+            logger.info("[%s] starting at the top, %s changed since the last scan",
+                        self.job_id, self._changed_scan_parts(saved.get('scan'), scan_key))
             return 0
         keys = [str(i) for i in ids]
         if str(saved.get('id')) in keys:
@@ -559,6 +564,17 @@ class RepairJob(ABC):
                                 self.job_id, saved.get('id'), index + 1)
                     return index
         return 0
+
+    def _changed_scan_parts(self, old_key: Any, new_key: str) -> str:
+        """Which named parts of the scan key differ, in words."""
+        old = str(old_key or '').split('|')
+        new = str(new_key or '').split('|')
+        names = self.scan_key_fields
+        if not names or len(names) != len(new):
+            return 'the scan settings'
+        changed = [name for n, name in enumerate(names)
+                   if (old[n] if n < len(old) else None) != new[n]]
+        return ', '.join(changed) or 'the scan settings'
 
     def save_checkpoint(self, context: JobContext, last_id: Any, scan_key: str = '') -> None:
         """``last_id=None`` clears it: the pass reached the end."""

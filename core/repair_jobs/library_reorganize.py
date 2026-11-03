@@ -15,6 +15,7 @@ logger = get_logger("repair_jobs.library_reorganize")
 
 @register_job
 class LibraryReorganizeJob(RepairJob):
+    scan_key_fields = ('dry run', 'recheck placed', 'naming settings')
     job_id = "library_reorganize"
     display_name = "Library Reorganize"
     description = "Reviews or queues files whose paths do not match the organization template"
