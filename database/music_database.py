@@ -11334,7 +11334,11 @@ class MusicDatabase:
                             AND m.server_library_id=CASE WHEN f.owner_profile_id IS NULL
                                 THEN '' ELSE 'own:' || f.owner_profile_id END
                           ORDER BY m.last_seen_at DESC, m.id DESC LIMIT 1), f.path) AS path,
-                       t.title AS title, ar.name AS artist,
+                       t.title AS title,
+                       -- the song's own artist, as 3.6.1 wrote it (a compilation
+                       -- track is not by "Various Artists"); the album artist when
+                       -- the row names none
+                       COALESCE(NULLIF(TRIM(t.track_artist), ''), ar.name) AS artist,
                        t.duration AS duration_ms, t.track_number AS track_number
                 FROM lib2_tracks t
                 JOIN lib2_albums al ON al.id = t.album_id
