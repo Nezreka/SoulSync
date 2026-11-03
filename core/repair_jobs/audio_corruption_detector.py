@@ -124,17 +124,10 @@ def _file_identity(path: str):
 
 
 def _whole_library(context: JobContext) -> bool:
-    """True when this run saw every library file: no artist/file scope and no
-    one-library scope (#1199). Only then is a remembered file the run did not
-    see one that left the library."""
-    from core.repair_jobs.base import get_scope_file_paths
-    if get_scope_file_paths(context) is not None:
-        return False
-    try:
-        from core.library2.sql_util import owner_clause
-        return not owner_clause(column="f.owner_profile_id")
-    except Exception:  # noqa: BLE001 - unknown scope: keep the memory
-        return False
+    """True when this run saw every library file (``base.whole_library_run``,
+    shared with the other jobs that remember answers)."""
+    from core.repair_jobs.base import whole_library_run
+    return whole_library_run(context)
 
 
 def _decoder_available() -> bool:

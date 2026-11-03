@@ -95,6 +95,24 @@ def get_scope_file_paths(context: Any) -> Optional[frozenset[str]]:
     )
 
 
+def whole_library_run(context: Any) -> bool:
+    """True when this run saw every library file: no artist/file scope and no
+    one-library scope (#1199). Only then is something a remembered-answer
+    memory didn't see this run something that left the library.
+
+    A run started by hand on an install with own libraries reads through the
+    library it was started in (E-14), so it sees that library's files only.
+    Pruning on that forgot every other library's remembered answers.
+    """
+    if get_scope_file_paths(context) is not None:
+        return False
+    try:
+        from core.library2.sql_util import owner_clause
+        return not owner_clause(column="f.owner_profile_id")
+    except Exception:  # noqa: BLE001 - unknown scope: keep the memory
+        return False
+
+
 def file_path_in_scope(path: Any, allowed_paths: Optional[frozenset[str]]) -> bool:
     """Return whether ``path`` is inside an exact per-run file allowlist."""
     if allowed_paths is None:

@@ -439,3 +439,35 @@ def test_a_hydrabase_empty_answer_is_remembered(tmp_path, source, monkeypatch):
     assert first > 0
     again()
     assert socket.asked == first
+
+
+def _remembered(db):
+    return {r[0] for r in db._get_connection().execute(
+        "SELECT key FROM repair_empty_lookups WHERE job_id='missing_cover_art'")}
+
+
+def test_a_library_wide_run_forgets_albums_that_left(tmp_path, source):
+    db = _album_db(tmp_path)
+    mem = EmptyLookupMemory.open(db, "missing_cover_art", 7)
+    mem.remember("999", "sig")
+    mem.close()
+
+    mca.MissingCoverArtJob().scan(_ctx(db, remember_empty_lookups=True))
+
+    assert "999" not in _remembered(db)
+
+
+def test_a_run_in_one_library_keeps_what_the_others_remember(tmp_path, source, monkeypatch):
+    """a run started by hand on an install with own libraries reads the library
+    it was started in. its albums are a keep-set for that library only, the
+    prune forgot every other library's empty answers"""
+    db = _album_db(tmp_path)
+    mem = EmptyLookupMemory.open(db, "missing_cover_art", 7)
+    mem.remember("999", "sig")
+    mem.close()
+    monkeypatch.setattr("core.library2.sql_util.owner_clause",
+                        lambda *a, column="owned_f.owner_profile_id", **k: f" AND +{column} = 3")
+
+    mca.MissingCoverArtJob().scan(_ctx(db, remember_empty_lookups=True))
+
+    assert "999" in _remembered(db)
