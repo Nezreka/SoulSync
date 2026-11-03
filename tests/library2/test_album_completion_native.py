@@ -332,3 +332,62 @@ def test_a_second_primary_album_artist_is_the_albums_own(catalogue):
 
     run(db)
     assert [r[0] for r in rules(db)] == sorted([missing, theirs])
+
+
+def _worker(db):
+    from core.repair_worker import RepairWorker
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    return worker
+
+
+def _record_with_a_guest_gap(db, *, own_gap=True):
+    with db._get_connection() as conn:
+        for n in (1, 2, 3):
+            lib2_seed.track(conn, 'Band', 'Record', f'Have {n}', track_number=n, disc_number=1, monitored=0)
+        gap = (lib2_seed.track(conn, 'Band', 'Record', 'Gap', owned=False, track_number=4,
+                               disc_number=1, monitored=0) if own_gap else None)
+        guest = lib2_seed.track(conn, 'Band', 'Record', 'Their Song', owned=False, track_number=5,
+                                disc_number=1, monitored=0)
+        _only_credit(conn, guest, 'Someone Else')
+        aid = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (guest,)).fetchone()[0]
+        conn.commit()
+    return aid, gap, guest
+
+
+def test_fixing_one_finding_on_its_own_adds_the_guest_songs_too(catalogue):
+    """3.6.1: an explicit "Fill Album" on one finding filled the other
+    artists' songs too; a bulk fix left them alone"""
+    db = catalogue[0]
+    aid, gap, guest = _record_with_a_guest_gap(db)
+    found, create = _collector()
+    run(db, as_shipped=True, create_finding=create)
+    finding, = [f for f in found if f['entity_id'] == f'lib2:{aid}']
+    assert finding['details']['track_ids'] == [gap]
+    assert finding['details']['guest_track_ids'] == [guest]
+    assert 'by other artists' in finding['description']
+
+    bulk = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
+                                             {**finding['details'], '_explicit_single_fix': False})
+    assert bulk['success'] is True and [r[0] for r in rules(db)] == [gap]
+
+    explicit = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
+                                                 {**finding['details'], '_explicit_single_fix': True})
+    assert explicit['success'] is True and [r[0] for r in rules(db)] == sorted([gap, guest])
+
+
+def test_an_album_missing_only_guest_songs_still_files_a_finding(catalogue):
+    db = catalogue[0]
+    aid, _gap, guest = _record_with_a_guest_gap(db, own_gap=False)
+    found, create = _collector()
+    run(db, as_shipped=True, create_finding=create)
+    finding, = [f for f in found if f['entity_id'] == f'lib2:{aid}']
+    assert finding['details']['track_ids'] == [] and finding['details']['guest_track_ids'] == [guest]
+
+    bulk = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
+                                             {**finding['details'], '_explicit_single_fix': False})
+    assert bulk['success'] is False and 'on its own' in bulk['error'] and rules(db) == []
+
+    explicit = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
+                                                 {**finding['details'], '_explicit_single_fix': True})
+    assert explicit['success'] is True and [r[0] for r in rules(db)] == [guest]

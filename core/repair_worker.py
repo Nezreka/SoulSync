@@ -3509,9 +3509,17 @@ class RepairWorker:
         details = details or {}
         try:
             track_ids = [int(t) for t in details.get('track_ids') or []]
+            guests = [int(t) for t in details.get('guest_track_ids') or []]
             profile_id = int(details.get('profile_id') or 1)
         except (TypeError, ValueError):
-            track_ids, profile_id = [], 1
+            track_ids, guests, profile_id = [], [], 1
+        # other artists' songs only when this one finding was fixed on its own:
+        # a bulk fix must not pull every artist on a compilation in (3.6.1)
+        if details.get('_explicit_single_fix'):
+            track_ids = track_ids + [t for t in guests if t not in track_ids]
+        elif guests and not track_ids:
+            return {'success': False, 'error': "Only other artists' songs are missing here; "
+                                               'fix this finding on its own to add them'}
         if album_id is None or not track_ids:
             return {'success': False, 'error': 'Nothing to fill on this finding; rerun Album Completeness'}
         from core.library2.monitor_rules import PROVENANCE_USER, record_rules

@@ -42,6 +42,18 @@ def _own_artist_ids(conn, album_id: int, primary) -> list:
     return sorted(own)
 
 
+def _gap_description(own: int, guests: int) -> str:
+    """What an incomplete-album finding will do when it is fixed."""
+    def songs(n):
+        return f"{n} missing track{'s' if n != 1 else ''}"
+    parts = []
+    if own:
+        parts.append(f"{songs(own)}. Approve to monitor them; Wanted and the Wishlist take it from there.")
+    if guests:
+        parts.append(f"{songs(guests)} by other artists, added only when you fix this finding on its own.")
+    return " ".join(parts)
+
+
 @register_job
 class AlbumCompletenessJob(RepairJob):
     job_id = 'album_completeness'
@@ -164,16 +176,20 @@ class AlbumCompletenessJob(RepairJob):
                             or 100 * owned / len(tracks) < float(settings['min_completion_pct'])):
                         result.skipped += 1
                         continue
-                    missing = [int(t['id']) for t in tracks if not t['owned']
-                               and not t['owned_elsewhere']
-                               and (target or not t['other_artist'])
-                               and str(t['title'] or '').strip()
-                               and not re.fullmatch(r'Track\s+\d+', t['title'], re.I)]
+                    gaps = [t for t in tracks if not t['owned']
+                            and not t['owned_elsewhere']
+                            and str(t['title'] or '').strip()
+                            and not re.fullmatch(r'Track\s+\d+', t['title'], re.I)]
                     existing = {int(r[0]) for r in conn.execute(
                         "SELECT r.entity_id FROM lib2_monitor_rules r JOIN lib2_tracks t ON t.id=r.entity_id WHERE r.entity_type='track' "
                         'AND r.profile_id=? AND r.monitored=1 AND t.album_id=?', (profile_id, album_id))}
-                    missing = [tid for tid in missing if tid not in existing]
-                    if missing and review and settings.get('dry_run') is not True:
+                    gaps = [t for t in gaps if int(t['id']) not in existing]
+                    missing = [int(t['id']) for t in gaps if target or not t['other_artist']]
+                    # other artists' songs (a compilation's, a soundtrack's):
+                    # listed on the finding, filled only when that finding is
+                    # fixed on its own (3.6.1's explicit "Fill Album")
+                    guests = [int(t['id']) for t in gaps if not target and t['other_artist']]
+                    if (missing or guests) and review and settings.get('dry_run') is not True:
                         if context.create_finding:
                             title = conn.execute('SELECT al.title, ar.name FROM lib2_albums al '
                                                  'LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id '
@@ -183,9 +199,9 @@ class AlbumCompletenessJob(RepairJob):
                                 entity_type='album', entity_id=f'lib2:{album_id}', file_path=None,
                                 title=f"Incomplete album: {title[1] or 'Unknown'} - {title[0]} "
                                       f"({owned}/{len(tracks)})",
-                                description=f'{len(missing)} missing track(s). Approve to monitor them; '
-                                            'Wanted and the Wishlist take it from there.',
+                                description=_gap_description(len(missing), len(guests)),
                                 details={'lib2_album_id': album_id, 'track_ids': missing,
+                                         'guest_track_ids': guests,
                                          'profile_id': profile_id, 'owned': owned,
                                          'total': len(tracks)})
                             if created:
