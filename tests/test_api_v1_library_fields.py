@@ -727,3 +727,24 @@ def test_the_library_lists_only_albums_you_have(client, db):
     recent = client.get("/api/v1/library/recently-added?type=albums").get_json()["data"]
     items = recent.get("items") or recent.get("albums") or recent
     assert "Discography Only" not in {a.get("title") for a in items}
+
+
+def test_playlist_tracks_carry_the_ids_every_other_v1_route_shows(client, db, monkeypatch):
+    """found in the second #1062 review: the curated and mirrored playlist
+    routes returned bare catalogue ids, which /library/tracks/<id> reads as
+    the old ids first (wrong track, or a 409). they show the v1 ids now."""
+    rows = [db.api_get_track(1), db.api_get_track(99)]
+    monkeypatch.setattr(db, "api_get_curated_playlist_tracks", lambda pid, profile_id=None: rows)
+    curated = client.get("/api/v1/library/playlists/5/tracks").get_json()["data"]["tracks"]
+
+    monkeypatch.setattr(db, "get_mirrored_playlist_tracks", lambda pid, profile_id=None: [
+        {"source_track_id": "x1", "track_name": "Song One"}, {"track_name": "Numeric Song"}])
+    monkeypatch.setattr(db, "api_get_track_by_external_id", lambda sid: rows[0] if sid == "x1" else None)
+    monkeypatch.setattr(db, "api_find_track_by_title_artist", lambda title, artist: rows[1])
+    mirrored = client.get("/api/v1/library/mirrored-playlists/5/tracks").get_json()["data"]["tracks"]
+
+    for tracks in (curated, mirrored):
+        assert [t["id"] for t in tracks] == ["tr1::soulsync", "99"]
+        for t in tracks:  # and each id opens that same track
+            assert client.get(f"/api/v1/library/tracks/{t['id']}").get_json()["data"]["track"]["title"] \
+                == t["title"]
