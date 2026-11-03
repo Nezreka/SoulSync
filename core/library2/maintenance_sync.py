@@ -768,8 +768,15 @@ def sync_repair_change(
             # resolved track subject, which is the only case that can be
             # library-wide.
             for profile_id, track_ids in owner_tracks.items():
-                recompute_wanted(conn.cursor(), profile_id=profile_id,
-                                 track_ids=sorted(track_ids) or None)
+                if track_ids:
+                    recompute_wanted(conn.cursor(), profile_id=profile_id,
+                                     track_ids=sorted(track_ids))
+                else:
+                    # the library-wide fallback, committed per batch so it
+                    # never holds the write lock for the whole rebuild
+                    recompute_wanted(conn.cursor(), profile_id=profile_id,
+                                     batch_size=2000,
+                                     on_batch=lambda _done, _total: conn.commit())
                 conn.commit()
                 changed_fields.add("wanted")
                 if track_ids:

@@ -44,6 +44,8 @@ upgrade candidate) stays a live decision of the acquisition path
 
 from __future__ import annotations
 
+import json
+
 from typing import Any, Callable, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -160,10 +162,18 @@ def recompute_wanted(conn: Any, *, profile_id: int = 1,
         scope_sql = f" WHERE t.id IN ({marks})"
         scope_args = unique_ids
     else:
-        cur = conn.execute(
-            "DELETE FROM lib2_wanted_tracks WHERE profile_id=? AND track_id "
-            "NOT IN (SELECT id FROM lib2_tracks)", (int(profile_id),))
-        stats["pruned"] = cur.rowcount
+        # read the orphans first, then delete just those: a DELETE ... NOT IN
+        # scan is the first write of the run, so it took the write lock for
+        # the whole multi-second scan before anything else was decided
+        orphans = [int(r[0]) for r in conn.execute(
+            "SELECT track_id FROM lib2_wanted_tracks WHERE profile_id=? AND track_id "
+            "NOT IN (SELECT id FROM lib2_tracks)", (int(profile_id),))]
+        if orphans:
+            cur = conn.execute(
+                "DELETE FROM lib2_wanted_tracks WHERE profile_id=? AND track_id IN "
+                "(SELECT value FROM json_each(?))",
+                (int(profile_id), json.dumps(orphans)))
+            stats["pruned"] = cur.rowcount
         if batched:
             scope_sql = " WHERE t.id > ? ORDER BY t.id LIMIT ?"
 
