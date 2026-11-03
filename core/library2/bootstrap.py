@@ -721,6 +721,9 @@ def run_deferred_backfills(database: Any, *,
             from core.maintenance.library_history_dedupe import dedupe_scan_import_history
             stats["history_repeats_removed"] = dedupe_scan_import_history(
                 database, should_stop=should_stop)["removed"]
+            # issues reported before the upgrade, onto the catalogue's ids
+            from core.library2.legacy_issues import carry_legacy_issue_ids
+            stats["issues_carried"] = carry_legacy_issue_ids(conn)["issues"]
             # 3.6.1 genre-cleanup locks the import left behind
             from core.library2.legacy_locks import carry_legacy_genre_locks
             stats["genre_locks_carried"] = sum(carry_legacy_genre_locks(conn).values())
