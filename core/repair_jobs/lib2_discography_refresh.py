@@ -477,6 +477,14 @@ class Lib2DiscographyRefreshJob(RepairJob):
             result.scanned += 1
             if context.update_progress:
                 context.update_progress(index + 1, total)
+            if reach == "library" and index + 1 < end:
+                # 3.6.1's pacing between artists: a library-wide walk is
+                # hundreds of discography fetches back to back (fe5e0e585)
+                pause = getattr(context, "sleep_or_stop", None)
+                if callable(pause) and pause(1.0):
+                    self.save_checkpoint(context, artist_id, scan_key=scan_key)
+                    finished = False
+                    break
 
         if finished:
             # a per-run limit leaves the rest of the pass for the next run

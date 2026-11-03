@@ -187,3 +187,27 @@ def test_approving_a_back_catalogue_finding_wishes_for_its_library(tmp_path, mon
                                     {"lib2_album_id": album_id})
 
     assert calls == [([album_id], 3), ([album_id], 1)]
+
+
+def test_the_library_walk_paces_its_provider_calls(monkeypatch):
+    """3.6.1 slept a second between artists; a library-wide walk without it is
+    hundreds of discography fetches back to back (fe5e0e585)"""
+    monkeypatch.setattr("core.library2.discography.refresh_artist_discography",
+                        lambda *_a, **_kw: ({"auto_monitor_album_ids": []}, 0))
+    job = Lib2DiscographyRefreshJob()
+    monkeypatch.setattr(job, "_sweep_ids", lambda _conn, _settings: [1, 2, 3])
+    monkeypatch.setattr(job, "_create_backfill_findings", lambda *a, **k: None)
+
+    class _Conn:
+        def close(self):
+            pass
+
+    naps = []
+    config = _Config({"artists": "library"})
+    context = JobContext(db=None, transfer_folder="/music", config_manager=config)
+    context.db = type("DB", (), {"_get_connection": lambda self: _Conn()})()
+    context.sleep_or_stop = lambda seconds: naps.append(seconds) or False
+
+    job.scan(context)
+
+    assert naps == [1.0, 1.0]  # between artists, not after the last
