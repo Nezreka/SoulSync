@@ -89,3 +89,44 @@ def test_the_deferred_convergence_runs_it():
     import inspect
     from core.library2 import bootstrap
     assert "carry_legacy_issue_ids(conn)" in inspect.getsource(bootstrap.run_deferred_backfills)
+
+
+def test_every_lookup_uses_an_index(imported_conn):
+    """the lookups were CAST(column AS TEXT)=?, which no index serves: every
+    one read the whole table, per issue and per album track, inside the
+    start-up convergence that holds the migration gate (discord, Nov 3: a
+    big library's automation sat paused for hours on every start)"""
+    conn = imported_conn
+    _issues_table(conn)
+    (tid, title, old_tid, aid, album, old_aid, arid, artist, old_arid) = _a_track(conn)
+    _issue(conn, "track", old_tid, {"id": old_tid, "title": title, "artist_id": old_arid,
+                                    "artist_name": artist, "album_id": old_aid, "album_title": album})
+    _issue(conn, "album", old_aid, {"id": old_aid, "title": album,
+                                    "tracks": [{"id": old_tid, "title": title}]})
+    conn.commit()
+    statements = []
+    conn.set_trace_callback(statements.append)
+    try:
+        carry_legacy_issue_ids(conn)
+    finally:
+        conn.set_trace_callback(None)
+
+    lookups = [s for s in statements
+               if s.lstrip().upper().startswith("SELECT") and " FROM lib2_" in s]
+    assert lookups, "the carry looked nothing up"
+    for sql in lookups:
+        plan = " ".join(str(r[-1]) for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
+        assert "USING" in plan and "SCAN lib2_" not in plan, (sql, plan)
+
+
+def test_a_text_legacy_id_still_translates(imported_conn):
+    """jellyfin/navidrome ids are text; the lookup asks for both spellings"""
+    conn = imported_conn
+    _issues_table(conn)
+    (tid, title, *_rest) = _a_track(conn)
+    conn.execute("UPDATE lib2_tracks SET legacy_track_id='a1b2c3' WHERE id=?", (tid,))
+    issue = _issue(conn, "track", "a1b2c3", {"id": "a1b2c3", "title": title})
+    conn.commit()
+
+    assert carry_legacy_issue_ids(conn)["issues"] == 1
+    assert _get(conn, issue)[0] == str(tid)

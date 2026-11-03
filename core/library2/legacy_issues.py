@@ -41,16 +41,25 @@ def _translate(conn, kind: str, old_id: Any, name: Any) -> Optional[int]:
     if old_id in (None, "") or not _fold(name):
         return None
     table, back_ref, name_col = _KINDS[kind]
+    # both spellings of the id, straight on the column so its index is used.
+    # CAST(column AS TEXT)=? can't use one: every lookup read the whole table,
+    # once per issue and per track of an album issue, inside the start-up
+    # convergence that holds the migration gate. on a big library with many
+    # issues that kept automation paused for hours, on every start
+    text_id = str(old_id).strip()
+    int_id = int(text_id) if text_id.lstrip("-").isdigit() else None
+    keys = (text_id,) if int_id is None else (text_id, int_id)
     rows = conn.execute(
-        f"SELECT id, {name_col} FROM {table} WHERE CAST({back_ref} AS TEXT)=? LIMIT 2",
-        (str(old_id),)).fetchall()
+        f"SELECT id, {name_col} FROM {table} WHERE {back_ref} IN ({','.join('?' * len(keys))}) LIMIT 2",
+        keys).fetchall()
     if len(rows) != 1 or _fold(rows[0][1]) != _fold(name):
         return None
     new_id = int(rows[0][0])
-    if str(new_id) == str(old_id):
+    if str(new_id) == text_id:
         return None  # already the catalogue id
-    current = conn.execute(f"SELECT {name_col} FROM {table} WHERE CAST(id AS TEXT)=?",
-                           (str(old_id),)).fetchone()
+    # catalogue ids are integers: a text id names no row there
+    current = (conn.execute(f"SELECT {name_col} FROM {table} WHERE id=?", (int_id,)).fetchone()
+               if int_id is not None else None)
     if current is not None and _fold(current[0]) == _fold(name):
         return None  # the id already names this very thing
     return new_id
