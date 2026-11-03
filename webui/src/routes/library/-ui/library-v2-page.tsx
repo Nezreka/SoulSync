@@ -4383,6 +4383,28 @@ function middleEllipsis(path: string, max = 76): string {
   return `${path.slice(0, side)}…${path.slice(-side)}`;
 }
 
+const SERVER_NAMES: Record<string, string> = {
+  plex: 'Plex',
+  jellyfin: 'Jellyfin',
+  navidrome: 'Navidrome',
+  emby: 'Emby',
+};
+
+/** A media-server artist removed from the database only comes back on that
+ *  server's next sync, files and all (3.6.1 said so after the delete; this
+ *  says it before you confirm). */
+export function returnsOnRescanNotice(name: string, servers: string[]): string {
+  const named = servers.map((s) => SERVER_NAMES[s.toLowerCase()] ?? s);
+  const who = name || 'This artist';
+  const tail = ' To keep it out, remove it there too, or choose Delete files.';
+  if (named.length > 1) {
+    const list = `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
+    return `${who} is in your ${list} libraries, so their next sync adds it back.${tail}`;
+  }
+  const server = named[0] || 'media server';
+  return `${who} is in your ${server} library, so the next ${server} sync adds it back.${tail}`;
+}
+
 export function UnifiedFileRemovalDialog({
   entity,
   eid,
@@ -4567,6 +4589,11 @@ export function UnifiedFileRemovalDialog({
               } in the library.`
             : ''}
         </p>
+      ) : null}
+      {entityImpact.data?.returns_on_rescan && mode === 'database_only' ? (
+        <div className={styles.mutedNotice} role="note">
+          {returnsOnRescanNotice(entityImpact.data.artist, entityImpact.data.media_servers ?? [])}
+        </div>
       ) : null}
 
       <div className={styles.fileRemovalChoices}>

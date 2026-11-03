@@ -4247,6 +4247,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as e:  # noqa: BLE001
             logger.debug("artwork cleanup failed (%s %s): %s", kind, eid, e)
 
+    def _artist_media_servers(conn, artist_id):
+        """The media servers that know this artist (or one of its aliases):
+        removing it here, its files still on that server, the server's next
+        sync adds it back."""
+        from core.library2.queries import _media_server_sources_many
+        canonical = conn.execute(
+            "SELECT COALESCE(canonical_artist_id, id) FROM lib2_artists WHERE id=?",
+            (artist_id,)).fetchone()
+        if canonical is None:
+            return []
+        try:
+            return sorted(_media_server_sources_many(conn, "artist", [int(canonical[0])])
+                          .get(int(canonical[0]), []))
+        except Exception as exc:  # noqa: BLE001 - a hint, never a failed delete
+            logger.debug("media server lookup for artist %s failed: %s", artist_id, exc)
+            return []
+
     @_route("/api/library/v2/artists/<int:artist_id>/delete-preview")
     def lib2_artist_delete_preview(artist_id):
         """Impact preview for artist delete: what cascades, what survives.
@@ -4273,9 +4290,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                    JOIN lib2_albums al ON al.id = aa.album_id
                    WHERE aa.artist_id=? AND al.primary_artist_id<>?""",
                 (artist_id, artist_id)).fetchone()[0]
+            servers = _artist_media_servers(conn, artist_id)
             return jsonify({"success": True, "artist": row["name"],
                             "albums": len(album_ids), "tracks": len(track_ids),
-                            "file_links": file_links, "detached_albums": detached})
+                            "file_links": file_links, "detached_albums": detached,
+                            "media_servers": servers, "returns_on_rescan": bool(servers)})
 
     @_route("/api/library/v2/<entity>/<int:eid>/file-delete-preview")
     def lib2_file_delete_preview(entity, eid):
@@ -4526,6 +4545,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             row = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
             if not row:
                 return _fail("Artist not found", 404)
+            # asked before the rows go: a media-server artist comes back on the
+            # server's next sync, and the answer says so (3.6.1 did)
+            servers = _artist_media_servers(conn, artist_id)
             from core.library2.mirror_outbox import drain as drain_mirror_outbox
             from core.library2.mirror_outbox import enqueue_artist_watchlist
             enqueue_artist_watchlist(conn, artist_id, False, profile_id=_intent_profile())
@@ -4549,7 +4571,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
             drain_mirror_outbox(db)
             _delete_artwork_files(db, "artist", artist_id)
-        return jsonify({"success": True, **stats})
+        return jsonify({"success": True, **stats, "media_servers": servers,
+                        "returns_on_rescan": bool(servers)})
 
     @_route("/api/library/v2/albums/<int:album_id>", methods=["DELETE"])
     def lib2_delete_album(album_id):

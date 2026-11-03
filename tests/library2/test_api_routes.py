@@ -2028,6 +2028,28 @@ def test_artist_delete_preview_for_primary_artist(api):
     assert missing.status_code == 404
 
 
+def test_a_media_server_artist_is_said_to_come_back_on_the_next_sync(api):
+    """3.6.1 told you a media-server artist comes back on the next scan; the
+    preview says it before the delete, and the delete's answer says it too"""
+    client, db, ids = api
+    quiet = client.get(f"/api/library/v2/artists/{ids['artist']}/delete-preview").get_json()
+    assert quiet["returns_on_rescan"] is False and quiet["media_servers"] == []
+
+    conn = _conn(db)
+    conn.executemany(
+        "INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source,"
+        " server_id, match_status) VALUES ('artist', ?, ?, ?, 'recognized')",
+        [(ids["artist"], "plex", "p1"), (ids["artist"], "jellyfin", "j1")])
+    conn.commit()
+    conn.close()
+
+    preview = client.get(f"/api/library/v2/artists/{ids['artist']}/delete-preview").get_json()
+    assert preview["returns_on_rescan"] is True
+    assert preview["media_servers"] == ["jellyfin", "plex"]
+    deleted = client.delete(f"/api/library/v2/artists/{ids['artist']}").get_json()
+    assert deleted["success"] is True and deleted["returns_on_rescan"] is True
+
+
 def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, monkeypatch):
     client, db, ids = api
     root = tmp_path / "music"

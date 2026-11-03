@@ -991,6 +991,9 @@ export interface LibraryV2ArtistDeletePreview {
   tracks: number;
   file_links: number;
   detached_albums: number;
+  /** media servers that know this artist; its next sync adds it back */
+  media_servers?: string[];
+  returns_on_rescan?: boolean;
 }
 
 export async function fetchLibraryV2ArtistDeletePreview(
