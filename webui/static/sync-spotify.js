@@ -223,7 +223,9 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
         } else if (virtualPlaylistId === 'discover_discovery_shuffle') {
             apiEndpoint = '/api/discover/personalized/discovery-shuffle';
         } else if (virtualPlaylistId === 'build_playlist_custom') {
-            apiEndpoint = '/api/discover/build-playlist';
+            // a built playlist lives only in its download batch, whose tasks
+            // carry every track; /api/discover/build-playlist never existed
+            apiEndpoint = null;
         } else if (virtualPlaylistId.startsWith('discover_lb_')) {
             console.log(`💧 ListenBrainz playlist - skipping (no automatic rehydration for ListenBrainz)`);
             return;
@@ -232,21 +234,36 @@ async function rehydrateDiscoverPlaylistModal(virtualPlaylistId, playlistName, b
             return;
         }
 
-        // Fetch tracks from API
-        console.log(`📡 Fetching tracks from ${apiEndpoint}...`);
-        const response = await fetch(apiEndpoint);
+        // Fetch tracks from API (a built playlist: from its own batch)
+        const tracksUrl = apiEndpoint === null
+            ? `/api/playlists/${encodeURIComponent(batchId)}/download_status`
+            : apiEndpoint;
+        console.log(`📡 Fetching tracks from ${tracksUrl}...`);
+        const response = await fetch(tracksUrl);
         if (!response.ok) {
             console.error(`❌ Failed to fetch discover playlist data: ${response.status}`);
             return;
         }
 
         const data = await response.json();
-        if (!data.success || !data.tracks) {
-            console.error(`❌ Invalid discover playlist data:`, data);
-            return;
+        let tracks;
+        if (apiEndpoint === null) {
+            const tasks = Array.isArray(data.tasks) ? [...data.tasks] : [];
+            tasks.sort((a, b) => (a.track_index ?? 0) - (b.track_index ?? 0));
+            tracks = tasks
+                .filter(task => task && task.track_info && typeof task.track_info === 'object')
+                .map(task => ({ track_data_json: { ...task.track_info } }));
+            if (!tracks.length) {
+                console.log(`💧 Built playlist batch has no tracks to show`);
+                return;
+            }
+        } else {
+            if (!data.success || !data.tracks) {
+                console.error(`❌ Invalid discover playlist data:`, data);
+                return;
+            }
+            tracks = data.tracks;
         }
-
-        const tracks = data.tracks;
         console.log(`✅ Retrieved ${tracks.length} tracks for ${playlistName}`);
 
         // Transform tracks to format expected by download modal (same as openDownloadModalForDiscoverPlaylist)

@@ -1572,6 +1572,16 @@ async function openDiscoverDownloadModal(playlistId) {
     }
 }
 
+// A download batch's tracks in playlist order, in the shape the rehydrate
+// mapping reads (track_data_json = the track as it was queued).
+function _tracksFromBatchTasks(batch) {
+    const tasks = (batch && Array.isArray(batch.tasks)) ? [...batch.tasks] : [];
+    tasks.sort((a, b) => (a.track_index ?? 0) - (b.track_index ?? 0));
+    return tasks
+        .filter(task => task && task.track_info && typeof task.track_info === 'object')
+        .map(task => ({ track_data_json: { ...task.track_info } }));
+}
+
 async function rehydrateDiscoverDownloadModal(playlistId) {
     /**
      * Rehydrates a discover download modal from backend process data.
@@ -1683,6 +1693,7 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
 
         // Determine API endpoint based on playlist ID
         let apiEndpoint;
+        let prefetchedTracks = null;
         if (playlistId === 'discover_release_radar') {
             apiEndpoint = '/api/discover/release-radar';
         } else if (playlistId === 'discover_discovery_weekly') {
@@ -1696,7 +1707,13 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
         } else if (playlistId === 'discover_discovery_shuffle') {
             apiEndpoint = '/api/discover/personalized/discovery-shuffle';
         } else if (playlistId === 'build_playlist_custom') {
-            apiEndpoint = '/api/discover/build-playlist';
+            // a built playlist lives only in its download batch, whose tasks
+            // carry every track; /api/discover/build-playlist never existed
+            prefetchedTracks = _tracksFromBatchTasks(batch);
+            if (!prefetchedTracks.length) {
+                console.log('⚠️ [REHYDRATE] Built playlist batch has no tracks to show');
+                return false;
+            }
         } else if (playlistId.startsWith('discover_lb_')) {
             // ListenBrainz playlist - fetch from cache
             const identifier = playlistId.replace('discover_lb_', '');
@@ -1823,21 +1840,25 @@ async function rehydrateDiscoverDownloadModal(playlistId) {
             return false;
         }
 
-        // Fetch tracks from API
-        console.log(`📡 [REHYDRATE] Fetching tracks from ${apiEndpoint}...`);
-        const response = await fetch(apiEndpoint);
-        if (!response.ok) {
-            console.error(`❌ [REHYDRATE] Failed to fetch tracks: ${response.status}`);
-            return false;
-        }
+        let tracks;
+        if (prefetchedTracks) {
+            tracks = prefetchedTracks;
+        } else {
+            // Fetch tracks from API
+            console.log(`📡 [REHYDRATE] Fetching tracks from ${apiEndpoint}...`);
+            const response = await fetch(apiEndpoint);
+            if (!response.ok) {
+                console.error(`❌ [REHYDRATE] Failed to fetch tracks: ${response.status}`);
+                return false;
+            }
 
-        const data = await response.json();
-        if (!data.success || !data.tracks) {
-            console.error(`❌ [REHYDRATE] Invalid track data:`, data);
-            return false;
+            const data = await response.json();
+            if (!data.success || !data.tracks) {
+                console.error(`❌ [REHYDRATE] Invalid track data:`, data);
+                return false;
+            }
+            tracks = data.tracks;
         }
-
-        const tracks = data.tracks;
         console.log(`✅ [REHYDRATE] Retrieved ${tracks.length} tracks`);
 
         // Transform tracks to Spotify format
