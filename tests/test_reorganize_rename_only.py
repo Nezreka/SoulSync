@@ -392,3 +392,31 @@ def test_the_sweep_never_runs_on_a_library_root(tmp_path, monkeypatch):
     }], update=lambda *a, **k: None)
 
     assert (lib / "Someone Elses Empty Folder").is_dir()
+
+
+def test_a_case_only_rename_really_renames_on_case_insensitive_storage(tmp_path):
+    """found in the second #1062 review: on storage that ignores case (WSL's
+    drvfs, Windows, macOS, SMB) the old and new spelling are one file, so the
+    mover returned success without renaming and recorded no move (3.6.1
+    failed it as "destination already exists"). it renames for real now,
+    the file, its same-named sibling and the album and artist folders, and
+    reports the move. on case-sensitive storage it is a plain move."""
+    old_dir = tmp_path / "lib" / "kendrick lamar" / "to pimp a butterfly"
+    old_dir.mkdir(parents=True)
+    src = old_dir / "07 - alright.flac"
+    src.write_bytes(b"audio")
+    sibling = old_dir / "07 - alright.opus"
+    sibling.write_bytes(b"lossy")
+    new = tmp_path / "lib" / "Kendrick Lamar" / "To Pimp a Butterfly" / "07 - Alright.flac"
+    moved = {}
+
+    ok, err = _rename_track_in_place(str(src), str(new), sibling_paths=[str(sibling)],
+                                     moved_paths=moved)
+
+    assert ok and err is None
+    assert moved[str(src)] == str(new)
+    assert "Kendrick Lamar" in os.listdir(tmp_path / "lib")
+    assert "To Pimp a Butterfly" in os.listdir(new.parent.parent)
+    names = os.listdir(new.parent)
+    assert "07 - Alright.flac" in names and "07 - Alright.opus" in names
+    assert (new.parent / "07 - Alright.flac").read_bytes() == b"audio"

@@ -756,6 +756,64 @@ def _album_dir_of(dest_dir: str) -> str:
     return os.path.dirname(d) if _DISC_DIR_RE.match(os.path.basename(d)) else d
 
 
+def _case_entry(folder: str, name: str) -> Optional[str]:
+    """The on-disk spelling of ``name`` in ``folder`` (case-insensitive)."""
+    try:
+        for entry in os.listdir(folder):
+            if entry.casefold() == name.casefold():
+                return entry
+    except OSError:
+        return None
+    return None
+
+
+def _respell(folder: str, actual: str, wanted: str) -> None:
+    """Rename ``folder/actual`` to ``folder/wanted`` when they differ only in
+    case, through a temporary name (a direct rename is a no-op there)."""
+    if actual == wanted:
+        return
+    temp = os.path.join(folder, f".{wanted}.ss-case-{os.getpid()}")
+    os.rename(os.path.join(folder, actual), temp)
+    try:
+        os.rename(temp, os.path.join(folder, wanted))
+    except OSError:
+        os.rename(temp, os.path.join(folder, actual))  # put it back
+        raise
+
+
+def _case_rename(current_abs: str, new_abs: str, sibling_paths=()) -> Dict[str, str]:
+    """Give a file (and its same-named siblings) the new letter case, and the
+    album and artist folders above it too, when only case differs. Never a
+    configured library root. Returns ``{old path: new path}`` for what moved."""
+    try:
+        from core.imports.file_ops import protected_root_dirs
+        protected = {os.path.normcase(os.path.normpath(p)) for p in protected_root_dirs()}
+    except Exception:  # noqa: BLE001
+        protected = set()
+    new_dir = os.path.dirname(new_abs)
+    # the folders first, outermost first: artist, then album
+    for level in (os.path.dirname(new_dir), new_dir):
+        parent, wanted = os.path.dirname(level), os.path.basename(level)
+        if not wanted or os.path.normcase(os.path.normpath(level)) in protected:
+            continue
+        actual = _case_entry(parent, wanted)
+        if actual and actual != wanted and actual.casefold() == wanted.casefold():
+            _respell(parent, actual, wanted)
+    moved: Dict[str, str] = {}
+    old_stem = os.path.splitext(os.path.basename(current_abs))[0]
+    new_stem = os.path.splitext(os.path.basename(new_abs))[0]
+    for source in (current_abs, *sibling_paths):
+        ext = os.path.splitext(source)[1]
+        if os.path.splitext(os.path.basename(source))[0].casefold() != old_stem.casefold():
+            continue
+        wanted = new_stem + ext if source != current_abs else os.path.basename(new_abs)
+        actual = _case_entry(new_dir, wanted)
+        if actual and actual.casefold() == wanted.casefold():
+            _respell(new_dir, actual, wanted)
+            moved[source] = os.path.join(new_dir, wanted)
+    return moved
+
+
 def _rename_track_in_place(
     current_abs: str, new_abs: str, *, sibling_paths=(), moved_paths=None,
     created_dirs: Optional[List[str]] = None,
@@ -779,6 +837,16 @@ def _rename_track_in_place(
         if current_abs and not os.path.exists(current_abs):
             return False, 'source file no longer on disk'
         same = _same_physical_file(current_abs, new_abs)
+        if same and current_abs and current_abs != new_abs \
+                and os.path.normpath(current_abs).casefold() == os.path.normpath(new_abs).casefold():
+            # only the letter case changes, on storage that ignores case: the
+            # two spellings are one file, so a plain rename does nothing
+            # there. 3.6.1 failed it as "destination already exists"; this
+            # renames through a temporary name, folders included
+            final = _case_rename(current_abs, new_abs, sibling_paths)
+            if moved_paths is not None:
+                moved_paths.update(final)
+            return True, None
         if same:
             return True, None
         if os.path.lexists(new_abs) and not same:
