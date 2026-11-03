@@ -278,3 +278,24 @@ def test_plugin_download_rejects_foreign_profiles_token(monkeypatch):
 
     assert run_async(_grab()) is None
     assert plugin.active_downloads == {}
+
+
+def test_a_search_reuses_one_connection_and_an_expired_token_stays_refused(monkeypatch):
+    """a fresh connection per registered release was most of a search's cost;
+    the expiry sweep is throttled, so resolve must refuse an expired token alone"""
+    from core.download_plugins import candidate_store as cs
+
+    store = cs.CandidateStore(ttl_seconds=60)
+    opened = []
+    real = store._connect
+    monkeypatch.setattr(store, "_connect", lambda: opened.append(1) or real())
+    clock = [1000.0]
+    monkeypatch.setattr(cs.time, "time", lambda: clock[0])
+
+    tokens = [store.put(f"https://indexer.test/{n}") for n in range(50)]
+
+    assert len(opened) == 1
+    assert store.resolve(tokens[0]) == "https://indexer.test/0"
+    clock[0] += 61  # past the ttl, inside the sweep interval
+    assert store.resolve(tokens[1]) is None
+

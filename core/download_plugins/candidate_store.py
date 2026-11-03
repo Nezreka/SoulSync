@@ -160,6 +160,11 @@ class CandidateStore:
         self._ttl = ttl_seconds
         self._max = max_entries
         self._lock = threading.Lock()
+        # one connection for the store's life, used under the lock: a search
+        # registers every release it shows, and a fresh connection (plus the
+        # WAL pragma) per release was most of the cost
+        self._shared: Optional[sqlite3.Connection] = None
+        self._last_sweep = 0.0
         if path is None:
             # Private in-process store (tests, ad-hoc instances): a named
             # shared-cache memory DB so per-operation connections all see
@@ -202,6 +207,21 @@ class CandidateStore:
         conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
+    @contextlib.contextmanager
+    def _session(self):
+        """The store's connection, under the caller's lock. A broken one is
+        dropped, and the next call opens a new one."""
+        if self._shared is None:
+            self._shared = self._connect()
+        try:
+            yield self._shared
+        except sqlite3.Error:
+            try:
+                self._shared.close()
+            finally:
+                self._shared = None
+            raise
+
     @staticmethod
     def is_token(value: Optional[str]) -> bool:
         return bool(value) and value.startswith(TOKEN_PREFIX)
@@ -217,7 +237,7 @@ class CandidateStore:
         """
         binding = current_binding()
         kind = _normalize_result_kind(result_kind or binding.result_kind)
-        with self._lock, contextlib.closing(self._connect()) as conn:
+        with self._lock, self._session() as conn:
             with conn:
                 # Captured under the lock, not before it: expires_at must
                 # reflect actual insertion order so a call that loses the
@@ -226,8 +246,12 @@ class CandidateStore:
                 # expiry-ordered eviction below could pick the entry this
                 # very call is about to create.
                 now = time.time()
-                conn.execute(
-                    "DELETE FROM candidate_tokens WHERE expires_at < ?", (now,))
+                # resolve rejects an expired token itself; the sweep only
+                # keeps the table small, so twice a minute is plenty
+                if now - self._last_sweep >= 30:
+                    conn.execute(
+                        "DELETE FROM candidate_tokens WHERE expires_at < ?", (now,))
+                    self._last_sweep = now
                 row = conn.execute(
                     "SELECT token FROM candidate_tokens WHERE url=? AND profile_id=?"
                     " AND COALESCE(lib2_track_id,-1)=COALESCE(?,-1)"
@@ -289,7 +313,7 @@ class CandidateStore:
             return None, {}
         binding = current_binding()
         now = time.time()
-        with self._lock, contextlib.closing(self._connect()) as conn:
+        with self._lock, self._session() as conn:
             with conn:
                 row = conn.execute(
                     "SELECT url, profile_id, lib2_track_id, lib2_album_id,"
