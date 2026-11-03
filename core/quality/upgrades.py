@@ -20,7 +20,35 @@ UNTIL_CUTOFF_POLICIES = frozenset({'until_cutoff', 'until_top'})
 
 
 def annotate_enhanced_payload(database, payload: dict) -> dict:
-    """Keep the enhanced artist adapter, using native live-profile evaluation."""
+    """Mark tracks that could be better and count them per album, in place.
+
+    The badges are decoration on the enhanced artist view: a database error
+    while working them out leaves the view without badges, never a 500 for
+    the whole artist (3.6.1 never failed the view over them). All of them are
+    worked out first and applied together, so a failure halfway never shows
+    half an artist badged.
+    """
+    albums = payload.get('albums') or []
+    try:
+        found = _enhanced_upgrades(database, albums)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        logger.warning('could-be-better badges unavailable for this artist: %s', exc)
+        found = None
+    for album in albums:
+        count = 0
+        for track in album.get('tracks') or []:
+            track.pop('quality_upgrade', None)
+            hit = (found or {}).get(id(track))
+            if hit:
+                track['quality_upgrade'] = hit
+                count += 1
+        album['upgradable_count'] = count
+    return payload
+
+
+def _enhanced_upgrades(database, albums: list) -> dict:
+    """``{id(track dict): quality_upgrade}`` for the tracks below their
+    profile's cutoff. Native live-profile evaluation; raises on a db error."""
     from core.library2.profile_lookup import effective_quality_profile
     from core.library2.quality_eval import audio_quality_from_file, quality_issue
     from core.library2.track_files import primary_file_rows
@@ -30,7 +58,7 @@ def annotate_enhanced_payload(database, payload: dict) -> dict:
         # one read for every track's primary file and one per distinct profile:
         # this ran three queries per track, every visit to an enhanced artist
         ids = []
-        for album in payload.get('albums') or []:
+        for album in albums:
             for track in album.get('tracks') or []:
                 try:
                     ids.append(int(track['id']))
@@ -51,10 +79,9 @@ def annotate_enhanced_payload(database, payload: dict) -> dict:
             return {**row, 'source': resolved['source'], 'source_id': resolved['source_id'],
                     'explicit': resolved['explicit']}
 
-        for album in payload.get('albums') or []:
-            count = 0
+        out: dict = {}
+        for album in albums:
             for track in album.get('tracks') or []:
-                track.pop('quality_upgrade', None)
                 try:
                     tid = int(track['id'])
                     file = files.get(tid)
@@ -64,17 +91,15 @@ def annotate_enhanced_payload(database, payload: dict) -> dict:
                     if quality_issue(file, profile) != 'below_cutoff':
                         continue
                     measured = audio_quality_from_file(file)
-                    track['quality_upgrade'] = {
+                    out[id(track)] = {
                         'lib2_track_id': tid, 'quality_profile_id': profile['id'],
                         'current': measured.label(),
                     }
-                    count += 1
                 except (LookupError, TypeError, ValueError) as exc:
                     logger.debug('enhanced track quality unavailable: %s', exc)
-            album['upgradable_count'] = count
+        return out
     finally:
         conn.close()
-    return payload
 
 
 def upgrade_bar(profile_id=None) -> Tuple[list, Optional[int], str]:
