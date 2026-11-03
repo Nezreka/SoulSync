@@ -21,21 +21,47 @@ UNTIL_CUTOFF_POLICIES = frozenset({'until_cutoff', 'until_top'})
 
 def annotate_enhanced_payload(database, payload: dict) -> dict:
     """Keep the enhanced artist adapter, using native live-profile evaluation."""
-    from core.library2.quality_eval import audio_quality_from_file, effective_track_profile, quality_issue
-    from core.library2.track_files import primary_file_row
+    from core.library2.profile_lookup import effective_quality_profile
+    from core.library2.quality_eval import audio_quality_from_file, quality_issue
+    from core.library2.track_files import primary_file_rows
 
     conn = database._get_connection()
     try:
+        # one read for every track's primary file and one per distinct profile:
+        # this ran three queries per track, every visit to an enhanced artist
+        ids = []
+        for album in payload.get('albums') or []:
+            for track in album.get('tracks') or []:
+                try:
+                    ids.append(int(track['id']))
+                except (KeyError, TypeError, ValueError):
+                    pass
+        files = primary_file_rows(conn, ids)
+        profile_rows: dict = {}
+
+        def profile_for(tid: int) -> dict:
+            resolved = effective_quality_profile(conn, 'tracks', tid)
+            row = profile_rows.get(resolved['id'])
+            if row is None:
+                found = conn.execute('SELECT * FROM quality_profiles WHERE id=?',
+                                     (resolved['id'],)).fetchone()
+                if found is None:
+                    raise LookupError('Effective quality profile not found')
+                row = profile_rows[resolved['id']] = dict(found)
+            return {**row, 'source': resolved['source'], 'source_id': resolved['source_id'],
+                    'explicit': resolved['explicit']}
+
         for album in payload.get('albums') or []:
             count = 0
             for track in album.get('tracks') or []:
                 track.pop('quality_upgrade', None)
                 try:
                     tid = int(track['id'])
-                    file = primary_file_row(conn, tid, scoped=True)
-                    profile = effective_track_profile(conn, tid)
-                    if (not file or (file.get('file_state') or 'active') != 'active'
-                            or quality_issue(file, profile) != 'below_cutoff'):
+                    file = files.get(tid)
+                    if not file or (file.get('file_state') or 'active') != 'active':
+                        continue
+                    profile = profile_for(tid)
+                    if quality_issue(file, profile) != 'below_cutoff':
                         continue
                     measured = audio_quality_from_file(file)
                     track['quality_upgrade'] = {
