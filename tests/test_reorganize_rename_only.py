@@ -300,3 +300,95 @@ def test_an_unresolvable_source_is_skipped_without_creating_folders(tmp_path):
 
     assert not new.parent.exists(), "an empty destination tree was created"
     assert out["moved"] == 0 and out["failed"] == 0 and out["skipped"] == 1
+
+
+# ── empty folders (3.6.1 never left them behind) ──
+
+
+def test_a_failed_move_takes_back_the_folders_it_created(tmp_path, monkeypatch):
+    src = tmp_path / "lib" / "Old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    dst = tmp_path / "lib" / "New Artist" / "New Album" / "Disc 1" / "01 - Song.flac"
+
+    def refuse(_a, _b):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(os, "rename", refuse)
+
+    ok, err = _rename_track_in_place(str(src), str(dst))
+
+    assert not ok and "Permission denied" in err
+    assert src.exists()
+    assert not (tmp_path / "lib" / "New Artist").exists()
+    assert (tmp_path / "lib").is_dir()  # what was there before stays
+
+
+def test_a_rolled_back_move_leaves_no_empty_destination(tmp_path):
+    src = tmp_path / "lib" / "old" / "01 - A.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"a")
+    new = tmp_path / "lib" / "Artist" / "New Album" / "A - Artist.flac"
+
+    def _boom(track_id, path):
+        raise RuntimeError("database is locked")
+
+    out = _run([{
+        "track_id": "t1", "title": "A", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": True,
+        "current_path_abs": str(src), "new_path_abs": str(new),
+    }], update=_boom)
+
+    assert out["failed"] == 1 and src.exists()
+    assert not (tmp_path / "lib" / "Artist").exists()
+
+
+def test_a_run_sweeps_empty_album_folders_beside_the_one_it_filled(tmp_path, monkeypatch):
+    """3.6.1: leftovers of earlier failed runs (empty album folders, empty
+    Disc-N folders) under the artist folder go; anything with files stays,
+    and nothing above the artist folder is touched"""
+    lib = tmp_path / "lib"
+    artist = lib / "Kendrick Lamar"
+    (artist / "2013 Backseat Freestyle").mkdir(parents=True)
+    (artist / "2012 Old" / "Disc 1").mkdir(parents=True)
+    (artist / "Keep" ).mkdir()
+    (artist / "Keep" / "cover.jpg").write_bytes(b"jpg")
+    (lib / "Empty Top Level").mkdir()
+    src = lib / "incoming" / "01 - Alright.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    (lib / "incoming" / "keep.txt").write_bytes(b"x")
+    new = artist / "2015 To Pimp a Butterfly" / "Disc 1" / "01 - Alright.flac"
+    monkeypatch.setattr("core.imports.paths.library_containing", lambda _p: str(lib))
+
+    out = _run([{
+        "track_id": "t1", "title": "Alright", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": True,
+        "current_path_abs": str(src), "new_path_abs": str(new),
+    }], update=lambda *a, **k: None)
+
+    assert out["moved"] == 1 and new.exists()
+    assert not (artist / "2013 Backseat Freestyle").exists()
+    assert not (artist / "2012 Old").exists()
+    assert (artist / "Keep" / "cover.jpg").exists()
+    assert (lib / "Empty Top Level").is_dir()  # never above the artist folder
+
+
+def test_the_sweep_never_runs_on_a_library_root(tmp_path, monkeypatch):
+    """an "$album/$title" template puts albums straight in the library root:
+    its other empty folders are not ours to remove"""
+    lib = tmp_path / "lib"
+    (lib / "Someone Elses Empty Folder").mkdir(parents=True)
+    src = lib / "incoming" / "01 - Alright.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    (lib / "incoming" / "keep.txt").write_bytes(b"x")
+    new = lib / "To Pimp a Butterfly" / "01 - Alright.flac"
+    monkeypatch.setattr("core.imports.paths.library_containing", lambda _p: str(lib))
+
+    _run([{
+        "track_id": "t1", "title": "Alright", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": True,
+        "current_path_abs": str(src), "new_path_abs": str(new),
+    }], update=lambda *a, **k: None)
+
+    assert (lib / "Someone Elses Empty Folder").is_dir()

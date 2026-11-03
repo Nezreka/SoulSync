@@ -695,8 +695,70 @@ def _persist_compilation_record_type(db, album_id: str) -> None:
         logger.warning("[Reorganize] Failed to persist compilation record_type for album %s: %s", album_id, e)
 
 
+def _make_dirs(path: str) -> List[str]:
+    """``os.makedirs`` that answers which folders it created, outermost first,
+    so a move that fails or is rolled back can take them away again."""
+    created: List[str] = []
+    d = os.path.normpath(path)
+    while d and not os.path.isdir(d):
+        created.append(d)
+        parent = os.path.dirname(d)
+        if parent == d:
+            break
+        d = parent
+    os.makedirs(path, exist_ok=True)
+    return list(reversed(created))
+
+
+def _remove_created_dirs(created: List[str]) -> None:
+    """Remove folders a move created, innermost first, while they are empty
+    (3.6.1 never left a failed move's "New Album/" behind). Stops at the first
+    one holding anything."""
+    for d in reversed(created or []):
+        if not _rmdir_if_empty(d):
+            break
+
+
+def _prune_empty_album_dirs(artist_dir: str) -> None:
+    """3.6.1's sweep after a run: empty album folders directly under the
+    artist folder a run wrote into (leftovers of earlier failed runs), and
+    their empty Disc-N folders. One level only, never deeper, never a
+    library root."""
+    try:
+        from core.imports.paths import library_containing
+        root = library_containing(artist_dir)
+    except Exception:  # noqa: BLE001
+        root = None
+    artist = os.path.normpath(artist_dir)
+    if not root or os.path.normpath(root) == artist or not os.path.isdir(artist):
+        return
+    try:
+        children = sorted(os.listdir(artist))
+    except OSError:
+        return
+    for entry in children:
+        album_path = os.path.join(artist, entry)
+        if entry.startswith('.') or not os.path.isdir(album_path) or os.path.islink(album_path):
+            continue
+        try:
+            for sub in sorted(os.listdir(album_path)):
+                disc = os.path.join(album_path, sub)
+                if _DISC_DIR_RE.match(sub) and os.path.isdir(disc) and not os.path.islink(disc):
+                    _rmdir_if_empty(disc)
+        except OSError:
+            continue
+        _rmdir_if_empty(album_path)
+
+
+def _album_dir_of(dest_dir: str) -> str:
+    """The album folder of a destination (its parent when it is a Disc-N folder)."""
+    d = os.path.normpath(dest_dir)
+    return os.path.dirname(d) if _DISC_DIR_RE.match(os.path.basename(d)) else d
+
+
 def _rename_track_in_place(
     current_abs: str, new_abs: str, *, sibling_paths=(), moved_paths=None,
+    created_dirs: Optional[List[str]] = None,
 ) -> Tuple[bool, Optional[str]]:
     """Move ONE file from ``current_abs`` to ``new_abs`` in place — no copy, no re-tag,
     no post-processing. Creates the destination folder, carries explicitly supplied
@@ -709,7 +771,10 @@ def _rename_track_in_place(
     Native plans supply proven ``sibling_paths``; the default authorizes only
     the selected audio file. ``moved_paths`` records only moves
     that actually succeeded, for exact catalogue updates and rollback.
+    ``created_dirs`` collects the folders this move created; a move that fails
+    takes its own back out.
     """
+    made: List[str] = []
     try:
         if current_abs and not os.path.exists(current_abs):
             return False, 'source file no longer on disk'
@@ -718,7 +783,9 @@ def _rename_track_in_place(
             return True, None
         if os.path.lexists(new_abs) and not same:
             return False, 'destination already exists'
-        os.makedirs(os.path.dirname(new_abs), exist_ok=True)
+        made = _make_dirs(os.path.dirname(new_abs))
+        if created_dirs is not None:
+            created_dirs.extend(made)
         # Siblings are collected BEFORE the rename (the source stem is gone
         # afterwards) but carried AFTER it succeeds (iss29-E02): moving them
         # first meant a failed canonical rename left the album split across two
@@ -757,6 +824,7 @@ def _rename_track_in_place(
                            os.path.basename(new_abs), sidecar_err)
         return True, None
     except Exception as e:
+        _remove_created_dirs(made)
         return False, str(e)
 
 
@@ -857,9 +925,11 @@ def reorganize_album_rename_only(
         except Exception as guard_err:
             logger.warning("[Reorganize/rename] move-guard check failed: %s", guard_err)
         moved_paths = {}
+        created_dirs: List[str] = []
         sibling_paths = [f['current_path_abs'] for f in t.get('sibling_files', [])]
         ok, err = _rename_track_in_place(
             current_abs, new_abs, sibling_paths=sibling_paths, moved_paths=moved_paths,
+            created_dirs=created_dirs,
         )
         if not ok:
             summary['failed'] += 1
@@ -903,6 +973,8 @@ def reorganize_album_rename_only(
                 undone = not rollback_errors
                 undo_err = '; '.join(rollback_errors)
                 if undone:
+                    # the folders this move made are empty again
+                    _remove_created_dirs(created_dirs)
                     detail = f'{db_err} (move undone)'
                     logger.warning(
                         "[Reorganize/rename] catalogue update failed for %s: %s "
@@ -947,6 +1019,15 @@ def reorganize_album_rename_only(
             _prune_empty_source_dirs(src_dir)   # #985: library-safe prune (transfer-dir-independent)
         except Exception as e:
             logger.debug("[Reorganize/rename] source prune of %s failed: %s", src_dir, e)
+
+    # leftovers of earlier failed runs beside the albums this run wrote into
+    artist_dirs = {os.path.dirname(_album_dir_of(d))
+                   for targets in dest_dirs.values() for d in targets}
+    for artist_dir in sorted(artist_dirs):
+        try:
+            _prune_empty_album_dirs(artist_dir)
+        except Exception as e:  # noqa: BLE001 - cosmetic
+            logger.debug("[Reorganize/rename] album-dir prune of %s failed: %s", artist_dir, e)
 
     if summary.get('moved', 0) > 0 and preview.get('record_type') == 'compilation':
         _persist_compilation_record_type(db, album_id)
