@@ -1494,6 +1494,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 str(value) for value in ((album_context or {}).get("secondary_types") or [])
                 if value
             ],
+            # #1299: the release's disambiguation the folder was built with, so
+            # a reorganize keeps "Album (baby punk version)" apart from "Album"
+            "disambiguation": str((album_context or {}).get("disambiguation") or "").strip(),
         }
 
     # $atypes: every qualifier the release actually carries, bracketed, and

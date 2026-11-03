@@ -64,6 +64,7 @@ def record_filed_release(conn, album_id: Any, context: Any) -> None:
             "total_tracks": int(filed.get("total_tracks") or 0),
             "source": str(filed.get("source") or ""),
             "locked": bool(filed.get("locked")),
+            "disambiguation": str(filed.get("disambiguation") or "").strip(),
         }
         conn.execute("UPDATE lib2_albums SET filed_release=? WHERE id=?",
                      (json.dumps(payload), int(album_id)))
@@ -86,20 +87,41 @@ def _filing(album_row: Any, album: Dict[str, Any]) -> Dict[str, Any]:
     """
     base_type = str(album_row["album_type"] or "album").strip().lower() or "album"
     effective_type = str(album.get("album_type") or base_type).strip().lower() or base_type
-    if effective_type != base_type:
-        return {"type": effective_type, "source": "", "locked": True, "total_tracks": 0}
     try:
         filed = json.loads(album_row["filed_release"] or "{}")
     except (TypeError, ValueError, IndexError, KeyError):
         filed = {}
+    # #1299: None means nothing recorded (a download from before it was kept,
+    # or an upgraded 3.6.1 library): the files' own tag answers then
+    recorded = (str(filed.get("disambiguation") or "").strip()
+                if isinstance(filed, dict) and "disambiguation" in filed else None)
+    if effective_type != base_type:
+        return {"type": effective_type, "source": "", "locked": True, "total_tracks": 0,
+                "disambiguation": recorded}
     if isinstance(filed, dict) and filed.get("type"):
         return {
             "type": str(filed["type"]).strip().lower(),
             "source": str(filed.get("source") or ""),
             "locked": bool(filed.get("locked")),
             "total_tracks": int(filed.get("total_tracks") or 0),
+            "disambiguation": recorded,
         }
-    return {"type": base_type, "source": "tags", "locked": None, "total_tracks": 0}
+    return {"type": base_type, "source": "tags", "locked": None, "total_tracks": 0,
+            "disambiguation": recorded}
+
+
+def _tagged_disambiguation(tracks: List[Dict[str, Any]],
+                           resolve_file_path_fn: Callable[[Optional[str]], Optional[str]]) -> str:
+    """The release disambiguation off the album's own files (MusicBrainz's
+    MUSICBRAINZ_ALBUMCOMMENT), as 3.6.1's reorganize read it. One readable
+    file answers: a release's files carry the same release tags."""
+    from core.library.release_identity import read_release_identity
+
+    for track in tracks:
+        resolved = resolve_file_path_fn(track.get("file_path")) if track.get("file_path") else None
+        if resolved and os.path.isfile(resolved):
+            return (read_release_identity(resolved)[1] or "").strip()
+    return ""
 
 
 def _album_row(conn, album_id: int):
@@ -206,6 +228,9 @@ def _as_provider_album(album: Dict[str, Any], track_count: int,
         "record_type": album_type,
         "secondary_types": [str(value) for value in secondary_types if value],
         "is_compilation": album_type == "compilation",
+        # #1299: the context builder hands this to the path builder, which
+        # suffixes the folder exactly as the download did
+        "disambiguation": str(album.get("disambiguation") or "").strip(),
     }
 
 
@@ -281,6 +306,8 @@ def plan_album_reorganize(
     # landed — the #1080 oscillation from the other direction.
     total_discs = max((int(t.get('total_discs') or t['disc_number'] or 1) for t in all_tracks), default=1)
     filing = _filing(album_row, album)
+    album["disambiguation"] = (filing["disambiguation"] if filing["disambiguation"] is not None
+                               else _tagged_disambiguation(tracks, resolve_file_path_fn))
 
     planned: List[Dict[str, Any]] = []
     for track in tracks:

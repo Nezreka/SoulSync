@@ -463,10 +463,109 @@ def test_recorded_secondary_types_fill_only_an_empty_list(imported_conn):
                        (album_id,)).fetchone()
     assert json.loads(row["secondary_types"]) == ["live"]
     assert json.loads(row["filed_release"]) == {
-        "type": "ep", "total_tracks": 5, "source": "musicbrainz", "locked": False}
+        "type": "ep", "total_tracks": 5, "source": "musicbrainz", "locked": False,
+        "disambiguation": ""}
 
     conn.execute("UPDATE lib2_albums SET secondary_types='[\"soundtrack\"]' WHERE id=?",
                  (album_id,))
     reorganize_plan.record_filed_release(conn, album_id, ctx)
     row = conn.execute("SELECT secondary_types FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
     assert json.loads(row["secondary_types"]) == ["soundtrack"]
+
+
+# ── #1299: a release's disambiguation keeps its own folder through reorganize ──
+
+def _plain_builder(monkeypatch, tmp_path, *, auto=True):
+    from core.imports import paths
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": "$albumartist/$album/$track - $title"},
+        "file_organization.enabled": True,
+        "file_organization.auto_disambiguation": auto,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    return paths.build_final_path_for_track
+
+
+def _album_folder(conn, album_id, build, tmp_path, resolve=lambda p: p):
+    plan = reorganize_plan.plan_album_reorganize(
+        conn, album_id, build_final_path_fn=build, transfer_dir=str(tmp_path),
+        resolve_file_path_fn=resolve)
+    return os.path.basename(os.path.dirname(plan["tracks"][0]["new_path_abs"]))
+
+
+def _downloaded_with(monkeypatch, tmp_path, disambiguation):
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    build = _plain_builder(monkeypatch, tmp_path)
+    ctx = _build_post_process_context(
+        {"id": "MB1", "name": "Views", "release_date": "2016-01-01", "total_tracks": 1,
+         "images": [{"url": ""}], "disambiguation": disambiguation},
+        {"name": "One Dance", "track_number": 1, "disc_number": 1,
+         "artists": [{"name": "Drake"}]},
+        "Drake", "Views", 1, record_type="album")
+    path, _ = build(ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac",
+                    create_dirs=False)
+    return ctx, os.path.basename(os.path.dirname(path))
+
+
+def test_a_disambiguated_release_stays_in_the_folder_its_download_made(
+        imported_conn, monkeypatch, tmp_path):
+    """import, press reorganize, nothing moves: the download filed it under
+    "Views (baby punk version)" and reorganize used to pull it into "Views",
+    on top of the other release of that name"""
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    ctx, download_folder = _downloaded_with(monkeypatch, tmp_path, "baby punk version")
+    assert download_folder == "Views (baby punk version)"
+
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    conn.commit()
+
+    assert _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path), tmp_path) == \
+        "Views (baby punk version)"
+
+
+def test_an_upgraded_album_reads_the_disambiguation_off_its_files(
+        imported_conn, monkeypatch, tmp_path):
+    """3.6.1 libraries have no recorded filing: the file's MusicBrainz album
+    comment answers, the way 3.6.1's reorganize read it"""
+    from tests.test_album_consistency_adopt import _make_flac
+
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    song = tmp_path / "song.flac"
+    _make_flac(song, {"MUSICBRAINZ_ALBUMCOMMENT": "baby punk version"})
+
+    folder = _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path), tmp_path,
+                           resolve=lambda _p: str(song))
+
+    assert folder == "Views (baby punk version)"
+
+
+def test_a_recorded_plain_filing_wins_over_a_tag(imported_conn, monkeypatch, tmp_path):
+    """a download that filed it plain stays plain even if a later tag says otherwise"""
+    from tests.test_album_consistency_adopt import _make_flac
+
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    ctx, download_folder = _downloaded_with(monkeypatch, tmp_path, "")
+    assert download_folder == "Views"
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    conn.commit()
+    song = tmp_path / "song.flac"
+    _make_flac(song, {"MUSICBRAINZ_ALBUMCOMMENT": "baby punk version"})
+
+    assert _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path), tmp_path,
+                         resolve=lambda _p: str(song)) == "Views"
+
+
+def test_the_auto_disambiguation_setting_still_decides(imported_conn, monkeypatch, tmp_path):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    ctx, _ = _downloaded_with(monkeypatch, tmp_path, "baby punk version")
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    conn.commit()
+
+    assert _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path, auto=False),
+                         tmp_path) == "Views"
