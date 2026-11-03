@@ -296,10 +296,25 @@ def _materialize_credits(conn, artist_id) -> None:
     materialize_artist_credits(conn, artist_id)
 
 
+def _row_release_mbid(row) -> str:
+    """The MusicBrainz release id an album row holds (column, else external_ids)."""
+    try:
+        held = row["musicbrainz_id"]
+    except (IndexError, KeyError):
+        held = None
+    return str(held or _row_external_ids(row["external_ids"]).get("musicbrainz") or "").strip()
+
+
 def _find_or_create_album(conn, artist_id: int, title: str, *,
                           album_type: str, spotify_album_id: Optional[str] = None,
                           source: Optional[str] = None,
-                          monitored: Optional[int] = None) -> int:
+                          monitored: Optional[int] = None,
+                          release_mbid: Optional[str] = None) -> int:
+    """``release_mbid``: the MusicBrainz release the file's own tags name
+    (MUSICBRAINZ_ALBUMID). Two releases of one name (a standard and a "baby
+    punk version") stay two albums, as 3.6.1's standalone scan kept them
+    (#1299); a same-titled row with no release id yet takes this one."""
+    release_mbid = str(release_mbid or "").strip() or None
     provider_id = _clean_provider_id(spotify_album_id)
     namespace = _provider_namespace(provider_id, source)
     key = release_title_key(title)
@@ -319,7 +334,8 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
         return merged
     placeholders = ",".join("?" for _ in scope_ids)
     rows = conn.execute(
-        f"""SELECT DISTINCT al.id, al.title, al.spotify_id, al.external_ids
+        f"""SELECT DISTINCT al.id, al.title, al.spotify_id, al.external_ids,
+                   al.musicbrainz_id
             FROM lib2_album_artists aa
             JOIN lib2_albums al ON al.id = aa.album_id
             WHERE aa.artist_id IN ({placeholders})""",
@@ -333,11 +349,19 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
         for row in rows:
             if row["spotify_id"] == provider_id:
                 return row["id"]
+    if release_mbid:
+        for row in rows:
+            if _row_release_mbid(row) == release_mbid:
+                return row["id"]
     for row in rows:
         if release_title_key(row["title"]) == key:
             stored_id = row['spotify_id'] if namespace == 'spotify' else _row_external_ids(row['external_ids']).get(namespace)
             if provider_id and stored_id and str(stored_id) != provider_id:
                 continue  # Same title does not make two provider editions identical.
+            if release_mbid and _row_release_mbid(row) not in ("", release_mbid):
+                continue  # another MusicBrainz release of the same name (#1299)
+            if release_mbid:
+                _adopt_release_mbid(conn, row["id"], release_mbid)
             if namespace is not None and namespace != "spotify" and provider_id:
                 _adopt_external_id(conn, "lib2_albums", row["id"], namespace,
                                    provider_id)
@@ -361,10 +385,22 @@ def _find_or_create_album(conn, artist_id: int, title: str, *,
          external_json, profile_id, monitored),
     )
     album_id = cur.lastrowid
+    if release_mbid:
+        _adopt_release_mbid(conn, album_id, release_mbid)
     conn.execute(
         "INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role) "
         "VALUES(?,?, 'primary')", (album_id, artist_id))
     return album_id
+
+
+def _adopt_release_mbid(conn, album_id: int, release_mbid: str) -> None:
+    """Record the file's release id on an album that has none, never
+    overwriting one (the same column the embedded-tag reconcile fills)."""
+    conn.execute(
+        "UPDATE lib2_albums SET musicbrainz_id=? WHERE id=?"
+        " AND (musicbrainz_id IS NULL OR musicbrainz_id='')",
+        (release_mbid, int(album_id)))
+    _adopt_external_id(conn, "lib2_albums", int(album_id), "musicbrainz", release_mbid)
 
 
 def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
@@ -577,10 +613,16 @@ def _fallback_identity(context: Dict[str, Any],
 
     if not title:
         return None
+    release_mbid = ""
+    if album:
+        # the release the tags name keeps same-named releases apart (#1299)
+        from core.library.release_identity import read_release_identity
+        release_mbid = read_release_identity(file_path)[0]
     return {
         "title": title,
         "artist": artist,
         "album": album or None,
+        "release_mbid": release_mbid or None,
         "track_number": tags.get("track_number"),
         "disc_number": tags.get("disc_number"),
         "isrc": tags.get("isrc"),
@@ -861,7 +903,8 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                 album_id = _find_or_create_album(
                     conn, artist_id, album_name,
                     album_type=album_type, spotify_album_id=spotify_album_id,
-                    source=identity_source, monitored=derived_monitored)
+                    source=identity_source, monitored=derived_monitored,
+                    release_mbid=fallback.get("release_mbid"))
                 track_id = _find_or_create_track(
                     conn, album_id, artist_id, title,
                     track_number=track_number, spotify_track_id=spotify_track_id,

@@ -1395,3 +1395,61 @@ def test_same_named_artist_with_another_provider_id_is_not_yours(
     assert A._find_or_create_artist(
         imported_conn, "Drake", spotify_id="sp1", source="spotify",
         create=False) == drake_id
+
+
+# --- #1299 on the standalone full refresh: same-named releases stay apart ------
+
+
+def _tagged_flac(path, **tags):
+    from pathlib import Path
+    from tests.test_album_consistency_adopt import _make_flac
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    _make_flac(Path(path), tags)
+    return str(path)
+
+
+def _refresh_link(path):
+    """what the standalone full refresh hands the import writer: a path only"""
+    return A.link_download_into_library_v2({
+        "_final_processed_path": path,
+        "_download_username": "standalone_refresh",
+        "username": "standalone_refresh",
+    })
+
+
+def _albums_named(conn, title):
+    return {row["musicbrainz_id"]: sorted(t["title"] for t in conn.execute(
+                "SELECT title FROM lib2_tracks WHERE album_id=?", (row["id"],)))
+            for row in conn.execute(
+                "SELECT id, musicbrainz_id FROM lib2_albums WHERE title=? ORDER BY id", (title,))}
+
+
+def test_full_refresh_keeps_two_releases_of_one_name_apart(lib2_enabled, imported_conn, tmp_path):
+    """3.6.1's standalone scan grouped by musicbrainz release id (#1299): the
+    baby punk version and the plain release are two albums, not one album
+    with every shared song twice."""
+    common = {"artist": "Melanie Martinez", "albumartist": "Melanie Martinez", "album": "K-12"}
+    punk = dict(common, musicbrainz_albumid="mb-punk", musicbrainz_albumcomment="baby punk version")
+    plain = dict(common, musicbrainz_albumid="mb-plain")
+    for path, tags in [
+            (tmp_path / "K-12 (baby punk version)" / "01.flac", dict(punk, title="Wheels on the Bus")),
+            (tmp_path / "K-12" / "01.flac", dict(plain, title="Wheels on the Bus")),
+            (tmp_path / "K-12 (baby punk version)" / "02.flac", dict(punk, title="Class Fight"))]:
+        assert _refresh_link(_tagged_flac(path, **tags)) is not None
+
+    assert _albums_named(imported_conn, "K-12") == {
+        "mb-punk": ["Class Fight", "Wheels on the Bus"],
+        "mb-plain": ["Wheels on the Bus"],
+    }
+
+
+def test_full_refresh_still_groups_files_without_a_release_id_by_title(
+        lib2_enabled, imported_conn, tmp_path):
+    common = {"artist": "Melanie Martinez", "albumartist": "Melanie Martinez", "album": "Portals"}
+    for name, title in [("01.flac", "Death"), ("02.flac", "Void")]:
+        _refresh_link(_tagged_flac(tmp_path / "Portals" / name, title=title, **common))
+    # a release-tagged file of the same name joins the row that has no id yet
+    _refresh_link(_tagged_flac(tmp_path / "Portals" / "03.flac", title="Tunnel Vision",
+                               musicbrainz_albumid="mb-portals", **common))
+    assert _albums_named(imported_conn, "Portals") == {
+        "mb-portals": ["Death", "Tunnel Vision", "Void"]}
