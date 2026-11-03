@@ -22,6 +22,7 @@ import pytest
 from core.repair_jobs import acoustid_scanner, library_retag, live_commentary_cleaner
 from core.repair_jobs import metadata_gap_filler, missing_cover_art, track_number_repair
 from core.repair_jobs.base import drop_hand_tagged
+from core.library2 import duplicate_review
 from database.music_database import MusicDatabase
 from tests.support.catalogue_seed import seed_library_track
 
@@ -73,6 +74,7 @@ def test_library_retag_never_offers_a_hand_tagged_file(tmp_path):
 @pytest.mark.parametrize("module", [
     acoustid_scanner, library_retag, live_commentary_cleaner,
     metadata_gap_filler, missing_cover_art, track_number_repair,
+    duplicate_review,  # the native duplicate detector's grouping
 ])
 def test_every_guarded_job_is_wired(module):
     """Pins the wiring: each of these jobs reads the remembered files. A job that

@@ -386,3 +386,33 @@ def test_a_better_single_is_never_given_up_for_the_album(library):
     candidates = review(library)
     assert candidates[0]["recommended_file_id"] == single_fid
 
+
+
+def test_a_hand_tagged_file_is_never_one_of_a_pair(library):
+    """3.6.1 left hand-tagged files out before grouping: the live take or the
+    bootleg someone tagged by hand next to the studio copy is not a
+    duplicate, and Keep Best keeping it would quarantine the studio copy."""
+    from database.music_database import MusicDatabase
+    _a, _af, studio = copy(library)
+    _b, _bf, bootleg = copy(library, album="Live Bootleg", bit_depth=24)
+    _c, _cf, _third = copy(library, album="Other")
+    library[0].manual_path_keys = lambda: {MusicDatabase.manual_path_key(str(bootleg))}
+
+    groups = review(library)
+
+    assert len(groups) == 1
+    paths = {t["file_path"] for t in groups[0]["tracks"]}
+    assert str(bootleg) not in paths and str(studio) in paths
+
+
+def test_keep_best_refuses_a_keeper_tagged_by_hand_after_the_review(library):
+    from database.music_database import MusicDatabase
+    _a, _af, studio = copy(library)
+    _b, bf, bootleg = copy(library, album="Live Bootleg", bit_depth=24)
+    candidate = review(library)[0]
+    library[0].manual_path_keys = lambda: {MusicDatabase.manual_path_key(str(bootleg))}
+
+    result = apply(library, candidate, approved=True, keep_file_id=bf)
+
+    assert result["success"] is False and "tagged by hand" in result["error"]
+    assert studio.exists() and bootleg.exists()

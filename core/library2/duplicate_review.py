@@ -302,6 +302,11 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
         if not 0 <= options[name] <= 1:
             raise ValueError(f"{name} must be between 0 and 1")
     files = _load_files(database, config_manager, scope=scope, playlist_membership=playlist_membership, server_source=server_source)
+    # a file the user tagged by hand is what they say it is (often the live
+    # take or the bootleg next to the studio copy): never one of a pair, or
+    # Keep Best could keep it and quarantine the studio copy (3.6.1 left
+    # these out before grouping too)
+    files = [f for f in files if "hand_tagged" not in f["protected_reasons"]]
     companion_exts = lossy_companion_exts(config_manager, database)
     buckets = defaultdict(list)
     artists = defaultdict(list)
@@ -436,6 +441,11 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         keeper = by_id[int(keep_file_id)] if keep_file_id is not None else _recommended(files)
         if keeper["file_id"] not in ids or "file_unavailable" in keeper["protected_reasons"]:
             raise ValueError("The selected keeper is not an available copy on this review")
+        if "hand_tagged" in keeper["protected_reasons"]:
+            # tagged by hand since the review: it is its own recording now, and
+            # keeping it would quarantine the copy it was paired with
+            raise ValueError("The selected keeper was tagged by hand since the review, "
+                             "so it is no longer a duplicate; refresh this review")
         options = {**DEFAULT_SETTINGS, **(review.get("settings") or {})}
         companions = lossy_companion_exts(config_manager, database)
         for i, a in enumerate(files):
