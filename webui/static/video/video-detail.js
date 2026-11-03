@@ -2392,7 +2392,9 @@
             var img = art ? '<img class="vd-rcard-img" src="' + sizedArt(art, 342) + '" alt="" loading="lazy"' +
                 (fb ? ' data-fb="' + esc(fb) + '"' : '') + ' onerror="' + oe + '">' : '';
             return '<button class="vd-rcard' + on + '" type="button" data-vd-season="' + s.season_number + '">' +
-                '<div class="vd-rcard-art">' + img + '<div class="vd-rcard-fb">📺</div>' +
+                // the fallback goes UNDER the poster: after it, it painted on top
+                // of every loaded poster (a faint 📺 in the middle)
+                '<div class="vd-rcard-art"><div class="vd-rcard-fb">📺</div>' + img +
                 '<div class="vd-rcard-grad"></div><div class="vd-rcard-pct">' + p + '%</div></div>' +
                 '<div class="vd-rcard-info"><span class="vd-rcard-name">' + esc(s.title) + '</span>' +
                 '<span class="vd-rcard-sub">' + s.episode_owned + ' / ' + s.episode_total + ' eps</span>' +

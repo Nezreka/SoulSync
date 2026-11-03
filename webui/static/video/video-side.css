@@ -4182,7 +4182,11 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     border-radius: 2px; background: linear-gradient(90deg, transparent, hsl(var(--vgm-h, 220), 85%, 62%), transparent);
     box-shadow: 0 0 9px 1px hsla(var(--vgm-h, 220), 85%, 62%, 0.7); animation: vdlScan 0.9s ease-in-out infinite; }
 /* inline per-episode source search */
-.vdl-ep-search { max-height: 0; overflow: hidden; transition: max-height var(--dur-slow) var(--ease-out); }
+/* opens to the results' real height: a max-height cap (2400px) cut a long
+   result list off mid-card with the next episode right under it */
+.vdl-ep-search { display: grid; grid-template-rows: 0fr; overflow: hidden;
+    transition: grid-template-rows var(--dur-slow) var(--ease-out); }
+.vdl-ep-search > * { min-height: 0; }
 .vdl-ep-srcs { display: flex; flex-direction: column; gap: 7px; padding: 3px 14px 12px 42px; }
 .vdl-src--mini { padding: 8px 11px; border-radius: 0; animation: none; }
 .vdl-src--mini .vdl-src-icon { width: 30px; height: 30px; border-radius: 0; }
@@ -4197,7 +4201,7 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdl-results { margin-top: 12px; }
 .vdl-results[hidden] { display: none; }
 .vdl-results--season { margin: 2px 14px 12px 14px; }
-.vdl-ep--open .vdl-ep-search { max-height: 2400px; }   /* room for result cards */
+.vdl-ep--open .vdl-ep-search { grid-template-rows: 1fr; }
 .vdl-res-loading { display: flex; align-items: center; gap: 9px; font-size: 12.5px; font-weight: 600;
     color: var(--white-a60); padding: 9px 2px; }
 .vdl-res-spin { width: 14px; height: 14px; border-radius: var(--radius-circle); flex-shrink: 0;
