@@ -459,7 +459,7 @@ def test_reexpansion_skips_a_new_single_when_singles_are_off(legacy_db, imported
     D.expand_artist_discography(legacy_db, aid)
 
     monkeypatch.setattr(D, "_artist_content_filters",
-                        lambda _conn, _aid: {**D._CONTENT_FILTER_DEFAULTS, "include_singles": False})
+                        lambda _conn, _aid, *_args: {**D._CONTENT_FILTER_DEFAULTS, "include_singles": False})
     grown = _cards(
         ("albums", {"id": "sp-views", "title": "Views", "album_type": "album", "track_count": 20}),
         ("albums", {"id": "sp-scorpion", "title": "Scorpion", "album_type": "album", "track_count": 25}),
@@ -884,7 +884,7 @@ def test_refresh_holds_artist_lock_through_auto_monitor(
     release_auto_monitor = threading.Event()
     expand_calls = []
 
-    def fake_expand(_database, target_artist_id):
+    def fake_expand(_database, target_artist_id, **_kwargs):
         expand_calls.append(target_artist_id)
         return {"auto_monitor_album_ids": [91]}
 
