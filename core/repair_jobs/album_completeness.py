@@ -13,6 +13,35 @@ from utils.logging_config import get_logger
 logger = get_logger('repair.album_completeness')
 
 
+def _own_artist_ids(conn, album_id: int, primary) -> list:
+    """The artists an album's own songs may be credited to: its primary
+    artist, its other primary album artists, and each member named in a
+    combined credit ("John Lennon & Yoko Ono" -> John Lennon, Yoko Ono),
+    every one with its aliases. A duo's album has songs credited to one
+    member alone; those are the album's own, not another artist's (3.6.1
+    counted the credit's members). Never a guest: a featured credit is not
+    the album's artist."""
+    from core.library2.artist_aliases import resolve_alias_group
+    from core.library2.importer import normalize_name, split_artist_credits
+
+    if primary is None:
+        return []
+    ids = {int(primary)}
+    ids.update(int(r[0]) for r in conn.execute(
+        "SELECT artist_id FROM lib2_album_artists WHERE album_id=? AND role='primary'",
+        (int(album_id),)))
+    name = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (int(primary),)).fetchone()
+    members = split_artist_credits(name[0] or "") if name else []
+    if len(members) > 1:
+        for member in members:
+            ids.update(int(r[0]) for r in conn.execute(
+                "SELECT id FROM lib2_artists WHERE name_key=?", (normalize_name(member),)))
+    own: set = set()
+    for artist_id in ids:
+        own.update(int(a) for a in (resolve_alias_group(conn, artist_id) or [artist_id]))
+    return sorted(own)
+
+
 @register_job
 class AlbumCompletenessJob(RepairJob):
     job_id = 'album_completeness'
@@ -51,7 +80,6 @@ class AlbumCompletenessJob(RepairJob):
     supports_file_scope = True
 
     def scan(self, context):
-        from core.library2.artist_aliases import resolve_alias_group
         from core.library2.completeness import load_album_catalogue
         from core.library2.editions import default_edition_id
         from core.library2.maintenance_subjects import active_file_subjects
@@ -107,7 +135,7 @@ class AlbumCompletenessJob(RepairJob):
                     # and so is a credit to one of the album artist's aliases
                     primary = conn.execute('SELECT primary_artist_id FROM lib2_albums WHERE id=?',
                                            (album_id,)).fetchone()[0]
-                    own = resolve_alias_group(conn, primary) if primary is not None else []
+                    own = _own_artist_ids(conn, album_id, primary)
                     with library_scope('shared' if owner is None else int(owner)):
                         owned_elsewhere_sql = owned_by_recording_sql(conn, 't')
                     tracks = conn.execute(

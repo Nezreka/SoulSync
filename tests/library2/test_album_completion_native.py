@@ -285,3 +285,50 @@ def test_a_single_does_not_count_toward_the_owned_floor(catalogue):
     run(db, settings={'min_owned_tracks': 1})
     assert rules(db) == [(third, 1, 1)]
 
+
+
+def _only_credit(conn, track_id, name):
+    """the song credited to ``name`` alone (no album-artist credit)"""
+    conn.execute('DELETE FROM lib2_track_artists WHERE track_id=?', (track_id,))
+    conn.execute('INSERT INTO lib2_track_artists(track_id,artist_id) VALUES(?,?)',
+                 (track_id, lib2_seed.artist(conn, name)))
+
+
+def test_a_duo_members_solo_song_is_the_duos_own(tmp_path, monkeypatch):
+    """3.6.1: Double Fantasy is "John Lennon & Yoko Ono", and Yoko's songs on
+    it are credited to her alone. they are the album's own songs, not another
+    artist's, so a bulk run fills them; a real stranger's song still waits."""
+    db = MusicDatabase(str(tmp_path / 'duo.db'))
+    duo = 'John Lennon & Yoko Ono'
+    with db._get_connection() as conn:
+        lib2_seed.artist(conn, 'John Lennon')
+        lib2_seed.artist(conn, 'Yoko Ono')
+        lib2_seed.track(conn, duo, 'Double Fantasy', 'Starting Over', track_number=1)
+        kiss = lib2_seed.track(conn, duo, 'Double Fantasy', 'Kiss Kiss Kiss', owned=False, track_number=2)
+        clean = lib2_seed.track(conn, duo, 'Double Fantasy', 'Cleanup Time', owned=False, track_number=3)
+        other = lib2_seed.track(conn, duo, 'Double Fantasy', 'Not Theirs', owned=False, track_number=4)
+        _only_credit(conn, kiss, 'Yoko Ono')
+        _only_credit(conn, clean, 'John Lennon')
+        _only_credit(conn, other, 'Someone Else')
+        conn.commit()
+    monkeypatch.setattr('core.library2.completeness.load_album_catalogue', lambda *a, **kw: [])
+
+    run(db)
+
+    assert [r[0] for r in rules(db)] == sorted([kiss, clean])
+
+
+def test_a_second_primary_album_artist_is_the_albums_own(catalogue):
+    """a collaboration album with two primary album artists"""
+    db, aid, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        partner = lib2_seed.artist(conn, 'Partner')
+        conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,'primary')",
+                     (aid, partner))
+        theirs = lib2_seed.track(conn, 'Artist', 'Album', 'Partner Song', owned=False,
+                                 track_number=6, disc_number=1, monitored=0)
+        _only_credit(conn, theirs, 'Partner')
+        conn.commit()
+
+    run(db)
+    assert [r[0] for r in rules(db)] == sorted([missing, theirs])
