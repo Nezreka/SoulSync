@@ -22065,13 +22065,10 @@ def _start_discover_warmer():
     threading.Thread(target=loop, name='discover-warmer', daemon=True).start()
 
 
-# NEVER under pytest: dozens of tests import web_server, and a leaked
-# background thread touching databases mid-suite is exactly the bug class
-# behind the video-db split-brain incident (conftest locks video installs
-# for the same reason). Opt-out env for anyone who wants it off in prod.
+# the warmer is started from start_runtime_services(), not here: it sends
+# requests through app.test_client(), and a request made while this module is
+# still importing makes Flask refuse every register_blueprint() below it.
 import sys as _sys
-if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
-    _start_discover_warmer()
 
 
 def _start_library_background():
@@ -25395,6 +25392,15 @@ def start_runtime_services():
         # Live log tail — streams new log lines to the log viewer
         socketio.start_background_task(_emit_live_log_loop)
         logger.info("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor + live logs)")
+
+        # Discover warmer. Started here, after the import has registered every
+        # blueprint: it sends real requests through app.test_client() 15 s
+        # after it starts, and a request served while web_server is still
+        # importing makes Flask refuse every later register_blueprint() --
+        # a slow boot (a big library upgrade) then fails to start at all.
+        # Opt-out env for anyone who wants it off.
+        if os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
+            _start_discover_warmer()
 
         _runtime_started = True
 
