@@ -4843,35 +4843,6 @@ function updateModalSyncProgress(playlistId, progress) {
 // declared again in wishlist-tools.js, which loads after this file, so those
 // copies won. The live ones are what was ported.
 
-async function loadArtistsData() {
-    try {
-        const response = await fetch(API.artists);
-        const data = await response.json();
-
-        const artistsGrid = document.getElementById('artists-grid');
-        if (data.artists && data.artists.length) {
-            artistsGrid.innerHTML = data.artists.map(artist => `
-                <div class="artist-card">
-                    <div class="artist-image">
-                        ${artist.image ?
-                    `<img src="${artist.image}" alt="${escapeHtml(artist.name)}" />` :
-                    '<div class="artist-placeholder">🎵</div>'
-                }
-                    </div>
-                    <div class="artist-info">
-                        <div class="artist-name">${escapeHtml(artist.name)}</div>
-                        <div class="artist-albums">${artist.album_count || 0} albums</div>
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            artistsGrid.innerHTML = '<div class="no-artists">No artists found</div>';
-        }
-    } catch (error) {
-        console.error('Error loading artists data:', error);
-        document.getElementById('artists-grid').innerHTML = '<div class="error">Error loading artists</div>';
-    }
-}
 
 // ===============================
 // UTILITY FUNCTIONS

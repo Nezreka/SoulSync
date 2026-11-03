@@ -1495,12 +1495,10 @@ const API = {
     playlists: '/api/playlists',
     sync: '/api/sync',
     search: '/api/search',
-    artists: '/api/artists',
     activity: '/api/activity',
     stream: {
         start: '/api/stream/start',
         status: '/api/stream/status',
-        toggle: '/api/stream/toggle',
         stop: '/api/stream/stop'
     }
 };
