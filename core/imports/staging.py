@@ -114,8 +114,12 @@ def available_import_sources() -> List[Dict[str, Any]]:
     return out
 
 
-def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -> Dict[str, Any]:
-    """Read common audio tag metadata from a staging file."""
+def read_staging_file_metadata(file_path: str, filename: Optional[str] = None, *, filename_fallback: bool = True) -> Dict[str, Any]:
+    """Read common audio tag metadata from a staging file.
+
+    Disable filename_fallback when the caller must distinguish embedded values
+    from guesses before merging them with request/filename metadata.
+    """
     try:
         # AIFF/WAV carry raw ID3 the easy view can't map (#1919)
         from core.metadata.easy_tags import open_easy
@@ -148,7 +152,7 @@ def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -
     albumartist = _first_tag("albumartist")
     album = _first_tag("album")
 
-    if not title:
+    if not title and filename_fallback:
         title = stem
     if not albumartist:
         albumartist = artist
@@ -159,7 +163,7 @@ def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -
     # will then fall through to authoritative metadata (track_info from
     # the original Spotify / API source) rather than locking the import
     # to track_number=1 for every file in the bundle.
-    track_number = extract_explicit_track_number(filename or file_path)
+    track_number = extract_explicit_track_number(filename or file_path) if filename_fallback else 0
     try:
         tag_track_number = _first_tag("tracknumber", "track_number")
         if tag_track_number:
@@ -169,7 +173,7 @@ def read_staging_file_metadata(file_path: str, filename: Optional[str] = None) -
     except (TypeError, ValueError):
         pass
 
-    disc_number = 1
+    disc_number = 1 if filename_fallback else 0
     try:
         tag_disc_number = _first_tag("discnumber", "disc_number")
         if tag_disc_number:
