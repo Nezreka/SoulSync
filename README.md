@@ -551,7 +551,7 @@ Open `http://localhost:8008`. Setup finds your media server, slskd, Prowlarr and
 | Video | `/media/movies`, `/media/tv`, `/media/youtube` | Optional, for the video side |
 | Video extras | `/media/anime`, `/media/movies-4k`, `/media/tv-4k` | Optional: the anime and 4K libraries, commented out in the compose file |
 
-Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE` (serve under a sub-path, see [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md)), and `SOULSYNC_LOG_LEVEL`.
+Useful environment variables: `PUID`, `PGID`, `UMASK`, `TZ`, `SOULSYNC_URL_BASE` (serve under a sub-path, see [docs/REVERSE_PROXY_SUBPATH.md](docs/REVERSE_PROXY_SUBPATH.md)), `SOULSYNC_LOG_LEVEL`, and `SOULSYNC_GUNICORN_THREADS` (request threads, default 32; every open browser tab holds one for its websocket).
 
 ### 5. Sign in with OIDC (optional)
 

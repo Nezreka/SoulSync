@@ -1,4 +1,5 @@
 """WSGI entrypoint: HTTP is available while protected database boot runs."""
+from core.request_watchdog import track_requests
 from core.startup_application import StartupApplication
 
 
@@ -9,4 +10,5 @@ def _load_application():
     return app
 
 
-application = StartupApplication(_load_application)
+# outermost: a request counts from the moment it holds a gunicorn thread
+application = track_requests(StartupApplication(_load_application))
