@@ -415,9 +415,18 @@ class AudioCorruptionDetectorJob(RepairJob):
                 if context.check_stop() or context.wait_if_paused():
                     stopped = True
                     for future in pending:
-                        future.cancel()
+                        future.cancel()  # the ones not started yet
                     break
                 top_up()
+        # a stop: the pool waited for the decodes already running, and any that
+        # finished before the stop was seen; keep those so the next run does
+        # not decode the same files again
+        for future, (row, resolved, identity_before) in pending.items():
+            if future.done() and not future.cancelled():
+                done += 1
+                tested += 1
+                corrupt += self._handle_verdict(context, result, memory, row, resolved,
+                                                identity_before, future, done, total)
 
         # A full pass saw every library FLAC, so remembered files it did not see
         # have left the library. Not when paths failed to resolve: an unmounted
