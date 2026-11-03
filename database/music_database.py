@@ -10818,6 +10818,12 @@ class MusicDatabase:
         SoulSync and the scan just took into the library, as 3.6.1 logged for
         every new track a scan found. SoulSync's own downloads log their own."""
         try:
+            # once per file: a file's own import row says when it arrived
+            if file_path:
+                with self._get_connection() as conn:
+                    if conn.execute("SELECT 1 FROM library_history WHERE file_path=? "
+                                    "AND event_type='import' LIMIT 1", (file_path,)).fetchone():
+                        return
             from core.library2.media_server_sync import server_track_names
             names = server_track_names(track_obj)
             self.add_library_history_entry(

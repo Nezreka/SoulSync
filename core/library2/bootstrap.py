@@ -717,6 +717,10 @@ def run_deferred_backfills(database: Any, *,
             from core.library2.dedup_repair import fold_shared_file_tracks
             stats["shared_files"] = fold_shared_file_tracks(conn)
             conn.commit()
+            # 3.6.1 logged a scan import on every refresh; once, in batches
+            from core.maintenance.library_history_dedupe import dedupe_scan_import_history
+            stats["history_repeats_removed"] = dedupe_scan_import_history(
+                database, should_stop=should_stop)["removed"]
     finally:
         ticker.stop()
         conn.close()
