@@ -162,6 +162,42 @@ def _reclaim_source(path) -> None:
                     os.path.basename(str(path)), e)
 
 
+def _remove_completed_usenet(db, dl, upd) -> bool:
+    """Remove Completed: take a usenet job out of the client once its import is
+    persisted, per the ``usenet_remove_completed`` setting (off / history /
+    files; default off -- see core.downloads.remove_completed).
+
+    Only a ``completed`` row reaches here; failed and ``import_failed`` rows keep
+    their job, because Manual import needs the files. A season pack qualifies
+    only when every episode it mapped imported and it held no video it could not
+    place. Best-effort: never raises, and a job left behind is the old
+    behavior."""
+    try:
+        if str(dl.get("source") or "").lower() != "usenet" or upd.get("status") != "completed":
+            return False
+        from core.downloads import remove_completed
+        mode = remove_completed.normalize(db.get_setting("usenet_remove_completed"))
+        if mode == remove_completed.OFF:
+            return False
+        ref = str(dl.get("client_ref") or "")
+        if not ref:
+            return False
+        if upd.get("_pack_failed") or upd.get("_pack_unplaced"):
+            logger.info("video import: kept usenet job %s in the client -- the pack left "
+                        "%d episode(s) not imported and %d file(s) unplaced", ref,
+                        int(upd.get("_pack_failed") or 0), int(upd.get("_pack_unplaced") or 0))
+            return False
+        from core.video.client_download import _resolve_path, _run
+        return remove_completed.remove_imported_job(ref, mode, run=_run,
+                                                    label=str(dl.get("title") or ""),
+                                                    resolve=_resolve_path,
+                                                    protected=_protected_roots())
+    except Exception:  # noqa: BLE001 - never let client cleanup break the monitor tick
+        logger.warning("video import: remove-completed failed for download %s",
+                       dl.get("id"), exc_info=True)
+        return False
+
+
 def _reclaim_job_dir(path) -> str:
     """Remove a usenet job's own download folder once its import is persisted
     and nothing is left in it (best-effort, never raises). Returns what
@@ -538,7 +574,10 @@ def _make_pack_importer(db, organize):
         # immediate searches.
         return {"status": "completed", "progress": 100.0,
                 "dest_path": imported[0][2].get("dest_path"),
-                "_pack_imported": len(imported), "_pack_failed": len(failed)}
+                "_pack_imported": len(imported), "_pack_failed": len(failed),
+                # video files the pack held but placed nowhere (no episode number,
+                # another season): Remove Completed must not delete those
+                "_pack_unplaced": sum(1 for s in skipped if s.get("unplaced"))}
 
     return import_pack
 
@@ -1787,6 +1826,7 @@ def _tick(db) -> bool:
             if upd.get("status") == "completed":
                 _reclaim_source(upd.get("_cleanup_source"))
                 _reclaim_job_dir(upd.get("_cleanup_dir"))
+                _remove_completed_usenet(db, dl, upd)
         except Exception:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:

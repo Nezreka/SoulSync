@@ -3489,6 +3489,8 @@ async function loadSettingsData() {
         if (_ucUser) _ucUser.value = settings.usenet_client?.username || '';
         if (_ucPass) _ucPass.value = settings.usenet_client?.password || '';
         if (_ucCat) _ucCat.value = settings.usenet_client?.category || 'soulsync';
+        const _ucRemove = document.getElementById('music-usenet-remove-completed');
+        if (_ucRemove) _ucRemove.value = settings.usenet_client?.remove_completed || 'off';
         const _ucDlPath = document.getElementById('usenet-download-path');
         if (_ucDlPath) _ucDlPath.value = settings.download_source?.usenet_download_path || '';
         if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
@@ -6995,6 +6997,7 @@ async function saveSettings(quiet = false) {
             username: _cfgStr('usenet-client-username'),
             password: _cfgStr('usenet-client-password'),
             category: _cfgStr('usenet-client-category', { fallback: 'soulsync' }),
+            remove_completed: _cfgStr('music-usenet-remove-completed', { fallback: 'off' }),
         },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so

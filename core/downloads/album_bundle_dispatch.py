@@ -178,6 +178,8 @@ def try_dispatch(
         # a fallback-eligible miss. Do not leave its error/progress attached to
         # the next source's live attempt.
         'album_bundle_error': None,
+        'album_bundle_client_job': None,
+        'album_bundle_client_job_label': None,
         **{f'album_bundle_{key}': None for key in _MIRRORED_KEYS},
     })
 
@@ -262,6 +264,10 @@ def try_dispatch(
         'album_bundle_partial': bool(outcome.get('partial')),
         'album_bundle_expected_count': outcome.get('expected_count'),
         'album_bundle_completed_count': outcome.get('completed_count', len(outcome.get('files', []))),
+        # the client job the files were staged from, for Remove Completed once
+        # the batch has imported every track (core.downloads.lifecycle)
+        'album_bundle_client_job': outcome.get('client_job_id'),
+        'album_bundle_client_job_label': outcome.get('client_job_label'),
     }
     try:
         staged_fields['max_concurrent'] = max(

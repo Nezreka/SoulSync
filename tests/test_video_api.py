@@ -711,6 +711,8 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             # seeding lifecycle (arr-parity P5) rides the same config payload
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},
+            # Remove Completed (usenet) is opt-in: off until someone picks it
+            "usenet_remove_completed": "off",
             "movies_additional_paths": [], "tv_additional_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",
@@ -719,13 +721,15 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
         client.post("/api/video/downloads/config",
                     json={"download_path": " /mnt/v/dl ", "movies_path": "/media/movies",
                           "tv_path": "/media/tv", "youtube_path": "/media/yt",
-                          "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]})
+                          "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
+                          "usenet_remove_completed": "files"})
         assert client.get("/api/video/downloads/config").get_json() == {
             "download_path": "/mnt/v/dl", "movies_path": "/media/movies",   # trimmed
             "tv_path": "/media/tv", "anime_path": "", "youtube_path": "/media/yt",
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},
+            "usenet_remove_completed": "files",
             "movies_additional_paths": [], "tv_additional_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",

@@ -709,6 +709,8 @@
                 if (srd) srd.checked = d.seed_remove_data !== false;
                 var smd = document.getElementById('video-seed-mode');
                 if (smd) smd.value = d.seed_mode || 'soulsync';
+                var urc = document.getElementById('video-usenet-remove-completed');
+                if (urc) urc.value = d.usenet_remove_completed || 'off';
                 _videoSeedRules = d.seed_overrides || {};
                 renderSeedIndexers();
                 wireSeedIndexers();
@@ -748,6 +750,7 @@
                 seed_remove_data: !!(document.getElementById('video-seed-remove-data') || {}).checked,
                 seed_mode: val('video-seed-mode') || 'soulsync',
                 seed_overrides: _videoSeedRules,
+                usenet_remove_completed: val('video-usenet-remove-completed') || 'off',
             })
         }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
           .catch(function () { /* ignore */ });
@@ -1132,6 +1135,9 @@
             var el = document.getElementById(id);
             if (el && !el._vdWired) { el._vdWired = true; el.addEventListener('change', function () { saveDownloads(true); }); }
         });
+        // Remove Completed (usenet) saves when it changes, like the folders above.
+        var urcSel = document.getElementById('video-usenet-remove-completed');
+        if (urcSel && !urcSel._vdWired) { urcSel._vdWired = true; urcSel.addEventListener('change', function () { saveDownloads(true); }); }
         // a 4K switch shows its folder; switching one off keeps the path for next time
         document.querySelectorAll('[data-video-4k-toggle]').forEach(function (box) {
             if (box._vdWired) return;

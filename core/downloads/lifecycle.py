@@ -265,6 +265,38 @@ def _cleanup_private_album_bundle_staging(batch_id: str, batch: dict) -> None:
         logger.warning("[Album Bundle] Could not clean private staging folder %s: %s", staging_path, exc)
 
 
+# A task in one of these left nothing in the release it still needs.
+_REMOVE_COMPLETED_TASK_STATUSES = ('completed', 'already_owned')
+
+
+def _remove_completed_album_bundle(batch_id: str, batch: dict, tasks_snapshot: dict) -> bool:
+    """Remove Completed for a usenet album grab, at the end of its batch.
+
+    Only when EVERY task of the batch finished completed (or already owned):
+    one failed, not-found or cancelled track keeps the job and its files in
+    the client, so the release is still there for a retry or a manual import.
+    The staged copies are deleted with the batch, so the client's folder is
+    the only copy left. Best-effort; the setting itself is read by the usenet
+    plugin (off means nothing happens)."""
+    if (batch.get('album_bundle_source') or '').lower() != 'usenet':
+        return False
+    job_id = batch.get('album_bundle_client_job')
+    if not job_id:
+        return False
+    statuses = [str((task or {}).get('status') or '') for task in (tasks_snapshot or {}).values()]
+    queue = batch.get('queue') or []
+    if not statuses or len(statuses) < len(queue):
+        return False
+    left = [s for s in statuses if s not in _REMOVE_COMPLETED_TASK_STATUSES]
+    label = batch.get('album_bundle_client_job_label') or ''
+    if left:
+        logger.info("[Album Bundle] Kept usenet job %s for batch %s: %d of %d track(s) "
+                    "did not import", label or job_id, batch_id, len(left), len(statuses))
+        return False
+    from core.download_plugins.usenet import remove_imported_album_job
+    return remove_imported_album_job(str(job_id), label=label)
+
+
 # Audio a stranded bundle might still be holding. Same list the auto-import
 # worker uses; kept local so this module doesn't import the import pipeline.
 _ORPHAN_RESCUE_AUDIO_EXTS = {
@@ -943,6 +975,13 @@ def _run_batch_completion_side_effects(batch_id: str, batch: dict, deps: Lifecyc
         _cleanup_private_album_bundle_staging(batch_id, batch)
     except Exception as _stage_err:  # noqa: BLE001 — best-effort, batch is already complete
         logger.warning(f"{tag} Album-bundle staging cleanup failed (non-fatal): {_stage_err}")
+
+    # Remove Completed for a usenet album grab: only now, with every track's
+    # outcome known (and never while any task could still read the release)
+    try:
+        _remove_completed_album_bundle(batch_id, batch, tasks_snapshot)
+    except Exception as _rc_err:  # noqa: BLE001 — best-effort, batch is already complete
+        logger.warning(f"{tag} Remove Completed for the album grab failed (non-fatal): {_rc_err}")
 
     # post-download playlist sync: note which playlists this batch fed. db
     # lookups, so it lives out here and not under tasks_lock

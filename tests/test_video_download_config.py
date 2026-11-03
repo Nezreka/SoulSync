@@ -62,7 +62,9 @@ class _FakeDB:
 _SEED_DEFAULTS = {"seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
                   "seed_mode": "soulsync",
                   # per indexer rules, empty until someone sets one
-                  "seed_overrides": {}}
+                  "seed_overrides": {},
+                  # Remove Completed (usenet) is opt-in: off until someone picks it
+                  "usenet_remove_completed": "off"}
 
 
 def test_load_defaults():

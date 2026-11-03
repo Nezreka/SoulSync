@@ -5031,6 +5031,47 @@
                                                                     style="margin-left: 8px;"></span>
                                                             </div>
                                                         </div>
+                                                        <!-- Remove Completed: what happens to a usenet job once
+                                         its import has landed. Shown on both sides like the
+                                         seeding goals (the Sources tab carries no side gating);
+                                         the music value lives in config (usenet_client.remove_completed,
+                                         settings.js), the video value in the video db (video-settings.js). -->
+                                                        <div class="form-group" id="music-usenet-remove-completed-group">
+                                                            <label>When a usenet download has imported (music):</label>
+                                                            <select id="music-usenet-remove-completed"
+                                                                class="form-select">
+                                                                <option value="off">Leave it in the client</option>
+                                                                <option value="history">Remove it from the client's
+                                                                    history</option>
+                                                                <option value="files">Remove it and delete what's left
+                                                                    in its folder</option>
+                                                            </select>
+                                                            <div class="setting-help-text">
+                                                                Music grabs copy the audio out, so without this the whole
+                                                                release stays in your client's completed folder. Only
+                                                                downloads SoulSync has imported are touched: an album goes
+                                                                once every track in it imported, and a failed or unmatched
+                                                                download stays for you.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group" id="video-usenet-remove-completed-group">
+                                                            <label>When a usenet download has imported (video):</label>
+                                                            <select id="video-usenet-remove-completed"
+                                                                class="form-select">
+                                                                <option value="off">Leave it in the client</option>
+                                                                <option value="history">Remove it from the client's
+                                                                    history</option>
+                                                                <option value="files">Remove it and delete what's left
+                                                                    in its folder</option>
+                                                            </select>
+                                                            <div class="setting-help-text">
+                                                                SoulSync already clears the file it imported; this also
+                                                                takes the job out of the client and, with the last option,
+                                                                deletes what it left behind (nfo, sample). Failed and import-failed
+                                                                downloads keep their job for Manual import, and a season
+                                                                pack only goes when every episode in it imported.
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>

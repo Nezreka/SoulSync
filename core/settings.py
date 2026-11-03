@@ -766,6 +766,13 @@ class ConfigManager:
                 "password": "",
                 "category": "soulsync",
                 "acquisition_monitor_interval_seconds": 15,
+                # Remove Completed: what happens to a music usenet job once it
+                # has imported -- "off" (default, leave it in the client),
+                # "history" (remove it from the client's history) or "files"
+                # (remove it and delete what's left in its folder). Album and
+                # track grabs COPY the audio out, so without this the whole
+                # release stays in the client's completed folder.
+                "remove_completed": "off",
             },
             "soundcloud_download": {
                 # Anonymous-only for now — SoundCloud Go+ OAuth tier could be
