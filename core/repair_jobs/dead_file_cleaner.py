@@ -70,8 +70,8 @@ class DeadFileCleanerJob(RepairJob):
             raw = context.config_manager.get(self.get_config_key('settings'), {}) \
                 if context.config_manager else {}
             saved = raw if isinstance(raw, dict) else {}
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.debug("dead file cleaner settings not read: %s", e)
         try:
             share = float(saved.get('max_unresolved_fraction', _GUARD_SHARE))
             share = share if 0 < share <= 1 else _GUARD_SHARE

@@ -113,8 +113,8 @@ def carry_legacy_issue_ids(conn: Any) -> Dict[str, int]:
         logger.warning("issues from before the upgrade not translated yet: %s", exc)
         try:
             conn.rollback()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as rb_exc:  # noqa: BLE001
+            logger.debug("legacy issue id rollback failed: %s", rb_exc)
     return stats
 
 
