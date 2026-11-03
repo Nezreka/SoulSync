@@ -1818,6 +1818,46 @@ def test_delete_artist_removes_rows_mirrors_and_artwork(api):
     assert not thumb.exists()
 
 
+def _seed_other_profiles_intent(db, ids, profile_id=3):
+    with _conn(db) as conn:
+        conn.execute(
+            "INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored, "
+            "provenance) VALUES('artist', ?, ?, 1, 'user_explicit')", (ids["artist"], profile_id))
+        conn.execute(
+            "INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, "
+            "projection_version) VALUES(?, ?, 1, 'track_rule:user_explicit', 1)",
+            (profile_id, ids["ep_track"]))
+        conn.commit()
+
+
+def test_delete_artist_withdraws_every_profiles_wish_and_watch(api):
+    """profile 3 watches the artist and wished for one of its tracks. the
+    admin deletes the artist: the delete drops every profile's wanted rows,
+    so the withdrawals go out for profile 3 too, not only for the profile
+    that clicked. before, profile 3's wishlist kept searching for the track
+    and its watchlist kept finding new releases of a deleted artist."""
+    client, db, ids = api
+    _seed_other_profiles_intent(db, ids)
+
+    resp = client.delete(f"/api/library/v2/artists/{ids['artist']}").get_json()
+
+    assert resp["success"] is True
+    assert {r["profile_id"] for r in db.wishlist_removes} == {1, 3}
+    assert {r["profile_id"] for r in db.watchlist_removes} == {1, 3}
+
+
+def test_delete_album_withdraws_every_profiles_wish(api):
+    client, db, ids = api
+    _seed_other_profiles_intent(db, ids)
+
+    resp = client.delete(f"/api/library/v2/albums/{ids['ep']}").get_json()
+
+    assert resp["success"] is True
+    assert {r["profile_id"] for r in db.wishlist_removes} == {1, 3}
+    # an album delete leaves the artist on everyone's watchlist
+    assert db.watchlist_removes == []
+
+
 def test_delete_featured_artist_keeps_owner_album(api):
     """Audit P0-01: deleting an artist who is merely featured on another
     artist's album must NOT delete that album — only the credit rows."""

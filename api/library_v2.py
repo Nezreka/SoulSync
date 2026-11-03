@@ -4182,9 +4182,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # Enqueue the wishlist un-mirrors BEFORE the rows vanish (the payload
         # builder needs them) and in the SAME transaction as the deletes —
         # the route drains the outbox after committing (audit P0-04).
-        from core.library2.mirror_outbox import enqueue_tracks
-        unmirrored = len(enqueue_tracks(conn, track_ids, False,
-                                        profile_id=_intent_profile())) if track_ids else 0
+        # every profile that wished for one of them: the delete below drops
+        # every profile's wanted rows, and each wishlist holds its own copy.
+        # only the clicking profile's was withdrawn, so the others kept
+        # searching for tracks of an album that is gone
+        from core.library2.mirror_outbox import enqueue_tracks, intent_profile_ids
+        unmirrored = 0
+        if track_ids:
+            profiles = intent_profile_ids(conn, track_ids=track_ids, album_ids=album_ids)
+            for profile_id in sorted(profiles | {_intent_profile()}):
+                unmirrored += len(enqueue_tracks(conn, track_ids, False, profile_id=profile_id))
         removed_albums = 0
         for aid_ in album_ids:
             conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (aid_,))
@@ -4522,9 +4529,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             row = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
             if not row:
                 return _fail("Artist not found", 404)
+            from core.library2.artist_settings import watching_profile_ids
             from core.library2.mirror_outbox import drain as drain_mirror_outbox
-            from core.library2.mirror_outbox import enqueue_artist_watchlist
-            enqueue_artist_watchlist(conn, artist_id, False, profile_id=_intent_profile())
+            from core.library2.mirror_outbox import enqueue_artist_watchlist, intent_profile_ids
+            # off every watchlist that has it, each profile keeps its own. only
+            # the clicking profile's was removed, and another profile's
+            # watchlist scan kept finding new releases for a deleted artist
+            watchers = (set(watching_profile_ids(conn, artist_id))
+                        | intent_profile_ids(conn, artist_ids=[artist_id])
+                        | {_intent_profile()})
+            for profile_id in sorted(watchers):
+                enqueue_artist_watchlist(conn, artist_id, False, profile_id=profile_id)
             stats = _unmonitor_tracks_and_delete(db, conn, artist_id=artist_id)
             # Detach the artist from releases owned by OTHER primary artists
             # (featured/various credits). Those albums, tracks, files and
