@@ -185,9 +185,11 @@ def _group_has_conflict(members: List[Any]) -> bool:
 
 
 def _survivor_key(member: Any) -> tuple:
+    # a canonical row before an alias: an alias kept over its own canonical
+    # ended up pointing at itself and vanished from the artist list
     return (
-        len(_stored_ids(member)),
         1 if member["canonical_artist_id"] is None else 0,
+        len(_stored_ids(member)),
         -int(member["id"]),
     )
 
@@ -219,19 +221,32 @@ def _merge_artist(cursor: Any, survivor: Any, duplicate: Any) -> None:
             f"""UPDATE OR IGNORE {table} SET artist_id=?
                  WHERE artist_id=?""", (survivor_id, duplicate_id))
         cursor.execute(f"DELETE FROM {table} WHERE artist_id=?", (duplicate_id,))
+    # Aliases follow to the survivor's own root, never onto an alias (a chain
+    # resolve_alias_group can't follow) and never onto the survivor itself.
+    # A survivor that was an alias of the duplicate takes the duplicate's
+    # place: its parent becomes the duplicate's parent (usually none).
+    survivor_parent = survivor["canonical_artist_id"]
+    if survivor_parent is not None and int(survivor_parent) == duplicate_id:
+        survivor_parent = duplicate["canonical_artist_id"]
+        cursor.execute("UPDATE lib2_artists SET canonical_artist_id=? WHERE id=?",
+                       (survivor_parent, survivor_id))
+    root = int(survivor_parent) if survivor_parent is not None else survivor_id
     cursor.execute(
         "UPDATE lib2_artists SET canonical_artist_id=? "
-        "WHERE canonical_artist_id=?", (survivor_id, duplicate_id))
+        "WHERE canonical_artist_id=? AND id<>?", (root, duplicate_id, root))
     cursor.execute(
-        "UPDATE OR IGNORE lib2_monitor_rules SET entity_id=? "
-        "WHERE entity_type='artist' AND entity_id=?", (survivor_id, duplicate_id))
-    cursor.execute(
-        "DELETE FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=?",
-        (duplicate_id,))
-    # an own library's twin carries that library's server id (#1199)
+        "UPDATE lib2_artists SET canonical_artist_id=NULL WHERE id=? AND canonical_artist_id=id",
+        (root,))
+    from core.library2.monitor_rules import merge_rules_into
+    merge_rules_into(cursor, "artist", duplicate_id, survivor_id)
+    # an own library's twin carries that library's server id (#1199); one
+    # that collides with the survivor's own mapping goes with the duplicate
     cursor.execute(
         "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
         "WHERE entity_type='artist' AND entity_id=?", (survivor_id, duplicate_id))
+    cursor.execute(
+        "DELETE FROM lib2_media_server_mappings WHERE entity_type='artist' AND entity_id=?",
+        (duplicate_id,))
     cursor.execute("DELETE FROM lib2_artists WHERE id=?", (duplicate_id,))
 
 

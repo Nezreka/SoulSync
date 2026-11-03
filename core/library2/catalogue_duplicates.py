@@ -365,18 +365,8 @@ def _move_references(conn, kind, source_id, target_id):
     # Conflicts were rejected in the reviewed snapshot. Keep explicit intent
     # when two equivalent monitor rules carry different provenance.
     if _table(conn, "lib2_monitor_rules"):
-        for row in conn.execute("SELECT * FROM lib2_monitor_rules WHERE entity_type=? AND entity_id=?", (kind, source_id)).fetchall():
-            row = dict(row)
-            existing = conn.execute("SELECT * FROM lib2_monitor_rules WHERE entity_type=? AND entity_id=? AND profile_id=?",
-                                    (kind, target_id, row["profile_id"])).fetchone()
-            if existing:
-                rank = {"user_explicit": 5, "wishlist_import": 4, "cascade": 3,
-                        "new_release": 3, "file_import": 2, "legacy_import": 0}
-                if rank.get(row["provenance"], 1) > rank.get(existing["provenance"], 1):
-                    conn.execute("UPDATE lib2_monitor_rules SET provenance=? WHERE id=?", (row["provenance"], existing["id"]))
-                conn.execute("DELETE FROM lib2_monitor_rules WHERE id=?", (row["id"],))
-            else:
-                conn.execute("UPDATE lib2_monitor_rules SET entity_id=? WHERE id=?", (target_id, row["id"]))
+        from core.library2.monitor_rules import merge_rules_into
+        merge_rules_into(conn, kind, source_id, target_id)
     if _table(conn, "lib2_media_server_mappings"):
         conn.execute("UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? WHERE entity_type=? AND entity_id=?",
                      (target_id, kind, source_id))
