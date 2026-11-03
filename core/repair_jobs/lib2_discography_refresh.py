@@ -98,6 +98,12 @@ def _release_included(album: Dict[str, Any], filters: Dict[str, bool]) -> bool:
     return not _track_content_excluded(title, title, filters)
 
 
+def _truthy(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 @register_job
 class Lib2DiscographyRefreshJob(RepairJob):
     job_id = "monitored_discography_refresh"
@@ -128,6 +134,8 @@ class Lib2DiscographyRefreshJob(RepairJob):
         "- Min Album Tracks Owned: a library artist needs this many tracks on one "
         "album, so a few playlist songs don't pull in a whole discography. "
         "Watchlist artists always count\n"
+        "- Auto Add To Wishlist: a missing back catalogue release also goes on "
+        "the Wishlist right away, the finding stays as the log of what was added\n"
         "- Include ...: release types and content for artists on no watchlist; a "
         "watchlist artist uses its own watchlist settings\n\n"
         "A run that gets stopped (or a restart) picks up at the artist it "
@@ -143,6 +151,8 @@ class Lib2DiscographyRefreshJob(RepairJob):
         "artists": "watchlist",
         "max_artists_per_run": 0,
         "min_album_tracks_owned": 3,
+        # 3.6.1's backfill option, same key so a saved one carries over
+        "auto_add_to_wishlist": False,
         "_section_release_types": "Release Types",
         "include_albums": True,
         "include_eps": True,
@@ -359,6 +369,7 @@ class Lib2DiscographyRefreshJob(RepairJob):
             filters = self._release_filters(conn, artist_id, settings, owner or ADMIN_PROFILE_ID)
             releases = [r for r in self._missing_releases(conn, group)
                         if int(r["id"]) not in skip and _release_included(r, filters)]
+        auto_add = _truthy(settings.get("auto_add_to_wishlist"))
         for release in releases:
             inserted = context.create_finding(
                 job_id=self.job_id,
@@ -380,10 +391,23 @@ class Lib2DiscographyRefreshJob(RepairJob):
                     "reason": "back_catalogue",
                     # #1504: approving wishes for the library that holds the artist
                     "owner_profile_id": owner,
+                    "auto_added": auto_add,
                 },
             )
-            if inserted:
-                result.findings_created += 1
+            if not inserted:
+                continue
+            result.findings_created += 1
+            if auto_add:
+                # 3.6.1's auto add: wished for at once, only on a new finding
+                # (a dismissed or already-added one doesn't come back)
+                try:
+                    from core.library2.discography import approve_release
+                    approve_release(context.db, getattr(context, "config_manager", None),
+                                    int(release["id"]),
+                                    profile_id=owner or ADMIN_PROFILE_ID)
+                    result.auto_fixed += 1
+                except Exception as e:  # noqa: BLE001 - the finding stays for a manual fix
+                    logger.debug("auto add failed for release %s: %s", release["id"], e)
 
     # -- the sweep --------------------------------------------------------
 
@@ -490,7 +514,7 @@ class Lib2DiscographyRefreshJob(RepairJob):
             # a per-run limit leaves the rest of the pass for the next run
             self.save_checkpoint(context, artist_ids[end - 1] if end < total else None,
                                  scan_key=scan_key)
-        result.auto_fixed = discovered if mode == "automatic" else 0
+        result.auto_fixed += discovered if mode == "automatic" else 0
         if total:
             logger.info("lib2 discography refresh (%s, %s): %d artists re-expanded, "
                         "%d new releases discovered (%d tracks mirrored, %d findings)",

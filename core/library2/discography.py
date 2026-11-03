@@ -862,6 +862,29 @@ def _track_content_excluded(
     return False
 
 
+def approve_release(db, config_manager, album_id: int, *, profile_id: int = 1) -> int:
+    """Put one catalogue release on ``profile_id``'s wishlist: monitor it, queue
+    its tracklist and wish for its tracks. What Fix on a discography finding
+    does, and what the back catalogue's auto add does without the click.
+    Returns the tracks mirrored; raises LookupError when the album is gone."""
+    from contextlib import closing as _closing
+
+    with _closing(db._get_connection()) as conn:
+        cursor = conn.execute(
+            """UPDATE lib2_albums
+                  SET monitored=1, tracklist_status='pending',
+                      tracklist_error=NULL, tracklist_retry_at=NULL,
+                      updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+            (int(album_id),),
+        )
+        if cursor.rowcount == 0:
+            raise LookupError("Library-v2 album no longer exists")
+        conn.commit()
+    return auto_monitor_releases(db, config_manager, [int(album_id)],
+                                 wishlist_profile_id=int(profile_id or 1))
+
+
 def auto_monitor_releases(db, config_manager, album_ids: List[int],
                           *, wishlist_profile_id: int = 1) -> int:
     """Make freshly discovered releases genuinely wanted.
@@ -1182,6 +1205,7 @@ def refresh_artist_discography(
 
 
 __all__ = [
+    "approve_release",
     "auto_monitor_releases",
     "expand_artist_discography",
     "refresh_artist_discography",

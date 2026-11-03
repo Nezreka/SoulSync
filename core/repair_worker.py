@@ -3645,37 +3645,24 @@ class RepairWorker:
         album_id = details.get('lib2_album_id') or _lib2_id(entity_id)
         if album_id is None:
             return {'success': False, 'error': 'Not a Library-v2 album finding'}
-        conn = self.db._get_connection()
-        try:
-            cursor = conn.execute(
-                """UPDATE lib2_albums
-                      SET monitored=1, tracklist_status='pending',
-                          tracklist_error=NULL, tracklist_retry_at=NULL,
-                          updated_at=CURRENT_TIMESTAMP
-                    WHERE id=?""",
-                (int(album_id),),
-            )
-            if cursor.rowcount == 0:
-                return {'success': False, 'error': 'Library-v2 album no longer exists'}
-            conn.commit()
-        finally:
-            conn.close()
         try:
             from core.library2 import ADMIN_PROFILE_ID
-            from core.library2.discography import auto_monitor_releases
+            from core.library2.discography import approve_release
             # a back catalogue finding names the library that holds the
             # artist (#1504); a new-release finding is the admin's as before
-            mirrored = auto_monitor_releases(
-                self.db, self._config_manager, [int(album_id)],
-                wishlist_profile_id=int(details.get('owner_profile_id') or ADMIN_PROFILE_ID),
+            mirrored = approve_release(
+                self.db, self._config_manager, int(album_id),
+                profile_id=int(details.get('owner_profile_id') or ADMIN_PROFILE_ID),
             )
-            return {
-                'success': True,
-                'action': 'approved_new_release',
-                'mirrored_tracks': mirrored,
-            }
+        except LookupError as exc:
+            return {'success': False, 'error': str(exc)}
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
+        return {
+            'success': True,
+            'action': 'approved_new_release',
+            'mirrored_tracks': mirrored,
+        }
 
     def _fix_quality_profile_audit(self, entity_type, entity_id, file_path, details):
         """Revalidate a reviewed native file before opting its track into monitoring."""

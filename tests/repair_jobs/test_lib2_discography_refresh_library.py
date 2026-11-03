@@ -211,3 +211,75 @@ def test_the_library_walk_paces_its_provider_calls(monkeypatch):
     job.scan(context)
 
     assert naps == [1.0, 1.0]  # between artists, not after the last
+
+
+def _auto_add_case(tmp_path, monkeypatch, *, auto_add, inserted=True):
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        lib2_seed.track(conn, "Kid Artist", "Owned Album", "Hit Song")
+        conn.execute("UPDATE lib2_track_files SET owner_profile_id=3")
+        album_id = lib2_seed.album(conn, "Kid Artist", "Second Album", origin="discography",
+                                   album_type="album", track_count=10, monitored=0)
+        conn.commit()
+    calls = []
+    monkeypatch.setattr("core.library2.discography.auto_monitor_releases",
+                        lambda _db, _cfg, ids, *, wishlist_profile_id=1:
+                        calls.append((ids, wishlist_profile_id)) or 4)
+    created = []
+    context = SimpleNamespace(db=db, config_manager=None,
+                              create_finding=lambda **kw: created.append(kw) or inserted)
+    result = SimpleNamespace(findings_created=0, auto_fixed=0)
+    job = Lib2DiscographyRefreshJob()
+    with db._get_connection() as conn:
+        artist_id = _id(conn, "Kid Artist")
+    job._create_backfill_findings(
+        context, artist_id,
+        {**job._settings(SimpleNamespace(config_manager=None)), "auto_add_to_wishlist": auto_add},
+        result)
+    with db._get_connection() as conn:
+        monitored = conn.execute("SELECT monitored FROM lib2_albums WHERE id=?",
+                                 (album_id,)).fetchone()[0]
+    return album_id, calls, created, result, monitored
+
+
+def test_auto_add_wishes_for_a_new_back_catalogue_release_at_once(tmp_path, monkeypatch):
+    """3.6.1's backfill had auto add to wishlist: the finding is made as the log
+    and the release goes on the owner's wishlist without a click."""
+    album_id, calls, created, result, monitored = _auto_add_case(
+        tmp_path, monkeypatch, auto_add=True)
+
+    assert calls == [([album_id], 3)]
+    assert monitored == 1
+    assert len(created) == 1 and created[0]["details"]["auto_added"] is True
+    assert result.findings_created == 1 and result.auto_fixed == 1
+
+
+def test_without_auto_add_a_back_catalogue_release_waits_for_fix(tmp_path, monkeypatch):
+    album_id, calls, created, result, monitored = _auto_add_case(
+        tmp_path, monkeypatch, auto_add=False)
+
+    assert calls == [] and monitored == 0
+    assert len(created) == 1 and result.auto_fixed == 0
+
+
+def test_auto_add_skips_a_release_already_found_before(tmp_path, monkeypatch):
+    """only a new finding: a dismissed one or one added on an earlier run is
+    not wished for again on every run"""
+    _album_id, calls, _created, result, monitored = _auto_add_case(
+        tmp_path, monkeypatch, auto_add=True, inserted=False)
+
+    assert calls == [] and monitored == 0 and result.auto_fixed == 0
+
+
+def test_a_saved_3_6_1_auto_add_carries_to_the_refresh(tmp_path):
+    from core.repair_worker import RepairWorker
+
+    config = _Config({})
+    config.store = {"repair.jobs.discography_backfill": {
+        "enabled": True, "settings": {"auto_add_to_wishlist": True}}}
+    RepairWorker(database=_db(tmp_path))._migrate_legacy_job_configs(config)
+
+    settings = config.store["repair.jobs.monitored_discography_refresh"]["settings"]
+    assert settings["auto_add_to_wishlist"] is True
+    assert settings["artists"] == "library"
+    assert Lib2DiscographyRefreshJob.default_settings["auto_add_to_wishlist"] is False
