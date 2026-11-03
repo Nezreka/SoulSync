@@ -93,6 +93,15 @@ RESOLVED_RECURRENCE_GRACE_DAYS = 7
 #   empty_folder names a directory that is empty by definition
 _ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
 
+# a selection of finding ids as ONE bound parameter. a placeholder per id
+# broke past SQLite's variable limit (32766) on a big library, which is how
+# many findings a library-wide job can leave
+_JSON_IDS = "SELECT value FROM json_each(?)"
+
+
+def _json_ids(ids) -> str:
+    return json.dumps([int(i) for i in ids])
+
 
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
@@ -6589,9 +6598,8 @@ class RepairWorker:
             params = list(fixable_types)
 
             if finding_ids:
-                id_placeholders = ','.join(['?'] * len(finding_ids))
-                where_parts.append(f"id IN ({id_placeholders})")
-                params.extend(finding_ids)
+                where_parts.append(f"id IN ({_JSON_IDS})")
+                params.append(_json_ids(finding_ids))
             if job_id:
                 where_parts.append("job_id = ?")
                 params.append(job_id)
@@ -6778,9 +6786,8 @@ class RepairWorker:
                 where.append("finding_type=?")
                 params.append(finding_type)
             if finding_ids:
-                marks = ','.join('?' for _ in finding_ids)
-                where.append(f"id IN ({marks})")
-                params.extend(finding_ids)
+                where.append(f"id IN ({_JSON_IDS})")
+                params.append(_json_ids(finding_ids))
             if safe_only and DESTRUCTIVE_FINDING_TYPES:
                 destructive = sorted(DESTRUCTIVE_FINDING_TYPES)
                 marks = ','.join('?' for _ in destructive)
@@ -6807,10 +6814,13 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            placeholders = ','.join(['?'] * len(ids))
+            # one json parameter: Fix All over 32k+ findings (track numbers
+            # flagged nearly every track, d8e924b69 for the history) broke
+            # the query, the types came back empty and the LRCLib breaker
+            # never tripped
             cursor.execute(
-                f"SELECT id, finding_type FROM repair_findings WHERE id IN ({placeholders})",
-                list(ids))
+                f"SELECT id, finding_type FROM repair_findings WHERE id IN ({_JSON_IDS})",
+                (_json_ids(ids),))
             return {row[0]: row[1] for row in cursor.fetchall()}
         except Exception as e:
             logger.debug("Could not read finding types for bulk run: %s", e)
@@ -7023,22 +7033,20 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            placeholders = ','.join(['?'] * len(finding_ids))
-
             if action == 'dismiss':
                 cursor.execute(f"""
                     UPDATE repair_findings
                     SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id IN ({placeholders})
-                """, finding_ids)
+                    WHERE id IN ({_JSON_IDS})
+                """, (_json_ids(finding_ids),))
             else:
                 cursor.execute(f"""
                     UPDATE repair_findings
                     SET status = 'resolved', user_action = ?, resolved_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id IN ({placeholders})
-                """, [action] + finding_ids)
+                    WHERE id IN ({_JSON_IDS})
+                """, (action, _json_ids(finding_ids)))
 
             conn.commit()
             return cursor.rowcount
