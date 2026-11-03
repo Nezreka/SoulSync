@@ -372,6 +372,11 @@ def _scope_snapshot(
         marks = ",".join("?" for _ in file_ids)
         id_filter = f" AND tf.id IN ({marks})"
         id_params = [int(f) for f in file_ids]
+    # the library the caller is looking at (#1199): an album can have files
+    # in two libraries, and removing it from one must not take the other's
+    # copy too. "All libraries" (no scope) still means all of them.
+    from core.library2.sql_util import owner_clause
+    owner = owner_clause(column="tf.owner_profile_id")
     with closing(database._get_connection()) as conn:
         if entity == "artists":
             from core.library2.artist_aliases import resolve_alias_group
@@ -391,7 +396,7 @@ def _scope_snapshot(
                      JOIN lib2_tracks t ON t.id=tf.track_id
                      JOIN lib2_albums al ON al.id=t.album_id
                     WHERE al.primary_artist_id IN ({artist_marks})
-                      AND tf.file_state<>'deleted'{id_filter}
+                      AND tf.file_state<>'deleted'{id_filter}{owner}
                     ORDER BY al.id, t.id, tf.id""",
                 (*artist_ids, *id_params),
             ).fetchall()
@@ -409,7 +414,7 @@ def _scope_snapshot(
                      FROM lib2_track_files tf
                      JOIN lib2_tracks t ON t.id=tf.track_id
                      JOIN lib2_albums al ON al.id=t.album_id
-                    WHERE al.id=? AND tf.file_state<>'deleted'{id_filter}
+                    WHERE al.id=? AND tf.file_state<>'deleted'{id_filter}{owner}
                     ORDER BY t.id, tf.id""",
                 (int(entity_id), *id_params),
             ).fetchall()

@@ -4382,12 +4382,25 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         db = get_database()
         with closing(db._get_connection()) as conn:
             from core.library2.wanted import recompute_wanted_for_entity
-            for track_id in ids:
-                recompute_wanted_for_entity(
-                    conn, "tracks", track_id, profile_id=_intent_profile()
-                )
             from core.library2.mirror_outbox import enqueue_projected_tracks
-            enqueue_projected_tracks(conn, ids, profile_id=_intent_profile())
+            # every profile that tracks these songs, not only the one acting:
+            # under "all libraries" a delete can take another profile's copy,
+            # and that profile's wishlist must learn the song is missing too
+            profiles = {int(_intent_profile())}
+            marks = ",".join("?" for _ in ids)
+            try:
+                profiles.update(int(r[0]) for r in conn.execute(
+                    f"SELECT DISTINCT profile_id FROM lib2_wanted_tracks WHERE track_id IN ({marks})",
+                    ids))
+                profiles.update(int(r[0]) for r in conn.execute(
+                    f"SELECT DISTINCT profile_id FROM lib2_monitor_rules"
+                    f" WHERE entity_type='track' AND entity_id IN ({marks})", ids))
+            except Exception as exc:  # noqa: BLE001 - the acting profile still updates
+                logger.debug("profiles for re-projection unknown: %s", exc)
+            for profile_id in sorted(profiles):
+                for track_id in ids:
+                    recompute_wanted_for_entity(conn, "tracks", track_id, profile_id=profile_id)
+                enqueue_projected_tracks(conn, ids, profile_id=profile_id)
             conn.commit()
         from core.library2.mirror_outbox import drain as drain_mirror_outbox
         drain_mirror_outbox(db)

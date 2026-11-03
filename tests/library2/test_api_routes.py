@@ -2096,6 +2096,37 @@ def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, m
         ).fetchone()
 
 
+def test_a_removed_file_reprojects_wanted_for_every_profile_tracking_the_song(
+        api, tmp_path, monkeypatch):
+    """found in the second #1062 review: a removal re-projected wanted only
+    for the profile acting, so another profile that monitors the song never
+    learned it was missing and its wishlist went stale"""
+    client, db, ids = api
+    path = tmp_path / "keep.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        file_id = conn.execute(
+            "UPDATE lib2_track_files SET path=? WHERE track_id=? RETURNING id",
+            (str(path), ids["album_track"]),
+        ).fetchone()[0]
+        conn.execute("INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id,"
+                     " monitored, provenance) VALUES('track', ?, 3, 1, 'user_explicit')",
+                     (ids["album_track"],))
+        conn.commit()
+    seen = []
+    import core.library2.wanted as wanted
+    real = wanted.recompute_wanted_for_entity
+    monkeypatch.setattr(wanted, "recompute_wanted_for_entity",
+                        lambda conn, kind, eid, profile_id=1, **kw: seen.append(profile_id)
+                        or real(conn, kind, eid, profile_id=profile_id, **kw))
+
+    response = client.post(f"/api/library/v2/albums/{ids['views']}/file-remove",
+                           json={"file_ids": [file_id]})
+
+    assert response.status_code == 200
+    assert {1, 3} <= set(seen)
+
+
 def test_database_only_file_remove_keeps_disk_file_and_reprojects_wanted(api, tmp_path):
     client, db, ids = api
     path = tmp_path / "keep.flac"

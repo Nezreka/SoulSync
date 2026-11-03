@@ -485,3 +485,35 @@ def test_selected_single_cannot_delete_an_unselected_albums_only_physical_copy(
     assert shared.read_bytes() == b'only-copy'
     assert imported_conn.execute('SELECT file_state FROM lib2_track_files WHERE id=?',
                                  (album_file,)).fetchone()[0] == 'active'
+
+
+def test_removing_an_album_in_one_library_never_takes_another_librarys_copy(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """found in the second #1062 review (#1199): an album can have files in
+    two libraries. removed from the shared library, its copy in profile 2's
+    own library went to quarantine too. "all libraries" still sees both."""
+    from core import library_scope
+    root = tmp_path / "music"
+    root.mkdir()
+    shared, own = root / "shared.flac", root / "own.flac"
+    shared.write_bytes(b"a")
+    own.write_bytes(b"b")
+    track = imported_conn.execute("SELECT id FROM lib2_tracks ORDER BY id LIMIT 1").fetchone()[0]
+    shared_id = _set_track_path(imported_conn, track, shared)
+    own_id = imported_conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, owner_profile_id) VALUES(?,?,2)",
+        (track, str(own))).lastrowid
+    imported_conn.commit()
+    album_id = imported_conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?",
+                                     (track,)).fetchone()[0]
+    monkeypatch.setattr(library_scope, "any_own_library_exists", lambda: True)
+
+    def files_in(scope):
+        with library_scope.library_scope(scope):
+            preview = preview_entity_files(legacy_db, entity="albums", entity_id=album_id,
+                                           config_manager=_Config([str(root)]))
+        return {fid for item in preview["files"] for fid in item["file_ids"]}
+
+    assert files_in("shared") == {shared_id}
+    assert files_in(2) == {own_id}
+    assert files_in(None) >= {shared_id, own_id}
