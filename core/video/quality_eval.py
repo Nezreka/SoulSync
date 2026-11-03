@@ -334,6 +334,9 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
         rejected = fam + " codec is on your reject list"
     if not rejected and parsed.get("three_d") and "3d" in rejects:
         rejected = "3D is on your reject list"
+    # a full disc image can never be imported, so it isn't a profile choice
+    if not rejected and parsed.get("disc_image"):
+        rejected = "Full disc image (ISO / BDMV), nothing in it SoulSync can import"
 
     # 2) must be an enabled ladder tier
     tier = tier_key(source, res)
