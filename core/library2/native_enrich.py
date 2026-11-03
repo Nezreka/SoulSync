@@ -1752,6 +1752,13 @@ def reconcile_unmapped_native_artists(
     artists = _pending_unmapped_artists(conn, limit, cooldown_hours=cooldown_hours,
                                         combined_only=combined_only)
     total = len(artists)
+    if progress is not None and total:
+        # the count as soon as it is known: the first artist is a network
+        # lookup, and until it answered the banner showed a stage with no numbers
+        try:
+            progress(0, total)
+        except Exception as progress_exc:  # noqa: BLE001
+            logger.debug("reconcile progress callback failed: %s", progress_exc)
     stats = {
         "scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0,
         "identities_released": released["released"],

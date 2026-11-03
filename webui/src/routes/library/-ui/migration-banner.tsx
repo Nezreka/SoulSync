@@ -56,6 +56,18 @@ export function MigrationBanner() {
       ? ` ${preparation.current.toLocaleString()} of ${preparation.total.toLocaleString()}` +
         ` (${Math.round((preparation.current / preparation.total) * 100)}%)`
       : '';
+    if (preparation.full === false) {
+      // the credit pass a restart repeats is no upgrade: say what it does, and
+      // only once there is something to count
+      if (!preparation.total) return null;
+      return (
+        <div className={`${styles.banner} ${styles.finishing}`} role="status">
+          <span className={styles.text}>
+            {`Matching new artist credits in the background:${counts}. Everything works meanwhile.`}
+          </span>
+        </div>
+      );
+    }
     return (
       <div className={`${styles.banner} ${styles.finishing}`} role="status">
         <span className={styles.text}>

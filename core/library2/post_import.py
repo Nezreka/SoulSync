@@ -124,7 +124,10 @@ _background_lock = threading.Lock()
 _background_thread: Optional[threading.Thread] = None
 # what the background preparation is doing, for the library banner: the
 # library works while it runs, but pages are slower until it's done
-_preparation_state: Dict[str, Any] = {"active": False, "stage": None, "current": 0, "total": 0}
+# ``full``: the one-time preparation after an upgrade, not the credit pass a
+# restart repeats (the banner only calls the first "finishing your upgrade")
+_preparation_state: Dict[str, Any] = {"active": False, "full": False, "stage": None,
+                                      "current": 0, "total": 0}
 
 
 def preparation_state() -> Dict[str, Any]:
@@ -198,7 +201,7 @@ def start_background_preparation(database: Any, config_manager: Any, *, full: bo
                         f"{total:,}", int(current * 100 / total))
 
     def run():
-        _preparation_state.update(active=True, stage=None, current=0, total=0)
+        _preparation_state.update(active=True, full=bool(full), stage=None, current=0, total=0)
         try:
             if full:
                 _set_full_pending(database, True)

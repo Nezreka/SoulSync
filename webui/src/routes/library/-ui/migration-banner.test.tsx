@@ -96,4 +96,53 @@ describe('MigrationBanner', () => {
     renderBanner();
     await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
   });
+
+  it('calls the credit pass a restart repeats what it is, not an upgrade', async () => {
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json({
+          ...status({ status: 'done' }),
+          preparation: { active: true, full: false, stage: 'artists', current: 30, total: 120 },
+        }),
+      ),
+    );
+    renderBanner();
+    expect(
+      await screen.findByText(
+        'Matching new artist credits in the background: 30 of 120 (25%). Everything works meanwhile.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Finishing your library upgrade/)).not.toBeInTheDocument();
+  });
+
+  it('shows nothing for the restart pass until it has something to count', async () => {
+    let calls = 0;
+    server.use(
+      http.get('/api/library/v2/import/status', () => {
+        calls += 1;
+        return HttpResponse.json({
+          ...status({ status: 'done' }),
+          preparation: { active: true, full: false, stage: 'artists', current: 0, total: 0 },
+        });
+      }),
+    );
+    renderBanner();
+    await waitFor(() => expect(calls).toBeGreaterThan(0));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('still says finishing your upgrade for the full preparation', async () => {
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json({
+          ...status({ status: 'done' }),
+          preparation: { active: true, full: true, stage: 'tracklists', current: 5, total: 10 },
+        }),
+      ),
+    );
+    renderBanner();
+    expect(
+      await screen.findByText(/Finishing your library upgrade: album tracklists 5 of 10 \(50%\)/),
+    ).toBeInTheDocument();
+  });
 });

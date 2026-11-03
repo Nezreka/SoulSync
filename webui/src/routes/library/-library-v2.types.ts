@@ -703,6 +703,8 @@ export interface LibraryV2ImportState {
 }
 
 export interface LibraryV2PreparationState {
+  /** the one-time preparation after an upgrade, not the credit pass a restart repeats */
+  full?: boolean;
   active: boolean;
   stage: string | null;
   current: number;
