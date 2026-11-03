@@ -1508,6 +1508,110 @@ _IDENTIFIED_SQL = ("(COALESCE(a.spotify_id,'')<>'' OR COALESCE(a.musicbrainz_id,
                    "OR COALESCE(a.external_ids,'{}') NOT IN ('','{}'))")
 
 
+def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -> int:
+    """A collaboration name that owns nothing but provider catalogue rows.
+
+    "Nelly & Florida Georgia Line" picked up Nelly's iTunes id somewhere
+    (legacy data stored it under spotify), and its discography fetch hung
+    Nelly's 22 albums on it: an artist with albums and tracks but not one
+    file, no watch and no wish. The local split only took ghosts that own no
+    album, so these stayed in the library for good.
+
+    Only when every part of the name is an artist with files here, the
+    collaboration itself is unwatched, and each of its albums is provider
+    catalogue nobody touched (no file, not monitored, no one's rule, nothing
+    wanted): those albums are dropped (the real artists keep their own
+    discography) and the name goes the way of any ghost, its credits moved
+    to the parts. Returns how many were cleared.
+    """
+    from core.library2.sql_util import ANY_OWNER, owned_sql
+
+    owners: Dict[str, int] = {}
+    for aid, name in conn.execute(
+            "SELECT a.id, a.name FROM lib2_artists a WHERE a.canonical_artist_id IS NULL "
+            f"AND {owned_sql('release_artist', 'a', scope=ANY_OWNER)}"):
+        key = normalize_name(name or "")
+        if key:
+            owners.setdefault(key, int(aid))
+    candidates = conn.execute(
+        """SELECT a.id, a.name FROM lib2_artists a
+            WHERE a.canonical_artist_id IS NULL AND COALESCE(a.monitored, 0) = 0
+              AND EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id = a.id)
+              AND NOT EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id = al.id
+                               JOIN lib2_track_files f ON f.track_id = t.id
+                              WHERE al.primary_artist_id = a.id)
+              AND NOT EXISTS (SELECT 1 FROM lib2_monitor_rules r
+                               WHERE r.entity_type = 'artist' AND r.entity_id = a.id
+                                 AND (r.monitored = 1 OR r.provenance IN ('user_explicit', 'wishlist_import')))"""
+    ).fetchall()
+    cleared = 0
+    for gid, name in candidates:
+        gid = int(gid)
+        pieces = split_artist_credits(name or "")
+        keys = [normalize_name(piece) for piece in pieces]
+        if len(keys) < 2 or not all(key in owners for key in keys):
+            continue
+        components = []
+        for key in keys:
+            if owners[key] != gid and owners[key] not in components:
+                components.append(owners[key])
+        if len(components) < 2:
+            continue
+        albums = [int(r[0]) for r in conn.execute(
+            "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (gid,))]
+        marks = ",".join("?" for _ in albums)
+        untouched = conn.execute(
+            f"""SELECT NOT EXISTS (SELECT 1 FROM lib2_albums al WHERE al.id IN ({marks})
+                         AND (COALESCE(al.monitored, 0) = 1 OR COALESCE(al.origin, '') <> 'discography'
+                              OR COALESCE(al.canonical_locked, 0) = 1))
+                   AND NOT EXISTS (SELECT 1 FROM lib2_monitor_rules r
+                         WHERE (r.entity_type = 'album' AND r.entity_id IN ({marks}))
+                            OR (r.entity_type = 'track' AND r.entity_id IN
+                                (SELECT id FROM lib2_tracks WHERE album_id IN ({marks}))))
+                   AND NOT EXISTS (SELECT 1 FROM lib2_wanted_tracks w
+                         JOIN lib2_tracks t ON t.id = w.track_id
+                        WHERE t.album_id IN ({marks}) AND w.wanted = 1)
+                   AND NOT EXISTS (SELECT 1 FROM lib2_tracks t
+                        WHERE t.album_id IN ({marks}) AND COALESCE(t.monitored, 0) = 1)""",
+            (*albums, *albums, *albums, *albums, *albums)).fetchone()[0]
+        if untouched:
+            # a hand edit, or the media server listing one of them, is a touch
+            track_ids = [int(r[0]) for r in conn.execute(
+                f"SELECT id FROM lib2_tracks WHERE album_id IN ({marks})", albums)]
+            for table, album_kinds, track_kinds in (
+                    ("lib2_metadata_overrides", ("album", "albums"), ("track", "tracks")),
+                    ("lib2_media_server_mappings", ("album", "album"), ("track", "track"))):
+                try:
+                    hit = conn.execute(
+                        f"SELECT 1 FROM {table} WHERE (entity_type IN (?, ?) AND entity_id IN "
+                        "(SELECT value FROM json_each(?))) OR (entity_type IN (?, ?) AND entity_id IN "
+                        "(SELECT value FROM json_each(?))) LIMIT 1",
+                        (*album_kinds, json.dumps(albums), *track_kinds, json.dumps(track_ids)),
+                    ).fetchone()
+                except Exception:  # noqa: BLE001 - table not there yet: nothing recorded
+                    hit = None
+                if hit:
+                    untouched = False
+        if not untouched:
+            continue
+        conn.execute(
+            f"DELETE FROM lib2_wanted_tracks WHERE track_id IN "
+            f"(SELECT id FROM lib2_tracks WHERE album_id IN ({marks}))", albums)
+        conn.execute(
+            f"DELETE FROM lib2_track_artists WHERE track_id IN "
+            f"(SELECT id FROM lib2_tracks WHERE album_id IN ({marks}))", albums)
+        conn.execute(f"DELETE FROM lib2_tracks WHERE album_id IN ({marks})", albums)
+        conn.execute(f"DELETE FROM lib2_album_artists WHERE album_id IN ({marks})", albums)
+        conn.execute(f"DELETE FROM lib2_albums WHERE id IN ({marks})", albums)
+        _rehome_and_delete_combined(conn, gid, components[0], components)
+        logger.info("cleared collaboration ghost %r: %d untouched catalogue album(s) dropped",
+                    name, len(albums))
+        cleared += 1
+    if cleared:
+        conn.commit()
+    return cleared
+
+
 def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, int], None]] = None,
                                    batch: int = 500) -> Dict[str, int]:
     """Clear guest-credit ghosts from the library's own knowledge, no network.
@@ -1541,6 +1645,8 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
         if has_id:
             identified.setdefault(key, int(aid))
 
+    unghosted = _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name)
+
     # every combined-looking credit that owns no album. One with an id or a
     # legacy id only qualifies for the anchored split below: a credit carrying
     # the album's own artist as one of its parts is a list whatever id it
@@ -1555,7 +1661,8 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
         "AND NOT EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id=a.id) "
         "ORDER BY a.id").fetchall()
     ghosts = [g for g in ghosts if not g[3] or len(split_artist_credits(g[1] or "")) >= 2]
-    stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0}
+    stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0,
+             "collab_ghosts_cleared": unghosted}
     total = len(ghosts)
     for index, (gid, name, monitored, settled) in enumerate(ghosts, start=1):
         gid = int(gid)

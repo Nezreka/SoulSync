@@ -160,6 +160,18 @@ def looks_like_foreign_provider_id(value: Any) -> bool:
     return bool(text) and (text.isdigit() or bool(_UUID_RE.match(text)))
 
 
+_BYTES_REPR_RE = re.compile(r"""^b(['"])(.*)\1$""", re.S)
+
+
+def unwrap_bytes_repr(text: Any) -> Any:
+    """``"b'Above & Beyond'"`` -> ``"Above & Beyond"``: a tag read as bytes
+    and turned into text with str(). Anything else comes back as it was."""
+    if not isinstance(text, str):
+        return text
+    match = _BYTES_REPR_RE.match(text.strip())
+    return match.group(2) if match else text
+
+
 def split_artist_credits(*sources: str) -> List[str]:
     """Split one or more raw artist/credit strings into individual artist names.
 
@@ -172,6 +184,7 @@ def split_artist_credits(*sources: str) -> List[str]:
     for raw in sources:
         if not raw:
             continue
+        raw = unwrap_bytes_repr(raw)
         # Promote any "feat." segment to a plain separator, then split the list.
         flattened = _FEAT_RE.sub(",", raw)
         for piece in _LIST_SEP_RE.split(flattened):
@@ -214,7 +227,7 @@ def _credit_names_for_import(
     provider match or manual alias link can refine it; creating several phantom
     artists cannot be reversed reliably from the source text alone (P2-24).
     """
-    display = (raw or "").strip()
+    display = unwrap_bytes_repr(raw or "").strip()
     if not display:
         return []
     if known_name(display):
