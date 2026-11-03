@@ -117,6 +117,15 @@ import time
 from flask import Flask, jsonify
 from flask_socketio import SocketIO, join_room, leave_room
 
+# the real settings module, on the isolated test config set above, before any
+# test module is collected. ~25 test files install a stub ``core.settings``
+# (every key answers its default) when the real one isn't imported yet, and
+# collection runs their module code for the whole run: one stub swapped the
+# settings out under every later test in that process (a reorganize run of
+# tests/library2 named every file with the default template), so those
+# passed alone and failed together.
+import core.settings  # noqa: E402,F401
+
 
 def symlinks_supported() -> bool:
     """True when the host can create symlinks (often false on Windows without Developer Mode)."""
