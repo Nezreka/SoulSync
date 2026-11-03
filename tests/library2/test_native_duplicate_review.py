@@ -416,3 +416,43 @@ def test_keep_best_refuses_a_keeper_tagged_by_hand_after_the_review(library):
 
     assert result["success"] is False and "tagged by hand" in result["error"]
     assert studio.exists() and bootleg.exists()
+
+
+# --- #1263: "Various Artists" is never artist evidence --------------------------
+
+
+def _performer(library, tid, name=None, tag=None):
+    import json
+    with closing(library[0]._get_connection()) as conn:
+        if name is not None:
+            conn.execute("UPDATE lib2_tracks SET track_artist=? WHERE id=?", (name, tid))
+        if tag is not None:
+            conn.execute("UPDATE lib2_track_files SET tags_json=? WHERE track_id=?",
+                         (json.dumps({"artist": tag}), tid))
+        conn.commit()
+
+
+def test_two_performers_intro_on_one_compilation_are_not_duplicates(library):
+    """every song on a compilation carries the album's "Various Artists"
+    credit, so two different performers' "Intro" matched on it"""
+    a, _af, _ = copy(library, artist="Various Artists", album="Now 99", title="Intro", isrc=None)
+    b, _bf, _ = copy(library, artist="Various Artists", album="Now 99 Disc 2", title="Intro", isrc=None)
+    _performer(library, a, "Kendrick Lamar")
+    _performer(library, b, tag="Taylor Swift")
+    assert review(library) == []
+
+
+def test_a_compilation_song_still_pairs_with_its_performers_own_copy(library):
+    """the #1263 match itself: the compilation copy and the artist's album copy"""
+    comp, _cf, _ = copy(library, artist="Various Artists", album="Now 99", title="Alright", isrc=None)
+    _own, _of, _ = copy(library, artist="Kendrick Lamar", album="To Pimp a Butterfly",
+                        title="Alright", isrc=None)
+    _performer(library, comp, tag="Kendrick Lamar")
+    groups = review(library)
+    assert len(groups) == 1 and groups[0]["count"] == 2
+
+
+def test_compilation_songs_with_no_performer_named_never_pair_on_the_credit(library):
+    copy(library, artist="Various Artists", album="Now 99", title="Intro", isrc=None)
+    copy(library, artist="Various Artists", album="Now 100", title="Intro", isrc=None)
+    assert review(library) == []

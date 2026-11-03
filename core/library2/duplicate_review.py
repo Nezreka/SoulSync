@@ -107,7 +107,6 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
     whole library walk -- a stat and a resolve per file row, twice per apply --
     is the scan's job, not one finding's."""
     from core.library2.paths import resolve_lib2_path
-    from core.library2.importer import split_artist_credits
 
     subjects = scoped_file_subjects(SimpleNamespace(scope=scope), active_file_subjects(database, config_manager))
     if only_file_ids is not None:
@@ -165,6 +164,10 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         for row in conn.execute("SELECT ta.track_id,a.name FROM lib2_track_artists ta "
                                 "JOIN lib2_artists a ON a.id=ta.artist_id ORDER BY ta.position"):
             credits[int(row[0])].append(row[1])
+        # who performs each song, as the row says (a compilation's own credit)
+        performers = {int(r[0]): r[1] for r in conn.execute(
+            "SELECT id, track_artist FROM lib2_tracks"
+            " WHERE track_artist IS NOT NULL AND track_artist <> ''")}
 
     reference_keys = defaultdict(set)
     inode_keys = defaultdict(set)
@@ -186,8 +189,8 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
                                     resolve_lib2_path(subject["path"], config_manager=config_manager) or subject["path"])
         subject["norm_title"] = _normalized_title(subject["title"])
         subject["title_numbers"] = _title_numbers(subject["norm_title"])
-        names = credits.get(tid) or [subject["artist_name"]]
-        subject["artist_names"] = [str(n).casefold().strip() for name in names for n in split_artist_credits(name or "") if n]
+        subject["artist_names"] = _performer_names(
+            credits.get(tid) or [subject["artist_name"]], performers.get(tid), subject)
         subject["quality_order"] = order[fid]
         subject["quality_tier"] = tiers[fid]
         subject["playlists"] = playlists.get(tid, [])
@@ -232,6 +235,29 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         subject["protected_reasons"] = reasons
         subject["snapshot"] = _file_snapshot(subject)
     return subjects
+
+
+def _performer_names(credited: list, track_artist, subject: dict) -> list:
+    """The names a song is credited to, folded, for the artist half of a
+    tag match. "Various Artists" is never one of them: it is the album's
+    credit on every song of a compilation, so two different performers'
+    "Intro" on one compilation matched on it (#1263). A compilation song
+    whose only credit is that falls back to its performer, as the row has
+    it (track_artist), then as the file's own artist tag has it (3.6.1's
+    #1315 healing). Nothing left means no artist evidence at all."""
+    from core.imports.compilation import is_various_artists_name
+    from core.library2.importer import split_artist_credits
+
+    names = [n for n in credited if n and not is_various_artists_name(n)]
+    if not names:
+        tag = None
+        try:
+            tag = (json.loads(subject.get("tags_json") or "{}") or {}).get("artist")
+        except (TypeError, ValueError):
+            pass
+        names = [n for n in (track_artist, tag) if n and not is_various_artists_name(n)][:1]
+    return [str(n).casefold().strip() for name in names
+            for n in split_artist_credits(name or "") if n and not is_various_artists_name(n)]
 
 
 def _strong_evidence(a: dict, b: dict) -> bool:
