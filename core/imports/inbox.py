@@ -115,7 +115,7 @@ def _file_row(path: str, record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         'full_path': path,
         'rel_path': r.get('rel_path') or os.path.basename(path),
         'title': r.get('title') or '',
-        'artist': r.get('albumartist') or r.get('artist') or '',
+        'artist': r.get('artist') or r.get('albumartist') or '',
         'album': r.get('album') or '',
         'track_number': r.get('track_number'),
         'disc_number': r.get('disc_number'),

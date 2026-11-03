@@ -151,7 +151,13 @@ def _raw_audio_save(audio_file: Any, symbols: Any, target: Any = None) -> None:
     save in place (the exact call used before #819, byte-for-byte unchanged); a
     path → save into that file (the atomic temp copy)."""
     if isinstance(audio_file.tags, symbols.ID3):
-        audio_file.save(v1=0, v2_version=4) if target is None else audio_file.save(target, v1=0, v2_version=4)
+        # ID3 inside an AIFF/WAVE container has no ID3v1 trailer. Its save
+        # implementation accepts v2_version, but rejects MP3's v1 argument.
+        from mutagen.aiff import AIFF
+        from mutagen.wave import WAVE
+
+        kwargs = {'v2_version': 4} if isinstance(audio_file, (AIFF, WAVE)) else {'v1': 0, 'v2_version': 4}
+        audio_file.save(**kwargs) if target is None else audio_file.save(target, **kwargs)
     elif isinstance(audio_file, symbols.FLAC):
         audio_file.save(deleteid3=True) if target is None else audio_file.save(target, deleteid3=True)
     else:

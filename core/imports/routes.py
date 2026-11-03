@@ -1894,6 +1894,25 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
     # picked, same as it did before this flag existed.)
     from_own_tags = file_info.get("from_own_tags") is True and not manual_match
 
+    if from_own_tags:
+        # The inbox/request can be stale, or contain a filename-derived artist.
+        # Re-read the validated file, never a client-supplied filename/path.
+        embedded = _read_staging_file_metadata(file_path, filename_fallback=False)
+        title = embedded.get("title") or title
+        artist = embedded.get("artist") or artist
+        file_info = dict(file_info)
+        if embedded.get("title") or embedded.get("artist") or embedded.get("album"):
+            # A blank embedded album is meaningful (an album-less remix).
+            file_info["album"] = embedded.get("album", "")
+            file_info["albumartist"] = embedded.get("albumartist") or artist
+        for key in ("track_number", "disc_number", "duration_ms"):
+            if embedded.get(key):
+                file_info[key] = embedded[key]
+
+        if not artist or artist.strip().casefold() == 'unknown artist':
+            parsed = runtime.parse_filename_metadata(os.path.basename(file_path))
+            artist = parsed.get('artist') or artist
+
     if not title and not manual_match:
         parsed = runtime.parse_filename_metadata(file_info.get("filename", ""))
         title = parsed.get("title") or os.path.splitext(file_info.get("filename", "Unknown"))[0]
@@ -1915,6 +1934,13 @@ def process_single_import_file(runtime: ImportRouteRuntime, file_info: Dict[str,
             duration_ms=file_info.get("duration_ms"),
         )
         context = runtime.normalize_import_context(resolved["context"])
+        if from_own_tags:
+            # Keep the file's frames/art/custom tags, and retain the album
+            # credit separately from the performing artist (compilations).
+            context['_preserve_embedded_tags'] = True
+            album_artist = file_info.get("albumartist")
+            if isinstance(album_artist, str) and album_artist.strip():
+                context['album']['artists'] = [{'name': album_artist.strip()}]
         context['is_local_import'] = True  # user's own file, not an slskd transfer (#804)
         # Manual import = the user explicitly matched this exact file to this
         # track, so the quality profile has no veto here (#1017). AcoustID,
