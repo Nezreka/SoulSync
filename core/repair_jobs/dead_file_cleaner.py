@@ -56,9 +56,33 @@ class DeadFileCleanerJob(RepairJob):
     icon = "repair-icon-deadfile"
     default_enabled = True
     default_interval_hours = 24
-    default_settings = {}
+    # 3.6.1's guard settings: from this many files on, this share unreachable
+    # at once is a mount or mapping problem
+    default_settings = {'max_unresolved_fraction': _GUARD_SHARE,
+                        'min_tracks_for_guard': _GUARD_MIN_FILES}
     auto_fix = False
     supports_file_scope = True
+
+    def _guard_settings(self, context: JobContext):
+        """The saved guard values, the 3.6.1 defaults when absent or garbage."""
+        saved = {}
+        try:
+            raw = context.config_manager.get(self.get_config_key('settings'), {}) \
+                if context.config_manager else {}
+            saved = raw if isinstance(raw, dict) else {}
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            share = float(saved.get('max_unresolved_fraction', _GUARD_SHARE))
+            share = share if 0 < share <= 1 else _GUARD_SHARE
+        except (TypeError, ValueError):
+            share = _GUARD_SHARE
+        try:
+            minimum = int(saved.get('min_tracks_for_guard', _GUARD_MIN_FILES))
+            minimum = minimum if minimum >= 0 else _GUARD_MIN_FILES
+        except (TypeError, ValueError):
+            minimum = _GUARD_MIN_FILES
+        return share, minimum
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -95,7 +119,8 @@ class DeadFileCleanerJob(RepairJob):
                 if context.report_progress:
                     context.report_progress(scanned=done, total=total_files)
             checked = result.scanned + missing
-            if deferred or (checked >= _GUARD_MIN_FILES and missing >= checked * _GUARD_SHARE):
+            share, minimum = self._guard_settings(context)
+            if deferred or (checked >= minimum and missing >= checked * share):
                 result.stopped_early = _unreachable_report(
                     context, missing=missing, checked=checked, deferred=deferred, before=before)
             after = scoped_file_subjects(context, active_file_subjects(

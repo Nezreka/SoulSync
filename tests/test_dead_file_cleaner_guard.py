@@ -169,3 +169,29 @@ def test_a_few_missing_files_are_just_missing_files(monkeypatch):
     result, progress = _unreachable(monkeypatch, total=30, missing=2)
     assert result.stopped_early == ""
     assert not any(p.get("log_type") == "error" for p in progress)
+
+
+def test_the_saved_guard_settings_still_decide(monkeypatch):
+    """found in the second #1062 review: 3.6.1 read max_unresolved_fraction
+    and min_tracks_for_guard; v2 hardcoded 0.5 / 25 while the Tools page still
+    showed the saved values"""
+    before = [_subject(i) for i in range(30)]
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: list(before))
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda _db, **kw: {
+        "scanned": len(kw["file_ids"]) - 18, "missing": 18})
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
+
+    def run(settings):
+        context = JobContext(
+            db=SimpleNamespace(), transfer_folder="/music",
+            config_manager=SimpleNamespace(
+                get=lambda key, default=None: settings if key.endswith(".settings") else default,
+                get_active_media_server=lambda: None),
+            create_finding=lambda **_k: True)
+        return DeadFileCleanerJob().scan(context).stopped_early
+
+    assert run({}) != ""                                        # 18 of 30 >= 0.5
+    assert run({"max_unresolved_fraction": 0.9}) == ""          # the user's 0.9
+    assert run({"min_tracks_for_guard": 100}) == ""             # too small a library
+    assert run({"max_unresolved_fraction": "junk"}) != ""       # garbage: default
