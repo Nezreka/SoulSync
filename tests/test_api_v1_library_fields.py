@@ -748,3 +748,17 @@ def test_playlist_tracks_carry_the_ids_every_other_v1_route_shows(client, db, mo
         for t in tracks:  # and each id opens that same track
             assert client.get(f"/api/v1/library/tracks/{t['id']}").get_json()["data"]["track"]["title"] \
                 == t["title"]
+
+
+def test_album_copyright_comes_from_the_tidal_or_qobuz_payload(client, db):
+    """found in the second #1062 review: 3.6.1 kept album copyright in a
+    column the Tidal/Qobuz workers filled; lib2 keeps it in their payload and
+    v1 served null"""
+    conn = db._get_connection()
+    enrichment = json.loads(conn.execute("SELECT enrichment FROM lib2_albums WHERE id=1").fetchone()[0])
+    enrichment["qobuz"] = {"copyright": "(P) 1999 Test Label"}
+    conn.execute("UPDATE lib2_albums SET enrichment=? WHERE id=1", (json.dumps(enrichment),))
+    conn.commit()
+    conn.close()
+    album = client.get("/api/v1/library/albums/al1::soulsync").get_json()["data"]["album"]
+    assert album["copyright"] == "(P) 1999 Test Label"

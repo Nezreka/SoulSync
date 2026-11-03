@@ -22750,6 +22750,14 @@ class MusicDatabase:
                 if isinstance(payload, dict):
                     for key, value in payload.items():
                         item[f'{service}_{key}'] = value
+            if entity_type == 'album' and not item.get('copyright') and isinstance(enrichment, dict):
+                # 3.6.1 kept album copyright in a column the Tidal/Qobuz workers
+                # filled; lib2 keeps it in their payload, and v1 served null
+                for service in ('tidal', 'qobuz'):
+                    payload = enrichment.get(service)
+                    if isinstance(payload, dict) and payload.get('copyright'):
+                        item['copyright'] = payload['copyright']
+                        break
         return data
 
     def api_get_artist(self, artist_id: Union[int, str]) -> Optional[Dict[str, Any]]:
