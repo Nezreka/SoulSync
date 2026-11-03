@@ -28,6 +28,7 @@ updates the stored native index path.
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import closing
 from dataclasses import dataclass, field
@@ -438,12 +439,34 @@ def reconcile_imported_path_drift(
                 stats["repointed"] += 1
             else:
                 unresolved.add(int(proposal["file_id"]))
+        if (stats["checked"] == len(ids) and len(ids) >= min(size, 50)
+                and len(unresolved) == len(ids) and not stats["repointed"]
+                and _storage_unreachable(database, ids, config_manager)):
+            # the first batch found nothing at all and the storage it lives on
+            # is not there: an unmounted library, not 300k renamed files.
+            # walking the rest resolves every row three times for the same
+            # answer, inside the upgrade barrier. leave them for the scans
+            # that run once the drive is back.
+            logger.warning("path drift: library storage unreachable, skipping the walk "
+                           "(%d files checked, none found)", len(ids))
+            stats["skipped_unreachable"] = 1
+            break
         if unresolved:
             from core.library2.scan import rescan_files
             observed = rescan_files(database, file_ids=sorted(unresolved))
             stats["protected"] += int(observed.get("missing") or 0)
             stats["unresolved"] += len(unresolved)
     return stats
+
+
+def _storage_unreachable(database, file_ids, config_manager) -> bool:
+    """Whether the storage under these rows is down, not merely the files gone."""
+    with closing(database._get_connection()) as conn:
+        sample = [row[0] for row in conn.execute(
+            "SELECT path FROM lib2_track_files WHERE id IN (SELECT value FROM json_each(?)) LIMIT 5",
+            (json.dumps([int(i) for i in file_ids]),)).fetchall() if row[0]]
+    return bool(sample) and not any(
+        _paths.missing_path_root_is_healthy(path, config_manager) for path in sample)
 
 
 __all__ = [
