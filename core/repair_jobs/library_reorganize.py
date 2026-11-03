@@ -160,6 +160,12 @@ class LibraryReorganizeJob(RepairJob):
             try:
                 preview = preview_album_reorganize(context.db, context.config_manager, album_id)
             except ReorganizeBridgeError as exc:
+                if getattr(exc, "status", None) == 404:
+                    # deleted (or emptied) while the scan ran: nothing to do,
+                    # not a failure (3.6.1 skipped it the same way)
+                    logger.debug("Reorganize: album %s is gone (%s), skipped", album_id, exc)
+                    result.skipped += 1
+                    continue
                 logger.warning("Reorganize bridge rejected album %s: %s", album_id, exc)
                 result.errors += 1
                 continue
