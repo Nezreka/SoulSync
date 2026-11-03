@@ -135,6 +135,8 @@ export function unmatchApiBase(source: SyncSourceId): string {
       return '/api/listenbrainz';
     case 'qobuz':
       return '/api/qobuz';
+    case 'ytmusic':
+      return '/api/ytmusic';
     default:
       return '/api/youtube';
   }

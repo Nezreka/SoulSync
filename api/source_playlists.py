@@ -4149,6 +4149,7 @@ def cancel_itunes_link_sync(url_hash):
 @bp.route('/api/beatport/discovery/unmatch', methods=['POST'])
 @bp.route('/api/listenbrainz/discovery/unmatch', methods=['POST'])
 @bp.route('/api/qobuz/discovery/unmatch', methods=['POST'])
+@bp.route('/api/ytmusic/discovery/unmatch', methods=['POST'])
 def unmatch_discovery_track():
     """Remove a discovery match — sets track back to Not Found"""
     try:
@@ -4178,6 +4179,10 @@ def unmatch_discovery_track():
             state = listenbrainz_playlist_states.get(identifier)
         elif '/qobuz/' in path:
             state = qobuz_discovery_states.get(identifier)
+        elif '/ytmusic/' in path:
+            # YT Music keeps its own states; posted to the YouTube route it
+            # looked in youtube_playlist_states and always answered 404
+            state = ytmusic_discovery_states.get(identifier)
 
         if not state:
             return jsonify({'success': False, 'error': 'Discovery state not found'}), 404
