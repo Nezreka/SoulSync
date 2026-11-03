@@ -366,6 +366,58 @@ def test_auto_monitored_duplicate_with_placeholder_tracks_folds_and_unmirrors(
     assert any(r["op"] == "wishlist_remove" for r in ops)
 
 
+def _attack_on_titan_pair(imported_conn):
+    aid = _artist_id(imported_conn)
+    _set_artist_mbid(imported_conn, aid)
+    _seed_album(imported_conn, aid,
+                title="TVアニメ「進撃の巨人」Season 2 オリジナルサウンドトラック",
+                release_date="2017-06-07", expected_track_count=33)
+    en_id = _seed_album(imported_conn, aid,
+                        title='TV Anime "Attack on Titan Season 2" (Original Soundtrack)',
+                        origin="discography", release_date="2017-06-07",
+                        expected_track_count=33, monitored=1)
+    track = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) VALUES(?,?,1,1)",
+        (en_id, "Cut 1")).lastrowid
+    return aid, en_id, track
+
+
+def test_a_track_someone_wished_for_keeps_the_duplicate_out_of_the_fold(
+        legacy_db, imported_conn):
+    """only the album's rules were checked: a profile's own wish on one of the
+    duplicate's tracks was deleted with the row and fell off their wishlist"""
+    from core.library2.monitor_rules import record_rule
+
+    aid, en_id, track = _attack_on_titan_pair(imported_conn)
+    record_rule(imported_conn, "album", en_id, True, "new_release")
+    record_rule(imported_conn, "track", track, True, "user_explicit", profile_id=3)
+    imported_conn.commit()
+
+    stats = R.reconcile_artist_release_groups(legacy_db, aid, client=FakeMBClient(_sawano_groups()))
+
+    assert stats["merged"] == 0
+    assert imported_conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id=?",
+                                 (en_id,)).fetchone()[0] == 1
+
+
+def test_the_fold_withdraws_every_profiles_wishlist_rows(legacy_db, imported_conn):
+    """the un-mirror only ran for profile 1; another profile's wishlist kept
+    the dead row's tracks and downloaded them forever"""
+    from core.library2.monitor_rules import record_rule
+
+    aid, en_id, track = _attack_on_titan_pair(imported_conn)
+    record_rule(imported_conn, "album", en_id, True, "new_release")
+    record_rule(imported_conn, "track", track, True, "cascade", profile_id=4)
+    imported_conn.commit()
+
+    stats = R.reconcile_artist_release_groups(legacy_db, aid, client=FakeMBClient(_sawano_groups()))
+
+    assert stats["merged"] == 1
+    removals = {r["profile_id"] for r in imported_conn.execute(
+        "SELECT profile_id FROM lib2_mirror_outbox WHERE op='wishlist_remove'")}
+    assert {1, 4} <= removals
+
+
 # --- release id vs release-group id -----------------------------------------
 #
 # `lib2_albums.musicbrainz_id` is the concrete MB *release* — the id a file's

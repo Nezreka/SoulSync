@@ -246,10 +246,22 @@ def _match_by_date(album: Dict[str, Any],
 
 
 def _has_preserved_intent(cursor: Any, album_id: int) -> bool:
-    return cursor.execute(
+    """A person asked for this row or one of its tracks, in any profile. The
+    album rule alone was checked, so a track someone wished for on the
+    duplicate lost its rule in the fold and dropped off their wishlist."""
+    if cursor.execute(
         """SELECT 1 FROM lib2_monitor_rules
             WHERE entity_type='album' AND entity_id=?
               AND provenance IN ('user_explicit', 'wishlist_import')
+            LIMIT 1""",
+        (album_id,),
+    ).fetchone() is not None:
+        return True
+    return cursor.execute(
+        """SELECT 1 FROM lib2_monitor_rules r
+             JOIN lib2_tracks t ON t.id = r.entity_id
+            WHERE r.entity_type='track' AND t.album_id=?
+              AND r.provenance IN ('user_explicit', 'wishlist_import')
             LIMIT 1""",
         (album_id,),
     ).fetchone() is not None
@@ -343,8 +355,16 @@ def _fold_duplicate(cursor: Any, survivor: Dict[str, Any],
         "SELECT id FROM lib2_tracks WHERE album_id=?", (duplicate["id"],))]
     if track_ids:
         from core.library2.mirror_outbox import enqueue_tracks
-        enqueue_tracks(cursor.connection, track_ids, False)
         marks = ",".join("?" for _ in track_ids)
+        # every profile that wanted these tracks, not only the admin's: each
+        # profile's wishlist holds its own row for them
+        profiles = {1} | {int(r[0]) for r in cursor.execute(
+            f"""SELECT profile_id FROM lib2_wanted_tracks WHERE track_id IN ({marks})
+                UNION SELECT profile_id FROM lib2_monitor_rules
+                 WHERE entity_type='track' AND entity_id IN ({marks})""",
+            (*track_ids, *track_ids)) if r[0] is not None}
+        for profile_id in sorted(profiles):
+            enqueue_tracks(cursor.connection, track_ids, False, profile_id=profile_id)
         for table, column in (("lib2_wanted_tracks", "track_id"),
                               ("lib2_track_artists", "track_id"),
                               ("lib2_monitor_rules", "entity_id")):
