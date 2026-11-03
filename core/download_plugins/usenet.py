@@ -106,13 +106,30 @@ def _music_protected_roots() -> list:
     return roots
 
 
+def _music_library_roots() -> list:
+    """Folders a job folder may never lie inside: the transfer folder and the
+    music library (a client completing straight into them)."""
+    roots = []
+    try:
+        from core.settings import config_manager
+        transfer = config_manager.get('soulseek.transfer_path', '')
+        if transfer:
+            roots.append(str(transfer))
+        for value in config_manager.get('library.music_paths', []) or []:
+            if value:
+                roots.append(str(value))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("remove completed: couldn't read the library folders: %s", e)
+    return roots
+
+
 def _remove_job(job_id, mode: str, *, adapter=None, label: str = '') -> bool:
     from core.downloads import remove_completed
     return remove_completed.remove_imported_job(
         job_id, mode, run=run_async,
         adapter=adapter if adapter is not None else get_active_usenet_adapter(),
         label=label, resolve=resolve_reported_save_path,
-        protected=_music_protected_roots())
+        protected=_music_protected_roots(), libraries=_music_library_roots())
 
 
 def remove_imported_album_job(job_id: str, label: str = '') -> bool:

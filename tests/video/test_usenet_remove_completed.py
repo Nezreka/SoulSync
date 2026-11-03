@@ -170,6 +170,38 @@ def test_a_category_folder_a_link_or_a_protected_root_is_never_the_job_folder(tm
     assert rc.job_folder(None, job.name) is None and rc.job_folder(str(job), "") is None
 
 
+def test_a_job_folder_inside_a_library_is_never_deleted(tmp_path):
+    """a client that completes straight into the library, with a naming
+    template that files the album or movie under the job's own name, would
+    otherwise have the imported item itself deleted"""
+    job = _job(tmp_path, name="Artist - Album", files=("01 - Song.flac",))
+    library = job.parent          # the library holds the job folder
+    assert rc.job_folder(str(job), job.name, libraries=[str(library)]) is None
+    assert rc.job_folder(str(job), job.name, libraries=[str(job)]) is None
+    assert rc.job_folder(str(job), job.name, libraries=[str(job / "inner")]) is None
+    # a library elsewhere does not touch it
+    elsewhere = tmp_path / "library"
+    elsewhere.mkdir()
+    assert rc.job_folder(str(job), job.name, libraries=[str(elsewhere)]) == str(job)
+
+
+def test_files_mode_keeps_a_job_folder_that_lies_in_the_library(tmp_path):
+    job = _job(tmp_path, name="Artist - Album", files=("01 - Song.flac",))
+
+    class Adapter:
+        async def get_status(self, job_id):
+            from types import SimpleNamespace
+            return SimpleNamespace(save_path=str(job), name=job.name)
+
+        async def remove(self, job_id, delete_files=False):
+            return True
+
+    import asyncio
+    removed = rc.remove_imported_job("j1", "files", run=asyncio.run, adapter=Adapter(),
+                                     libraries=[str(job.parent)])
+    assert removed is True and job.is_dir() and (job / "01 - Song.flac").exists()
+
+
 def test_the_reported_path_is_resolved_to_this_mount(tmp_path):
     job = _job(tmp_path)
     resolve = lambda p: p.replace("/client/complete", str(job.parent.parent))  # noqa: E731

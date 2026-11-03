@@ -329,3 +329,24 @@ def test_the_music_setting_is_on_the_settings_page_and_saved():
     js = (_ROOT / 'webui' / 'static' / 'settings.js').read_text(encoding='utf-8')
     assert "remove_completed: _cfgStr('music-usenet-remove-completed'" in js
     assert "settings.usenet_client?.remove_completed" in js
+
+
+def test_both_sides_hand_their_library_folders_to_the_folder_check(monkeypatch):
+    """the music transfer/library folders and the video library folders may
+    never hold a job folder that files mode deletes"""
+    from core.downloads import remove_completed as rc
+    from core.download_plugins import usenet
+    seen = {}
+    monkeypatch.setattr(rc, "remove_imported_job",
+                        lambda *a, **k: seen.setdefault("libraries", list(k.get("libraries") or [])) or True)
+    from core.settings import config_manager
+    real = config_manager.get
+    monkeypatch.setattr(config_manager, "get", lambda key, default=None: (
+        "/music/transfer" if key == "soulseek.transfer_path"
+        else ["/music/library"] if key == "library.music_paths" else real(key, default)))
+    usenet._remove_job("j1", "files", adapter=object())
+    assert set(seen["libraries"]) == {"/music/transfer", "/music/library"}
+
+    import inspect
+    from core.video import download_monitor
+    assert "libraries=_library_roots()" in inspect.getsource(download_monitor._remove_completed_usenet)

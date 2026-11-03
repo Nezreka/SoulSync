@@ -191,7 +191,8 @@ def _remove_completed_usenet(db, dl, upd) -> bool:
         return remove_completed.remove_imported_job(ref, mode, run=_run,
                                                     label=str(dl.get("title") or ""),
                                                     resolve=_resolve_path,
-                                                    protected=_protected_roots())
+                                                    protected=_protected_roots(),
+                                                    libraries=_library_roots())
     except Exception:  # noqa: BLE001 - never let client cleanup break the monitor tick
         logger.warning("video import: remove-completed failed for download %s",
                        dl.get("id"), exc_info=True)
@@ -245,6 +246,14 @@ def _protected_roots() -> set:
             roots.add(os.path.abspath(dl_dir))
     except Exception:   # noqa: BLE001
         pass
+    return roots | _library_roots()
+
+
+def _library_roots() -> set:
+    """The video library and transfer folders: a usenet job folder found inside
+    one is never deleted by Remove Completed (a client completing straight
+    into the library). Best-effort."""
+    roots = set()
     try:
         from api.video import get_video_db
         db = get_video_db()

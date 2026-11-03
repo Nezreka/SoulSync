@@ -62,7 +62,8 @@ def matches_job_name(folder_name: Any, job_name: Any) -> bool:
 
 def job_folder(save_path: Any, job_name: Any, *,
                resolve: Optional[Callable[[str], str]] = None,
-               protected: Iterable[Any] = ()) -> Optional[str]:
+               protected: Iterable[Any] = (),
+               libraries: Iterable[Any] = ()) -> Optional[str]:
     """The job's own folder from what the client reported for it, or None.
 
     ``save_path`` is the client's final path for the job (a folder, or for a
@@ -72,7 +73,11 @@ def job_folder(save_path: Any, job_name: Any, *,
     named after the job (see ``matches_job_name``), is a real folder (not a
     link), and is neither a protected root nor a folder that holds one -- so a
     category folder that holds jobs without folders of their own, the
-    download folder and the library are never returned."""
+    download folder and the library are never returned. Nor anything INSIDE a
+    ``libraries`` root (the library and transfer folders): a client that
+    completes straight into the library, with a naming template that files
+    the album under the job's own name, would have the imported album itself
+    deleted."""
     if not save_path or not job_name:
         return None
     try:
@@ -98,6 +103,16 @@ def job_folder(save_path: Any, job_name: Any, *,
                     return None          # the root itself, or a folder holding it
             except ValueError:
                 continue                 # different drives: cannot hold it
+        for root in libraries or ():
+            if not root:
+                continue
+            library = os.path.realpath(os.path.abspath(str(root)))
+            try:
+                common = os.path.commonpath([real, library])
+            except ValueError:
+                continue                 # different drives
+            if common in (real, library):
+                return None              # holds the library, or lies inside it
         return path
     except (OSError, TypeError, ValueError):
         return None
@@ -131,7 +146,8 @@ def _delete_job_folder(path: str, what: str, logger) -> bool:
 def remove_imported_job(job_id: Any, mode: Any, *, run: Callable[[Any], Any],
                         adapter: Optional[Any] = None, label: str = "",
                         resolve: Optional[Callable[[str], str]] = None,
-                        protected: Iterable[Any] = ()) -> bool:
+                        protected: Iterable[Any] = (),
+                        libraries: Iterable[Any] = ()) -> bool:
     """Take an imported usenet job out of the client per ``mode``.
 
     ``run`` executes the adapter's coroutine (each side passes the runner it
@@ -162,7 +178,8 @@ def remove_imported_job(job_id: Any, mode: Any, *, run: Callable[[Any], Any],
             if status is not None:
                 reported = getattr(status, "save_path", None)
                 folder = job_folder(reported, getattr(status, "name", None),
-                                    resolve=resolve, protected=protected)
+                                    resolve=resolve, protected=protected,
+                                    libraries=libraries)
                 gone = folder is None and _reported_path_gone(reported, resolve)
         removed = bool(run(adapter.remove(str(job_id), delete_files=(mode == FILES))))
     except Exception:  # noqa: BLE001 - external client boundary; the import already landed
