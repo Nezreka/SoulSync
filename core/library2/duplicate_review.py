@@ -305,9 +305,21 @@ def _similar_tags(a: dict, b: dict, settings: dict) -> bool:
             return True
     if _filename_key(a["path"]) and _filename_key(a["path"]) == _filename_key(b["path"]):
         if a.get("duration") and b.get("duration"):
-            return abs(int(a["duration"]) - int(b["duration"])) <= 3000 and artist_score >= 0.6
+            same_length = abs(int(a["duration"]) - int(b["duration"])) <= 3000
+            # slskd's "_<timestamp>" twin of a file often has no artist tag at
+            # all: the same name and the same length are the evidence then
+            # (3.6.1 paired these); a blank never pairs without both lengths
+            return same_length and (artist_score >= 0.6 or _no_artist(a) or _no_artist(b))
         return artist_score >= 0.6
     return False
+
+
+_UNKNOWN_ARTISTS = frozenset({"unknown artist", "unknown", "[unknown]", "<unknown>", "various"})
+
+
+def _no_artist(subject: dict) -> bool:
+    """No usable artist name: none at all, or only a placeholder."""
+    return all(n in _UNKNOWN_ARTISTS for n in subject.get("artist_names") or [])
 
 
 def _recommended(files: list[dict]) -> dict:

@@ -488,3 +488,52 @@ def test_another_failure_gives_its_reason_without_the_permission_hint(library, m
     result, _pa, _pb = _failing_keep_best(library, monkeypatch, OSError("No space left on device"))
     assert "No space left on device" in result["error"]
     assert "PUID" not in result["error"]
+
+
+# --- slskd's "_<timestamp>" twin with no artist tag ------------------------------
+
+
+def _named(library, tid, name):
+    db, _config, root, _transfer = library
+    with closing(db._get_connection()) as conn:
+        old = conn.execute("SELECT path FROM lib2_track_files WHERE track_id=?", (tid,)).fetchone()[0]
+        new = os.path.join(str(root), name)
+        os.rename(old, new)
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?", (new, tid))
+        conn.commit()
+    return new
+
+
+@pytest.mark.parametrize("blank", ["", "Unknown Artist"])
+def test_an_slskd_twin_with_no_artist_pairs_on_name_and_length(library, blank):
+    """3.6.1 paired "Song.flac" with slskd's "Song_638662543210987654.flac" when the
+    twin carried no artist: same name, same length"""
+    a, _af, _ = copy(library, artist="M83", title="Midnight City", isrc=None)
+    b, _bf, _ = copy(library, album="Unknown Album", artist=blank or "Unknown Artist",
+                     title="midnight city (1)", isrc=None)
+    _named(library, a, "Midnight City.flac")
+    _named(library, b, "Midnight City_638662543210987654.flac")
+    if blank == "":
+        with closing(library[0]._get_connection()) as conn:
+            conn.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (b,))
+            conn.execute("UPDATE lib2_tracks SET track_artist=NULL WHERE id=?", (b,))
+            conn.commit()
+    groups = review(library)
+    assert len(groups) == 1 and groups[0]["count"] == 2
+
+
+def test_a_blank_artist_twin_of_another_length_is_not_paired(library):
+    a, _af, _ = copy(library, artist="M83", title="Midnight City", isrc=None)
+    b, _bf, _ = copy(library, album="Unknown Album", artist="Unknown Artist",
+                     title="midnight city (1)", isrc=None, duration=260000)
+    _named(library, a, "Midnight City.flac")
+    _named(library, b, "Midnight City_638662543210987654.flac")
+    assert review(library) == []
+
+
+def test_a_named_different_artist_twin_is_still_not_paired(library):
+    a, _af, _ = copy(library, artist="M83", title="Intro", isrc=None)
+    b, _bf, _ = copy(library, album="Other", artist="Someone Else", title="Intro (live)", isrc=None)
+    _named(library, a, "Intro.flac")
+    _named(library, b, "Intro_638662543210987654.flac")
+    assert review(library) == []
