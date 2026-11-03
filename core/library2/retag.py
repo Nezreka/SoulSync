@@ -611,6 +611,52 @@ def _album_cover_data(database, album_id: int) -> Optional[Tuple[bytes, str]]:
         return None
 
 
+def _preferred_cover_data(database, album_id: int,
+                          data: Dict[str, Any]) -> Optional[Tuple[bytes, str]]:
+    """Re-tag's "replace" cover from the user's cover-art sources, or None.
+
+    3.6.1's Library Re-tag asked ``metadata_enhancement.album_art_order``
+    first, the same list the download embed uses, so changing those sources
+    and re-tagging pulled fresh art from them. ``_album_cover_data`` hands
+    back the cover the album already has (cache, then its files), which made
+    "replace" re-embed the old cover. Same picker and minimum size as the
+    download path. None, and the album's own cover is used, when no order is
+    set, when the album has a cover picked by hand (that always wins), or
+    when no source had one. Never raises.
+    """
+    try:
+        from core.settings import config_manager
+        order = config_manager.get('metadata_enhancement.album_art_order')
+        if not isinstance(order, (list, tuple)) or not order:
+            return None
+        from core.library2.artwork import manual_art_override_url
+        with closing(database._get_connection()) as conn:
+            if manual_art_override_url(conn, "album", int(album_id)):
+                return None
+        from core.metadata import artwork as metadata_artwork
+        from core.metadata.art_lookup import select_preferred_art_url
+        artist = data.get('artist_name') or ''
+        album = data.get('album_title') or ''
+        if not artist or not album:
+            return None
+        validate, fetched = metadata_artwork._min_size_art_validator(
+            config_manager.get('metadata_enhancement.min_art_size', 1000))
+        url = select_preferred_art_url(
+            artist, album,
+            {'artist': artist, 'album_artist': artist, 'album': album,
+             'musicbrainz_release_id': data.get('musicbrainz_release_id')},
+            order, validate=validate)
+        if not url:
+            return None
+        image, mime = fetched.get(url) or metadata_artwork._fetch_art_bytes(url)
+        if not image:
+            return None
+        return image, mime or "image/jpeg"
+    except Exception as e:  # noqa: BLE001 - the album's own cover is the fallback
+        logger.debug("preferred cover for album %s failed: %s", album_id, e)
+        return None
+
+
 def _persist_file_tags(database, file_id: int, file_tags: Dict[str, Any], config=None, source='retag') -> bool:
     """Persist one tag-cache result in a short transaction."""
     from core.library2.tag_cache import persist_tag_cache
@@ -700,7 +746,11 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
                             (policy['cover_art'] == 'replace' or not tags.get('has_cover_art')
                              or (legacy and (legacy_changed or index > 0)))):
                         if row['album_id'] not in covers:
-                            covers[row['album_id']] = _album_cover_data(database, row['album_id'])
+                            # replace asks the user's cover sources first (3.6.1)
+                            covers[row['album_id']] = (
+                                (policy['cover_art'] == 'replace' and not legacy
+                                 and _preferred_cover_data(database, row['album_id'], data))
+                                or _album_cover_data(database, row['album_id']))
                         cover = covers[row['album_id']]
                     diff_data = {**data, 'thumb_url': 'resolved' if cover else None}
                     if legacy:
