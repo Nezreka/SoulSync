@@ -18,7 +18,7 @@ repoints the catalogue at a file that is already there.
 from __future__ import annotations
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, stop_or_pause
 from utils.logging_config import get_logger
 
 logger = get_logger("repair.path_drift_reconcile")
@@ -87,7 +87,7 @@ class PathDriftReconcileJob(RepairJob):
             context.update_progress(total, total)
 
         for entry in entries:
-            if context.check_stop():
+            if stop_or_pause(context):
                 return result
             proposed = entry.get("proposed_stored_path")
             candidate = entry.get("candidate_path")

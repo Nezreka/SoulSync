@@ -95,6 +95,19 @@ def get_scope_file_paths(context: Any) -> Optional[frozenset[str]]:
     )
 
 
+def stop_or_pause(context: Any) -> bool:
+    """``check_stop``, and hold here while the job is paused. True = stop.
+
+    Free function like the scope helpers, so a job loop works the same with
+    the SimpleNamespace contexts the tests build (no pause there: it only
+    stops). Jobs that checked stop but never pause ran on through Pause.
+    """
+    if context.check_stop():
+        return True
+    wait = getattr(context, 'wait_if_paused', None)
+    return bool(wait()) if callable(wait) else False
+
+
 def whole_library_run(context: Any) -> bool:
     """True when this run saw every library file: no artist/file scope and no
     one-library scope (#1199). Only then is something a remembered-answer
