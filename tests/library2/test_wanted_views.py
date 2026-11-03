@@ -206,6 +206,21 @@ class TestListCutoffUnmet:
         conn.commit()
         return conn, track
 
+    def test_another_library_scope_is_never_served_from_the_cache(self, tmp_path, monkeypatch):
+        """found in the second #1062 review: "all libraries" and "shared" both
+        map to profile 1, so the cached list of one was served to the other
+        for a minute, own-library files and all"""
+        from core import library_scope
+        conn, track = self._seed_unmet(tmp_path)
+        conn.execute("UPDATE lib2_track_files SET owner_profile_id=2 WHERE track_id=?", (track,))
+        conn.commit()
+        monkeypatch.setattr(library_scope, "any_own_library_exists", lambda: True)
+        with library_scope.library_scope(None):
+            everything = list_cutoff_unmet(conn)[1]
+        with library_scope.library_scope("shared"):
+            shared = list_cutoff_unmet(conn)[1]
+        assert (everything, shared) == (1, 0)
+
     def test_the_next_page_reuses_the_evaluated_list(self, tmp_path, monkeypatch):
         import core.library2.wanted_views as wv
         conn, _track_id = self._seed_unmet(tmp_path)
