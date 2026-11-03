@@ -195,3 +195,56 @@ def test_beatport_does_not_search_for_a_track_that_isnt_electronic(monkeypatch, 
     # the metadata cache is still asked; beatport's search is not
     assert calls == [False]
 
+
+
+# --- one run covers the whole library (3.6.1) -----------------------------------
+
+
+def _deezer_run(monkeypatch, subjects, stop_after=None):
+    asked = []
+
+    class _Deezer:
+        def get_track_details(self, deezer_id):
+            asked.append(int(deezer_id))
+            return {'bpm': 0}
+
+    monkeypatch.setattr('core.repair_jobs.bpm_backfill.get_client_for_source',
+                        lambda source: _Deezer())
+    monkeypatch.setattr('core.repair_jobs.bpm_backfill.resolve_lib2_path',
+                        lambda *a, **kw: None)
+    context, _findings = _context(monkeypatch, subjects)
+    context.config_manager = type('C', (), {
+        'get': staticmethod(lambda key, default=None:
+                            {'use_file_tags': False, 'use_beatport': False,
+                             'use_deezer': True, 'use_local_analysis': False}
+                            if key.endswith('.settings') else default)})()
+    context.sleep_or_stop = lambda _seconds: False
+    if stop_after is not None:
+        context.check_stop = lambda: len(asked) >= stop_after
+    result = BpmBackfillJob().scan(context)
+    cursor = context.db._get_connection().execute(
+        "SELECT value FROM metadata WHERE key='repair.bpm_backfill.cursor'").fetchone()
+    return result, asked, int(cursor[0]) if cursor else None, context
+
+
+def test_one_run_covers_every_track_missing_bpm(monkeypatch):
+    """3.6.1 scanned the whole library; v2 stopped at 500 a run, so a big
+    library took weeks of scheduled runs to come up."""
+    subjects = [_subject(i, deezer_id=str(i)) for i in range(1, 1201)]
+    result, asked, cursor, _ = _deezer_run(monkeypatch, subjects)
+    assert result.scanned == 1200
+    assert asked == list(range(1, 1201))
+    assert cursor == 0  # a finished pass starts at the top next time
+
+
+def test_a_stopped_run_resumes_after_the_last_track_it_finished(monkeypatch):
+    subjects = [_subject(i, deezer_id=str(i)) for i in range(1, 11)]
+    _result, asked, cursor, context = _deezer_run(monkeypatch, subjects, stop_after=4)
+    assert asked == [1, 2, 3, 4]
+    assert cursor == 4
+
+    asked.clear()
+    context.check_stop = lambda: False
+    BpmBackfillJob().scan(context)
+    # the rest first, then the ones before the stop
+    assert asked == [5, 6, 7, 8, 9, 10, 1, 2, 3, 4]

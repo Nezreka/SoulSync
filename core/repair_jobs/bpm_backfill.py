@@ -109,9 +109,11 @@ class BpmBackfillJob(RepairJob):
             return result
 
         # Tracks missing BPM, one subject per track (its primary file when it
-        # has several). A batch per run, continuing where the last one stopped:
-        # a track no source can answer would otherwise hold its place in the
-        # first batch on every run and the rest of the library never come up.
+        # has several). One run covers all of them, as 3.6.1 did; it used to
+        # stop at 500, so a big library took weeks of scheduled runs to come
+        # up. The cursor only remembers where a STOPPED run got to: the next
+        # run starts there, and the tracks before it come last, so a track no
+        # source can answer never keeps the rest of the library waiting.
         try:
             missing = _missing_bpm_subjects(context)
         except Exception as e:
@@ -123,9 +125,15 @@ class BpmBackfillJob(RepairJob):
         # made the next library-wide run skip everything below that id
         scoped = bool(getattr(context, 'scope', None))
         cursor = 0 if scoped else _gap_cursor(context, _BPM_CURSOR_KEY)
-        tracks = [s for s in missing if int(s['track_id']) > cursor][:_BPM_BATCH]
-        if not tracks:
-            tracks = missing[:_BPM_BATCH]
+        tracks = ([s for s in missing if int(s['track_id']) > cursor]
+                  + [s for s in missing if int(s['track_id']) <= cursor])
+        done = {'last': None}
+
+        def _stopped():
+            # a stopped run picks up after the last track it finished
+            if done['last'] is not None and not scoped:
+                _gap_cursor(context, _BPM_CURSOR_KEY, int(done['last']))
+            return result
 
         total = len(tracks)
         if context.update_progress:
@@ -138,10 +146,12 @@ class BpmBackfillJob(RepairJob):
             context.report_progress(phase=f'Finding BPM for {total} tracks...', total=total)
 
         for i, row in enumerate(tracks):
+            if i:
+                done['last'] = tracks[i - 1]['track_id']
             if context.check_stop():
-                return result
+                return _stopped()
             if i % 20 == 0 and context.wait_if_paused():
-                return result
+                return _stopped()
 
             track_id = row['track_id']
             title, artist_name, album_title = row.get('title'), row.get('artist_name'), row.get('album_title')
@@ -288,15 +298,17 @@ class BpmBackfillJob(RepairJob):
             # Rate limit API calls; local analysis is CPU-bound so no sleep needed
             if bpm_source == 'deezer':
                 if context.sleep_or_stop(0.5):
-                    return result
+                    done['last'] = track_id
+                    return _stopped()
 
             if context.update_progress and (i + 1) % 10 == 0:
                 context.update_progress(i + 1, total)
 
         if context.update_progress:
             context.update_progress(total, total)
-        if tracks and not scoped:
-            _gap_cursor(context, _BPM_CURSOR_KEY, int(tracks[-1]['track_id']))
+        if not scoped:
+            # a finished pass covered everything; the next one starts at the top
+            _gap_cursor(context, _BPM_CURSOR_KEY, 0)
 
         if unreachable:
             logger.warning("BPM backfill: %d track files couldn't be found on disk", unreachable)
@@ -326,7 +338,6 @@ class BpmBackfillJob(RepairJob):
             return 0
 
 
-_BPM_BATCH = 500
 _BPM_CURSOR_KEY = 'repair.bpm_backfill.cursor'
 
 
