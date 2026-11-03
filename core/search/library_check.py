@@ -189,12 +189,14 @@ def _result_scope(cursor, names: list[str]) -> tuple[list[int], list[int]]:
 
     from core.text.normalize import normalize_key
 
-    keys = sorted({normalize_key(n) for n in names if n} - {''})
+    keys = set({normalize_key(n) for n in names if n} - {''})
     if not keys:
         return [], []
-    marks = ','.join('?' for _ in keys)
-    artist_ids = [r[0] for r in cursor.execute(
-        f"SELECT id FROM lib2_artists WHERE norm_key(name) IN ({marks})", keys)]
+    # the fold runs once per distinct name for the process, not per row per
+    # search: `norm_key(name) IN (...)` called Python on every artist and
+    # every credited track of the library for each search
+    artist_ids = [row[0] for row in cursor.execute("SELECT id, name FROM lib2_artists")
+                  if row[1] and _folded(row[1]) in keys]
     track_ids: set[int] = set()
     if artist_ids:
         ids_json = json.dumps(artist_ids)
@@ -205,11 +207,31 @@ def _result_scope(cursor, names: list[str]) -> tuple[list[int], list[int]]:
                SELECT track_id FROM lib2_track_artists
                 WHERE artist_id IN (SELECT value FROM json_each(?))""",
             (ids_json, ids_json)))
-    # the partial index on track_artist keeps this off a full scan
-    track_ids.update(r[0] for r in cursor.execute(
-        f"SELECT id FROM lib2_tracks WHERE track_artist IS NOT NULL "
-        f"AND norm_key(track_artist) IN ({marks})", keys))
+    # distinct credit texts through the partial index, folded once each, then
+    # the matching ones fetched by value through the same index
+    credits = [row[0] for row in cursor.execute(
+        "SELECT DISTINCT track_artist FROM lib2_tracks WHERE track_artist IS NOT NULL")
+        if row[0] and _folded(row[0]) in keys]
+    if credits:
+        track_ids.update(r[0] for r in cursor.execute(
+            "SELECT id FROM lib2_tracks WHERE track_artist IS NOT NULL"
+            " AND track_artist IN (SELECT value FROM json_each(?))",
+            (json.dumps(credits),)))
     return artist_ids, sorted(track_ids)
+
+
+_FOLDED: dict = {}
+
+
+def _folded(value: str) -> str:
+    """``normalize_key`` with a memory: names repeat across every search."""
+    hit = _FOLDED.get(value)
+    if hit is None:
+        from core.text.normalize import normalize_key
+        if len(_FOLDED) > 400_000:
+            _FOLDED.clear()
+        hit = _FOLDED[value] = normalize_key(value)
+    return hit
 
 
 def _owned_tracks_sql() -> str:
