@@ -351,6 +351,16 @@ _ALBUM_SORTS = {
 }
 
 
+def _source_has_albums(source: str) -> bool:
+    """Whether a provider's ids are kept on albums at all. A provider the
+    match table doesn't list is filtered as before."""
+    from .match_status import SERVICES
+    for name, _label, entity_types in SERVICES:
+        if name == source:
+            return "album" in entity_types
+    return True
+
+
 def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
                 page: int = 1, limit: int = 75, letter: str = "all",
                 source_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
@@ -395,6 +405,11 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
             params["letter"] = str(letter)[:1]
     from .provider_ids import normalize_provider_name
     source = normalize_provider_name(str(source_filter or "").lstrip("!"))
+    if source and not _source_has_albums(source):
+        # an artist-only provider (genius) carried over from the Artists view:
+        # albums never hold its id, so the filter would empty the grid (3.6.1
+        # left it out)
+        source = ""
     if source:
         # has / has no id from one provider; a leading ! means has none
         parts = [f"COALESCE(json_extract(al.external_ids, '$.{source}'),'') <> ''"]
