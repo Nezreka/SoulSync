@@ -721,6 +721,10 @@ def run_deferred_backfills(database: Any, *,
             from core.maintenance.library_history_dedupe import dedupe_scan_import_history
             stats["history_repeats_removed"] = dedupe_scan_import_history(
                 database, should_stop=should_stop)["removed"]
+            # the Songs tab's artist/album/year/recent sorts walk these
+            # (a pass over every track the first time, then nothing)
+            from core.library2.queries import ensure_song_sort_indexes
+            stats["song_sort_indexes"] = ensure_song_sort_indexes(conn)
     finally:
         ticker.stop()
         conn.close()

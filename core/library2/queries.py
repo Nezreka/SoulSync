@@ -21,6 +21,7 @@ from .sql_util import (
 )
 from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier, _coerce_tags
 from .track_files import primary_order
+from utils.logging_config import get_logger
 
 def _alpha_key(column: str) -> str:
     """Upstream's A-Z key (33da6be49): leading punctuation is skipped, so
@@ -507,6 +508,97 @@ _SONG_SORTS = {
 }
 
 
+logger = get_logger("library2.queries")
+
+# The sorts above read every song and sort them all: ~25 s a page on a 310k
+# library (3.6.1 walked an index). With these indexes the same order is read
+# off an index, one page at a time (25 s -> 0.03 s). Built once, off the
+# startup path (bootstrap.run_deferred_backfills): the two on lib2_tracks
+# read the whole table. Until they exist the sorts run as before, which is
+# faster than an index walk without its index.
+SONG_SORT_INDEXES = {
+    "idx_lib2_tracks_added_order": "lib2_tracks(added_at, id, album_id)",
+    "idx_lib2_tracks_album_order": "lib2_tracks(album_id, disc_number, track_number, id)",
+    "idx_lib2_albums_title_order": "lib2_albums(title COLLATE NOCASE, id)",
+    "idx_lib2_albums_year_order": "lib2_albums(year DESC, title COLLATE NOCASE, id)",
+    "idx_lib2_albums_artist_order": "lib2_albums(primary_artist_id, title COLLATE NOCASE, id)",
+    "idx_lib2_artists_sort_order": "lib2_artists(COALESCE(sort_name, name) COLLATE NOCASE, id)",
+}
+_TRACK_ORDER = "t.disc_number, t.track_number, t.id"
+_ALBUM_WALK = ("FROM lib2_albums al CROSS JOIN lib2_tracks t ON t.album_id = al.id"
+               " LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id")
+# the same order as _SONG_SORTS, written the way the indexes are. "x IS NULL,
+# x DESC" is "x DESC": sqlite sorts NULL lowest, so DESC already puts it last
+_INDEXED_SONG_SORTS = {
+    "recent": ("FROM lib2_tracks t CROSS JOIN lib2_albums al ON al.id = t.album_id"
+               " LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id",
+               "t.added_at DESC, t.id DESC"),
+    "album": (_ALBUM_WALK, f"al.title COLLATE NOCASE, al.id, {_TRACK_ORDER}"),
+    "year": (_ALBUM_WALK, f"al.year DESC, al.title COLLATE NOCASE, al.id, {_TRACK_ORDER}"),
+    # albums whose artist row is gone sort first (no name), see _artist_sorted_ids
+    "artist": ("FROM lib2_artists ar CROSS JOIN lib2_albums al ON al.primary_artist_id = ar.id"
+               " CROSS JOIN lib2_tracks t ON t.album_id = al.id",
+               f"COALESCE(ar.sort_name, ar.name) COLLATE NOCASE, ar.id,"
+               f" al.title COLLATE NOCASE, al.id, {_TRACK_ORDER}"),
+}
+_sort_indexes_ready: set = set()
+
+
+def ensure_song_sort_indexes(conn) -> int:
+    """Create the Songs sort indexes that are missing; how many were made.
+    Never raises: without them the sorts are slow, not wrong."""
+    made = 0
+    for name, target in SONG_SORT_INDEXES.items():
+        try:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                            (name,)).fetchone():
+                continue
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {target}")
+            conn.commit()
+            made += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("songs sort index %s not built (retried next start): %s", name, exc)
+    return made
+
+
+def song_sort_indexes_ready(conn) -> bool:
+    """Every Songs sort index exists in this database (kept once true)."""
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    if db_file and db_file in _sort_indexes_ready:
+        return True
+    names = list(SONG_SORT_INDEXES)
+    have = {r[0] for r in conn.execute(
+        f"SELECT name FROM sqlite_master WHERE type='index' AND name IN ({','.join('?' * len(names))})",
+        names)}
+    ready = have == set(names)
+    if ready and db_file:
+        _sort_indexes_ready.add(db_file)
+    return ready
+
+
+def _artist_sorted_ids(conn, where_sql: str, params: Dict[str, Any], limit: int,
+                       offset: int) -> List[int]:
+    """One page of the artist sort: songs on albums whose artist row is gone
+    first (their name is NULL, which sorts first), then the artist index walk."""
+    gone = [r[0] for r in conn.execute(
+        "SELECT primary_artist_id FROM lib2_albums EXCEPT SELECT id FROM lib2_artists")]
+    lead: List[int] = []
+    if gone:
+        lead = [r[0] for r in conn.execute(
+            f"SELECT t.id {_ALBUM_WALK} WHERE al.primary_artist_id IN"
+            f" (SELECT value FROM json_each(:gone)) AND {where_sql}"
+            f" ORDER BY al.primary_artist_id, al.title COLLATE NOCASE, al.id, {_TRACK_ORDER}",
+            {**params, "gone": json.dumps(gone)})]
+    head = lead[offset:offset + limit]
+    if len(head) >= limit:
+        return head
+    frm, order = _INDEXED_SONG_SORTS["artist"]
+    rest = [r[0] for r in conn.execute(
+        f"SELECT t.id {frm} WHERE {where_sql} ORDER BY {order} LIMIT :limit OFFSET :offset",
+        {**params, "limit": limit - len(head), "offset": max(0, offset - len(lead))})]
+    return head + rest
+
+
 _song_count_cache: Dict[tuple, int] = {}
 
 
@@ -602,9 +694,23 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
     page_sql = (f"WITH hits AS MATERIALIZED (SELECT t.id, t.album_id, t.disc_number, t.track_number,"
                 f" {_fold_sql('t.title')} AS ft, {_alpha_key('t.title')} AS ak {base})"
                 f" SELECT t.id FROM hits t" if q else f"SELECT t.id {base}")
-    ids = [r[0] for r in conn.execute(
-        f"{page_sql} ORDER BY {order} LIMIT :limit OFFSET :offset",
-        {**params, "limit": limit, "offset": (page - 1) * limit})] if total else []
+    indexed = (not q and sort in _INDEXED_SONG_SORTS and total
+               and song_sort_indexes_ready(conn))
+    offset = (page - 1) * limit
+    where_sql = " AND ".join(where)
+    if not total:
+        ids = []
+    elif indexed and sort == "artist":
+        ids = _artist_sorted_ids(conn, where_sql, params, limit, offset)
+    elif indexed:
+        frm, indexed_order = _INDEXED_SONG_SORTS[sort]
+        ids = [r[0] for r in conn.execute(
+            f"SELECT t.id {frm} WHERE {where_sql} ORDER BY {indexed_order}"
+            " LIMIT :limit OFFSET :offset", {**params, "limit": limit, "offset": offset})]
+    else:
+        ids = [r[0] for r in conn.execute(
+            f"{page_sql} ORDER BY {order} LIMIT :limit OFFSET :offset",
+            {**params, "limit": limit, "offset": offset})]
     songs = song_rows(conn, ids)
     capped = filtered and total > SONGS_COUNT_CAP
     total = min(total, SONGS_COUNT_CAP) if capped else total

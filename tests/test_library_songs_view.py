@@ -24,10 +24,14 @@ from core.library2.schema import ensure_library_v2_schema
 from tests import lib2_seed
 
 
-@pytest.fixture()
-def conn(tmp_path, monkeypatch):
+@pytest.fixture(params=["sorted", "index_walk"])
+def conn(tmp_path, monkeypatch, request):
+    """every test runs twice: before the sort indexes exist (the sorted
+    query) and after (the index walk); both must give the same pages"""
     c = lib2_seed.row_conn(str(tmp_path / "music.db"))
     ensure_library_v2_schema(c)
+    if request.param == "index_walk":
+        assert Q.ensure_song_sort_indexes(c) == len(Q.SONG_SORT_INDEXES)
     albums = {'Dangerous': ('Morgan Wallen', 2021), 'Dangerous: The Double Album': ('Morgan Wallen', 2021),
               'Famous Friends': ('Chris Young', 2021), 'Arcade': ('Love Arcade', 2010),
               'Elsewhere': ('Nobody', 2000)}
