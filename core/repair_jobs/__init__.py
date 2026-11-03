@@ -35,8 +35,6 @@ JOB_DATA_BASIS: dict[str, str] = {
     'short_preview_track': 'lib2',
     'skip_audit_cleanup': 'lib2',
     'monitored_discography_refresh': 'lib2',
-    # every library artist's provider discography, back from 3.6.1
-    'discography_backfill': 'lib2',
     'album_catalogue_backfill': 'lib2',
     'album_completeness': 'lib2',
     'album_edition_review': 'lib2',
@@ -109,8 +107,6 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'short_preview_track': frozenset({'observe', 'delete', 'wanted'}),
     'skip_audit_cleanup': frozenset({'none'}),
     'monitored_discography_refresh': frozenset({'discography', 'wanted'}),
-    # findings, and wishlist adds when auto-add is on
-    'discography_backfill': frozenset({'observe', 'wanted'}),
     'album_catalogue_backfill': frozenset({'metadata', 'artwork', 'discography', 'wanted'}),
     'album_edition_review': frozenset({'observe', 'metadata', 'wanted'}),
     'album_completeness': frozenset({'metadata', 'artwork', 'discography', 'wanted'}),
@@ -160,6 +156,7 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
 RETIRED_JOB_IDS = frozenset({
     'quality_upgrade_scanner',
     'quality_upgrade',
+    'discography_backfill',
     'duplicate_detector',
     # NOT 'library_reorganize': unlike the other entries here, nothing native
     # regenerates its 'path_mismatch' findings (core.library2.maintenance_sync
@@ -190,6 +187,7 @@ JOB_ID_MIGRATIONS = {
     # queueing upgrades is not a job any more, it is what the wanted
     # projection does continuously. Their saved configs go inert rather than
     # being folded into an unrelated job's enabled/interval.
+    'discography_backfill': 'monitored_discography_refresh',
     'canonical_version_resolve': 'album_edition_review',
     'duplicate_detector': 'native_duplicate_detector',
     'lib2_skips_cleanup': 'skip_audit_cleanup',
@@ -212,6 +210,7 @@ PRESERVED_RETIRED_FINDING_IDS = frozenset({
     # approvable through `_fix_quality_below_cutoff` instead of being pruned
     # out from under a user who was midway through reviewing them.
     'quality_upgrade_scan',
+    'discography_backfill',
     'canonical_version_resolve',
     'duplicate_detector',
 })
@@ -279,7 +278,6 @@ _JOB_MODULES = [
     'core.repair_jobs.comma_artist_splitter',
     'core.repair_jobs.lib2_skips_cleanup',
     'core.repair_jobs.lib2_discography_refresh',
-    'core.repair_jobs.discography_backfill',
     'core.repair_jobs.album_catalogue_backfill',
     'core.repair_jobs.album_completeness',
     'core.repair_jobs.monitoring_list_reconcile',

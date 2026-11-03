@@ -1,9 +1,10 @@
 """#1709 on Library v2: a stopped library-wide pass resumes.
 
 Upstream's Discography Backfill rescanned the same first artists every run.
-Here the retired backfill's job is Monitored Discography Refresh, which walks
-every monitored artist each run, so the per-run window does not apply; the
-resume does. It shares ``RepairJob.resume_index`` / ``save_checkpoint`` with
+Here the retired backfill's job is the Discography Refresh, which walks
+every artist each run, so the per-run window only applies when Max Artists
+Per Run is set (test_lib2_discography_refresh_library.py); the resume always
+does. It shares ``RepairJob.resume_index`` / ``save_checkpoint`` with
 Library Reorganize (tests/test_reorganize_resume_1716.py): a stopped run
 resumes right after the last item it finished, a finished pass clears the
 checkpoint, and a vanished or foreign checkpoint starts at the top.
