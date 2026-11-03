@@ -174,3 +174,29 @@ def test_row_without_an_id_still_groups_by_name(cur):
 def test_release_id_compare_ignores_case(cur):
     nk = _add(cur, server_id="nk", title=ALBUM, musicbrainz_id=BABY_PUNK.upper())
     assert _find(cur, BABY_PUNK) == nk
+
+
+def test_a_provider_the_indexes_dont_know_still_unifies_by_its_id(cur):
+    """a provider without an index (a newer source) is looked up with the
+    json path bound as a value, so its ids still join a release"""
+    row = _add(cur, server_id="existing", title="Parachutes",
+               external_ids={"hydrabase": "HB1"})
+    got = find_existing_soulsync_album_id(
+        cur, name_key_id="different_hash", artist_id=1,
+        album_name="Parachutes (Deluxe)", album_source_id="HB1", source="hydrabase")
+    assert got == row
+
+
+@pytest.mark.parametrize("source", [
+    # valid sql once spliced: it would match the other album's "x" key
+    "x') IS NOT NULL OR json_extract(external_ids, '$.x",
+    "x') = '' OR 1=1 --", "a.b", "spot ify"])
+def test_a_provider_name_is_never_spliced_into_the_sql(cur, source):
+    """3.6.1 spliced the provider name into json_extract; a name that is not a
+    plain word is never used as a path, and nothing but the title can match"""
+    _add(cur, server_id="other", title="Some Other Album", external_ids={"x": ""})
+    title_row = _add(cur, server_id="existing", title="Parachutes")
+    got = find_existing_soulsync_album_id(
+        cur, name_key_id="different_hash", artist_id=1,
+        album_name="Parachutes", album_source_id="anything", source=source)
+    assert got == title_row

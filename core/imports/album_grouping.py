@@ -23,6 +23,7 @@ Pure SQL-over-a-cursor; no app singletons, so it tests against an in-memory DB.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from utils.logging_config import get_logger
@@ -98,6 +99,7 @@ def find_existing_soulsync_album_id(
         return int(row[0])
 
     provider = (source or '').strip().lower()
+    where, params = None, (album_source_id,)
     if album_source_id and provider:
         if provider in ('spotify', 'musicbrainz'):
             column = 'spotify_id' if provider == 'spotify' else 'musicbrainz_id'
@@ -108,12 +110,17 @@ def find_existing_soulsync_album_id(
             from core.library2.provider_ids import external_id_sql
             try:
                 where = f"{external_id_sql('external_ids', provider)} = ?"
-            except ValueError:  # not a provider the indexes know
-                where = f"json_extract(external_ids, '$.{provider}') = ?"
+            except ValueError:
+                # not a provider the indexes know: the path goes in as a bound
+                # value, never spliced into the sql, and only for a plain name
+                if re.fullmatch(r"[a-z0-9_]+", provider):
+                    where = "json_extract(external_ids, ?) = ?"
+                    params = (f"$.{provider}", album_source_id)
+    if where:
         try:
             row = cursor.execute(
                 f"SELECT id, musicbrainz_id FROM lib2_albums WHERE {where} LIMIT 1",
-                (album_source_id,),
+                params,
             ).fetchone()
             if _usable(row):
                 return int(row[0])
