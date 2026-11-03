@@ -751,6 +751,8 @@ class RepairWorker:
                             defaults['settings'].update({key: policy[key] for key in job.default_settings})
                         except ValueError:
                             pass  # Keep invalid settings visible; the scan reports the error.
+        for key in getattr(job, 'retired_settings', ()) or ():
+            defaults['settings'].pop(key, None)
 
         return defaults
 
@@ -810,6 +812,14 @@ class RepairWorker:
                 current.update(settings)
             else:
                 current = settings
+            # a retired legacy switch the save left out: the user answered
+            # with the switch the page shows, and the stale value must not
+            # override it (see RepairJob.retired_settings)
+            self._ensure_jobs_loaded()
+            job = self._jobs.get(job_id)
+            for key in getattr(job, 'retired_settings', ()) or ():
+                if key not in settings:
+                    current.pop(key, None)
             if job_id == 'genre_enrichment':
                 defaults = self._jobs.get(job_id).default_settings if self._jobs.get(job_id) else {
                     'max_genres': 5, 'include_artists': True, 'include_albums': True, 'allow_live_calls': False}

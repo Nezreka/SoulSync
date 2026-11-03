@@ -507,6 +507,14 @@ class RepairJob(ABC):
     # (Discord, Jose: good tracks swept into the deleted quarantine).
     writes_library_files: bool = False
 
+    # Settings a job carried over from 3.6.1 but no longer shows: they stay
+    # readable (a saved legacy value keeps its meaning until the user answers
+    # with the new switch) but the Tools page doesn't offer them, and the first
+    # save that leaves one out drops it. A shown-but-dead "Dry Run" next to
+    # "Auto Apply" sent the stale value back on every save, so the new switch
+    # snapped back off.
+    retired_settings: tuple = ()
+
     @abstractmethod
     def scan(self, context: JobContext) -> JobResult:
         """Execute the job scan. Must be implemented by each job.

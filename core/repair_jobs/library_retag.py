@@ -83,6 +83,7 @@ class LibraryRetagJob(RepairJob):
                        'cover_art': ['replace', 'fill_missing', 'skip'], 'lyrics': ['fetch', 'skip'],
                        'source': list(RETAG_SOURCES)}
     auto_fix = False
+    retired_settings = ('dry_run',)   # 3.6.1's switch; auto_apply answers it now
     supports_file_scope = True
     # Moves/rewrites real library files, so a LIVE run is refused when the
     # preflight says this process cannot see the library (upstream 36f13cdd8).

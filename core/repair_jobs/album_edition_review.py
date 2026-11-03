@@ -26,6 +26,9 @@ class AlbumEditionReviewJob(RepairJob):
     default_settings = {'min_score': 0.5, 'source_selection': 'active_preferred'}
     setting_options = {'source_selection': ['active_preferred', 'active_only', 'best_fit']}
     auto_fix = False
+    # 3.6.1's canonical resolve pinned live with dry_run off; this job only
+    # ever files findings, so the carried-over switch would do nothing
+    retired_settings = ('dry_run',)
     supports_artist_scope = True
 
     def _subjects(self, context):
