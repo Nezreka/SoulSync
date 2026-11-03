@@ -116,7 +116,8 @@ def run_post_import_precache(database: Any, config_manager: Any, *,
     return results
 
 
-__all__ = ["run_post_import_precache", "prepare_imported_artists", "ArtistPreparationError"]
+__all__ = ["run_post_import_precache", "prepare_imported_artists", "ArtistPreparationError",
+           "full_preparation_pending", "start_background_preparation"]
 
 
 _background_lock = threading.Lock()
@@ -129,6 +130,37 @@ _preparation_state: Dict[str, Any] = {"active": False, "stage": None, "current":
 def preparation_state() -> Dict[str, Any]:
     """A copy of the background preparation's stage and counts."""
     return dict(_preparation_state)
+
+
+# set when a full preparation starts, cleared when every stage finished: a
+# restart in the middle used to run only the short credit pass from then on,
+# so the tracklists and tags of an upgrade were never prepared
+_FULL_PENDING = "post_import_full_preparation_pending"
+
+
+def _set_full_pending(database: Any, pending: bool) -> None:
+    try:
+        with closing(database._get_connection()) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+                         "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            if pending:
+                conn.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) VALUES(?)",
+                             (_FULL_PENDING,))
+            else:
+                conn.execute("DELETE FROM lib2_upgrade_repairs WHERE name=?", (_FULL_PENDING,))
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001 - worst case the next start runs the short pass
+        logger.debug("preparation marker not written: %s", exc)
+
+
+def full_preparation_pending(database: Any) -> bool:
+    """Whether a full post-upgrade preparation started and never finished."""
+    try:
+        with closing(database._get_connection()) as conn:
+            return conn.execute("SELECT 1 FROM lib2_upgrade_repairs WHERE name=?",
+                                (_FULL_PENDING,)).fetchone() is not None
+    except Exception:  # noqa: BLE001 - no table: nothing pending
+        return False
 
 
 def start_background_preparation(database: Any, config_manager: Any, *, full: bool,
@@ -169,7 +201,10 @@ def start_background_preparation(database: Any, config_manager: Any, *, full: bo
         _preparation_state.update(active=True, stage=None, current=0, total=0)
         try:
             if full:
-                run_post_import_precache(database, config_manager, progress=progress)
+                _set_full_pending(database, True)
+                results = run_post_import_precache(database, config_manager, progress=progress)
+                if all(status == "ok" for status in results.values()):
+                    _set_full_pending(database, False)
             else:
                 prepare_imported_artists(database, config_manager, progress=progress)
         except Exception as exc:  # noqa: BLE001 - best effort, the next start retries

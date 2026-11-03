@@ -20586,12 +20586,17 @@ def _autostart_library_v2_bootstrap_import():
             result = lib2_bootstrap.run_bootstrap_if_needed(database, config_manager.get)
             if lib2_bootstrap.should_stop_autostart(result):
                 from core.library2.migration_gate import start_deferred_workers
-                from core.library2.post_import import start_background_preparation
+                from core.library2.post_import import (
+                    full_preparation_pending, start_background_preparation,
+                )
                 start_deferred_workers(database)
                 # the credit split, tracklists and tags run behind a library
                 # that already works. the worker queues skip an unresolved
-                # combined credit on their own, so nothing waits on this
-                if result.get("success"):
+                # combined credit on their own, so nothing waits on this.
+                # a restart in the middle of the full pass runs it again
+                if result.get("success") or (
+                        result.get("skipped") == "already_done"
+                        and full_preparation_pending(database)):
                     start_background_preparation(
                         database, config_manager, full=True,
                         after=lambda: start_artwork_precache(get_database, config_manager))
