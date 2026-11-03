@@ -212,6 +212,44 @@ def delete_quarantine_item(entry_id):
 
 
 @bp.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
+def _after_approved_import(context, batch):
+    """What a finished batch does for its tracks, for one approved later.
+
+    An approval can come long after its batch finished (or a restart dropped
+    it), so no batch completion runs for it: the media server never heard of
+    the file, and the playlist the track was downloaded for was never pushed
+    again, so an approved playlist track waited for the playlist's next full
+    sync (#1976). Only after the pipeline produced a real final file and no
+    rejection flag."""
+    try:
+        from core.imports.pipeline import import_rejection_reason
+        final_path = context.get('_final_processed_path') or context.get('_final_path')
+        if not final_path or not os.path.isfile(final_path) or import_rejection_reason(context) is not None:
+            return
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Quarantine] post-approval check failed: %s", exc)
+        return
+    # the playlist it was downloaded for: synced again once the scan and the
+    # database update below have the track (the same chain a batch uses)
+    try:
+        from core.sync.post_download_sync import register_completed_playlist_batch
+        snapshot = {'approved': {'status': 'completed', 'track_info': context.get('track_info') or {}}}
+        register_completed_playlist_batch(batch or {}, tasks_snapshot=snapshot)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Quarantine] post-approval playlist sync not queued: %s", exc)
+    try:
+        automation_engine = _automation_engine()
+        web_scan_manager = _web_scan_manager()
+        auto_scan_on = (
+            automation_engine is None
+            or automation_engine.is_event_action_enabled('batch_complete', 'scan_library')
+        )
+        if web_scan_manager and auto_scan_on:
+            web_scan_manager.request_scan("Quarantine approval completed")
+    except Exception as scan_exc:  # noqa: BLE001
+        logger.warning("[Quarantine] Post-approval media scan failed: %s", scan_exc)
+
+
 def approve_quarantine_item(entry_id):
     """One-click approve: restore the file and re-run post-process with the
     quarantine gates skipped for this explicit user-approved pass."""
@@ -283,47 +321,22 @@ def approve_quarantine_item(entry_id):
             if _batch_id:
                 context['batch_id'] = _batch_id
         context_key = f"approve_{entry_id}_{int(time.time())}"
-        if _task_id:
-            _reprocess = lambda: _post_process_matched_download_with_verification(
-                context_key, context, restored_path, _task_id, _batch_id,
-            )
-        else:
-            def _reprocess():
+        # the batch the track came in with, while it's still in memory: a
+        # playlist sync batch keeps its playlist there, not on the track
+        try:
+            from core.runtime_state import download_batches
+            _batch = dict(download_batches.get(_batch_id) or {}) if _batch_id else {}
+        except Exception:  # noqa: BLE001 - no batch is just less provenance
+            _batch = {}
+
+        def _reprocess():
+            if _task_id:
+                _post_process_matched_download_with_verification(
+                    context_key, context, restored_path, _task_id, _batch_id,
+                )
+            else:
                 _post_process_matched_download(context_key, context, restored_path)
-                # A manager approval can outlive its original in-memory task.
-                # Without a batch completion callback, external media servers
-                # never learn about the newly imported file. Request the same
-                # coalesced scan used by direct downloads, but only after the
-                # pipeline produced a real final file and no rejection flag.
-                try:
-                    from core.imports.pipeline import import_rejection_reason
-                    automation_engine = _automation_engine()
-                    web_scan_manager = _web_scan_manager()
-                    final_path = (
-                        context.get('_final_processed_path')
-                        or context.get('_final_path')
-                    )
-                    auto_scan_on = (
-                        automation_engine is None
-                        or automation_engine.is_event_action_enabled(
-                            'batch_complete', 'scan_library'
-                        )
-                    )
-                    if (
-                        web_scan_manager
-                        and auto_scan_on
-                        and final_path
-                        and os.path.isfile(final_path)
-                        and import_rejection_reason(context) is None
-                    ):
-                        web_scan_manager.request_scan(
-                            "Quarantine approval completed"
-                        )
-                except Exception as scan_exc:
-                    logger.warning(
-                        "[Quarantine] Post-approval media scan failed: %s",
-                        scan_exc,
-                    )
+            _after_approved_import(context, _batch)
         threading.Thread(target=_reprocess, daemon=True).start()
         logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
         # #876: once one alternative for a song is accepted, the other
