@@ -1291,6 +1291,8 @@ def _carry_artist_files(src_dir: str, dst_dir: str) -> List[str]:
         names = os.listdir(src_dir)
     except OSError:
         return []
+    if any(os.path.splitext(n)[1].lower() in _AUDIO_EXTS for n in names):
+        return []  # a loose track still lives here: its artist files stay with it
     moved = []
     for name in names:
         src = os.path.join(src_dir, name)

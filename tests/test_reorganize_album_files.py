@@ -227,3 +227,17 @@ def test_no_known_root_means_the_artist_folder_stays(tmp_path, monkeypatch):
     _run(tmp_path, preview)
 
     assert (music / "Old Artist" / "artist.jpg").exists()
+
+
+def test_an_artist_folder_with_a_loose_track_keeps_its_photo(tmp_path, monkeypatch):
+    """a single sitting right in the artist folder still belongs there, so its
+    artist.jpg / artist.nfo stay with it (the album carry has the same rule)"""
+    music, preview = _artist_tree(tmp_path, monkeypatch)
+    (music / "Old Artist" / "Loose Single.mp3").write_bytes(b"audio")
+
+    _run(tmp_path, preview)
+
+    assert (music / "Old Artist" / "Loose Single.mp3").exists()
+    assert (music / "Old Artist" / "artist.jpg").exists()
+    assert (music / "Old Artist" / "artist.nfo").exists()
+    assert not (music / "New Artist" / "artist.jpg").exists()
