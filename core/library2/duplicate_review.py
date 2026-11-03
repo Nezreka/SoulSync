@@ -15,6 +15,7 @@ import json
 import os
 import re
 from types import SimpleNamespace
+from typing import Optional
 
 from core.library.duplicate_rules import is_lossy_companion_file, is_lossy_companion_pair, lossy_companion_exts
 from core.library2.duplicate_relationship import (
@@ -27,6 +28,9 @@ from core.library2.track_files import quality_order, quality_tier_columns
 from core.repair_jobs.base import (
     hand_tagged_path_keys, is_hand_tagged_path, scoped_file_subjects,
 )
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.duplicate_review")
 
 REVIEW_SCHEMA = "native_duplicate_review/v1"
 DEFAULT_SETTINGS = {
@@ -414,6 +418,33 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
     return candidates
 
 
+_PERMISSION_MARKERS = ("permission denied", "errno 13", "operation not permitted", "errno 1]",
+                       "read-only file system", "errno 30")
+
+
+def _quarantine_failure(failed: list, rollback: Optional[dict] = None) -> str:
+    """What stopped Keep Best, in words: which file and why, and for a
+    permission error what to check (3.6.1 said "usually a PUID/PGID
+    permission mismatch on the media volume"; v2 said only "Duplicate
+    quarantine failed"). Logged as well as returned."""
+    first = (failed or [{}])[0]
+    path = first.get("path") or "a copy"
+    reason = str(first.get("error") or "unknown error")
+    message = f"Couldn't move {path} to the deleted-files folder ({reason})."
+    if (rollback or {}).get("errors"):
+        message += (" Some copies already moved could not be put back; they are in the "
+                    "deleted-files folder and can be restored from there.")
+    else:
+        message += " Nothing was removed; the copies are where they were."
+    if any(marker in reason.lower() for marker in _PERMISSION_MARKERS):
+        message += (" SoulSync isn't allowed to change that folder. In Docker this is "
+                    "usually a PUID/PGID mismatch with the owner of your music volume.")
+    if len(failed or []) > 1:
+        message += f" ({len(failed)} files failed.)"
+    logger.warning("Keep Best: %s", message)
+    return message
+
+
 def _rollback_moves(database, files: list[dict], transfer_folder: str) -> dict:
     from core.library.deleted_quarantine import list_entries, restore_entries
 
@@ -527,7 +558,8 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         operations.append(outcome["operation_id"])
         if outcome["failed"]:
             rollback = _rollback_moves(database, moved, transfer_folder)
-            return {"success": False, "error": "Duplicate quarantine failed", "failed": outcome["failed"],
+            return {"success": False, "error": _quarantine_failure(outcome["failed"], rollback),
+                    "failed": outcome["failed"],
                     "rollback": rollback, "operation_ids": operations}
         moved.append(f)
     try:

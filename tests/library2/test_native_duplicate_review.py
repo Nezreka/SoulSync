@@ -456,3 +456,35 @@ def test_compilation_songs_with_no_performer_named_never_pair_on_the_credit(libr
     copy(library, artist="Various Artists", album="Now 99", title="Intro", isrc=None)
     copy(library, artist="Various Artists", album="Now 100", title="Intro", isrc=None)
     assert review(library) == []
+
+
+# --- Keep Best says what stopped it (3.6.1's PUID/PGID hint) ---------------------
+
+
+def _failing_keep_best(library, monkeypatch, error):
+    from core.library import deleted_quarantine
+    _a, _af, pa = copy(library)
+    _b, bf, pb = copy(library, album="Other", bit_depth=24)
+    candidate = review(library)[0]
+
+    def move(source, target, *args, **kwargs):
+        raise error
+    monkeypatch.setattr(deleted_quarantine.shutil, "move", move)
+    result = apply(library, candidate, approved=True, keep_file_id=bf)
+    return result, pa, pb
+
+
+def test_a_permission_failure_names_the_file_and_the_puid_pgid_fix(library, monkeypatch):
+    result, pa, pb = _failing_keep_best(
+        library, monkeypatch, PermissionError(13, "Permission denied"))
+    assert result["success"] is False
+    assert str(pa) in result["error"] and "Permission denied" in result["error"]
+    assert "PUID/PGID" in result["error"]
+    assert "Nothing was removed" in result["error"]
+    assert pa.exists() and pb.exists()
+
+
+def test_another_failure_gives_its_reason_without_the_permission_hint(library, monkeypatch):
+    result, _pa, _pb = _failing_keep_best(library, monkeypatch, OSError("No space left on device"))
+    assert "No space left on device" in result["error"]
+    assert "PUID" not in result["error"]
