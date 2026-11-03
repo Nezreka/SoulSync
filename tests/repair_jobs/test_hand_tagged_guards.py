@@ -81,3 +81,26 @@ def test_every_guarded_job_is_wired(module):
     stops doing so silently starts proposing studio-release fixes again."""
     source = inspect.getsource(module)
     assert 'drop_hand_tagged(' in source or 'is_hand_tagged_path(' in source
+
+
+def test_track_number_repair_leaves_an_album_with_one_hand_tagged_file_alone(tmp_path, monkeypatch):
+    """3.6.1 skipped the whole album folder: renumbering the other files of a
+    release the user typed against the service's tracklist splits it"""
+    from core.repair_jobs.base import JobContext
+    db = _db(tmp_path)
+    db.record_manual_metadata_file(LIVE)
+    live_other = LIVE.replace('01 - Of the Girl', '02 - Corduroy')
+    subjects = [
+        {'album_id': 1, 'path': LIVE, 'artist_name': 'Pearl Jam', 'file_id': 1, 'track_id': 1},
+        {'album_id': 1, 'path': live_other, 'artist_name': 'Pearl Jam', 'file_id': 2, 'track_id': 2},
+        {'album_id': 2, 'path': STUDIO, 'artist_name': 'Pearl Jam', 'file_id': 3, 'track_id': 3},
+    ]
+    monkeypatch.setattr(track_number_repair, 'active_file_subjects', lambda *_a, **_k: subjects)
+    asked = []
+    monkeypatch.setattr('core.library2.completeness.resolve_tracklist',
+                        lambda _cfg, _conn, album_id: asked.append(album_id))
+    ctx = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=None)
+
+    track_number_repair.TrackNumberRepairJob().scan(ctx)
+
+    assert asked == [2]

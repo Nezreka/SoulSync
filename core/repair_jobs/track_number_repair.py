@@ -84,10 +84,17 @@ class TrackNumberRepairJob(RepairJob):
         scope_key = scope_artist.casefold() if scope_artist else None
         # hand-tagged: the user typed this release and its numbering; the
         # service's tracklist is the studio album and would renumber it
+        # one hand-tagged file is enough: renumbering the rest of its album
+        # against that tracklist would split the release the user typed
+        # (3.6.1 skipped the whole album folder)
+        everything = active_file_subjects(context.db, context.config_manager)
+        kept = drop_hand_tagged(context, everything)
+        kept_ids = {id(row) for row in kept}
+        hand_albums = {int(row["album_id"]) for row in everything if id(row) not in kept_ids}
         subjects = [
-            row for row in drop_hand_tagged(
-                context, active_file_subjects(context.db, context.config_manager))
-            if not scope_key or str(row.get("artist_name") or "").casefold() == scope_key
+            row for row in kept
+            if int(row["album_id"]) not in hand_albums
+            and (not scope_key or str(row.get("artist_name") or "").casefold() == scope_key)
         ]
         by_album: Dict[int, list[Dict[str, Any]]] = {}
         for subject in subjects:
