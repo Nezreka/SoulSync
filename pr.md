@@ -31,6 +31,10 @@ a hot fix for 3.6.2. on a big library the library page could time out with "coul
 - **discover's decades, labels and undiscovered albums stop reading whole tables:** decades read every pool row in full to get at the year (6.9s, 0.3s now), labels started from every album to find the played tracks, and undiscovered albums built a key for each of 70k owned albums to drop the ones by its 25 artists (3.9s to 0.2s). an owned album by "BJÖRK" also stops showing as undiscovered when you listened to "björk".
 - **musicbrainz lookups by release id stop paying a 404 first.** the library's post-import check asked for each album as a release group, got a 404 (a second at musicbrainz's rate limit) and an error in the log, then asked again as a release. ids known to be releases go straight there now.
 
+- **filter, sort and save filters on manual search results (thanks SeadogsBooty).** a bar over every movie, show, season and episode search: quick text, sort by size, age, quality, format score, seeders, indexer or grabs, and a builder for conditions (1080, hevc, group contains megusta, under 1 gb) matched on all or any, saved per profile. display only, auto still ranks by your profile.
+- **a failed grab shows which release replaced it (thanks SeadogsBooty).** the card you grabbed lists what the retry tried after, and the release that replaced it is marked grabbed instead or downloaded instead. the episode row shows the newest attempt.
+- **choose what a colon in a title becomes (thanks SeadogsBooty).** settings > library organization: delete (the default, as before), smart ("Dexter - Resurrection", 12:30 becomes 12-30), space dash space, or dash.
+
 ## search
 
 - **browse tiles show what's charting on deezer (thanks cremonies, #1984).** top trending and the genre tiles read deezer's public charts now (no account needed, kept a few hours), a two-genre tile like electronic & dance blends both, and when deezer is off or has nothing for a tile it falls back to your own metadata like before.

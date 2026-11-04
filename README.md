@@ -266,6 +266,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 - **Quality profiles**:
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
   - **Per-title profiles**: pick one in Get / Manual search (even before the title is in your library; it keeps it when it lands) or the title's Manage panel, with separate defaults for new movies and new shows.
+  - **Manual search results** can be filtered (conditions on resolution, codec, group, size, age, indexer, format score and more, matched on all or any), sorted, and saved as named filters per profile. A failed grab shows which release replaced it. **Colons in titles** can become " - " instead of being dropped.
   - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
   - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
   - **Your library's folders**: every folder your Plex / Jellyfin libraries read, Movies or TV, asked from the server. The ones SoulSync already reaches are ticked; tell it where it reaches the rest (checked against a sample of real files) and each becomes a full library folder: files found, renamed to your templates, recycled into that drive's own bin, languages read.
