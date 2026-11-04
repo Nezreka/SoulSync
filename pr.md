@@ -17,6 +17,9 @@ a hot fix for 3.6.2. on a big library the library page could time out with "coul
 - **cancel takes a torrent or usenet download out of the client.** it only marked the row cancelled, and the client downloaded it to the end for nothing.
 - **block and retry every failed download at once (thanks c5pie).** the downloads menu has block and retry failed next to retry failed: every failed release is blocklisted and the next best release grabbed for each, searched one title at a time so 40 retries don't hit your indexers together.
 - **tag a plex playlist's songs with a mood (thanks wolf39us).** the server playlist editor has tag in plex for admins: every song on the playlist gets a mood (the playlist's name, or one you type), in plex only. build a plex smart playlist on "mood is <tag>" and add rating rules on top, and a plain playlist turns into one that keeps itself tidy.
+- **the next-release retry keeps the quality profile (thanks SeadogsBooty).** a profile picked in the search modal for a show not in the library yet didn't reach episodes wished after the pick, and the retry read only the wishlist row, so the replacement was ranked under default and took a 1.4 gb non-megusta release. the retry keeps the failed grab's profile now, and the wishlist search reads the modal's pick.
+- **episode file names carry the episode title (thanks SeadogsBooty).** no grab passed the title to the import, so $episodetitle was always empty. the import looks it up (library, wishlist, then tmdb) and skips placeholders like tba.
+- **an episode's manual search results stay inside the panel (thanks SeadogsBooty).** a long release name made the panel wider than the modal, and scrolling the grabbed card into view slid it sideways, cutting off both edges.
 - **retry with another searches the profile that wished the title.** it searched the first profile's wishlist, so for a title another profile wished it said a search started and grabbed nothing.
 
 ## performance
