@@ -2028,8 +2028,17 @@ def _tick(db) -> bool:
                 # A stalled DOWNLOAD deserves another release; a download that
                 # finished and then couldn't be found does not — the bytes are
                 # already on disk, and searching again just repeats the same import.
-                _fail_or_retry(db, dl, stall.reason(_verdict, _idle, at_completion=_at_completion),
-                               allow_retry=not _at_completion,
+                # Unless its folder IS there and nothing in it is playable (a disc
+                # image, unextracted rars): then the release is junk, not the path.
+                # It is blocklisted -- even with redownload_failed off, like the
+                # importer's _bad_release -- and goes to the next release.
+                _junk = upd.get("_nothing_playable") if _at_completion else None
+                _why = stall.reason(_verdict, _idle, at_completion=_at_completion,
+                                    nothing_playable=_junk)
+                if _junk and dl.get("username") and dl.get("filename"):
+                    _blocklist_release(db, dl, _why)
+                _fail_or_retry(db, dl, _why,
+                               allow_retry=not _at_completion or bool(_junk),
                                client_failure=dl.get("source") in ("torrent", "usenet"))
                 continue
             if _verdict in (stall.MOVED, stall.SEEDED):

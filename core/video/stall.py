@@ -88,7 +88,8 @@ def classify(previous_progress: Any, new_progress: Any, progress_at: Any,
     return WAITING, idle
 
 
-def reason(verdict: str, idle_seconds: Any, *, at_completion: bool = False) -> str:
+def reason(verdict: str, idle_seconds: Any, *, at_completion: bool = False,
+           nothing_playable: Any = None) -> str:
     """What to write on the row. The two situations read completely differently to
     the person looking at them: one is a download nobody is seeding, the other is a
     download that FINISHED and whose file SoulSync then could not find — that one
@@ -98,6 +99,9 @@ def reason(verdict: str, idle_seconds: Any, *, at_completion: bool = False) -> s
     except (TypeError, ValueError):
         mins = 0          # a message is never worth raising over
 
+    if at_completion and nothing_playable:
+        return ("Finished downloading, but there is nothing playable in it (%s)"
+                % nothing_playable)
     if at_completion:
         return ("Finished downloading, but the file never appeared where SoulSync "
                 "could reach it (%d min). Check the download client's save path "
