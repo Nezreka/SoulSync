@@ -30,6 +30,11 @@ def db(tmp_path, monkeypatch):
     spawned = []
     monkeypatch.setattr(monitor, "_spawn_next_release",
                         lambda db_, dl, err: spawned.append((dl["id"], err)))
+    removed = []
+    import core.video.client_grab as cg
+    monkeypatch.setattr(cg, "remove", lambda source, ref, delete_files=True:
+                        removed.append((source, ref, delete_files)) or True)
+    vdb.removed = removed
     vdb.published = published
     vdb.spawned = spawned
     return vdb
@@ -147,3 +152,60 @@ def test_a_stalled_torrent_is_a_failed_release_too(db, monkeypatch):
     import inspect
     src = inspect.getsource(monitor._tick)
     assert src.count('client_failure=dl.get("source") in ("torrent", "usenet")') == 2
+
+
+def test_a_replaced_release_leaves_the_client_with_its_files(db):
+    # a stalled torrent otherwise kept going next to its replacement, and a
+    # failed sab job kept its partial files
+    monitor._fail_or_retry(db, _row(db, source="torrent"), "Stalled", client_failure=True)
+    assert db.removed == [("torrent", "SABnzbd_nzo_x", True)]
+
+
+def test_a_release_it_gave_up_on_stays_in_the_client(db):
+    from core.video.download_config import save
+    save(db, {"redownload_failed": False})
+    monitor._fail_or_retry(db, _row(db), "Aborted", client_failure=True)
+    assert db.removed == []
+
+
+def _cancel_client(db, monkeypatch):
+    import api.video as videoapi
+    from flask import Flask
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+
+    @app.before_request
+    def _admin():
+        from flask import g
+        g.profile_id = 1
+        g.is_admin = True
+        g.can_download = True
+
+    import core.video.slskd_download as slskd
+    monkeypatch.setattr(slskd, "cancel_download", lambda *a: db.removed.append(("slskd",) + a))
+    return app.test_client()
+
+
+def test_cancel_takes_a_client_job_out_of_the_client(db, monkeypatch):
+    import api.video as videoapi
+    try:
+        http = _cancel_client(db, monkeypatch)
+        dl = _row(db, source="usenet")
+        assert http.post("/api/video/downloads/cancel", json={"id": dl["id"]}).get_json()["ok"]
+        assert db.get_video_download(dl["id"])["status"] == "cancelled"
+        assert db.removed == [("usenet", "SABnzbd_nzo_x", True)]
+    finally:
+        videoapi._video_db = None
+
+
+def test_cancel_of_a_finished_download_touches_nothing(db, monkeypatch):
+    import api.video as videoapi
+    try:
+        http = _cancel_client(db, monkeypatch)
+        dl = _row(db, source="torrent")
+        db.update_video_download(dl["id"], status="completed")
+        assert http.post("/api/video/downloads/cancel", json={"id": dl["id"]}).get_json()["already"]
+        assert db.removed == []
+    finally:
+        videoapi._video_db = None

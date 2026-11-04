@@ -1718,7 +1718,13 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Download not found."}), 404
         if dl["status"] in ("completed", "failed", "cancelled"):
             return jsonify({"ok": True, "already": True})
-        cancel_download(dl.get("username"), dl.get("filename"))   # best-effort; mark regardless
+        if dl.get("source") in ("torrent", "usenet"):
+            # the client kept downloading a cancelled grab to the end, and
+            # nothing would ever import it. unfinished, so its files go too
+            from core.video.client_grab import remove as remove_client_job
+            remove_client_job(dl.get("source"), dl.get("client_ref"), delete_files=True)
+        else:
+            cancel_download(dl.get("username"), dl.get("filename"))   # best-effort; mark regardless
         import time
         db.update_video_download(dl["id"], status="cancelled", error="Cancelled",
                                  completed_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))

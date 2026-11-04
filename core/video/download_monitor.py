@@ -1586,6 +1586,14 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True,
     _wishlist_failed(db, dl)
     _archive_history(db, dl, {"status": "failed", "error": err, "completed_at": completed})
     if redownload and redownload.get("retry"):
+        # the failed release is blocklisted and won't be imported: out of the
+        # client with its partial files, or a stalled torrent kept going next
+        # to its replacement
+        try:
+            from core.video.client_grab import remove as remove_client_job
+            remove_client_job(dl.get("source"), dl.get("client_ref"), delete_files=True)
+        except Exception:  # noqa: BLE001 - leaving it behind is the old behaviour
+            logger.debug("video download %s: client remove failed", dl.get("id"), exc_info=True)
         # the notification waits for the outcome: a release that got replaced
         # isn't something to come and fix
         _spawn_next_release(db, dl, err)

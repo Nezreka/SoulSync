@@ -87,3 +87,26 @@ def grab(source: str, url: Any, *, save_path: Optional[str] = None,
     if str(source).lower() == "usenet":
         return grab_usenet(url, save_path=save_path)
     return {"ok": False, "error": "Unsupported source %r" % source}
+
+
+def remove(source: str, ref: Any, *, delete_files: bool = True) -> bool:
+    """Take one job out of the torrent/usenet client, with what it downloaded
+    when ``delete_files``. For a download SoulSync gave up on (cancelled, or a
+    failed release it replaced): the client kept it going, or kept its partial
+    files, forever. Best-effort, False when it couldn't. Never for a finished
+    download, whose files are the import's."""
+    source = str(source or "").lower()
+    if not ref or source not in ("torrent", "usenet"):
+        return False
+    try:
+        if source == "torrent":
+            from core.torrent_clients import get_active_adapter
+        else:
+            from core.usenet_clients import get_active_adapter
+        adapter = get_active_adapter()
+        if adapter is None or not adapter.is_configured():
+            return False
+        return bool(_run(adapter.remove(str(ref), delete_files=delete_files)))
+    except Exception as e:  # noqa: BLE001 - leaving the job behind is the old behaviour
+        logger.warning("%s remove of %s failed: %s", source, ref, e)
+        return False

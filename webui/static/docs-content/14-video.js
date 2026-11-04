@@ -743,7 +743,7 @@ When SABnzbd or the torrent client reports a movie or episode as failed, or a to
 - no other release your profile accepts was found (the item stays on the wishlist), or
 - 5 releases of the same title (or episode) failed in 2 days. A client that fails everything, like a full disk or a wrong category, would otherwise blocklist every release there is, so it stops and asks you to check the client.
 
-A job the client simply lost (deleted by hand, connection trouble) isn't treated as a bad release. Turn it off with **When a video download fails, grab the next best release** in Settings, on the usenet client's card.
+The replaced job is taken out of the client with its partial files, so a stalled torrent doesn't keep going next to its replacement; one it gave up on stays for you to look at. A job the client simply lost (deleted by hand, connection trouble) isn't treated as a bad release. **Cancel** on a torrent or usenet download takes it out of the client too. Turn it off with **When a video download fails, grab the next best release** in Settings, on the usenet client's card.
 
 ## Recycle bin
 
