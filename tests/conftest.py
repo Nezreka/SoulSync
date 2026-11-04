@@ -1138,6 +1138,9 @@ def _fresh_fold_index():
     # the mirror outbox's background drainer would outlive the test's database
     from core.library2 import mirror_outbox as _mirror_outbox
     saved_bg_drain, _mirror_outbox.BACKGROUND_DRAIN = _mirror_outbox.BACKGROUND_DRAIN, False
+    # the metasync depot's background network asker: same reason
+    from core import metasync_depot as _metasync_depot
+    saved_bg_ask, _metasync_depot.BACKGROUND_ASK = _metasync_depot.BACKGROUND_ASK, False
     worker_queue._reset_progress_snapshots()
     worker_queue._NEW_CURSOR.clear()
     worker_queue._NEW_IDLE.clear()
@@ -1165,6 +1168,7 @@ def _fresh_fold_index():
     worker_queue.PROGRESS_SNAPSHOT_TTL = saved_ttl
     worker_queue.PENDING_COUNT_TTL = saved_pending_ttl
     _mirror_outbox.BACKGROUND_DRAIN = saved_bg_drain
+    _metasync_depot.BACKGROUND_ASK = saved_bg_ask
     MusicDatabase._OWNED_GENRES_TTL = saved_genres_ttl
     metadata_cache._TOUCH_FLUSH_SECONDS = saved_touch
     _artist_facts.ONLINE_LOOKUP = saved_online

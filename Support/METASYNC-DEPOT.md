@@ -17,7 +17,17 @@ waits until something earns it a place.
 SoulSync's own workflows consult the depot — chiefly **tagging during
 post-processing**, which checks the depot before it runs any live
 provider search. A live search still happens for everything the
-depot can't supply. When the tagging pipeline fills a field from the
+depot can't supply.
+
+Tagging never waits on the network. On a depot miss it asks your
+node for what the node already holds (its own data and answer
+cache, which answers at once), and hands the miss to a background
+asker. That asker makes the real network ask, which holds the
+node's relay round open for its collection window (6 seconds by
+default), and deposits the answer for the next file of the same
+album and the next run. A node that fails, answers an error or
+answers something that isn't JSON is left alone for five minutes,
+so a batch import never re-asks a broken node once per file. When the tagging pipeline fills a field from the
 depot, that is a **promotion**, and promotion has a floor that peer
 agreement alone never satisfies:
 
@@ -109,7 +119,10 @@ tracks export a year too), ISRC, genres — inherits the mark.
   fails open.
 - When the node learns an answer died — a revocation, an expiry, a
   superseding answer — it pushes that death to the depot
-  (`POST /api/v1/metasync/depot/invalidate` and `/records`). The
+  (`POST /api/v1/metasync/depot/invalidate` and `/records`). These
+  pushes need an **admin** API key: a read-only key can fetch the
+  export but can't post, so a node holding one is refused its
+  pushes and relies on the daily reconcile below. The
   depot flags the dead fields and stops promoting from them
   immediately. A value already promoted into your library or a
   file's tags is **not** rewritten by the network; the flag stops

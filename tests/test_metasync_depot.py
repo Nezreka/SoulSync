@@ -1817,3 +1817,142 @@ def test_promoted_value_round_trips_to_the_export(client, db, monkeypatch):
             if i["soul_id"] == track_sid]
     assert mine and mine[0]["spotify_track_id"] == "spE2E"
     assert mine[0]["network_fields"] == ["spotify_id"]
+
+
+# ── the consult never waits on the network ───────────────────────
+# A network ask holds the node's relay round open for its collection
+# window (6s by default). On a depot miss the consult used to make that
+# ask inside tagging, so every new track of an import could wait ~6s.
+
+def test_the_consult_asks_cache_only_and_queues_its_misses(db, monkeypatch):
+    from core.metadata.source import _process_metasync_depot_source
+    asks, queued = [], []
+
+    def fake_query(cfg, kind, subjects, network=True):
+        asks.append((kind, network))
+        return [_record(s, kind, {}, found=False) for s in subjects]
+
+    monkeypatch.setattr(depot, "query_node", fake_query)
+    monkeypatch.setattr(depot, "ask_network_soon",
+                        lambda db_, cfg, subjects: queued.append(subjects) or True)
+    depot._node_miss_until.clear()
+    pp = _pp()
+    _process_metasync_depot_source(
+        pp, {"album": "The Album", "track_number": 1}, _Cfg(_node_cfg_values()),
+        None, "The Song", "The Artist", context=None, db=db)
+
+    assert asks and all(network is False for _kind, network in asks)
+    track_sid = generate_soul_id("track", "The Artist", "The Song")
+    assert queued and track_sid in queued[0]["track"]
+
+
+def _node_cfg_values():
+    return {"metasync.node_url": "http://node:8790", "metasync.local_api_key": "mn_key"}
+
+
+def test_a_cache_only_miss_neither_clears_the_depot_nor_counts_as_a_miss(db, monkeypatch):
+    subject = "soul_track_cached"
+    depot.store_record(db, _record(subject, "track", {"isrc": _field([_value("K1")])}), now=NOW)
+    monkeypatch.setattr(depot, "query_node",
+                        lambda cfg, kind, subjects, network=True:
+                        [_record(s, kind, {}, found=False) for s in subjects])
+    depot._node_miss_until.clear()
+
+    depot.collect_subjects(db, _node_cfg, {"track": [subject]}, now=NOW, network=False)
+
+    assert depot.get_fields(db, subject, now=NOW), "the stored candidates survive"
+    assert not depot._miss_memoized("http://node:8790", "track", subject)
+
+
+def test_the_network_ask_is_what_records_a_miss(db, monkeypatch):
+    monkeypatch.setattr(depot, "query_node",
+                        lambda cfg, kind, subjects, network=True:
+                        [_record(s, kind, {}, found=False) for s in subjects])
+    depot._node_miss_until.clear()
+    depot.collect_subjects(db, _node_cfg, {"track": ["soul_track_gone"]}, now=NOW)
+    assert depot._miss_memoized("http://node:8790", "track", "soul_track_gone")
+
+
+def test_query_node_says_whether_to_ask_the_network(monkeypatch):
+    sent = []
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {"ok": True, "records": []}
+
+    monkeypatch.setattr(depot.requests, "post",
+                        lambda url, json=None, **kw: sent.append(json) or _Resp())
+    depot._node_failure_until.clear()
+    depot.query_node(_node_cfg, "track", ["soul_x"], network=False)
+    depot.query_node(_node_cfg, "track", ["soul_x"])
+    assert [b["network"] for b in sent] == [False, True]
+
+
+@pytest.mark.parametrize("answer", ["http_500", "not_json"])
+def test_a_bad_answer_opens_the_breaker_too(monkeypatch, answer):
+    """a node answering 500s (or a proxy's html page) was asked again
+    for every file of a batch import: only transport errors tripped it"""
+    calls = []
+
+    class _Resp:
+        status_code = 500 if answer == "http_500" else 200
+
+        def json(self):
+            raise ValueError("not json")
+
+    def post(*a, **kw):
+        calls.append(1)
+        return _Resp()
+
+    monkeypatch.setattr(depot.requests, "post", post)
+    depot._node_failure_until.clear()
+    for _ in range(2):
+        with pytest.raises(depot.NodeUnreachable):
+            depot.query_node(_node_cfg, "track", ["soul_x"])
+    assert len(calls) == 1
+    depot._node_failure_until.clear()
+
+
+def test_the_background_asker_deposits_the_network_answer(db, monkeypatch):
+    asked = []
+
+    def fake_query(cfg, kind, subjects, network=True):
+        asked.append((kind, tuple(subjects), network))
+        return [_record(s, kind, {"isrc": _field([_value("BG1")])}) for s in subjects]
+
+    monkeypatch.setattr(depot, "query_node", fake_query)
+    monkeypatch.setattr(depot, "BACKGROUND_ASK", True)
+    depot._node_miss_until.clear()
+    depot._node_failure_until.clear()
+    depot._bg_queue.clear()
+
+    assert depot.ask_network_soon(db, _node_cfg, {"track": ["soul_track_bg"]}) is True
+    depot._bg_state["thread"].join(10)
+
+    assert asked == [("track", ("soul_track_bg",), True)]
+    assert depot.get_fields(db, "soul_track_bg")
+
+
+def test_the_background_queue_is_bounded(db, monkeypatch):
+    monkeypatch.setattr(depot, "BACKGROUND_ASK", True)
+    monkeypatch.setattr(depot, "BACKGROUND_QUEUE_MAX", 3)
+    depot._bg_queue.clear()
+    depot._node_miss_until.clear()
+    depot._node_failure_until.clear()
+    # a live worker already holds the queue: nothing new starts, the queue caps
+    alive = type("T", (), {"is_alive": lambda self: True})()
+    monkeypatch.setitem(depot._bg_state, "thread", alive)
+
+    depot.ask_network_soon(db, _node_cfg, {"track": [f"soul_track_{i}" for i in range(10)]})
+
+    assert list(depot._bg_queue) == [("track", f"soul_track_{i}") for i in (7, 8, 9)]
+    depot._bg_queue.clear()
+
+
+def test_no_node_means_no_background_ask(db, monkeypatch):
+    monkeypatch.setattr(depot, "BACKGROUND_ASK", True)
+    depot._bg_queue.clear()
+    assert depot.ask_network_soon(db, lambda k, d=None: d, {"track": ["soul_x"]}) is False
+    assert not depot._bg_queue

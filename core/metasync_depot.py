@@ -74,6 +74,7 @@ import json
 import re
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import quote
@@ -1289,12 +1290,18 @@ def _note_node_hit(node_url: str, kind: str, subject: str) -> None:
 
 
 def query_node(config_get: Callable[..., Any], kind: str,
-               subjects: List[str]) -> List[Dict[str, Any]]:
+               subjects: List[str], network: bool = True) -> List[Dict[str, Any]]:
     """One exact ask through the node (POST /local/meta/query).
     Returns the projected records (found or not). Raises
     NodeUnreachable on transport failure or a refusal — and, while
-    the circuit breaker is in its cooldown after a transport
-    failure, without making the call at all."""
+    the circuit breaker is in its cooldown after a failure, without
+    making the call at all.
+
+    ``network=False`` asks the node's own data and answer cache only
+    (no relay round, which holds a query for its collection window,
+    6s by default): the tagging consult asks this way so an import
+    never waits on the network, and leaves the network ask to the
+    background asker (``ask_network_soon``)."""
     node_url, local_key = _node_config(config_get)
     if not node_url or not local_key:
         raise NodeUnreachable("MetaSync is not connected")
@@ -1304,20 +1311,30 @@ def query_node(config_get: Callable[..., Any], kind: str,
     try:
         resp = requests.post(
             f"{node_url}/local/meta/query",
-            json={"kind": kind, "mode": "exact", "subjects": subjects},
+            json={"kind": kind, "mode": "exact", "subjects": subjects,
+                  "network": bool(network)},
             headers={"Authorization": f"Bearer {local_key}",
                      "Accept": "application/json"},
             timeout=NODE_TIMEOUT_SECONDS)
     except requests.RequestException as e:
         _note_node_failure(node_url)
         raise NodeUnreachable(f"MetaSync is unreachable at {node_url}: {e}") from e
+    # any answer that isn't a usable one opens the breaker too: a node
+    # returning 500s, a wrong key's 401 or a proxy's HTML page was asked
+    # again for every file of a batch import
     if resp.status_code != 200:
+        _note_node_failure(node_url)
         raise NodeUnreachable(
             f"MetaSync query failed with HTTP {resp.status_code}")
-    payload = resp.json()
-    if not payload.get("ok"):
+    try:
+        payload = resp.json()
+    except ValueError as e:
+        _note_node_failure(node_url)
+        raise NodeUnreachable(f"MetaSync at {node_url} did not answer JSON") from e
+    if not isinstance(payload, dict) or not payload.get("ok"):
         raise NodeUnreachable(
-            f"MetaSync query refused: {payload.get('error') or 'unknown error'}")
+            "MetaSync query refused: "
+            f"{(payload.get('error') if isinstance(payload, dict) else None) or 'unknown error'}")
     _note_node_success(node_url)
     records = payload.get("records")
     return records if isinstance(records, list) else []
@@ -1350,10 +1367,15 @@ def fetch_node_record(config_get: Callable[..., Any],
         _note_node_success(node_url)
         return None
     if resp.status_code != 200:
+        _note_node_failure(node_url)
         raise NodeUnreachable(
             f"MetaSync record fetch failed with HTTP {resp.status_code}")
+    try:
+        payload = resp.json()
+    except ValueError as e:
+        _note_node_failure(node_url)
+        raise NodeUnreachable(f"MetaSync at {node_url} did not answer JSON") from e
     _note_node_success(node_url)
-    payload = resp.json()
     if not isinstance(payload, dict):
         return None
     # the node wraps the projection: {"ok": true, "record": {...}}
@@ -1366,7 +1388,8 @@ def fetch_node_record(config_get: Callable[..., Any],
 
 def collect_subjects(db: Any, config_get: Callable[..., Any],
                      subjects_by_kind: Dict[str, List[str]],
-                     now: Optional[datetime] = None) -> Dict[str, Any]:
+                     now: Optional[datetime] = None,
+                     network: bool = True) -> Dict[str, Any]:
     """Ask the node about the given subjects and deposit every
     record it returns. This is the everyday workhorse (§1):
     SoulSync already knows the IDs of what it is tagging, so the
@@ -1382,7 +1405,15 @@ def collect_subjects(db: Any, config_get: Callable[..., Any],
         if not ask:
             continue
         returned = set()
-        for record in query_node(config_get, kind, ask):
+        answers = (query_node(config_get, kind, ask) if network
+                   else query_node(config_get, kind, ask, network=False))
+        for record in answers:
+            if not network and isinstance(record, dict) and not record.get("found"):
+                # the node's cache doesn't hold it yet; that says nothing
+                # about the network, so it neither clears what the depot
+                # holds nor counts as a miss (the memo would then stop
+                # the background network ask for it)
+                continue
             if store_record(db, record, now=now):
                 stored += 1
             if isinstance(record, dict) and record.get("subject"):
@@ -1391,12 +1422,82 @@ def collect_subjects(db: Any, config_get: Callable[..., Any],
                     _note_node_hit(node_url, kind, record["subject"])
                 else:
                     _note_node_miss(node_url, kind, record["subject"])
+        if not network:
+            continue
         for subject in ask:
             if subject not in returned:
                 # No record at all is also a miss — the node holds
                 # nothing under that subject right now.
                 _note_node_miss(node_url, kind, subject)
     return {"status": "ok", "stored": stored}
+
+
+# -- the background network asker ---------------------------------------------
+# A network ask holds the node's relay round open for its collection window
+# (6s by default). The tagging consult asks cache-only and queues its misses
+# here instead, so an import never waits on the network: one worker per
+# process asks for the queued subjects and deposits the answers, ready for the
+# next file of the same album (album and artist subjects are shared) and the
+# next run. Bounded: a long import queues at most BACKGROUND_QUEUE_MAX
+# subjects; older ones fall off and are asked again next time they miss.
+BACKGROUND_ASK = True            # the test suite turns it off
+BACKGROUND_QUEUE_MAX = 500
+_bg_queue: "OrderedDict[Tuple[str, str], None]" = OrderedDict()
+_bg_lock = threading.Lock()
+_bg_state: Dict[str, Any] = {"thread": None}
+
+
+def ask_network_soon(db: Any, config_get: Callable[..., Any],
+                     subjects_by_kind: Dict[str, List[str]]) -> bool:
+    """Queue a network ask for these subjects; True when a worker
+    was started. Never blocks and never raises."""
+    if not BACKGROUND_ASK:
+        return False
+    try:
+        node_url, local_key = _node_config(config_get)
+        if not node_url or not local_key or _node_circuit_open(node_url):
+            return False
+        with _bg_lock:
+            for kind, subjects in subjects_by_kind.items():
+                for subject in subjects:
+                    if subject and not _miss_memoized(node_url, kind, subject):
+                        _bg_queue[(kind, subject)] = None
+                        _bg_queue.move_to_end((kind, subject))
+            while len(_bg_queue) > BACKGROUND_QUEUE_MAX:
+                _bg_queue.popitem(last=False)
+            if not _bg_queue:
+                return False
+            thread = _bg_state.get("thread")
+            if thread is not None and thread.is_alive():
+                return False
+            thread = threading.Thread(target=_bg_run, args=(db, config_get),
+                                      daemon=True, name="metasync-depot-ask")
+            _bg_state["thread"] = thread
+            thread.start()
+            return True
+    except Exception as e:  # noqa: BLE001 - the depot is an optimisation
+        logger.debug("metasync depot background ask not queued: %s", e)
+        return False
+
+
+def _bg_run(db: Any, config_get: Callable[..., Any]) -> None:
+    while True:
+        with _bg_lock:
+            if not _bg_queue:
+                return
+            batch: Dict[str, List[str]] = {}
+            for _ in range(min(25, len(_bg_queue))):
+                (kind, subject), _none = _bg_queue.popitem(last=False)
+                batch.setdefault(kind, []).append(subject)
+        try:
+            collect_subjects(db, config_get, batch)
+        except NodeUnreachable as e:
+            logger.debug("metasync depot background ask stopped: %s", e)
+            with _bg_lock:
+                _bg_queue.clear()   # the breaker is open; the next miss re-queues
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.debug("metasync depot background ask failed: %s", e)
 
 
 def reconcile(db: Any, config_get: Callable[..., Any], *,

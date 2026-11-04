@@ -1187,20 +1187,30 @@ def _process_metasync_depot_source(pp: dict, metadata: dict, cfg, runtime,
             depot.get_fields(db, subject))
 
     if not _have(track_sid) and not _have(album_sid):
-        # Depot miss: one exact ask, deposited for this and the next
-        # run. A silent network (or no node) is a normal miss.
+        # Depot miss: one exact ask of the node's OWN data and answer
+        # cache (instant), deposited for this run. The network ask
+        # holds the node's relay round open for its collection window
+        # (6s by default), so it never runs here: the misses go to the
+        # background asker, which deposits the network's answers for
+        # the next file of this album and the next run. An import never
+        # waits on the network. A silent network (or no node) is a
+        # normal miss.
+        subjects = {}
+        if track_sid:
+            subjects.setdefault("track", []).append(track_sid)
+        if album_sid:
+            subjects.setdefault("album", []).append(album_sid)
+        if artist_sid:
+            subjects.setdefault("artist", []).append(artist_sid)
         try:
-            config_get = cfg.get
-            subjects = {}
-            if track_sid:
-                subjects.setdefault("track", []).append(track_sid)
-            if album_sid:
-                subjects.setdefault("album", []).append(album_sid)
-            if artist_sid:
-                subjects.setdefault("artist", []).append(artist_sid)
-            depot.collect_subjects(db, config_get, subjects)
+            depot.collect_subjects(db, cfg.get, subjects, network=False)
         except Exception as e:  # noqa: BLE001 - depot is an optimisation
             logger.debug("metasync depot collect failed: %s", e)
+        still_missing = {kind: [s for s in sids if not _have(s)]
+                         for kind, sids in subjects.items()}
+        still_missing = {k: v for k, v in still_missing.items() if v}
+        if still_missing:
+            depot.ask_network_soon(db, cfg.get, still_missing)
 
     marks = []
 
