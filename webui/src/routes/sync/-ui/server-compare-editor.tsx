@@ -32,6 +32,7 @@ import type {
 import {
   addServerTrack,
   adoptServerPlaylist,
+  tagServerPlaylistMood,
   addTrackPosition,
   alignMatchedIds,
   alignServerPlaylist,
@@ -338,6 +339,10 @@ export function ServerCompareEditor({
   onAdopted,
 }: ServerCompareEditorProps) {
   const [adopting, setAdopting] = useState(false);
+  // wolf39us: tag every song with a plex mood, for a smart playlist built on it
+  const [tagOpen, setTagOpen] = useState(false);
+  const [tagText, setTagText] = useState('');
+  const [tagging, setTagging] = useState(false);
   const [data, setData] = useState<CompareResponse | null>(null);
   /**
    * The tracks are state of their own, apart from `data`, because that is the
@@ -706,6 +711,31 @@ export function ServerCompareEditor({
     }
   }, [playlist.name, onAdopted]);
 
+  const tagMood = useCallback(async () => {
+    const tag = tagText.trim();
+    if (!tag) return;
+    setTagging(true);
+    try {
+      const result = await tagServerPlaylistMood(playlistIdRef.current, playlist.name, tag);
+      if (!result.success) {
+        window.showToast?.(result.error || 'Could not tag the songs', 'error');
+        return;
+      }
+      window.showToast?.(
+        `Tagging ${result.total ?? 0} song${result.total === 1 ? '' : 's'} with the mood "${tag}" in Plex`,
+        'success',
+      );
+      setTagOpen(false);
+    } catch (error) {
+      window.showToast?.(
+        `Tagging failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+        'error',
+      );
+    } finally {
+      setTagging(false);
+    }
+  }, [tagText, playlist.name]);
+
   const stats = compareStats(tracks);
   const outOfOrder = Boolean(data?.order_status?.out_of_order);
   const serverLabel = compareServerLabel(data?.server_type);
@@ -818,13 +848,28 @@ export function ServerCompareEditor({
             {compareFilterLabel(f, stats)}
           </button>
         ))}
+        {data?.can_tag ? (
+          <button
+            type="button"
+            className="discog-filter server-editor-tag"
+            style={{ marginLeft: 'auto' }}
+            aria-expanded={tagOpen}
+            title="Add a Plex mood to every song here, to build a smart playlist on it"
+            onClick={() => {
+              setTagText((t) => t || playlist.name);
+              setTagOpen((o) => !o);
+            }}
+          >
+            Tag in Plex
+          </button>
+        ) : null}
         {/* The export button is the fifth pill in this row, pushed right — NOT
             a header button. 657/694: the label IS the button state. */}
         <button
           type="button"
           className="discog-filter server-editor-export"
           id="server-editor-export-btn"
-          style={{ marginLeft: 'auto' }}
+          style={{ marginLeft: data?.can_tag ? undefined : 'auto' }}
           disabled={exporting}
           title="Export this server playlist as an M3U file (for Music Assistant etc.)"
           onClick={() => void exportM3u()}
@@ -844,6 +889,35 @@ export function ServerCompareEditor({
           {deleting ? '⏳ Removing…' : '🗑️ Remove from Server'}
         </button>
       </div>
+
+      {tagOpen ? (
+        <div className="server-tag-row">
+          <label className="server-tag-label">
+            Mood
+            <input
+              className="server-tag-input"
+              value={tagText}
+              maxLength={100}
+              onChange={(e) => setTagText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void tagMood();
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            className="server-adopt-btn"
+            disabled={tagging || !tagText.trim()}
+            onClick={() => void tagMood()}
+          >
+            {tagging ? 'Tagging…' : 'Tag every song'}
+          </button>
+          <span className="server-tag-hint">
+            Adds the mood in Plex only, never to your files. Then make a smart playlist on Mood is{' '}
+            {tagText.trim() || '…'} and add rating rules on top.
+          </span>
+        </div>
+      ) : null}
 
       <div className="server-compare-columns">
         <div className="server-compare-col source" id="server-col-source">

@@ -77428,3 +77428,34 @@ body.src-modal-open { overflow: hidden; }
 }
 .server-adopt-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.28); }
 .server-adopt-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* tag every song on a plex playlist with a mood (wolf39us) */
+.server-tag-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.server-tag-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.server-tag-input {
+    width: 180px;
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--white-a12);
+    border-radius: var(--radius-pill);
+    background: var(--white-a04);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+.server-tag-hint {
+    flex-basis: 100%;
+    font-size: 11px;
+    color: var(--text-secondary);
+}

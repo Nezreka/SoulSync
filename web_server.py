@@ -17531,6 +17531,8 @@ def get_server_playlist_tracks(playlist_id):
             "source_track_count": len(source_tracks),
             "order_status": order_status,
             "server_order": server_order,
+            # the "Tag in Plex" mood action (admin, plex): see tag-mood below
+            "can_tag": active_server == 'plex' and is_admin_request(),
         })
     except Exception as e:
         logger.error(f"Error getting server playlist tracks: {e}")
@@ -17569,6 +17571,39 @@ def adopt_server_playlist_route(playlist_id):
     except Exception as e:
         logger.error(f"Error adopting server playlist {playlist_id}: {e}", exc_info=True)
         return jsonify({"success": False, "error": "Could not adopt the playlist"}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/tag-mood', methods=['POST'])
+def server_playlist_tag_mood(playlist_id):
+    """Add a mood tag to every song on a plex playlist (wolf39us), so a plex
+    smart playlist can be built on "mood is <tag>". Plex metadata only; it
+    is the household's shared library, so admin only. Runs in the background
+    (one plex call per song) and answers with how many songs it will look at."""
+    try:
+        if not is_admin_request():
+            return jsonify({"success": False, "error": "Admin only"}), 403
+        data = request.get_json(silent=True) or {}
+        tag = str(data.get('tag') or '').strip()
+        if not tag or len(tag) > 100:
+            return jsonify({"success": False, "error": "Give the tag a name (100 characters at most)"}), 400
+        active_server = config_manager.get_active_media_server()
+        if active_server != 'plex':
+            return jsonify({"success": False, "error": "Tagging songs needs Plex"}), 400
+        client, playlist_id, playlist_name, refusal = _server_playlist_guard(
+            active_server, playlist_id, str(data.get('name') or ''))
+        if refusal is not None:
+            return refusal
+        tracks = client.playlist_tracks_for_tagging(playlist_id)
+
+        def _run():
+            counts = client.tag_tracks_mood(tracks, tag)
+            logger.info(f"[ServerPlaylist] mood '{tag}' on playlist '{playlist_name}': {counts}")
+
+        threading.Thread(target=_run, daemon=True, name='plex-playlist-mood').start()
+        return jsonify({"success": True, "tag": tag, "total": len(tracks)})
+    except Exception as e:
+        logger.error(f"Error tagging server playlist {playlist_id}: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Could not tag the playlist"}), 500
 
 
 @app.route('/api/server/playlist/<playlist_id>/align', methods=['POST'])

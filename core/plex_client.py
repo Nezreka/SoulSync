@@ -1753,6 +1753,34 @@ class PlexClient(MediaServerBase):
             logger.error(f"Failed to trigger library scan for '{section_label}': {e}")
             return False
 
+    def playlist_tracks_for_tagging(self, playlist_id) -> List:
+        """The tracks of one plex playlist, for tag_tracks_mood."""
+        if not self.ensure_connection():
+            return []
+        playlist = self.server.fetchItem(int(playlist_id))
+        return [t for t in playlist.items() if getattr(t, "type", "") == "track"]
+
+    @staticmethod
+    def tag_tracks_mood(tracks, tag: str) -> Dict[str, int]:
+        """Add ``tag`` as a mood on each track that doesn't have it yet (wolf39us,
+        Discord Nov 4 2026): with every song on a playlist tagged, a plex smart
+        playlist can start from "mood is <tag>" and add rating rules on top.
+        Plex metadata only, nothing is written to the files; existing moods stay."""
+        wanted = tag.strip()
+        counts = {"tagged": 0, "skipped": 0, "failed": 0}
+        for track in tracks:
+            try:
+                have = {str(getattr(m, "tag", "")).casefold() for m in (track.moods or [])}
+                if wanted.casefold() in have:
+                    counts["skipped"] += 1
+                    continue
+                track.addMood(wanted)
+                counts["tagged"] += 1
+            except Exception as e:  # noqa: BLE001 - one track never stops the rest
+                counts["failed"] += 1
+                logger.debug(f"mood tag failed on {getattr(track, 'title', '?')}: {e}")
+        return counts
+
     def trigger_folder_scan(self, folders: List[str]) -> bool:
         """Scan only these folders (#1978), given as Plex sees them. Each goes
         to the music section whose folder holds it; False, with nothing

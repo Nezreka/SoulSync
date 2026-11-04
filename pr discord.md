@@ -6,6 +6,8 @@ When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls
 
 After downloads, Plex and Jellyfin now scan only the album folders that changed instead of the whole library (#1978). Jellyfin on localhost no longer costs two seconds per connection on Windows, Discover's decades, labels and undiscovered albums shelves are much faster, and MusicBrainz lookups stop paying a wasted request per album.
 
+Admins can also tag every song on a Plex playlist with a mood from the server playlist editor, to build a Plex smart playlist on it (thanks wolf39us).
+
 Fixes: a failing wishlist sync waits before retrying instead of using up its tries in a second, Bandcamp's bot check no longer marks albums as not found, a blocked audiobook release stays out of that profile's searches, and Settings > MetaSync says whether your install is being counted.
 
 Full notes on GitHub.
