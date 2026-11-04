@@ -10123,11 +10123,18 @@ class VideoDatabase:
                                    (int(tmdb_id),)).fetchone()
                 if row and row[0]:
                     return row[0]
+                # a show is wished for as its EPISODES (kind='episode', the show's
+                # tmdb id): asking for kind='show' never matched one, so a show
+                # whose profile lives on its wishlist rows (not in the library,
+                # or a library row without its own) was searched and judged by
+                # the Default profile
+                kinds = ("movie",) if kind == "movie" else ("show", "season", "episode")
                 row = conn.execute(
                     "SELECT quality_profile_id FROM video_wishlist "
-                    "WHERE tmdb_id=? AND kind=? AND quality_profile_id IS NOT NULL "
+                    f"WHERE tmdb_id=? AND kind IN ({','.join('?' * len(kinds))}) "
+                    "AND quality_profile_id IS NOT NULL "
                     "ORDER BY CASE WHEN profile_id=1 THEN 0 ELSE 1 END LIMIT 1",
-                    (int(tmdb_id), str(kind),)).fetchone()
+                    (int(tmdb_id), *kinds)).fetchone()
                 if row and row[0]:
                     return row[0]
             return None
