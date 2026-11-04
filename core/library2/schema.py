@@ -1355,6 +1355,9 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     try:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_played "
                        "ON lib2_tracks(album_id, play_count) WHERE play_count > 0")
+        # a stray from testing that index against a dev server that reloads
+        # on edits (Nov 4 2026); a no-op everywhere else
+        cursor.execute("DROP INDEX IF EXISTS idx_x_played")
     except Exception as e:  # noqa: BLE001
         logger.error("played-tracks index failed (will retry next start): %s", e)
     # Multi-file primary model (audit P1-07 / ADR-03): elect a primary where

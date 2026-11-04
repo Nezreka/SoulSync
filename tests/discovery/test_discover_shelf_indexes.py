@@ -71,3 +71,24 @@ def test_undiscovered_excludes_only_the_top_artists_owned_albums(db):
         keys = _owned_album_keys_for(conn, ["björk ", "Nobody"])
     # the listened name folds to the library's, past sqlite's ascii-only LOWER
     assert keys == {("homogenic", "björk")}
+
+
+def test_the_stray_test_indexes_are_dropped_on_start(tmp_path, monkeypatch):
+    import sqlite3
+
+    path = str(tmp_path / "stray.db")
+    MusicDatabase(path)
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE INDEX idx_x_rel ON discovery_pool (added_date)")
+    conn.execute("CREATE INDEX idx_x_played ON lib2_tracks(added_at)")
+    conn.commit()
+    conn.close()
+    from database import music_database
+    monkeypatch.setattr(music_database, "_database_initialized_paths", set())   # a restart
+    MusicDatabase(path)
+    conn = sqlite3.connect(path)
+    try:
+        left = conn.execute("SELECT name FROM sqlite_master WHERE name LIKE 'idx_x_%'").fetchall()
+    finally:
+        conn.close()
+    assert left == []

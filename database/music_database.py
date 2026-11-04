@@ -4752,6 +4752,9 @@ class MusicDatabase:
         try:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_profile_release "
                            "ON discovery_pool (profile_id, release_date)")
+            # a stray from testing that index against a dev server that reloads
+            # on edits (Nov 4 2026); a no-op everywhere else
+            cursor.execute("DROP INDEX IF EXISTS idx_x_rel")
         except Exception as e:  # noqa: BLE001 - an index is an assist, retried next start
             logger.debug("discovery_pool decade index skipped: %s", e)
 
