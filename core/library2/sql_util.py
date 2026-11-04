@@ -134,15 +134,22 @@ _OWNED = {
               "        WHERE owned_t.album_id = {alias}.id AND " + _LIVE_FILE + ")"),
     # a release of their own on disk: the album's primary artist, or a primary
     # album artist (a split or joint album). Not a featured credit.
-    "release_artist": ("EXISTS (SELECT 1 FROM lib2_albums owned_al"
-                       "         JOIN lib2_tracks owned_t ON owned_t.album_id = owned_al.id"
-                       "         JOIN lib2_track_files owned_f ON owned_f.track_id = owned_t.id"
-                       "        WHERE (owned_al.primary_artist_id = {alias}.id"
-                       "               OR EXISTS (SELECT 1 FROM lib2_album_artists owned_aa"
-                       "                           WHERE owned_aa.album_id = owned_al.id"
-                       "                             AND owned_aa.artist_id = {alias}.id"
-                       "                             AND owned_aa.role = 'primary'))"
-                       "          AND " + _LIVE_FILE + ")"),
+    #
+    # Two EXISTS, never one with an OR inside: "primary_artist_id = x OR a
+    # credit row names x" can't use either index, so SQLite walked every album
+    # for every artist (30k x 71k on a big library, minutes per cold Library
+    # page load, Nov 4 2026). Each branch here starts from its own index.
+    "release_artist": ("(EXISTS (SELECT 1 FROM lib2_albums owned_al"
+                       "          JOIN lib2_tracks owned_t ON owned_t.album_id = owned_al.id"
+                       "          JOIN lib2_track_files owned_f ON owned_f.track_id = owned_t.id"
+                       "         WHERE owned_al.primary_artist_id = {alias}.id"
+                       "           AND " + _LIVE_FILE + ")"
+                       " OR EXISTS (SELECT 1 FROM lib2_album_artists owned_aa"
+                       "              JOIN lib2_tracks owned_t ON owned_t.album_id = owned_aa.album_id"
+                       "              JOIN lib2_track_files owned_f ON owned_f.track_id = owned_t.id"
+                       "             WHERE owned_aa.artist_id = {alias}.id"
+                       "               AND owned_aa.role = 'primary'"
+                       "               AND " + _LIVE_FILE + "))"),
     # Either credit counts: the album's primary artist and a featured credit on
     # the track are both in the library.
     "artist": ("(EXISTS (SELECT 1 FROM lib2_tracks owned_t"

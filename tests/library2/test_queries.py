@@ -1247,3 +1247,20 @@ def test_a_joint_albums_second_primary_artist_is_listed(imported_conn):
                           (views, partner))
     names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
     assert {"Drake", "Future"} <= names and "Wizkid" not in names
+
+
+def test_library_index_membership_searches_each_ownership_branch_by_index(imported_conn):
+    # "primary_artist_id = x OR a credit names x" inside one EXISTS forced a
+    # scan of every album per artist: minutes on a big library, so the
+    # Library page timed out (Nov 4 2026). each branch must start from its index.
+    from core.library2.sql_util import library_index_artist_ids_sql
+
+    plan = " | ".join(
+        str(row[-1])
+        for row in imported_conn.execute(
+            "EXPLAIN QUERY PLAN " + library_index_artist_ids_sql()
+        )
+    )
+    assert "SCAN owned_al" not in plan, plan
+    assert "INDEX idx_lib2_albums_artist (primary_artist_id=?)" in plan, plan
+    assert "INDEX idx_lib2_album_artists_artist (artist_id=?)" in plan, plan
