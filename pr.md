@@ -33,6 +33,9 @@ a hot fix for 3.6.2. on a big library the library page could time out with "coul
 
 ## fixes
 
+- **anime TMDB lumps into one season splits without a tvdb key (thanks Thibs).** jujutsu kaisen is one season of 59 on tmdb. the split into 24/23/12 came from tvdb by air date, so with no tvdb key it stayed one season. the anime map and anilist know the same split (where each anilist season starts inside tmdb's, and how many episodes it has), so the episode sync uses that when tvdb can't, and only when the counts add up. shows anilist already linked are re-synced once. a server that numbers the show tmdb's way still keeps its numbering.
+- **a search preview gets the anime layer too.** frieren opened from search had no anilist score, other names or season links, because only library titles were linked. a preview the anime map knows asks anilist itself now, one request, cached with the page.
+
 - **interactive search says wrong artist when it's the wrong artist (thanks cremonies, #1980).** on streaming sources the length check ran first, so every other artist's song of the same name read as wrong length and the right one got lost in them. wrong artists are labelled as such now, the closest misses sort to the top, and when nothing passes the filtered results show instead of an empty table.
 - **a matched song that didn't start says why (#1981)** instead of "no specific failure reason was recorded".
 - **a running wishlist batch opens with its songs (#1982)** instead of an empty table.
