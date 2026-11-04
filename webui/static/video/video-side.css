@@ -1155,13 +1155,12 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border: 1px solid var(--white-a12); backdrop-filter: blur(6px);
 }
 .vd-rt-tag { font-size: 11px; font-weight: 900; padding: 1px 5px; border-radius: var(--radius-xs); letter-spacing: 0.02em; }
-/* a chip that opens its site says so on hover */
-a.vd-rt { text-decoration: none; transition: border-color 0.15s ease, background 0.15s ease; }
-a.vd-rt:hover { border-color: var(--white-a30); background: var(--black-a60); }
+/* a linked chip (a.vd-rt, its hover lift lives with the rating links further
+   down) gets a keyboard focus ring */
 a.vd-rt:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
 /* the provider pages with no score: quieter than a rating */
-.vd-rt--site { font-size: 12px; font-weight: 700; padding: 5px 10px; color: var(--white-a70, rgba(255,255,255,0.7)); }
-.vd-rt--site:hover { color: #fff; }
+.vd-rt--site { font-size: 12px; font-weight: 700; padding: 5px 10px; color: var(--text-2); }
+.vd-rt--site:hover { color: var(--text-1); }
 .vd-rt-out { font-size: 11px; opacity: 0.6; }
 .vd-rt-ic { font-size: 15px; line-height: 1; }
 .vd-rt--imdb .vd-rt-tag { background: #f5c518; color: #000; }
@@ -4785,12 +4784,12 @@ body[data-side="video"] #gsearch-aura {
     border-radius: var(--radius-pill); background: var(--white-a06); border: 1px solid var(--white-a12); }
 .vdl-prof-lab { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--white-a50); }
 .vdl-prof-sel { appearance: none; -webkit-appearance: none; border: 0; border-radius: var(--radius-pill);
-    padding: 4px 26px 4px 10px; font: inherit; font-size: 12.5px; font-weight: 700; color: #fff; cursor: pointer;
+    padding: 4px 26px 4px 10px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--text-1); cursor: pointer;
     background: var(--white-a10) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 9px center; }
 .vdl-prof-sel:hover { background-color: var(--white-a14); }
 .vdl-prof-sel:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
 .vdl-prof-sel:disabled { opacity: 0.55; cursor: progress; }
-.vdl-prof-sel option { background: #16181d; color: #fff; }
+.vdl-prof-sel option { background: var(--bg-raised); color: var(--text-1); }
 .vms-body { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 18px; }
 .vms-src-head { font-size: 13px; font-weight: 700; color: var(--white-a85); margin-bottom: 8px; }
 .vms-grabbed { color: #4ade80 !important; border-color: rgba(74,222,128,0.5) !important; }
