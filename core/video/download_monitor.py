@@ -1159,13 +1159,35 @@ def retry_another_release(db, dl) -> dict:
         if tmdb_id:
             if already_failed:
                 _wishlist_failed(db, dl)   # make sure the row is back on the wishlist
-            from core.video.wishlist_search import manual_search
-            scope = "movie" if kind == "movie" else ("episode" if en is not None else "show")
-            manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en)
-            kicked = True
+            kicked = _search_again_now(db, dl)
     except Exception:
         logger.exception("video download %s: wishlist search kick failed", dl.get("id"))
     return {"status": "failed", "wishlist_search": kicked}
+
+
+def _search_again_now(db, dl) -> bool:
+    """Run the wishlist search for this download's item now, for every profile
+    that has it wished. The search ranks under that wish's profile and the
+    blocklist drops what already failed, so the next best release is grabbed.
+
+    It used to search profile 1's wishlist only: a show another profile wished
+    found no item there, and "retry with another" quietly did nothing."""
+    kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+    if kind == "youtube" or not tmdb_id:
+        return False
+    from core.video.wishlist_search import manual_search
+    scope = "movie" if kind == "movie" else ("episode" if en is not None else "show")
+    try:
+        profiles = db.wishlist_profiles_for_media(
+            kind, int(tmdb_id), season_number=sn, episode_number=en)
+    except Exception:  # noqa: BLE001 - fall back to the default profile
+        profiles = []
+    # the in-flight key is per item, not per profile, so a second profile's
+    # search is skipped while the first runs: one grab, not one per profile
+    for pid in profiles or [1]:
+        manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en,
+                      profile_id=int(pid))
+    return True
 
 
 def _archive_history(db, dl, upd) -> None:
