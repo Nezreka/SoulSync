@@ -658,6 +658,16 @@ def _show_type_sql(tmdb_expr: str, *, with_genre: bool) -> str:
     parts = [hand, lib, hint] + ([genre] if with_genre else [])
     return "COALESCE(" + ", ".join(part.format(t=tmdb_expr) for part in parts) + ")"
 
+_PLACEHOLDER_TITLE = re.compile(r"^(tba|tbd|to be announced|episode\s*#?\s*\d+(\.\d+)?)$", re.I)
+
+
+def real_episode_title(title) -> bool:
+    """False for an empty title or a placeholder TMDB shows before the real
+    one is known ("TBA", "Episode 2"): neither belongs in a file name."""
+    text = str(title or "").strip()
+    return bool(text) and not _PLACEHOLDER_TITLE.match(text)
+
+
 class VideoDatabase:
     """Connection + schema manager for the isolated video library DB."""
 
@@ -8277,6 +8287,32 @@ class VideoDatabase:
                 "ORDER BY s.title COLLATE NOCASE, e.season_number, e.episode_number, "
                 "f.size_bytes DESC").fetchall()
             return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def episode_title_for(self, tmdb_id, season, episode) -> str | None:
+        """An episode's title for the naming template: the library's episode
+        row, else a wishlist row's. None when neither knows a real one."""
+        try:
+            tid, sn, en = int(tmdb_id), int(season), int(episode)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            for sql in (
+                "SELECT e.title FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "WHERE s.tmdb_id=? AND e.season_number=? AND e.episode_number=? "
+                "AND e.title IS NOT NULL AND TRIM(e.title) <> ''",
+                "SELECT episode_title FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
+                "AND season_number=? AND episode_number=? "
+                "AND episode_title IS NOT NULL AND TRIM(episode_title) <> ''",
+            ):
+                for (title,) in conn.execute(sql, (tid, sn, en)).fetchall():
+                    if real_episode_title(title):
+                        return str(title).strip()
+            return None
+        except sqlite3.Error:
+            return None
         finally:
             conn.close()
 

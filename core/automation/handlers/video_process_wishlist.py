@@ -494,6 +494,11 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
                # full air date — daily series (Daily Show / Kimmel / soaps) release by
                # DATE, not SxxExx; the ranker + retry queries key off this.
                "air_date": (str(item.get("air_date") or "")[:10] or None)}
+        if scope == "episode" and item.get("episode_title"):
+            # the naming template's $episodetitle (the import also looks it up)
+            from database.video_database import real_episode_title
+            if real_episode_title(item["episode_title"]):
+                ctx["episode_title"] = str(item["episode_title"]).strip()
         if scope == "season":
             ctx.pop("episode", None)
             ctx.pop("air_date", None)

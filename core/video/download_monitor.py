@@ -128,6 +128,39 @@ def _expected_duration_sec(db, dl) -> float | None:
         return None
 
 
+def _with_episode_title(db, dl):
+    """The download with its episode's title in ``search_ctx``, for the
+    template's $episodetitle. no grab path put it there (the wishlist search,
+    the manual search, a retry), so every import named the file without it
+    (SeadogsBooty). from the library's episode row, else the wishlist row,
+    else TMDB's season (cached). unchanged when it's known or not an episode."""
+    from core.video.importer import _scope_of, _search_ctx
+    try:
+        if _scope_of(dl) != "episode":
+            return dl
+        ctx = _search_ctx(dl)
+        if ctx.get("episode_title") or ctx.get("episode") is None or ctx.get("season") is None:
+            return dl
+        _kind, tmdb_id, sn, en, _c = _wishlist_ids(db, dl)
+        if not tmdb_id:
+            return dl
+        title = db.episode_title_for(tmdb_id, sn, en)
+        if not title:
+            from database.video_database import real_episode_title
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            season = get_video_enrichment_engine().tmdb_season(int(tmdb_id), int(sn)) or {}
+            for e in season.get("episodes") or []:
+                if e.get("episode_number") == int(en) and real_episode_title(e.get("title")):
+                    title = str(e["title"]).strip()
+                    break
+        if not title:
+            return dl
+        return {**dl, "search_ctx": json.dumps({**ctx, "episode_title": title})}
+    except Exception:   # noqa: BLE001 - a title lookup never blocks an import
+        logger.debug("episode title lookup failed for download %s", dl.get("id"), exc_info=True)
+        return dl
+
+
 def _soulseek_size_error(dl, src) -> str | None:
     """Error text when a finished Soulseek transfer's bytes fall well short of what
     was advertised — the backstop for truncations the duration check can't see
@@ -379,6 +412,7 @@ def _make_organizer(db):
             probe_info = prober(src) if prober is not None else None
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
+        dl = _with_episode_title(db, dl)
         plan = plan_import(dl, src, list_dir=fs.list_dir, probe=probe_info,
                            settings=settings, library_dir=_owned_library_dir(db, dl, settings),
                            expected_duration_sec=_expected_duration_sec(db, dl),
