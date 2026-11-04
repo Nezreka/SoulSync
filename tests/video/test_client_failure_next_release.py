@@ -209,3 +209,56 @@ def test_cancel_of_a_finished_download_touches_nothing(db, monkeypatch):
         assert db.removed == []
     finally:
         videoapi._video_db = None
+
+
+# -- the retry keeps the profile the failed grab was ranked by (SeadogsBooty) ---
+
+def test_the_retry_ranks_under_the_failed_grabs_profile(monkeypatch, db):
+    # Dexter: Resurrection, not in the library, profile 3 picked in the search
+    # modal: the replacement was ranked under Default and took a 1.4 GB
+    # non-MeGusta release
+    import core.video.wishlist_search as ws
+    seen = []
+    monkeypatch.setattr(ws, "manual_search", lambda *a, **k: seen.append(k.get("quality_profile_id"))
+                        or {"queued": 1, "skipped": 0, "total": 1, "grabbed": 1})
+    dl = _row(db)
+    db.update_video_download(dl["id"], quality_profile_id=3)
+    assert monitor._search_again_now(db, db.get_video_download(dl["id"]), wait=True) is True
+    assert seen == [3]
+
+
+def test_a_retry_without_a_profile_passes_none(monkeypatch, db):
+    import core.video.wishlist_search as ws
+    seen = []
+    monkeypatch.setattr(ws, "manual_search", lambda *a, **k: seen.append("quality_profile_id" in k)
+                        or {"grabbed": 1})
+    monitor._search_again_now(db, _row(db), wait=True)
+    assert seen == [False]
+
+
+def test_the_search_ranks_items_under_the_given_profile(monkeypatch, db):
+    import core.video.wishlist_search as ws
+    import api.video as api_video
+    monkeypatch.setattr(api_video, "get_video_db", lambda: db)
+    monkeypatch.setattr(ws.vpw, "_default_target_dir", lambda media_type: "/tv")
+    monkeypatch.setattr(ws.vpw, "_default_active_keys", lambda media_type: set())
+    import core.video.numbering as numbering
+    monkeypatch.setattr(numbering, "annotate", lambda items: items)
+    ran = []
+    monkeypatch.setattr(ws, "_run_batch", lambda todo, media_type, **k: ran.extend(todo) or 1)
+    db.add_episodes_to_wishlist(1399, "Show", [{"season_number": 1, "episode_number": 2}])
+    ws.manual_search("episode", 1399, season_number=1, episode_number=2, wait=True,
+                     quality_profile_id=3)
+    assert [it["quality_profile_id"] for it in ran] == [3]
+
+
+def test_a_profile_picked_in_the_search_modal_reaches_the_wishlist_search(db):
+    # a show not in the library keeps the modal's pick in video_title_profiles;
+    # the wishlist search only read the wish row and the library row. the pick
+    # stamps rows already wished; an episode wished after it carried none
+    assert db.set_title_profile_choice("show", 1399, 3)
+    db.add_episodes_to_wishlist(1399, "Show", [{"season_number": 1, "episode_number": 2}])
+    items = db.wishlist_manual_search_items("episode", 1399, season_number=1, episode_number=2)
+    assert [it["quality_profile_id"] for it in items] == [3]
+    due = db.episode_wishlist_to_download(due_only=False)
+    assert [it["quality_profile_id"] for it in due] == [3]

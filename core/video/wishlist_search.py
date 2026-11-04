@@ -188,14 +188,18 @@ def _run_batch(todo: List[Dict[str, Any]], media_type: str, *, all_sources: bool
 
 def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
                   *, all_sources: bool = False, profile_id: int = 1,
-                  wait: bool = False) -> Dict[str, Any]:
+                  wait: bool = False, quality_profile_id=None) -> Dict[str, Any]:
     """Kick a background search for one wished item (or a season/show of
     episodes). Returns immediately: {queued, skipped, total}. 'skipped' =
     already downloading / already being searched.
 
     ``wait`` runs the search on the calling thread instead and adds
     'grabbed', for a caller that has to know whether anything was taken (the
-    monitor's next-release retry, which says so when nothing was)."""
+    monitor's next-release retry, which says so when nothing was).
+
+    ``quality_profile_id`` ranks under that quality profile whatever the
+    wishlist row says: the next-release retry keeps the profile the failed
+    grab was ranked by (SeadogsBooty's retry fell back to Default)."""
     from api.video import get_video_db
     media_type = "movie" if scope == "movie" else "episode"
     items = get_video_db().wishlist_manual_search_items(
@@ -204,6 +208,8 @@ def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
     if media_type == "episode":
         from core.video.numbering import annotate
         items = annotate(items)
+    if quality_profile_id:
+        items = [dict(it, quality_profile_id=int(quality_profile_id)) for it in items]
     if not items:
         return {"queued": 0, "skipped": 0, "total": 0}
     todo = _prepare(items, media_type, user_initiated=True)

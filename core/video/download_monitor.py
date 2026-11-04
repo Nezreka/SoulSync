@@ -1215,10 +1215,14 @@ def _search_again_now(db, dl, *, wait: bool = False) -> bool:
     # search is skipped while the first runs: one grab, not one per profile.
     # ``wait``: True only when something was grabbed (or another search or
     # download already has the item, which is handled too)
+    # the retry ranks under the profile the failed grab was ranked by. the
+    # wishlist row often has none (a profile picked in the search modal for a
+    # show not in the library yet), and the replacement fell back to Default
+    keep = {"quality_profile_id": dl["quality_profile_id"]} if dl.get("quality_profile_id") else {}
     handled = False
     for pid in profiles or [1]:
         res = manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en,
-                            profile_id=int(pid), **({"wait": True} if wait else {})) or {}
+                            profile_id=int(pid), **({"wait": True} if wait else {}), **keep) or {}
         if not wait:
             continue
         if res.get("grabbed") or (res.get("skipped") and not res.get("queued")):
