@@ -8676,6 +8676,14 @@ textarea.searchInput {
     border-radius: var(--radius-xl);
   }
 
+  /* the toolbar doesn't stick here, so its name tag would appear in a bar
+     already scrolled off the top. worse, it wrapped the bar to a second row
+     (48 to 86px), which pushed the hero's edge back into view, which took the
+     tag away again: the page jumped up and down as you scrolled past the hero */
+  .detailView .toolbarIdentity {
+    display: none;
+  }
+
   .detailView .toolButton {
     min-height: 34px;
     padding: 0 12px;
