@@ -64,6 +64,11 @@ class ResumePoint(NamedTuple):
     run_id: str
 
 
+def _clean_summary(text):
+    from core.library2.summary_markers import clean_summary
+    return clean_summary(text)
+
+
 def _rebuild_album_artist_credits(cursor: Any, album_ids: Set[int]) -> None:
     """Replace derived album credits from current album/track ownership."""
 
@@ -1763,7 +1768,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "image_url": _pick(row, "thumb_url", "banner_url"),
                 "art_locked": _pick(row, "art_locked"),
                 "genres": _normalize_genres(_pick(row, "genres")),
-                "summary": _pick(row, "summary"),
+                # the plex summary carries the legacy updater's "-updatedAt…"
+                # bookkeeping, which is not a biography
+                "summary": _clean_summary(_pick(row, "summary")),
                 # §17.7 remainder: AudioDB-sourced fields + MusicBrainz aliases
                 # had no lib2 destination column at all.
                 "style": _pick(row, "style"),

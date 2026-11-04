@@ -1704,6 +1704,20 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
         except Exception as e:  # noqa: BLE001
             logger.error("recording-home pass failed (will retry next start): %s", e)
 
+    if not _stopped():
+        # the legacy plex updater's "-updatedAt<date>" marker was imported as
+        # the biography of every artist it touched (core/library2/summary_markers.py)
+        try:
+            from core.library2.summary_markers import repair_artist_summaries
+            fixed = repair_artist_summaries(cursor)
+            stats["artist_summary_markers"] = fixed
+            if fixed["cleared"] or fixed["cleaned"]:
+                logger.info("Removed SoulSync's update markers from %d artist biographies",
+                            fixed["cleared"] + fixed["cleaned"])
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("artist summary marker pass failed (will retry next start): %s", e)
+
     return stats
 
 

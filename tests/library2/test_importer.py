@@ -2427,6 +2427,21 @@ def test_reimport_keeps_provider_genres_a_legacy_row_does_not_carry(legacy_db):
         assert artist["summary"] == 'Bio.'
 
 
+def test_the_plex_updaters_marker_is_not_imported_as_a_biography(legacy_db):
+    """The legacy plex updater stamps "-updatedAt<date>" into a plex artist's
+    summary as bookkeeping; it showed as the bio on 443 artists (Nov 4 2026)."""
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE artists SET summary='Toronto rapper.\n\n-updatedAt2026-04-13' "
+                     "WHERE name='Drake'")
+        conn.commit()
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute(
+            "SELECT summary FROM lib2_artists WHERE name='Drake'").fetchone()[0] == "Toronto rapper."
+
+
 def test_reimport_does_not_blank_artwork_a_legacy_row_has_none_for(legacy_db):
     """The artist upsert wrote `image_url = ?` outright when art was unlocked,
     so a legacy row with no thumbnail erased whatever the artwork worker had
