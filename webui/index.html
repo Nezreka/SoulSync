@@ -5089,6 +5089,22 @@
                                                                 pack only goes when every episode in it imported.
                                                             </div>
                                                         </div>
+                                                        <!-- A video release the client failed: block it and grab the
+                                         next one the profile ranks (core/video/download_monitor.py,
+                                         redownload_failed in the video db). -->
+                                                        <div class="form-group" id="video-redownload-failed-group">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="video-redownload-failed" checked>
+                                                                When a video download fails, grab the next best release
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                When SABnzbd or the torrent client fails a movie or episode,
+                                                                or a torrent stalls, that release is blocklisted and the next
+                                                                one your quality profile ranks is grabbed right away. It stops
+                                                                after 5 failed releases of the same title in 2 days, and you
+                                                                get the failed notification when nothing else could be taken.
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>

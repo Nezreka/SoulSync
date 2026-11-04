@@ -262,6 +262,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Prowlarr (structured and text queries, TV query ladder including anime and daily shows) and **RSS sync**.
   - qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd.
   - Seeding goals, **season packs**, and stall detection.
+  - **Failed download handling**: a release SABnzbd or the torrent client fails is blocklisted and the next one your profile ranks is grabbed right away, with a notification only when nothing else could be taken.
 - **Quality profiles**:
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
   - **Per-title profiles**: pick one in Get / Manual search (even before the title is in your library; it keeps it when it lands) or the title's Manage panel, with separate defaults for new movies and new shows.

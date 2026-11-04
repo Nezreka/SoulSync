@@ -736,6 +736,15 @@ When a grab turns out to be a bad file — corrupt, mislabeled, wrong title — 
 - **Retry** and automatic re-queries skip them.
 - A **manual grab** always overrides the blocklist, in case you know better.
 
+## When the download client fails a release
+
+When SABnzbd or the torrent client reports a movie or episode as failed, or a torrent stalls, SoulSync blocklists that release and searches again straight away, so the next release your quality profile ranks is grabbed: the next one from the same group at the same quality first, then lower qualities the profile still accepts. You get the **download failed** notification only when it gives up:
+
+- no other release your profile accepts was found (the item stays on the wishlist), or
+- 5 releases of the same title (or episode) failed in 2 days. A client that fails everything, like a full disk or a wrong category, would otherwise blocklist every release there is, so it stops and asks you to check the client.
+
+A job the client simply lost (deleted by hand, connection trouble) isn't treated as a bad release. Turn it off with **When a video download fails, grab the next best release** in Settings, on the usenet client's card.
+
 ## Recycle bin
 
 When an upgrade replaces an existing file, the old file isn't deleted outright — it lands in a **recycle bin** first. If the "upgrade" turns out to be worse, you can recover the original.

@@ -1165,7 +1165,7 @@ def retry_another_release(db, dl) -> dict:
     return {"status": "failed", "wishlist_search": kicked}
 
 
-def _search_again_now(db, dl) -> bool:
+def _search_again_now(db, dl, *, wait: bool = False) -> bool:
     """Run the wishlist search for this download's item now, for every profile
     that has it wished. The search ranks under that wish's profile and the
     blocklist drops what already failed, so the next best release is grabbed.
@@ -1183,11 +1183,19 @@ def _search_again_now(db, dl) -> bool:
     except Exception:  # noqa: BLE001 - fall back to the default profile
         profiles = []
     # the in-flight key is per item, not per profile, so a second profile's
-    # search is skipped while the first runs: one grab, not one per profile
+    # search is skipped while the first runs: one grab, not one per profile.
+    # ``wait``: True only when something was grabbed (or another search or
+    # download already has the item, which is handled too)
+    handled = False
     for pid in profiles or [1]:
-        manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en,
-                      profile_id=int(pid))
-    return True
+        res = manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en,
+                            profile_id=int(pid), **({"wait": True} if wait else {})) or {}
+        if not wait:
+            continue
+        if res.get("grabbed") or (res.get("skipped") and not res.get("queued")):
+            handled = True
+            break
+    return handled if wait else True
 
 
 def _archive_history(db, dl, upd) -> None:
@@ -1540,7 +1548,8 @@ def _blocked_users(db):
         return frozenset()
 
 
-def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True) -> None:
+def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True,
+                   client_failure: bool = False) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
     hand off to a requery thread; if nothing left, mark it failed for real — and
     put it back on the wishlist so it isn't silently lost.
@@ -1551,7 +1560,12 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True) -> None:
     nothing, and — because the requery path clears the error on its way through —
     it would replace a message naming the real cause with "No working release found
     after retries", pointing the user at their indexer instead of at the path
-    mapping that actually broke."""
+    mapping that actually broke.
+
+    ``client_failure`` = the torrent/usenet client failed THIS release (SAB
+    said failed, or the transfer stalled). That release is blocklisted and
+    the item searched again at once, so the next release the profile ranks is
+    grabbed instead of the item waiting hours for the wishlist's next pass."""
     from core.video.retry import plan_retry
     plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db)) \
         if allow_retry else {"action": "fail"}
@@ -1562,15 +1576,93 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True) -> None:
         _spawn_requery(dl["id"])
         return
     err = error_msg or "Download failed"
+    redownload = _next_release_plan(db, dl, err) if (client_failure and allow_retry) else None
+    if redownload and redownload.get("retry"):
+        err = "%s · trying the next release" % err
+    elif redownload and redownload.get("gave_up"):
+        err = redownload["gave_up"]
     completed = _now()
     db.update_video_download(dl["id"], status="failed", error=err, completed_at=completed)
     _wishlist_failed(db, dl)
     _archive_history(db, dl, {"status": "failed", "error": err, "completed_at": completed})
+    if redownload and redownload.get("retry"):
+        # the notification waits for the outcome: a release that got replaced
+        # isn't something to come and fix
+        _spawn_next_release(db, dl, err)
+        return
+    _publish_failed(dl, err)
+
+
+def _publish_failed(dl, err) -> None:
     try:
         from core.video.download_events import publish
         publish("video_download_failed", {**_event_payload(dl), "error": err})
     except Exception:
         logger.exception("video download %s: failed-event publish failed", dl.get("id"))
+
+
+# How many releases of one title the client may fail in a row (48h) before
+# the retry stops and asks: a misconfigured client fails everything, and
+# without a cap it would blocklist every release there is.
+REDOWNLOAD_LIMIT = 5
+REDOWNLOAD_WINDOW_HOURS = 48
+
+
+def _next_release_plan(db, dl, err) -> dict | None:
+    """Blocklist the release the client just failed and decide whether to grab
+    the next one. None = not ours to retry (the setting is off, not a client
+    grab, no title to search for). {'retry': True} or {'gave_up': message}."""
+    if str(dl.get("source") or "") not in ("torrent", "usenet"):
+        return None
+    try:
+        from core.video.download_config import load as load_download_config
+        if not load_download_config(db).get("redownload_failed", True):
+            return None
+    except Exception:  # noqa: BLE001 - an unreadable setting keeps the default (on)
+        logger.debug("redownload setting unreadable", exc_info=True)
+    kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+    if kind == "youtube" or not tmdb_id or not (dl.get("username") and dl.get("filename")):
+        return None
+    _blocklist_release(db, dl, "Download failed: %s" % err)
+    try:
+        failed = db.recent_failed_release_count(
+            media_source=dl.get("media_source"), media_id=dl.get("media_id"),
+            season_number=sn, episode_number=en, hours=REDOWNLOAD_WINDOW_HOURS)
+    except Exception:  # noqa: BLE001 - can't count: retry, the wishlist backoff still paces it
+        logger.debug("failed-release count unreadable", exc_info=True)
+        failed = 1
+    if failed >= REDOWNLOAD_LIMIT:
+        return {"gave_up": ("%s · %d releases failed in a row, stopped trying the next one. "
+                            "Check the download client, then search again" % (err, failed))}
+    return {"retry": True}
+
+
+def _next_release_now(db, dl, err) -> bool:
+    """Search the item again and grab what ranks next. When nothing is taken
+    the row says so and the failure is announced, since that one needs a person.
+    True when something was grabbed (or the item is already in hand)."""
+    try:
+        grabbed = _search_again_now(db, dl, wait=True)
+    except Exception:  # noqa: BLE001
+        logger.exception("video download %s: next-release search failed", dl.get("id"))
+        grabbed = False
+    if grabbed:
+        logger.info("video download %s: %s failed in the client, grabbed the next release",
+                    dl.get("id"), dl.get("release_title") or dl.get("filename"))
+        return True
+    final = ("%s, and no other release your profile accepts was found. "
+             "It stays on the wishlist" % err.replace(" · trying the next release", ""))
+    try:
+        db.update_video_download(dl["id"], error=final)
+    except Exception:  # noqa: BLE001
+        logger.debug("video download %s: final error not saved", dl.get("id"), exc_info=True)
+    _publish_failed(dl, final)
+    return False
+
+
+def _spawn_next_release(db, dl, err) -> None:
+    threading.Thread(target=_next_release_now, args=(db, dl, err), daemon=True,
+                     name="video-next-release-%s" % dl.get("id")).start()
 
 
 def _search_for_retry(query, max_seconds=55):
@@ -1795,7 +1887,8 @@ def _tick(db) -> bool:
             # same file from the same user.
             if upd.get("_bad_release") and dl.get("username") and dl.get("filename"):
                 _blocklist_release(db, dl, upd.get("error") or "Bad release")
-            _fail_or_retry(db, dl, upd.get("error"))      # auto-retry before truly failing
+            _fail_or_retry(db, dl, upd.get("error"),      # auto-retry before truly failing
+                           client_failure=dl.get("source") in ("torrent", "usenet"))
             continue
         # Stall/queue timeout — a transfer sitting with no % movement for too long
         # (queued behind a dead peer, frozen mid-download, or finished with its file
@@ -1825,7 +1918,8 @@ def _tick(db) -> bool:
                 # finished and then couldn't be found does not — the bytes are
                 # already on disk, and searching again just repeats the same import.
                 _fail_or_retry(db, dl, stall.reason(_verdict, _idle, at_completion=_at_completion),
-                               allow_retry=not _at_completion)
+                               allow_retry=not _at_completion,
+                               client_failure=dl.get("source") in ("torrent", "usenet"))
                 continue
             if _verdict in (stall.MOVED, stall.SEEDED):
                 upd["progress_at"] = _now()      # restart (or start) the clock

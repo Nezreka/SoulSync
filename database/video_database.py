@@ -4405,6 +4405,29 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def recent_failed_release_count(self, *, media_source, media_id, season_number=None,
+                                    episode_number=None, hours: int = 48,
+                                    reason_prefix: str = "Download failed") -> int:
+        """How many releases of one title (one episode) the monitor blocklisted
+        because the download client failed them, in the last ``hours``. The
+        next-release retry stops at a cap so a broken client can't blocklist
+        every release there is."""
+        conn = self._get_connection()
+        try:
+            return int(conn.execute(
+                """SELECT COUNT(*) FROM video_blocklist
+                    WHERE COALESCE(media_source,'') = COALESCE(?, '')
+                      AND COALESCE(media_id,'') = COALESCE(?, '')
+                      AND season_number IS ?
+                      AND episode_number IS ?
+                      AND reason LIKE ? || '%'
+                      AND created_at >= datetime('now', ?)""",
+                (media_source, None if media_id is None else str(media_id),
+                 season_number, episode_number, reason_prefix,
+                 "-%d hours" % int(hours))).fetchone()[0])
+        finally:
+            conn.close()
+
     def video_blocklist_pairs(self) -> set:
         """{(username, filename)} for per-release candidate filtering — cheap enough to
         read per search/retry pass (the table stays small). Excludes the source-wide
