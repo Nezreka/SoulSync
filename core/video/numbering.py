@@ -280,6 +280,91 @@ def regroup_season(db: Any, tvdb_id: Any, season: int, episodes: Sequence[Dict[s
         return unchanged
 
 
+# AniList entries that are a run of regular episodes (not a movie, OVA or special)
+_RUN_FORMATS = ("", "TV", "TV_SHORT", "ONA")
+
+
+def anilist_regroup(season: int, episodes: Sequence[Dict[str, Any]],
+                    entries: Sequence[Dict[str, Any]]):
+    """split one lumped TMDB season by the AniList entries it holds.
+
+    the anime id map says where each AniList entry starts inside a TMDB season
+    (Jujutsu Kaisen's third season starts after TMDB S1E47) and which TVDB
+    season that is; AniList says how many episodes each entry has. TVDB does
+    the same split by air date, but only with a TVDB key; this needs neither.
+
+    the map lags behind TMDB sometimes (it still files JJK's second season
+    under a TMDB season 2 that TMDB folded into season 1), so an entry pointing
+    elsewhere is used only when it sits between two entries of this season and
+    the episode counts add up exactly. anything that doesn't add up leaves the
+    season as it is.
+
+    returns ({season: [episode dicts]}, {old episode number: (season, episode)})."""
+    season = int(season)
+    unchanged = ({season: list(episodes or [])}, {})
+
+    def _n(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    rows = [e for e in entries or []
+            if (_n(e.get("tvdb_season")) or 0) > 0
+            and str(e.get("format") or "").upper() in _RUN_FORMATS]
+    rows.sort(key=lambda e: (_n(e["tvdb_season"]), _n(e.get("tvdb_offset")) or 0))
+    anchors = [i for i, e in enumerate(rows) if _n(e.get("tmdb_season")) == season]
+    if season <= 0 or len(anchors) < 2:
+        return unchanged
+    first = rows[anchors[0]]
+    if (_n(first.get("tmdb_offset")) or 0) != 0 or _n(first["tvdb_season"]) != season:
+        return unchanged
+
+    # (first TMDB episode number of the run - 1, tvdb season, tvdb offset)
+    runs: List[Tuple[int, int, int]] = []
+    for a, b in zip(anchors, anchors[1:], strict=False):
+        start = _n(rows[a].get("tmdb_offset")) or 0
+        nxt = _n(rows[b].get("tmdb_offset")) or 0
+        if nxt <= start:
+            return unchanged
+        runs.append((start, _n(rows[a]["tvdb_season"]), _n(rows[a].get("tvdb_offset")) or 0))
+        between = rows[a + 1:b]
+        if between:
+            count = _n(rows[a].get("episodes"))
+            if not count:
+                return unchanged
+            pos = start + count
+            for m in between:
+                runs.append((pos, _n(m["tvdb_season"]), _n(m.get("tvdb_offset")) or 0))
+                count = _n(m.get("episodes"))
+                if not count:
+                    return unchanged
+                pos += count
+            if pos != nxt:
+                return unchanged
+        elif _n(rows[a].get("episodes")) and start + _n(rows[a]["episodes"]) != nxt:
+            return unchanged
+    last = rows[anchors[-1]]
+    runs.append((_n(last.get("tmdb_offset")) or 0, _n(last["tvdb_season"]),
+                 _n(last.get("tvdb_offset")) or 0))
+
+    groups: Dict[int, List[Dict[str, Any]]] = {season: []}
+    moved: Dict[int, Numbering] = {}
+    for e in episodes or []:
+        en = _n(e.get("episode_number"))
+        target = None
+        if en is not None:
+            for start, ts, toff in runs:
+                if en > start:
+                    target = (ts, en - start + toff)
+        if target and target[0] != season:
+            moved[en] = target
+            groups.setdefault(target[0], []).append(dict(e, episode_number=target[1]))
+        else:
+            groups[season].append(e)
+    return (groups, moved) if moved else unchanged
+
+
 def annotate(items: List[Dict[str, Any]], db: Any = None, client: Any = None) -> List[Dict[str, Any]]:
     """set alt_season / alt_episode on every wished episode whose scene
     numbering differs. one TVDB client for the batch; seasons come from the

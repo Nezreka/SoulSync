@@ -88,7 +88,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 63   # v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 64   # v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -912,6 +912,13 @@ class VideoDatabase:
             conn.execute("INSERT INTO video_settings (key, value) VALUES ('anilist_enabled', '1') "
                          "ON CONFLICT(key) DO UPDATE SET value = '1'")
             conn.execute("UPDATE shows SET anilist_status = NULL, anilist_attempted = NULL")
+        if prev_version < 64:
+            # v64: the episode sync splits a season TMDB lumped by AniList's
+            # entries too (no TVDB key needed, Thibs' Jujutsu Kaisen). AniList
+            # ran for everyone at v61, so queue the shows it already linked.
+            conn.execute(
+                "UPDATE shows SET episodes_synced = 0 WHERE id IN ("
+                + VideoDatabase._LUMPED_ANIME_SQL + ")")
         if prev_version < 41:
             # v41 heal: the details backfill used to swallow failed TMDB calls
             # (429/5xx/timeout) into empty metadata and still mark
@@ -1334,6 +1341,35 @@ class VideoDatabase:
                      r.get("next_episode"), r.get("next_airing_at"),
                      r.get("cover_url"), r.get("banner_url")))
             conn.commit()
+        finally:
+            conn.close()
+
+    # a show whose AniList entries say a later season starts inside a TMDB
+    # season (anime_regroup's offsets) while that season still holds missing
+    # rows past the start: TMDB's lump, waiting for the episode sync to split it
+    _LUMPED_ANIME_SQL = (
+        "SELECT DISTINCT a.item_id FROM video_anime a "
+        "JOIN shows s ON s.id = a.item_id "
+        "WHERE a.kind = 'show' AND a.tmdb_offset > 0 AND a.tmdb_season > 0 "
+        "AND s.tmdb_id IS NOT NULL AND s.episodes_synced = 1 "
+        "AND EXISTS (SELECT 1 FROM episodes e WHERE e.show_id = a.item_id "
+        "  AND e.season_number = a.tmdb_season AND e.episode_number > a.tmdb_offset "
+        "  AND e.server_id IS NULL AND COALESCE(e.has_file, 0) = 0)")
+
+    def requeue_lumped_anime(self, show_id=None) -> int:
+        """queue the episode sync again for a show TMDB lumped that AniList
+        can split (one show, or all of them). returns shows queued."""
+        sql, args = self._LUMPED_ANIME_SQL, []
+        if show_id is not None:
+            sql += " AND a.item_id = ?"
+            args.append(int(show_id))
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(f"UPDATE shows SET episodes_synced = 0 WHERE id IN ({sql})", args)
+            conn.commit()
+            return int(cur.rowcount or 0)
+        except (sqlite3.Error, ValueError, TypeError):
+            return 0
         finally:
             conn.close()
 
