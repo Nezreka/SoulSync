@@ -1529,6 +1529,7 @@ class MusicDatabase:
             self._add_profile_support_v2(cursor)
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
+            self._ensure_discovery_pool_decade_index(cursor)
             self._fix_profile_one_owner_rows(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_sides(cursor)
@@ -4740,6 +4741,19 @@ class MusicDatabase:
             "CREATE INDEX IF NOT EXISTS idx_metadata_match_provenance_origin "
             "ON metadata_match_provenance(origin, service)"
         )
+
+    def _ensure_discovery_pool_decade_index(self, cursor):
+        """Discover's decade shelves group the pool by its release year.
+
+        the only index on the filter was profile_id, so every call read each
+        pool row in full (track json and all, ~300MB on a 227k-row pool) to
+        get at release_date: 6.9s live, 25s cold (Nov 4 2026). this one covers
+        the query. after the profile migrations, which add profile_id."""
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_profile_release "
+                           "ON discovery_pool (profile_id, release_date)")
+        except Exception as e:  # noqa: BLE001 - an index is an assist, retried next start
+            logger.debug("discovery_pool decade index skipped: %s", e)
 
     def _add_profile_support(self, cursor):
         """Add multi-profile support: profiles table + profile_id on per-profile tables"""

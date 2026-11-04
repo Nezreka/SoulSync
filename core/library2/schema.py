@@ -1349,6 +1349,14 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                        "ON lib2_albums(musicbrainz_release_group_id)")
     except Exception as e:  # noqa: BLE001
         logger.error("release-group index failed (will retry next start): %s", e)
+    # Played tracks (Discover's label explorer ranks labels by plays). Partial:
+    # a few thousand of 300k tracks have plays, and without it the query
+    # walked every album and its tracks, 5.8s live (Nov 4 2026).
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_played "
+                       "ON lib2_tracks(album_id, play_count) WHERE play_count > 0")
+    except Exception as e:  # noqa: BLE001
+        logger.error("played-tracks index failed (will retry next start): %s", e)
     # Multi-file primary model (audit P1-07 / ADR-03): elect a primary where
     # missing, repair accidental extras, and keep the invariant via triggers
     # so every write path participates without changes.
