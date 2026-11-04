@@ -38,6 +38,7 @@ a hot fix for 3.6.2. on a big library the library page could time out with "coul
 - **a running wishlist batch opens with its songs (#1982)** instead of an empty table.
 - **a deleted mirrored playlist stops showing as In SoulSync on its source tab (#1979).**
 
+- **the library upgrade stops sitting paused forever (thanks Skowl).** two old rows stamped with the same media-server id took turns holding it in the upgrade's mapping step, which never finished, so automations and enrichment stayed paused. a row whose id another row already holds is left to that row now.
 - **a failing wishlist sync row waits before its next try** (30s, doubling, an hour at most). the background sync picked the same failing row first every time, so a passing "database is locked" spent all ten tries in a second and the change sat failed.
 - **bandcamp's bot check stops writing albums off.** bandcamp sometimes answers searches with a "client challenge" page instead of results. soulsync asked again for every album (125 warnings in 45 minutes) and the bandcamp worker marked each one not found. a challenge now pauses bandcamp searches for 30 minutes with one warning, and the albums stay pending.
 - **audiobooks: a release you blocked stays out of your searches.** the search only read the first profile's blocklist, so a release another profile blocked kept being offered and grabbed for them.
