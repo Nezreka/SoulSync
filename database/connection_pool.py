@@ -19,7 +19,12 @@ around one, so the callers' existing code (``conn.close()``, ``with conn:``,
 - A proxy that is garbage collected without close() returns its connection only
   when no cursor made through it is still alive. A cursor that outlives the proxy
   keeps its connection exactly as it did before, and that connection is not
-  reused.
+  reused. The finalizer never takes the pool lock: it rolls back an open
+  transaction and queues the connection, and the next acquire or close puts it
+  back. Garbage collection runs on whatever thread allocates, including one
+  inside ``with _lock:``, and a finalizer that took the (non-reentrant) lock
+  there deadlocked that thread on itself and every request behind it (Nov 3
+  2026, all 32 request threads stuck on acquire's lock).
 - A connection is handed to one caller at a time. It is reused only while the
   database file is still the same file (a restored or replaced file is reopened),
   and only after what a caller can leave behind is undone: an open transaction,
@@ -46,7 +51,7 @@ import sqlite3
 import threading
 import time
 import weakref
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Any, Callable, List, Optional
 
 ENABLED = os.environ.get("SOULSYNC_DB_POOL", "1").strip().lower() not in ("0", "false", "no", "off")
@@ -75,7 +80,13 @@ _RESET_PRAGMAS = ("busy_timeout", "analysis_limit")
 _checked_out: "weakref.WeakSet[PooledConnection]" = weakref.WeakSet()
 
 # plain counters for diagnostics and tests; not locked on purpose, approximate is fine
-stats = {"hits": 0, "misses": 0, "discarded": 0, "kept_by_cursor": 0, "overflow_closed": 0}
+stats = {"hits": 0, "misses": 0, "discarded": 0, "kept_by_cursor": 0, "overflow_closed": 0,
+         "deferred": 0}
+
+# connections their proxies' finalizers dropped, waiting to be put back outside
+# the lock. deque.append/popleft are atomic, so a finalizer can push here from
+# anywhere, even from inside a ``with _lock:`` block on its own thread
+_deferred: "deque[tuple]" = deque()
 
 
 class _Slot:
@@ -260,73 +271,105 @@ class PooledConnection:
 
     def _give_back(self) -> None:
         object.__setattr__(self, "_released", True)
-        slot = self._slot
-        raw = slot.raw
-        try:
-            if raw.in_transaction:
-                raw.rollback()
-            # per-connection hooks a caller may have installed; a fresh connection had none
-            raw.set_authorizer(None)
-            raw.set_progress_handler(None, 0)
-            raw.set_trace_callback(None)
-            # TEMP tables, views and triggers live as long as their connection; callers
-            # such as MusicDatabase._temp_key_set rely on them going away with it
-            temp = raw.execute(
-                "SELECT type, name FROM sqlite_temp_master WHERE type IN ('table', 'view', 'trigger')"
-            ).fetchall()
-            for kind, name in temp:
-                if kind == "trigger":
-                    raw.execute('DROP TRIGGER IF EXISTS temp."%s"' % name.replace('"', '""'))
-            for kind, name in temp:
-                if kind != "trigger":
-                    raw.execute('DROP %s IF EXISTS temp."%s"' % (kind.upper(), name.replace('"', '""')))
-            if raw.isolation_level != slot.isolation_level:
-                raise sqlite3.ProgrammingError("isolation_level changed")
-            if raw.row_factory is not slot.row_factory:
-                raw.row_factory = slot.row_factory
-            if raw.text_factory is not slot.text_factory:
-                raw.text_factory = slot.text_factory
-            if raw.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
-                raw.execute("PRAGMA foreign_keys = ON")
-            for name, value in slot.pragmas.items():
-                if raw.execute(f"PRAGMA {name}").fetchone()[0] != value:
-                    raw.execute(f"PRAGMA {name} = {int(value)}")
-        except sqlite3.Error:
-            stats["discarded"] += 1
-            _close_quietly(raw)
-            return
-        evicted: List[_Slot] = []
-        with _lock:
-            bucket = _idle.setdefault(self._path, [])
-            _idle.move_to_end(self._path)
-            if len(bucket) >= MAX_IDLE:
-                evicted.append(slot)
-            else:
-                bucket.append(slot)
-                total = sum(len(b) for b in _idle.values())
-                while total > MAX_IDLE_TOTAL:
-                    oldest_path = next(iter(_idle))
-                    oldest = _idle[oldest_path]
-                    evicted.append(oldest.pop(0))
-                    total -= 1
-                    if not oldest:
-                        del _idle[oldest_path]
-        for gone in evicted:
-            stats["overflow_closed"] += 1
-            _close_quietly(gone.raw)
+        _return_slot(self._slot, self._path)
+        _drain_deferred()
 
     def __del__(self) -> None:
+        # never the pool lock here: a finalizer runs wherever garbage collection
+        # does, including inside another ``with _lock:`` on this same thread
         try:
             if self._released:
                 return
+            object.__setattr__(self, "_released", True)
             if self._live_cursor():
                 # a cursor still needs this connection; it keeps it alive on its own
-                object.__setattr__(self, "_released", True)
                 stats["kept_by_cursor"] += 1
                 return
-            self._give_back()
+            raw = self._slot.raw
+            try:
+                # an abandoned write transaction must not hold the database's
+                # write lock until the queue is drained
+                if raw.in_transaction:
+                    raw.rollback()
+            except sqlite3.Error:
+                _close_quietly(raw)
+                return
+            _deferred.append((self._slot, self._path))
+            stats["deferred"] += 1
         except Exception:  # noqa: BLE001, S110 - never raise from a finalizer
             pass
+
+
+def _return_slot(slot: "_Slot", path: str) -> None:
+    """Undo what a caller can leave on a connection and put it back in the
+    idle pool (or close it). Never called from a finalizer."""
+    raw = slot.raw
+    try:
+        if raw.in_transaction:
+            raw.rollback()
+        # per-connection hooks a caller may have installed; a fresh connection had none
+        raw.set_authorizer(None)
+        raw.set_progress_handler(None, 0)
+        raw.set_trace_callback(None)
+        # TEMP tables, views and triggers live as long as their connection; callers
+        # such as MusicDatabase._temp_key_set rely on them going away with it
+        temp = raw.execute(
+            "SELECT type, name FROM sqlite_temp_master WHERE type IN ('table', 'view', 'trigger')"
+        ).fetchall()
+        for kind, name in temp:
+            if kind == "trigger":
+                raw.execute('DROP TRIGGER IF EXISTS temp."%s"' % name.replace('"', '""'))
+        for kind, name in temp:
+            if kind != "trigger":
+                raw.execute('DROP %s IF EXISTS temp."%s"' % (kind.upper(), name.replace('"', '""')))
+        if raw.isolation_level != slot.isolation_level:
+            raise sqlite3.ProgrammingError("isolation_level changed")
+        if raw.row_factory is not slot.row_factory:
+            raw.row_factory = slot.row_factory
+        if raw.text_factory is not slot.text_factory:
+            raw.text_factory = slot.text_factory
+        if raw.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
+            raw.execute("PRAGMA foreign_keys = ON")
+        for name, value in slot.pragmas.items():
+            if raw.execute(f"PRAGMA {name}").fetchone()[0] != value:
+                raw.execute(f"PRAGMA {name} = {int(value)}")
+    except sqlite3.Error:
+        stats["discarded"] += 1
+        _close_quietly(raw)
+        return
+    evicted: List[_Slot] = []
+    with _lock:
+        bucket = _idle.setdefault(path, [])
+        _idle.move_to_end(path)
+        if len(bucket) >= MAX_IDLE:
+            evicted.append(slot)
+        else:
+            bucket.append(slot)
+            total = sum(len(b) for b in _idle.values())
+            while total > MAX_IDLE_TOTAL:
+                oldest_path = next(iter(_idle))
+                oldest = _idle[oldest_path]
+                evicted.append(oldest.pop(0))
+                total -= 1
+                if not oldest:
+                    del _idle[oldest_path]
+    for gone in evicted:
+        stats["overflow_closed"] += 1
+        _close_quietly(gone.raw)
+
+
+def _drain_deferred() -> None:
+    """Put back the connections finalizers queued. Runs outside the lock; a
+    finalizer that fires in here only queues another one."""
+    while True:
+        try:
+            slot, path = _deferred.popleft()
+        except IndexError:
+            return
+        try:
+            _return_slot(slot, path)
+        except Exception:  # noqa: BLE001 - one bad connection must not stop the rest
+            _close_quietly(slot.raw)
 
 
 def acquire(path: Any, opener: Callable[[bool], sqlite3.Connection]):
@@ -336,6 +379,7 @@ def acquire(path: Any, opener: Callable[[bool], sqlite3.Connection]):
     p = _poolable_path(path)
     if p is None:
         return opener(True)
+    _drain_deferred()
     ident = _file_ident(p)
     while True:
         with _lock:
