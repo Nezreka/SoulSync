@@ -15,6 +15,7 @@ import sqlite3
 import types
 import collections
 import functools
+import contextlib
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -21980,7 +21981,14 @@ _DISCOVER_WARM_PATHS = [
 from core.discovery.warm_refresh import refresh as refresh_discover_caches  # noqa: E402
 
 
-def _discover_warm_sweep(paths=None):
+# the Library page's first view. its member list is cached per process and
+# keyed by the counter in core.library2.member_version, so the first click
+# after a restart (or after an import moved the counter) computed it on the
+# request: ~5s on a 30k-artist library. warmed with the discover shelves.
+_LIBRARY_WARM_PATHS = ['/api/library/v2/artists?sort=name&monitored=all&page=1']
+
+
+def _discover_warm_sweep(paths=None, recompute=True):
     """one pass over the discover shelves, as every profile.
 
     the shelf caches are per profile, and a request with no profile is refused
@@ -22019,7 +22027,7 @@ def _discover_warm_sweep(paths=None):
                     # recompute, don't read. a sweep inside the 30 min ttl
                     # otherwise finds every answer still valid and refreshes
                     # nothing, so every other sweep was a no-op
-                    with refresh_discover_caches():
+                    with (refresh_discover_caches() if recompute else contextlib.nullcontext()):
                         status = client.get(p).status_code
                 except Exception as e:
                     logger.debug(f"discover warmup {p} as profile {pid} failed: {e}")
@@ -22050,6 +22058,11 @@ def _start_discover_warmer():
         _t.sleep(15)  # let boot finish before the first sweep
         while True:
             started = _t.time()
+            # library first: it's the page people open first. a cache hit when
+            # nothing changed, so it costs nothing on a quiet library
+            lib = _discover_warm_sweep(_LIBRARY_WARM_PATHS, recompute=False)
+            if lib['failed']:
+                logger.debug(f"Library warmup: {lib['failed'][:3]}")
             stats = _discover_warm_sweep()
             took = _t.time() - started
             if stats['failed']:
