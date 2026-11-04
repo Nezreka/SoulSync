@@ -1165,6 +1165,35 @@ def retry_another_release(db, dl) -> dict:
     return {"status": "failed", "wishlist_search": kicked}
 
 
+def block_and_retry_failed(db) -> dict:
+    """Block every failed row's release and grab the next release for each.
+
+    The bulk twin of a row's block-and-retry. Every block lands first, then
+    one background thread searches the titles one at a time: a retry per row
+    fired at once started a search per row together, which is a flood of
+    indexer calls for a list of 40. A title failed twice is searched once
+    (the second finds the first's grab in flight and skips)."""
+    rows = [r for r in (db.failed_video_downloads() or [])
+            if str(r.get("kind") or "") != "youtube"]
+    blocked = 0
+    for dl in rows:
+        if dl.get("username") and dl.get("filename"):
+            _blocklist_release(db, dl, "Blocked with retry failed: %s" % (dl.get("error") or "failed"))
+            blocked += 1
+        _wishlist_failed(db, dl)   # back on the wishlist, so the search finds it
+
+    def run():
+        for dl in rows:
+            try:
+                _search_again_now(db, dl, wait=True)
+            except Exception:  # noqa: BLE001 - one title must not stop the rest
+                logger.exception("video download %s: block-and-retry search failed", dl.get("id"))
+
+    if rows:
+        threading.Thread(target=run, daemon=True, name="video-block-retry-failed").start()
+    return {"blocked": blocked, "searching": len(rows)}
+
+
 def _search_again_now(db, dl, *, wait: bool = False) -> bool:
     """Run the wishlist search for this download's item now, for every profile
     that has it wished. The search ranks under that wish's profile and the

@@ -4190,6 +4190,16 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def failed_video_downloads(self) -> list:
+        """Rows the queue holds as failed, oldest first (not cancelled, not
+        import_failed: those keep their own actions)."""
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT * FROM video_downloads WHERE status='failed' ORDER BY id")]
+        finally:
+            conn.close()
+
     def clear_failed_video_downloads(self) -> int:
         """Delete every failed/cancelled row from the queue."""
         statuses = self.VIDEO_DOWNLOAD_REMOVABLE_STATUSES

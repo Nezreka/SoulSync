@@ -197,6 +197,14 @@ export function blockVideoRelease(downloadId: number): Promise<VdlResult | null>
   return post('video/downloads/blocklist', { download_id: downloadId });
 }
 
+/** Block every failed row's release and grab the next one for each, one title
+ *  at a time in the background (admin). */
+export function blockAndRetryFailedVideoDownloads(): Promise<
+  (VdlResult & { blocked?: number; searching?: number }) | null
+> {
+  return post('video/downloads/blocklist/retry-failed', {});
+}
+
 /** Block one exact release from a history row. */
 export function blockVideoHistoryRelease(historyId: number | string): Promise<VdlResult | null> {
   return post('video/downloads/blocklist', { history_id: Number(historyId) });

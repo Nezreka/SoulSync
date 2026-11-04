@@ -25,6 +25,9 @@ export interface VdlHeaderProps {
   onOpenHistory: () => void;
   onCancelAll: () => void;
   onRetryAll: () => void;
+  /** failed rows whose release can be blocked and replaced; 0 hides the item */
+  blockableFailedCount?: number;
+  onBlockRetryAll?: () => void;
   onClearFinished: () => void;
   onClearFailed: () => void;
   /** completed, failed and cancelled rows; import failures stay for Manual import. */
@@ -50,6 +53,8 @@ export function VdlHeader({
   onOpenHistory,
   onCancelAll,
   onRetryAll,
+  blockableFailedCount = 0,
+  onBlockRetryAll,
   onClearFinished,
   onClearFailed,
   onClearEverything,
@@ -67,6 +72,15 @@ export function VdlHeader({
       title: 'Re-grab every failed download (same releases)',
       disabled: retryAllPending,
       onSelect: onRetryAll,
+    });
+  }
+  if (blockableFailedCount > 0 && onBlockRetryAll) {
+    menu.push({
+      key: 'block-retry',
+      label: `Block and retry failed (${blockableFailedCount})`,
+      title: 'Block every failed release and grab the next best release for each',
+      disabled: retryAllPending,
+      onSelect: onBlockRetryAll,
     });
   }
   if (counts.removable > 0) {

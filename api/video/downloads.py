@@ -730,6 +730,16 @@ def register_routes(bp):
         rid = db.add_video_blocklist(row)
         return jsonify({"success": bool(rid), "id": rid})
 
+    @bp.route("/downloads/blocklist/retry-failed", methods=["POST"])
+    def video_downloads_block_retry_failed():
+        """Block every failed row's release and grab the next one for each,
+        searched one title at a time in the background (admin, like a block)."""
+        from . import get_video_db
+        from core.video.download_monitor import block_and_retry_failed, ensure_started
+        res = block_and_retry_failed(get_video_db())
+        ensure_started(get_video_db)
+        return jsonify({"ok": True, **res})
+
     @bp.route("/downloads/blocklist/<int:row_id>", methods=["DELETE"])
     def video_downloads_blocklist_remove(row_id):
         from . import get_video_db

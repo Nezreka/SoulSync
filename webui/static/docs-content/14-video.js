@@ -650,6 +650,7 @@ The **Downloads** page is the mission-control view for video acquisition. Every 
 |--------|--------------|
 | **Grab** | Queue the selected release for download |
 | **Retry** | Re-attempt a failed or stalled grab |
+| **Block and retry failed** | (menu, admin) Blocklist every failed release and grab the next best release for each, one title at a time |
 | **Cancel** | Stop an in-flight download and remove it from the queue |
 | **Clear** | Remove completed items from the queue view |
 
