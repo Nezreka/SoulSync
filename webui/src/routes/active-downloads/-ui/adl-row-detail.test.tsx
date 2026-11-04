@@ -192,6 +192,11 @@ describe('AdlRow expansion (#1156)', () => {
       'Matching results found, but the download could not start. No specific failure reason was recorded.',
     ],
     [
+      // #1981: newer workers say why the matched files didn't start
+      '8 results, 1 passed filters but download failed to start (why: deezer_dl: the download client refused it)',
+      'Matching results found, but the download could not start: deezer_dl: the download client refused it.',
+    ],
+    [
       '1 results but none passed quality/artist filters',
       'Results found, but none passed the quality or artist filters.',
     ],

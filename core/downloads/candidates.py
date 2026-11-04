@@ -499,6 +499,19 @@ class CandidatesDeps:
     on_download_completed: Callable
 
 
+def _note_start_failure(task_id, why):
+    """Why a matched candidate didn't start, kept on the task (#1981): the row
+    said "No specific failure reason was recorded" because nothing was. The
+    first few are enough to say what went wrong."""
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if task is None:
+            return
+        notes = task.setdefault('start_failures', [])
+        if why not in notes and len(notes) < 6:
+            notes.append(why)
+
+
 def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                                      deps: CandidatesDeps = None, *,
                                      quality_first=False, quality_targets=None):
@@ -535,7 +548,10 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
     with tasks_lock:
         _pinned = bool((download_tasks.get(task_id) or {}).get('_pinned_candidate'))
     if not _pinned:
+        _before = len(candidates)
         candidates = filter_music_candidates(candidates, expected_duration_ms=expected_duration_ms)
+        if _before and not candidates:
+            _note_start_failure(task_id, 'every match was over the size limit or the wrong length')
 
     with tasks_lock:
         active_peer_occupancy = {}
@@ -615,8 +631,10 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             rejected_releases = task.get('failed_release_ids') or ()
             attempted_endpoints = task.get('used_release_sources') or ()
         if release_id and release_id in rejected_releases:
+            _note_start_failure(task_id, 'its release already failed')
             continue
         if endpoint_id and endpoint_id in attempted_endpoints:
+            _note_start_failure(task_id, 'already tried')
             continue
 
         # Create source key to avoid duplicate attempts (like GUI)
@@ -624,6 +642,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         is_slow_fallback = source_key == slow_fallback_key
         if source_key in used_sources and not is_slow_fallback:
             logger.info(f"[Modal Worker] Skipping already tried source: {source_key}")
+            _note_start_failure(task_id, 'already tried')
             continue
 
         # Blacklist check — skip sources the user has flagged as bad matches
@@ -631,6 +650,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             _bl_db = deps.get_database()
             if _bl_db.is_blacklisted(candidate.username, candidate.filename):
                 logger.info(f"[Modal Worker] Skipping blacklisted source: {source_key}")
+                _note_start_failure(task_id, 'blacklisted')
                 continue
         except Exception as e:
             logger.debug("blacklist check failed: %s", e)
@@ -641,6 +661,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
             from core.downloads.failed_blocklist import is_candidate_blocked
             if is_candidate_blocked(deps.get_database(), candidate):
                 logger.info(f"[Modal Worker] Skipping failed-blocklisted file: {source_key}")
+                _note_start_failure(task_id, 'on the failed-download blocklist')
                 continue
         except Exception as e:
             logger.debug("failed-blocklist check failed: %s", e)
@@ -1112,6 +1133,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                 fail_prepared_correlated_grab(
                     acq_markers, "legacy client rejected the dispatch")
                 logger.error(f"[Modal Worker] Failed to start download for '{filename}'")
+                _note_start_failure(task_id, f"{candidate.username}: the download client refused it")
                 # Reset status back to searching for next attempt
                 with tasks_lock:
                     if task_id in download_tasks:
@@ -1121,6 +1143,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         except Exception as e:
             import traceback
             logger.error(f"[Modal Worker] Error attempting download for '{candidate.filename}': {e}")
+            _note_start_failure(task_id, f"{getattr(candidate, 'username', '?')}: {str(e)[:120]}")
             traceback.print_exc()
             # Reset status back to searching for next attempt
             with tasks_lock:
