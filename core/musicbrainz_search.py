@@ -15,6 +15,19 @@ from utils.logging_config import get_logger
 
 logger = get_logger("musicbrainz_search")
 
+# MBIDs get_album found to be releases, not release groups, so it stops
+# asking for them as groups. bounded, oldest out first; ids don't change type
+_RELEASE_NOT_GROUP: "dict[str, None]" = {}
+_RELEASE_NOT_GROUP_MAX = 5000
+_release_lock = threading.Lock()
+
+
+def _remember_release_id(mbid: str) -> None:
+    with _release_lock:
+        _RELEASE_NOT_GROUP[mbid] = None
+        while len(_RELEASE_NOT_GROUP) > _RELEASE_NOT_GROUP_MAX:
+            _RELEASE_NOT_GROUP.pop(next(iter(_RELEASE_NOT_GROUP)))
+
 COVER_ART_ARCHIVE_URL = "https://coverartarchive.org"
 
 
@@ -1140,8 +1153,11 @@ class MusicBrainzSearchClient:
         representative release and then fetch its tracklist.
         """
         try:
-            # Path A: release-group MBID (new browse-based search default)
-            rg = self._client.get_release_group(
+            # Path A: release-group MBID (new browse-based search default).
+            # Skipped for an id already shown to be a release: the library's
+            # post-import reconcile asks by release id, album after album, and
+            # each one paid a 404 (a second at the rate limit) before path B.
+            rg = None if album_mbid in _RELEASE_NOT_GROUP else self._client.get_release_group(
                 album_mbid, includes=['releases', 'artist-credits']
             )
             if rg:
@@ -1166,6 +1182,8 @@ class MusicBrainzSearchClient:
 
             # Path B: release MBID (text-search fallback path)
             album = self._render_release_as_album(album_mbid)
+            if album and rg is None:
+                _remember_release_id(album_mbid)
             if album and not include_tracks:
                 album.pop('tracks', None)
             return album
