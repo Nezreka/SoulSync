@@ -33,3 +33,19 @@ describe('artist toolbar name tag', () => {
     expect(body).toMatch(/if \(!pastRef\.current\) edge = topOf\(\);/);
   });
 });
+
+describe('a folded biography on a phone', () => {
+  it('fades with a mask but keeps the four-line clamp', () => {
+    // display: block switched the clamp off, so with "Read more" showing the
+    // bio was its full height under the fade (3,800px for Taylor Swift), the
+    // size watcher measured it as fitting, the toggle went, the clamp came
+    // back: the hero swung 927 <-> 4,765px and the page with it (Nov 4 2026)
+    const start = css.indexOf('/* a folded biography: four lines');
+    const rule = css.slice(start, css.indexOf('}', start));
+    expect(rule).toContain('mask-image');
+    expect(rule).not.toMatch(/\bdisplay:/);
+    expect(css).toMatch(
+      /\.premierHero :global\(\.artist-hero-bio:not\(\.expanded\)\) :global\(\.bio-text\) \{[^}]*-webkit-line-clamp: 4/,
+    );
+  });
+});
