@@ -4191,7 +4191,10 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 /* inline per-episode source search */
 /* opens to the results' real height: a max-height cap (2400px) cut a long
    result list off mid-card with the next episode right under it */
-.vdl-ep-search { display: grid; grid-template-rows: 0fr; overflow: hidden;
+/* minmax(0, 1fr): a bare track grows to the longest release name (titles are
+   nowrap), the panel then scrolls sideways when a card is scrolled into view,
+   and both edges get cut off (SeadogsBooty) */
+.vdl-ep-search { display: grid; grid-template-rows: 0fr; grid-template-columns: minmax(0, 1fr); overflow: hidden;
     transition: grid-template-rows var(--dur-slow) var(--ease-out); }
 .vdl-ep-search > * { min-height: 0; }
 .vdl-ep-srcs { display: flex; flex-direction: column; gap: 7px; padding: 3px 14px 12px 42px; }
