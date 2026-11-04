@@ -572,6 +572,18 @@ CREATE TABLE IF NOT EXISTS video_watchlist (
 );
 CREATE INDEX IF NOT EXISTS idx_video_watchlist_kind ON video_watchlist(kind);
 
+-- A quality profile chosen for a title that isn't in the library yet (picked
+-- in the Get / Manual search modal). Keyed by kind + tmdb id like the title it
+-- names; the library row adopts it when the title lands, so its future
+-- upgrades keep the same profile. kind is 'movie' or 'show'.
+CREATE TABLE IF NOT EXISTS video_title_profiles (
+    kind                TEXT    NOT NULL,
+    tmdb_id             INTEGER NOT NULL,
+    quality_profile_id  INTEGER NOT NULL,
+    updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, tmdb_id)
+);
+
 -- WISHLIST (curated 'get this') — atomic units are MOVIES and EPISODES. Adding a
 -- whole show or a season just expands into episode rows. Upcoming (un-aired)
 -- episodes do NOT live here; the watchlist/calendar promote them once they air,

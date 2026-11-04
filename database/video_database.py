@@ -5135,6 +5135,7 @@ class VideoDatabase:
                 "SELECT id FROM movies WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),
             ).fetchone()["id"]
+            self._adopt_title_profile(conn, "movie", movie_id)
             self._set_media_file(conn, "movie_id", movie_id,
                                  item.get("files") or item.get("file"))
             if "genres" not in self._locked_fields_set(conn, "movies", movie_id):
@@ -5187,6 +5188,7 @@ class VideoDatabase:
                 "SELECT id FROM shows WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),
             ).fetchone()["id"]
+            self._adopt_title_profile(conn, "show", show_id)
             if "genres" not in self._locked_fields_set(conn, "shows", show_id):
                 self._set_genres(conn, "show_genres", "show_id", show_id, item.get("genres"))
             if "network" not in self._locked_fields_set(conn, "shows", show_id):
@@ -10077,6 +10079,10 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             cur = conn.execute("DELETE FROM quality_profiles WHERE id=?", (int(profile_id),))
+            # a pick made for a title that hasn't landed yet goes with it (the
+            # title falls back to its kind's default, like an assigned one does)
+            conn.execute("DELETE FROM video_title_profiles WHERE quality_profile_id=?",
+                         (int(profile_id),))
             conn.commit()
             return cur.rowcount > 0
         except (sqlite3.Error, TypeError, ValueError):
@@ -10123,6 +10129,12 @@ class VideoDatabase:
                                    (int(tmdb_id),)).fetchone()
                 if row and row[0]:
                     return row[0]
+                # chosen in the Get / Manual search modal before the title landed
+                row = conn.execute(
+                    "SELECT quality_profile_id FROM video_title_profiles WHERE kind=? AND tmdb_id=?",
+                    ("movie" if kind == "movie" else "show", int(tmdb_id))).fetchone()
+                if row and row[0]:
+                    return row[0]
                 # a show is wished for as its EPISODES (kind='episode', the show's
                 # tmdb id): asking for kind='show' never matched one, so a show
                 # whose profile lives on its wishlist rows (not in the library,
@@ -10141,6 +10153,72 @@ class VideoDatabase:
         except sqlite3.Error:
             logger.exception("quality_profile_id_for failed")
             return None
+        finally:
+            conn.close()
+
+    def _adopt_title_profile(self, conn, kind: str, row_id: int) -> None:
+        """A title landing in the library takes the profile chosen for it in the
+        Get / Manual search modal before it was here, so its upgrades keep it.
+        Only fills an empty assignment; never overrides one made on the title."""
+        tbl = "movies" if kind == "movie" else "shows"
+        try:
+            conn.execute(
+                f"""UPDATE {tbl} SET quality_profile_id = (
+                        SELECT tp.quality_profile_id FROM video_title_profiles tp
+                         WHERE tp.kind=? AND tp.tmdb_id={tbl}.tmdb_id)
+                     WHERE id=? AND quality_profile_id IS NULL AND tmdb_id IS NOT NULL
+                       AND EXISTS (SELECT 1 FROM video_title_profiles tp
+                                    JOIN quality_profiles qp ON qp.id = tp.quality_profile_id
+                                   WHERE tp.kind=? AND tp.tmdb_id={tbl}.tmdb_id)""",
+                (kind, int(row_id), kind))
+        except sqlite3.Error as exc:   # an older schema without the table: nothing chosen
+            logger.debug("title profile adoption skipped for %s %s: %s", kind, row_id, exc)
+
+    def title_profile_choice(self, kind: str, tmdb_id) -> "int | None":
+        """The profile chosen for a title not (yet) in the library, or None."""
+        if not tmdb_id:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT quality_profile_id FROM video_title_profiles WHERE kind=? AND tmdb_id=?",
+                ("movie" if kind == "movie" else "show", int(tmdb_id))).fetchone()
+            return int(row[0]) if row and row[0] else None
+        except (sqlite3.Error, TypeError, ValueError):
+            return None
+        finally:
+            conn.close()
+
+    def set_title_profile_choice(self, kind: str, tmdb_id, quality_profile_id) -> bool:
+        """Choose a title's quality profile by tmdb id (0/None = back to the
+        default): remembered for when it lands, stamped on its wishlist rows,
+        and set on its library row if it is already here. One transaction."""
+        k = "movie" if kind == "movie" else "show"
+        tbl = "movies" if k == "movie" else "shows"
+        pid = int(quality_profile_id) if quality_profile_id else None
+        conn = self._get_connection()
+        try:
+            if pid:
+                conn.execute(
+                    "INSERT INTO video_title_profiles(kind, tmdb_id, quality_profile_id) VALUES(?,?,?) "
+                    "ON CONFLICT(kind, tmdb_id) DO UPDATE SET quality_profile_id=excluded.quality_profile_id, "
+                    "updated_at=CURRENT_TIMESTAMP", (k, int(tmdb_id), pid))
+            else:
+                conn.execute("DELETE FROM video_title_profiles WHERE kind=? AND tmdb_id=?",
+                             (k, int(tmdb_id)))
+            wl_kinds = ("movie",) if k == "movie" else ("show", "season", "episode")
+            conn.execute(
+                f"UPDATE video_wishlist SET quality_profile_id=? WHERE tmdb_id=? "
+                f"AND kind IN ({','.join('?' * len(wl_kinds))})",
+                (pid, int(tmdb_id), *wl_kinds))
+            conn.execute(f"UPDATE {tbl} SET quality_profile_id=? WHERE tmdb_id=?",
+                         (pid, int(tmdb_id)))
+            conn.commit()
+            return True
+        except (sqlite3.Error, TypeError, ValueError):
+            conn.rollback()
+            logger.exception("set_title_profile_choice failed")
+            return False
         finally:
             conn.close()
 
@@ -10257,6 +10335,17 @@ class VideoDatabase:
             if row and row[0]:
                 conn.execute("UPDATE video_wishlist SET quality_profile_id=? WHERE tmdb_id=?",
                              (pid, int(row[0])))
+                # the modal's earlier pick for this title follows the title page:
+                # left behind, a later "back to Default" here fell through to it
+                k = "movie" if kind == "movie" else "show"
+                if pid:
+                    conn.execute(
+                        "INSERT INTO video_title_profiles(kind, tmdb_id, quality_profile_id) VALUES(?,?,?) "
+                        "ON CONFLICT(kind, tmdb_id) DO UPDATE SET quality_profile_id=excluded.quality_profile_id, "
+                        "updated_at=CURRENT_TIMESTAMP", (k, int(row[0]), pid))
+                else:
+                    conn.execute("DELETE FROM video_title_profiles WHERE kind=? AND tmdb_id=?",
+                                 (k, int(row[0])))
             conn.commit()
             return cur.rowcount > 0
         except sqlite3.Error:

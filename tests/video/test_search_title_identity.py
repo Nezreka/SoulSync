@@ -44,7 +44,7 @@ def test_a_title_outside_the_library_keeps_its_body():
 
 def test_the_profile_comes_from_the_library_row(monkeypatch):
     import core.video.quality_profile as qp
-    monkeypatch.setattr(qp, "profile_by_id", lambda db, pid: SimpleNamespace(pid=pid))
+    monkeypatch.setattr(qp, "profile_by_id", lambda db, pid, kind=None: SimpleNamespace(pid=pid))
     by_library = dl._profile_for_request(_DB(), {"scope": "episode", "media_id": 2021,
                                                  "media_source": "library"})
     by_tmdb = dl._profile_for_request(_DB(), {"scope": "season", "tmdb_id": 247718})

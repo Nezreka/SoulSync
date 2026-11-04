@@ -94,7 +94,7 @@ def _profile_library_for(db, kind, body) -> str:
                     pid = db.quality_profile_id_for(kind_key, library_id=int(mid))
         except (TypeError, ValueError):
             pid = None
-    return str(profile_by_id(db, pid).get("library") or "main")
+    return str(profile_by_id(db, pid, kind=kind).get("library") or "main")
 
 
 def _target_for(db, kind, body) -> str:
@@ -160,11 +160,12 @@ def _profile_for_request(db, src):
     whichever the client sends) → else the Default profile (P2, per-title
     profiles). A show page's episode search names its show by library id;
     reading only tmdb ids judged every episode by the Default."""
-    from core.video.quality_profile import profile_by_id
+    from core.video.quality_profile import kind_default_id, profile_by_id
+    scope = str(src.get("scope") or src.get("kind") or "movie").lower()
+    kind = "movie" if scope == "movie" else "show"
     pid = src.get("quality_profile_id")
     if pid in (None, "", 0, "0"):
-        scope = str(src.get("scope") or src.get("kind") or "movie").lower()
-        kind = "movie" if scope == "movie" else "show"
+        pid = None
         library_id, tmdb = _title_keys(src)
         if library_id or tmdb:
             try:
@@ -173,7 +174,11 @@ def _profile_for_request(db, src):
                     library_id=int(library_id) if library_id else None)
             except (TypeError, ValueError):
                 pid = None
-    return profile_by_id(db, pid), pid
+    # nothing assigned: the kind's default (Default for movies / for TV), so a
+    # grab records the profile it was really judged under
+    if not pid:
+        pid = kind_default_id(db, kind)
+    return profile_by_id(db, pid, kind=kind), pid
 
 
 def _with_title_identity(db, src) -> dict:
@@ -848,6 +853,89 @@ def register_routes(bp):
         return jsonify(save(get_video_db(), body))
 
     # ── named quality profiles (per-title assignment; arr-parity P2) ─────────
+    @bp.route("/downloads/quality/for", methods=["GET"])
+    def video_quality_for_title():
+        """The profile a title is searched and grabbed under, for the Get /
+        Manual search modals: its own assignment (library row, the modal's
+        earlier pick, its wishlist rows), else its kind's default, else the
+        Default. Query: kind/scope, media_id, media_source, tmdb_id."""
+        from . import get_video_db
+        from core.video.quality_profile import kind_default_id, list_profiles
+        db = get_video_db()
+        src = request.args.to_dict()
+        scope = str(src.get("scope") or src.get("kind") or "movie").lower()
+        kind = "movie" if scope == "movie" else "show"
+        own = None
+        library_id, tmdb = _title_keys(src)
+        if library_id or tmdb:
+            try:
+                own = db.quality_profile_id_for(
+                    kind, tmdb_id=int(tmdb) if tmdb else None,
+                    library_id=int(library_id) if library_id else None)
+            except (TypeError, ValueError):
+                own = None
+        profile, pid = _profile_for_request(db, src)
+        return jsonify({
+            "kind": kind, "profile_id": int(pid or 0), "profile": profile,
+            "assigned": bool(own), "kind_default_id": int(kind_default_id(db, kind) or 0),
+            "profiles": [{"id": p["id"], "name": p["name"]} for p in list_profiles(db)],
+        })
+
+    @bp.route("/downloads/quality/choose", methods=["POST"])
+    def video_quality_choose_for_title():
+        """Make a profile the title's own from the Get / Manual search modal
+        (Seadog's request): judged by it now, kept on its wishlist rows, set
+        on its library row, or remembered until it lands. profile_id 0 = back
+        to the default. Body: kind/scope, media_id, media_source, tmdb_id,
+        profile_id."""
+        from . import get_video_db
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        scope = str(body.get("scope") or body.get("kind") or "movie").lower()
+        kind = "movie" if scope == "movie" else "show"
+        try:
+            pid = int(body.get("profile_id") or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "profile_id must be a number"}), 400
+        if pid and not db.get_named_quality_profile(pid):
+            return jsonify({"success": False, "error": "No such quality profile"}), 404
+        library_id, tmdb = _title_keys(body)
+        if not tmdb and library_id:
+            ident = db.search_ids_for(kind, library_id=int(library_id)) or {}
+            tmdb = ident.get("tmdb_id")
+        try:
+            if tmdb:
+                ok = db.set_title_profile_choice(kind, int(tmdb), pid or None)
+            elif library_id:
+                ok = db.set_title_quality_profile(kind, int(library_id), pid or None)
+            else:
+                return jsonify({"success": False, "error": "The title has no id to keep the choice on"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Bad title id"}), 400
+        if not ok:
+            return jsonify({"success": False, "error": "Could not save the choice"}), 500
+        profile, resolved = _profile_for_request(db, body | {"quality_profile_id": None})
+        return jsonify({"success": True, "profile_id": int(resolved or 0), "profile": profile})
+
+    @bp.route("/downloads/quality/defaults", methods=["GET"])
+    def video_quality_kind_defaults():
+        """{'movie': id, 'show': id}: the profile each kind of new title gets
+        when nothing assigns one (0 = the Default)."""
+        from . import get_video_db
+        from core.video.quality_profile import kind_defaults
+        return jsonify(kind_defaults(get_video_db()))
+
+    @bp.route("/downloads/quality/defaults", methods=["POST"])
+    def video_quality_kind_defaults_save():
+        """Body: {kind: 'movie'|'show', profile_id}."""
+        from . import get_video_db
+        from core.video.quality_profile import set_kind_default
+        body = request.get_json(silent=True) or {}
+        try:
+            return jsonify(set_kind_default(get_video_db(), body.get("kind"), body.get("profile_id")))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
     @bp.route("/downloads/quality/profiles", methods=["GET"])
     def video_quality_profiles_list():
         """Every selectable profile, Default (id 0) first."""

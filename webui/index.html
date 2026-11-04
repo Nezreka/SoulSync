@@ -3679,9 +3679,9 @@
                                     <div class="settings-section-body collapsed" data-stg="quality">
                                         <div class="settings-group" data-stg="quality">
                                             <div class="setting-help-text">
-                                                Profiles apply <strong>per title</strong>: everything uses
-                                                <strong>Default</strong> unless you assign another profile from a
-                                                movie/show's Manage panel. Quality is read from the release name — pick
+                                                Profiles apply <strong>per title</strong>: pick one in a title's
+                                                Get or Manual search, or its Manage panel. A title with none uses
+                                                its kind's default below. Quality is read from the release name — pick
                                                 the ladder you'll accept, where to stop upgrading, what to reject
                                                 outright, then the soft tie-breakers.
                                             </div>
@@ -3698,6 +3698,23 @@
                                                     profile</button>
                                                 <button class="test-button hidden" type="button" data-vq-profile-delete
                                                     style="background:#663333;">Delete</button>
+                                            </div>
+                                            <div class="form-group" data-vq-kind-defaults
+                                                style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+                                                <label style="display:inline-flex; gap:8px; align-items:center;">
+                                                    <span>New movies use</span>
+                                                    <select class="library-source-filter-select" data-vq-kind-default="movie"
+                                                        title="The profile a movie gets when you haven't picked one for it">
+                                                        <option value="0">Default</option>
+                                                    </select>
+                                                </label>
+                                                <label style="display:inline-flex; gap:8px; align-items:center;">
+                                                    <span>New shows use</span>
+                                                    <select class="library-source-filter-select" data-vq-kind-default="show"
+                                                        title="The profile a show gets when you haven't picked one for it">
+                                                        <option value="0">Default</option>
+                                                    </select>
+                                                </label>
                                             </div>
                                             <div class="vq-block">
                                                 <div class="vq-label">Quality ladder <span class="vq-hint">toggle what

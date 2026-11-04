@@ -489,7 +489,9 @@ Episodes are treated as facts: a scan that no longer sees an episode **demotes**
             title: 'Per-Title Quality & Series Type',
             lede: 'Give individual titles their own quality profile and tell shows how their numbering works.',
             body: `
-Assign a title its own **quality profile** — "this show is always 1080p, that movie is 4K" — overriding the global default. Set a show's **series type** so numbering and matching behave correctly:
+Assign a title its own **quality profile** ("this show is always 1080p, that movie is 4K"). Pick it from the title's Manage panel, or right in **Get** / **Manual search** with the **Profile** picker, even for a title that isn't in your library yet: the pick judges that search and grab, sticks to the title's wishlist entries, and the title keeps it when it lands, so its upgrades use it too.
+
+A title with no profile of its own uses its kind's default: set **New movies use** and **New shows use** under Settings > Quality (both start on **Default**). Set a show's **series type** so numbering and matching behave correctly:
 
 | Series type | For |
 |-------------|-----|

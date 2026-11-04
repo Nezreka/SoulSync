@@ -1212,6 +1212,54 @@
         }
         var del = document.querySelector('[data-vq-profile-delete]');
         if (del) del.classList.toggle('hidden', !named);
+        renderKindDefaults();
+    }
+
+    // New movies use / New shows use: the profile a title of that kind gets
+    // when nothing picked one for it (0 = Default)
+    var _vqKindDefaults = null;
+    function renderKindDefaults() {
+        var sels = document.querySelectorAll('[data-vq-kind-default]');
+        if (!sels.length) return;
+        function fill(defs) {
+            for (var i = 0; i < sels.length; i++) {
+                var sel = sels[i], kind = sel.getAttribute('data-vq-kind-default');
+                var cur = (defs && defs[kind]) || 0;
+                sel.innerHTML = _vqProfiles.map(function (p) {
+                    return '<option value="' + p.id + '"' + (p.id === cur ? ' selected' : '') + '>' +
+                        String(p.name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</option>';
+                }).join('');
+                if (!sel._vqWired) {
+                    sel._vqWired = true;
+                    sel.addEventListener('change', onKindDefaultChange);
+                }
+            }
+        }
+        if (_vqKindDefaults) { fill(_vqKindDefaults); return; }
+        fill(null);
+        fetch(QUALITY_URL + '/defaults', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) { _vqKindDefaults = d; fill(d); } })
+            .catch(function () { /* an older server: the selects stay on Default */ });
+    }
+    function onKindDefaultChange(e) {
+        var sel = e.currentTarget, kind = sel.getAttribute('data-vq-kind-default');
+        sel.disabled = true;
+        fetch(QUALITY_URL + '/defaults', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ kind: kind, profile_id: parseInt(sel.value, 10) || 0 })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (res) {
+                sel.disabled = false;
+                if (!res.ok) {
+                    if (typeof showToast === 'function') showToast((res.d && res.d.error) || 'Could not save the default', 'error');
+                    _vqKindDefaults = null; renderKindDefaults(); return;
+                }
+                _vqKindDefaults = res.d;
+                if (typeof showToast === 'function') showToast('New ' + (kind === 'movie' ? 'movies' : 'shows') + ' use ' +
+                    (sel.options[sel.selectedIndex] || {}).text, 'success');
+            })
+            .catch(function () { sel.disabled = false; });
     }
 
     function loadQuality() {
@@ -1220,6 +1268,7 @@
             .then(function (d) {
                 if (!d || !Array.isArray(d.profiles) || !d.profiles.length) return;
                 _vqProfiles = d.profiles;
+                _vqKindDefaults = null;   // a deleted profile may have been a default
                 var cur = _vqSelected();
                 _vqSelectedId = cur ? cur.id : 0;
                 _videoQuality = (cur || d.profiles[0]).profile;

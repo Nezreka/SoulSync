@@ -3465,6 +3465,8 @@ const WHATS_NEW = {
         { title: 'Faster everywhere', desc: 'Playlist syncs match about 15x faster and keep their matches across scans, Discover\'s For you builds in 1.6s, and startup repairs stop holding the database\'s write lock.' },
         { title: 'Fixes', desc: 'AIFF and WAV tags read in scans and ISRCs kept (thanks @TaunGadd), album-bundle staging publishes atomically (thanks @SimpleSimonLA), a live version no longer counts as the studio song you own, Plex Home links are admin only in login mode, and fixes for search, playlist sync and download history.' },
         { title: 'Checked against 3.6.1', desc: 'Library v2 was checked against everything 3.6.1 did and the gaps were closed: reorganize keeps a release\'s MusicBrainz folder suffix, the Songs tab sorts in a fraction of a second, a rematch drops the old guest artists, issues and genre cleanups from before the upgrade carry over, Single/Album Dedup users keep a dedup, and Re-tag\'s Auto Apply turns on again.', page: 'library' },
+        { title: 'Pick a profile when you get a title', desc: 'Get and Manual search have a Profile picker, even for a movie or show that isn\'t in your library yet: the pick judges that search, sticks to its wishlist entries and the title keeps it when it lands. Settings > Quality sets which profile new movies and new shows use (thanks @SeadogsBooty for the idea).' },
+        { title: 'Every rating opens its site', desc: 'A title\'s ratings row links each score to its site and adds IMDb, TMDB, TVDB and Letterboxd, on preview pages too.' },
         { title: 'Earlier versions', desc: '3.6.1 moved the video side onto React and added 4K libraries, folders that check themselves, the Songs tab and rebuilt daily mixes.' },
     ],
 };

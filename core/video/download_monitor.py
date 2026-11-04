@@ -1354,7 +1354,7 @@ def _remove_satisfied_movie_wishes(db, tmdb_id: int, label: str, user_initiated:
             return
         rows = db.get_movie_wishlist_profiles(tmdb_id)
         for profile_id, quality_profile_id in rows:
-            profile = profile_by_id(db, quality_profile_id)
+            profile = profile_by_id(db, quality_profile_id, kind="movie")
             if user_initiated or meets_cutoff(label, profile):
                 db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=profile_id)
             else:
@@ -1379,7 +1379,7 @@ def _remove_satisfied_episode_wishes(db, tmdb_id: int, sn: int, en: int,
             return
         rows = db.get_episode_wishlist_profiles(tmdb_id, sn, en)
         for profile_id, quality_profile_id in rows:
-            profile = profile_by_id(db, quality_profile_id)
+            profile = profile_by_id(db, quality_profile_id, kind="show")
             if user_initiated or meets_cutoff(label, profile):
                 db.remove_from_wishlist("episode", tmdb_id=tmdb_id,
                                         season_number=sn, episode_number=en,
@@ -1414,7 +1414,7 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
             from core.video.quality_profile import profile_by_id
             label = (upd or {}).get("quality_label") or dl.get("quality_label") or ""
             # judged under the profile the grab was made with (per-title, P2)
-            profile = profile_by_id(db, dl.get("quality_profile_id"))
+            profile = profile_by_id(db, dl.get("quality_profile_id"), kind=dl.get("kind"))
             if resolution_rank(label) and not meets_cutoff(label, profile):
                 if not user_initiated:
                     logger.info("video download %s: '%s' landed below the cutoff - kept on the "
@@ -1602,7 +1602,7 @@ def _requery_worker(dl_id) -> None:
             return
         first = db.get_video_download(dl_id) or {}
         # requery under the profile the ORIGINAL grab was judged with (P2)
-        profile = profile_by_id(db, first.get("quality_profile_id"))
+        profile = profile_by_id(db, first.get("quality_profile_id"), kind=first.get("kind"))
         # What the retries actually SAW, so giving up can say why instead of the
         # one generic sentence every exhausted download used to record.
         seen = {"searches": 0, "hits": 0, "accepted": 0, "refusals": []}
