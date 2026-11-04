@@ -4604,8 +4604,13 @@ class VideoDatabase:
         """The most recently completed grab of a type — the probe target for the smart
         post-download scan. ``media_type`` ∈ movie|show|all."""
         where, args = ["outcome = 'completed'"], []
-        if media_type in ("movie", "show"):
-            where.append("kind = ?"); args.append(media_type)
+        # a single episode's grab is kind 'episode' (only a season pack is
+        # 'show'): matching 'show' alone probed the newest season pack, weeks
+        # old and long on the server, so every tv rescan after episode grabs
+        # was skipped and the episodes stayed missing (c5pie)
+        kinds = {"movie": ("movie",), "show": ("show", "episode")}.get(media_type)
+        if kinds:
+            where.append("kind IN (%s)" % ",".join("?" * len(kinds))); args.extend(kinds)
         conn = self._get_connection()
         try:
             row = conn.execute(
