@@ -26,17 +26,26 @@ def db(tmp_path):
 
 
 def _artist(db, artist_id, name, genres):
+    from core.library2.importer import normalize_name
+
     conn = db._get_connection()
-    conn.execute("INSERT OR REPLACE INTO artists (id, name, genres) VALUES (?, ?, ?)",
-                 (artist_id, name, json.dumps(genres) if genres is not None else None))
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_artists (id, name, name_key, genres) "
+        "VALUES (?, ?, ?, ?)",
+        (artist_id, name, normalize_name(name),
+         json.dumps(genres) if genres is not None else ''),
+    )
     conn.commit()
     conn.close()
 
 
 def _album(db, album_id, artist_id, name):
     conn = db._get_connection()
-    conn.execute("INSERT OR REPLACE INTO albums (id, artist_id, title) VALUES (?, ?, ?)",
-                 (album_id, artist_id, name))
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_albums (id, primary_artist_id, title) "
+        "VALUES (?, ?, ?)",
+        (album_id, artist_id, name),
+    )
     conn.commit()
     conn.close()
 
@@ -44,9 +53,14 @@ def _album(db, album_id, artist_id, name):
 def _track(db, track_id, album_id, artist_id, title, play_count=0):
     conn = db._get_connection()
     conn.execute(
-        "INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, play_count) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (track_id, album_id, artist_id, title, play_count))
+        "INSERT OR REPLACE INTO lib2_tracks (id, album_id, title, play_count) "
+        "VALUES (?, ?, ?, ?)",
+        (track_id, album_id, title, play_count),
+    )
+    conn.execute(
+        "INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+        (track_id, f'/music/{track_id}.flac'),
+    )
     conn.commit()
     conn.close()
 
@@ -54,7 +68,7 @@ def _track(db, track_id, album_id, artist_id, title, play_count=0):
 def _play(db, track_id, title='t', artist='A', when=None):
     conn = db._get_connection()
     conn.execute(
-        "INSERT INTO listening_history (track_id, title, artist, played_at, duration_ms, db_track_id) "
+        "INSERT INTO listening_history (track_id, title, artist, played_at, duration_ms, lib2_track_id) "
         "VALUES (?, ?, ?, ?, 1000, ?)",
         (f'x{track_id}-{when}', title, artist,
          (when or datetime.now()).isoformat(sep=' '), track_id))
@@ -159,8 +173,11 @@ def test_both_sides_parse_genres_the_same_way(db):
     """A genre spelled one way on the owned side and another on the played
     side would render as a real gap. Same parser, both halves."""
     conn = db._get_connection()
-    # A comma string, not JSON — the legacy shape the parser also accepts.
-    conn.execute("INSERT OR REPLACE INTO artists (id, name, genres) VALUES (1, 'X', 'Metal, Jazz')")
+    # A comma string, not JSON — the old payload shape the parser also accepts.
+    conn.execute(
+        "INSERT OR REPLACE INTO lib2_artists (id, name, name_key, genres) "
+        "VALUES (1, 'X', 'x', 'Metal, Jazz')"
+    )
     conn.commit(); conn.close()
     _album(db, 10, 1, 'x')
     _track(db, 100, 10, 1, 'song')

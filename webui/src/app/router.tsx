@@ -3,6 +3,8 @@ import { createRouter, type RouterHistory } from '@tanstack/react-router';
 import { RouterProvider } from '@tanstack/react-router';
 
 import { getShellBridge } from '@/platform/shell/bridge';
+import { noteNavigation, resetNavigationHistory } from '@/platform/shell/last-navigation';
+import { LibrarySearchHost } from '@/routes/library/-ui/interactive-search-host';
 import { routeTree } from '@/routeTree.gen';
 
 import { createAppQueryClient } from './query-client';
@@ -31,7 +33,7 @@ export function createAppRouter(
     },
   };
 
-  return createRouter({
+  const router = createRouter({
     routeTree,
     basepath:
       document.querySelector<HTMLMetaElement>('meta[name="soulsync-url-base"]')?.content || '/',
@@ -54,6 +56,20 @@ export function createAppRouter(
     defaultErrorComponent: DefaultErrorComponent,
     defaultNotFoundComponent: DefaultNotFoundComponent,
   });
+  // the artist page's back button labels itself with where you came from
+  resetNavigationHistory();
+  let navigationLocation = router.latestLocation;
+  // onBeforeLoad, not onBeforeNavigate: TanStack keeps the last redirect in its
+  // store and skips onBeforeNavigate while it is there, so after the library's
+  // first header redirect no navigation was noted until a reload
+  router.subscribe('onBeforeLoad', (event) => {
+    // TanStack can omit fromLocation while the previous route is resolving,
+    // or still report the older resolved page during a quick follow-up hop.
+    // The last target seen here is the page the user visibly clicked on.
+    noteNavigation(navigationLocation, event.toLocation);
+    navigationLocation = event.toLocation;
+  });
+  return router;
 }
 
 export function AppRouterProvider({
@@ -66,6 +82,7 @@ export function AppRouterProvider({
   return (
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
+      <LibrarySearchHost />
     </QueryClientProvider>
   );
 }

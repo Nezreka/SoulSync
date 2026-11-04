@@ -113,6 +113,24 @@ The admin account's services stay managed in Settings. Disconnecting a personal 
 - **Plex** — link a **Plex Home user** from the server's user list (PIN asked if they have one); the profile's playlists are then written as that user. Unlink to go back to the app account.
 - **Navidrome** — save your own Navidrome username and password (verified with one ping before saving); your playlists are written as you.
 - **Library choice** — pick which Plex/Jellyfin/Navidrome library the profile reads from.
+
+## Your own listening
+
+A profile's stats, Recently Played and recommendations read its own listening when it has a source of its own, and the shared history otherwise:
+
+- a linked **Plex** account or a **Jellyfin user** of its own: the server's plays by that user are yours (a Jellyfin user read for the first time brings its recent history with it)
+- your own **ListenBrainz** or **Last.fm**: your history from there
+
+The card at the top of **My Account** says which one you are on.
+
+## Scrobbling your plays
+
+Your own plays can scrobble to your own accounts, from the moment you turn it on (nothing older is sent):
+
+- **ListenBrainz** — once your token is connected, flip **Scrobble your plays to ListenBrainz**
+- **Last.fm** — **Sign in** under the Last.fm row. Writing scrobbles needs you to sign in to Last.fm once (reading them only needed your username). This needs the admin to have added a Last.fm API key and secret in Settings.
+
+Your plays never go to the admin's accounts, and the admin's never go to yours.
 `
         },
         {

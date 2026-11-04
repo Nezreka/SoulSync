@@ -451,9 +451,9 @@ export const SYNC_SOURCES: Record<SyncSourceId, SourceVerticalConfig> = {
       discoveryStart: (id) => `/api/listenbrainz/discovery/start/${id}`,
       discoveryStatus: (id) => `/api/listenbrainz/discovery/status/${id}`,
       syncStart: (id) => `/api/listenbrainz/sync/start/${id}`,
-      // Borrowed: no LB cancel endpoint exists; the vanilla posts the mbid to
-      // the YOUTUBE cancel (cancelYouTubeSync at 9806). Preserved knowingly.
-      syncCancel: (id) => `/api/youtube/sync/cancel/${id}`,
+      // its own cancel (api/listenbrainz_routes.py): the YouTube one it used
+      // to borrow looks the mbid up in the YouTube states and answers 404
+      syncCancel: (id) => `/api/listenbrainz/sync/cancel/${id}`,
       syncStatus: (id) => `/api/listenbrainz/sync/status/${id}`,
       // The other HYPHEN endpoint.
       updatePhase: (id) => `/api/listenbrainz/update-phase/${id}`,

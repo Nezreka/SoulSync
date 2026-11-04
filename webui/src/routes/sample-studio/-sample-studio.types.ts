@@ -10,8 +10,8 @@
  */
 
 /**
- * A library track id. Always text: plex ids are digits, jellyfin ids are
- * guids, navidrome ids are alphanumeric.
+ * A native catalogue track ID, normalized to text by the API mapper.
+ * Media-server identifiers remain in Library-v2 mappings.
  */
 export type TrackId = string;
 
@@ -171,7 +171,7 @@ export interface StashEntry {
   id: number;
   name: string;
   tags: string[];
-  track_id: TrackId;
+  track_id: TrackId | null;
   track_title: string;
   artist_name: string;
   start_s: number;

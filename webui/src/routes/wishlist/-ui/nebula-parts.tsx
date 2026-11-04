@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useState } from 'react';
 
 import { orbAnimationDelay } from '../-wishlist.helpers';
+import { WishlistCover } from './wishlist-cover';
 
 /*
  * The wishlist's shared grammar. Music, movies, TV and YouTube all render
@@ -84,6 +85,8 @@ export function NebulaZone({
 export interface NebulaOrbProps {
   name: string;
   image: string;
+  /** painted when `image` fails: a cold Library v2 artwork build. */
+  imageFallback?: string;
   /** shown when there's no image. */
   initials: string;
   hue: number;
@@ -113,6 +116,7 @@ export interface NebulaOrbProps {
 export function NebulaOrb({
   name,
   image,
+  imageFallback,
   initials,
   hue,
   sizeClass,
@@ -134,9 +138,6 @@ export function NebulaOrb({
   // restarts its css animations, so without this every moved orb blinked out
   // and faded back in while a wishlist run was going.
   const [entered, setEntered] = useState(false);
-  // a dead image url falls back to the initials instead of an empty circle.
-  const [broken, setBroken] = useState(false);
-  const showImage = image && !broken;
   const dataAttrs = Object.fromEntries(Object.entries(data).map(([k, v]) => [`data-${k}`, v]));
 
   return (
@@ -166,11 +167,13 @@ export function NebulaOrb({
         onClick={onToggle}
       >
         <span className="wl-orb-glow" />
-        {showImage ? (
-          <img className="wl-orb-img" src={image} alt="" onError={() => setBroken(true)} />
-        ) : (
-          <span className="wl-orb-initials">{initials}</span>
-        )}
+        {/* a dead image url falls back to the CDN copy, then the initials */}
+        <WishlistCover
+          className="wl-orb-img"
+          src={image}
+          fallback={imageFallback}
+          placeholder={<span className="wl-orb-initials">{initials}</span>}
+        />
         <span className="wl-orb-ring" />
 
         {ringCovers.length > 0 ? (
@@ -280,6 +283,8 @@ export interface NebulaSheetProps {
   /** names the panel for assistive tech: "<name> on the wishlist". */
   label: string;
   image: string;
+  /** painted when `image` fails: a cold Library v2 artwork build. */
+  imageFallback?: string;
   /** a film poster sits as a rectangle, everything else as a circle. */
   avatarShape?: 'circle' | 'poster';
   avatarFallback: string;
@@ -300,6 +305,7 @@ export interface NebulaSheetProps {
 export function NebulaSheet({
   label,
   image,
+  imageFallback,
   avatarShape = 'circle',
   avatarFallback,
   name,
@@ -310,9 +316,6 @@ export function NebulaSheet({
   onClose,
   closeLabel = 'Close artist panel',
 }: NebulaSheetProps) {
-  const [broken, setBroken] = useState(false);
-  const showImage = image && !broken;
-
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
@@ -332,7 +335,7 @@ export function NebulaSheet({
       <div className="wlp-sheet-scrim" aria-hidden="true" onClick={onClose} />
       <aside className="wlp-sheet" aria-label={label}>
         <div className="wlp-sheet-backdrop" aria-hidden="true">
-          {showImage ? <img src={image} alt="" /> : null}
+          <WishlistCover src={image} fallback={imageFallback} />
         </div>
         <button
           type="button"
@@ -345,13 +348,16 @@ export function NebulaSheet({
         </button>
 
         <div className="wlp-sheet-head">
-          {showImage ? (
-            <img className={avatarClass} src={image} alt="" onError={() => setBroken(true)} />
-          ) : (
-            <div className={`${avatarClass} wlp-sheet-avatar--ph`} aria-hidden="true">
-              {avatarFallback}
-            </div>
-          )}
+          <WishlistCover
+            className={avatarClass}
+            src={image}
+            fallback={imageFallback}
+            placeholder={
+              <div className={`${avatarClass} wlp-sheet-avatar--ph`} aria-hidden="true">
+                {avatarFallback}
+              </div>
+            }
+          />
           <div className="wlp-sheet-id">
             <h2 className="wlp-sheet-name">{name}</h2>
             <div className="wlp-sheet-meta">{meta}</div>

@@ -101,3 +101,45 @@ def test_fix_resolves_unassigned_track_against_live_default(tmp_path, monkeypatc
         "success": False,
         "error": "Lossy Copy is disabled for this track profile",
     }
+
+
+def test_fix_re_resolves_native_track_profile_at_apply_time(tmp_path, monkeypatch):
+    resolved_track_ids = []
+
+    class _Conn:
+        def close(self):
+            pass
+
+    def _effective(_conn, track_id):
+        resolved_track_ids.append(track_id)
+        return {
+            "id": 101,
+            "name": "New inherited default",
+            "lossy_copy_enabled": False,
+        }
+
+    monkeypatch.setattr(
+        "core.library2.quality_eval.effective_track_profile", _effective,
+    )
+    monkeypatch.setattr(
+        "core.quality.selection.load_profile_by_id",
+        lambda _profile_id: (_ for _ in ()).throw(
+            AssertionError("native findings must use the live Library-v2 cascade")
+        ),
+    )
+    worker = _worker(tmp_path)
+    worker.db = SimpleNamespace(_get_connection=lambda: _Conn())
+
+    result = worker._fix_missing_lossy_copy(
+        "track", "lib2:42", str(tmp_path / "track.flac"),
+        {
+            "quality_profile_id": 77,
+            "library_v2": {"track_id": 42},
+        },
+    )
+
+    assert resolved_track_ids == [42]
+    assert result == {
+        "success": False,
+        "error": "Lossy Copy is disabled for this track profile",
+    }

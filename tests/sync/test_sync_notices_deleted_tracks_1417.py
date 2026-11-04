@@ -20,22 +20,34 @@ from core.sync.library_presence import matched_tracks_still_present
 
 
 @pytest.fixture()
-def db(tmp_path):
+def db(tmp_path, monkeypatch):
     from database.music_database import MusicDatabase
+    from core.settings import config_manager
+
+    monkeypatch.setattr(config_manager, 'get_active_media_server', lambda: 'plex')
 
     db = MusicDatabase(str(tmp_path / 'm.db'))
+    # Library v2: the id a sync records is the media server's track id
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES ('a1', 'Artist')")
-        conn.execute("INSERT INTO albums (id, title, artist_id) VALUES ('al1', 'Album', 'a1')")
-        conn.execute("INSERT INTO tracks (id, title, artist_id, album_id, file_path) "
-                     "VALUES ('lib-1', 'Song', 'a1', 'al1', '/m/1.flac')")
+        artist = conn.execute(
+            "INSERT INTO lib2_artists (name, name_key) VALUES ('Artist', 'artist')").lastrowid
+        album = conn.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title, origin) "
+            "VALUES (?, 'Album', 'library')", (artist,)).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks (album_id, title, server_source, server_id) "
+            "VALUES (?, 'Song', 'plex', 'lib-1')", (album,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) "
+                     "VALUES (?, '/m/1.flac', 1)", (track,))
         conn.commit()
     return db
 
 
 def _delete_from_library(db, track_id='lib-1'):
     with db._get_connection() as conn:
-        conn.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+        conn.execute(
+            "UPDATE lib2_track_files SET file_state = 'deleted' WHERE track_id = "
+            "(SELECT id FROM lib2_tracks WHERE server_id = ?)", (track_id,))
         conn.commit()
 
 
@@ -50,6 +62,67 @@ def test_presence_is_proven_only_while_every_matched_track_exists(db):
     assert not matched_tracks_still_present(db, [row({'in_library': True})])
     _delete_from_library(db)
     assert not matched_tracks_still_present(db, [row({'in_library': True, 'library_track_id': 'lib-1'})])
+
+
+def test_a_server_id_known_only_to_the_mappings_counts_too(db, monkeypatch):
+    """a second media server's id for the same track lives in the mappings,
+    not on the track row"""
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source, server_id) "
+            "SELECT 'track', id, 'jellyfin', 'jf-9' FROM lib2_tracks WHERE server_id = 'lib-1'")
+        conn.commit()
+    from core.settings import config_manager
+    monkeypatch.setattr(config_manager, 'get_active_media_server', lambda: 'jellyfin')
+    assert matched_tracks_still_present(db, [row({'in_library': True, 'library_track_id': 'jf-9'})])
+    _delete_from_library(db)
+    assert not matched_tracks_still_present(db, [row({'in_library': True, 'library_track_id': 'jf-9'})])
+
+
+@pytest.mark.parametrize('mapping_only', [False, True])
+def test_another_servers_same_id_does_not_hide_the_active_servers_deleted_file(db, mapping_only):
+    _delete_from_library(db)
+    with db._get_connection() as conn:
+        album_id = conn.execute('SELECT album_id FROM lib2_tracks LIMIT 1').fetchone()[0]
+        other = conn.execute(
+            'INSERT INTO lib2_tracks (album_id, title, server_source, server_id) VALUES (?, ?, ?, ?)',
+            (album_id, 'Unrelated song', None if mapping_only else 'navidrome',
+             None if mapping_only else 'lib-1'),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path) VALUES (?, '/m/other.flac')", (other,))
+        if mapping_only:
+            conn.execute(
+                "INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source, server_id) "
+                "VALUES ('track', ?, 'navidrome', 'lib-1')", (other,))
+        conn.commit()
+    assert not matched_tracks_still_present(
+        db, [row({'in_library': True, 'library_track_id': 'lib-1'})])
+
+
+def test_another_librarys_copy_does_not_hide_the_selected_librarys_deleted_file(db, monkeypatch):
+    from core import library_scope
+
+    _delete_from_library(db)
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path, owner_profile_id) "
+            "SELECT id, '/m/owner2.flac', 2 FROM lib2_tracks WHERE server_id='lib-1'")
+        conn.commit()
+    monkeypatch.setattr(library_scope, 'any_own_library_exists', lambda: True)
+    token = library_scope.set_library_scope('shared')
+    try:
+        assert not matched_tracks_still_present(
+            db, [row({'in_library': True, 'library_track_id': 'lib-1'})])
+    finally:
+        library_scope.reset_library_scope(token)
+
+    token = library_scope.set_library_scope(2)
+    try:
+        assert matched_tracks_still_present(
+            db, [row({'in_library': True, 'library_track_id': 'lib-1'})])
+    finally:
+        library_scope.reset_library_scope(token)
 
 
 def test_the_sync_records_which_library_track_it_matched(db):
@@ -99,7 +172,7 @@ def _sync(db, pid):
     deps.get_database.return_value = db
     deps.run_sync_task = _run_sync_task
     deps.load_sync_status_file.return_value = status
-    deps.config_manager.get_active_media_server.return_value = 'navidrome'
+    deps.config_manager.get_active_media_server.return_value = 'plex'
     result = auto_sync_playlist({'playlist_id': str(pid)}, deps)
     if result.get('status') == 'started':
         assert started.wait(5)

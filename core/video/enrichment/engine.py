@@ -329,7 +329,7 @@ class VideoEnrichmentEngine:
         self._backfill_ratings("movie", movie_id)
         return {"ok": True}
 
-    def item_extras(self, kind, item_id) -> dict:
+    def item_extras(self, kind, item_id, watcher=None) -> dict:
         """Live TMDB extras (trailer / where-to-watch / similar) for the detail
         page. Not cached — fetched per view so providers stay current. For an
         owned item we also surface a 'watch on your server' deep link as the first
@@ -363,7 +363,7 @@ class VideoEnrichmentEngine:
                 # Continue Watching: point the CTA at the NEXT episode, not the
                 # show root — Plex/Jellyfin resume an in-progress item themselves.
                 try:
-                    nu = self.db.show_next_up(item_id)
+                    nu = self.db.show_next_up(item_id, watcher=watcher)
                 except Exception:
                     nu = None
                 if nu and nu.get("server_id"):

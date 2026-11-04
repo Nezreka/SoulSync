@@ -100,7 +100,7 @@ def test_full_plan_lands_on_the_right_disc(tmp_path):
     plan = _plan_track_repair(str(f), f.name, _kid_a_mnesia(), 0.8)
     assert plan is not None
     assert plan['correct_disc'] == 3 and plan['correct_num'] == 1
-    assert plan['tag_ok'] is True          # 1 was right all along
+    assert plan['tag_ok'] is True          # number is right; a missing total isn't wrong
     assert plan['disc_ok'] is False        # the missing disc tag IS the finding
     assert plan['total_discs'] == 3
 
@@ -163,7 +163,8 @@ def test_fix_disc_number_tag_writes_flac_tags(tmp_path):
     _make_flac(f, {'title': 'X'})
     _fix_disc_number_tag(str(f), 2, 3)
     audio = FLAC(str(f))
-    assert audio['discnumber'] == ['2/3']
+    assert audio['discnumber'] == ['2']
+    assert audio['disctotal'] == ['3']
     assert audio['disctotal'] == ['3']
 
 

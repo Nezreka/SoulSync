@@ -42,24 +42,24 @@ def db_with_soundtrack(tmp_path: Path):
     conn = db._get_connection()
     cursor = conn.cursor()
 
-    cursor.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-        ("artist-1", "Lin-Manuel Miranda", "plex"),
+    from tests.support.catalogue_seed import seed_library_track
+
+    track_id = seed_library_track(
+        conn,
+        artist="Lin-Manuel Miranda",
+        album="Vaiana (English Version/Original Motion Picture Soundtrack)",
+        title="Where You Are",
+        artist_server_id="artist-1", album_server_id="album-1",
+        track_server_id="track-1", track_number=4, duration=210000,
+        file_path="/music/where_you_are.mp3", bitrate=320,
+        track_artist="Christopher Jackson", server_source="plex",
     )
-    cursor.execute(
-        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-        ("album-1", "artist-1", "Vaiana (English Version/Original Motion Picture Soundtrack)", "plex"),
-    )
-    cursor.execute(
-        """
-        INSERT INTO tracks (
-            id, album_id, artist_id, title, track_number, duration,
-            file_path, bitrate, server_source, track_artist
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("track-1", "album-1", "artist-1", "Where You Are", 4, 210000,
-         "/music/where_you_are.mp3", 320, "plex", "Christopher Jackson"),
-    )
+    # Native scanning stores performer credits in the indexed junction as
+    # well as preserving the raw credit string for matching/scoring.
+    performer = cursor.execute("INSERT INTO lib2_artists(name,name_key) "
+                               "VALUES('Christopher Jackson','christopher jackson')").lastrowid
+    cursor.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) "
+                   "VALUES(?,?,'featured',1)", (track_id, performer))
     conn.commit()
     conn.close()
     return db
@@ -164,24 +164,12 @@ def test_album_aware_fallback_does_not_over_match_wrong_album(tmp_path: Path) ->
     db = MusicDatabase(database_path=str(db_path))
 
     conn = db._get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-        ("ar-y", "Madonna", "plex"),
-    )
-    cursor.execute(
-        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-        ("al-y", "ar-y", "Ray of Light", "plex"),
-    )
-    cursor.execute(
-        """
-        INSERT INTO tracks (
-            id, album_id, artist_id, title, track_number, duration,
-            file_path, bitrate, server_source, track_artist
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("tr-y", "al-y", "ar-y", "Frozen", 1, 200000,
-         "/m/frozen.mp3", 320, "plex", None),
+    from tests.support.catalogue_seed import seed_library_track
+    seed_library_track(
+        conn, artist="Madonna", album="Ray of Light", title="Frozen",
+        artist_server_id="ar-y", album_server_id="al-y", track_server_id="tr-y",
+        track_number=1, duration=200000, file_path="/m/frozen.mp3", bitrate=320,
+        server_source="plex",
     )
     conn.commit()
     conn.close()
@@ -218,23 +206,15 @@ def test_album_aware_fallback_actually_works(tmp_path: Path) -> None:
 
     conn = db._get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-        ("ar-x", "Various Artists", "plex"),
-    )
-    cursor.execute(
-        "INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-        ("al-x", "ar-x", "Awesome Mix Vol. 1", "plex"),
-    )
-    cursor.execute(
-        """
-        INSERT INTO tracks (
-            id, album_id, artist_id, title, track_number, duration,
-            file_path, bitrate, server_source, track_artist
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        ("tr-x", "al-x", "ar-x", "Hooked on a Feeling", 2, 175000,
-         "/m/hooked.mp3", 320, "plex", None),  # No per-track artist set
+    from tests.support.catalogue_seed import seed_library_track
+
+    seed_library_track(
+        conn,
+        artist="Various Artists", album="Awesome Mix Vol. 1",
+        title="Hooked on a Feeling",
+        artist_server_id="ar-x", album_server_id="al-x", track_server_id="tr-x",
+        track_number=2, duration=175000, file_path="/m/hooked.mp3", bitrate=320,
+        server_source="plex",   # no per-track artist set
     )
     conn.commit()
     conn.close()
@@ -253,3 +233,39 @@ def test_album_aware_fallback_actually_works(tmp_path: Path) -> None:
     assert track is not None, "album-aware fallback must find the track"
     assert track.title == "Hooked on a Feeling"
     assert confidence >= 0.7
+
+
+@pytest.mark.parametrize("server_source", ["navidrome", "jellyfin", "plex"])
+@pytest.mark.parametrize("mapped", [False, True])
+def test_album_fallback_returns_server_id(tmp_path, server_source, mapped):
+    """An album match must carry the server song ID into playlist writes."""
+    from tests.support.catalogue_seed import seed_library_track
+
+    db = MusicDatabase(database_path=str(tmp_path / "fallback_identity.db"))
+    with db._get_connection() as conn:
+        catalogue_id = seed_library_track(
+            conn, artist="Various Artists", album="Compilation", title="Song",
+            track_server_id="compat-song", server_source=server_source,
+            file_path="/music/Compilation/Song.flac",
+        )
+        if mapped:
+            conn.execute(
+                "INSERT INTO lib2_media_server_mappings"
+                "(entity_type,entity_id,server_source,server_id) VALUES('track',?,?,?)",
+                (catalogue_id, server_source, "live-song"),
+            )
+            # Another server's compatibility projection must not override the mapping.
+            conn.execute(
+                "UPDATE lib2_tracks SET server_source='soulsync',server_id='local-song' WHERE id=?",
+                (catalogue_id,),
+            )
+
+    track, confidence = db.check_track_exists(
+        "Song", "Guest Performer", confidence_threshold=0.7,
+        server_source=server_source, album="Compilation", candidate_tracks=[],
+    )
+
+    assert track is not None
+    assert confidence == 1.0
+    assert track.id == ("live-song" if mapped else "compat-song")
+    assert track.server_source == server_source

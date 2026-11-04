@@ -718,12 +718,13 @@
     function renderRatings(d) {
         var host = q('[data-vd-ratings]');
         if (!host) return;
-        // each score opens its own site (library pages; previews stay in-app)
+        // each score opens its own site, previews included: a title you don't
+        // own yet is exactly the one you look up elsewhere before getting it.
+        // in-app NAVIGATION (cast, more like this, search) still stays in-app
         var q1 = encodeURIComponent(String(d.title || ''));
-        var linked = d.source !== 'tmdb';
         function chip(cls, inner, url, tip) {
             var attrs = 'class="vd-rt ' + cls + '"' + (tip ? ' title="' + esc(tip) + '"' : '');
-            return (linked && url)
+            return url
                 ? '<a ' + attrs + ' href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + inner + '</a>'
                 : '<span ' + attrs + '>' + inner + '</span>';
         }
@@ -751,14 +752,37 @@
             items.push(chip('vd-rt--tvmaze', '<span class="vd-rt-tag">TVmaze</span>' + (Math.round(d.tvmaze_rating * 10) / 10),
                 'https://www.tvmaze.com/search?q=' + q1, 'TVmaze'));
         }
-        // AniList only scores anime; older title-search matches gave Arrow and
-        // The Bear a stranger's score, so it shows on animation only
-        if (d.anilist_score && (d.genres || []).indexOf('Animation') >= 0) {
-            items.push(chip('vd-rt--anilist', '<span class="vd-rt-tag">AniList</span>' + d.anilist_score + '%',
-                'https://anilist.co/search/anime?search=' + q1, 'AniList'));
+        // AniList only scores anime. a title linked through the anime id map
+        // has its own entry; an older title-search score (Arrow and The Bear
+        // once got a stranger's) still shows on animation only
+        var anMain = d.anime && d.anime.main;
+        var anScore = (anMain && anMain.score) ||
+            ((d.genres || []).indexOf('Animation') >= 0 ? d.anilist_score : null);
+        if (anScore) {
+            items.push(chip('vd-rt--anilist', '<span class="vd-rt-tag">AniList</span>' + anScore + '%',
+                (anMain && anMain.site_url) || ('https://anilist.co/search/anime?search=' + q1), 'AniList'));
         }
+        // the providers with no score here still get a way out, so this row is
+        // the one place for every external page (SeadogsBooty's request)
+        siteLinks(d).forEach(function (s) {
+            if (s.label === 'IMDb' && d.imdb_rating) return;   // its score chip links already
+            items.push(chip('vd-rt--site', '<span class="vd-rt-site">' + esc(s.label) + '</span>' +
+                '<span class="vd-rt-out" aria-hidden="true">↗</span>', s.url, 'Open on ' + s.label));
+        });
         host.innerHTML = items.join('');
         host.hidden = !items.length;
+    }
+
+    // the external pages a title has, in one list for the ratings row and the
+    // More menu's "Open on"
+    function siteLinks(d) {
+        var out = [];
+        if (d.imdb_id) out.push({ label: 'IMDb', url: 'https://www.imdb.com/title/' + d.imdb_id + '/' });
+        if (d.tmdb_id) out.push({ label: 'TMDB', url: 'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id });
+        if (d.tvdb_id) out.push({ label: 'TVDB', url: 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series' });
+        // Letterboxd is film-only; it deep-links by TMDB id (#1039, QT3496)
+        if (d.kind === 'movie' && d.tmdb_id) out.push({ label: 'Letterboxd', url: 'https://letterboxd.com/tmdb/' + d.tmdb_id + '/' });
+        return out;
     }
 
     function renderCast(d) {
@@ -828,13 +852,7 @@
             '<span class="vd-manage-ic" aria-hidden="true">↗</span> ' + esc(label) + '</a>';
     }
     function externalLinks(d) {
-        if (d.source === 'tmdb') return '';   // preview items keep everything in-app
-        var out = '';
-        if (d.imdb_id) out += moreLink('IMDb', 'https://www.imdb.com/title/' + d.imdb_id + '/');
-        if (d.tmdb_id) out += moreLink('TMDB', 'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id);
-        if (d.tvdb_id) out += moreLink('TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series');
-        // Letterboxd is film-only; it deep-links by TMDB id (#1039, QT3496)
-        if (d.kind === 'movie' && d.tmdb_id) out += moreLink('Letterboxd', 'https://letterboxd.com/tmdb/' + d.tmdb_id + '/');
+        var out = siteLinks(d).map(function (s) { return moreLink(s.label, s.url); }).join('');
         if (d.wikidata_url) out += moreLink('Official site', d.wikidata_url);
         return out;
     }
@@ -1076,7 +1094,10 @@
         }
         // Watched toggle (the /watched API): local state + markPlayed/markUnplayed
         // pushed to the server. Library rows only.
+        // A profile with no watch state of its own (no linked Plex account) has
+        // nothing to mark, so it gets no toggle (#1941).
         if (ownLibItem && (d.kind === 'movie' || d.kind === 'show') && libRow &&
+                d.can_mark_watched !== false &&
                 (d.owned || d.episode_owned || d.watched)) {
             libMore += moreItem('watched-toggle', d.watched ? '↺' : '✓', d.watched ? 'Mark unwatched' : 'Mark watched',
                 d.watched ? 'Mark unwatched (clears played state on your server too)'
@@ -1526,10 +1547,15 @@
         var gb = n / 1073741824;
         return gb >= 1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round(n / 1048576) + ' MB';
     }
+    // a version's audio languages as 'JA+EN' (the $audiolangs naming shape)
+    function audioLangs(v) {
+        return String(v.audio_languages || '').split(',').map(function (c) { return c.trim().toUpperCase(); })
+            .filter(Boolean).join('+');
+    }
     function fileSummary(v) {
         return [mediaRes(v.resolution), v.dynamic_range || '', prettyCodec(v.video_codec),
             v.audio_codec ? String(v.audio_codec).toUpperCase() : '',
-            v.atmos ? 'Atmos' : channelsLabel(v.audio_channels), fmtBytes(v.size_bytes),
+            v.atmos ? 'Atmos' : channelsLabel(v.audio_channels), audioLangs(v), fmtBytes(v.size_bytes),
             v.release_source ? prettySource(v.release_source) : ''].filter(Boolean).join(' · ');
     }
 
@@ -1934,6 +1960,42 @@
     // wall the eye skipped entirely.
     var KW_VISIBLE = 10;
 
+    // ── the anime layer (AniList, linked through the anime id map) ──────────
+    function airingIn(epochSec) {
+        var ms = Number(epochSec) * 1000 - Date.now();
+        if (!(ms > 0)) return '';
+        var h = Math.round(ms / 3600000);
+        if (h < 1) return 'within the hour';
+        if (h < 48) return 'in ' + h + ' hour' + (h === 1 ? '' : 's');
+        return 'in ' + Math.round(h / 24) + ' days';
+    }
+    function animeEntryLabel(e) {
+        if (e.format === 'MOVIE') return 'Movie';
+        if (e.tvdb_season === 0) return 'Specials';
+        if (e.tvdb_season) return 'Season ' + e.tvdb_season;
+        return e.title_romaji || 'AniList';
+    }
+    // About rows for an anime: its other names, the studio that animated it,
+    // the next episode's countdown, and each season's AniList page
+    function animeFactRows(anime, title) {
+        if (!anime || !anime.main) return [];
+        var m = anime.main, rows = [];
+        var names = [m.title_romaji, m.title_native].filter(function (n) {
+            return n && String(n).toLowerCase() !== String(title || '').toLowerCase();
+        });
+        if (names.length) rows.push(['Also known as', names.join(' · ')]);
+        if (m.studios && m.studios.length) rows.push(['Animation', m.studios.join(', ')]);
+        var airing = (anime.entries || []).filter(function (e) { return e.next_episode && e.next_airing_at; })[0];
+        var when = airing && airingIn(airing.next_airing_at);
+        if (when) rows.push(['Next episode', 'Episode ' + airing.next_episode + ', ' + when]);
+        var links = (anime.entries || []).filter(function (e) { return e.site_url; }).map(function (e) {
+            return '<a class="vd-anilist-link" href="' + esc(e.site_url) + '" target="_blank" rel="noopener noreferrer">' +
+                esc(animeEntryLabel(e)) + (e.score ? ' <span class="vd-anilist-score">' + e.score + '%</span>' : '') + '</a>';
+        });
+        if (links.length) rows.push(['AniList', links.join(''), 'html']);
+        return rows;
+    }
+
     function renderFacts(facts, keywords, studios) {
         var sec = q('[data-vd-facts-section]'), host = q('[data-vd-facts]'), kwh = q('[data-vd-keywords]');
         facts = facts || {}; keywords = keywords || []; studios = studios || [];
@@ -1945,12 +2007,13 @@
         if (facts.revenue) rows.push(['Box office', '$' + fmtMoney(facts.revenue)]);
         if (facts.original_language) rows.push(['Language', langName(facts.original_language)]);
         if (facts.countries && facts.countries.length) rows.push(['Country', facts.countries.join(', ')]);
+        animeFactRows(data && data.anime, data && data.title).forEach(function (r) { rows.push(r); });
         // where subtitles EXIST (OpenSubtitles backfill) — one fact, not a chip wall
         var subLangs = subLangOrder((data && data.subtitle_langs) || [], (prefs && prefs.subtitle_langs) || ['en']);
         if (subLangs.length) rows.push(['Subtitles exist in', subLangs, 'subs']);
         if (host) {
             host.innerHTML = rows.length ? '<div class="vd-detail-grid">' + rows.map(function (r) {
-                var v = r[2] === 'subs' ? subLangsHTML(r[1]) : esc(r[1]);
+                var v = r[2] === 'subs' ? subLangsHTML(r[1]) : r[2] === 'html' ? r[1] : esc(r[1]);
                 return '<div class="vd-detail-row' + (r[2] === 'subs' ? ' vd-detail-row--subs' : '') + '"><span class="vd-detail-k">' + esc(r[0]) +
                     '</span><span class="vd-detail-v">' + v + '</span></div>';
             }).join('') + '</div>' : '';
@@ -2343,7 +2406,9 @@
             var img = art ? '<img class="vd-rcard-img" src="' + sizedArt(art, 342) + '" alt="" loading="lazy"' +
                 (fb ? ' data-fb="' + esc(fb) + '"' : '') + ' onerror="' + oe + '">' : '';
             return '<button class="vd-rcard' + on + '" type="button" data-vd-season="' + s.season_number + '">' +
-                '<div class="vd-rcard-art">' + img + '<div class="vd-rcard-fb">📺</div>' +
+                // the fallback goes UNDER the poster: after it, it painted on top
+                // of every loaded poster (a faint 📺 in the middle)
+                '<div class="vd-rcard-art"><div class="vd-rcard-fb">📺</div>' + img +
                 '<div class="vd-rcard-grad"></div><div class="vd-rcard-pct">' + p + '%</div></div>' +
                 '<div class="vd-rcard-info"><span class="vd-rcard-name">' + esc(s.title) + '</span>' +
                 '<span class="vd-rcard-sub">' + s.episode_owned + ' / ' + s.episode_total + ' eps</span>' +
@@ -4513,7 +4578,8 @@
     function _openManualSearch(scope, en) {
         if (!window.VideoDownload || !window.VideoDownload.manualSearch || !data) return;
         VideoDownload.manualSearch({ title: data.title, scope: scope, season: selectedSeason, episode: en,
-            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year, poster: _showPoster() });
+            mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source,
+            tmdbId: (data.source === 'tmdb' ? data.id : (data.tmdb_id || null)), year: data.year, poster: _showPoster() });
     }
     function manualSearchEpisode(btn) { _openManualSearch('episode', parseInt(btn.getAttribute('data-vd-ep-search'), 10)); }
     function manualSearchSeason() { _openManualSearch('season'); }

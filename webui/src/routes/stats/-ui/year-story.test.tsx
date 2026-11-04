@@ -249,7 +249,7 @@ describe('YearStory', () => {
     await advanceTo('You found them this year');
 
     const link = screen.getByRole('link', { name: /Brand New Act/ });
-    expect(link).toHaveAttribute('href', '/artist-detail/library/99');
+    expect(link).toHaveAttribute('href', '/library?artist=99&view=discovery&immersive=true');
   });
 
   it('gives discoveries their artwork too', async () => {

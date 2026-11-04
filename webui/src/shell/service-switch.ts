@@ -48,6 +48,7 @@ const _SS_SERVER_INFO: Record<string, { name: string; logo?: string; dark?: bool
   plex: { name: 'Plex', logo: '/static/img/brands/plex.png', dark: true },
   jellyfin: { name: 'Jellyfin', logo: '/static/img/brands/jellyfin.png' },
   navidrome: { name: 'Navidrome', logo: '/static/img/brands/navidrome.png' },
+  music_assistant: { name: 'Music Assistant', logo: '/static/img/brands/music-assistant.png' },
   soulsync: { name: 'SoulSync', logo: '/static/trans2.png', dark: true },
 };
 const _SS_META_FALLBACK: Record<string, { text: string; icon: string; logo?: string }> = {
@@ -66,6 +67,7 @@ const _SS_BRAND: Record<string, string> = {
   plex: '#e5a00d',
   jellyfin: '#aa5cc3',
   navidrome: '#3b6cf6',
+  music_assistant: '#1976d2',
   soulsync: '#7c5cff',
   soulseek: '#22a7f0',
   youtube: '#ff0000',

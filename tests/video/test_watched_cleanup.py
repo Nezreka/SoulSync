@@ -36,6 +36,16 @@ def worker(db):
     return VideoRepairWorker(db)
 
 
+@pytest.fixture(autouse=True)
+def _no_linked_profiles(monkeypatch):
+    """the job finds linked profiles in the MUSIC database, which a test
+    process shares: a profile another test linked to Plex (and left) turned
+    these single-viewer tests into per-viewer runs that flagged nothing. A
+    test that wants linked profiles says so with the ``linked`` fixture."""
+    from core import media_accounts
+    monkeypatch.setattr(media_accounts, "plex_linked_profiles", lambda: [])
+
+
 def _days_ago(n):
     return (datetime.now() - timedelta(days=n)).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -200,3 +210,145 @@ def test_job_is_registered_everywhere():
     assert VIDEO_ACTION_LABELS["cleaned"] == "Cleaned"
     assert "function WatchedDetail(" in _DETAIL_TSX
     assert "v-watched-cleanup" in _HUB_JS           # discoverable via a hub recipe
+
+
+# ── several viewers (#1941): every ACTIVE viewer must have watched it ────────
+@pytest.fixture()
+def linked(monkeypatch):
+    """Profiles linked to their own Plex accounts: {profile id: name}. The
+    owner (admin, shared columns) is 'Owner'."""
+    from core import media_accounts
+
+    def _link(profiles):
+        monkeypatch.setattr(media_accounts, "plex_linked_profiles",
+                            lambda: [(pid, "tok-%d" % pid) for pid in profiles])
+        monkeypatch.setattr(media_accounts, "profile_names",
+                            lambda: ({1: "Owner", **profiles}, "Owner"))
+    return _link
+
+
+def _member(db, pid, mid=None, *, play_count=0, last_viewed=None, offset=0, active=None):
+    """A member's own row for a movie, and/or a dated watch of something else
+    (an episode row) so the member reads as active ``active`` days ago."""
+    rows = []
+    if mid is not None:
+        rows.append(("movie", mid, play_count, last_viewed, offset))
+    if active is not None:
+        rows.append(("episode", 900000 + pid, 1, _days_ago(active), 0))
+    db.save_profile_watch_state(pid, rows)
+
+
+def _owner_offset(db, mid, offset):
+    conn = db._get_connection()
+    conn.execute("UPDATE movies SET view_offset_ms=? WHERE id=?", (offset, mid))
+    conn.commit(); conn.close()
+
+
+def test_every_active_viewer_must_have_watched_it(db, worker, tmp_path, linked):
+    linked({4: "Z"})
+    both, _ = _seed_movie(db, tmp_path, title="BothSaw", play_count=1, last_viewed=_days_ago(100))
+    owner_only, _ = _seed_movie(db, tmp_path, title="OwnerOnly", play_count=1,
+                                last_viewed=_days_ago(100))
+    _seed_movie(db, tmp_path, title="OwnerRecent", play_count=1, last_viewed=_days_ago(5))
+    _member(db, 4, both, play_count=1, last_viewed=_days_ago(40), active=5)
+
+    worker._run_job("watched_cleanup", forced=True)
+    items = _pending(db)
+    assert [f["details"]["title"] for f in items] == ["BothSaw"]      # Z hasn't seen OwnerOnly
+    f = items[0]
+    # the clock runs from the LAST watch among the counted viewers (Z, 40 days)
+    assert "watched by all 2 viewers, last 40 days ago" in f["title"]
+    names = {v["name"]: v for v in f["details"]["viewers"]}
+    assert names["Owner"]["watched"] and names["Z"]["watched"] and names["Z"]["counted"]
+
+
+def test_the_age_runs_from_the_latest_watch(db, worker, tmp_path, linked):
+    linked({4: "Z"})
+    mid, _ = _seed_movie(db, tmp_path, title="RecentForZ", play_count=1, last_viewed=_days_ago(100))
+    _member(db, 4, mid, play_count=1, last_viewed=_days_ago(10))
+    worker._run_job("watched_cleanup", forced=True)
+    assert _pending(db) == []                       # Z watched it 10 days ago (< 30)
+
+
+def test_an_inactive_viewer_does_not_hold_it_back(db, worker, tmp_path, linked):
+    linked({4: "Z", 5: "Quiet"})
+    mid, _ = _seed_movie(db, tmp_path, title="QuietNeverSaw", play_count=1,
+                         last_viewed=_days_ago(60))
+    _member(db, 4, mid, play_count=1, last_viewed=_days_ago(50), active=3)
+    _member(db, 5, active=200)                      # nothing watched in 200 days
+
+    worker._run_job("watched_cleanup", forced=True)
+    items = _pending(db)
+    assert len(items) == 1
+    quiet = next(v for v in items[0]["details"]["viewers"] if v["name"] == "Quiet")
+    assert quiet["counted"] is False and quiet["last_active"].startswith(_days_ago(200)[:10])
+    assert items[0]["details"]["active_days"] == 90
+
+
+def test_the_activity_window_is_a_setting(db, worker, tmp_path, linked):
+    linked({4: "Z", 5: "Quiet"})
+    mid, _ = _seed_movie(db, tmp_path, title="Windowed", play_count=1, last_viewed=_days_ago(60))
+    _member(db, 4, mid, play_count=1, last_viewed=_days_ago(50), active=3)
+    _member(db, 5, active=200)
+    worker.set_job_config("watched_cleanup", settings={"watched_days": 30, "active_days": 365})
+    worker._run_job("watched_cleanup", forced=True)
+    assert _pending(db) == []                       # Quiet counts at 365 days and hasn't seen it
+
+
+@pytest.mark.parametrize("who", ["inactive member", "owner"])
+def test_anyone_part_way_through_holds_it_back(db, worker, tmp_path, linked, who):
+    linked({4: "Z", 5: "Quiet"})
+    mid, _ = _seed_movie(db, tmp_path, title="MidWatch", play_count=1, last_viewed=_days_ago(60))
+    _member(db, 4, mid, play_count=1, last_viewed=_days_ago(50), active=3)
+    if who == "owner":
+        _owner_offset(db, mid, 1_200_000)
+        _member(db, 5, active=200)
+    else:                                            # not counted, but mid-watch: still blocks
+        _member(db, 5, mid, play_count=0, last_viewed=_days_ago(200), offset=600_000)
+    worker._run_job("watched_cleanup", forced=True)
+    assert _pending(db) == []
+
+
+def test_nobody_active_flags_nothing_and_retires_old_findings(db, worker, tmp_path, linked):
+    _seed_movie(db, tmp_path, title="Dusty", play_count=0, added=_days_ago(800))
+    mid, _ = _seed_movie(db, tmp_path, title="OldSeen", play_count=1, last_viewed=_days_ago(300))
+    worker.set_job_config("watched_cleanup", settings={"watched_days": 30,
+                                                       "include_unwatched": True,
+                                                       "unwatched_days": 365})
+    worker._run_job("watched_cleanup", forced=True)
+    assert len(_pending(db)) == 2                   # single viewer: as before
+
+    linked({4: "Z"})
+    _member(db, 4, active=400)                      # owner last watched 300 days ago, Z 400
+    worker._run_job("watched_cleanup", forced=True)
+    assert _pending(db) == []                       # nobody counted -> nothing is a candidate
+
+
+def test_never_watched_means_no_counted_viewer_watched(db, worker, tmp_path, linked):
+    linked({4: "Z", 5: "Quiet"})
+    _seed_movie(db, tmp_path, title="Recent", play_count=1, last_viewed=_days_ago(5))   # owner active
+    mid, _ = _seed_movie(db, tmp_path, title="OnlyQuietSaw", play_count=0, added=_days_ago(500))
+    _member(db, 4, active=3)
+    _member(db, 5, mid, play_count=1, last_viewed=_days_ago(250))   # Quiet: inactive
+    worker.set_job_config("watched_cleanup", settings={"watched_days": 30,
+                                                       "include_unwatched": True,
+                                                       "unwatched_days": 365})
+    worker._run_job("watched_cleanup", forced=True)
+    items = _pending(db)
+    assert [f["details"]["title"] for f in items] == ["OnlyQuietSaw"]
+    assert "never watched in" in items[0]["title"]
+
+
+def test_a_dateless_watch_among_counted_viewers_is_skipped(db, worker, tmp_path, linked):
+    linked({4: "Z"})
+    mid, _ = _seed_movie(db, tmp_path, title="NoDateForZ", play_count=1, last_viewed=_days_ago(90))
+    _member(db, 4, mid, play_count=1, last_viewed=None, active=3)
+    worker._run_job("watched_cleanup", forced=True)
+    assert _pending(db) == []
+
+
+def test_viewers_are_shown_on_the_finding():
+    assert "d.viewers.map(" in _DETAIL_TSX and "not counted" in _DETAIL_TSX
+    from core.video.repair.watched_cleanup import WatchedCleanupJob
+    assert WatchedCleanupJob.default_settings["active_days"] == 90
+    assert 90 in WatchedCleanupJob.setting_options["active_days"]

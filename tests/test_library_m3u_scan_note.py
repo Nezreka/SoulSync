@@ -63,3 +63,14 @@ def test_write_failure_is_surfaced_in_the_summary(m3u_dir, monkeypatch):
                         lambda *a, **k: None)
     _db_admin._db_update_finished_callback(0, 0, 0, 0, 0)
     assert "Library M3U write failed" in _phase()
+
+
+def test_scan_completion_keeps_the_sync_match_cache():
+    """A scan used to wipe the whole sync match cache, and the auto-sync the
+    same scan fires then re-matched every playlist track from scratch. Every
+    cache read re-checks its row, so the cache survives the scan."""
+    db = web_server.get_database()
+    db.save_sync_match_cache('sp-keep-1', 'song', 'artist', 'plex', 4242, 'Song', 0.95)
+    _db_admin._db_update_finished_callback(0, 0, 0, 0, 0)
+    kept = db.read_sync_match_cache('sp-keep-1', 'plex')
+    assert kept and str(kept['server_track_id']) == '4242'

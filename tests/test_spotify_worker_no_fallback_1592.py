@@ -39,7 +39,7 @@ class _Client:
 
 def _worker(monkeypatch):
     import core.spotify_worker as sw
-    monkeypatch.setattr(sw, 'honor_stored_match', lambda **k: None)
+    monkeypatch.setattr(sw, 'honor_stored_match', lambda *a, **k: None)  # ours: db is positional
     w = object.__new__(sw.SpotifyWorker)
     w.db = None
     w.stats = {'matched': 0, 'not_found': 0, 'errors': 0}

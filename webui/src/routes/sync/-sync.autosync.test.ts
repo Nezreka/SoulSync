@@ -1813,6 +1813,23 @@ describe('beatport mirror kinds', () => {
   });
 });
 
+it('refreshes live Beatport lists and keeps dated snapshots frozen', () => {
+  for (const source_playlist_id of [
+    'top-100',
+    'genre:trance-main-floor:7:hype-10',
+    'chart:a-chart:42',
+  ]) {
+    const live = { source: 'beatport', source_playlist_id };
+    expect(beatportMirrorRefreshes(live)).toBe(true);
+    expect(beatportMirrorIsSnapshot(live)).toBe(false);
+    const snapshot = { ...live, source_playlist_id: `${source_playlist_id}@2026-10-16` };
+    expect(beatportMirrorRefreshes(snapshot)).toBe(false);
+    expect(beatportMirrorIsSnapshot(snapshot)).toBe(true);
+  }
+  expect(beatportMirrorRefreshes({ source_playlist_id: 'genre:broken' })).toBe(false);
+  expect(beatportMirrorIsSnapshot({ source_playlist_id: 'top-100@bad-date' })).toBe(false);
+});
+
 describe('discovery mirror targets', () => {
   it('reads kind and variant off an ssd id, longest kind first', async () => {
     const { autoSyncSsdTarget } = await import('./-sync.autosync');

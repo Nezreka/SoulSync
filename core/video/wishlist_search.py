@@ -151,9 +151,10 @@ def _one(item: Dict[str, Any], media_type: str, target: str, *, all_sources: boo
             logger.info("manual search: no acceptable release for %s",
                         item.get("title") or item.get("show_title"))
             return False
+        folder = vpw.grab_target_dir(item, media_type, target)   # before the slot is held
         if not budget.claim():
             return False
-        ok = bool(vpw._default_enqueue(item, best, cands or [], media_type, target))
+        ok = bool(vpw._default_enqueue(item, best, cands or [], media_type, folder))
         if not ok:
             budget.give_back()
         return ok

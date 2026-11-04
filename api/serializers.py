@@ -65,6 +65,12 @@ def _isoformat(val) -> Optional[str]:
     return str(val)
 
 
+def _id_or_none(val):
+    """A library id as the v1 API has always typed it: a string. Library v2
+    catalogue ids are integers in the database (#1062 review)."""
+    return None if val is None else str(val)
+
+
 def _bool_or_none(val):
     """Convert to bool, returning None if val is None."""
     if val is None:
@@ -86,7 +92,7 @@ def serialize_artist(obj, fields: Optional[Set[str]] = None) -> dict:
     """Full artist serialization — all columns."""
     d = _to_dict(obj)
     result = {
-        "id": d.get("id"),
+        "id": _id_or_none(d.get("id")),
         "name": d.get("name"),
         "thumb_url": d.get("thumb_url"),
         "banner_url": d.get("banner_url"),
@@ -174,8 +180,8 @@ def serialize_album(obj, fields: Optional[Set[str]] = None) -> dict:
     """Full album serialization — all columns."""
     d = _to_dict(obj)
     result = {
-        "id": d.get("id"),
-        "artist_id": d.get("artist_id"),
+        "id": _id_or_none(d.get("id")),
+        "artist_id": _id_or_none(d.get("artist_id")),
         "title": d.get("title"),
         "year": d.get("year"),
         # Full release date (YYYY-MM-DD when known), unlike the year alone.
@@ -277,9 +283,9 @@ def serialize_track(obj, fields: Optional[Set[str]] = None) -> dict:
     """Full track serialization — all columns."""
     d = _to_dict(obj)
     result = {
-        "id": d.get("id"),
-        "album_id": d.get("album_id"),
-        "artist_id": d.get("artist_id"),
+        "id": _id_or_none(d.get("id")),
+        "album_id": _id_or_none(d.get("album_id")),
+        "artist_id": _id_or_none(d.get("artist_id")),
         "title": d.get("title"),
         # Per-track performer credit (compilations, featured artists).
         "track_artist": d.get("track_artist"),

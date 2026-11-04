@@ -1,15 +1,13 @@
 """What counts as a *residual* file — a leftover with no value once the audio it
 accompanied is gone: OS junk, cover/scan images, and lyric/metadata sidecars.
 
-Single source of truth shared by:
-  * the **Reorganize** cleanup, which strips these from a source dir after every
-    track has moved out (so the empty-dir pruner can take the folder), and
-  * the **Empty Folder Cleaner** job, which can optionally treat a folder holding
-    ONLY residual files as removable (#891).
+Used by the **Empty Folder Cleaner** job, which can optionally treat a folder
+holding ONLY residual files as removable (#891). Reorganize's old staging path
+stripped them from an emptied source dir too; the mover that replaced it leaves
+them for this job, so "dead folder" is defined here once.
 
-Defining "disposable" in one place keeps the two features agreeing on what a "dead
-folder" is. Pure predicates — no filesystem access — so they're unit-tested in
-isolation. The whitelist is deliberately conservative: anything NOT recognized here
+Pure predicates — no filesystem access — so they're unit-tested in isolation.
+The whitelist is deliberately conservative: anything NOT recognized here
 (a booklet ``.pdf``, a video, a ``.txt`` note) is treated as real content and kept.
 """
 

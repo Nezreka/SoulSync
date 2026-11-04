@@ -91,4 +91,4 @@ def test_recent_library_tracks_are_serialized_tracks(monkeypatch):
     monkeypatch.setattr(sample_api, "get_database", lambda: _DB())
     tracks = sample_api.recent_library_tracks(50)
     assert asked == {"entity_type": "tracks", "limit": 50}
-    assert tracks[0]["id"] == 7 and tracks[0]["title"] == "ISSA"
+    assert tracks[0]["id"] == "7" and tracks[0]["title"] == "ISSA"

@@ -6,11 +6,7 @@ from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from utils.logging_config import get_logger
 from core.musicbrainz_client import MusicBrainzClient
-from core.worker_utils import (
-    catalog_overlap_score,
-    pick_artist_by_catalog,
-    source_id_conflict,
-)
+from core.worker_utils import catalog_overlap_score, pick_artist_by_catalog
 from database.music_database import MusicDatabase
 from core.text.fold import fold_title
 from core.text.title_match import is_trailing_version_qualifier, recording_version_markers
@@ -21,9 +17,11 @@ logger = get_logger("musicbrainz_service")
 # (None is a real value there: "matched, but no group known").
 _UNSET = object()
 
-# What a cache row looks like when MusicBrainz genuinely answered "this artist
-# has no alternate spellings". The `resolved` marker is what separates that
-# from a row written by a lookup that never came back — see `_cached_aliases`.
+# The cached form of "MusicBrainz answered, and the answer is no aliases".
+# ``resolved`` is what separates it from the row the old failure path wrote,
+# which had the same empty alias list but no answer behind it — see
+# ``lookup_artist_aliases``. Rows predating this marker and carrying no MBID
+# are ambiguous, so they get one retry rather than standing forever.
 _NO_ALIASES = {'aliases': [], 'resolved': True}
 
 # #1509 — recording-match duration gate. A legit recording-vs-file length
@@ -296,19 +294,15 @@ class MusicBrainzService:
         """What a cache row settles about an artist's aliases, or None.
 
         An EMPTY list is an answer only when the row records that MusicBrainz
-        actually answered (the ``resolved`` marker). It used to count as one
-        unconditionally, and it must not: ``fetch_artist_aliases`` returned
-        ``[]`` for a timeout exactly as readily as for a genuine absence, so a
-        single rate-limited fetch wrote "this artist has no aliases" against a
-        perfectly good identity and held it for the row's whole TTL. A bulk
-        AcoustID scan is precisely the workload that trips MusicBrainz's rate
-        limit, so the bridge went down exactly when it was being leaned on.
-
-        Rows written before the marker existed return None — one retry each,
-        rather than standing forever.
+        actually answered (the ``resolved`` marker). A stored MBID used to count
+        as that proof, and it is not: ``fetch_artist_aliases`` returned ``[]``
+        for a timeout exactly as readily as for a genuine absence, so a single
+        rate-limited fetch wrote "this artist has no aliases" against a perfectly
+        good identity and held it for the row's whole 90-day TTL. That is what
+        left a correct download unverifiable on every later scan.
 
         ``for_mbid`` restricts the answer to a row resolved against that
-        identity; a name-keyed row for some other entity says nothing about it.
+        identity — a name-keyed row for some other entity says nothing about it.
         """
         if not cached:
             return None
@@ -1477,11 +1471,11 @@ class MusicBrainzService:
         cached = self._check_cache('artist_aliases', artist_name)
         row_mbid = self._artist_row_mbid(artist_name)
         if row_mbid:
-            # A cache row resolved against THIS identity says exactly what a
-            # fresh fetch would say, and every fetch spends a second of the
-            # process-wide MusicBrainz budget — one per scanned file for an
+            # A cache row that was resolved against THIS identity says exactly
+            # what a fresh fetch would say, and every fetch spends a second of
+            # the process-wide MusicBrainz budget — one per scanned file for an
             # artist MusicBrainz lists no alias for, all of it contending with
-            # the enrichment worker on the same limiter.
+            # the enrichment worker on the same lock.
             known = self._cached_aliases(cached, for_mbid=row_mbid)
             if known is not None:
                 return known
@@ -1517,7 +1511,7 @@ class MusicBrainzService:
         # `None` from a search means MusicBrainz never answered (timeout, rate
         # limit, 503). That is not the same as "no such artist", and caching it
         # as an empty alias list is how a single bulk-scan rate-limit could
-        # silence the romaji-kanji bridge for the whole cache TTL.
+        # silence the romaji↔kanji bridge for a month.
         strict_hits = self._search_and_score_artists(artist_name, strict=True)
         lookup_failed = strict_hits is None
         scored = strict_hits or []
@@ -1613,7 +1607,7 @@ class MusicBrainzService:
         if aliases is None:
             # The identity resolved, the alias fetch did not come back. Writing
             # that down as "no aliases" is precisely what froze this lookup for
-            # a full TTL and took the romaji-kanji bridge with it; leave the
+            # a 90-day TTL and took the romaji-kanji bridge with it; leave the
             # question open instead.
             logger.debug(
                 "lookup_artist_aliases: alias fetch for %r (%s) did not "
@@ -1643,21 +1637,21 @@ class MusicBrainzService:
         the caller falls back to resolving by name, which is what it did before
         this existed.
         """
-        if not artist_name:
-            return None
-        conn = None
         try:
             conn = self.db._get_connection()
-            # DISTINCT, not LIMIT 1. A library can hold several rows under one
-            # display name — the same artist indexed on two media servers, or
-            # two genuinely different artists who share it. Taking whichever row
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            # DISTINCT, not LIMIT 1. A catalogue can hold several rows under
+            # one display name — the same artist from two providers, or two
+            # genuinely different artists who share it. Taking whichever row
             # sorted first would make an arbitrary pick authoritative for every
             # verification that ever compares against this name, and its aliases
             # could then let a wrong artist pass. Same-name rows agreeing on the
             # id is the normal case and stays free; disagreement means the name
             # does not identify anybody, so fall back to resolving it.
             rows = conn.execute(
-                "SELECT DISTINCT musicbrainz_id FROM artists "
+                "SELECT DISTINCT musicbrainz_id FROM lib2_artists "
                 "WHERE name = ? COLLATE NOCASE "
                 "AND COALESCE(musicbrainz_id,'') <> ''",
                 (artist_name,),
@@ -1673,96 +1667,84 @@ class MusicBrainzService:
             logger.debug("artist mbid lookup failed for %r: %s", artist_name, e)
             return None
         finally:
-            if conn:
-                try:
-                    conn.close()
-                except Exception:  # noqa: BLE001, S110 — best effort
-                    pass
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001, S110 — best effort
+                pass
 
     def _persist_artist_identity(self, artist_name: str, mbid: Optional[str],
                                  aliases: Optional[list]) -> None:
-        """Store a live-resolved MBID + alias list on the library artist row.
+        """Store a live-resolved MBID + alias list on the catalogue artist row.
 
         Matched by name because that is all the verifier ever has — it compares
         against a metadata-source string, not a library id. A differently-named
         artist already holding this MBID means the name search landed on the
-        wrong entity, so the same gate every enrichment worker passes through
-        applies here too: better no id than one smeared across two artists.
+        wrong entity, so the guard the enrichment worker uses applies here too:
+        better no id than one smeared across two artists.
 
-        A name can also address several rows — the same artist indexed on two
-        media servers is the ordinary case, which is exactly why
-        ``source_id_conflict`` treats a same-named holder as no conflict. So
-        every row under the name is read, and the write only happens when they
-        AGREE about the identity: one of them already saying a different MBID
-        means this name does not identify anybody, and picking a row would make
-        the choice arbitrary.
+        A name can also address several rows — the same artist reached through
+        two providers is the ordinary case, which is why ``provider_id_conflict``
+        treats a same-named holder as no conflict. So every row under the name
+        is read, and the write only happens when they AGREE about the identity:
+        one of them already naming a different MBID means this name does not
+        identify anybody, and picking a row would make the choice arbitrary.
         """
         if not artist_name or not mbid:
             return
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+            from core.library2.worker_support import provider_id_conflict
+
             conn = self.db._get_connection()
             rows = conn.execute(
-                "SELECT id, musicbrainz_id FROM artists WHERE name = ? COLLATE NOCASE",
+                "SELECT id, musicbrainz_id FROM lib2_artists "
+                "WHERE name = ? COLLATE NOCASE",
                 (artist_name,),
             ).fetchall()
-        finally:
-            if conn:
-                conn.close()
-        if not rows:
-            return
-        # Ids stay exactly as the catalogue stores them. A migrated library
-        # keys artists by the media server's id, which for Jellyfin is a GUID —
-        # int() raised there, the caller swallowed it as a best-effort failure,
-        # and the deterministic identity tier silently never became available.
-        targets = [r[0] for r in rows]
-        stored = {str(r[1]) for r in rows if r[1]}
-        if stored - {str(mbid)}:
+            if not rows:
+                return
+            targets = [int(r[0]) for r in rows]
+            stored = {str(r[1]) for r in rows if r[1]}
             # The aliases were fetched FROM this MBID, so they are only this
             # artist's aliases if this MBID is. Writing them without that is
             # how one artist's alternate spellings end up on another's row.
-            logger.debug(
-                "alias write-back skipped for %r: rows under that name hold "
-                "MBID(s) %s, the name search resolved %s",
-                artist_name, sorted(stored), mbid)
-            return
-        write_mbid = not stored
-        if write_mbid:
-            # Checked before the write connection is opened — the guard reads
-            # through its own connection, and nesting one inside an open write
-            # is how a SQLite writer deadlocks itself.
-            conflict = source_id_conflict(
-                self.db, 'musicbrainz_id', mbid, targets[0], artist_name)
-            if conflict:
+            if stored - {str(mbid)}:
                 logger.debug(
-                    "alias write-back skipped for %r: MBID %s already held "
-                    "by %r", artist_name, mbid, conflict)
+                    "alias write-back skipped for %r: rows under that name hold "
+                    "MBID(s) %s, the name search resolved %s",
+                    artist_name, sorted(stored), mbid)
                 return
-
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            for artist_id in targets:
-                if write_mbid:
-                    conn.execute(
-                        "UPDATE artists SET musicbrainz_id = ?, "
-                        "musicbrainz_last_attempted = ?, "
-                        "musicbrainz_match_status = 'matched' WHERE id = ?",
-                        (mbid, datetime.now(), artist_id))
-                if aliases:
-                    conn.execute(
-                        "UPDATE artists SET aliases = ?, "
-                        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                        (json.dumps(aliases), artist_id))
+            if not stored:
+                conflict = provider_id_conflict(
+                    conn, 'musicbrainz', mbid, targets[0], artist_name)
+                if conflict:
+                    logger.debug(
+                        "alias write-back skipped for %r: MBID %s already held "
+                        "by %r", artist_name, mbid, conflict)
+                    return
+                for artist_id in targets:
+                    write_provider_enrichment(
+                        conn, entity_type='artist', entity_id=artist_id,
+                        service='musicbrainz', provider_id=mbid)
+                    record_attempt(conn, entity_type='artist', entity_id=artist_id,
+                                   service='musicbrainz', status='matched')
+            if aliases:
+                for artist_id in targets:
+                    write_provider_enrichment(
+                        conn, entity_type='artist', entity_id=artist_id,
+                        service='musicbrainz',
+                        columns={'aliases': json.dumps(aliases)})
             conn.commit()
+            logger.info(
+                "Stored MusicBrainz identity for artist %r on %d row(s) "
+                "(mbid=%s, %d aliases)",
+                artist_name, len(targets), mbid, len(aliases or []),
+            )
         finally:
             if conn:
                 conn.close()
-        logger.info(
-            "Stored MusicBrainz identity for artist %r on %d row(s) "
-            "(mbid=%s, %d aliases)",
-            artist_name, len(targets), mbid, len(aliases or []),
-        )
 
     def _search_and_score_artists(self, artist_name: str, strict: bool):
         """Search MB for an artist and score each result.
@@ -1813,8 +1795,8 @@ class MusicBrainzService:
 
         Kept for callers that genuinely cannot act on the difference (the
         enrichment worker, which only ever stores a non-empty list). Anything
-        that CACHES the answer must use :meth:`resolve_artist_aliases` — see
-        the note there.
+        that CACHES the answer must use :meth:`resolve_artist_aliases` — see the
+        note there.
         """
         return self.resolve_artist_aliases(mbid) or []
 
@@ -1839,7 +1821,7 @@ class MusicBrainzService:
         an empty list means "MusicBrainz lists no alternate spelling", None
         means "we do not know", and only the first may ever be written down as
         a result. Collapsing the two is what let one timeout freeze a working
-        cross-script bridge for the length of a cache TTL.
+        cross-script bridge for 90 days.
         """
         if not mbid:
             return None
@@ -1886,21 +1868,23 @@ class MusicBrainzService:
         return cleaned
 
     def update_artist_aliases(self, artist_id: int, aliases: list) -> None:
-        """Persist the alias list to `artists.aliases` as a JSON array.
+        """Persist the alias list to ``lib2_artists.aliases`` as a JSON array.
 
-        Idempotent — overwrites any existing value. Empty list
-        clears the column (caller may want this if MB has no aliases
-        for the artist anymore).
+        Idempotent — overwrites any existing value. An empty list clears the column
+        (the caller may want this if MB no longer lists aliases for the artist), so
+        this is an outright write rather than a backfill.
         """
         if artist_id is None:
             return
         conn = None
         try:
+            from core.library2.provider_writes import write_provider_enrichment
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE artists SET aliases = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (json.dumps(aliases) if aliases else None, artist_id),
+            write_provider_enrichment(
+                conn, entity_type='artist', entity_id=artist_id,
+                service='musicbrainz',
+                columns={'aliases': json.dumps(aliases) if aliases else '[]'},
             )
             conn.commit()
             logger.debug("Updated artist %s aliases (%d entries)", artist_id, len(aliases or []))
@@ -1928,8 +1912,12 @@ class MusicBrainzService:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+            # Reads lib2, because that is where update_artist_aliases writes now
+            # (docs §32.3.1 stage 2). A reader left on legacy would not see the
+            # aliases the worker just stored.
             cursor.execute(
-                "SELECT aliases FROM artists WHERE name = ? COLLATE NOCASE LIMIT 1",
+                "SELECT aliases FROM lib2_artists WHERE name = ? COLLATE NOCASE "
+                "LIMIT 1",
                 (artist_name,),
             )
             row = cursor.fetchone()
@@ -1949,83 +1937,67 @@ class MusicBrainzService:
             if conn:
                 conn.close()
 
-    def update_artist_mbid(self, artist_id: int, mbid: Optional[str], status: str):
-        """Update artist with MusicBrainz ID"""
+    def _record_mbid(self, entity_type: str, entity_id, mbid: Optional[str],
+                     status: str):
+        """Store an MBID and the attempt outcome on a Library-v2 row.
+
+        One method for all three entity types: legacy needed three because the
+        column name differed per table (musicbrainz_id / musicbrainz_release_id /
+        musicbrainz_recording_id), while lib2 keeps the mbid in one promoted
+        ``musicbrainz_id`` column plus ``external_ids`` on every entity.
+
+        A miss records the attempt and leaves any stored id alone. Legacy nulled it
+        out, which was a no-op on every path that can reach here — a stored id
+        short-circuits into the preserve-manual-match branch long before — and
+        keeping it means a transient failure can never erase a good id.
+        """
         conn = None
         try:
+            from core.library2.provider_attempts import record_attempt
+            from core.library2.provider_writes import write_provider_enrichment
+
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE artists
-                SET musicbrainz_id = ?,
-                    musicbrainz_last_attempted = ?,
-                    musicbrainz_match_status = ?
-                WHERE id = ?
-            """, (mbid, datetime.now(), status, artist_id))
-            
+            if mbid:
+                write_provider_enrichment(
+                    conn, entity_type=entity_type, entity_id=entity_id,
+                    service='musicbrainz', provider_id=mbid)
+            record_attempt(conn, entity_type=entity_type, entity_id=entity_id,
+                           service='musicbrainz', status=status)
             conn.commit()
-            
-            logger.debug(f"Updated artist {artist_id} with MBID: {mbid}, status: {status}")
-            
+
+            logger.debug(f"Updated {entity_type} {entity_id} with MBID: {mbid}, "
+                         f"status: {status}")
+
         except Exception as e:
-            logger.error(f"Error updating artist {artist_id}: {e}")
+            logger.error(f"Error updating {entity_type} {entity_id}: {e}")
             if conn:
                 conn.rollback()
         finally:
             if conn:
                 conn.close()
-    
+
+    def update_artist_mbid(self, artist_id: int, mbid: Optional[str], status: str):
+        """Update artist with MusicBrainz ID"""
+        self._record_mbid('artist', artist_id, mbid, status)
+
     def update_album_mbid(self, album_id: int, mbid: Optional[str], status: str,
                           release_group_mbid: Any = _UNSET):
         """Update album with MusicBrainz release ID.
 
-        ``release_group_mbid`` is written only when given: a match passes
-        the group it found (or None), while re-marking an existing id as
-        matched leaves the stored group alone. When the release id changes
-        and no group is given, the trg_albums_release_group_reset trigger
-        clears the old one and the worker's backfill looks the new one up.
+        ``release_group_mbid`` is written only when given: a match passes the
+        group it found (or None), while re-marking an existing id as matched
+        leaves the stored group alone. Written after the release id, so the
+        trg_lib2_albums_release_group_reset trigger has already cleared an old
+        edition's group when the release changed.
         """
-        conn = None
-        try:
-            conn = self.db._get_connection()
-            cursor = conn.cursor()
-            
-            if release_group_mbid is _UNSET:
-                cursor.execute("""
-                    UPDATE albums
-                    SET musicbrainz_release_id = ?,
-                        musicbrainz_last_attempted = ?,
-                        musicbrainz_match_status = ?
-                    WHERE id = ?
-                """, (mbid, datetime.now(), status, album_id))
-            else:
-                cursor.execute("""
-                    UPDATE albums
-                    SET musicbrainz_release_id = ?,
-                        musicbrainz_release_group_id = ?,
-                        musicbrainz_release_group_attempted = ?,
-                        musicbrainz_last_attempted = ?,
-                        musicbrainz_match_status = ?
-                    WHERE id = ?
-                """, (mbid, release_group_mbid,
-                      # no group from the match (an old cache row): leave the
-                      # attempt unstamped so the backfill looks it up next
-                      datetime.now() if release_group_mbid else None,
-                      datetime.now(), status, album_id))
-            
-            conn.commit()
-            
-            logger.debug(f"Updated album {album_id} with MBID: {mbid}, status: {status}")
-            
-        except Exception as e:
-            logger.error(f"Error updating album {album_id}: {e}")
-            if conn:
-                conn.rollback()
-        finally:
-            if conn:
-                conn.close()
-    
+        self._record_mbid('album', album_id, mbid, status)
+        if release_group_mbid is _UNSET or not mbid:
+            return
+        if release_group_mbid:
+            self.update_album_release_group(album_id, release_group_mbid)
+        # no group from the match (an old cache row): leave the attempt
+        # unstamped so the worker's backfill looks it up next
+
     @staticmethod
     def release_group_of(release: Any) -> Optional[str]:
         """The release-group MBID inside a MusicBrainz release object (a
@@ -2049,9 +2021,10 @@ class MusicBrainzService:
         conn = None
         try:
             conn = self.db._get_connection()
+            # a lookup that found nothing keeps a group mb_reconcile browsed
             conn.execute("""
-                UPDATE albums
-                SET musicbrainz_release_group_id = ?,
+                UPDATE lib2_albums
+                SET musicbrainz_release_group_id = COALESCE(?, musicbrainz_release_group_id),
                     musicbrainz_release_group_attempted = ?
                 WHERE id = ?
             """, (release_group_mbid, datetime.now(), album_id))
@@ -2087,36 +2060,26 @@ class MusicBrainzService:
 
     def update_track_mbid(self, track_id: int, mbid: Optional[str], status: str,
                           recording_disambiguation: Optional[str] = None):
-        """Update track identity and any disambiguation supplied by MusicBrainz."""
-        clean_disambiguation = (
-            recording_disambiguation.strip() or None
-            if recording_disambiguation is not None else None
-        )
+        """Update track identity and any disambiguation supplied by MusicBrainz.
+
+        The comment belongs to the recording (upstream 5170059ed): a lookup
+        without one keeps the stored comment of the SAME recording, and a new
+        recording id drops the old comment (the schema trigger). A miss leaves
+        both alone, like the id.
+        """
+        self._record_mbid('track', track_id, mbid, status)
+        if not mbid or recording_disambiguation is None:
+            return
         conn = None
         try:
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                UPDATE tracks
-                SET musicbrainz_recording_id = ?,
-                    recording_disambiguation = CASE
-                        WHEN musicbrainz_recording_id = ? AND ? IS NULL
-                        THEN recording_disambiguation ELSE ? END,
-                    musicbrainz_last_attempted = ?,
-                    musicbrainz_match_status = ?
-                WHERE id = ?
-            """, (mbid, mbid, recording_disambiguation, clean_disambiguation,
-                  datetime.now(), status, track_id))
-
+            conn.execute(
+                "UPDATE lib2_tracks SET recording_disambiguation = ?"
+                " WHERE id = ? AND LOWER(COALESCE(musicbrainz_id, '')) = LOWER(?)",
+                (recording_disambiguation.strip() or None, track_id, mbid))
             conn.commit()
-
-            logger.debug(f"Updated track {track_id} with MBID: {mbid}, status: {status}")
-
         except Exception as e:
-            logger.error(f"Error updating track {track_id}: {e}")
-            if conn:
-                conn.rollback()
+            logger.error(f"Error storing the recording comment of track {track_id}: {e}")
         finally:
             if conn:
                 conn.close()

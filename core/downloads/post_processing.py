@@ -113,6 +113,15 @@ def _copy_release_audio_to_transfer(source_path: str, transfer_dir: str) -> Opti
         return None
 
 
+def _remove_imported_usenet_job(download_id: str) -> None:
+    """Best-effort Remove Completed for a single-track usenet grab."""
+    try:
+        from core.download_plugins.usenet import remove_imported_usenet_job
+        remove_imported_usenet_job(download_id)
+    except Exception as exc:  # noqa: BLE001 - client cleanup never breaks an import
+        logger.warning("[Post-Processing] Remove completed failed for %s: %s", download_id, exc)
+
+
 @dataclass
 class PostProcessDeps:
     """Bundle of dependencies the post-processing worker needs.
@@ -212,8 +221,8 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         # an own-library profile's batch lands in that profile's folder (#1199);
         # everyone else keeps the folder resolved above, untouched
         try:
-            from core.imports.paths import import_profile_id, library_root_for_profile
-            transfer_dir = library_root_for_profile(import_profile_id({'batch_id': batch_id})) or transfer_dir
+            from core.imports.paths import import_owner_id, library_root_for_profile
+            transfer_dir = library_root_for_profile(import_owner_id({'batch_id': batch_id})) or transfer_dir
         except Exception as _root_err:  # noqa: BLE001 - the shared folder is the fallback
             logger.debug(f"[Post-Processing] per-profile root lookup failed: {_root_err}")
 
@@ -283,6 +292,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
         found_file = None
         file_location = None
         release_album = None
+        usenet_job_download_id = None
 
         # CRITICAL FIX: For YouTube downloads, the filename in task is 'id||title' (metadata),
         # but the actual file on disk is the remuxed/transcoded audio (e.g. Title.mp3).
@@ -299,6 +309,9 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                 actual_download_id = task.get('download_id') or task_id
                 status = deps.run_async(deps.download_orchestrator.get_download_status(actual_download_id))
                 if status and task.get('username') in ('torrent', 'usenet'):
+                    if context:
+                        from core.library2.download_catalogue import hydrate_download_album
+                        hydrate_download_album(context)
                     audio_files = list(getattr(status, 'audio_files', None) or [])
                     if not audio_files and getattr(status, 'file_path', None):
                         audio_files = [status.file_path]
@@ -336,6 +349,11 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                             found_file = copied_path
                             file_location = 'download'
                             release_album = (release_files, selected)
+                            if task.get('username') == 'usenet':
+                                # Remove Completed runs after the import
+                                # below, and only if it (and every other album
+                                # track the profile takes) imported.
+                                usenet_job_download_id = actual_download_id
                     if not found_file:
                         with tasks_lock:
                             if task_id in download_tasks:
@@ -515,8 +533,8 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
 
                             # Ensure track_number is valid
                             if not isinstance(track_number, int) or track_number < 1:
-                                logger.error(f"[Verification] Invalid track number ({track_number}), defaulting to 1")
-                                track_number = 1
+                                logger.warning(f"[Verification] Unknown track number ({track_number})")
+                                track_number = 0
 
                             # Get clean track name
                             clean_track_name = get_import_clean_title(context, default=original_search.get('title', 'Unknown Track'))
@@ -563,6 +581,10 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                             logger.info(f"[Verification] Created proper album_info - track_number: {track_number}, album: {album_info['album_name']}")
 
                             logger.info(f"[Post-Processing] Attempting metadata enhancement for: {found_file}")
+                            from core.library2.validation import import_reference
+                            reference = import_reference(context)
+                            if reference:
+                                context['_metadata_reference'] = reference
                             logger.warning(f"[Metadata Input] Verification worker - artist: '{artist_context.get('name', 'MISSING')}' (id: {artist_context.get('id', 'MISSING')})")
                             logger.warning(f"[Metadata Input] Verification worker - album: '{album_info.get('album_name', 'MISSING')}', track#: {album_info.get('track_number', 'MISSING')}, source: {album_info.get('source', 'unknown')}")
                             enhancement_success = deps.enhance_file_metadata(found_file, context, artist_context, album_info)
@@ -596,6 +618,14 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             else:
                 logger.info("[Post-Processing] File already has metadata enhancement completed")
 
+            metadata_status = 'unknown'
+            if _found_file_matches_expected(found_file, expected_final_path):
+                try:
+                    from database.music_database import get_database
+                    from core.library2.validation import refresh_imported_metadata
+                    metadata_status = refresh_imported_metadata(get_database(), [found_file])
+                except Exception as exc:
+                    logger.warning('Final metadata read failed for %s: %s', found_file, exc)
             with tasks_lock:
                 if task_id in download_tasks:
                     track_info = download_tasks[task_id].get('track_info')
@@ -606,6 +636,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                     # genuinely published track would be kept on the wishlist
                     # and downloaded twice.
                     download_tasks[task_id].setdefault('final_file_path', found_file)
+                    download_tasks[task_id]['metadata_status'] = metadata_status
                     deps.mark_task_completed(task_id, track_info)
 
             # Clean up context now that both stream processor and verification worker are done
@@ -630,6 +661,7 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                     context.pop('_pipeline_import_succeeded', None)  # this attempt's outcome only
                 # Run the existing post-processing logic with verification
                 deps.post_process_with_verification(context_key, context, found_file, task_id, batch_id)
+                album_tracks_ok = True
                 if release_album and context.get('_pipeline_import_succeeded') and deps.process_release_file:
                     # The requested track is done and its task completed. The
                     # profile may also want the album's other tracks from it.
@@ -638,7 +670,16 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
                         import_album_tracks(context_key, context, *release_album, transfer_dir,
                                             deps.process_release_file, _copy_release_audio_to_transfer)
                     except Exception as album_error:  # the completed request must stay completed
+                        album_tracks_ok = False
                         logger.error(f"[Post-Processing] Album tracks import failed: {album_error}")
+                if usenet_job_download_id and context.get('_pipeline_import_succeeded'):
+                    # Remove Completed: the release is done with only when the
+                    # request imported and no album track it offered failed.
+                    if album_tracks_ok and not context.get('_album_tracks_incomplete'):
+                        _remove_imported_usenet_job(usenet_job_download_id)
+                    else:
+                        logger.info("[Post-Processing] Kept usenet job for %s: not every "
+                                    "album track from its release imported", task_id)
             else:
                 # No matched context - just mark as completed since file exists
                 #

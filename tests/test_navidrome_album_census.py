@@ -104,12 +104,18 @@ class _Client:
 def db(tmp_path, monkeypatch):
     database = MusicDatabase(str(tmp_path / "music.db"))
     monkeypatch.setattr("core.database_update_worker.get_database", lambda path=None: database)
+    # lib2 port: the catalogue rows a navidrome scan maps, the server's ids
+    # in lib2_media_server_mappings
+    from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
     with database._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('r1', 'Known', 'navidrome')")
-        conn.execute("INSERT INTO albums (id, title, artist_id, server_source) VALUES ('held', 'Held', 'r1', 'navidrome')")
-        for i in range(3):
-            conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, server_source) "
-                         "VALUES (?, 'held', 'r1', 'T', 'navidrome')", (f"t{i}",))
+        artist = seed_artist(conn, server_id='r1', name='Known', server_source='navidrome')
+        album = seed_album(conn, server_id='held', title='Held', artist_id=artist,
+                           server_source='navidrome')
+        rows = [('album', album, 'held')] + [
+            ('track', seed_track(conn, server_id=f"t{i}", title=f"T{i}", album_id=album,
+                                 server_source='navidrome'), f"t{i}") for i in range(3)]
+        conn.executemany("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, "
+                         "server_source, server_id) VALUES (?, ?, 'navidrome', ?)", rows)
         conn.commit()
     return database
 

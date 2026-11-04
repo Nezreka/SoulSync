@@ -13,22 +13,40 @@ from core.repair_worker import RepairWorker
 from database.music_database import MusicDatabase
 
 
+class _EnabledConfig:
+    def get(self, key, default=None):
+        return True if key == "features.library_v2" else default
+
+
 def _seed(db: MusicDatabase):
     conn = db._get_connection()
-    conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ar1', 'A-ha')")
-    conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'Hunting High and Low')")
+    from core.library2.schema import ensure_library_v2_schema
+
+    ensure_library_v2_schema(conn)
+    conn.execute(
+        "INSERT INTO lib2_artists(id, name, sort_name) VALUES(1, 'A-ha', 'A-ha')"
+    )
+    conn.execute(
+        "INSERT INTO lib2_albums(id, primary_artist_id, title) "
+        "VALUES(1, 1, 'Hunting High and Low')"
+    )
     conn.commit()
     conn.close()
 
 
 def _track(db, tid: int, duration_ms, path, spotify_id=None):
-    # tid is an INTEGER id, exactly like production (tracks.id is INTEGER PRIMARY KEY) — so the
-    # test exercises the real round-trip: the finding stores str(id) and the fix queries WHERE id=?.
+    """``duration_ms`` is the FILE's length (tag cache); the catalogue always
+    expects a full song, which is exactly what a preview disagrees with."""
     conn = db._get_connection()
     conn.execute(
-        "INSERT INTO tracks (id, artist_id, album_id, title, duration, file_path, spotify_track_id) "
-        "VALUES (?, 'ar1', 'al1', ?, ?, ?, ?)",
-        (tid, f"Track {tid}", duration_ms, path, spotify_id),
+        "INSERT INTO lib2_tracks(id, album_id, title, duration, spotify_id) "
+        "VALUES(?, 1, ?, 238000, ?)",
+        (tid, f"Track {tid}", spotify_id),
+    )
+    conn.execute(
+        "INSERT INTO lib2_track_files(track_id, path, format, is_primary, tags_json) "
+        "VALUES(?, ?, ?, 1, json_object('duration_ms', ?))",
+        (tid, path, Path(path).suffix.lstrip('.').lower(), duration_ms),
     )
     conn.commit()
     conn.close()
@@ -42,7 +60,7 @@ class _FakeSpotify:
 
 def _ctx(db, findings, spotify=None):
     return JobContext(
-        db=db, transfer_folder='/tmp', config_manager=None,
+        db=db, transfer_folder='/tmp', config_manager=_EnabledConfig(),
         spotify_client=spotify,
         create_finding=lambda **kw: findings.append(kw) or True,
         should_stop=lambda: False, is_paused=lambda: False,
@@ -65,7 +83,7 @@ def test_scan_flags_preview_skips_genuine_short_and_unverifiable(tmp_path: Path)
     assert len(findings) == 1
     f = findings[0]
     assert f['finding_type'] == 'short_preview_track'
-    assert f['entity_id'] == '1'          # str(int id), as create_finding stores it
+    assert f['entity_id'] == 'lib2:1'
     assert f['entity_type'] == 'track'
     assert f['details']['expected_duration_s'] == pytest.approx(200.0)
     assert result.findings_created == 1
@@ -93,16 +111,20 @@ def test_estimate_scope_counts_short_tracks(tmp_path: Path):
 
 # ── fix (approval) ──
 
-def test_fix_deletes_file_removes_row_and_wishlists(tmp_path: Path):
+def test_fix_deletes_the_preview_and_asks_for_the_full_track(tmp_path: Path):
+    """The subject is ``lib2:1`` — the only kind the scan above produces.
+
+    The native fix does not build a wishlist payload here and does not drop a
+    row: it deletes the file and reports ``repair_intent='redownload'``, and the
+    maintenance bridge turns that into "wanted" against the real track
+    (``tests/library2/test_maintenance_sync.py``). Written against a bare ``'1'``
+    this test drove the legacy branch instead, which is why the two could drift
+    without anything failing."""
     db = MusicDatabase(str(tmp_path / 'm.db'))
     _seed(db)
     preview = tmp_path / 'preview.flac'
     preview.write_bytes(b'fake audio bytes')
     _track(db, 1, 28_000, str(preview), spotify_id='sp1')
-
-    captured = {}
-    db.add_to_wishlist = lambda spotify_track_data, **kw: captured.update(
-        {'data': spotify_track_data, 'kw': kw}) or True
 
     w = RepairWorker.__new__(RepairWorker)
     w.db = db
@@ -110,18 +132,14 @@ def test_fix_deletes_file_removes_row_and_wishlists(tmp_path: Path):
     w._config_manager = None
 
     res = w._fix_short_preview_track(
-        'track', '1', str(preview),    # entity_id is the string the finding stored
+        'track', 'lib2:1', str(preview),
         {'expected_duration_s': 225.0, 'original_path': str(preview)})
 
     assert res['success'] is True
     assert not preview.exists()                                  # preview file deleted
-    assert captured['data']['name'] == 'Track 1'                 # re-wishlisted with payload
-    assert captured['data']['duration_ms'] == 225_000           # uses the real (expected) length
-    assert captured['kw'].get('source_type') == 'redownload'
-    conn = db._get_connection()
-    remaining = conn.execute("SELECT COUNT(*) FROM tracks WHERE id=1").fetchone()[0]
-    conn.close()
-    assert remaining == 0                                        # DB row dropped → track missing again
+    assert res['repair_intent'] == 'redownload'
+    assert res['library_v2_file_deleted'] is True
+    assert 'Track 1' in res['message']
 
 
 # ── album art capture (so the re-wishlisted item isn't art-less) ──
@@ -150,45 +168,29 @@ def test_art_from_itunes_artwork_is_upscaled():
     assert _art_from_details(d) == 'https://is1.mzstatic.com/a/600x600bb.jpg'
 
 
-def test_fix_uses_finding_art_for_wishlist_payload(tmp_path: Path):
-    db = MusicDatabase(str(tmp_path / 'm.db'))
-    _seed(db)
-    preview = tmp_path / 'preview.flac'
-    preview.write_bytes(b'fake audio')
-    _track(db, 1, 28_000, str(preview), spotify_id='sp1')
-
-    captured = {}
-    db.add_to_wishlist = lambda spotify_track_data, **kw: captured.update(
-        {'data': spotify_track_data}) or True
-
-    w = RepairWorker.__new__(RepairWorker)
-    w.db = db
-    w.transfer_folder = str(tmp_path)
-    w._config_manager = None
-
-    w._fix_short_preview_track('track', '1', str(preview),
-                               {'expected_duration_s': 200.0,
-                                'album_thumb_url': 'https://cdn/art.jpg'})
-    assert captured['data']['album']['images'] == [{'url': 'https://cdn/art.jpg'}]
+# The fix no longer builds a wishlist payload, so there is nothing left to put
+# the captured art into: it marks the native track wanted and the acquisition
+# path takes the album's own `image_url`. The capture is still asserted above —
+# `finding-detail.tsx` shows it on the finding — but the payload assertion that
+# used to live here only ever ran against the legacy branch.
 
 
-def test_fix_missing_file_still_wishlists_and_drops_row(tmp_path: Path):
-    """If the preview file is already gone, still re-wishlist + drop the row (idempotent-ish)."""
+def test_fix_of_an_already_gone_preview_still_asks_for_the_full_track(tmp_path: Path):
+    """Idempotent-ish: the file being gone is not a failure, the track is still
+    the wrong one to be holding a 30-second clip of."""
     db = MusicDatabase(str(tmp_path / 'm.db'))
     _seed(db)
     _track(db, 1, 28_000, str(tmp_path / 'gone.flac'), spotify_id='sp2')
-    db.add_to_wishlist = lambda spotify_track_data, **kw: True
 
     w = RepairWorker.__new__(RepairWorker)
     w.db = db
     w.transfer_folder = str(tmp_path)
     w._config_manager = None
 
-    res = w._fix_short_preview_track('track', '1', str(tmp_path / 'gone.flac'), {})
+    res = w._fix_short_preview_track('track', 'lib2:1', str(tmp_path / 'gone.flac'), {})
     assert res['success'] is True
-    conn = db._get_connection()
-    assert conn.execute("SELECT COUNT(*) FROM tracks WHERE id=1").fetchone()[0] == 0
-    conn.close()
+    assert res['repair_intent'] == 'redownload'
+    assert 'already gone' in res['message']
 
 
 # ── HiFi fragmented-FLAC previews (sella): stored duration 0, decode to find them ──
@@ -217,7 +219,7 @@ def test_scan_decodes_zero_duration_hifi_previews(tmp_path: Path, monkeypatch):
     findings = []
     result = ShortPreviewTrackJob().scan(_ctx(db, findings, _FakeSpotify()))
     assert len(findings) == 1
-    assert findings[0]['entity_id'] == '1'
+    assert findings[0]['entity_id'] == 'lib2:1'
     assert findings[0]['details']['file_duration_s'] == pytest.approx(30.0)
     assert result.scanned == 2
 
@@ -257,3 +259,21 @@ def test_verify_zero_off_keeps_the_old_stored_duration_behavior(tmp_path: Path):
     )
     res = ShortPreviewTrackJob().scan(ctx)
     assert res.scanned == 1     # only the 28s row; the zero-duration row is excluded
+
+
+def test_an_uncached_file_length_is_read_once_and_remembered(tmp_path: Path, monkeypatch):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _seed(db)
+    clip = tmp_path / 'clip.flac'
+    clip.write_bytes(b'fake flac')
+    _track(db, 1, None, str(clip), spotify_id='sp_long')
+    monkeypatch.setattr('core.library2.paths.resolve_lib2_path', lambda p, *_a: p)
+    monkeypatch.setattr('mutagen.File', lambda p: type('A', (), {'info': type('I', (), {'length': 3.0})()})())
+
+    findings = []
+    ShortPreviewTrackJob().scan(_ctx(db, findings, _FakeSpotify()))
+
+    assert [f['entity_id'] for f in findings] == ['lib2:1']
+    conn = db._get_connection()
+    assert conn.execute("SELECT json_extract(tags_json,'$.duration_ms') FROM lib2_track_files").fetchone()[0] == 3000
+    conn.close()

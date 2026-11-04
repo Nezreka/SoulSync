@@ -193,14 +193,22 @@
     function render(container, opts) {
         if (!container) return;
         opts = opts || {};
-        if (opts.kind === 'show') { renderShow(container, opts); return; }
+        // a show reads its title off container._dl: an earlier movie's _opts left on a
+        // reused modal would name that movie in this show's searches and grabs
+        if (opts.kind === 'show') { container._opts = null; renderShow(container, opts); return; }
         container._opts = opts;
         container.innerHTML = contentHTML();
         if (!container._vdlWired) { container._vdlWired = true; container.addEventListener('click', onClick); }
 
         var isYt = !!opts.isYt;
-        getJSON(isYt ? '/api/video/downloads/youtube-quality' : '/api/video/downloads/quality')
-            .then(function (p) { if (container.isConnected && p) renderTarget(container, p, isYt); });
+        if (isYt) {
+            getJSON('/api/video/downloads/youtube-quality')
+                .then(function (p) { if (container.isConnected && p) renderTarget(container, p, true); });
+        } else {
+            loadTitleProfile(container, function () { return container._opts || {}; },
+                opts.kind === 'show' ? 'show' : 'movie',
+                function (p, info) { renderTarget(container, p, false, info); });
+        }
         if (isYt) {
             renderSources(container, ['youtube']);
         } else {
@@ -275,7 +283,73 @@
 
     function chip(text, mod) { return '<span class="vdl-chip' + (mod ? ' vdl-chip--' + mod : '') + '">' + esc(text) + '</span>'; }
 
-    function renderTarget(container, p, isYt) {
+    // ── the title's quality profile (picked here, kept on the title) ──────────
+    // Seadog's request: a new title had no assignment, so Get / Manual search
+    // judged it by the Default with no way to pick "Movie 4K". The pick becomes
+    // the title's own profile: this search and grab, its wishlist rows, and its
+    // library row when it lands (POST /downloads/quality/choose).
+    function titleQS(o, kind) {
+        o = o || {};
+        var q = ['kind=' + encodeURIComponent(kind || 'movie')];
+        var id = o.id || o.mediaId, src = o.source || o.mediaSource, tmdb = o.tmdbId || o.tvId;
+        if (id != null && id !== '') q.push('media_id=' + encodeURIComponent(id));
+        if (src) q.push('media_source=' + encodeURIComponent(src));
+        if (tmdb != null && tmdb !== '') q.push('tmdb_id=' + encodeURIComponent(tmdb));
+        return q.join('&');
+    }
+    function titleBody(o, kind, profileId) {
+        o = o || {};
+        return { kind: kind || 'movie', media_id: o.id || o.mediaId || null,
+            media_source: o.source || o.mediaSource || null, tmdb_id: o.tmdbId || o.tvId || null,
+            profile_id: profileId };
+    }
+    function profilePickerHTML(info) {
+        if (!info || !info.profiles || info.profiles.length < 2) return '';
+        var kindDefault = null;
+        info.profiles.forEach(function (p) { if (p.id === info.kind_default_id) kindDefault = p; });
+        var cur = info.assigned ? info.profile_id : 0;
+        var opts = info.profiles.map(function (p) {
+            var label = p.id === 0
+                ? (kindDefault && kindDefault.id !== 0 ? 'Default (' + kindDefault.name + ')' : 'Default')
+                : p.name;
+            return '<option value="' + p.id + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(label) + '</option>';
+        }).join('');
+        return '<label class="vdl-prof" title="The quality profile this title is searched, grabbed and upgraded by">' +
+            '<span class="vdl-prof-lab">Profile</span>' +
+            '<select class="vdl-prof-sel" data-vdl-profile>' + opts + '</select></label>';
+    }
+    // fetch the title's profile, render it, and keep the picker's change wired.
+    // onChanged runs after a pick is saved (the overlay re-runs its searches)
+    function loadTitleProfile(host, getIdent, kind, render, onChanged) {
+        var url = '/api/video/downloads/quality/for?' + titleQS(getIdent(), kind);
+        getJSON(url).then(function (info) {
+            if (!host.isConnected) return;
+            if (info && info.profile) { render(info.profile, info); return; }
+            // an older server without /quality/for: the classic Default, no picker
+            getJSON('/api/video/downloads/quality').then(function (p) { if (host.isConnected && p) render(p, null); });
+        });
+        if (host._vdlProfWired) return;
+        host._vdlProfWired = true;
+        host.addEventListener('change', function (e) {
+            var sel = e.target.closest && e.target.closest('[data-vdl-profile]');
+            if (!sel) return;
+            var pid = parseInt(sel.value, 10) || 0;
+            sel.disabled = true;
+            postJSON('/api/video/downloads/quality/choose', titleBody(getIdent(), kind, pid)).then(function (res) {
+                sel.disabled = false;
+                if (!res || res.success === false) {
+                    toast((res && res.error) || 'Could not change the quality profile', 'error');
+                    loadTitleProfile(host, getIdent, kind, render, onChanged);
+                    return;
+                }
+                toast('Quality profile saved for this title', 'success');
+                loadTitleProfile(host, getIdent, kind, render, onChanged);
+                if (onChanged) onChanged();
+            });
+        });
+    }
+
+    function renderTarget(container, p, isYt, info) {
         var box = container.querySelector('[data-vdl-target]'); if (!box) return;
         var chips = [];
         if (isYt) {
@@ -293,7 +367,7 @@
             if (p.max_movie_gb) chips.push(chip('Movie ≤ ' + p.max_movie_gb + ' GB'));
             if (p.max_episode_gb) chips.push(chip('Episode ≤ ' + p.max_episode_gb + ' GB'));
         }
-        box.innerHTML = chips.join('');
+        box.innerHTML = (isYt ? '' : profilePickerHTML(info)) + chips.join('');
     }
 
     // Owned copy → "In your library · 720p · BluRay · X265" + a verdict against the
@@ -382,8 +456,25 @@
 
     // Start a search; for Soulseek, stream results in (poll like the music side —
     // results trickle in over ~30s, so a single short wait misses them).
+    // the title this panel searches for, so the server judges results by ITS
+    // quality profile and asks the indexers by its ids (the wishlist search's
+    // way). episode, season and series searches sent neither, so they were
+    // judged by the Default profile on a title-only search.
+    function withIdentity(container, resultsEl, params) {
+        if (params.media_id != null || params.tmdb_id != null) return params;
+        var host = resultsEl.closest('[data-vgm-dl-content]');
+        var o = (host && host._opts) || (container && (container._opts || container._dl)) || {};
+        var extra = {};
+        var id = o.id || o.mediaId;
+        if (id) { extra.media_id = id; extra.media_source = o.source || o.mediaSource || 'library'; }
+        var tmdb = o.tmdbId || o.tvId;
+        if (tmdb) extra.tmdb_id = tmdb;
+        return Object.keys(extra).length ? Object.assign({}, params, extra) : params;
+    }
+
     function searchInto(container, resultsEl, params, triggerRows, onDone) {
         if (!resultsEl) return;
+        params = withIdentity(container, resultsEl, params);
         triggerRows = (triggerRows || []).filter(Boolean);
         if (resultsEl._poll) { clearTimeout(resultsEl._poll); resultsEl._poll = null; }
         resultsEl._rows = null;   // drop any prior search's rows so Auto can't grab a stale hit
@@ -415,7 +506,10 @@
             var qs = '?id=' + encodeURIComponent(id) + '&scope=' + encodeURIComponent(params.scope || 'movie') +
                 '&title=' + encodeURIComponent(params.title || '') +
                 (params.season != null ? '&season=' + params.season : '') +
-                (params.episode != null ? '&episode=' + params.episode : '');
+                (params.episode != null ? '&episode=' + params.episode : '') +
+                (params.media_id != null ? '&media_id=' + encodeURIComponent(params.media_id) +
+                    '&media_source=' + encodeURIComponent(params.media_source || '') : '') +
+                (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '');
             getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
                 if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
                 var rows = (d && d.results) || [];
@@ -779,7 +873,8 @@
             container.addEventListener('click', onShowClick);
             container.addEventListener('change', onShowChange);
         }
-        getJSON('/api/video/downloads/quality').then(function (p) { if (container.isConnected && p) renderTarget(container, p, false); });
+        loadTitleProfile(container, function () { return container._dl || {}; }, 'show',
+            function (p, info) { renderTarget(container, p, false, info); });
         getJSON('/api/video/downloads/config').then(function (c) {
             if (!container.isConnected) return;
             st.sources = sourcesFromConfig(c);
@@ -1301,6 +1396,7 @@
                     '<div class="vms-eyebrow">Manual search</div>' +
                     '<div class="vms-title">' + esc(opts.title || '') + '</div>' +
                     '<div class="vms-scope">' + esc(scopeLabel) + '</div>' +
+                    '<div class="vms-prof" data-vms-prof></div>' +
                     '<div class="vms-sub" data-vms-sub>Searching your sources…</div>' +
                 '</div>' +
                 '<div class="vms-body" data-vms-body data-vgm-dl-content></div>' +
@@ -1310,7 +1406,7 @@
         var body = ov.querySelector('[data-vms-body]');
         // buildGrabPayload reads media context off the nearest [data-vgm-dl-content]._opts
         body._opts = { id: opts.mediaId, mediaId: opts.mediaId, source: opts.mediaSource,
-            mediaSource: opts.mediaSource, year: opts.year, poster: opts.poster };
+            mediaSource: opts.mediaSource, tmdbId: opts.tmdbId || null, year: opts.year, poster: opts.poster };
 
         ov.addEventListener('click', function (e) {
             if (e.target === ov || e.target.closest('[data-vms-close]')) { _closeManual(ov); return; }
@@ -1333,6 +1429,17 @@
         var onKey = function (e) { if (e.key === 'Escape') { _closeManual(ov); document.removeEventListener('keydown', onKey); } };
         document.addEventListener('keydown', onKey);
 
+        var profHost = ov.querySelector('[data-vms-prof]');
+        loadTitleProfile(profHost, function () { return body._opts || {}; },
+            scope === 'movie' ? 'movie' : 'show',
+            function (p, info) {
+                var picker = profilePickerHTML(info);
+                profHost.innerHTML = picker;
+                profHost.hidden = !picker;
+            },
+            function () { runAll(); });   // a new profile re-judges every result
+
+        function runAll() {
         getJSON('/api/video/downloads/config').then(function (c) {
             // Search every configured source that returns REAL, grabbable results. Soulseek
             // (slskd), Torrent + Usenet (Prowlarr) are all wired end-to-end now — live search
@@ -1355,6 +1462,8 @@
                     episode: (scope === 'episode' ? opts.episode : null), source: s }, []);
             });
         });
+        }
+        runAll();
     }
 
     window.VideoDownload = { render: render, manualSearch: manualSearch };

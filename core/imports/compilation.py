@@ -8,10 +8,7 @@ Cyberfunk — onto a guitarist who appears on one track of each
 (sassmastawillis, Sept 22 2026).
 
 The signal has to come from the ALBUM. At this point we hold exactly one track
-and cannot count distinct artists across the release, which is why
-``is_multi_artist_compilation`` (core/library_reorganize.py) cannot be reused
-here — it needs the whole tracklist and runs at reorganize time, where it
-decides the folder layout and has no say over who the album is attributed to.
+and cannot count distinct artists across the release.
 
 Nothing here touches the TRACK's artist. The library already stores a
 per-track ``track_artist`` for exactly the case where it differs from the
@@ -25,11 +22,8 @@ from typing import Any, Dict, Optional
 
 VARIOUS_ARTISTS = "Various Artists"
 
-# The spellings a source actually ships. Same vocabulary as
-# ``is_multi_artist_compilation`` so the two agree about what "various" means.
-# (R4 M2: "ONE shared" overclaims — is_multi_artist_compilation keeps its own
-# tuple and this set uses casefold while some call sites use lower(). They
-# agree on the spellings that matter; this comment no longer claims more.)
+# The spellings a source actually ships. Some call sites compare with lower(),
+# this set with casefold; they agree on the spellings that matter.
 # Used by the #1567 poisoned-batch guards in core/metadata/source.py,
 # core/wishlist/album_grouping.py and core/repair_jobs/suspect_album_tag.py.
 VARIOUS_ARTIST_NAMES = frozenset({

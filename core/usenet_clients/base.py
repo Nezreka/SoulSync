@@ -51,6 +51,22 @@ class UsenetStatus:
     category: Optional[str] = None
     files: Optional[List[str]] = None
     error: Optional[str] = None
+    # True only when the job is waiting its turn behind other jobs: SAB
+    # ``Queued``/``Idle``, or nothing downloaded yet with an unpaused job ahead
+    # of it in SAB's queue (a live SAB reported every waiting slot as
+    # ``Downloading``). ``state`` can't carry it: the adapters fold waiting in
+    # with grabbing/propagating, which can hang and must stay stall-timed.
+    # Adapters that can't tell leave it False.
+    waiting_in_queue: bool = False
+    # True while the client is still fetching the NZB for a job it has just
+    # been handed (SAB's ``Grabbing`` placeholder). The job's files are not in
+    # yet, and SAB lists the job in neither its queue nor its history while it
+    # adds them, so a gap right after this is expected. Adapters that can't
+    # tell leave it False.
+    fetching_nzb: bool = False
+    # True when a person removed the job in the client (SAB's ``Deleted``):
+    # it ends the grab, but says nothing bad about the release itself
+    removed_by_user: bool = False
 
 
 @runtime_checkable

@@ -3,8 +3,8 @@
 recently added used to answer that by loading every track's path (300k) and
 keying each one in python, on every dashboard load, even when every card's
 file was sitting right there on disk. now the caller only asks about cards
-whose file is gone, and this asks sqlite for the few paths ending in those
-filenames over idx_tracks_file_path, then checks the exact key in python.
+whose file is gone, and this asks sqlite for the few active library files
+whose path ends in those filenames, then checks the exact key in python.
 
 the LIKE is only a prefilter, it may match too much but python confirms each
 one. it can also miss: LIKE folds ascii case only, and a casefold can change
@@ -21,6 +21,8 @@ from core.library.expired_cleanup import path_suffix_key
 
 # past this many filenames the OR'd LIKEs cost about what the full pass does
 PREFILTER_MAX = 5
+# the Library v2 file rows that still count as the library's
+_LIVE = "file_state = 'active'"
 
 
 def _like_tail(key: str) -> str:
@@ -40,8 +42,8 @@ def live_suffix_keys(cursor, paths: Iterable[str]) -> Set[str]:
     if len(wanted) <= PREFILTER_MAX:
         patterns = [_like_tail(k) for k in wanted]
         cursor.execute(
-            "SELECT file_path FROM tracks WHERE "
-            + " OR ".join(["file_path LIKE ?"] * len(patterns)),
+            f"SELECT path FROM lib2_track_files WHERE {_LIVE} AND ("
+            + " OR ".join(["path LIKE ?"] * len(patterns)) + ")",
             patterns)
         for (file_path,) in cursor.fetchall():
             key = path_suffix_key(file_path)
@@ -49,7 +51,7 @@ def live_suffix_keys(cursor, paths: Iterable[str]) -> Set[str]:
                 found.add(key)
         if found == wanted:
             return found
-    cursor.execute("SELECT file_path FROM tracks WHERE file_path IS NOT NULL")
+    cursor.execute(f"SELECT path FROM lib2_track_files WHERE {_LIVE} AND path IS NOT NULL")
     for (file_path,) in cursor.fetchall():
         key = path_suffix_key(file_path)
         if key in wanted:

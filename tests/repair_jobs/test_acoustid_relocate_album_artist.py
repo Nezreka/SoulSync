@@ -29,13 +29,10 @@ def test_relocate_keeps_the_album_artist(tmp_path):
     f = tmp_path / 'music' / '04 - wrong.flac'
     f.parent.mkdir(parents=True)
     _make_flac(f)
+    from tests import lib2_seed
     with db._get_connection() as conn:
-        conn.execute("INSERT OR REPLACE INTO artists (id, name, server_source) "
-                     "VALUES ('va','Various Artists','plex')")
-        conn.execute("INSERT OR REPLACE INTO albums (id, title, artist_id) VALUES (10,'Trail Songs','va')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, "
-                     "file_path, server_source) VALUES ('t1',10,'va','Wrong Title',4,100,?, 'plex')",
-                     (str(f),))
+        track_id = lib2_seed.track(conn, 'Various Artists', 'Trail Songs', 'Wrong Title',
+                                   path=str(f), track_number=4, duration=100)
         conn.commit()
 
     captured = {}
@@ -45,13 +42,11 @@ def test_relocate_keeps_the_album_artist(tmp_path):
 
     worker = RepairWorker(db)
     with patch('core.repair_jobs.relocate.relocate_mismatch_to_staging', fake_relocate):
-        # bypass path resolution by patching _resolve_file_path and _resolve_path
+        # bypass path resolution: the catalogue path is the file itself
         with patch.object(worker, '_resolve_path', return_value=str(tmp_path / 'staging')):
-            from core import repair_worker as rw_mod
-            orig_resolve = rw_mod._resolve_file_path
-            with patch.object(rw_mod, '_resolve_file_path', return_value=str(f)):
+            with patch('core.library2.paths.resolve_lib2_path', return_value=str(f)):
                 res = worker._fix_acoustid_mismatch(
-                    'track', 't1', str(f),
+                    'track', f'lib2:{track_id}', str(f),
                     {'_fix_action': 'relocate', 'acoustid_title': 'Such Great Heights',
                      'acoustid_artist': 'Iron & Wine'})
 

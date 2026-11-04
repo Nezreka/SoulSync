@@ -9,15 +9,19 @@ import {
   failingTitle,
   groupTracks,
   orbImage,
+  orbImageFallback,
   shortStamp,
   trackCountLabel,
 } from '../-wishlist.helpers';
-import { openWishlistInspector } from '../../../features/downloads/inspector-modal';
+import { openWishlistSearch } from '../../library/-ui/interactive-search-host';
 import { NebulaSheet } from './nebula-parts';
+import { WishlistCover } from './wishlist-cover';
 
 interface Props {
   group: WishlistArtistGroup;
   artistImages: Map<string, string>;
+  /** CDN photos to paint while a cold local artwork build runs. */
+  artistImageFallbacks?: Map<string, string>;
   onClose: () => void;
   onGrabArtist: () => void;
   onGrabAlbum: (album: WishlistAlbumGroup) => void;
@@ -64,6 +68,7 @@ function troubleCallout(stuck: ParsedWishlistTrack[]): { headline: string; detai
 export function WishlistArtistSheet({
   group,
   artistImages,
+  artistImageFallbacks,
   onClose,
   onGrabArtist,
   onGrabAlbum,
@@ -81,6 +86,7 @@ export function WishlistArtistSheet({
     <NebulaSheet
       label={`${group.name} on the wishlist`}
       image={image}
+      imageFallback={orbImageFallback(group, artistImages, artistImageFallbacks ?? new Map())}
       avatarFallback={group.name.substring(0, 2).toUpperCase()}
       name={group.name}
       meta={
@@ -129,13 +135,16 @@ export function WishlistArtistSheet({
       {group.albums.map((album) => (
         <section key={album.name} className="wlp-sheet-album" data-album={album.name}>
           <div className="wlp-sheet-album-head">
-            {album.image ? (
-              <img className="wlp-sheet-cover" src={album.image} alt="" />
-            ) : (
-              <div className="wlp-sheet-cover wlp-sheet-cover--ph" aria-hidden="true">
-                ♪
-              </div>
-            )}
+            <WishlistCover
+              className="wlp-sheet-cover"
+              src={album.image}
+              fallback={album.imageFallback}
+              placeholder={
+                <div className="wlp-sheet-cover wlp-sheet-cover--ph" aria-hidden="true">
+                  ♪
+                </div>
+              }
+            />
             <div className="wlp-sheet-album-id">
               <div className="wlp-sheet-album-name" title={album.name}>
                 {album.name}
@@ -222,13 +231,16 @@ function SheetTrack({
   return (
     <div className={`wlp-sheet-track${track.failing ? ' is-stuck' : ''}`}>
       {withCover ? (
-        track.image ? (
-          <img className="wlp-sheet-track-cover" src={track.image} alt="" />
-        ) : (
-          <div className="wlp-sheet-track-cover wlp-sheet-cover--ph" aria-hidden="true">
-            ♪
-          </div>
-        )
+        <WishlistCover
+          className="wlp-sheet-track-cover"
+          src={track.image}
+          fallback={track.imageFallback}
+          placeholder={
+            <div className="wlp-sheet-track-cover wlp-sheet-cover--ph" aria-hidden="true">
+              ♪
+            </div>
+          }
+        />
       ) : null}
       <div className="wlp-sheet-track-main">
         <div className="wlp-sheet-track-top">
@@ -251,14 +263,8 @@ function SheetTrack({
         className="wlp-sheet-chip"
         title="Interactive Search — pick a source yourself"
         aria-label={`Interactive Search for ${track.track}`}
-        onClick={() =>
-          openWishlistInspector({
-            id: track.id,
-            name: track.track,
-            artist: track.artist,
-            album: track.album,
-          })
-        }
+        // the library's Interactive Search for a library track, else the inspector
+        onClick={() => openWishlistSearch(track)}
       >
         Search
       </button>

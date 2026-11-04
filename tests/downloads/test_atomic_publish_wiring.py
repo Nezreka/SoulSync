@@ -11,6 +11,7 @@ from pathlib import Path
 
 import core.imports.pipeline as pl
 import core.downloads.lifecycle as lc
+from tests.support.catalogue_seed import seed_library_track
 
 
 class _Cfg:
@@ -150,9 +151,19 @@ def test_end_to_end_stage_then_publish(monkeypatch, tmp_path):
     # 2) At batch completion, publish moves staging → library, repoints DB, remaps roster.
     db_updates = []
 
+    # The repoint runs through core.library2.track_files.repoint_file_path, so
+    # the stub has to answer the one question that function asks: how many rows
+    # moved. A stub that cannot say is read as "matched no row", which is a
+    # FAILED publish now (L2-002) — the SQL itself is pinned by
+    # test_rollback_repoints_a_real_sqlite_row against a real database.
+    class _FakeCursor:
+        rowcount = 1
+
     class _FakeConn:
         def cursor(self): return self
-        def execute(self, q, params): db_updates.append(params)
+        def execute(self, q, params):
+            db_updates.append(params)
+            return _FakeCursor()
         def commit(self): pass
         def close(self): pass
 
@@ -184,9 +195,12 @@ def test_publish_reregisters_final_folder_with_repair(monkeypatch, tmp_path):
     Path(staged).parent.mkdir(parents=True, exist_ok=True)
     Path(staged).write_bytes(b"A")
 
+    class _FakeCursor:
+        rowcount = 1
+
     class _FakeConn:
         def cursor(self): return self
-        def execute(self, q, p): pass
+        def execute(self, q, p): return _FakeCursor()
         def commit(self): pass
         def close(self): pass
 
@@ -228,11 +242,12 @@ def _staged_batch(monkeypatch, tmp_path, name="F"):
 def test_publish_hook_reports_success(monkeypatch, tmp_path):
     batch, staged, final = _staged_batch(monkeypatch, tmp_path)
 
-    class _FakeConn:
+    class _FakeCursor:
         rowcount = 1
 
+    class _FakeConn:
         def cursor(self): return self
-        def execute(self, q, params): pass
+        def execute(self, q, params): return _FakeCursor()
         def commit(self): pass
         def close(self): pass
 
@@ -303,11 +318,8 @@ def test_rollback_repoints_a_real_sqlite_row(monkeypatch, tmp_path):
         Path(p).write_bytes(b"AUDIO")
 
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist')")
-    conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Album')")
-    conn.execute(
-        "INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-        "VALUES (1, 1, 1, 'Song', ?)", (one,))
+    track_id = seed_library_track(conn, artist="Artist", album="Album",
+                                  title="Song", file_path=one)
     conn.commit()
     conn.close()
 
@@ -323,7 +335,9 @@ def test_rollback_repoints_a_real_sqlite_row(monkeypatch, tmp_path):
     assert lc._publish_atomic_album("B", batch) is False
 
     conn = db._get_connection()
-    stored = conn.execute("SELECT file_path FROM tracks WHERE id = 1").fetchone()[0]
+    stored = conn.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id = ?",
+        (track_id,)).fetchone()[0]
     conn.close()
 
     assert stored == one, "the library row followed the file back to staging"
@@ -350,27 +364,43 @@ def _real_db_batch(monkeypatch, tmp_path, server):
     return batch, staged, final
 
 
-def test_a_media_server_install_publishes_with_no_track_rows(monkeypatch, tmp_path):
-    """The Lil-Uzi-Chimp bug (Docker + Navidrome): rows with a staged path are
-    only ever written by record_soulsync_library_entry, which is gated on the
-    active server being 'soulsync' — on a Plex/Navidrome/Jellyfin install there
-    is legitimately NO row until the server scans the PUBLISHED files. The
-    rowcount guard read that 0 as 'the library would dangle' and rolled every
-    atomic album back into .soulsync_atomic_staging, forever."""
+def test_a_dangling_row_count_rolls_back_on_a_media_server_too(monkeypatch, tmp_path):
+    """The media-server axis upstream added does NOT apply on this branch.
+
+    Upstream gates the rowcount proof on the active server being 'soulsync',
+    because there the staged row comes from record_soulsync_library_entry and a
+    Plex/Navidrome/Jellyfin install legitimately has none until the server
+    scans the published files (3934742fd — atomic albums stranded in staging).
+    Here the row this repoints is a ``lib2_track_files`` row written by
+    ``require_library_v2_registration``, which the import pipeline runs on
+    EVERY install. So a zero count is real evidence whatever the media server
+    is, and the guard must keep rolling back rather than strand the catalogue
+    on a staging path.
+    """
     batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
-    assert lc._publish_atomic_album("B", batch) is True
-    assert os.path.isfile(final), "the album never left staging"
-    assert not os.path.isfile(staged)
+    assert lc._publish_atomic_album("B", batch) is False
+    assert os.path.isfile(staged), "the failed publish must keep the staged copy"
+    assert not os.path.isfile(final)
 
 
 def test_a_soulsync_install_still_fails_on_a_dangling_row_count(monkeypatch, tmp_path):
-    """...but where the rows ARE ours (active server 'soulsync'), a zero count is
-    still the proof of a dangle the guard was built for, and the publish must
-    keep rolling back rather than strand the library on a staging path."""
+    """The same on a 'soulsync' install: a zero count is the proof of a dangle
+    the guard was built for."""
     batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "soulsync")
     assert lc._publish_atomic_album("B", batch) is False
     assert os.path.isfile(staged), "the failed publish must keep the staged copy"
     assert not os.path.isfile(final)
+
+
+def _registered(db, path):
+    """lib2 port: the import pipeline registers every staged file in
+    ``lib2_track_files`` on every install, so a publish without that row is
+    the dangle the guard above rolls back."""
+    from tests.lib2_seed import track
+    conn = db._get_connection()
+    track(conn, "Artist", "Album", "Song", path=path)
+    conn.commit()
+    conn.close()
 
 
 def _ledger_row(db, path):
@@ -400,6 +430,7 @@ def test_publish_repoints_the_download_ledger(monkeypatch, tmp_path):
     batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
     import database.music_database as mdb_mod
     db = mdb_mod.MusicDatabase()
+    _registered(db, staged)
     _ledger_row(db, staged)
 
     assert lc._publish_atomic_album("B", batch) is True
@@ -447,6 +478,7 @@ def test_a_database_without_the_ledger_still_publishes(monkeypatch, tmp_path):
     batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
     import database.music_database as mdb_mod
     db = mdb_mod.MusicDatabase()
+    _registered(db, staged)
     conn = db._get_connection()
     conn.execute("DROP TABLE track_downloads")
     conn.commit()
@@ -476,6 +508,7 @@ def test_publish_repoints_library_history_too(monkeypatch, tmp_path):
     batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
     import database.music_database as mdb_mod
     db = mdb_mod.MusicDatabase()
+    _registered(db, staged)
     _history_row(db, staged)
 
     assert lc._publish_atomic_album("B", batch) is True
@@ -535,3 +568,42 @@ def test_repair_leaves_a_row_whose_file_is_gone_everywhere(tmp_path):
 
     assert repair_staged_path_records(db) == {}
     assert _ledger_path(db) == staged
+
+
+# --- the staging route carries no batch_id in its context -------------------
+
+def _wrapper_sees_stash(monkeypatch, *, context, batch_id, flag):
+    """Run the verification wrapper with a stub inner pipeline and return the
+    batch id the inner pipeline would have read for the stage redirect."""
+    import types
+    seen = {}
+
+    def _inner(context_key, ctx, file_path, runtime, metadata_runtime=None):
+        seen["stash"] = ctx.get("_atomic_publish_batch_id")
+        ctx["_upgrade_rejected"] = True  # short-circuit the wrapper's tail
+
+    monkeypatch.setattr(pl, "config_manager", _Cfg({"album_downloads.atomic_publish": flag}))
+    monkeypatch.setattr(pl, "post_process_matched_download", _inner)
+    runtime = types.SimpleNamespace(on_download_completed=lambda *a, **kw: None,
+                                    automation_engine=None, web_scan_manager=None,
+                                    repair_worker=None)
+    pl.post_process_matched_download_with_verification(
+        "staging_T", context, "/fake/source.mp3", "T", batch_id, runtime)
+    return seen.get("stash")
+
+
+def test_staging_route_stashes_the_wrapper_batch_id(monkeypatch):
+    # try_staging_match builds its context without batch_id, so the wrapper's
+    # own argument is the only place the batch is named. Tracks claimed from an
+    # album-bundle staging folder used to skip the stage redirect and land in
+    # the live library one by one.
+    assert _wrapper_sees_stash(monkeypatch, context={}, batch_id="B", flag=True) == "B"
+
+
+def test_context_batch_id_still_wins_over_the_argument(monkeypatch):
+    assert _wrapper_sees_stash(monkeypatch, context={"batch_id": "CTX"},
+                               batch_id="ARG", flag=True) == "CTX"
+
+
+def test_flag_off_stashes_nothing_on_the_staging_route(monkeypatch):
+    assert _wrapper_sees_stash(monkeypatch, context={}, batch_id="B", flag=False) is None

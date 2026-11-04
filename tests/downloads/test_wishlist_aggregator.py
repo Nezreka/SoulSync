@@ -190,3 +190,23 @@ def test_primary_playlist_id_preserved():
     # Primary's playlist_name + playlist_id propagate (it's the row the modal opened against).
     assert merged['playlist_id'] == 'wishlist'
     assert merged['playlist_name'] == 'Wishlist (Auto)'
+
+
+def test_rows_keep_the_index_the_modal_drew_them_at():
+    """#1925: an album sibling holds rows 0 and 2, the residual holds row 1.
+    renumbering in sibling order put row 1's status on row 2."""
+    album = _status('downloading',
+                    analysis_results=[{'track_index': 0, 'found': False},
+                                      {'track_index': 2, 'found': False}],
+                    tasks=[{'task_id': 'jenny', 'track_index': 0, 'status': 'completed'},
+                           {'task_id': 'young', 'track_index': 2, 'status': 'completed'}])
+    residual = _status('downloading',
+                       analysis_results=[{'track_index': 1, 'found': False}],
+                       tasks=[{'task_id': 'rebel', 'track_index': 1, 'status': 'completed'}])
+
+    out = merge_wishlist_run_status(album, [residual])
+
+    assert [t['task_id'] for t in out['tasks']] == ['jenny', 'rebel', 'young']
+    assert [t['track_index'] for t in out['tasks']] == [0, 1, 2]
+    assert [r['track_index'] for r in out['analysis_results']] == [0, 1, 2]
+

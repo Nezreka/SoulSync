@@ -1,221 +1,93 @@
-"""Opt-in completion of albums identified by the repair scanner."""
+"""Complete Incomplete Albums: native Album Completeness, never a separate batch.
+
+Two ways in, as in 3.6.1:
+
+- on a schedule (or by hand) it runs the Album Completeness job, which wishlists
+  the missing tracks of what it finds when it runs in automatic mode;
+- fired by Album Completeness finishing (the way every 3.6.1 automation of this
+  kind was built) it applies the job's pending incomplete-album findings, up to
+  ``max_albums``: each one's missing tracks go on the wishlist. 3.6.1 queued
+  them here; for a while this only skipped, so those automations did nothing.
+  It applies findings, it never re-runs the job, so it can't loop on its own
+  completion event.
+"""
 
 from __future__ import annotations
 
+from contextlib import closing
+
+
+def _native_target(target: str, deps):
+    """'lib2:<id>', or a 3.6.1 album id mapped through its recorded legacy id
+    (never read as a coincident native id), or None."""
+    if target.startswith('lib2:') and target[5:].isdigit():
+        return target
+    if not target.isdigit():
+        return None
+    get_db = getattr(deps, 'get_database', None)
+    if not callable(get_db):
+        return None
+    try:
+        with closing(get_db()._get_connection()) as conn:
+            row = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=? LIMIT 1",
+                               (int(target),)).fetchone()
+    except Exception:  # noqa: BLE001 - an unreadable mapping selects nothing
+        return None
+    return f"lib2:{row[0]}" if row else None
+
+
+def _apply_pending_findings(deps, limit, target):
+    bulk_fix = getattr(deps, 'bulk_fix_repair_findings', None)
+    get_db = getattr(deps, 'get_database', None)
+    if not callable(bulk_fix) or not callable(get_db):
+        return {'status': 'skipped', 'reason': 'Library maintenance is unavailable'}
+    sql = ("SELECT id FROM repair_findings WHERE job_id='album_completeness' "
+           "AND finding_type='incomplete_album' AND status='pending'")
+    args = []
+    if target:
+        sql += " AND entity_id=?"
+        args.append(target)
+    sql += " ORDER BY id LIMIT ?"
+    args.append(limit)
+    try:
+        with closing(get_db()._get_connection()) as conn:
+            ids = [int(row[0]) for row in conn.execute(sql, args)]
+    except Exception:  # noqa: BLE001
+        return {'status': 'skipped', 'reason': 'Album Completeness findings are unavailable'}
+    if not ids:
+        return {'status': 'completed', 'applied': 0, 'reason': 'No incomplete albums to complete'}
+    result = bulk_fix(ids) or {}
+    return {'status': 'completed', 'applied': int(result.get('fixed') or 0),
+            'failed': int(result.get('failed') or 0),
+            'reason': 'Missing tracks went on the Wishlist'}
+
 
 def auto_complete_incomplete_albums(config, deps):
-    """Queue only missing tracks from pinned canonical releases."""
+    config = config or {}
     event = config.get('_event_data') or {}
-
-    if (
-        event.get('job_id') != 'album_completeness'
-        or event.get('run_status') != 'completed'
-        or event.get('errors') != 0
-    ):
-        return {
-            'status': 'skipped',
-            'reason': 'Requires a successful Album Completeness scan',
-        }
-
-    if not callable(getattr(deps, 'get_repair_findings', None)):
-        return {
-            'status': 'skipped',
-            'reason': 'Repair findings are unavailable',
-        }
-
-    if not callable(getattr(deps, 'queue_album_completion', None)):
-        return {
-            'status': 'skipped',
-            'reason': 'Album completion queue is unavailable',
-        }
-
-    if not callable(getattr(deps, 'fetch_canonical_release', None)):
-        return {
-            'status': 'skipped',
-            'reason': 'Canonical release verification is unavailable',
-        }
-
-    if not callable(getattr(deps, "get_current_album_pin", None)):
-        return {"status": "skipped", "reason": "Current album pin lookup is unavailable"}
-
     try:
-        max_albums = max(1, min(10, int(config.get('max_albums', 3))))
+        limit = max(1, min(10, int(config.get('max_albums', 3))))
     except (TypeError, ValueError):
-        max_albums = 3
+        limit = 3
+    raw_target = str(config.get('target_album_id') or '').strip()
+    target = _native_target(raw_target, deps) if raw_target else None
+    if raw_target and not target:
+        return {'status': 'skipped', 'reason': 'Target album is not in the library'}
 
-    target_album_id = str(config.get('target_album_id') or '').strip()
+    if event:
+        if (event.get('job_id') != 'album_completeness'
+                or event.get('run_status') != 'completed'
+                or event.get('errors') not in (0, None)):
+            return {'status': 'skipped', 'reason': 'Requires a successful Album Completeness scan'}
+        return _apply_pending_findings(deps, limit, target)
 
-    result = deps.get_repair_findings(
-        job_id='album_completeness',
-        finding_type='incomplete_album',
-        status='pending',
-        page=0,
-        limit=50,
-    )
-
-    if not isinstance(result, dict):
-        return {'status': 'skipped', 'reason': 'Invalid repair findings'}
-
-    # Read all pages before selecting albums, including untargeted runs.
-    # Never process a partial result if pagination fails.
-    if not isinstance(result.get('items'), list):
-        return {'status': 'skipped', 'reason': 'Invalid findings page'}
-
-    findings = list(result['items'])
-    try:
-        total = int(result.get('total'))
-        if total < 0 or len(findings) > total:
-            raise ValueError('Invalid findings count')
-    except (TypeError, ValueError):
-        return {'status': 'skipped', 'reason': 'Invalid findings count'}
-
-    page = 1
-    while len(findings) < total:
-        next_page = deps.get_repair_findings(
-            job_id='album_completeness',
-            finding_type='incomplete_album',
-            status='pending',
-            page=page,
-            limit=50,
-        )
-        if not isinstance(next_page, dict) or not isinstance(next_page.get('items'), list):
-            return {'status': 'skipped', 'reason': 'Could not read all findings'}
-        if not next_page['items'] or len(findings) + len(next_page['items']) > total:
-            return {'status': 'skipped', 'reason': 'Findings pagination ended unexpectedly'}
-        findings.extend(next_page['items'])
-        page += 1
-
-    eligible = []
-    seen_releases = set()
-
-    for finding in findings:
-        if not isinstance(finding, dict):
-            continue
-
-        if (
-            finding.get('finding_type') != 'incomplete_album'
-            or finding.get('status') != 'pending'
-        ):
-            continue
-
-        details = finding.get('details')
-        if not isinstance(details, dict):
-            continue
-
-        if target_album_id and str(details.get('album_id') or '').strip() != target_album_id:
-            continue
-
-        source = str(details.get('canonical_source') or '').strip()
-        album_id = str(details.get('canonical_album_id') or '').strip()
-        missing = details.get('missing_tracks')
-
-        if not source or not album_id:
-            continue
-
-        if not isinstance(missing, list) or not missing:
-            continue
-
-        release_key = (source.casefold(), album_id)
-        if release_key in seen_releases:
-            continue
-
-        seen_releases.add(release_key)
-        eligible.append(finding)
-
-    # max_albums caps what gets queued, not what gets looked at. capping the
-    # candidates let cooling-down or re-pinned albums at the top eat every slot
-    queued = 0
-    cooling_down = getattr(deps, 'album_completion_cooling_down', None)
-    for finding in eligible:
-        if queued >= max_albums:
-            break
-        details = finding['details']
-
-        if callable(cooling_down):
-            try:
-                if cooling_down(
-                    str(details['canonical_source']).strip(),
-                    str(details['canonical_album_id']).strip(),
-                ):
-                    continue
-            except Exception:  # noqa: S110 — the queue's claim is the real gate
-                pass
-
-        try:
-            pin = deps.get_current_album_pin(details.get("album_id"))
-            # Only shared-library albums are supported. Missing ownership
-            # information must fail closed, never default to shared.
-            if not isinstance(pin, dict) or "owner_profile_id" not in pin:
-                continue
-            if pin["owner_profile_id"] is not None:
-                continue
-            if str(pin.get("canonical_source", "")).casefold() != str(details["canonical_source"]).casefold() or str(pin.get("canonical_album_id", "")) != str(details["canonical_album_id"]):
-                continue
-            source = str(details['canonical_source']).strip()
-            release_id = str(details['canonical_album_id']).strip()
-            release = deps.fetch_canonical_release(
-                canonical_source=source,
-                canonical_album_id=release_id,
-                album_title=details.get('album_title') or '',
-                artist=details.get('artist') or '',
-            )
-            album = release['album']
-            if str(album.get('id')) != release_id:
-                continue
-            if str(album.get('source') or '').casefold() != source.casefold():
-                continue
-
-            tracks = release.get('tracks') or []
-            by_id = {}
-            for track in tracks:
-                if not isinstance(track, dict):
-                    continue
-                tid = str(track.get('id') or '').strip()
-                if tid:
-                    by_id.setdefault(tid, []).append(track)
-
-            verified = []
-            used = set()
-            for missing in details['missing_tracks']:
-                if not isinstance(missing, dict):
-                    break
-                if str(missing.get('source') or '').casefold() != source.casefold():
-                    break
-                tid = str(missing.get('source_track_id') or '').strip()
-                matches = by_id.get(tid, [])
-                if len(matches) != 1 or tid in used:
-                    break
-                track = matches[0]
-                if (int(missing.get('track_number') or 0) !=
-                        int(track.get('track_number') or 0)):
-                    break
-                if (int(missing.get('disc_number') or 1) !=
-                        int(track.get('disc_number') or 1)):
-                    break
-                used.add(tid)
-                verified.append(track)
-
-            if len(verified) != len(details['missing_tracks']):
-                continue
-
-            outcome = deps.queue_album_completion(
-                canonical_source=str(details['canonical_source']).strip(),
-                canonical_album_id=str(details['canonical_album_id']).strip(),
-                album_id=details.get('album_id'),
-                album_title=details.get('album_title') or '',
-                artist=details.get('artist') or '',
-                missing_tracks=verified,
-                related_album_ids=details.get('related_album_ids'),
-                canonical_album=album,
-            )
-        except Exception:
-            continue
-
-        if isinstance(outcome, dict) and outcome.get('status') == 'queued':
-            queued += 1
-
-    return {
-        'status': 'completed' if queued else 'skipped',
-        'eligible_albums': len(eligible),
-        'queued_albums': queued,
-    }
+    run = getattr(deps, 'run_repair_job_now', None)
+    if not callable(run):
+        return {'status': 'skipped', 'reason': 'Library maintenance is unavailable'}
+    from core.library_scope import current_library_scope
+    scope = {'library': current_library_scope(), 'max_albums': limit}
+    if target:
+        scope['target_album_id'] = target
+    queued = run('album_completeness', scope=scope, respect_enabled=True)
+    return {'status': 'completed' if queued else 'skipped', 'queued': int(bool(queued)),
+            'reason': 'Missing tracks enter the normal monitoring and Wishlist pipeline'}

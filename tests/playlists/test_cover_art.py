@@ -80,15 +80,22 @@ def _mirror(db, name="Night Drive", image="https://src/a.jpg", tracks=None, sour
 
 
 def _library(db, rows):
-    """rows: (track_id, artist_name, artist_genres, album_genres, mood, year)."""
+    """rows: (track_id, artist_name, artist_genres, album_genres, mood, year).
+
+    lib2 port: track_id is the media server's id, held by the mapping."""
     with db._get_connection() as conn:
         for tid, artist, ar_genres, al_genres, mood, year in rows:
-            conn.execute("INSERT OR IGNORE INTO artists (id, name, genres) VALUES (?, ?, ?)",
-                         (f"ar-{artist}", artist, ar_genres))
-            conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title, genres, year) "
-                         "VALUES (?, ?, ?, ?, ?)", (f"al-{tid}", f"ar-{artist}", "Album", al_genres, year))
-            conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, mood) VALUES (?, ?, ?, ?, ?)",
-                         (tid, f"al-{tid}", f"ar-{artist}", f"Song {tid}", mood))
+            found = conn.execute("SELECT id FROM lib2_artists WHERE name = ?", (artist,)).fetchone()
+            artist_id = found[0] if found else conn.execute(
+                "INSERT INTO lib2_artists (name, name_key, genres) VALUES (?, ?, ?)",
+                (artist, artist.lower(), ar_genres or "[]")).lastrowid
+            album_id = conn.execute(
+                "INSERT INTO lib2_albums (primary_artist_id, title, genres, year) VALUES (?, ?, ?, ?)",
+                (artist_id, "Album", al_genres or "[]", year)).lastrowid
+            track_id = conn.execute("INSERT INTO lib2_tracks (album_id, title, mood) VALUES (?, ?, ?)",
+                                    (album_id, f"Song {tid}", mood)).lastrowid
+            conn.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source, "
+                         "server_id) VALUES ('track', ?, 'jellyfin', ?)", (track_id, tid))
         conn.commit()
 
 
@@ -710,3 +717,10 @@ def test_an_unwritable_cover_folder_on_apply_says_so_too(mdb, tmp_path, monkeypa
     with pytest.raises(ca.CoverArtError) as e:
         ca.apply_preview(mdb, mdb.get_mirrored_playlist(pid), base_dir=str(tmp_path))
     assert "isn't writable" in str(e.value)
+
+
+def test_vibe_takes_the_artists_genres_when_the_album_has_none(mdb):
+    """lib2 keeps an album without genres as '[]', which must read as none."""
+    _library(mdb, [("jf1", "Habn", '["ambient"]', "[]", None, None)])
+    pid = _mirror(mdb, tracks=[_owned_track("A", "Habn", "jf1")])
+    assert ca.collect_vibe(mdb, mdb.get_mirrored_playlist(pid))["genres"] == ["ambient"]

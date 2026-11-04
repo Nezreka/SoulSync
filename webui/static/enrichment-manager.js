@@ -6,7 +6,7 @@
  * pause/resume, a matched/not-found/pending breakdown per entity type, and a
  * searchable/paginated browser of the items that source hasn't matched — each
  * with inline manual-match (reusing /api/library/search-service +
- * manual-match) and retry (clear-match, which re-queues the item).
+ * the Library v2 manual-match) and retry (clear-match, which re-queues the item).
  *
  * Backend: GET /api/enrichment/<id>/{status,breakdown,unmatched}, POST
  * .../{pause,resume}. The unmatched/breakdown routes are generic across all 11
@@ -1403,10 +1403,11 @@ async function _emRunMatchSearch(service, entityType, entityId, query, container
 
 async function _emApplyMatch(entityType, entityId, service, serviceId, overlay) {
     try {
-        const res = await fetch('/api/library/manual-match', {
+        // The unmatched browser lists Library v2 ids.
+        const res = await fetch(`/api/library/v2/${entityType}s/${encodeURIComponent(entityId)}/manual-match`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ entity_type: entityType, entity_id: entityId, service, service_id: serviceId }),
+            body: JSON.stringify({ service, service_id: serviceId }),
         });
         const data = await res.json();
         if (data.success) {

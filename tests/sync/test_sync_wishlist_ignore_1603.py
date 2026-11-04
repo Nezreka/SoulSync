@@ -19,6 +19,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.playlists import pipeline
+from core.async_utils import run_blocking
 from core.wishlist.ignore import REASON_REMOVED
 from core.wishlist.service import WishlistService
 from database.music_database import MusicDatabase
@@ -49,7 +50,7 @@ def _sync(db, monkeypatch, *, user_initiated):
     playlist = SimpleNamespace(name='test', id='auto_mirror_1')
 
     async def inner(pl, _download_missing, _profile_id, _sync_mode):
-        return await asyncio.to_thread(svc._wishlist_unmatched, pl, [_unmatched('t1')])
+        return await run_blocking(svc._wishlist_unmatched, pl, [_unmatched('t1')])
 
     svc._sync_playlist = inner
     return asyncio.run(svc.sync_playlist(playlist, profile_id=1, user_initiated=user_initiated))

@@ -15,7 +15,7 @@ function renderRoute(path: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [path] });
   const router = createAppRouter({ history, queryClient });
-  return render(<AppRouterProvider router={router} queryClient={queryClient} />);
+  return { router, ...render(<AppRouterProvider router={router} queryClient={queryClient} />) };
 }
 
 /**
@@ -91,6 +91,51 @@ describe('the search route', () => {
     expect(screen.getByText('Top trending')).toBeInTheDocument();
   });
 
+  it('a browse tile opens its browse view right here, not a search for its name (#1935)', async () => {
+    server.use(
+      http.get('/api/discover/genre-deep-dive', ({ request }) =>
+        HttpResponse.json({
+          success: true,
+          genre: new URL(request.url).searchParams.get('genre'),
+          artists: [{ name: 'Kavinsky', entity_id: 'a1', source: 'deezer' }],
+          albums: [{ name: 'OutRun', artist_name: 'Kavinsky', entity_id: 'al1', source: 'deezer' }],
+          tracks: [
+            { name: 'Nightcall', artist_name: 'Kavinsky', entity_id: 't1', source: 'deezer' },
+          ],
+          related_genres: [{ genre: 'Synthwave', count: 3 }],
+        }),
+      ),
+    );
+    const { router } = await renderRoute('/search');
+    await settled();
+
+    act(() => screen.getByText('Electronic & dance').click());
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ browse: 'genre:electronic' }),
+    );
+    expect(await screen.findByRole('heading', { name: 'Electronic' })).toBeInTheDocument();
+    expect((await screen.findAllByText('Nightcall')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Synthwave' })).toBeInTheDocument();
+    expect((document.getElementById('enhanced-search-input') as HTMLInputElement).value).toBe('');
+    expect(document.getElementById('enh-explore-section')).toBeNull();
+  });
+
+  it('a browse url opens straight onto its view, and typing takes over', async () => {
+    server.use(
+      http.get('/api/discover/recent-releases', () =>
+        HttpResponse.json({
+          success: true,
+          source: 'deezer',
+          albums: [{ album_name: 'Fresh One', artist_name: 'New Artist', album_deezer_id: '9' }],
+        }),
+      ),
+    );
+    await renderRoute('/search?browse=new');
+    expect((await screen.findAllByText('Fresh One')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'New releases' })).toBeInTheDocument();
+  });
+
   it('renders #enhanced-main-results-area, where download bubbles land', async () => {
     // showSearchDownloadBubbles renders into this id and silently returns
     // without it, so every download started from search would draw nowhere.
@@ -155,6 +200,75 @@ describe('the search route', () => {
     unmount();
     // Cleaned up, so a stale page cannot answer for a live one.
     await waitFor(() => expect(window._searchPageSetQuery).toBeUndefined());
+  });
+});
+
+describe('the sidebar opens a fresh search (#1937)', () => {
+  const input = () => document.getElementById('enhanced-search-input') as HTMLInputElement;
+  function type(value: string) {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set as (
+      v: string,
+    ) => void;
+    act(() => {
+      setter.call(input(), value);
+      input().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+
+  afterEach(() => {
+    window.__soulsyncFreshNav = null;
+  });
+
+  it('coming back without the sidebar keeps the last search', async () => {
+    const first = renderRoute('/search');
+    await settled();
+    type('radiohead');
+    // the controller takes the query after the debounce
+    await act(() => new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 50)));
+    first.unmount();
+
+    renderRoute('/search');
+    await settled();
+    expect(input().value).toBe('radiohead');
+  });
+
+  it('a sidebar click starts empty', async () => {
+    const first = renderRoute('/search');
+    await settled();
+    type('radiohead');
+    // the controller takes the query after the debounce
+    await act(() => new Promise((resolve) => setTimeout(resolve, SEARCH_DEBOUNCE_MS + 50)));
+    first.unmount();
+
+    window.__soulsyncFreshNav = 'search';
+    renderRoute('/search');
+    await settled();
+    expect(input().value).toBe('');
+    expect(window.__soulsyncFreshNav).toBeNull();
+  });
+
+  it('a sidebar click while already here clears it', async () => {
+    renderRoute('/search');
+    await settled();
+    type('radiohead');
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('soulsync:fresh-nav', { detail: { pageId: 'search' } }));
+    });
+    await waitFor(() => expect(input().value).toBe(''));
+  });
+
+  it('another page in the sidebar leaves it alone', async () => {
+    renderRoute('/search');
+    await settled();
+    type('radiohead');
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('soulsync:fresh-nav', { detail: { pageId: 'library' } }),
+      );
+    });
+    expect(input().value).toBe('radiohead');
   });
 });
 
@@ -446,14 +560,20 @@ describe('where a result card points', () => {
     });
   }
 
-  it('links a library artist to /artist-detail/library/<id> and a found one to its source', async () => {
+  it('sends an owned artist to its Library V2 page and a found one to the artist page', async () => {
     // The href IS the feature. The first version guessed `/artist-detail/<id>`,
     // which matches no route and resolves to nothing — clicking an artist did
     // nothing at all, and no test noticed.
+    //
+    // An owned artist links straight to Library V2; `releases`, `releaseView`
+    // and `header` are what make an arrival from search show the full
+    // discography as cards under the rich header (ldp-05) instead of the
+    // in-library defaults. A found one opens upstream's artist page under the
+    // source it came from, which checks the catalogue itself.
     server.use(
       http.post('/api/enhanced-search', () =>
         HttpResponse.json({
-          db_artists: [{ id: 7, name: 'Owned Artist' }],
+          db_artists: [{ id: 7, name: 'Owned Artist', library_v2_id: 7 }],
           spotify_artists: [{ id: 'sp1', name: 'Found Artist', source: 'spotify' }],
         }),
       ),
@@ -470,15 +590,43 @@ describe('where a result card points', () => {
     await screen.findAllByText('Owned Artist', undefined, { timeout: 3000 });
     const faces = document.querySelectorAll('#enh-spotify-artists-section a');
     expect(faces[0].textContent).toContain('Owned Artist');
-    expect(faces[0].getAttribute('href')).toBe('/artist-detail/library/7');
+    expect(faces[0].getAttribute('href')).toBe(
+      '/library?artist=7&releases=all&releaseView=cards&header=rich&immersive=true',
+    );
     expect(screen.getByRole('link', { name: 'Open artist' })).toHaveAttribute(
       'href',
-      '/artist-detail/library/7',
+      '/library?artist=7&releases=all&releaseView=cards&header=rich&immersive=true',
     );
 
     const found = screen.getByText('Found Artist');
     expect(found.closest('a')?.getAttribute('href')).toBe(
-      '/artist-detail/spotify/sp1?name=Found%20Artist',
+      '/library?view=discovery&immersive=true&discover=spotify%3Asp1&discoverName=Found+Artist',
+    );
+  });
+
+  it('falls back to the redirect route when an owned card has no catalogue id', async () => {
+    // _build_db_artists always sets library_v2_id, so this is the shape that
+    // should not happen — but inventing a v2 id would 404 the page, and the
+    // legacy route still resolves it, so the fallback has to stay reachable.
+    server.use(
+      http.post('/api/enhanced-search', () =>
+        HttpResponse.json({ db_artists: [{ id: 42, name: 'Idless Artist' }] }),
+      ),
+      http.post('/api/labels/search', () => HttpResponse.json({ labels: [] })),
+      http.post('/api/enhanced-search/library-check', () => HttpResponse.json({})),
+      http.get('/api/artist/:id/image', () => HttpResponse.json({ success: false })),
+    );
+
+    renderRoute('/search');
+    await settled();
+    type('idless');
+
+    await screen.findAllByText('Idless Artist', undefined, { timeout: 3000 });
+    const faces = document.querySelectorAll('#enh-spotify-artists-section a');
+    expect(faces[0].getAttribute('href')).toBe('/library?view=discovery&immersive=true&artist=42');
+    expect(screen.getByRole('link', { name: 'Open artist' })).toHaveAttribute(
+      'href',
+      '/library?view=discovery&immersive=true&artist=42',
     );
   });
 

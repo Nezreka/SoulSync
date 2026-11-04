@@ -44,7 +44,6 @@ def service():
     svc._check_cache = MagicMock(return_value=None)
     svc._save_to_cache = MagicMock()
     svc._persist_artist_identity = MagicMock()
-    svc._artist_row_mbid = MagicMock(return_value=None)
     return svc
 
 
@@ -180,36 +179,26 @@ def test_write_back_failure_never_costs_the_caller_its_aliases(service):
 # --- the write-back must not put one artist's aliases on another ------------
 
 
-_ARTISTS_DDL = """
-CREATE TABLE artists (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL,
-    musicbrainz_id TEXT,
-    musicbrainz_match_status TEXT,
-    musicbrainz_last_attempted TIMESTAMP,
-    aliases TEXT,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-"""
-
-
 def _artist_row_service(tmp_path, name, mbid=None, aliases=None):
-    """A real `artists` table with one artist, so the write-back's guards run
+    """A real lib2 catalogue with one artist, so the write-back's guards run
     against actual rows rather than mocks."""
     import json
     import sqlite3
 
+    from core.library2.schema import ensure_library_v2_schema
+
     db_path = tmp_path / "aliases.db"
     conn = sqlite3.connect(str(db_path))
-    conn.execute(_ARTISTS_DDL)
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
     conn.execute(
-        "INSERT INTO artists (id, name, musicbrainz_id, aliases) "
+        "INSERT INTO lib2_artists (id, name, musicbrainz_id, aliases) "
         "VALUES (1, ?, ?, ?)",
-        (name, mbid, json.dumps(aliases) if aliases else None),
+        (name, mbid, json.dumps(aliases) if aliases else '[]'),
     )
     # A second artist that already owns the MBID our name search resolves to.
     conn.execute(
-        "INSERT INTO artists (id, name, musicbrainz_id) "
+        "INSERT INTO lib2_artists (id, name, musicbrainz_id) "
         "VALUES (2, 'Someone Else', 'mbid-taken')")
     conn.commit()
     conn.close()
@@ -226,13 +215,14 @@ def _artist_row_service(tmp_path, name, mbid=None, aliases=None):
 
 
 def _stored(db_path, artist_id):
-    """``(musicbrainz_id, aliases)`` with the alias column decoded."""
+    """``(musicbrainz_id, aliases)`` with the alias column decoded — it is
+    stored as escaped JSON, which is the column's existing convention."""
     import json
     import sqlite3
 
     conn = sqlite3.connect(str(db_path))
     mbid, aliases = conn.execute(
-        "SELECT musicbrainz_id, aliases FROM artists WHERE id=?",
+        "SELECT musicbrainz_id, aliases FROM lib2_artists WHERE id=?",
         (artist_id,)).fetchone()
     conn.close()
     return mbid, json.loads(aliases) if aliases else []
@@ -356,10 +346,9 @@ def test_the_row_mbid_answering_none_is_an_answer_not_a_reason_to_guess(tmp_path
 def test_a_cache_row_for_the_same_mbid_spares_the_fetch(tmp_path):
     """One rate-limited MusicBrainz call per scanned file, removed.
 
-    Tier 1b sits in front of the cache, so without this an artist MusicBrainz
-    lists no alias for would cost a blocking request on every single
-    comparison — all of it queued behind the enrichment worker on the same
-    one-per-second lock.
+    Tier 1b sat in front of the cache, so an artist MusicBrainz lists no alias
+    for cost a blocking request on every single comparison — all of it queued
+    behind the enrichment worker on the same one-per-second lock.
     """
     svc, _db_path = _artist_row_service(tmp_path, "Sawano Hiroyuki",
                                         mbid="mbid-sawano")
@@ -408,7 +397,7 @@ def test_no_mbid_on_the_row_still_searches_by_name(tmp_path):
     svc.mb_client.search_artist.assert_called()
 
 
-# --- review round: the five ways the guards above could still be bypassed ---
+# --- review round: the ways the guards above could still be bypassed -------
 
 
 def test_a_client_that_swallows_a_timeout_is_still_a_failure(service):
@@ -481,23 +470,20 @@ def test_a_complete_search_that_rejects_its_candidates_is_still_cached(service):
 # --- the name has to identify ONE artist -----------------------------------
 
 
-# The shipped schema starts artists.id as INTEGER and MIGRATES it to TEXT
-# (`artists_new` in database/music_database.py), because a library keys artists
-# by the media server's id — a GUID on Jellyfin. Rows here use the migrated
-# shape, which is what an installed database actually has.
-_ARTISTS_DDL_TEXT_ID = _ARTISTS_DDL.replace(
-    "id INTEGER PRIMARY KEY", "id TEXT PRIMARY KEY")
-
-
-def _two_rows(tmp_path, rows):
+def _rows_service(tmp_path, rows):
+    """A lib2 catalogue holding exactly the artist rows given."""
     import sqlite3
+
+    from core.library2.schema import ensure_library_v2_schema
 
     db_path = tmp_path / "dupes.db"
     conn = sqlite3.connect(str(db_path))
-    conn.execute(_ARTISTS_DDL_TEXT_ID)
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
     for row in rows:
         conn.execute(
-            "INSERT INTO artists (id, name, musicbrainz_id) VALUES (?, ?, ?)", row)
+            "INSERT INTO lib2_artists (id, name, musicbrainz_id) VALUES (?, ?, ?)",
+            row)
     conn.commit()
     conn.close()
 
@@ -516,57 +502,43 @@ def test_same_name_rows_with_different_mbids_do_not_settle_the_identity(tmp_path
     """Two artists share a display name. Whichever row sorted first would
     otherwise become authoritative for every verification against that name,
     and its aliases could let the wrong artist pass."""
-    svc, _ = _two_rows(tmp_path, [
-        ("1", "Rone", "mbid-rone-fr"),
-        ("2", "Rone", "mbid-rone-us"),
+    svc, _ = _rows_service(tmp_path, [
+        (1, "Rone", "mbid-rone-fr"),
+        (2, "Rone", "mbid-rone-us"),
     ])
 
     assert svc._artist_row_mbid("Rone") is None
 
 
 def test_same_name_rows_agreeing_on_one_mbid_still_settle_it(tmp_path):
-    """The ordinary case: one artist indexed on two media servers."""
-    svc, _ = _two_rows(tmp_path, [
-        ("1", "Sawano Hiroyuki", "mbid-sawano"),
-        ("2", "Sawano Hiroyuki", "mbid-sawano"),
+    """The ordinary case: one artist reached through two providers."""
+    svc, _ = _rows_service(tmp_path, [
+        (1, "Sawano Hiroyuki", "mbid-sawano"),
+        (2, "Sawano Hiroyuki", "mbid-sawano"),
     ])
 
     assert svc._artist_row_mbid("Sawano Hiroyuki") == "mbid-sawano"
 
 
 def test_write_back_refuses_when_one_of_the_rows_names_another_identity(tmp_path):
-    svc, db_path = _two_rows(tmp_path, [
-        ("1", "Rone", None),
-        ("2", "Rone", "mbid-rone-us"),
+    svc, db_path = _rows_service(tmp_path, [
+        (1, "Rone", None),
+        (2, "Rone", "mbid-rone-us"),
     ])
 
     svc._persist_artist_identity("Rone", "mbid-rone-fr", ["Erwan Castex"])
 
-    assert _stored(db_path, "1") == (None, [])
-    assert _stored(db_path, "2")[0] == "mbid-rone-us"
+    assert _stored(db_path, 1) == (None, [])
+    assert _stored(db_path, 2)[0] == "mbid-rone-us"
 
 
 def test_write_back_reaches_every_row_the_name_addresses(tmp_path):
-    svc, db_path = _two_rows(tmp_path, [
-        ("1", "Sawano Hiroyuki", None),
-        ("2", "Sawano Hiroyuki", None),
+    svc, db_path = _rows_service(tmp_path, [
+        (1, "Sawano Hiroyuki", None),
+        (2, "Sawano Hiroyuki", None),
     ])
 
     svc._persist_artist_identity("Sawano Hiroyuki", "mbid-sawano", ["澤野弘之"])
 
-    assert _stored(db_path, "1") == ("mbid-sawano", ["澤野弘之"])
-    assert _stored(db_path, "2") == ("mbid-sawano", ["澤野弘之"])
-
-
-def test_a_non_numeric_artist_id_is_written_not_dropped(tmp_path):
-    """A migrated library keys artists by the media server's id — a GUID on
-    Jellyfin. int() raised there, the caller swallowed it as a best-effort
-    failure, and the deterministic identity tier silently never arrived."""
-    svc, db_path = _two_rows(tmp_path, [
-        ("a1b2c3d4-e5f6-7890-abcd-ef1234567890", "Sawano Hiroyuki", None),
-    ])
-
-    svc._persist_artist_identity("Sawano Hiroyuki", "mbid-sawano", ["澤野弘之"])
-
-    assert _stored(db_path, "a1b2c3d4-e5f6-7890-abcd-ef1234567890") == (
-        "mbid-sawano", ["澤野弘之"])
+    assert _stored(db_path, 1) == ("mbid-sawano", ["澤野弘之"])
+    assert _stored(db_path, 2) == ("mbid-sawano", ["澤野弘之"])

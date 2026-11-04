@@ -46,7 +46,7 @@ def cur():
     c.executescript("""
         CREATE TABLE metadata_cache_entities (source TEXT, entity_type TEXT, entity_id TEXT,
             name TEXT, image_url TEXT, followers INTEGER, raw_json TEXT);
-        CREATE TABLE artists (name TEXT, thumb_url TEXT);
+        CREATE TABLE lib2_artists (name TEXT, image_url TEXT);
     """)
     return c.cursor()
 
@@ -65,7 +65,7 @@ def test_an_artist_takes_its_twins_photo_then_the_library_thumb(cur, monkeypatch
     monkeypatch.setattr('core.metadata.normalize_image_url', lambda u: '/api/image-cache/lib')
     cur.execute("INSERT INTO metadata_cache_entities VALUES "
                 "('deezer','artist','9','Boards Of Canada','https://cdn/boc.jpg',5,'{}')")
-    cur.execute("INSERT INTO artists VALUES ('Orr', '/library/metadata/1/thumb')")
+    cur.execute("INSERT INTO lib2_artists VALUES ('Orr', '/library/metadata/1/thumb')")
     artists = [{'name': 'Boards of Canada', 'image_url': ''},
                {'name': 'Orr', 'image_url': None},
                {'name': 'Nobody', 'image_url': ''}]

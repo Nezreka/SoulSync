@@ -15,7 +15,7 @@ import { applyDraft, previewEffects, realEffects, SAVE_FAILED, type ReadyRow } f
 import { emptyDraft } from './plan';
 
 const WRITES =
-  /\/api\/(settings|profiles|watchlist\/add|setup\/complete|quality-profile|video\/|plex\/select|jellyfin\/select|navidrome\/select|auth\/login)/;
+  /\/api\/(settings|profiles|watchlist\/add|setup\/complete|quality-profile|video\/|plex\/select|jellyfin\/select|navidrome\/select|music-assistant\/select|auth\/login)/;
 
 let calls: { method: string; path: string; body: unknown }[];
 

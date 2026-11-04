@@ -26,7 +26,7 @@ import re
 from core.imports.compilation import is_various_artists_name
 from core.imports.context import is_real_provider_album_id
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, not_locked_sql
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.suspect_album_tag")
@@ -52,6 +52,12 @@ _ARTIST_COMPILATION = re.compile(
 # read unchanged.
 def _is_various_artist(name: str) -> bool:
     return is_various_artists_name(name)
+
+
+def _owned_track_sql(alias: str) -> str:
+    """``alias`` is a track with a live file in the library the run is for."""
+    from core.library2.sql_util import owned_sql
+    return owned_sql('track', alias)
 
 
 @register_job
@@ -117,14 +123,12 @@ class SuspectAlbumTagDetector(RepairJob):
             conn = context.db._get_connection()
             try:
                 cur = conn.cursor()
-                album_not_locked = not_locked_sql(cur, 'albums', 'al')
                 cur.execute(f"""
                     SELECT COUNT(*) FROM (
                         SELECT al.id
-                        FROM albums al
-                        JOIN tracks t ON t.album_id = al.id
-                        WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                          {album_not_locked}
+                        FROM lib2_albums al
+                        JOIN lib2_tracks t ON t.album_id = al.id
+                        WHERE {_owned_track_sql('t')}
                         GROUP BY al.id
                         HAVING COUNT(t.id) = 1
                     )
@@ -151,30 +155,37 @@ class SuspectAlbumTagDetector(RepairJob):
         conn = context.db._get_connection()
         try:
             cur = conn.cursor()
-            album_not_locked = not_locked_sql(cur, 'albums', 'al')
             # Pull every album that has exactly 1 locally-owned track.
-            # Include the DB track_count (from the metadata source) so we
-            # can tell if the full release is actually bigger.
-            # Join both track artist and album artist to get accurate track-level identity.
+            # Include the metadata source's track count so we can tell if the
+            # full release is actually bigger. The track's own credit (its
+            # primary track artist) next to the album artist gives the
+            # track-level identity.
+            from core.library2.sql_util import scoped_primary_file_join
             cur.execute(f"""
                 SELECT
                     al.id          AS album_id,
                     al.title       AS album_title,
-                    al.thumb_url   AS thumb_url,
-                    al.record_type AS album_type,
-                    al.track_count AS full_track_count,
+                    al.image_url   AS thumb_url,
+                    al.album_type  AS album_type,
+                    COALESCE(al.expected_track_count, al.track_count) AS full_track_count,
                     COALESCE(tar.id, aar.id)   AS artist_id,
                     COALESCE(tar.name, aar.name, '') AS artist_name,
                     aar.name       AS album_artist_name,
                     t.id           AS track_id,
                     t.title        AS track_title,
-                    t.file_path    AS file_path
-                FROM albums al
-                JOIN tracks  t  ON t.album_id = al.id
-                LEFT JOIN artists tar ON tar.id = t.artist_id
-                LEFT JOIN artists aar ON aar.id = al.artist_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  {album_not_locked}
+                    f.path         AS file_path
+                FROM lib2_albums al
+                JOIN lib2_tracks t ON t.album_id = al.id
+                JOIN lib2_track_files f ON {scoped_primary_file_join('t', 'f')}
+                LEFT JOIN lib2_artists aar ON aar.id = al.primary_artist_id
+                LEFT JOIN lib2_artists tar ON tar.id = (
+                    SELECT ta.artist_id FROM lib2_track_artists ta
+                     WHERE ta.track_id = t.id
+                     ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                              ta.position, ta.artist_id
+                     LIMIT 1)
+                WHERE {_owned_track_sql('t')}
+                  AND f.path IS NOT NULL AND f.path != ''
                 GROUP BY al.id
                 HAVING COUNT(t.id) = 1
                 ORDER BY al.title
@@ -183,6 +194,9 @@ class SuspectAlbumTagDetector(RepairJob):
             rows = [dict(r) for r in cur.fetchall()]
         finally:
             conn.close()
+        # Library v2 keeps the "tagged it myself" lock on the file: a hand-tagged
+        # release is the user's call, never a suspect.
+        rows = drop_hand_tagged(context, rows, path_key='file_path')
 
         total = len(rows)
         if context.report_progress:
@@ -270,7 +284,7 @@ class SuspectAlbumTagDetector(RepairJob):
                         finding_type='suspect_album_tag',
                         severity='warning',
                         entity_type='track',
-                        entity_id=str(track_id),
+                        entity_id=f'lib2:{track_id}',
                         file_path=row['file_path'] or '',
                         title=title,
                         description=description,
@@ -322,81 +336,34 @@ class SuspectAlbumTagDetector(RepairJob):
             context.report_progress(phase='Checking multi-track albums for poisoned batches…',
                                     log_line='Loading multi-track albums…', log_type='info')
 
+        from core.library2.sql_util import scoped_primary_file_join
+        # R4F2: the per-track truth is the track's own credit string, then its
+        # first credited artist; the album artist alone would make a poisoned
+        # batch look like one artist.
+        eff = ("COALESCE(NULLIF(TRIM(t.track_artist), ''), "
+               "TRIM(COALESCE(tar.name, '')))")
         conn = context.db._get_connection()
         try:
             cur = conn.cursor()
-            album_not_locked = not_locked_sql(cur, 'albums', 'al')
-            # The provider album-id columns are migration-added; on a schema
-            # that predates them the curator-credit exemption below simply
-            # doesn't apply (fail-open toward flagging, the old behavior).
-            # Tolerant of dict-shaped test doubles as well as sqlite3.Row.
-            try:
-                cur.execute("PRAGMA table_info(albums)")
-                _album_cols = set()
-                for _prow in cur.fetchall():
-                    if isinstance(_prow, dict):
-                        _album_cols.add(_prow.get("name"))
-                    else:
-                        _album_cols.add(_prow[1])
-            except Exception:  # noqa: BLE001 — fail open, no exemption
-                _album_cols = set()
-            _has_spotify_id = 'spotify_album_id' in _album_cols
-            _has_itunes_id = 'itunes_album_id' in _album_cols
-            _sp_id_col = 'al.spotify_album_id' if _has_spotify_id else "''"
-            _it_id_col = 'al.itunes_album_id' if _has_itunes_id else "''"
-            # R4F2: bundle-flow imports stamp every track with the BATCH
-            # artist_id, so counting distinct artists via tar.name can never
-            # see a poisoned batch (all rows join to the one batch artist —
-            # the real #1567 DB shape). The per-track truth is
-            # tracks.track_artist — prefer it, falling back to the joined
-            # artist name when empty. On a schema predating the column,
-            # fall back to the joined name (old behavior).
-            try:
-                cur.execute("PRAGMA table_info(tracks)")
-                _track_cols = set()
-                for _trow in cur.fetchall():
-                    if isinstance(_trow, dict):
-                        _track_cols.add(_trow.get("name"))
-                    else:
-                        _track_cols.add(_trow[1])
-            except Exception:  # noqa: BLE001 — fail open, old behavior
-                _track_cols = set()
-            if 'track_artist' in _track_cols:
-                _eff_artist = ("COALESCE(NULLIF(TRIM(t.track_artist), ''), "
-                               "TRIM(COALESCE(tar.name, '')))")
-            else:
-                _eff_artist = "TRIM(COALESCE(tar.name, ''))"
-            # One row per album with >1 locally-owned track. The HAVING
-            # clause does the >= N distinct-artists gate in SQL so huge
-            # libraries only ship candidate albums back to Python.
-            # Duplicate track numbers are counted per (disc_number, track_number):
-            # a genuine multi-disc comp legitimately repeats track numbers
-            # across discs (#1567 M3) — only repeats WITHIN a disc are the
-            # poisoned-batch fingerprint. Rows with NULL disc_number are
-            # excluded from the duplicate count: an unknown disc is not
-            # provably the same disc as another (MINOR 1, #1567 round 3).
+            # One row per album with >1 owned track; the HAVING clause does the
+            # >= N distinct-artists gate in SQL. Duplicate numbers count per
+            # (disc, track), and a NULL disc never counts as a duplicate
+            # (#1567 M3 / round 3).
             cur.execute(f"""
                 SELECT
                     al.id          AS album_id,
-                    al.artist_id   AS artist_id,
+                    al.primary_artist_id AS artist_id,
                     al.title       AS album_title,
-                    al.record_type AS album_type,
-                    al.track_count AS full_track_count,
-                    {_sp_id_col}    AS spotify_album_id,
-                    {_it_id_col}    AS itunes_album_id,
+                    al.album_type  AS album_type,
+                    COALESCE(al.expected_track_count, al.track_count) AS full_track_count,
+                    al.spotify_id  AS spotify_album_id,
+                    json_extract(al.external_ids, '$.itunes') AS itunes_album_id,
                     COALESCE(aar.name, '') AS album_artist_name,
+                    MIN(f.path)    AS rep_path,
                     COUNT(t.id)    AS local_track_count,
-                    COUNT(DISTINCT CASE WHEN {_eff_artist} != ''
-                                    THEN LOWER({_eff_artist}) END) AS distinct_artists,
-                    GROUP_CONCAT(DISTINCT {_eff_artist}) AS artist_names,
+                    COUNT(DISTINCT CASE WHEN {eff} != '' THEN LOWER({eff}) END) AS distinct_artists,
+                    GROUP_CONCAT(DISTINCT {eff}) AS artist_names,
                     SUM(CASE WHEN t.track_number IS NOT NULL THEN 1 ELSE 0 END) AS numbered_tracks,
-                    -- MINOR 1 (#1567 round 3): NULL disc numbers cannot prove
-                    -- two tracks share a disc — a legit multi-disc rip that
-                    -- never set disc_number would collapse all its discs
-                    -- into one (COALESCE(t.disc_number, 1)) and false-positive
-                    -- the duplicate fingerprint. Only rows with an explicit
-                    -- disc participate in the duplicate count; NULL-disc rows
-                    -- simply don't count as duplicates.
                     COUNT(DISTINCT CASE WHEN t.track_number IS NOT NULL
                                          AND t.disc_number IS NOT NULL
                                     THEN t.disc_number || ':' || t.track_number
@@ -404,25 +371,31 @@ class SuspectAlbumTagDetector(RepairJob):
                     SUM(CASE WHEN t.track_number IS NOT NULL
                               AND t.disc_number IS NOT NULL
                              THEN 1 ELSE 0 END) AS numbered_for_dup_check,
-                    SUM(CASE WHEN {_eff_artist} != ''
-                              AND LOWER({_eff_artist}) = LOWER(TRIM(COALESCE(aar.name, '')))
+                    SUM(CASE WHEN {eff} != ''
+                              AND LOWER({eff}) = LOWER(TRIM(COALESCE(aar.name, '')))
                              THEN 1 ELSE 0 END) AS album_artist_track_hits
-                FROM albums al
-                JOIN tracks  t  ON t.album_id = al.id
-                LEFT JOIN artists tar ON tar.id = t.artist_id
-                LEFT JOIN artists aar ON aar.id = al.artist_id
-                WHERE t.file_path IS NOT NULL AND t.file_path != ''
-                  {album_not_locked}
+                FROM lib2_albums al
+                JOIN lib2_tracks t ON t.album_id = al.id
+                JOIN lib2_track_files f ON {scoped_primary_file_join('t', 'f')}
+                LEFT JOIN lib2_artists aar ON aar.id = al.primary_artist_id
+                LEFT JOIN lib2_artists tar ON tar.id = (
+                    SELECT ta.artist_id FROM lib2_track_artists ta
+                     WHERE ta.track_id = t.id
+                     ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                              ta.position, ta.artist_id
+                     LIMIT 1)
+                WHERE {_owned_track_sql('t')}
+                  AND f.path IS NOT NULL AND f.path != ''
                 GROUP BY al.id
                 HAVING COUNT(t.id) > 1
-                   AND COUNT(DISTINCT CASE WHEN {_eff_artist} != ''
-                                       THEN LOWER({_eff_artist}) END) >= ?
+                   AND COUNT(DISTINCT CASE WHEN {eff} != '' THEN LOWER({eff}) END) >= ?
                 ORDER BY al.title
                 LIMIT 2000
             """, (min_artists,))
             rows = [dict(r) for r in cur.fetchall()]
         finally:
             conn.close()
+        rows = drop_hand_tagged(context, rows, path_key='rep_path')
 
         total = len(rows)
         if total >= 2000:
@@ -529,6 +502,7 @@ class SuspectAlbumTagDetector(RepairJob):
             )
             details = {
                 'album_id': album_id,
+                'lib2_album_id': album_id,
                 # the fix is per track, so the finding opens the album in
                 # the library. that needs the artist page it lives on
                 'artist_id': row.get('artist_id'),
@@ -550,7 +524,7 @@ class SuspectAlbumTagDetector(RepairJob):
                         finding_type='suspect_album_tag',
                         severity='warning',
                         entity_type='album',
-                        entity_id=str(album_id),
+                        entity_id=f'lib2:{album_id}',
                         file_path=None,
                         title=title,
                         description=description,

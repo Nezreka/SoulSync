@@ -91,15 +91,19 @@ def db(tmp_path):
     artists = [(1, 'Daft Punk', 'sp1'), (2, 'Justice', 'sp2'),
                (3, 'QOTSA', 'sp3'), (4, 'Foo Fighters', 'sp4')]
     for aid, name, sp in artists:
-        cur.execute("INSERT INTO artists (id, name, spotify_artist_id) VALUES (?,?,?)",
-                    (aid, name, sp))
-        cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (?,?,?)",
-                    (aid * 10, f'{name} Album', aid))
+        cur.execute(
+            "INSERT INTO lib2_artists (id, name, name_key, spotify_id) VALUES (?,?,?,?)",
+            (aid, name, name.lower(), sp))
+        cur.execute(
+            "INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (?,?,?)",
+            (aid * 10, f'{name} Album', aid))
         for t in range(8):
             cur.execute(
-                "INSERT INTO tracks (title, artist_id, album_id, file_path, play_count) "
-                "VALUES (?,?,?,?,?)",
-                (f'{name} Song {t}', aid, aid * 10, f'/m/{aid}-{t}.flac', 10 - t))
+                "INSERT INTO lib2_tracks (title, album_id, play_count) VALUES (?,?,?)",
+                (f'{name} Song {t}', aid * 10, 10 - t))
+            cur.execute(
+                "INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
+                "VALUES (?,?,1,'active')", (cur.lastrowid, f'/m/{aid}-{t}.flac'))
     for _aid, name, _sp in artists:
         for i in range(20):
             cur.execute(
@@ -166,7 +170,9 @@ def test_empty_listening_history_yields_no_mixes(tmp_path):
 def test_owned_durations_remain_milliseconds(db):
     from core.personalized.daily_mixes import _owned_tracks_for
     conn = db._get_connection()
-    conn.execute("UPDATE tracks SET duration = 367725 WHERE artist_id = 1")
+    # the fixture's catalogue is lib2; a track belongs to its release's artist
+    conn.execute("UPDATE lib2_tracks SET duration = 367725 WHERE album_id ="
+                 " (SELECT id FROM lib2_albums WHERE primary_artist_id = 1)")
     conn.commit()
     conn.close()
     tracks = _owned_tracks_for(db, ['Daft Punk'])['daft punk']
@@ -464,6 +470,16 @@ def test_internal_fields_never_reach_the_payload(db):
 
 # ── end to end on richer libraries ────────────────────────────────────────
 
+def _owned(cur, album_id, title, play_count=0, duration=None, path=None):
+    """lib2 port: a catalogue track with its file -- what an owned song is."""
+    cur.execute("INSERT INTO lib2_tracks (title, album_id, play_count, duration) VALUES (?,?,?,?)",
+                (title, album_id, play_count, duration))
+    track_id = cur.lastrowid
+    cur.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
+                "VALUES (?,?,1,'active')", (track_id, path or f'/m/{track_id}.flac'))
+    return track_id
+
+
 def _library(tmp_path, name, artists, plays_per_artist=20, similar=(), pool=()):
     """artists: [(id, name, sp, n_tracks, genres)]"""
     import json as _json
@@ -471,17 +487,12 @@ def _library(tmp_path, name, artists, plays_per_artist=20, similar=(), pool=()):
     conn = d._get_connection()
     cur = conn.cursor()
     for aid, aname, sp, n, genres in artists:
-        cur.execute("INSERT INTO artists (id, name, spotify_artist_id, genres) VALUES (?,?,?,?)",
-                    (aid, aname, sp, _json.dumps(list(genres)) if genres else None))
-        cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (?,?,?)",
+        cur.execute("INSERT INTO lib2_artists (id, name, name_key, spotify_id, genres) VALUES (?,?,?,?,?)",
+                    (aid, aname, aname.lower(), sp, _json.dumps(list(genres or []))))
+        cur.execute("INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (?,?,?)",
                     (aid * 10, f'{aname} Album', aid))
         for t in range(n):
-            # tracks.id is the media server's id (text), never null on a real install
-            cur.execute(
-                "INSERT INTO tracks (id, title, artist_id, album_id, file_path, play_count, duration) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (str(aid * 1000 + t), f'{aname} Song {t}', aid, aid * 10, f'/m/{aid}-{t}.flac',
-                 n - t, 200_000))
+            _owned(cur, aid * 10, f'{aname} Song {t}', n - t, 200_000, f'/m/{aid}-{t}.flac')
     for _aid, aname, _sp, _n, _g in artists:
         for i in range(plays_per_artist if not isinstance(plays_per_artist, dict)
                        else plays_per_artist.get(aname, 0)):
@@ -507,10 +518,9 @@ def _library(tmp_path, name, artists, plays_per_artist=20, similar=(), pool=()):
 
 def test_one_copy_of_each_song(db):
     conn = db._get_connection()
-    conn.execute("INSERT INTO albums (id, title, artist_id) VALUES (99, 'Deluxe', 1)")
+    conn.execute("INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (99, 'Deluxe', 1)")
     for title in ('Daft Punk Song 0', 'Daft Punk Song 0 (Remastered 2011)'):
-        conn.execute("INSERT INTO tracks (title, artist_id, album_id, file_path, play_count) "
-                     "VALUES (?,1,99,'/m/dup.flac',50)", (title,))
+        _owned(conn.cursor(), 99, title, 50, path='/m/dup.flac')
     conn.commit()
     conn.close()
     from core.personalized.daily_mixes import track_key
@@ -521,8 +531,7 @@ def test_one_copy_of_each_song(db):
 
 def test_christmas_songs_stay_out_of_a_july_mix(db):
     conn = db._get_connection()
-    conn.execute("INSERT INTO tracks (title, artist_id, album_id, file_path, play_count) "
-                 "VALUES ('Christmas Robot', 1, 10, '/m/x.flac', 999)")
+    _owned(conn.cursor(), 10, 'Christmas Robot', 999, path='/m/x.flac')
     conn.commit()
     conn.close()
     for mix in generate_daily_mixes(db, today=date(2026, 7, 1))['mixes']:
@@ -577,9 +586,9 @@ def test_a_profiles_own_plays_pick_its_favourites(tmp_path):
     from core.personalized.daily_mixes import _owned_tracks_for
     d = _library(tmp_path, 'pp.db', [(1, 'Daft Punk', 'dp', 3, [])], plays_per_artist=0)
     conn = d._get_connection()
-    tid = conn.execute("SELECT id FROM tracks WHERE title = 'Daft Punk Song 2'").fetchone()[0]
+    tid = conn.execute("SELECT id FROM lib2_tracks WHERE title = 'Daft Punk Song 2'").fetchone()[0]
     for i in range(4):
-        conn.execute("INSERT INTO listening_history (title, artist, played_at, db_track_id) "
+        conn.execute("INSERT INTO listening_history (title, artist, played_at, lib2_track_id) "
                      "VALUES ('Daft Punk Song 2', 'Daft Punk', datetime('now', ?), ?)",
                      (f'-{i} hours', tid))
     conn.commit()

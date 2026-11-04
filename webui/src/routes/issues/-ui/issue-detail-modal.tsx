@@ -251,11 +251,13 @@ export function IssueDetailModal({
         return;
       }
       case 'redownload':
+        // the redownload dialog right here, as in 3.6.1 (its routes take
+        // lib2 ids); without the track in hand, the artist page
         if (entity === 'track' && presence.track && presence.album) {
           setTool({ kind: 'redownload', track: presence.track, album: presence.album });
           return;
         }
-        openArtistPage('Open the track there and pick Redownload from its menu');
+        openArtistPage('Open the track there and run Interactive Search for a better copy');
         return;
       case 'wishlist_missing':
         if (entity !== 'artist' && albumWorkflowInput.albumName) {
@@ -287,9 +289,10 @@ export function IssueDetailModal({
         return;
       }
       case 'find_duplicates':
-        // the duplicate detector's findings, searched for this item
+        // the Duplicate Detector's findings, searched for this item (the
+        // native job; the old duplicate_detector id maps onto it)
         requestFindingsFocus({
-          jobId: 'duplicate_detector',
+          jobId: 'native_duplicate_detector',
           query: getItemName(issue, snapshot).replace(/^(Track|Album|Artist) #.*/, ''),
         });
         notify('Showing the Duplicate Detector findings for this item', 'info');

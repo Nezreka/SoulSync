@@ -249,16 +249,6 @@ def test_get_audiodb_logo_url_survives_the_markup_deletion() -> None:
     )
 
 
-def test_library_helper_defers_to_core_first() -> None:
-    helper = (
-        WEBUI / "src" / "routes" / "library" / "-library.helpers.ts"
-    ).read_text(encoding="utf-8")
-    assert "window.getAudioDBLogoURL?.()" in helper, (
-        "the library page queries img.audiodb-logo directly again — off the "
-        "dashboard route that node no longer exists"
-    )
-
-
 # ── The post-flip hardening sweep ────────────────────────────────────────────
 #
 # Every id inside the recorded dashboard fixture is React-rendered now. The

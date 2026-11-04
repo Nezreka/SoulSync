@@ -8,6 +8,10 @@ track that was fine.
 The sweep here retires on positive evidence only: the row is gone from
 `tracks`, or the file now resolves. It never retires because this process
 cannot see the library.
+
+Library v2 port: the subject is `lib2:<track id>`, the dead file a
+`lib2_track_files` row in `missing_confirmed`. A file row a rescan found again,
+a delete retired or a repoint moved is the same positive evidence.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import threading
 
 import pytest
 
+from core.library2.schema import ensure_library_v2_schema
 from core.repair_worker import RepairWorker
 
 
@@ -52,7 +57,9 @@ def worker(tmp_path):
             last_error TEXT
         )
     """)
-    conn.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, file_path TEXT, title TEXT)")
+    ensure_library_v2_schema(conn)
+    conn.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Artist')")
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Album')")
     conn.commit()
     w = RepairWorker.__new__(RepairWorker)
     w.db = _Db(conn)
@@ -63,10 +70,18 @@ def worker(tmp_path):
     return w
 
 
-def _track(worker, track_id, path):
-    worker.db._conn.execute("INSERT INTO tracks (id, file_path) VALUES (?, ?)",
-                            (track_id, str(path)))
-    worker.db._conn.commit()
+def _track(worker, track_id, path, state="missing_confirmed"):
+    conn = worker.db._conn
+    conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (?, 1, 'x')", (track_id,))
+    conn.execute("INSERT INTO lib2_track_files (track_id, path, file_state, is_primary)"
+                 " VALUES (?, ?, ?, 1)", (track_id, str(path), state))
+    conn.commit()
+
+
+def _live_files(worker, track_id):
+    return worker.db._conn.execute(
+        "SELECT COUNT(*) FROM lib2_track_files WHERE track_id = ?"
+        " AND file_state NOT IN ('deleted')", (track_id,)).fetchone()[0]
 
 
 def _finding(worker, track_id, path, *, job_id="dead_file_cleaner",
@@ -74,7 +89,7 @@ def _finding(worker, track_id, path, *, job_id="dead_file_cleaner",
     cur = worker.db._conn.execute(
         "INSERT INTO repair_findings (job_id, finding_type, entity_type, entity_id, "
         "file_path, title) VALUES (?,?,'track',?,?,'x')",
-        (job_id, finding_type, track_id, str(path)))
+        (job_id, finding_type, f"lib2:{track_id}", str(path)))
     worker.db._conn.commit()
     return cur.lastrowid
 
@@ -85,7 +100,7 @@ def _row(worker, fid):
 
 
 def test_a_finding_whose_track_row_is_gone_is_retired(worker, tmp_path):
-    fid = _finding(worker, "t1", tmp_path / "Artist" / "gone.flac")   # no tracks row
+    fid = _finding(worker, 1, tmp_path / "Artist" / "gone.flac")   # no tracks row
 
     assert worker.retire_resolved_dead_file_findings() == 1
     assert _row(worker, fid) == ("resolved", "obsolete")
@@ -96,8 +111,26 @@ def test_a_finding_whose_file_is_back_is_retired(worker, tmp_path):
     album.mkdir(parents=True)
     path = album / "01 - back.flac"
     path.write_bytes(b"audio")
-    _track(worker, "t1", path)
-    fid = _finding(worker, "t1", path)
+    _track(worker, 1, path)
+    fid = _finding(worker, 1, path)
+
+    assert worker.retire_resolved_dead_file_findings() == 1
+    assert _row(worker, fid) == ("resolved", "obsolete")
+
+
+@pytest.mark.parametrize("state", ["active", "deleted"])
+def test_a_file_row_a_rescan_found_or_a_delete_retired_is_retired(worker, tmp_path, state):
+    path = tmp_path / "Artist" / "Album" / "03.flac"      # not reachable from here
+    _track(worker, 1, path, state=state)
+    fid = _finding(worker, 1, path)
+
+    assert worker.retire_resolved_dead_file_findings() == 1
+    assert _row(worker, fid) == ("resolved", "obsolete")
+
+
+def test_a_repointed_file_retires_the_finding_for_the_old_path(worker, tmp_path):
+    _track(worker, 1, tmp_path / "Artist" / "Album" / "new.flac")
+    fid = _finding(worker, 1, tmp_path / "Artist" / "Album" / "old.flac")
 
     assert worker.retire_resolved_dead_file_findings() == 1
     assert _row(worker, fid) == ("resolved", "obsolete")
@@ -107,8 +140,8 @@ def test_a_genuinely_dead_file_stays_pending(worker, tmp_path):
     album = tmp_path / "Artist" / "Album"
     album.mkdir(parents=True)
     path = album / "02 - gone.flac"                  # row is there, file is not
-    _track(worker, "t1", path)
-    fid = _finding(worker, "t1", path)
+    _track(worker, 1, path)
+    fid = _finding(worker, 1, path)
 
     assert worker.retire_resolved_dead_file_findings() == 0
     assert _row(worker, fid) == ("pending", None)
@@ -117,8 +150,8 @@ def test_a_genuinely_dead_file_stays_pending(worker, tmp_path):
 def test_an_unreachable_library_retires_nothing(worker, tmp_path):
     # the folder is not there either: this process may simply not see the library
     path = tmp_path / "not-mounted" / "Artist" / "Album" / "01.flac"
-    _track(worker, "t1", path)
-    fid = _finding(worker, "t1", path)
+    _track(worker, 1, path)
+    fid = _finding(worker, 1, path)
 
     assert worker.retire_resolved_dead_file_findings() == 0
     assert _row(worker, fid) == ("pending", None)
@@ -126,9 +159,9 @@ def test_an_unreachable_library_retires_nothing(worker, tmp_path):
 
 def test_other_jobs_and_types_are_left_alone(worker, tmp_path):
     gone = tmp_path / "Artist" / "gone.flac"
-    other_job = _finding(worker, "t1", gone, job_id="audio_corruption_detector",
+    other_job = _finding(worker, 1, gone, job_id="audio_corruption_detector",
                          finding_type="corrupt_audio")
-    other_type = _finding(worker, "t2", gone, finding_type="orphan_file")
+    other_type = _finding(worker, 2, gone, finding_type="orphan_file")
 
     assert worker.retire_resolved_dead_file_findings() == 0
     assert _row(worker, other_job) == ("pending", None)
@@ -139,26 +172,30 @@ def test_fix_refuses_a_finding_whose_file_exists(worker, tmp_path):
     path = tmp_path / "Artist" / "Album" / "01 - here.flac"
     path.parent.mkdir(parents=True)
     path.write_bytes(b"audio")
-    _track(worker, "t1", path)
+    _track(worker, 1, path)
 
     for action in ("remove", "redownload"):
         result = worker._fix_dead_file(
-            "track", "t1", str(path), {"_fix_action": action, "title": "x"})
+            "track", "lib2:1", str(path), {"_fix_action": action, "title": "x"})
         assert result["success"] is False
         assert "out of date" in result["error"]
-    assert worker.db._conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0] == 1
+    assert _live_files(worker, 1) == 1
 
 
 def test_fix_remove_still_deletes_the_row_of_a_dead_file(worker, tmp_path):
     path = tmp_path / "Artist" / "Album" / "02 - gone.flac"
     path.parent.mkdir(parents=True)
-    _track(worker, "t1", path)
+    _track(worker, 1, path)
 
     result = worker._fix_dead_file(
-        "track", "t1", str(path), {"_fix_action": "remove", "title": "x"})
+        "track", "lib2:1", str(path), {"_fix_action": "remove", "title": "x"})
 
+    # the native fix hands the file delete and the track decision to the
+    # shared maintenance sync, which retires the file row
     assert result["success"] is True
-    assert worker.db._conn.execute("SELECT COUNT(*) FROM tracks").fetchone()[0] == 0
+    assert result["action"] == "removed"
+    assert result["library_v2_file_deleted"] is True
+    assert result["repair_intent"] == "remove"
 
 
 # --- through the real _run_job seam ------------------------------------------
@@ -188,12 +225,12 @@ def _run_cleaner(tmp_path, result):
         conn.execute(
             "INSERT INTO repair_findings (job_id, finding_type, severity, status, entity_type, "
             "entity_id, file_path, title) VALUES ('dead_file_cleaner', 'dead_file', 'warning', "
-            "'pending', 'track', 'gone-row', '/music/gone.mp3', 'Missing file: Gone')")
+            "'pending', 'track', 'lib2:999', '/music/gone.mp3', 'Missing file: Gone')")
         conn.commit()
     w._run_job('dead_file_cleaner', forced=True)
     with w.db._get_connection() as conn:
         return tuple(conn.execute(
-            "SELECT status, user_action FROM repair_findings WHERE entity_id = 'gone-row'").fetchone())
+            "SELECT status, user_action FROM repair_findings WHERE entity_id = 'lib2:999'").fetchone())
 
 
 def test_a_completed_cleaner_run_retires_the_stale_finding(tmp_path):

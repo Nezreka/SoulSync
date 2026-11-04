@@ -39,6 +39,7 @@ export interface AdlDownload {
   progress: number;
   error: string | null;
   verification_status: string | null;
+  metadata_status?: string | null;
   batch_id: string;
   batch_name: string;
   batch_source: string;

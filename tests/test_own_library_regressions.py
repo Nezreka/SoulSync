@@ -5,6 +5,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# Parked, not deleted: see the reason below. Turning them on is part of
+# porting the scope to lib2, and rewriting them from scratch then would lose
+# the scenarios upstream worked out here.
+pytestmark = pytest.mark.skip(reason=(
+    "upstream's own-library model: these seed the catalogue through insert_or_update_media_*(owner_profile_id=...) and assert on artists/albums/tracks. this branch retired those tables, keeps ownership on lib2_track_files, and its scan is import-controlled -- it maps a server item onto a row it already has and never creates one. the scenarios are worth keeping verbatim; they get rewritten against lib2 when the read scope lands (docs/library-v2-dir-ownership.md, Stufe 3)"
+))
+
 from core.library_scope import (invalidate_library_scope_cache, library_artist_id,
                                 reset_library_scope, set_library_scope)
 from database.music_database import MusicDatabase

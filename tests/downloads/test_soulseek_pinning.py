@@ -23,12 +23,21 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from core.soulseek_client import SoulseekClient
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
+
+
+def _instant_sleep_asyncio():
+    # Only the client's poll delays are replaced. Patching asyncio.sleep on
+    # the process module also stalls/spins the shared background-loop pump.
+    module = SimpleNamespace(**vars(asyncio))
+    module.sleep = AsyncMock()
+    return module
 
 
 def _run_async(coro):
@@ -1216,7 +1225,7 @@ def test_search_does_not_skip_late_inserted_responses():
     with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
          patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
          patch.object(client, '_make_request', side_effect=fake_request), \
-         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+         patch('core.soulseek_client.asyncio', _instant_sleep_asyncio()):
         tracks, albums = _run_async(client.search('marshall james vortex', timeout=2))
 
     assert albums == []
@@ -1246,7 +1255,7 @@ def test_search_keeps_more_than_thirty_peers_and_merges_late_files():
     with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
          patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
          patch.object(client, '_make_request', side_effect=fake_request), \
-         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+         patch('core.soulseek_client.asyncio', _instant_sleep_asyncio()):
         tracks, albums = _run_async(client.search('Artist Album', timeout=12))
 
     assert len(albums) == 1
@@ -1281,7 +1290,7 @@ def test_search_uses_terminal_state_after_initial_collection_grace(terminal_payl
     with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
          patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
          patch.object(client, '_make_request', side_effect=fake_request), \
-         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+         patch('core.soulseek_client.asyncio', _instant_sleep_asyncio()):
         tracks, _ = _run_async(client.search('Artist Song', timeout=30))
 
     assert len(tracks) == 1
@@ -1307,7 +1316,7 @@ def test_search_with_no_responses_still_stops_at_terminal_state():
     with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
          patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
          patch.object(client, '_make_request', side_effect=fake_request), \
-         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+         patch('core.soulseek_client.asyncio', _instant_sleep_asyncio()):
         tracks, _ = _run_async(client.search('Nothing Here', timeout=30))
 
     assert tracks == []
@@ -1334,7 +1343,7 @@ def test_search_keeps_polling_an_active_search_through_a_quiet_period():
     with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
          patch.object(client, '_wait_for_rate_limit', AsyncMock()), \
          patch.object(client, '_make_request', side_effect=fake_request), \
-         patch('core.soulseek_client.asyncio.sleep', AsyncMock()):
+         patch('core.soulseek_client.asyncio', _instant_sleep_asyncio()):
         tracks, _ = _run_async(client.search('Artist', timeout=30))
 
     assert counts['responses'] >= 25

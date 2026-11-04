@@ -236,6 +236,7 @@ describe('artist info modal — footer', () => {
     render(
       <ArtistInfoModal {...props({ pool: pool({ active_source: '' }), buildDetailPath: build })} />,
     );
-    expect(build).toHaveBeenCalledWith('sp1', null);
+    // the name goes along, so the library can find an artist without this id
+    expect(build).toHaveBeenCalledWith('sp1', null, 'Aphex Twin');
   });
 });

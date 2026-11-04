@@ -17,6 +17,7 @@ thorough audit:
   without the stem column.
 """
 
+from tests.lib2_seed import file_track
 import json
 import os
 import time
@@ -74,11 +75,9 @@ def client(tmp_path, monkeypatch):
     db = mdb.get_database()
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (9001, 'Gap Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (9001, 9001, 'Gap Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (9001, 9001, 9001, 'Gap Track', ?)",
-            (str(wav),),
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (9001, 'Gap Artist')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (9001, 9001, 'Gap Album')")
+        file_track(conn, 9001, 9001, 'Gap Track', str(wav),
         )
         conn.commit()
     finally:
@@ -205,10 +204,7 @@ def test_chop_over_600s_is_400(client, tmp_path):
     _click_track(long_wav, seconds=605.0)
     conn = db._get_connection()
     try:
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (9003, 9001, 9001, 'Very Long', ?)",
-            (long_wav,),
-        )
+        file_track(conn, 9003, 9001, 'Very Long', long_wav)
         conn.commit()
     finally:
         conn.close()
@@ -300,6 +296,35 @@ def test_process_one_unknown_track_raises():
         worker._process_one(900102)
 
 
+def test_track_file_path_respects_active_library_scope(db_only, monkeypatch, tmp_path):
+    """Sample Studio must resolve the file owned by the selected profile;
+    primary-file ordering alone can return another library's copy."""
+    db = db_only
+    conn = db._get_connection()
+    try:
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (9007, 'Scoped Artist')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (9007, 9007, 'Scoped Album')")
+        conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (9007, 9007, 'Scoped Track')")
+        conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path, is_primary, owner_profile_id) VALUES (9007, ?, 1, 1)",
+            (str(tmp_path / "shared.flac"),),
+        )
+        conn.execute(
+            "INSERT INTO lib2_track_files (track_id, path, is_primary, owner_profile_id) VALUES (9007, ?, 1, 2)",
+            (str(tmp_path / "own.flac"),),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(
+        "core.library2.sql_util.owner_clause",
+        lambda scope=None, column="owned_f.owner_profile_id":
+            " AND +f.owner_profile_id = 2" if column == "f.owner_profile_id" else "",
+    )
+    assert store.get_track_file_path(9007) == str(tmp_path / "own.flac")
+
+
 def test_process_one_skips_current_analysis(db_only, monkeypatch):
     store.save_analysis(
         900103,
@@ -355,11 +380,9 @@ def test_stems_enqueue_already_complete_returns_done(db_only, tmp_path):
     db = db_only
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (9002, 'Stem Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (9002, 9002, 'Stem Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (9002, 9002, 9002, 'Stem Track', ?)",
-            (str(wav),),
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (9002, 'Stem Artist')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (9002, 9002, 'Stem Album')")
+        file_track(conn, 9002, 9002, 'Stem Track', str(wav),
         )
         conn.commit()
     finally:

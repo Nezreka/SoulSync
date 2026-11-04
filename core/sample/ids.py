@@ -1,10 +1,9 @@
-"""Library track ids as Sample Studio keys them.
+"""Safe string keys for Sample Studio's native catalogue track IDs.
 
-tracks.id is TEXT: plex ids are digits, jellyfin ids are 32-hex guids and
-navidrome ids are alphanumeric. the studio cast every id with int(), so on a
-jellyfin or navidrome library every analysis, waveform and chop request was
-a 400 and the page said "check your connection". ids are text everywhere now.
-they also name cache files and stem folders, so only plain characters pass.
+Library-v2 uses native row IDs and stores Plex/Jellyfin/Navidrome identifiers
+in media mappings. HTTP/store/cache keys use a consistent string form. Plain
+characters also keep cache paths safe; legacy derived-artifact keys remain
+valid while native ownership checks decide which library files are usable.
 """
 
 from __future__ import annotations

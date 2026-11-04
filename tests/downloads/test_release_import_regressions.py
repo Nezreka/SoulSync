@@ -22,6 +22,7 @@ from core.settings import config_manager
 from core.tag_writer import read_file_tags, write_tags_to_file
 import core.wishlist.service as wishlist_service
 import database.music_database as database
+from core.wishlist.identity import wishlist_row_key
 
 
 def _wav(path, seconds=3, bits=16):
@@ -235,9 +236,13 @@ def test_full_pipeline_inherits_profile_quality_and_persists_real_files(album):
         assert ctx["profile_id"] == album.profile and ctx["track_info"]["quality_profile_id"] == album.qp
         assert "task_id" not in ctx and "batch_id" not in ctx
     with album.db._get_connection() as conn:
-        rows = conn.execute("SELECT file_path, owner_profile_id, quality_profile_id FROM tracks").fetchall()
+        rows = conn.execute(
+            "SELECT f.path AS file_path, f.owner_profile_id, t.quality_profile_id "
+            "FROM lib2_track_files f JOIN lib2_tracks t ON t.id = f.track_id").fetchall()
     assert len(rows) == 2
-    assert all(Path(row["file_path"]).is_file() and row["owner_profile_id"] == album.profile
+    # Ours: a file's owner is the library it sits in, and this requester keeps
+    # no library of its own -- the shared one (None).
+    assert all(Path(row["file_path"]).is_file() and row["owner_profile_id"] is None
                and row["quality_profile_id"] == album.qp for row in rows)
     assert {key: value for key, value in album.context.items() if key != "_quality_profile"} == original
     assert [hashlib.sha256(path.read_bytes()).hexdigest() for path in album.paths] == hashes
@@ -278,6 +283,20 @@ def test_cache_does_not_cross_own_library_roots(album):
     assert len(album.calls) == 4
 
 
+def test_extra_tracks_follow_the_library_the_request_was_filed_in(album):
+    """Ours (E-04): the request was decided for the shared library although its
+    profile keeps a library of its own -- the album's other tracks join it there."""
+    from core.library_scope import BATCH_OWNER_KEY
+
+    album.settings["active_media_server"] = "plex"
+    assert album.db.set_profile_library(album.profile, "own", str(album.tmp / "Own"))
+    invalidate_library_scope_cache()
+    album.context[BATCH_OWNER_KEY] = None
+    shared = Path(album.settings["soulseek.transfer_path"])
+    assert album.expand() == 2
+    assert all(Path(ctx["_final_processed_path"]).is_relative_to(shared) for ctx in album.calls)
+
+
 def test_cache_checks_the_published_file_before_skipping(album):
     assert album.expand() == 2
     assert album.expand() == 0  # simulates a media server that has not scanned yet
@@ -293,9 +312,11 @@ def test_success_settles_an_existing_wishlist_request_without_adding_one(album):
     # Seed an existing independent request, bypassing only this test's spy.
     assert database.MusicDatabase.add_to_wishlist(album.db, track_data=wanted, profile_id=album.profile,
                                                 quality_profile_id=album.qp, user_initiated=True)
-    assert album.db.get_wishlist_track("2", profile_id=album.profile)
+    # Ours: a wishlist row is keyed per release, ``<track>::<album>``.
+    key = wishlist_row_key("2", album.context["album"]["id"])
+    assert album.db.get_wishlist_track(key, profile_id=album.profile)
     assert album.expand() == 2
-    assert album.db.get_wishlist_track("2", profile_id=album.profile) is None
+    assert album.db.get_wishlist_track(key, profile_id=album.profile) is None
 
 
 @pytest.mark.parametrize("failure", ["quality", "integrity", "duration", "acoustid", "silence", "exception"])
@@ -329,6 +350,8 @@ def test_failed_extra_is_one_pass_without_new_downloads_or_wishlist(album, monke
         monkeypatch.setattr(pipeline, "safe_move_file", move)
     assert album.expand() == 1
     assert album.calls[-1]["track_info"]["name"] == "Third"
+    # Ours: Remove Completed keeps the client job, the only copy left of Second
+    assert album.context["_album_tracks_incomplete"] is True
     assert not any(key for key in matched_downloads_context if "album-track" in key)
     assert download_tasks == {"requested-task": {"status": "completed"}}
     with album.db._get_connection() as conn:
@@ -341,3 +364,14 @@ def test_failed_extra_is_one_pass_without_new_downloads_or_wishlist(album, monke
         assert ctx["profile_id"] == album.profile and ctx["track_info"]["quality_profile_id"] == album.qp
         assert "task_id" not in ctx and "batch_id" not in ctx
     assert [payload["title"] for event, payload in album.events if event == "track_downloaded"] == ["Third"]
+
+
+def test_an_unavailable_track_list_marks_the_album_incomplete(album, monkeypatch):
+    """Ours: the profile wanted the album's tracks and none could be paired, so
+    Remove Completed must keep the release in the client."""
+    files = [releases.read_release_file(str(path)) for path in album.paths]
+    assert releases.import_album_tracks(
+        "request", album.context, files, files[0], album.settings["soulseek.transfer_path"],
+        lambda *a: None, _copy_release_audio_to_transfer,
+        lookup_album=lambda *a, **k: {"success": False}, is_owned=lambda *a: False) == 0
+    assert album.context["_album_tracks_incomplete"] is True

@@ -35,20 +35,36 @@ class _Cfg:
 
 @pytest.fixture()
 def db():
+    """Library-v2 rows. The job's catalogue boundary is lib2 (T-11) — reading
+    artists/albums would have meant scanning the shrinking legacy projection, 9 of
+    273 albums in the user's real library."""
     d = MusicDatabase(os.path.join(tempfile.mkdtemp(), 't.db'))
     conn = d._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name, genres, thumb_url) VALUES "
-                "('AR1', 'Dirty Artist', ?, 'art.jpg')",
+    cur.execute("INSERT INTO lib2_artists (id, name, sort_name, genres, image_url) "
+                "VALUES (1, 'Dirty Artist', 'Dirty Artist', ?, 'art.jpg')",
                 (json.dumps(['Rock', 'downtempo fusion junk', 'seen live']),))
-    cur.execute("INSERT INTO artists (id, name, genres) VALUES ('AR2', 'Clean Artist', ?)",
+    cur.execute("INSERT INTO lib2_artists (id, name, sort_name, genres) "
+                "VALUES (2, 'Clean Artist', 'Clean Artist', ?)",
                 (json.dumps(['Jazz']),))
-    cur.execute("INSERT INTO albums (id, artist_id, title, genres, thumb_url) VALUES "
-                "('AL1', 'AR1', 'Dirty Album', ?, 'alb.jpg')",
+    cur.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, album_type, "
+                "genres, image_url) VALUES (1, 1, 'Dirty Album', 'album', ?, 'alb.jpg')",
                 (json.dumps(['favorites', 'Rock']),))
+    # the library is what has files: a song on the album, Clean Artist a guest on it
+    _owned_track(cur, 1, [1, 2])
     conn.commit()
     conn.close()
     return d
+
+
+def _owned_track(cur, album_id, artist_ids):
+    track_id = cur.execute("INSERT INTO lib2_tracks (album_id, title) VALUES (?, 'Song')",
+                           (album_id,)).lastrowid
+    cur.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                (track_id, f'/music/{track_id}.flac'))
+    for artist_id in artist_ids:
+        cur.execute("INSERT INTO lib2_track_artists (track_id, artist_id) VALUES (?, ?)",
+                    (track_id, artist_id))
 
 
 def _ctx(db, cfg, findings):
@@ -84,28 +100,33 @@ def test_scan_flags_dirty_artist_and_album_not_clean_ones(db):
     findings = []
     res = GenreCleanupJob().scan(_ctx(db, _Cfg(), findings))
     assert res.findings_created == 2
+    # Native subjects carry a `lib2:` entity id so they can never collide with a
+    # legacy integer one.
     by_entity = {(f['entity_type'], f['entity_id']): f for f in findings}
-    assert ('artist', 'AR1') in by_entity and ('album', 'AL1') in by_entity
-    assert ('artist', 'AR2') not in by_entity        # already clean → no finding
+    assert ('artist', 'lib2:1') in by_entity and ('album', 'lib2:1') in by_entity
+    assert ('artist', 'lib2:2') not in by_entity     # already clean → no finding
 
-    art = by_entity[('artist', 'AR1')]['details']
+    art = by_entity[('artist', 'lib2:1')]['details']
     assert art['kept_genres'] == ['Rock']
     assert art['removed_genres'] == ['downtempo fusion junk', 'seen live']
-    assert art['artist_id'] == 'AR1'                 # clickable-card contract
+    assert art['artist_id'] == 1                     # clickable-card contract
+    assert art['library_v2'] == {'artist_ids': [1]}
 
-    alb = by_entity[('album', 'AL1')]['details']
+    alb = by_entity[('album', 'lib2:1')]['details']
     assert alb['kept_genres'] == ['Rock']
-    assert alb['artist_id'] == 'AR1'
+    assert alb['artist_id'] == 1
+    assert alb['library_v2'] == {'album_ids': [1]}
 
 
 def test_scan_warns_when_cleanup_empties_the_list(db):
     conn = db._get_connection()
-    conn.execute("UPDATE artists SET genres = ? WHERE id='AR1'",
+    conn.execute("UPDATE lib2_artists SET genres = ? WHERE id=1",
                  (json.dumps(['all junk', 'no matches']),))
     conn.commit(); conn.close()
     findings = []
     GenreCleanupJob().scan(_ctx(db, _Cfg(), findings))
-    art = next(f for f in findings if f['entity_id'] == 'AR1')
+    art = next(f for f in findings
+               if f['entity_type'] == 'artist' and f['entity_id'] == 'lib2:1')
     assert art['details']['kept_genres'] == []
     assert 'NO genres' in art['description']
 
@@ -121,29 +142,31 @@ def _worker_with(db):
 
 def test_fix_rewrites_to_kept_genres(db):
     w = _worker_with(db)
-    out = w._fix_genre_cleanup('artist', 'AR1', None,
+    out = w._fix_genre_cleanup('artist', 'lib2:1', None,
                                {'kept_genres': ['Rock'], 'removed_genres': ['x']})
     assert out['success'] and out['action'] == 'genres_cleaned'
     conn = db._get_connection()
-    row = conn.execute("SELECT genres FROM artists WHERE id='AR1'").fetchone()
+    row = conn.execute("SELECT genres FROM lib2_artists WHERE id=1").fetchone()
     conn.close()
     assert json.loads(row['genres']) == ['Rock']
 
 
-def test_fix_empty_kept_stores_null(db):
+def test_fix_empty_kept_stores_an_empty_list(db):
+    """T-11: "no genres left" is an empty array on a native row, not NULL — the
+    lib2 columns are NOT NULL DEFAULT '[]'. Strict still means strict."""
     w = _worker_with(db)
-    out = w._fix_genre_cleanup('album', 'AL1', None, {'kept_genres': []})
+    out = w._fix_genre_cleanup('album', 'lib2:1', None, {'kept_genres': []})
     assert out['success']
     conn = db._get_connection()
-    row = conn.execute("SELECT genres FROM albums WHERE id='AL1'").fetchone()
+    row = conn.execute("SELECT genres FROM lib2_albums WHERE id=1").fetchone()
     conn.close()
-    assert row['genres'] is None
+    assert json.loads(row['genres']) == []
 
 
 def test_fix_refuses_bad_inputs(db):
     w = _worker_with(db)
-    assert not w._fix_genre_cleanup('artist', 'AR1', None, {})['success']
-    assert not w._fix_genre_cleanup('track', 'T1', None, {'kept_genres': []})['success']
+    assert not w._fix_genre_cleanup('artist', 'lib2:1', None, {})['success']
+    assert not w._fix_genre_cleanup('track', 'lib2:1', None, {'kept_genres': []})['success']
     assert not w._fix_genre_cleanup('artist', 'GONE', None, {'kept_genres': ['Rock']})['success']
 
 
@@ -174,8 +197,9 @@ def test_scanned_counts_the_whole_library_not_just_genre_rows(db):
     conn = db._get_connection()
     cur = conn.cursor()
     for i in range(5):
-        cur.execute("INSERT INTO artists (id, name) VALUES (?, ?)",
-                    (f'BARE{i}', f'No Genres {i}'))
+        artist_id = cur.execute("INSERT INTO lib2_artists (name, sort_name) VALUES (?, ?)",
+                                (f'No Genres {i}', f'No Genres {i}')).lastrowid
+        _owned_track(cur, 1, [artist_id])
     conn.commit()
     conn.close()
 
@@ -184,5 +208,23 @@ def test_scanned_counts_the_whole_library_not_just_genre_rows(db):
     # 2 seeded artists + 5 bare artists + 1 seeded album = 8 examined
     assert res.scanned == 8
     # findings unchanged by the counting fix: only the dirty rows raise them
+    assert {f['title'] for f in findings} == {
+        'Off-whitelist genres: Dirty Artist', 'Off-whitelist genres: Dirty Album'}
+
+
+def test_rows_the_library_does_not_hold_are_not_scanned(db):
+    """watchlist discography and wishlist rows share the catalogue tables; their
+    provider genres are not the library's, and cleaning them was noise"""
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists (id, name, sort_name, genres) VALUES (9, 'Watched', 'Watched', ?)",
+                 (json.dumps(['seen live']),))
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, album_type, genres) "
+                 "VALUES (9, 9, 'Wished Album', 'album', ?)", (json.dumps(['favorites']),))
+    conn.commit()
+    conn.close()
+
+    findings = []
+    GenreCleanupJob().scan(_ctx(db, _Cfg(), findings))
+
     assert {f['title'] for f in findings} == {
         'Off-whitelist genres: Dirty Artist', 'Off-whitelist genres: Dirty Album'}

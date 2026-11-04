@@ -3,6 +3,7 @@ import type { WishlistArtistGroup } from '../-wishlist.types';
 import {
   artistHue,
   orbImage,
+  orbImageFallback,
   orbMeta,
   orbRingCovers,
   orbSizeClass,
@@ -14,6 +15,8 @@ interface Props {
   group: WishlistArtistGroup;
   index: number;
   artistImages: Map<string, string>;
+  /** CDN photos to paint while a cold local artwork build runs. */
+  artistImageFallbacks?: Map<string, string>;
   currentCycle: string;
   /** A wishlist run is in flight; the orb shows its working state. */
   processing: boolean;
@@ -30,6 +33,7 @@ export function WishlistOrb({
   group,
   index,
   artistImages,
+  artistImageFallbacks,
   currentCycle,
   processing,
   expanded,
@@ -39,6 +43,7 @@ export function WishlistOrb({
     <NebulaOrb
       name={group.name}
       image={orbImage(group, artistImages)}
+      imageFallback={orbImageFallback(group, artistImages, artistImageFallbacks ?? new Map())}
       initials={group.name.substring(0, 2).toUpperCase()}
       hue={artistHue(group.name)}
       sizeClass={orbSizeClass(group.total)}

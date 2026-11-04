@@ -63,12 +63,20 @@ def test_scan_stores_the_real_path_and_keeps_plex_in_server_path(tmp_path, music
     root, _ = music
     db = MusicDatabase(database_path=str(tmp_path / 'music.db'))
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('ar', 'Bring Me The Horizon', 'plex')")
-        conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES ('al', 'ar', 'Suicide Season', 'plex')")
+        artist = conn.execute("INSERT INTO lib2_artists(name,server_source,server_id) "
+                              "VALUES('Bring Me The Horizon','plex','ar')").lastrowid
+        album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title,server_source,server_id) "
+                             "VALUES(?,'Suicide Season','plex','al')", (artist,)).lastrowid
+        track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'The Comedown')",
+                             (album,)).lastrowid
+        conn.execute('INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)',
+                     (track, str(root / _DISK)))
         conn.commit()
     db.insert_or_update_media_track(_Track('px-1', _PLEX), 'al', 'ar', server_source='plex')
     with db._get_connection() as conn:
-        row = conn.execute("SELECT file_path, server_path FROM tracks WHERE id = 'px-1'").fetchone()
+        row = conn.execute("SELECT f.path, m.server_path FROM lib2_track_files f "
+                           "JOIN lib2_media_server_mappings m ON m.entity_type='track' AND m.entity_id=f.track_id "
+                           "WHERE m.server_source='plex' AND m.server_id='px-1'").fetchone()
     assert (row[0], row[1]) == (str(root / _DISK), _PLEX)
 
 
@@ -105,3 +113,12 @@ def test_unknown_artist_is_still_a_miss(music):
     _, cfg = music
     plex = r'N:\mp3\Someone Else\Album\[2008] Suicide Season\01 - The Comedown.mp3'
     assert resolve_library_file_path(plex, config_manager=cfg) is None
+
+
+def test_case_folded_matches_in_two_physical_roots_are_ambiguous(music, tmp_path):
+    root, _ = music
+    other = tmp_path / 'other-music'
+    song = other / _DISK
+    song.parent.mkdir(parents=True)
+    song.write_bytes(b'other copy')
+    assert resolve_library_file_path(_PLEX, config_manager=_Config([str(root), str(other)])) is None

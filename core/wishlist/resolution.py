@@ -111,7 +111,7 @@ def _profiles_owning_path(published_path: Any, database=None) -> List[Any]:
         return []
 
     shared_root: Optional[str] = None
-    owners: List[Any] = []
+    owners: List[Any] = []  # (root length, profile id)
     for profile in profiles:
         pid = profile.get("id") if isinstance(profile, dict) else None
         if pid is None:
@@ -134,8 +134,11 @@ def _profiles_owning_path(published_path: Any, database=None) -> List[Any]:
             except (OSError, ValueError):
                 continue
         if root_n and (path_n == root_n or path_n.startswith(root_n + os.sep)):
-            owners.append(pid)
-    return owners
+            owners.append((len(root_n), pid))
+    # an own folder inside the shared one holds its own files, not everyone's:
+    # the deepest root that contains the path is the library it is in
+    deepest = max((n for n, _pid in owners), default=0)
+    return [pid for n, pid in owners if n == deepest]
 
 
 def _log_removal(event: str, *, quiet: bool = False, **fields: Any) -> None:

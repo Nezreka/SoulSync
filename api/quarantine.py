@@ -33,17 +33,23 @@ _post_process_matched_download = None
 _post_process_matched_download_with_verification = None
 _download_orchestrator = None
 _matching_engine = None
+get_database = None
+_automation_engine = None
+_web_scan_manager = None
 
 
 def configure(*, config_manager_, docker_resolve_path_,
               serve_audio_file_with_range, audio_mime_types,
               post_process_matched_download,
               post_process_matched_download_with_verification,
-              download_orchestrator_getter, matching_engine_getter):
+              download_orchestrator_getter, matching_engine_getter,
+              get_database_, automation_engine_getter,
+              web_scan_manager_getter):
     global config_manager, docker_resolve_path, _serve_audio_file_with_range
     global _AUDIO_MIME_TYPES, _post_process_matched_download
     global _post_process_matched_download_with_verification
     global _download_orchestrator, _matching_engine
+    global get_database, _automation_engine, _web_scan_manager
     config_manager = config_manager_
     docker_resolve_path = docker_resolve_path_
     _serve_audio_file_with_range = serve_audio_file_with_range
@@ -53,6 +59,11 @@ def configure(*, config_manager_, docker_resolve_path_,
         post_process_matched_download_with_verification)
     _download_orchestrator = download_orchestrator_getter
     _matching_engine = matching_engine_getter
+    get_database = get_database_
+    # Rebindable at boot like the orchestrator pair, so the approve path sees
+    # the live objects rather than whatever was None when this ran.
+    _automation_engine = automation_engine_getter
+    _web_scan_manager = web_scan_manager_getter
 
 
 bp = Blueprint('quarantine', __name__)
@@ -200,6 +211,44 @@ def delete_quarantine_item(entry_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _after_approved_import(context, batch):
+    """What a finished batch does for its tracks, for one approved later.
+
+    An approval can come long after its batch finished (or a restart dropped
+    it), so no batch completion runs for it: the media server never heard of
+    the file, and the playlist the track was downloaded for was never pushed
+    again, so an approved playlist track waited for the playlist's next full
+    sync (#1976). Only after the pipeline produced a real final file and no
+    rejection flag."""
+    try:
+        from core.imports.pipeline import import_rejection_reason
+        final_path = context.get('_final_processed_path') or context.get('_final_path')
+        if not final_path or not os.path.isfile(final_path) or import_rejection_reason(context) is not None:
+            return
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Quarantine] post-approval check failed: %s", exc)
+        return
+    # the playlist it was downloaded for: synced again once the scan and the
+    # database update below have the track (the same chain a batch uses)
+    try:
+        from core.sync.post_download_sync import register_completed_playlist_batch
+        snapshot = {'approved': {'status': 'completed', 'track_info': context.get('track_info') or {}}}
+        register_completed_playlist_batch(batch or {}, tasks_snapshot=snapshot)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Quarantine] post-approval playlist sync not queued: %s", exc)
+    try:
+        automation_engine = _automation_engine()
+        web_scan_manager = _web_scan_manager()
+        auto_scan_on = (
+            automation_engine is None
+            or automation_engine.is_event_action_enabled('batch_complete', 'scan_library')
+        )
+        if web_scan_manager and auto_scan_on:
+            web_scan_manager.request_scan("Quarantine approval completed")
+    except Exception as scan_exc:  # noqa: BLE001
+        logger.warning("[Quarantine] Post-approval media scan failed: %s", scan_exc)
+
+
 @bp.route('/api/quarantine/<entry_id>/approve', methods=['POST'])
 def approve_quarantine_item(entry_id):
     """One-click approve: restore the file and re-run post-process with the
@@ -236,6 +285,13 @@ def approve_quarantine_item(entry_id):
         # for this one restored pass so multi-reason failures do not loop.
         context['_skip_quarantine_check'] = 'all'
         context['_approved_quarantine_trigger'] = trigger
+        # Acquisition tracks: the approve resolves this track by hand, so the
+        # persistent retry walk must not be resumable after a restart.
+        try:
+            from core.acquisition.pipeline_callback import notify_quarantine_approved
+            notify_quarantine_approved(context)
+        except Exception as _acq_journal_exc:
+            logger.debug(f"[Quarantine] acquisition retry journal close skipped: {_acq_journal_exc}")
         # If the caller (download-modal chooser) passed the originating task, run
         # the re-import through the verification WRAPPER with that task_id so the
         # task is marked completed on success — otherwise the modal row stays
@@ -265,12 +321,22 @@ def approve_quarantine_item(entry_id):
             if _batch_id:
                 context['batch_id'] = _batch_id
         context_key = f"approve_{entry_id}_{int(time.time())}"
-        if _task_id:
-            _reprocess = lambda: _post_process_matched_download_with_verification(
-                context_key, context, restored_path, _task_id, _batch_id,
-            )
-        else:
-            _reprocess = lambda: _post_process_matched_download(context_key, context, restored_path)
+        # the batch the track came in with, while it's still in memory: a
+        # playlist sync batch keeps its playlist there, not on the track
+        try:
+            from core.runtime_state import download_batches
+            _batch = dict(download_batches.get(_batch_id) or {}) if _batch_id else {}
+        except Exception:  # noqa: BLE001 - no batch is just less provenance
+            _batch = {}
+
+        def _reprocess():
+            if _task_id:
+                _post_process_matched_download_with_verification(
+                    context_key, context, restored_path, _task_id, _batch_id,
+                )
+            else:
+                _post_process_matched_download(context_key, context, restored_path)
+            _after_approved_import(context, _batch)
         threading.Thread(target=_reprocess, daemon=True).start()
         logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
         # #876: once one alternative for a song is accepted, the other
@@ -483,12 +549,21 @@ def recover_quarantine_item(entry_id):
     """Fallback for legacy thin sidecars: move file into Staging so the user
     can manually finish via the existing Import flow."""
     try:
-        from core.imports.quarantine import recover_to_staging
+        from core.acquisition.recovery import recover_quarantine_entry_to_staging
         from core.imports.staging import get_staging_path
-        target = recover_to_staging(_get_quarantine_dir(), get_staging_path(), entry_id)
-        if not target:
+        recovery = recover_quarantine_entry_to_staging(
+            get_database()._get_connection,
+            quarantine_dir=_get_quarantine_dir(),
+            staging_dir=get_staging_path(),
+            entry_id=entry_id,
+        )
+        if not recovery:
             return jsonify({"success": False, "error": "Entry not found"}), 404
-        return jsonify({"success": True, "staged_path": target})
+        return jsonify({
+            "success": True,
+            "staged_path": recovery.staged_path,
+            "recovery": recovery.to_public_dict(),
+        })
     except Exception as e:
         logger.error(f"[Quarantine] Error recovering {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

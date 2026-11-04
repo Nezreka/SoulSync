@@ -51,7 +51,8 @@ def test_guard_walks_up_to_an_existing_ancestor(tmp_path):
     assert ok is True and free is not None
 
 
-def test_probe_failure_fails_open():
+def test_probe_failure_fails_open(monkeypatch):
+    monkeypatch.setattr(disk_guard, "free_gb", lambda path: None)
     assert disk_guard.has_room("", {"min_free_disk_gb": 5}) == (True, None)
 
 

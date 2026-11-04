@@ -27,6 +27,7 @@ import {
   clearArtistDetailPageState,
   navigateToArtistDetail,
   playLibraryTrack,
+  setLibraryArtistBreadcrumb,
 } from './library-globals';
 import {
   _mlmClose,
@@ -58,6 +59,8 @@ import {
   toggleOriginEntry,
   toggleOriginGroup,
 } from './origin-history';
+import './download-modal-library';
+import './library-switch';
 import './server-activity';
 import { initPlexSignIn } from './plex-signin';
 import {
@@ -123,6 +126,7 @@ export const SHELL_WINDOW_EXPORTS = {
   playLibraryTrack,
   clearArtistDetailPageState,
   _updateSidebarLibraryBreadcrumb,
+  setLibraryArtistBreadcrumb,
   _handoffLibrarySearchToEnhancedSearch,
   // track-detail.js (ported aug 26)
   openTrackDetail,

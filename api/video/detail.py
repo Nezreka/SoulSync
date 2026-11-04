@@ -209,14 +209,24 @@ def register_routes(bp):
     @bp.route("/detail/<kind>/<int:item_id>/watched", methods=["POST"])
     def video_set_watched(kind, item_id):
         """Played/unplayed toggle — local watch state + server markPlayed. An
-        episode or season id marks just that one."""
+        episode or season id marks just that one. Whose state it is follows
+        core.video.watch_scope (#1941): the server owner's click marks the shared
+        state on the server account; a profile linked to its own server account
+        marks its own rows and plays it on that account; any other profile has
+        no watch state, so its click is refused."""
         from core.video import metadata as med
+        from core.video.watch_scope import current_watcher
 
         from . import get_video_db
         if kind not in ("movie", "show", "episode", "season"):
             return jsonify({"error": "bad kind"}), 400
+        watcher = current_watcher()
+        if not watcher.can_mark:
+            return jsonify({"error": "Connect your Plex account to keep your own "
+                                     "watched list."}), 409
         watched = bool((request.get_json(silent=True) or {}).get("watched"))
-        res = med.set_watched(get_video_db(), kind, item_id, watched)
+        res = med.set_watched(get_video_db(), kind, item_id, watched, push=watcher.push,
+                              watcher=watcher.rows, member_token=watcher.token)
         if not res.get("ok"):
             return jsonify({"error": res.get("error", "not found")}), 404
         return jsonify(res)
@@ -242,9 +252,13 @@ def register_routes(bp):
         from . import get_video_db
         from .kids import restricted_response, video_cap
         from core.content_filter import title_allowed
-        data = get_video_db().show_detail(show_id)
+        from core.video.watch_scope import current_watcher
+        watcher = current_watcher()
+        data = get_video_db().show_detail(show_id, watcher=watcher.rows)
         if not data:
             return jsonify({"error": "not found"}), 404
+        # a profile with no watch state of its own gets no watched toggle (#1941)
+        data["can_mark_watched"] = watcher.can_mark
         # kids profiles: over the cap (or unrated) is a hard no
         cap = video_cap()
         if cap is not None and not title_allowed(data.get("content_rating"), cap):
@@ -256,9 +270,13 @@ def register_routes(bp):
         from . import get_video_db
         from .kids import restricted_response, video_cap
         from core.content_filter import title_allowed
-        data = get_video_db().movie_detail(movie_id)
+        from core.video.watch_scope import current_watcher
+        watcher = current_watcher()
+        data = get_video_db().movie_detail(movie_id, watcher=watcher.rows)
         if not data:
             return jsonify({"error": "not found"}), 404
+        # a profile with no watch state of its own gets no watched toggle (#1941)
+        data["can_mark_watched"] = watcher.can_mark
         cap = video_cap()
         if cap is not None and not title_allowed(data.get("content_rating"), cap):
             return restricted_response()
@@ -412,7 +430,9 @@ def register_routes(bp):
             return restricted_response()
         try:
             from core.video.enrichment.engine import get_video_enrichment_engine
-            return jsonify(get_video_enrichment_engine().item_extras(kind, item_id))
+            from core.video.watch_scope import current_watcher
+            return jsonify(get_video_enrichment_engine().item_extras(
+                kind, item_id, watcher=current_watcher().rows))
         except Exception:
             logger.exception("extras failed for %s %s", kind, item_id)
             return jsonify({})

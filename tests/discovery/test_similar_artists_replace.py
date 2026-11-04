@@ -69,26 +69,34 @@ def test_other_artists_and_profiles_are_untouched(tmp_path):
 
 
 def test_the_rematch_migration_requeues_everything_once(tmp_path):
+    # Library v2: the worker's "already done" is a lib2_provider_attempts row
+    from core.library2.provider_attempts import record_attempt
+
     db = MusicDatabase(str(tmp_path / 'music.db'))
     _seed_old(db)
+
+    def attempts(conn):
+        return conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts "
+                            "WHERE service='similar_artists'").fetchone()[0]
+
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (name, server_source, deezer_id, similar_artists_match_status) "
-                     "VALUES ('Audioslave', 'plex', '1', 'matched')")
+        artist_id = conn.execute("INSERT INTO lib2_artists (name) VALUES ('Audioslave')").lastrowid
+        record_attempt(conn, entity_type='artist', entity_id=artist_id,
+                       service='similar_artists', status='matched')
         conn.execute("DROP TABLE _similar_artists_rematch_applied")
         db._requeue_similar_artists_rematch(conn.cursor())
         conn.commit()
-        status = conn.execute("SELECT similar_artists_match_status FROM artists").fetchone()[0]
-    assert status is None                                    # the worker runs it again
+        assert attempts(conn) == 0                           # the worker runs it again
     assert {r[2] for r in _rows(db)} == {1}                  # inflated counts reset
     assert db.has_fresh_similar_artists('seed-1', profile_id=1) is False  # watchlist refetches
 
     # once: a second startup leaves the new results alone
     with db._get_connection() as conn:
-        conn.execute("UPDATE artists SET similar_artists_match_status = 'matched'")
+        record_attempt(conn, entity_type='artist', entity_id=artist_id,
+                       service='similar_artists', status='matched')
         db._requeue_similar_artists_rematch(conn.cursor())
         conn.commit()
-        status = conn.execute("SELECT similar_artists_match_status FROM artists").fetchone()[0]
-    assert status == 'matched'
+        assert attempts(conn) == 1
 
 
 def test_a_watchlist_refresh_replaces_too(tmp_path, monkeypatch):

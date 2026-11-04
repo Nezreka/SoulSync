@@ -173,6 +173,47 @@ describe('collab albums', () => {
     expect(screen.getByText('1 album')).toBeTruthy();
   });
 
+  it('opens the album from its title and its artist from the with line', async () => {
+    // the cover plays it; the name opens the release from this page, the
+    // artist it is filed under opens theirs
+    stub([], [WTT]);
+    const openAlbum = vi.fn();
+    const openArtist = vi.fn();
+    render(
+      <AppearsOnSection
+        artistId="6"
+        artistName="Kanye West"
+        onOpenAlbum={openAlbum}
+        onOpenArtist={openArtist}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Watch the Throne' }));
+    expect(openAlbum).toHaveBeenCalledWith(expect.objectContaining({ id: '30' }));
+    fireEvent.click(screen.getByRole('button', { name: 'JAY-Z' }));
+    expect(openArtist).toHaveBeenCalledWith('5');
+  });
+
+  it('keeps names as text where the page opens nothing', async () => {
+    stub([], [WTT]);
+    render(<AppearsOnSection artistId="6" artistName="Kanye West" />);
+    await screen.findByText('Watch the Throne');
+    expect(screen.queryByRole('button', { name: 'Watch the Throne' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'JAY-Z' })).toBeNull();
+  });
+
+  it('lists a wanted guest track that is not here yet, with nothing to play', async () => {
+    // Rockwell on a monitored Michael Jackson compilation: the wish is what
+    // puts him in the library, so his page shows it
+    stub([{ ...WFL, file_path: null, wanted: true }]);
+    const play = vi.fn();
+    window.playTrackList = play;
+    render(<AppearsOnSection artistId="6" artistName="Rihanna" />);
+    const row = await screen.findByRole('button', { name: /We Found Love/ });
+    expect(row).toBeDisabled();
+    expect(screen.getByText('Wanted')).toBeTruthy();
+    expect(screen.queryByLabelText('Play all')).toBeNull();
+  });
+
   it('play all takes the albums first, then the songs', async () => {
     stub([{ ...WFL, id: '100' }], [WTT]);
     const play = vi.fn();
@@ -190,5 +231,25 @@ describe('collab albums', () => {
     render(<AppearsOnSection artistId="6" artistName="Kanye West" />);
     await screen.findByText('We Found Love');
     expect(screen.queryByText('Watch the Throne')).toBeNull();
+  });
+});
+
+describe('a cover still being built', () => {
+  it('shows the provider cover while the local one is still being built', async () => {
+    stub([
+      {
+        ...WFL,
+        album_thumb_url: '/api/library/v2/artwork/album/10',
+        album_thumb_remote_url: 'https://cdn.test/18.jpg',
+      },
+    ]);
+    render(<AppearsOnSection artistId={7} artistName="Rihanna" />);
+    await screen.findByText('We Found Love');
+    const local = document.querySelector('img[src="/api/library/v2/artwork/album/10"]')!;
+    // the endpoint answers 404 while it builds the cover
+    fireEvent.error(local);
+    await waitFor(() =>
+      expect(document.querySelector('img[src="https://cdn.test/18.jpg"]')).not.toBeNull(),
+    );
   });
 });

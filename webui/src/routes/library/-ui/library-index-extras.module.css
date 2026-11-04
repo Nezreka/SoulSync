@@ -1,0 +1,378 @@
+/* the old library page's index tools on the v2 page: plain on purpose */
+
+.searchWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.searchWrap input {
+  padding-right: 28px;
+}
+
+.searchClear {
+  position: absolute;
+  right: 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.searchClear:hover {
+  opacity: 1;
+}
+
+.alphabet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 4px 0 18px;
+}
+
+.alphabet button {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.alphabet button:hover {
+  background: var(--white-a06);
+  color: var(--text-1);
+}
+
+.alphabet button.letterActive {
+  background: var(--white-a14);
+  color: var(--text-1);
+  font-weight: 750;
+}
+
+/* the filters, behind one button */
+.filterWrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.filterButton {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.filterOn {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--text-1);
+}
+
+.filterCount {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: rgb(var(--accent-rgb));
+  color: var(--text-1);
+  font-size: 11px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  place-items: center;
+}
+
+.filterPanel {
+  position: absolute;
+  z-index: var(--z-menu);
+  top: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 320px;
+  padding: 18px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-lg);
+  background: var(--bg-raised);
+  box-shadow: 0 24px 60px var(--black-a60);
+  animation: filterIn var(--dur-fast) var(--ease-out);
+}
+
+@keyframes filterIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filterPanel {
+    animation: none;
+  }
+}
+
+.filterPanel section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filterPanel h4 {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--white-a05);
+}
+
+.segmented button {
+  padding: 7px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  color: var(--text-1);
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--white-a14);
+  color: var(--text-1);
+}
+
+.switchRow {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.switchRow strong {
+  display: block;
+  color: var(--text-1);
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.switchRow small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.switch {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  background: var(--white-a14);
+  transition: background var(--dur-fast) ease;
+}
+
+.switch::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-circle);
+  background: var(--text-1);
+  content: '';
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+
+.switchRow[aria-checked='true'] .switch {
+  background: rgb(var(--accent-rgb));
+}
+
+.switchRow[aria-checked='true'] .switch::after {
+  transform: translateX(14px);
+}
+
+.switchRow:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 4px;
+  border-radius: var(--radius-sm);
+}
+
+.filterSelect {
+  width: 100%;
+}
+
+/* what's filtered, under the toolbar */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: -6px 0 16px;
+}
+
+.chipsCount {
+  margin-right: 4px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 10px 5px 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: var(--radius-pill);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chip span {
+  color: var(--text-3);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.chip:hover span,
+.chip:focus-visible span {
+  color: var(--text-1);
+}
+
+.chipsClear {
+  padding: 5px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.chipsClear:hover {
+  color: var(--text-1);
+}
+
+.cardExtras {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.cardPlay {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--white-a25);
+  border-radius: var(--radius-pill);
+  background: var(--black-a55);
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.cardPlay:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+  background: var(--white-a07);
+  color: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.badge img {
+  display: block;
+  width: 14px;
+  height: auto;
+}
+
+.upgradable {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.searchOnline {
+  margin-top: 12px;
+  padding: 8px 14px;
+  border: 1px solid currentcolor;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* a phone: the filter spans the row, the letters scroll in one line */
+@media (max-width: 600px) {
+  .searchWrap {
+    flex: 1 1 100%;
+  }
+
+  .searchWrap input {
+    width: 100%;
+  }
+
+  .alphabet {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .alphabet button {
+    flex: 0 0 auto;
+  }
+}

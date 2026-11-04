@@ -320,12 +320,11 @@ def test_embed_source_ids_skips_disabled_source_specific_tags(monkeypatch):
 def test_embed_source_ids_writes_musicbrainz_release_year_and_updates_album_year(tmp_path, monkeypatch):
     db_path = tmp_path / "music.db"
     conn = sqlite3.connect(db_path)
-    conn.execute("CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT)")
-    conn.execute("CREATE TABLE albums (id TEXT PRIMARY KEY, artist_id TEXT, title TEXT, year INTEGER)")
-    conn.execute("INSERT INTO artists (id, name) VALUES (?, ?)", ("artist-1", "Artist One"))
+    conn.execute("CREATE TABLE lib2_artists (id INTEGER PRIMARY KEY, name TEXT, name_key TEXT)")
+    conn.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, primary_artist_id INTEGER, title TEXT, year INTEGER)")
+    conn.execute("INSERT INTO lib2_artists (id, name, name_key) VALUES (1, 'Artist One', 'artist one')")
     conn.execute(
-        "INSERT INTO albums (id, artist_id, title, year) VALUES (?, ?, ?, ?)",
-        ("album-1", "artist-1", "Album One", None),
+        "INSERT INTO lib2_albums (id, primary_artist_id, title, year) VALUES (1, 1, 'Album One', NULL)",
     )
     conn.commit()
     conn.close()
@@ -408,10 +407,10 @@ def test_embed_source_ids_writes_musicbrainz_release_year_and_updates_album_year
     check.row_factory = sqlite3.Row
     row = check.execute(
         """
-        SELECT albums.year
-        FROM albums
-        JOIN artists ON artists.id = albums.artist_id
-        WHERE albums.title = ? AND artists.name = ?
+        SELECT lib2_albums.year
+        FROM lib2_albums
+        JOIN lib2_artists ON lib2_artists.id = lib2_albums.primary_artist_id
+        WHERE lib2_albums.title = ? AND lib2_artists.name = ?
         """,
         ("Album One", "Artist One"),
     ).fetchone()
@@ -637,7 +636,7 @@ def test_enhance_file_metadata_writes_tags_and_propagates_release_id(monkeypatch
     assert strip_calls == ["song.flac"]
     assert verify_calls == ["song.flac"]
     assert audio.clear_pictures_calls == 1
-    assert len(audio.save_calls) == 2
+    assert len(audio.save_calls) == 1
     assert album_info["musicbrainz_release_id"] == "mb-release-1"
     assert any(frame.kind == "TIT2" for frame in audio.tags.added)
     assert any(frame.kind == "TPE1" for frame in audio.tags.added)

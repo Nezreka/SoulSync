@@ -334,3 +334,19 @@ def test_apply_cover_falls_back_to_file_dir_when_folder_doesnt_exist(tmp_path, m
 
     assert (real_dir / 'cover.jpg').read_bytes() == b'EMB'   # written to the REAL dir
     assert res['cover_written'] is True
+
+
+def test_apply_says_when_embedding_is_switched_off(tmp_path, monkeypatch):
+    """embedding off skipped every file too, and the fix said the art was
+    already there. it says embedding is off now."""
+    import core.metadata.common as common
+    f1 = tmp_path / '01.flac'; f1.write_bytes(b'')
+    audio = SimpleNamespace(pictures=[], tags=None, save=lambda: None)
+    monkeypatch.setattr(aa, 'get_mutagen_symbols', lambda: _fake_symbols(audio))
+    monkeypatch.setattr(aa, 'download_cover_art', lambda *a, **k: None)
+    monkeypatch.setattr(common, 'get_config_manager', lambda: SimpleNamespace(
+        get=lambda key, default=None: False if key == 'metadata_enhancement.embed_album_art' else default))
+
+    res = aa.apply_art_to_album_files([str(f1)], {'album': 'B'}, {'album_name': 'B'}, folder=str(tmp_path))
+    assert res['skipped'] == 1 and res['embedding_off'] is True
+

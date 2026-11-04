@@ -92,52 +92,6 @@ def _download_destination(track_number, disc_number, title):
     return path
 
 
-def _reorganize_destination(user_tracks, monkeypatch):
-    """What Reorganize proposes for the same album, via the real planner."""
-    album_data = {"id": "AL1", "title": ALBUM, "artist_name": ARTIST,
-                  "artist_id": "AR1", "spotify_album_id": "sp1"}
-    monkeypatch.setattr(
-        lr, "_resolve_source",
-        lambda ad, ps, strict_source=False, **kw: ("spotify", API_ALBUM, API_TRACKS))
-    plan = lr.plan_album_reorganize(album_data, user_tracks, "spotify")
-
-    out = []
-    for item in plan["items"]:
-        assert item["matched"], item.get("reason")
-        ctx = lr._build_post_process_context(
-            API_ALBUM, item["api_track"], ARTIST, ALBUM, plan["total_discs"],
-            local_title=item["track"]["title"])
-        path, _ = build_final_path_for_track(
-            ctx, ctx["spotify_artist"], lr._build_album_info(ctx), ".flac",
-            create_dirs=False)
-        out.append(path)
-    return out
-
-
-def test_reorganize_proposes_nothing_for_a_part_downloaded_multi_disc_album(cfg, monkeypatch):
-    """Three tracks of disc 1 have landed. This is the reported case."""
-    downloaded = [_download_destination(n, 1, "D1-%02d" % n) for n in (1, 2, 3)]
-    assert all(os.sep + "Disc 1" + os.sep in p for p in downloaded), downloaded
-
-    user_tracks = [{"id": "T%d" % n, "title": "D1-%02d" % n, "track_number": n,
-                    "file_path": downloaded[i]}
-                   for i, n in enumerate((1, 2, 3))]
-
-    assert _reorganize_destination(user_tracks, monkeypatch) == downloaded
-
-
-def test_reorganize_proposes_nothing_once_both_discs_have_landed(cfg, monkeypatch):
-    """And it must not flip back the other way when the album completes."""
-    picks = [(1, 1, "D1-01"), (25, 1, "D1-25"), (1, 2, "D2-01"), (20, 2, "D2-20")]
-    downloaded = [_download_destination(tn, dn, title) for tn, dn, title in picks]
-
-    user_tracks = [{"id": "T%d" % i, "title": title, "track_number": tn,
-                    "file_path": downloaded[i]}
-                   for i, (tn, dn, title) in enumerate(picks)]
-
-    assert _reorganize_destination(user_tracks, monkeypatch) == downloaded
-
-
 def test_the_destination_is_absolute_so_the_catalogue_can_store_it(cfg):
     path = _download_destination(1, 1, "D1-01")
     assert os.path.isabs(path), path

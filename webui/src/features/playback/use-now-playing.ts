@@ -12,13 +12,17 @@ export interface NowPlaying {
   playing: boolean;
 }
 
-function idOf(track: { id?: unknown } | null | undefined): string | null {
-  const id = track?.id;
+type PlayingTrack = { id?: unknown; lib2_track_id?: unknown } | null | undefined;
+
+/** Library v2: the catalogue id is the typed `lib2_track_id`; a queue row's
+ *  `id` is the media server's (or null), never the id a library row shows. */
+function idOf(track: PlayingTrack): string | null {
+  const id = track?.lib2_track_id ?? track?.id;
   return typeof id === 'string' || typeof id === 'number' ? String(id) : null;
 }
 
 function currentId(): string | null {
-  return idOf((window as { __ssCurrentTrack?: { id?: unknown } | null }).__ssCurrentTrack);
+  return idOf((window as { __ssCurrentTrack?: PlayingTrack }).__ssCurrentTrack);
 }
 
 function audio(): HTMLAudioElement | null {
@@ -33,7 +37,7 @@ export function useNowPlaying(): NowPlaying {
 
   useEffect(() => {
     const onTrack = (event: Event) => {
-      const track = (event as CustomEvent<{ id?: unknown } | null>).detail;
+      const track = (event as CustomEvent<PlayingTrack>).detail;
       setState((s) => ({ ...s, id: idOf(track) }));
     };
     const onPlay = () => setState((s) => ({ ...s, playing: true }));

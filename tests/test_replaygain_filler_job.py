@@ -5,7 +5,7 @@ the apply handler's analyze→compute→write seam (ffmpeg mocked)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from core.repair_jobs.replaygain_filler import needs_replaygain
 from core.repair_worker import RepairWorker
@@ -74,6 +74,59 @@ def test_apply_errors_when_file_missing():
     res = _worker()._fix_missing_replaygain(
         'track', '1', '/no/such/file.flac', {'file_path': '/no/such/file.flac'})
     assert res['success'] is False
+
+
+# ── native (lib2:<id>) findings must use resolve_lib2_path, not the legacy
+# resolver — same LV2-LYRICS-01 divergence, same fix, applied consistently. ──
+
+def test_apply_native_finding_uses_lib2_resolver(tmp_path, monkeypatch):
+    f = tmp_path / 'song.flac'
+    f.write_bytes(b'\x00' * 64)
+
+    def _boom(*a, **k):
+        raise AssertionError('legacy resolver must not be used for a native lib2 finding')
+    monkeypatch.setattr('core.repair_worker._resolve_file_path', _boom)
+    resolve_calls = []
+    monkeypatch.setattr(
+        'core.library2.paths.resolve_lib2_path',
+        lambda raw, config_manager=None: resolve_calls.append(raw) or str(f),
+    )
+
+    with patch('core.replaygain.is_ffmpeg_available', return_value=True), \
+         patch('core.replaygain.analyze_track', return_value=(-12.0, -1.5)), \
+         patch('core.replaygain.write_replaygain_tags', return_value=True), \
+         patch('core.replaygain.RG_REFERENCE_LUFS', -18.0):
+        res = _worker()._fix_missing_replaygain(
+            'track', 'lib2:1', None, {'file_path': 'stored/song.flac'})
+
+    assert res['success'] is True
+    assert resolve_calls == ['stored/song.flac']
+
+
+def test_apply_native_finding_refreshes_lib2_tag_cache(tmp_path, monkeypatch):
+    f = tmp_path / 'song.flac'
+    f.write_bytes(b'\x00' * 64)
+
+    w = _worker()
+    w.db = SimpleNamespace(_get_connection=lambda: MagicMock())
+    monkeypatch.setattr(
+        'core.library2.paths.resolve_lib2_path', lambda raw, config_manager=None: str(f))
+    refreshed = {}
+    monkeypatch.setattr(
+        'core.library2.tag_cache.read_and_persist_tag_cache',
+        lambda conn, file_id, path: refreshed.update(file_id=file_id, path=path) or True,
+    )
+
+    with patch('core.replaygain.is_ffmpeg_available', return_value=True), \
+         patch('core.replaygain.analyze_track', return_value=(-12.0, -1.5)), \
+         patch('core.replaygain.write_replaygain_tags', return_value=True), \
+         patch('core.replaygain.RG_REFERENCE_LUFS', -18.0):
+        res = w._fix_missing_replaygain(
+            'track', 'lib2:1', None,
+            {'file_path': 'song.flac', 'library_v2': {'file_id': 7}})
+
+    assert res['success'] is True
+    assert refreshed == {'file_id': 7, 'path': str(f)}
 
 
 def test_job_is_registered_and_opt_in():
@@ -151,17 +204,35 @@ def _scan_ctx(db, cfg, findings):
 
 def _db_with_tracks(n=3):
     from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
     d = MusicDatabase(_os.path.join(_tempfile.mkdtemp(), 't.db'))
     conn = d._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('AR1','A')")
-    cur.execute("INSERT INTO albums (id, artist_id, title) VALUES ('AL1','AR1','Al')")
+    artist_id = seed_artist(conn, server_id='ar1', name='A')
+    album_id = seed_album(conn, server_id='al1', title='Al', artist_id=artist_id)
     for i in range(n):
-        cur.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-                    "VALUES (?, 'AL1', 'AR1', ?, ?)",
-                    (f'T{i}', f'Song {i}', f'/music/{i}.flac'))
+        seed_track(conn, server_id=f'tr{i}', title=f'Song {i}', album_id=album_id,
+                   artist_id=artist_id, file_path=f'/music/{i}.flac')
     conn.commit(); conn.close()
     return d
+
+
+def _subjects_from_db(db):
+    """The job enumerates Library-v2 file subjects — build the same shape here
+    so these tests stay isolated from whatever real files happen to exist on
+    the filesystem being scanned."""
+    conn = db._get_connection()
+    rows = conn.execute(
+        """SELECT t.id AS id, t.title AS title, f.path AS path
+             FROM lib2_tracks t
+             JOIN lib2_track_files f ON f.track_id = t.id AND f.is_primary = 1
+            ORDER BY t.id"""
+    ).fetchall()
+    conn.close()
+    return [
+        {'track_id': r['id'], 'title': r['title'], 'artist_name': 'A', 'path': r['path']}
+        for r in rows
+    ]
 
 
 def test_scan_rescan_off_skips_tagged_tracks():
@@ -169,7 +240,10 @@ def test_scan_rescan_off_skips_tagged_tracks():
     findings = []
     with patch('core.repair_jobs.replaygain_filler._resolve', side_effect=lambda p, c: p), \
          patch('core.replaygain.is_ffmpeg_available', return_value=True), \
-         patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}):
+         patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}), \
+         patch('core.library2.maintenance_subjects.active_file_subjects',
+               return_value=_subjects_from_db(db)), \
+         patch('core.repair_jobs.filesystem_subjects.filesystem_audio_files', return_value=[]):
         ReplayGainFillerJob().scan(_scan_ctx(db, _Cfg(), findings))
     assert findings == []                      # all tagged, rescan off → nothing
 
@@ -180,7 +254,10 @@ def test_scan_rescan_on_flags_tagged_tracks_as_retag():
     cfg = _Cfg(**{'repair.jobs.replaygain_filler.settings.rescan_existing': True})
     with patch('core.repair_jobs.replaygain_filler._resolve', side_effect=lambda p, c: p), \
          patch('core.replaygain.is_ffmpeg_available', return_value=True), \
-         patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}):
+         patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}), \
+         patch('core.library2.maintenance_subjects.active_file_subjects',
+               return_value=_subjects_from_db(db)), \
+         patch('core.repair_jobs.filesystem_subjects.filesystem_audio_files', return_value=[]):
         res = ReplayGainFillerJob().scan(_scan_ctx(db, cfg, findings))
     assert res.findings_created == 2
     assert all(f['finding_type'] == 'replaygain_retag' for f in findings)
@@ -198,6 +275,9 @@ def test_scan_rescan_cap_is_honoured_and_logged():
     with patch('core.repair_jobs.replaygain_filler._resolve', side_effect=lambda p, c: p), \
          patch('core.replaygain.is_ffmpeg_available', return_value=True), \
          patch('core.replaygain.read_replaygain_tags', return_value={'track_gain': '-6.00 dB'}), \
+         patch('core.library2.maintenance_subjects.active_file_subjects',
+               return_value=_subjects_from_db(db)), \
+         patch('core.repair_jobs.filesystem_subjects.filesystem_audio_files', return_value=[]), \
          patch.object(ReplayGainFillerJob, 'RESCAN_BATCH_LIMIT', 2):
         ReplayGainFillerJob().scan(ctx)
     assert len(findings) == 2                                  # capped
@@ -210,7 +290,10 @@ def test_untagged_tracks_still_flagged_normally_in_rescan_mode():
     cfg = _Cfg(**{'repair.jobs.replaygain_filler.settings.rescan_existing': True})
     with patch('core.repair_jobs.replaygain_filler._resolve', side_effect=lambda p, c: p), \
          patch('core.replaygain.is_ffmpeg_available', return_value=True), \
-         patch('core.replaygain.read_replaygain_tags', return_value=None):
+         patch('core.replaygain.read_replaygain_tags', return_value=None), \
+         patch('core.library2.maintenance_subjects.active_file_subjects',
+               return_value=_subjects_from_db(db)), \
+         patch('core.repair_jobs.filesystem_subjects.filesystem_audio_files', return_value=[]):
         ReplayGainFillerJob().scan(_scan_ctx(db, cfg, findings))
     assert len(findings) == 1
     assert findings[0]['finding_type'] == 'missing_replaygain'
@@ -218,8 +301,10 @@ def test_untagged_tracks_still_flagged_normally_in_rescan_mode():
 
 def test_all_gain_writers_use_the_target():
     from pathlib import Path
+    # The four web_server call sites were the artist-detail page's ReplayGain
+    # endpoints; they went with the page (§50.4.4.24). What has to stay pinned
+    # is that no writer reintroduces a hard-coded reference.
     ws = Path('web_server.py').read_text(encoding='utf-8')
-    assert ws.count('_rg_get_target_lufs(config_manager)') == 4
     assert '_RG_REFERENCE_LUFS' not in ws
     pl = Path('core/imports/pipeline.py').read_text(encoding='utf-8')
     assert '_rg_target(config_manager) - lufs' in pl

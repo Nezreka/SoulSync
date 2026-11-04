@@ -28,6 +28,7 @@ import {
   wishlistTracksQueryOptions,
 } from '../-wishlist.api';
 import {
+  buildArtistImageFallbackMap,
   buildArtistImageMap,
   filterWishlistGroups,
   groupWishlistArtists,
@@ -47,6 +48,7 @@ import { NebulaStage, NebulaZone } from './nebula-parts';
 import { VideoWishlist } from './video-wishlist';
 import { WishlistArtistSheet } from './wishlist-artist-sheet';
 import { WishlistAudiobooks } from './wishlist-audiobooks';
+import { WishlistExportDialog } from './wishlist-export';
 import { WishlistList } from './wishlist-list';
 import { WishlistOrb } from './wishlist-orb';
 
@@ -107,6 +109,7 @@ function MusicWishlistPage() {
   const queryClient = useQueryClient();
 
   const [abReloadKey, setAbReloadKey] = useState(0);
+  const [exporting, setExporting] = useState(false);
   // The audiobook search box lives in WishlistAudiobooks; the audio plays listed
   // beneath it follow the same text.
   const [abQuery, setAbQuery] = useState('');
@@ -155,6 +158,13 @@ function MusicWishlistPage() {
         photosQuery.data ?? [],
       ),
     [albumsQuery.data, singlesQuery.data, photosQuery.data],
+  );
+
+  // Painted only when a primary photo fails to load, which for a Library-v2
+  // artist means the local artwork build is still cold.
+  const artistImageFallbacks = useMemo(
+    () => buildArtistImageFallbackMap([albumsQuery.data ?? {}, singlesQuery.data ?? {}]),
+    [albumsQuery.data, singlesQuery.data],
   );
 
   const allGroups = useMemo(() => {
@@ -770,6 +780,12 @@ function MusicWishlistPage() {
                       onSelect: () => window.cleanupWishlistOverview?.(),
                     },
                     {
+                      key: 'export',
+                      label: 'Export…',
+                      title: 'Save the wishlist as CSV or JSON',
+                      onSelect: () => setExporting(true),
+                    },
+                    {
                       key: 'clear',
                       label: 'Clear All',
                       danger: true,
@@ -780,7 +796,7 @@ function MusicWishlistPage() {
                     <button
                       type="button"
                       className="wlp-btn wlp-more"
-                      title="Ignored, cleanup, clear all"
+                      title="Ignored, cleanup, export, clear all"
                       aria-label="More wishlist actions"
                       {...props}
                       ref={props.ref as (el: HTMLButtonElement | null) => void}
@@ -923,6 +939,7 @@ function MusicWishlistPage() {
                                 group={group}
                                 index={nebulaGroups.indexOf(group)}
                                 artistImages={artistImages}
+                                artistImageFallbacks={artistImageFallbacks}
                                 currentCycle={currentCycle}
                                 processing={processing}
                                 expanded={expandedArtist === group.name}
@@ -944,6 +961,7 @@ function MusicWishlistPage() {
                         key={sheetGroup.name}
                         group={sheetGroup}
                         artistImages={artistImages}
+                        artistImageFallbacks={artistImageFallbacks}
                         onClose={() => setExpandedArtist(null)}
                         onGrabArtist={() => onGrabArtist(sheetGroup)}
                         onGrabAlbum={onGrabAlbum}
@@ -961,6 +979,7 @@ function MusicWishlistPage() {
           )}
         </>
       )}
+      {exporting ? <WishlistExportDialog side="music" onClose={() => setExporting(false)} /> : null}
     </div>
   );
 }

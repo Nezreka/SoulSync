@@ -52,6 +52,8 @@ export const realEffects: Effects = {
     if (server === 'plex') return postOk('plex/select-music-library', { library_name: name });
     if (server === 'navidrome')
       return postOk('navidrome/select-music-folder', { folder_name: name });
+    if (server === 'music_assistant')
+      return postOk('music-assistant/select-source', { source_name: name });
     if (server === 'jellyfin') {
       // jellyfin libraries hang off a user, the admin one sees everything
       const users = await readJson<{ users?: { name?: string; is_admin?: boolean }[] }>(

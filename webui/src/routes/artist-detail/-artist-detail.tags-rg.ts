@@ -61,7 +61,10 @@ export async function writeTagsRequest(
   if (!result.success) throw new Error(result.error);
 
   const fieldCount = (result.written_fields || []).length;
-  let message = `Tags written successfully (${fieldCount} fields)`;
+  let message =
+    typeof result.written === 'number'
+      ? `Tags written successfully (${result.written} files)`
+      : `Tags written successfully (${fieldCount} fields)`;
   if (result.server_sync) {
     if (result.server_sync.synced > 0) {
       message += ` — synced to ${serverType === 'plex' ? 'Plex' : 'Jellyfin'}`;

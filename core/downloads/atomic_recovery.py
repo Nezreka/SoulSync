@@ -57,53 +57,68 @@ logger = get_logger("downloads.atomic_recovery")
 
 
 # Tables that remember where an import landed, and so hold the staging path for a
-# staged batch. ``tracks`` is handled separately (it is the media-server mirror).
+# staged batch (upstream 8e0641f92, ea62c97c0): repointed with the file row.
 _PATH_RECORD_TABLES = ("track_downloads", "library_history")
 
 
-def make_db_path_updater(db):
-    """``fn(old_path, new_path) -> rows | None`` repointing a library row.
+def _repoint_legacy_before_import(db, conn, old_path: str, new_path: str) -> None:
+    """An upgrade whose Library v2 import has not run yet still reads the
+    legacy rows; left on the staging path, the album comes over missing."""
+    try:
+        from core.library2.migration_gate import migration_required
+        if migration_required(db):
+            # legacy-upgrade-only-begin
+            conn.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
+                         (new_path, old_path))
+            # legacy-upgrade-only-end
+    except Exception as exc:  # noqa: BLE001 - no legacy table on this install
+        logger.debug("[Atomic Recovery] legacy repoint skipped: %s", exc)
 
-    Returns None — meaning "this count carries no information" — on anything but
-    a ``soulsync`` media server, because rows holding a staged path are only
-    ever written by ``record_soulsync_library_entry``, which is gated on that.
-    Reading a legitimate 0 as failure is what stranded albums in staging for
-    Navidrome/Plex/Jellyfin users in the first place.
+
+def make_db_path_updater(db, *, count_is_evidence: bool = True):
+    """``fn(old_path, new_path) -> rows | None`` repointing a library file row.
+
+    Library v2: the file row lives in ``lib2_track_files`` and is written by
+    ``require_library_v2_registration``, which the import pipeline runs on
+    EVERY install whatever the media server -- so, unlike upstream's legacy
+    ``tracks`` row (only written on a 'soulsync' server), a zero here is real
+    evidence that the catalogue does not know where the file went, and the
+    live publish rolls the album back on it (L2-002).
+
+    ``count_is_evidence=False`` returns None ("unknown") instead. That is the
+    startup recovery's setting: a tree abandoned by an older build may never
+    have been registered, and a recovery that refuses to publish on a zero
+    would strand exactly the albums it exists to rescue. The scan registers
+    them once they are live.
 
     The download ledger (``track_downloads``) and ``library_history`` record the
     path an import landed at, which for a staged batch is the staging path, and
-    are repointed by the same call (so a rollback takes them back too). The
-    count returned is the
-    ``tracks`` count only: ledger rows exist on every install and prove nothing
-    about whose library rows these are. Left on the staging path, the ledger
-    went stale the moment the folder was emptied, and everything that asks it
-    "is this download still on disk?" (ownership for artists routed to the
-    audiobook library, for one) answered no and fetched the album again.
+    are repointed by the same call (so a rollback takes them back too). They do
+    not count: ledger rows exist on every install and prove nothing about the
+    catalogue. Left on the staging path, the ledger went stale the moment the
+    folder was emptied, and "is this download still on disk?" answered no and
+    fetched the album again.
     """
     def _update(old_path: str, new_path: str):
+        from core.library2.track_files import repoint_file_path
+
         conn = db._get_connection()
         try:
-            cur = conn.cursor()
-            cur.execute("UPDATE tracks SET file_path = ? WHERE file_path = ?",
-                        (new_path, old_path))
-            rowcount = getattr(cur, 'rowcount', None)
+            repointed = repoint_file_path(conn, old_path, new_path)
+            _repoint_legacy_before_import(db, conn, old_path, new_path)
             for table in _PATH_RECORD_TABLES:
                 try:
-                    cur.execute(f"UPDATE {table} SET file_path = ? WHERE file_path = ?",
-                                (new_path, old_path))
+                    conn.execute(f"UPDATE {table} SET file_path = ? WHERE file_path = ?",
+                                 (new_path, old_path))
                 except Exception as exc:  # noqa: BLE001 - an old db without the table must still publish
                     logger.debug("[Atomic Publish] could not repoint %s for %s: %s",
                                  table, old_path, exc)
             conn.commit()
         finally:
             conn.close()
-        try:
-            from core.settings import config_manager as _cm
-            if _cm.get_active_media_server() != 'soulsync':
-                return None
-        except Exception:  # noqa: BLE001 - can't tell whose rows these are → unknown
+        if not count_is_evidence:
             return None
-        return int(rowcount) if isinstance(rowcount, int) else None
+        return int(repointed) if isinstance(repointed, int) else None
     return _update
 
 
@@ -331,7 +346,7 @@ def recover_orphan_staging(transfer_dirs: Iterable[str], *,
             from database.music_database import MusicDatabase
             result = _publish.publish_album_batch(
                 root, transfer_dir, safe_move_file,
-                make_db_path_updater(MusicDatabase()))
+                make_db_path_updater(MusicDatabase(), count_is_evidence=False))
         except Exception as exc:  # noqa: BLE001
             logger.error("[Atomic Recovery] Publish of %s failed, files kept in staging: %s",
                          root, exc, exc_info=True)

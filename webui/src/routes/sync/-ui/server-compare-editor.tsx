@@ -31,6 +31,7 @@ import type {
 
 import {
   addServerTrack,
+  adoptServerPlaylist,
   addTrackPosition,
   alignMatchedIds,
   alignServerPlaylist,
@@ -50,6 +51,7 @@ import {
   compareSourceLabel,
   compareStats,
   deleteServerPlaylist,
+  fetchMirroredMatches,
   exportServerM3u,
   fetchComparePlaylist,
   formatDurationMs,
@@ -69,7 +71,7 @@ type CompareFilter = (typeof FILTERS)[number];
 
 /* ── Rows ─────────────────────────────────────────────────────────────────── */
 
-function SourceRow({
+export function SourceRow({
   track,
   index,
   hidden,
@@ -129,7 +131,7 @@ function SourceRow({
   );
 }
 
-function ServerRow({
+export function ServerRow({
   track,
   index,
   hidden,
@@ -139,6 +141,7 @@ function ServerRow({
   onUnmatch,
   onRemove,
   onFindAndAdd,
+  presync = false,
 }: {
   track: CompareTrack;
   index: number;
@@ -147,8 +150,11 @@ function ServerRow({
   onSelect: () => void;
   onSwap: (index: number) => void;
   onUnmatch: (index: number) => void;
-  onRemove: (index: number, serverTrackId: string) => void;
+  /** no remove before a sync: there is no server playlist to remove from */
+  onRemove?: (index: number, serverTrackId: string) => void;
   onFindAndAdd: (index: number) => void;
+  /** the pre-sync editor (#1958): the right side is your library, not a server playlist */
+  presync?: boolean;
 }) {
   const svr = track.server_track;
   // 564-577: missing on the server — the whole slot is the Find & add button.
@@ -177,13 +183,17 @@ function ServerRow({
               <path d="m21 21-4.35-4.35" />
             </svg>
           </div>
-          <span className="empty-slot-label">Find &amp; add</span>
-          <span className="empty-slot-hint">{compareMissingHint(track)}</span>
+          <span className="empty-slot-label">
+            {presync ? 'Pick from your library' : 'Find & add'}
+          </span>
+          <span className="empty-slot-hint">
+            {presync ? 'Not in your library, the sync downloads it' : compareMissingHint(track)}
+          </span>
           {/* #1128: a durable manual match exists but its library track isn't in
               this playlist yet, so it can't pair here. Say so — otherwise this
               row is indistinguishable from one that was never matched and the
               user re-matches the same track forever. The real sync DOES use it. */}
-          {track.has_manual_match ? (
+          {track.has_manual_match && !presync ? (
             <span
               className="empty-slot-matched-note"
               title="Your manual match is saved and will be used on the next sync — this track just isn't in the server playlist yet."
@@ -232,7 +242,9 @@ function ServerRow({
           <button
             type="button"
             className="server-track-swap-btn"
-            title="Swap for different version"
+            title={
+              presync ? 'Sync a different version from your library' : 'Swap for different version'
+            }
             onClick={(event) => {
               event.stopPropagation();
               onSwap(index);
@@ -256,8 +268,12 @@ function ServerRow({
           <button
             type="button"
             className="server-track-unmatch-btn"
-            title="Remove match (keep in playlist)"
-            aria-label="Remove match (keep in playlist)"
+            title={
+              presync ? 'Not this one, download it instead' : 'Remove match (keep in playlist)'
+            }
+            aria-label={
+              presync ? 'Not this one, download it instead' : 'Remove match (keep in playlist)'
+            }
             onClick={(event) => {
               event.stopPropagation();
               onUnmatch(index);
@@ -276,27 +292,29 @@ function ServerRow({
             </svg>
           </button>
         )}
-        <button
-          type="button"
-          className="server-track-remove-btn"
-          title="Remove from playlist"
-          onClick={(event) => {
-            event.stopPropagation();
-            onRemove(index, svr.id ?? '');
-          }}
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
+        {onRemove && (
+          <button
+            type="button"
+            className="server-track-remove-btn"
+            title="Remove from playlist"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove(index, svr.id ?? '');
+            }}
           >
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
       <div className="server-track-status-dot" />
     </div>
@@ -309,9 +327,17 @@ export interface ServerCompareEditorProps {
   playlist: ServerPlaylist;
   mirrored: MirroredMatch | null;
   onBack: () => void;
+  /** adopted into My Playlists: compare against that from now on */
+  onAdopted?: (mirrored: MirroredMatch | null) => void;
 }
 
-export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompareEditorProps) {
+export function ServerCompareEditor({
+  playlist,
+  mirrored,
+  onBack,
+  onAdopted,
+}: ServerCompareEditorProps) {
+  const [adopting, setAdopting] = useState(false);
   const [data, setData] = useState<CompareResponse | null>(null);
   /**
    * The tracks are state of their own, apart from `data`, because that is the
@@ -655,6 +681,31 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
     }
   }, [playlist.name, onBack]);
 
+  const adopt = useCallback(async () => {
+    setAdopting(true);
+    try {
+      const result = await adoptServerPlaylist(playlistIdRef.current, playlist.name);
+      if (!result.success) {
+        window.showToast?.(result.error || 'Could not adopt the playlist', 'error');
+        return;
+      }
+      const skipped = result.skipped ? `, ${result.skipped} without an artist left out` : '';
+      window.showToast?.(
+        `Added to My Playlists: ${result.name} (${result.track_count} tracks${skipped})`,
+        'success',
+      );
+      const matches = await fetchMirroredMatches(playlist.name, playlistIdRef.current);
+      onAdopted?.(matches.find((m) => m.id === result.id) ?? matches[0] ?? null);
+    } catch (error) {
+      window.showToast?.(
+        `Adopt failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+        'error',
+      );
+    } finally {
+      setAdopting(false);
+    }
+  }, [playlist.name, onAdopted]);
+
   const stats = compareStats(tracks);
   const outOfOrder = Boolean(data?.order_status?.out_of_order);
   const serverLabel = compareServerLabel(data?.server_type);
@@ -731,7 +782,27 @@ export function ServerCompareEditor({ playlist, mirrored, onBack }: ServerCompar
           markup's own — the vanilla never wrote this text, it just unhid it. */}
       {data && !mirrored && (
         <div id="server-no-source-banner" className="server-no-source-banner">
-          No mirrored playlist found matching this name. Showing server tracks only.
+          {playlist.readonly ? (
+            <span>
+              Read-only on the server (a smart playlist, or one you can't edit). The server builds
+              it, so it stays as it is.
+            </span>
+          ) : (
+            <>
+              <span>
+                Made outside SoulSync. Adopt it to manage it here: it joins My Playlists under the
+                same name, and syncing it updates this playlist.
+              </span>
+              <button
+                type="button"
+                className="server-adopt-btn"
+                disabled={adopting}
+                onClick={() => void adopt()}
+              >
+                {adopting ? 'Adopting…' : 'Adopt into My Playlists'}
+              </button>
+            </>
+          )}
         </div>
       )}
 

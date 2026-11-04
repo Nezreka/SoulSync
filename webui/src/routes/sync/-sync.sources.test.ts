@@ -39,12 +39,14 @@ describe('endpoint families', () => {
     expect(SYNC_SERVICES).toContain('/api/spotify-public/update_phase/');
   });
 
-  it('listenbrainz cancel BORROWS the youtube endpoint (no LB cancel exists)', () => {
+  it('listenbrainz cancel uses its own endpoint, in the vanilla too', () => {
+    // found in the second #1062 review: it borrowed the YouTube cancel, which
+    // looks the mbid up in the YouTube states and answers 404, so a
+    // ListenBrainz sync could not be cancelled
     expect(SYNC_SOURCES.listenbrainz.api.syncCancel('mbid-1')).toBe(
-      '/api/youtube/sync/cancel/mbid-1',
+      '/api/listenbrainz/sync/cancel/mbid-1',
     );
-    // The vanilla proves it: no LB cancel route anywhere in the family.
-    expect(SYNC_SERVICES).not.toContain('/api/listenbrainz/sync/cancel');
+    expect(SYNC_SERVICES).toContain('/api/listenbrainz/sync/cancel/');
   });
 
   it('beatport state + reset ride the charts endpoints', () => {

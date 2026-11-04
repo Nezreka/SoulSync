@@ -81,3 +81,17 @@ def test_wishlist_owned_sweep_sees_the_download(db, tmp_path):
     match = find_owned_match(db, "early breeze", [{"name": "Petit Biscuit"}], "insomnia",
                              "plex", strict_identity=True)
     assert match is not None and match[0].file_path == str(path)
+
+
+@pytest.mark.parametrize("scope, owned", [("shared", True), (7, False)])
+def test_a_download_counts_only_in_its_own_library(db, tmp_path, monkeypatch, scope, owned):
+    """lib2 port: with own libraries the ledger counts only files of the
+    caller's library, as the routed-artist ledger read does. A download no
+    library row claims yet belongs to the shared library, never to a
+    housemate's own one."""
+    path = _song(tmp_path)
+    _record_download(db, path, "early breeze", "Petit Biscuit")
+    monkeypatch.setattr("core.library2.sql_util.ambient_scope", lambda: scope)
+
+    track, _confidence = db.check_track_exists("Early Breeze", "Petit Biscuit", include_downloads=True)
+    assert (track is not None) is owned

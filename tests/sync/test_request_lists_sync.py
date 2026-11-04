@@ -190,18 +190,31 @@ def test_a_non_spotify_request_list_removes_nothing():
     profile_client.remove_playlist_tracks.assert_not_called()
 
 
-def test_library_spotify_id_reads_the_tracks_table(mdb):
+def test_library_spotify_id_reads_the_catalogue_track_behind_the_server_id(mdb, monkeypatch):
+    """the sync's track id is the active server's; the spotify id is the
+    catalogue track's. mapping first, then the compatibility pair."""
+    from tests.support.catalogue_seed import seed_library_track
+    monkeypatch.setattr("core.settings.config_manager.get_active_media_server", lambda: "plex")
     with mdb._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Album')")
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, spotify_track_id) "
-                     "VALUES (5, 1, 1, 'Song', ?)", (SP_A,))
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title) VALUES (6, 1, 1, 'Other')")
+        mapped = seed_library_track(conn, artist="Artist", album="Album", title="Song",
+                                    track_server_id="old-5")
+        conn.execute("UPDATE lib2_tracks SET spotify_id = ? WHERE id = ?", (SP_A, mapped))
+        conn.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id,"
+                     " server_source, server_id) VALUES ('track', ?, 'plex', '5')", (mapped,))
+        seed_library_track(conn, artist="Artist", album="Album", title="Other",
+                           track_server_id="6")
+        compat = seed_library_track(conn, artist="Artist", album="Album", title="Third",
+                                    track_server_id="7")
+        conn.execute("UPDATE lib2_tracks SET spotify_id = ? WHERE id = ?", (SP_B, compat))
         conn.commit()
     assert ss._library_spotify_id(mdb, 5) == SP_A
     assert ss._library_spotify_id(mdb, "5") == SP_A
+    assert ss._library_spotify_id(mdb, "7") == SP_B
     assert ss._library_spotify_id(mdb, 6) is None
     assert ss._library_spotify_id(mdb, None) is None
+    # a catalogue id is never read as the server's
+    assert str(mapped) not in ("5", "6", "7")
+    assert ss._library_spotify_id(mdb, mapped) is None
 
 
 # ── the wishlist step is the job ─────────────────────────────────────────────

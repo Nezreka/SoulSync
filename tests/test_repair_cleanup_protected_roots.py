@@ -93,12 +93,14 @@ def test_cleanup_empty_parents_still_prunes_ordinary_dirs(tmp_path, monkeypatch)
 
 
 def test_cleanup_empty_dirs_keeps_nested_staging_root(tmp_path, monkeypatch):
+    # this branch has one cleanup helper; upstream's _cleanup_empty_dirs
+    # served the retired duplicate/single-dedup fixes
     transfer, staging, downloads, album_dir, track = _unraid_layout(tmp_path)
     _patch_roots(monkeypatch, transfer, staging, downloads)
     _, w = _worker(tmp_path)
 
     track.unlink()
-    w._cleanup_empty_dirs(str(album_dir))
+    w._cleanup_empty_parents(str(track))
 
     assert not album_dir.exists()
     assert staging.is_dir()

@@ -20,20 +20,23 @@ def db(tmp_path):
 
 
 def _seed(db, artists):
-    """artists: [(artist_id, genres_list, [plays per track, ...]), ...]"""
+    """artists: [(artist_id, genres_list, [plays per track, ...]), ...]
+    Library v2 port: owned lib2 tracks, plays linked through lib2_track_id."""
     c = sqlite3.connect(str(db.database_path))
     track_id = 1000
     for aid, genres, plays in artists:
-        c.execute("INSERT INTO artists (id, name, genres) VALUES (?, ?, ?)",
-                  (str(aid), f"artist {aid}", json.dumps(genres)))
-        c.execute("INSERT INTO albums (id, artist_id, title) VALUES (?, ?, 'al')", (f"al{aid}", str(aid)))
+        c.execute("INSERT INTO lib2_artists (id, name, name_key, genres) VALUES (?, ?, ?, ?)",
+                  (aid + 1, f"artist {aid}", f"artist {aid}", json.dumps(genres)))
+        album = c.execute("INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'al')",
+                          (aid + 1,)).lastrowid
         for n in plays:
             track_id += 1
-            c.execute("INSERT INTO tracks (id, album_id, artist_id, title) VALUES (?, ?, ?, 't')",
-                      (str(track_id), f"al{aid}", str(aid)))
+            c.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (?, ?, 't')", (track_id, album))
+            c.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                      (track_id, f"/m/{track_id}.flac"))
             for i in range(n):
                 c.execute(
-                    "INSERT INTO listening_history (track_id, title, artist, played_at, db_track_id, profile_id) "
+                    "INSERT INTO listening_history (track_id, title, artist, played_at, lib2_track_id, profile_id) "
                     "VALUES (?, 't', ?, datetime('now', ?), ?, 1)",
                     (str(track_id), f"artist {aid}", f"-{i + 1} hours", track_id))
     c.commit()
@@ -51,7 +54,7 @@ def test_breakdown_counts_every_play_of_a_track(db):
     _seed(db, [(1, ["Rock"], [3, 2]), (2, ["Jazz"], [1])])
     c = sqlite3.connect(str(db.database_path))
     # a play with no library track counts for nothing, same as before
-    c.execute("INSERT INTO listening_history (title, artist, played_at, db_track_id, profile_id) "
+    c.execute("INSERT INTO listening_history (title, artist, played_at, lib2_track_id, profile_id) "
               "VALUES ('x', 'y', datetime('now'), NULL, 1)")
     c.commit()
     c.close()
@@ -86,4 +89,4 @@ def test_played_sql_joins_tracks_once_per_track_not_per_play(db):
     # the plays are grouped first, then the join walks the grouped rows
     assert any(s.startswith("MATERIALIZE played") for s in plan), plan
     assert "SCAN played" in plan, plan
-    assert any("SEARCH t USING INDEX sqlite_autoindex_tracks_1" in s for s in plan), plan
+    assert any(s.startswith("SEARCH t USING INTEGER PRIMARY KEY") for s in plan), plan

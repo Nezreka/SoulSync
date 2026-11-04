@@ -13,6 +13,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
+
 import type { LibraryCheckTrack, SearchAlbum, SearchTrack } from './-search.types';
 import type { OwnershipState } from './-ui/search-results';
 
@@ -107,6 +109,14 @@ export function useLibraryCheck(albums: SearchAlbum[], tracks: SearchTrack[]): O
   ].join('|');
   const rowsRef = useRef({ albums, tracks });
   rowsRef.current = { albums, tracks };
+  // "in your library" means the library picked in the header (#1199): a
+  // switch asks again for the same rows
+  const [scopeEpoch, setScopeEpoch] = useState(0);
+  useEffect(() => {
+    const bump = () => setScopeEpoch((n) => n + 1);
+    window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, bump);
+    return () => window.removeEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, bump);
+  }, []);
 
   useEffect(() => {
     const { albums: askAlbums, tracks: askTracks } = rowsRef.current;
@@ -133,7 +143,7 @@ export function useLibraryCheck(albums: SearchAlbum[], tracks: SearchTrack[]): O
       live = false;
       controller.abort();
     };
-  }, [key, recheck]);
+  }, [key, scopeEpoch, recheck]);
 
   return ownership;
 }

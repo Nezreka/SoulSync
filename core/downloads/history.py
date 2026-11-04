@@ -258,8 +258,32 @@ def record_sync_history_completion(database, batch_id: str, batch: dict) -> None
     """Update sync_history with completion stats + per-track results.
 
     NOTE: Called from within tasks_lock context — does NOT acquire it here.
-    Reads from `download_tasks` (also lock-protected by caller).
+    Reads from `download_tasks` (also lock-protected by caller). A caller that
+    can let go of the lock first builds under it and writes after
+    (build_sync_history_completion / write_sync_history_completion).
     """
+    write_sync_history_completion(database, batch_id, build_sync_history_completion(batch_id, batch))
+
+
+def write_sync_history_completion(database, batch_id: str, payload) -> None:
+    """The database half of record_sync_history_completion. Needs no lock:
+    under tasks_lock a busy write lock held every download page reader up to
+    the busy timeout (Oct 31 2026)."""
+    if not payload:
+        return
+    try:
+        database.update_sync_history_completion(
+            batch_id, payload['tracks_found'], payload['completed_count'], payload['failed_count'])
+        if payload['track_results']:
+            database.update_sync_history_track_results(batch_id, json.dumps(payload['track_results']))
+    except Exception as e:
+        logger.warning(f"Failed to record sync history completion: {e}")
+
+
+def build_sync_history_completion(batch_id: str, batch: dict):
+    """The tasks_lock half: everything record_sync_history_completion reads
+    from the batch and download_tasks, as a payload for
+    write_sync_history_completion. Called under tasks_lock."""
     try:
         analysis_results = batch.get('analysis_results', [])
         # a batch that ran no analysis of its own has nothing to say about how
@@ -319,10 +343,9 @@ def record_sync_history_completion(database, batch_id: str, batch: dict) -> None
             }
             track_results.append(entry)
 
-        database.update_sync_history_completion(batch_id, tracks_found, completed_count, failed_count)
-
-        if track_results:
-            database.update_sync_history_track_results(batch_id, json.dumps(track_results))
+        return {'tracks_found': tracks_found, 'completed_count': completed_count,
+                'failed_count': failed_count, 'track_results': track_results}
 
     except Exception as e:
         logger.warning(f"Failed to record sync history completion: {e}")
+        return None

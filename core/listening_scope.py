@@ -41,6 +41,17 @@ _HAS_ACCOUNT = " OR ".join(
 # katy perry stays out of the admin's stats and mixes)
 MEDIA_ACCOUNT_COLUMNS = ('plex_account_id', 'plex_home_user_id')
 
+# jellyfin: the poll reads each linked profile's jellyfin user as well as the
+# app's own, and records the app's user here. a profile linked to that same
+# user shares the pile instead of owning an empty one, and with jellyfin not
+# the server being read (no key) a jellyfin link owns nothing
+JELLYFIN_OWNER_KEY = 'jellyfin_owner_user_id'
+_JELLYFIN_OWNS_PILE = (
+    "(jellyfin_user_id IS NOT NULL AND jellyfin_user_id != '' AND EXISTS ("
+    f"SELECT 1 FROM metadata WHERE key = '{JELLYFIN_OWNER_KEY}' "
+    "AND value != '' AND value != jellyfin_user_id))"
+)
+
 
 def _owns_pile_sql(conn) -> str:
     """the "this profile has its own pile" condition, for the columns this
@@ -48,6 +59,8 @@ def _owns_pile_sql(conn) -> str:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
     parts = [_HAS_ACCOUNT]
     parts += [f"({c} IS NOT NULL AND {c} != '')" for c in MEDIA_ACCOUNT_COLUMNS if c in cols]
+    if 'jellyfin_user_id' in cols:
+        parts.append(_JELLYFIN_OWNS_PILE)
     return " OR ".join(parts)
 
 
@@ -142,14 +155,14 @@ def play_duration_sql(alias: str = "") -> str:
 
     only web-player plays carry a duration. plex, last.fm and listenbrainz
     plays come in without one, so 689 plays summed to 45 minutes. those fall
-    back to the length of the library track the play is linked to. the cast
-    matters: db_track_id is an integer and tracks.id is text, and without it
-    sqlite scans every track for every play.
+    back to the length of the library track the play is linked to. Ours: that
+    link is ``lib2_track_id`` (``db_track_id`` is the media server's id), a
+    primary-key lookup on lib2_tracks.
     """
     col = f"{alias}." if alias else "listening_history."
     return (f"(CASE WHEN {col}duration_ms > 0 THEN {col}duration_ms "
-            f"ELSE COALESCE((SELECT _pt.duration FROM tracks _pt "
-            f"WHERE _pt.id = CAST({col}db_track_id AS TEXT)), 0) END)")
+            f"ELSE COALESCE((SELECT _pt.duration FROM lib2_tracks _pt "
+            f"WHERE _pt.id = {col}lib2_track_id), 0) END)")
 
 
 def total_play_ms_sql(rows: str) -> str:
@@ -161,16 +174,16 @@ def total_play_ms_sql(rows: str) -> str:
     plays per track first and looks each track up once.
 
     `rows` names the table or cte the outer SELECT reads (it needs
-    duration_ms and db_track_id). it's read twice, so make it a MATERIALIZED
+    duration_ms and lib2_track_id). it's read twice, so make it a MATERIALIZED
     cte of the plays you want or the history gets scanned twice."""
     return (
         "(COALESCE(SUM(CASE WHEN duration_ms > 0 THEN duration_ms END), 0) + "
         "COALESCE((SELECT SUM(_pp.n * COALESCE(_pt.duration, 0)) FROM ("
-        f"SELECT db_track_id AS tid, COUNT(*) AS n FROM {rows} "
+        f"SELECT lib2_track_id AS tid, COUNT(*) AS n FROM {rows} "
         # the plays play_duration_sql sends to the track, null duration included
-        "WHERE NOT COALESCE(duration_ms > 0, 0) AND db_track_id IS NOT NULL "
-        "GROUP BY db_track_id) _pp "
-        "JOIN tracks _pt ON _pt.id = CAST(_pp.tid AS TEXT)), 0))"
+        "WHERE NOT COALESCE(duration_ms > 0, 0) AND lib2_track_id IS NOT NULL "
+        "GROUP BY lib2_track_id) _pp "
+        "JOIN lib2_tracks _pt ON _pt.id = _pp.tid), 0))"
     )
 
 
@@ -224,17 +237,28 @@ PLEX_OWNER_ACCOUNT = '1'
 
 def media_account_owners(database, server_source: str) -> dict:
     """{server account id: pile} for every profile linked to an account on
-    this server. plex only for now; the owner's account is the shared pile"""
-    if server_source != 'plex':
+    this server (plex and jellyfin); the app's own account is the shared pile"""
+    if server_source == 'plex':
+        owners = {PLEX_OWNER_ACCOUNT: SHARED_OWNER}
+        columns = MEDIA_ACCOUNT_COLUMNS
+    elif server_source == 'jellyfin':
+        try:
+            app_user = database.get_metadata(JELLYFIN_OWNER_KEY)
+        except Exception:  # noqa: BLE001 - no owner known: nothing to attribute
+            app_user = None
+        if not app_user:
+            return {}
+        owners = {str(app_user): SHARED_OWNER}
+        columns = ('jellyfin_user_id',)
+    else:
         return {}
-    owners = {PLEX_OWNER_ACCOUNT: SHARED_OWNER}
     conn = None
     try:
         conn = database._get_connection()
         cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
         # sign-in's own record first, then the home-user link; lowest id wins
         # a tie, so two profiles on one account can't split its plays
-        for col in [c for c in MEDIA_ACCOUNT_COLUMNS if c in cols]:
+        for col in [c for c in columns if c in cols]:
             for pid, account in conn.execute(
                     f"SELECT id, {col} FROM profiles WHERE {col} IS NOT NULL AND {col} != '' "
                     f"AND id != ? ORDER BY id DESC", (SHARED_OWNER,)).fetchall():

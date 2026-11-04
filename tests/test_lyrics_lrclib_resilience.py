@@ -348,6 +348,15 @@ class _DB:
         return conn
 
 
+def _native_rows(monkeypatch, rows):
+    """lib2 port: the scan walks the native file subjects, not a cursor."""
+    subjects = [{"track_id": tid, "title": title, "artist_name": artist, "album_title": album,
+                 "path": path, "duration": duration}
+                for tid, title, artist, album, path, duration in rows]
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *a, **k: subjects)
+
+
 def _ctx(db, findings):
     return SimpleNamespace(
         db=db,
@@ -368,6 +377,7 @@ def _scan_with_probe(tmp_path, monkeypatch, probe, n=7):
     fake_client = SimpleNamespace(api=object(), check_remote_lyrics=probe)
     monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
     findings = []
+    _native_rows(monkeypatch, rows)
     result = MissingLyricsJob().scan(_ctx(_DB(rows), findings))
     return result, findings
 
@@ -474,6 +484,7 @@ def test_scan_falls_back_to_bool_probe(tmp_path, monkeypatch):
         has_remote_lyrics=lambda title, *a, **k: True if title == "Song" else None)
     monkeypatch.setattr("core.lyrics_client.lyrics_client", fake_client)
     findings = []
+    _native_rows(monkeypatch, rows)
     result = MissingLyricsJob().scan(_ctx(_DB(rows), findings))
     assert result.findings_created == 1
     assert result.skipped == 0 and result.stopped_early == ''

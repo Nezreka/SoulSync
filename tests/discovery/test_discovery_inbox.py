@@ -164,15 +164,45 @@ def test_added_is_observed_not_clicked(db):
     inbox.refresh(db, 1, today=TODAY, concerts=lambda n: {'events': []})
     assert inbox.unread_count(db, 1) == 1
     # it's in the library now, and the saved artist got watched
+    from tests.lib2_seed import track as _track
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name) VALUES (9, 'Tool')")
-    conn.execute("INSERT INTO albums (id, title, artist_id) VALUES (90, 'Fear Inoculum', 9)")
+    _track(conn, 'Tool', 'Fear Inoculum', 'Pneuma')
     conn.commit()
     conn.close()
     db.add_artist_to_watchlist('sp-kv', 'Karnivool', profile_id=1, source='spotify')
     inbox.refresh(db, 1, today=TODAY, concerts=lambda n: {'events': []})
     assert inbox.unread_count(db, 1) == 0
     assert _titles(db, 'saved') == []
+
+
+def test_background_refresh_keeps_selected_library(db, monkeypatch):
+    """An own-library inbox must not clear news owned only by the shared library."""
+    import threading
+    from core.library_scope import library_scope
+    from tests.lib2_seed import track
+
+    monkeypatch.setattr('core.library_scope.SCOPE_PARKED', False)
+    monkeypatch.setattr('core.library_scope.any_own_library_exists', lambda: True)
+    monkeypatch.setattr('core.library_scope.library_scope_for_profile', lambda pid: 'shared')
+    monkeypatch.setattr('core.concerts_client.ticketmaster_configured', lambda: False)
+    _album(db, 'Tool', 'Fear Inoculum', (date.today() - timedelta(days=2)).isoformat())
+    with db._get_connection() as conn:
+        track(conn, 'Tool', 'Fear Inoculum', 'Pneuma')
+        conn.commit()
+    finished = threading.Event()
+    original = inbox.refresh
+
+    def refresh(*args, **kwargs):
+        try:
+            return original(*args, **kwargs)
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(inbox, 'refresh', refresh)
+    with library_scope(2):
+        assert inbox.refresh_in_background(db, 1)
+    assert finished.wait(5), 'background refresh did not finish'
+    assert _titles(db) == [('new_release', 'Fear Inoculum')]
 
 
 def test_whats_passed_is_pruned(db):

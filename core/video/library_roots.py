@@ -115,7 +115,19 @@ def library_roots(db, kind=None):
                 roots.append(str(anime))
         if item != "youtube":
             roots.extend(additional_paths(db, key.replace("_path", "_additional_paths")))
+            # the server's library folders SoulSync was told how to reach
+            # (Settings > Folders > Video > Your library's folders): a Movies
+            # folder on another drive is a movie library folder like any other
+            roots.extend(_mapped_folders(db, item))
     return normalize_paths(roots)
+
+
+def _mapped_folders(db, kind):
+    try:
+        from core.video import drive_map
+        return [e["local"] for e in drive_map.load(db) if e.get("kind") == kind]
+    except Exception:   # noqa: BLE001 - a bad map never hides the configured folders
+        return []
 
 
 def containing_root(path, roots):

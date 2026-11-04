@@ -249,16 +249,31 @@ class TestDuplicateCleaner:
 
 
 class TestQualityScanner:
-    def test_triggers_quality_upgrade_repair_job(self):
+    def test_triggers_the_job_that_now_owns_the_outcome(self):
+        """There is no quality-scan job left to trigger.
+
+        Queueing an upgrade candidate is what the wanted projection does
+        continuously; `monitoring_list_reconcile` mirrors the result. A saved
+        automation keeps its action name and now runs the job that actually
+        produces the outcome it was written for, instead of erroring on a job
+        that no longer exists.
+        """
         triggered = []
-        deps = _build_deps(run_repair_job_now=lambda job_id, **kw: triggered.append(job_id) or True)
+        deps = _build_deps(
+            run_repair_job_now=lambda job_id, **kwargs: triggered.append(
+                (job_id, kwargs.get('scope'))
+            ) or True
+        )
         result = auto_start_quality_scan({}, deps)
-        assert triggered == ['quality_upgrade']
+        assert triggered == [(
+            'monitoring_list_reconcile',
+            {'compatibility_source': 'start_quality_scan'},
+        )]
         assert result['status'] == 'completed'
         assert result['triggered'] is True
 
     def test_error_when_worker_unavailable(self):
-        deps = _build_deps(run_repair_job_now=lambda job_id, **kw: None)
+        deps = _build_deps(run_repair_job_now=lambda job_id, **kwargs: None)
         result = auto_start_quality_scan({}, deps)
         assert result['status'] == 'skipped'
 
@@ -272,7 +287,11 @@ class TestQualityScanner:
             return True
 
         auto_start_quality_scan({}, _build_deps(run_repair_job_now=_run))
-        assert seen == {'job': 'quality_upgrade', 'respect_enabled': True}
+        assert seen == {
+            'job': 'monitoring_list_reconcile',
+            'scope': {'compatibility_source': 'start_quality_scan'},
+            'respect_enabled': True,
+        }
 
     def test_a_disabled_job_reads_as_skipped_not_failed(self):
         """Turning a job off is a choice, not a fault. #1192 already taught us
@@ -324,6 +343,19 @@ class TestRunRepairJob:
         result = auto_run_repair_job({'job_id': 'no_such_job'}, _build_deps(run_repair_job_now=run))
         assert result['status'] == 'error'
         assert calls == []
+
+    def test_a_saved_automation_keeps_working_across_a_job_rename(self):
+        calls, run = self._record()
+        result = auto_run_repair_job({'job_id': 'lib2_wishlist_reconcile'},
+                                     _build_deps(run_repair_job_now=run))
+        assert calls == [('monitoring_list_reconcile', {'respect_enabled': True})]
+        assert result['status'] == 'completed'
+
+    def test_a_retired_job_is_skipped_not_failed(self):
+        calls, run = self._record()
+        result = auto_run_repair_job({'job_id': 'quality_upgrade_scan'},
+                                     _build_deps(run_repair_job_now=run))
+        assert result['status'] == 'skipped' and calls == []
 
     def test_the_block_lists_every_registered_job(self):
         from core.automation.blocks import blocks_for_scope

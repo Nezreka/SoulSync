@@ -388,12 +388,12 @@ describe('OperationsStudio (Simple Mode)', () => {
         'album_tag_consistency',
         'missing_lyrics',
         'missing_cover_art',
-        'duplicate_detector',
+        'empty_folder_cleaner',
       ],
     ],
     [
       'Audio Fidelity Sweep',
-      ['audio_corruption_detector', 'fake_lossless_detector', 'quality_upgrade_scanner'],
+      ['audio_corruption_detector', 'fake_lossless_detector', 'short_preview_track'],
     ],
     [
       'Metadata Polish',
@@ -406,9 +406,7 @@ describe('OperationsStudio (Simple Mode)', () => {
     const catalogueIds = [
       'audio_corruption_detector',
       'fake_lossless_detector',
-      'quality_upgrade_scanner',
       'short_preview_track',
-      'duplicate_detector',
       'album_tag_consistency',
       'comma_artist_splitter',
       'genre_cleanup',

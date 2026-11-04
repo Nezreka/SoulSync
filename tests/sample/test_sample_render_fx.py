@@ -10,6 +10,7 @@ never computed. these walk each one through the real blueprint, plus:
 - the demucs model name is the real checkpoint and its hash is checked
 """
 
+from tests.lib2_seed import file_track
 import os
 import time
 
@@ -64,11 +65,9 @@ def client(tmp_path, monkeypatch):
     db = mdb.get_database()
     conn = db._get_connection()
     try:
-        conn.execute("INSERT INTO artists (id, name) VALUES (1, 'FX Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'FX Album')")
-        conn.execute(
-            "INSERT INTO tracks (id, album_id, artist_id, title, file_path) VALUES (1, 1, 1, 'FX Track', ?)",
-            (str(wav),),
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'FX Artist')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'FX Album')")
+        file_track(conn, 1, 1, 'FX Track', str(wav),
         )
         conn.commit()
     finally:
@@ -93,7 +92,8 @@ def _preview_audio(c, **body):
 def _seed_analysis(bpm=120.0):
     from core.sample import store
 
-    store.save_analysis(1, {"bpm": bpm, "onsets": [], "duration_s": 8.0})
+    store.save_analysis(1, {"bpm": bpm, "onsets": [], "duration_s": 8.0},
+                        source_sig=store.source_signature(store.get_track_file_path(1)))
 
 
 # ── fx params ──────────────────────────────────────────────────────────
@@ -332,12 +332,24 @@ def test_v2_rows_reanalyze_for_the_key(client):
     c, _ = client
     from core.sample import store
 
-    store.save_analysis(1, {"bpm": 99.0, "onsets": [], "duration_s": 8.0, "analyzer_version": 2})
+    store.save_analysis(1, {"bpm": 99.0, "onsets": [], "duration_s": 8.0, "analyzer_version": 2},
+                        source_sig=store.source_signature(store.get_track_file_path(1)))
     r = c.get("/api/v1/sample/analysis", query_string={"track_id": 1})
     assert r.status_code == 202
     data = r.get_json()["data"]
     assert data["bpm"] == 99.0  # the old numbers stay visible meanwhile
     assert data["status"] in ("pending", "running", "done")
+    # Keep this fixture's database/path alive until its queued job has finished.
+    deadline = time.monotonic() + 10
+    from core.sample import worker
+    while time.monotonic() < deadline:
+        status = worker.get_status(1)
+        if status == "done":
+            break
+        assert not status.startswith("error:"), status
+        time.sleep(0.01)
+    else:
+        pytest.fail("the old-version analysis never completed")
 
 
 # ── stale source files ─────────────────────────────────────────────────

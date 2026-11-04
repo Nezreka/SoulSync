@@ -43,6 +43,24 @@ def test_fresh_install_seeds_exactly_two_builtin_profiles(db):
     # renames the default row to 'Default' — see
     # tests/quality/test_migrate_to_profiles.py for the rename itself.
     assert names == {"Default", "Upgrade until top quality"}
+    profiles = {p["name"]: p for p in profiles}
+    assert profiles["Default"]["upgrade_policy"] == "none"
+    assert profiles["Upgrade until top quality"]["upgrade_policy"] == "until_cutoff"
+
+
+def test_schema_upgrade_preserves_an_existing_upgrade_policy(db):
+    conn = db._get_connection()
+    try:
+        conn.execute(
+            "UPDATE quality_profiles SET upgrade_policy='acceptable' WHERE is_default=1")
+        ensure_quality_profiles_schema(conn)
+        conn.commit()
+        policy = conn.execute(
+            "SELECT upgrade_policy FROM quality_profiles WHERE is_default=1"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert policy == "acceptable"
 
 
 def test_existing_profile_table_gets_upgrade_cutoff_columns(db):
@@ -94,7 +112,7 @@ def test_existing_profile_table_gets_upgrade_cutoff_columns(db):
     assert "upgrade_policy" in cols
     assert "upgrade_cutoff_index" in cols
     assert "folder_artist_override" not in cols
-    assert row["upgrade_policy"] == "acceptable"
+    assert row["upgrade_policy"] == "none"
     assert row["upgrade_cutoff_index"] == 0
 
 

@@ -551,6 +551,134 @@
         return Array.from(host.querySelectorAll('input')).map(function (input) { return input.value.trim(); }).filter(Boolean);
     }
 
+    // ── your library's folders: every folder the server's libraries read ─────
+    // (core/video/drive_map). each Movies / TV folder with its file count; the
+    // ones soulsync already reaches are ticked, the rest get a box and a check
+    // that finds a sample of their files.
+    var DRIVES_URL = '/api/video/libraries/drives';
+    var _driveTimers = {};
+    var KIND_LABEL = { movie: 'Movies', episode: 'TV' };
+    function driveRowHtml(d) {
+        var kind = d.kind || '';
+        var meta = [d.library, KIND_LABEL[kind] || 'Drive',
+            d.files ? Number(d.files).toLocaleString() + ' files' : 'no files'].filter(Boolean).join(' · ');
+        var head = '<div class="video-drive-server"><code title="' + esc(d.server) + '">' + esc(d.server) + '</code>' +
+            '<span class="video-drive-count">' + esc(meta) + '</span></div>';
+        var attrs = ' data-server="' + esc(d.server) + '" data-kind="' + esc(kind) + '"';
+        if (d.auto) {
+            return '<div class="video-drive-row is-auto"' + attrs + ' data-local="' + esc(d.local) + '">' + head +
+                '<div class="video-drive-known">' + esc(d.local) + '</div>' +
+                '<div class="video-drive-status is-ok">✓ ' + esc(d.role || 'Already reached') + '</div></div>';
+        }
+        // the example is the drive's own path on a share: /mnt/easystore3/PLEX/TV
+        // SHOWS reads \\nas\easystore3\PLEX\TV SHOWS
+        var parts = String(d.server).split('/').filter(Boolean);
+        var example = '\\\\nas\\' + (parts.length > 1 ? parts.slice(1) : parts).join('\\');
+        return '<div class="video-drive-row"' + attrs + '>' + head +
+            '<input type="text" class="video-drive-local" value="' + esc(d.local || '') + '" ' +
+            'placeholder="Where SoulSync reaches it, e.g. ' + esc(example) + '" ' +
+            'aria-label="Where SoulSync reaches ' + esc(d.server) + '">' +
+            '<div class="video-drive-status" aria-live="polite"></div></div>';
+    }
+    function checkDrive(row) {
+        var input = row.querySelector('.video-drive-local');
+        var status = row.querySelector('.video-drive-status');
+        if (!input) return;
+        var local = (input.value || '').trim();
+        status.className = 'video-drive-status';
+        if (!local) { status.textContent = 'Not reached yet: works the way it does today'; return; }
+        status.textContent = 'Checking…';
+        fetch(DRIVES_URL + '/check', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ server: row.getAttribute('data-server'), local: local }),
+        }).then(function (r) { return r.json(); }).then(function (res) {
+            if ((input.value || '').trim() !== local) return;   // typed on meanwhile
+            status.textContent = (res.ok ? '✓ ' : '✗ ') + (res.message || '');
+            status.classList.add(res.ok ? 'is-ok' : 'is-bad');
+            if (res.ok) fillSiblings(row, local);
+        }).catch(function () { status.textContent = 'The check failed'; status.classList.add('is-bad'); });
+    }
+    // one folder of a drive checked out: the drive's other folders sit beside
+    // it the same way (/mnt/easystore3/PLEX/MOVIES next to .../TV SHOWS), so
+    // they're filled in and checked too. never over what was typed.
+    function drivePrefix(server, local) {
+        var s = String(server).split('/').filter(Boolean);
+        var l = String(local).split(/[\\/]/);
+        var n = 0;
+        // never past the drive itself (/mnt/easystore3): a share named like its
+        // drive would otherwise match on up to /mnt and guess every other drive
+        var keep = s.length > 2 ? 2 : 1;
+        while (n < s.length - keep && n < l.length - 1 &&
+               s[s.length - 1 - n].toLowerCase() === String(l[l.length - 1 - n]).toLowerCase()) n++;
+        if (!n) return null;
+        var sep = local.indexOf('\\') >= 0 ? '\\' : '/';
+        return { server: '/' + s.slice(0, s.length - n).join('/'),
+                 local: l.slice(0, l.length - n).join(sep), sep: sep };
+    }
+    function fillSiblings(row, local) {
+        var pre = drivePrefix(row.getAttribute('data-server'), local);
+        if (!pre) return;
+        var host = document.getElementById('video-drive-map');
+        Array.from(host.querySelectorAll('.video-drive-row')).forEach(function (other) {
+            var input = other.querySelector('.video-drive-local');
+            var server = other.getAttribute('data-server') || '';
+            if (other === row || !input || (input.value || '').trim()) return;
+            if (server.indexOf(pre.server + '/') !== 0) return;
+            input.value = pre.local + pre.sep + server.slice(pre.server.length + 1).split('/').join(pre.sep);
+            checkDrive(other);
+        });
+    }
+    function renderDriveMap(folders) {
+        var host = document.getElementById('video-drive-map');
+        if (!host) return;
+        if (!folders || !folders.length) {
+            host.innerHTML = '<div class="setting-help-text">No library folders yet: pick your libraries and scan first.</div>';
+            return;
+        }
+        // a drive's folders side by side, so filling one fills its neighbours
+        folders = folders.slice().sort(function (a, b) {
+            return String(a.server).localeCompare(String(b.server));
+        });
+        host.innerHTML = folders.map(driveRowHtml).join('');
+        Array.from(host.querySelectorAll('.video-drive-row')).forEach(function (row) {
+            var input = row.querySelector('.video-drive-local');
+            if (!input) return;
+            input.addEventListener('input', function () {
+                var key = row.getAttribute('data-server');
+                clearTimeout(_driveTimers[key]);
+                _driveTimers[key] = setTimeout(function () { checkDrive(row); }, 600);
+            });
+            checkDrive(row);
+        });
+    }
+    function loadDriveMap() {
+        return fetch(DRIVES_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) renderDriveMap(d.folders || []); })
+            .catch(function () {});
+    }
+    function saveDriveMap() {
+        var host = document.getElementById('video-drive-map');
+        if (!host) return;
+        var map = Array.from(host.querySelectorAll('.video-drive-row')).map(function (row) {
+            var input = row.querySelector('.video-drive-local');
+            return { server: row.getAttribute('data-server'), kind: row.getAttribute('data-kind') || null,
+                     local: input ? (input.value || '').trim() : (row.getAttribute('data-local') || '') };
+        });
+        fetch(DRIVES_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ map: map }),
+        }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+                if (!res.ok) { toast(res.j.error || 'Could not save the folders', 'error'); return; }
+                toast('Folders saved: ' + (res.j.map || []).length + ' reached', 'success');
+                renderDriveMap(res.j.folders || []);
+            }).catch(function () { toast('Could not save the folders', 'error'); });
+    }
+    document.addEventListener('click', function (e) {
+        if (e.target && e.target.id === 'video-drive-map-save') saveDriveMap();
+    });
+
     function loadDownloads() {
         return fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -570,6 +698,7 @@
                 setC('video-tv-4k-enabled', d.tv_4k_enabled);
                 setP('video-tv-4k-path', d.tv_4k_path);
                 refreshVideoFolders();
+                loadDriveMap();
                 _videoMode = d.download_mode || 'soulseek';
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
                 var ms = document.getElementById('video-download-mode');
@@ -580,6 +709,8 @@
                 if (srd) srd.checked = d.seed_remove_data !== false;
                 var smd = document.getElementById('video-seed-mode');
                 if (smd) smd.value = d.seed_mode || 'soulsync';
+                var urc = document.getElementById('video-usenet-remove-completed');
+                if (urc) urc.value = d.usenet_remove_completed || 'off';
                 _videoSeedRules = d.seed_overrides || {};
                 renderSeedIndexers();
                 wireSeedIndexers();
@@ -619,6 +750,7 @@
                 seed_remove_data: !!(document.getElementById('video-seed-remove-data') || {}).checked,
                 seed_mode: val('video-seed-mode') || 'soulsync',
                 seed_overrides: _videoSeedRules,
+                usenet_remove_completed: val('video-usenet-remove-completed') || 'off',
             })
         }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
           .catch(function () { /* ignore */ });
@@ -1003,6 +1135,9 @@
             var el = document.getElementById(id);
             if (el && !el._vdWired) { el._vdWired = true; el.addEventListener('change', function () { saveDownloads(true); }); }
         });
+        // Remove Completed (usenet) saves when it changes, like the folders above.
+        var urcSel = document.getElementById('video-usenet-remove-completed');
+        if (urcSel && !urcSel._vdWired) { urcSel._vdWired = true; urcSel.addEventListener('change', function () { saveDownloads(true); }); }
         // a 4K switch shows its folder; switching one off keeps the path for next time
         document.querySelectorAll('[data-video-4k-toggle]').forEach(function (box) {
             if (box._vdWired) return;
@@ -1077,6 +1212,54 @@
         }
         var del = document.querySelector('[data-vq-profile-delete]');
         if (del) del.classList.toggle('hidden', !named);
+        renderKindDefaults();
+    }
+
+    // New movies use / New shows use: the profile a title of that kind gets
+    // when nothing picked one for it (0 = Default)
+    var _vqKindDefaults = null;
+    function renderKindDefaults() {
+        var sels = document.querySelectorAll('[data-vq-kind-default]');
+        if (!sels.length) return;
+        function fill(defs) {
+            for (var i = 0; i < sels.length; i++) {
+                var sel = sels[i], kind = sel.getAttribute('data-vq-kind-default');
+                var cur = (defs && defs[kind]) || 0;
+                sel.innerHTML = _vqProfiles.map(function (p) {
+                    return '<option value="' + p.id + '"' + (p.id === cur ? ' selected' : '') + '>' +
+                        String(p.name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</option>';
+                }).join('');
+                if (!sel._vqWired) {
+                    sel._vqWired = true;
+                    sel.addEventListener('change', onKindDefaultChange);
+                }
+            }
+        }
+        if (_vqKindDefaults) { fill(_vqKindDefaults); return; }
+        fill(null);
+        fetch(QUALITY_URL + '/defaults', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) { _vqKindDefaults = d; fill(d); } })
+            .catch(function () { /* an older server: the selects stay on Default */ });
+    }
+    function onKindDefaultChange(e) {
+        var sel = e.currentTarget, kind = sel.getAttribute('data-vq-kind-default');
+        sel.disabled = true;
+        fetch(QUALITY_URL + '/defaults', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ kind: kind, profile_id: parseInt(sel.value, 10) || 0 })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (res) {
+                sel.disabled = false;
+                if (!res.ok) {
+                    if (typeof showToast === 'function') showToast((res.d && res.d.error) || 'Could not save the default', 'error');
+                    _vqKindDefaults = null; renderKindDefaults(); return;
+                }
+                _vqKindDefaults = res.d;
+                if (typeof showToast === 'function') showToast('New ' + (kind === 'movie' ? 'movies' : 'shows') + ' use ' +
+                    (sel.options[sel.selectedIndex] || {}).text, 'success');
+            })
+            .catch(function () { sel.disabled = false; });
     }
 
     function loadQuality() {
@@ -1085,6 +1268,7 @@
             .then(function (d) {
                 if (!d || !Array.isArray(d.profiles) || !d.profiles.length) return;
                 _vqProfiles = d.profiles;
+                _vqKindDefaults = null;   // a deleted profile may have been a default
                 var cur = _vqSelected();
                 _vqSelectedId = cur ? cur.id : 0;
                 _videoQuality = (cur || d.profiles[0]).profile;
@@ -1588,9 +1772,11 @@
     var _videoOrg = null;
     // Sample values for the live preview (mirrors what the importer feeds the engine).
     var _ORG_MOVIE_EG = { title: 'The Matrix', titlefirst: 'T', year: '1999', quality: 'Bluray-1080p',
-        resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', tmdbid: '603', imdbid: 'tt0133093' };
+        resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', audiolangs: 'EN', sublangs: 'EN+ES',
+        tmdbid: '603', imdbid: 'tt0133093' };
     var _ORG_EP_EG = { series: 'Breaking Bad', season: '01', seasonraw: '1', episode: '01', episodetitle: 'Pilot',
-        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189',
+        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264',
+        audiolangs: 'EN', sublangs: 'EN', tvdbid: '81189',
         tmdbid: '1396', imdbid: 'tt0903747' };
     var _ORG_YT_EG = { channel: 'Veritasium', title: 'How Electricity Actually Works', year: '2024',
         date: '2024-03-15', month: '03', day: '15', sxe: 's2024e0315', videoid: 'oI_X2cMHNe0' };

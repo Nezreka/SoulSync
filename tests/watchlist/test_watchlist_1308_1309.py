@@ -28,10 +28,21 @@ def db(tmp_path):
 
 
 def _library_artist(db, lib_id, **ids):
+    # a Library v2 artist: this branch's library rows (spotify / musicbrainz
+    # have columns, every other provider id lives in external_ids)
+    import json
+    own = {"spotify_artist_id": "spotify_id", "musicbrainz_id": "musicbrainz_id"}
+    cols = {"id": lib_id, "name": "Destiny's Child"}
+    external = {}
+    for key, value in ids.items():
+        if key in own:
+            cols[own[key]] = value
+        else:
+            external[key.replace("_artist_id", "").replace("_id", "")] = value
+    cols["external_ids"] = json.dumps(external)
     conn = db._get_connection()
-    cols = ["id", "name"] + list(ids)
-    conn.execute(f"INSERT INTO artists ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-                 [lib_id, "Destiny's Child", *ids.values()])
+    conn.execute(f"INSERT INTO lib2_artists ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                 list(cols.values()))
     conn.commit()
     conn.close()
 

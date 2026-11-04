@@ -20,16 +20,20 @@ import core.similar_artists_worker as w
 # --------------------------------------------------------------------------
 
 def test_pick_source_artist_id_priority():
-    row = {'spotify_artist_id': 'sp1', 'itunes_artist_id': 'it1', 'deezer_id': 'dz1'}
+    # Reads a Library-v2 artist row now: Spotify/MusicBrainz in promoted columns,
+    # the rest in external_ids (docs §32.3.1 stage 2). The priority order is
+    # unchanged — it has to match the watchlist scanner's.
+    row = {'spotify_id': 'sp1', 'external_ids': {'itunes': 'it1', 'deezer': 'dz1'}}
     assert w.pick_source_artist_id(row) == 'sp1'           # spotify wins
-    assert w.pick_source_artist_id({'itunes_artist_id': 'it1', 'deezer_id': 'dz1'}) == 'it1'
-    assert w.pick_source_artist_id({'deezer_id': 'dz1'}) == 'dz1'
+    assert w.pick_source_artist_id(
+        {'external_ids': {'itunes': 'it1', 'deezer': 'dz1'}}) == 'it1'
+    assert w.pick_source_artist_id({'external_ids': {'deezer': 'dz1'}}) == 'dz1'
     assert w.pick_source_artist_id({'musicbrainz_id': 'mb1'}) == 'mb1'
 
 
 def test_pick_source_artist_id_none_when_unmatched():
     # Library artist not matched to any metadata source yet → skip (None).
-    assert w.pick_source_artist_id({'spotify_artist_id': None, 'itunes_artist_id': ''}) is None
+    assert w.pick_source_artist_id({'spotify_id': None, 'external_ids': {}}) is None
     assert w.pick_source_artist_id({}) is None
 
 

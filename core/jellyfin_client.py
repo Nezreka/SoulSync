@@ -764,6 +764,27 @@ class JellyfinClient(MediaServerBase):
                 self.api_key is not None and 
                 self.user_id is not None and 
                 self.music_library_id is not None)
+
+    def get_music_library_locations(self) -> List[str]:
+        """the folders behind the music library, as jellyfin sees them.
+        the selected library when one is set, every music library otherwise"""
+        if not self.ensure_connection():
+            return []
+        try:
+            folders = self._make_request('/Library/VirtualFolders') or []
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("jellyfin library folders lookup failed: %s", exc)
+            return []
+        music = [f for f in folders if isinstance(f, dict)
+                 and str(f.get('CollectionType') or '').lower() == 'music']
+        picked = [f for f in music if self.music_library_id
+                  and str(f.get('ItemId') or '') == str(self.music_library_id)]
+        locations: List[str] = []
+        for folder in picked or music:
+            for loc in folder.get('Locations') or []:
+                if loc and str(loc) not in locations:
+                    locations.append(str(loc))
+        return locations
     
     def as_user(self, user_id: str, library_id: Optional[str] = None) -> 'JellyfinUserView':
         """this client, acting as one jellyfin user (see JellyfinUserView)."""
@@ -2190,6 +2211,37 @@ class JellyfinClient(MediaServerBase):
         # Genre updates not supported via Jellyfin API - silently skip
         return True
     
+    def update_artist_background(self, artist, image_data: bytes):
+        """Set the artist's backdrop, the wide picture behind the artist page
+        (#1957). Same upload as the primary image, another image type."""
+        try:
+            artist_id = artist.ratingKey
+            if not artist_id:
+                return False
+            import requests
+            from base64 import b64encode
+            url = f"{self.base_url}/Items/{artist_id}/Images/Backdrop/0"
+            headers = {
+                'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
+                'Content-Type': 'image/jpeg'
+            }
+            response = requests.post(url, data=b64encode(image_data), headers=headers, timeout=30)
+            response.raise_for_status()
+            logger.info(f"Updated backdrop for {artist.title}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating backdrop for {getattr(artist, 'title', '?')}: {e}")
+            return False
+
+    @staticmethod
+    def artist_has_background(artist) -> bool:
+        """True unless jellyfin says the artist has no backdrop. an item that
+        doesn't say (no BackdropImageTags) counts as having one: never
+        overwrite on a guess."""
+        raw = getattr(artist, 'raw', None) or {}
+        tags = raw.get('BackdropImageTags') if isinstance(raw, dict) else None
+        return not (isinstance(tags, list) and not tags)
+
     def update_artist_poster(self, artist, image_data: bytes):
         """Update artist poster image using Jellyfin API"""
         try:

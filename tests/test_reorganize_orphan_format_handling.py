@@ -14,91 +14,10 @@ the canonical, preserving both formats.
 
 from __future__ import annotations
 
-import os
 
 from core.library_reorganize import (
-    _find_sibling_audio_files,
     _move_sibling_to_destination,
 )
-
-
-# ---------------------------------------------------------------------------
-# Sibling detection
-# ---------------------------------------------------------------------------
-
-
-class TestFindSiblingAudioFiles:
-    def test_finds_flac_when_opus_is_canonical(self, tmp_path):
-        """Reporter's exact case: lossy-copy `.opus` is the
-        canonical (DB-tracked); `.flac` is the orphan to move."""
-        opus = tmp_path / "01 Track.opus"
-        flac = tmp_path / "01 Track.flac"
-        opus.write_bytes(b"opus-data")
-        flac.write_bytes(b"flac-data")
-
-        siblings = _find_sibling_audio_files(str(opus))
-
-        assert siblings == [str(flac)]
-
-    def test_finds_opus_when_flac_is_canonical(self):
-        """Symmetric direction — works either way."""
-        # tmp_path fixture handled by next test inline
-        import tempfile, pathlib
-        tmp = pathlib.Path(tempfile.mkdtemp())
-        flac = tmp / "X.flac"
-        opus = tmp / "X.opus"
-        flac.write_bytes(b"a"); opus.write_bytes(b"b")
-
-        siblings = _find_sibling_audio_files(str(flac))
-        assert siblings == [str(opus)]
-
-    def test_excludes_canonical_itself(self, tmp_path):
-        """Canonical must NOT appear in its own sibling list."""
-        canonical = tmp_path / "X.opus"
-        canonical.write_bytes(b"data")
-
-        siblings = _find_sibling_audio_files(str(canonical))
-        assert siblings == []
-
-    def test_excludes_different_stem(self, tmp_path):
-        """Different track in same dir shouldn't be flagged as
-        sibling — only same-stem files."""
-        canonical = tmp_path / "01 Track One.opus"
-        other_track = tmp_path / "02 Track Two.flac"
-        canonical.write_bytes(b"a"); other_track.write_bytes(b"b")
-
-        siblings = _find_sibling_audio_files(str(canonical))
-        assert siblings == []
-
-    def test_excludes_non_audio_extensions(self, tmp_path):
-        """Sidecars (.lrc, .nfo, .txt) handled by separate sidecar
-        helper — must not appear in audio-sibling list."""
-        canonical = tmp_path / "X.opus"
-        sidecar = tmp_path / "X.lrc"
-        nfo = tmp_path / "X.nfo"
-        canonical.write_bytes(b"a")
-        sidecar.write_bytes(b"lyrics")
-        nfo.write_bytes(b"info")
-
-        siblings = _find_sibling_audio_files(str(canonical))
-        assert siblings == []
-
-    def test_finds_multiple_siblings(self, tmp_path):
-        """User could have 3+ formats: .flac + .opus + .mp3."""
-        opus = tmp_path / "X.opus"
-        flac = tmp_path / "X.flac"
-        mp3 = tmp_path / "X.mp3"
-        opus.write_bytes(b"a"); flac.write_bytes(b"b"); mp3.write_bytes(b"c")
-
-        siblings = _find_sibling_audio_files(str(opus))
-        # All formats other than canonical
-        assert sorted(siblings) == sorted([str(flac), str(mp3)])
-
-    def test_missing_source_dir_returns_empty(self, tmp_path):
-        """Defensive: source dir vanished mid-reorganize. Return
-        empty, don't raise."""
-        siblings = _find_sibling_audio_files(str(tmp_path / "nonexistent" / "X.opus"))
-        assert siblings == []
 
 
 # ---------------------------------------------------------------------------
@@ -172,3 +91,90 @@ class TestMoveSiblingToDestination:
             str(src), str(tmp_path / "new" / "X.opus"),
         )
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# iss29-E02: the sibling move must not destroy an existing destination file
+# ---------------------------------------------------------------------------
+
+
+class TestSiblingMoveNeverOverwrites:
+    """The canonical move refuses to overwrite; the sibling move must too.
+
+    ``_rename_track_in_place`` checks the destination and returns
+    'destination already exists' rather than clobbering — its docstring calls
+    this out as "never silent data loss". But the sibling carry ran *before*
+    that check and used a bare ``shutil.move``, which on POSIX resolves to
+    ``os.rename`` for a regular file and overwrites without error, without a
+    log line and without a counter.
+
+    Reachable whenever lossy-copy is on and a previous partial run (or a second
+    edition) already put a file with the canonical's post-rename stem in the
+    destination.
+    """
+
+    def test_refuses_to_overwrite_an_existing_destination(self, tmp_path):
+        src_dir = tmp_path / "Old"
+        dst_dir = tmp_path / "New"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+        sibling_src = src_dir / "05 Song.mp3"
+        sibling_src.write_bytes(b"the sibling being moved")
+        # Someone else's file already occupies the destination name.
+        occupied = dst_dir / "05 - Song.mp3"
+        occupied.write_bytes(b"a DIFFERENT recording that must survive")
+
+        canonical_dst = dst_dir / "05 - Song.flac"
+        result = _move_sibling_to_destination(str(sibling_src), str(canonical_dst))
+
+        assert result is None, "an occupied destination must be reported as a failure"
+        assert occupied.read_bytes() == b"a DIFFERENT recording that must survive"
+        assert sibling_src.exists(), "the source must be left in place, not silently lost"
+
+    def test_still_moves_when_the_destination_is_free(self, tmp_path):
+        src_dir = tmp_path / "Old"
+        dst_dir = tmp_path / "New"
+        src_dir.mkdir()
+        sibling_src = src_dir / "05 Song.mp3"
+        sibling_src.write_bytes(b"payload")
+
+        canonical_dst = dst_dir / "05 - Song.flac"
+        result = _move_sibling_to_destination(str(sibling_src), str(canonical_dst))
+
+        assert result == str(dst_dir / "05 - Song.mp3")
+        assert (dst_dir / "05 - Song.mp3").read_bytes() == b"payload"
+        assert not sibling_src.exists()
+
+
+class TestRenameInPlaceOrdersTheSiblingCarry:
+    """A failed canonical rename must not leave the siblings moved.
+
+    Siblings used to be carried across BEFORE the canonical's own rename. When
+    that rename then failed, the album ended up split over two directories with
+    no error path that could put it back.
+    """
+
+    def test_a_failing_canonical_rename_leaves_siblings_at_the_source(self, tmp_path, monkeypatch):
+        from core import library_reorganize
+
+        src_dir = tmp_path / "Old"
+        dst_dir = tmp_path / "New"
+        src_dir.mkdir()
+        canonical = src_dir / "05 Song.flac"
+        sibling = src_dir / "05 Song.mp3"
+        canonical.write_bytes(b"flac")
+        sibling.write_bytes(b"mp3")
+
+        def _boom(*_args, **_kwargs):
+            raise OSError("disk went away mid-rename")
+
+        monkeypatch.setattr(library_reorganize.os, "rename", _boom)
+
+        ok, err = library_reorganize._rename_track_in_place(
+            str(canonical), str(dst_dir / "05 - Song.flac"), sibling_paths=[str(sibling)]
+        )
+
+        assert ok is False
+        assert err
+        assert sibling.exists(), "sibling must not be stranded in the destination"
+        assert not (dst_dir / "05 - Song.mp3").exists()

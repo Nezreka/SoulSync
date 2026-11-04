@@ -87,6 +87,13 @@ const _MA_SERVICES: MaService[] = [
   },
 ];
 
+/** where this profile scrobbles its own plays (Phonk_Ben_67) */
+interface MaScrobbling {
+  managed_in_settings?: boolean;
+  lastfm?: { connected?: boolean; user?: string; available?: boolean };
+  listenbrainz?: { enabled?: boolean; available?: boolean };
+}
+
 interface MaConnections {
   connections?: Record<string, { connected?: boolean; account?: string | null }>;
   is_admin?: boolean;
@@ -157,9 +164,18 @@ const _ma: {
   server: ServerModel | null;
   oidc: OidcStatus | null;
   imports: Partial<Record<'listenbrainz' | 'lastfm', ImportStatus>>;
+  scrobbling: MaScrobbling | null;
   open: string | null;
   poll: ReturnType<typeof setTimeout> | null;
-} = { data: null, server: null, oidc: null, imports: {}, open: null, poll: null };
+} = {
+  data: null,
+  server: null,
+  oidc: null,
+  imports: {},
+  scrobbling: null,
+  open: null,
+  poll: null,
+};
 
 function _maProfile(): { id: number; name: string; color: string; avatar: string } {
   try {
@@ -273,14 +289,16 @@ async function _maJson<T>(url: string): Promise<T | null> {
 }
 
 async function _maLoad(): Promise<void> {
-  const [data, server, oidc] = await Promise.all([
+  const [data, server, oidc, scrobbling] = await Promise.all([
     _maJson<MaConnections>('/api/profiles/me/connections'),
     _maLoadServer(),
     _maJson<OidcStatus>('/api/profiles/me/oidc'),
+    _maJson<MaScrobbling>('/api/profiles/me/scrobbling'),
   ]);
   _ma.data = data || { connections: {}, is_admin: false };
   _ma.server = server;
   _ma.oidc = oidc;
+  _ma.scrobbling = scrobbling;
   _maRefreshHeader();
   _maRender();
   const last = oidc?.last;
@@ -479,7 +497,7 @@ function _maSignInLogo(icon: string): string {
 function _maListeningCard(): string {
   const listening = _ma.data?.listening || {};
   const names = (listening.sources || [])
-    .map((s) => _MA_SERVICES.find((x) => x.id === s)?.name)
+    .map((s) => _MA_SERVICES.find((x) => x.id === s)?.name || _MA_SOURCE_NAMES[s])
     .filter(Boolean) as string[];
   if (listening.scope === 'profile' && names.length) {
     return `
@@ -677,6 +695,45 @@ function _maServerForm(s: ServerModel): string {
     <div class="ma-actions"><button type="button" class="ma-btn ma-btn-primary" data-ma="jf-save">Save</button></div>`;
 }
 
+/** listening that isn't a music-service row: a linked media-server user */
+const _MA_SOURCE_NAMES: Record<string, string> = { plex: 'Plex', jellyfin: 'Jellyfin' };
+
+/** scrobbling your own plays: a switch for listenbrainz (it reuses the
+ * token), sign in for last.fm (writing scrobbles takes a session). nothing
+ * when the server can't do it for you */
+function _maScrobbleLine(svc: MaService): string {
+  const sc = _ma.scrobbling;
+  if (!sc || sc.managed_in_settings) return '';
+  if (svc.id === 'listenbrainz') {
+    if (!sc.listenbrainz?.available) return '';
+    const on = !!sc.listenbrainz.enabled;
+    return `
+      <div class="ma-scrobble">
+        <span>${on ? 'Scrobbling your plays to ListenBrainz' : 'Scrobble your plays to ListenBrainz'}</span>
+        <label class="ma-switch" title="Send what you play from now on to your ListenBrainz">
+          <input type="checkbox" data-ma-scrobble="listenbrainz" aria-label="Scrobble your plays to ListenBrainz"${on ? ' checked' : ''}>
+          <span></span>
+        </label>
+      </div>`;
+  }
+  if (svc.id === 'lastfm') {
+    if (!sc.lastfm?.available) return '';
+    if (sc.lastfm.connected) {
+      return `
+        <div class="ma-scrobble">
+          <span>Scrobbling your plays to <b>${escapeHtml(sc.lastfm.user || 'your Last.fm')}</b></span>
+          <button type="button" class="ma-btn ma-btn-quiet" data-ma="scrobble-stop">Stop</button>
+        </div>`;
+    }
+    return `
+      <div class="ma-scrobble">
+        <span>Scrobble your plays to Last.fm</span>
+        <button type="button" class="ma-btn ma-btn-outline" data-ma="scrobble-signin">Sign in</button>
+      </div>`;
+  }
+  return '';
+}
+
 function _maServiceRow(svc: MaService): string {
   const c = _ma.data?.connections?.[svc.id] || {};
   const connected = !!c.connected;
@@ -737,6 +794,7 @@ function _maServiceRow(svc: MaService): string {
         ${trailing}
       </div>
       ${svc.history ? `<div class="ma-import" id="ma-import-${svc.id}" hidden></div>` : ''}
+      ${_maScrobbleLine(svc)}
       ${panel}
     </div>`;
 }
@@ -873,6 +931,17 @@ function _maOnClick(e: Event): void {
         'Plex library saved',
       );
       break;
+    case 'scrobble-signin':
+      void _maLastfmScrobbleSignIn(btn);
+      break;
+    case 'scrobble-stop':
+      void _maScrobbleCall(
+        '/api/profiles/me/lastfm/scrobble',
+        'DELETE',
+        null,
+        'Stopped scrobbling to Last.fm',
+      );
+      break;
     case 'jf-save':
       void _maServerCall(
         '/api/profiles/me/server-library',
@@ -890,6 +959,15 @@ function _maOnClick(e: Event): void {
 
 function _maOnChange(e: Event): void {
   const el = e.target as HTMLElement;
+  if (el instanceof HTMLInputElement && el.dataset.maScrobble === 'listenbrainz') {
+    void _maScrobbleCall(
+      '/api/profiles/me/listenbrainz/scrobble',
+      'POST',
+      { enabled: el.checked },
+      el.checked ? 'Scrobbling to ListenBrainz' : 'Stopped scrobbling to ListenBrainz',
+    );
+    return;
+  }
   if (el.id !== 'ma-plex-user') return;
   const users = _ma.server?.plexHomeUsers || [];
   const picked = users.find((u) => String(u.id) === (el as HTMLSelectElement).value);
@@ -1167,6 +1245,98 @@ export async function _maPlexConnect(
     }
     popup?.close();
     toast('Connecting with Plex timed out. Try again.', 'error');
+    return false;
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+}
+
+/** change where your plays scrobble, then redraw from what the server says */
+async function _maScrobbleCall(
+  url: string,
+  method: 'POST' | 'DELETE',
+  body: Record<string, unknown> | null,
+  done: string,
+): Promise<void> {
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok || data.success === false)
+      toast(_maError(data, "Couldn't change scrobbling"), 'error');
+    else toast(done, 'success');
+  } catch {
+    toast("Couldn't change scrobbling", 'error');
+  }
+  _ma.scrobbling = await _maJson<MaScrobbling>('/api/profiles/me/scrobbling');
+  _maRender();
+}
+
+const _MA_LASTFM_POLL_MS = 2000;
+const _MA_LASTFM_GIVE_UP_MS = 5 * 60 * 1000;
+
+/**
+ * sign in to last.fm for scrobbling: last.fm's page in a popup (opened
+ * straight from the click so a blocker lets it through), then wait until
+ * the callback has saved the session
+ */
+export async function _maLastfmScrobbleSignIn(
+  button: HTMLElement | null,
+  openPopup: () => Window | null = () =>
+    window.open('', 'soulsync-lastfm-connect', 'width=520,height=720'),
+  sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)),
+): Promise<boolean> {
+  const btn = button instanceof HTMLButtonElement ? button : null;
+  const label = btn?.textContent || '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Waiting for Last.fm...';
+  }
+  const popup = openPopup();
+  try {
+    let start: { url?: string; error?: string } | null = null;
+    try {
+      const res = await fetch('/api/profiles/me/lastfm/scrobble/auth-url');
+      start = (await res.json()) as { url?: string; error?: string };
+    } catch {
+      start = null;
+    }
+    if (!start?.url) {
+      popup?.close();
+      toast(start?.error || "Couldn't reach Last.fm. Try again in a moment.", 'error');
+      return false;
+    }
+    if (popup) popup.location.href = start.url;
+    else window.open(start.url, '_blank', 'noopener');
+    const until = Date.now() + _MA_LASTFM_GIVE_UP_MS;
+    while (Date.now() < until) {
+      await sleep(_MA_LASTFM_POLL_MS);
+      const sc = await _maJson<MaScrobbling>('/api/profiles/me/scrobbling');
+      if (sc?.lastfm?.connected) {
+        popup?.close();
+        _ma.scrobbling = sc;
+        toast(`Scrobbling to ${sc.lastfm.user || 'Last.fm'}`, 'success');
+        _maRender();
+        return true;
+      }
+      if (popup?.closed) {
+        // closed without finishing: one last look, then stop
+        const last = await _maJson<MaScrobbling>('/api/profiles/me/scrobbling');
+        _ma.scrobbling = last || _ma.scrobbling;
+        _maRender();
+        if (last?.lastfm?.connected) return true;
+        toast('Signing in to Last.fm was cancelled', 'info');
+        return false;
+      }
+    }
+    popup?.close();
+    toast('Signing in to Last.fm timed out. Try again.', 'error');
     return false;
   } finally {
     if (btn) {

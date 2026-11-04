@@ -30,18 +30,24 @@ _ids = iter(range(1, 10_000))
 
 
 def _seed(db, artist, album, tags=None, mood=None, tracks=4, plays=0, owned=True):
-    artist_id, album_id = f'ar{next(_ids)}', f'al{next(_ids)}'
+    # Library v2: last.fm's tags ride in the album's provider payload, and a
+    # track is owned when it has a file row
     with db._get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("INSERT INTO artists (id, name) VALUES (?, ?)", (artist_id, artist))
-        cur.execute("INSERT INTO albums (id, artist_id, title, lastfm_tags, mood) VALUES (?, ?, ?, ?, ?)",
-                    (album_id, artist_id, album, json.dumps(tags) if tags is not None else None, mood))
+        artist_id = cur.execute(
+            "INSERT INTO lib2_artists (name, name_key) VALUES (?, ?)",
+            (artist, f'{artist.lower()}{next(_ids)}')).lastrowid
+        enrichment = json.dumps({'lastfm': {'tags': tags}}) if tags is not None else '{}'
+        album_id = cur.execute(
+            "INSERT INTO lib2_albums (primary_artist_id, title, enrichment, mood, origin) "
+            "VALUES (?, ?, ?, ?, 'library')", (artist_id, album, enrichment, mood)).lastrowid
         for n in range(tracks):
-            cur.execute(
-                "INSERT INTO tracks (id, artist_id, album_id, title, duration, play_count, file_path) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (f'tr{next(_ids)}', artist_id, album_id, f'{album} {n}', 200000, plays,
-                 f'/music/{artist}/{album}/{n}.flac' if owned else None))
+            track_id = cur.execute(
+                "INSERT INTO lib2_tracks (album_id, title, duration, play_count) VALUES (?, ?, ?, ?)",
+                (album_id, f'{album} {n}', 200000, plays)).lastrowid
+            if owned:
+                cur.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                            (track_id, f'/music/{artist}/{album}/{n}.flac'))
         conn.commit()
 
 

@@ -127,7 +127,9 @@ def test_approve_makes_rows_downloadable_and_tells_the_requester(asker, notes):
     album = next(g for g in _pending_for(admin, pid) if g['kind'] == 'album')
     r = admin.post('/api/requests/music/approve', json={'profile_id': pid, 'key': album['key']})
     assert r.get_json()['approved'] == 2
-    approved = {t['spotify_track_id'] for t in db.get_wishlist_tracks(profile_id=pid, approved_only=True)}
+    # this branch keys every row <track>::<album> (core/wishlist/identity.py)
+    approved = {t['spotify_track_id'].split('::')[0]
+                for t in db.get_wishlist_tracks(profile_id=pid, approved_only=True)}
     assert approved == {f'{tag}a', f'{tag}b'}
     assert [g['kind'] for g in _pending_for(admin, pid)] == ['track']
     assert any(p == pid and 'approved' in m for p, k, m in notes)

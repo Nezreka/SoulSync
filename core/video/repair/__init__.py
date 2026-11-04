@@ -20,6 +20,7 @@ _JOB_MODULES = [
     "watched_cleanup",
     "naming_conformance",
     "missing_subtitles",
+    "media_info",
 ]
 
 

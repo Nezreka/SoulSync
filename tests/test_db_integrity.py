@@ -174,3 +174,22 @@ def test_failed_backup_leaves_no_empty_file(tmp_path, monkeypatch):
     with pytest.raises(sqlite3.OperationalError):
         safe_backup(src, str(dst), verify_source=False)
     assert not dst.exists()
+
+
+def test_a_watched_backup_reports_its_stages_and_bytes(tmp_path, monkeypatch):
+    """The startup page shows these (#1062 review, point 4): the copy in steps,
+    its bytes growing to the database's size."""
+    import core.db_integrity as integrity
+    monkeypatch.setattr(integrity, "_BACKUP_STEP_PAGES", 2)
+    src = str(tmp_path / "src.db"); dst = str(tmp_path / "dst.db")
+    _make_db(src, rows=2000)
+    heard = []
+
+    safe_backup(src, dst, progress=lambda stage, done, total: heard.append((stage, done, total)))
+
+    assert [s for s, *_ in heard if s != "copy"] == ["check", "verify"]
+    copies = [(done, total) for s, done, total in heard if s == "copy" and total]
+    assert len(copies) > 1
+    assert copies[-1][0] == copies[-1][1] == os.path.getsize(src)
+    assert [d for d, _ in copies] == sorted(d for d, _ in copies)
+    assert is_healthy(dst)

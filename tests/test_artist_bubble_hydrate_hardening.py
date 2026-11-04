@@ -130,9 +130,9 @@ def test_downloads_sections_filter_malformed_bubbles():
 
 # initializeLibraryPage's opaque-toast fix retired with the function itself when
 # React took over /library. The equivalent guarantee — a failed artist load
-# surfaces a toast rather than a blank page — is pinned in
-# webui/src/routes/library/-ui/library-page.test.tsx ("toasts the vanilla fixed
-# string when the server reports failure").
+# surfaces a toast rather than a blank page — is pinned by the Library v2 page's
+# own error state (webui/src/routes/library/-ui/library-v2-page.tsx), which
+# renders the failure instead of blanking the route.
 
 
 def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
@@ -143,15 +143,16 @@ def test_library_downloads_section_anchors_on_the_grid_not_a_class_query():
     fn = _HELPERS_JS.split("function showLibraryDownloadsSection")[1].split("function createArtistBubbleCard")[0]
     assert "getElementById('library-artists-grid')" in fn
     assert "artistGrid.parentElement" in fn
-    # The ambiguity is still real, it just spans two renderers now: index.html
-    # carries the VIDEO library's .library-content, and the React music library
-    # renders its own. A class query would still be able to hit the wrong one.
+    # The ambiguity is still real: index.html carries the VIDEO library's
+    # .library-content, and a class query could still hit it. The music side is
+    # Library v2 now — it is CSS-module scoped and owns no global class at all,
+    # so the only safe anchor left is the data attribute asserted below.
     index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     react_page = (
-        _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-page.tsx"
+        _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-v2-page.tsx"
     ).read_text(encoding="utf-8")
     assert index.count('class="library-content"') >= 1, "video library lost its .library-content"
-    assert 'className="library-content"' in react_page, "music library lost its .library-content"
+    assert "data-library-downloads-host" in react_page, "music library lost the bubbles host"
 
     # The React library page renders a dedicated host and is preferred when
     # present, so a querySelector is no longer disqualifying on its own — but it
@@ -177,6 +178,6 @@ def test_react_library_downloads_host_is_unique_to_the_music_page():
         and "data-library-downloads-host" in path.read_text(encoding="utf-8", errors="ignore")
     ]
     rendered = [p for p in hosts if p.name != "shared-helpers.js"]
-    assert [p.name for p in rendered] == ["library-page.tsx"], (
+    assert [p.name for p in rendered] == ["library-v2-page.tsx"], (
         f"the host must be rendered by the music library page alone, got {rendered}"
     )

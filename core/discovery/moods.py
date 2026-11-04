@@ -167,10 +167,13 @@ def _chunks(items: Sequence[Any], n: int) -> Iterable[Sequence[Any]]:
 def _scored_albums(conn) -> Dict[str, Dict[int, float]]:
     """album id -> score, per mood, for every album that is any mood at all."""
     cur = conn.cursor()
+    # Library v2 keeps last.fm's tags inside the album's provider payload
     cur.execute(
         """
-        SELECT id, lastfm_tags, mood FROM albums
-        WHERE (lastfm_tags IS NOT NULL AND lastfm_tags NOT IN ('', '[]'))
+        SELECT id, json_extract(enrichment, '$.lastfm.tags') AS lastfm_tags, mood
+        FROM lib2_albums
+        WHERE (json_extract(enrichment, '$.lastfm.tags') IS NOT NULL
+               AND json_extract(enrichment, '$.lastfm.tags') NOT IN ('', '[]'))
            OR (mood IS NOT NULL AND mood != '')
         """
     )
@@ -185,18 +188,26 @@ def _scored_albums(conn) -> Dict[str, Dict[int, float]]:
 
 
 def _owned_tracks(conn, album_ids: Sequence[int]) -> List[Dict[str, Any]]:
+    from core.library2.sql_util import owned_sql
     from core.metadata import normalize_image_url
     rows: List[Dict[str, Any]] = []
     cur = conn.cursor()
     for chunk in _chunks(list(album_ids), 900):
+        # the track's own credit first, else the album's artist (Library v2)
         cur.execute(
             f"""
             SELECT t.album_id, t.title, t.duration, t.play_count,
-                   ar.name, al.title, COALESCE(al.thumb_url, ar.thumb_url)
-            FROM tracks t
-            JOIN artists ar ON ar.id = t.artist_id
-            JOIN albums al ON al.id = t.album_id
-            WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                   COALESCE(credited.name, ar.name), al.title,
+                   COALESCE(al.image_url, ar.image_url)
+            FROM lib2_tracks t
+            JOIN lib2_albums al ON al.id = t.album_id
+            JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+            LEFT JOIN lib2_artists credited ON credited.id = (
+                 SELECT ta.artist_id FROM lib2_track_artists ta
+                  WHERE ta.track_id = t.id
+                  ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                           ta.position, ta.artist_id LIMIT 1)
+            WHERE {owned_sql('track', 't')}
               AND t.album_id IN ({','.join('?' * len(chunk))})
             """,
             list(chunk),

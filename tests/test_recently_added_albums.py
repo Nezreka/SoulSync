@@ -12,6 +12,7 @@ import sqlite3
 import pytest
 
 from database.music_database import MusicDatabase
+from tests import lib2_seed
 
 
 def _db(tmp_path):
@@ -27,22 +28,13 @@ def _land(db, title, artist, album, thumb='', quality='flac', source='soulseek',
             " VALUES ('download', ?, ?, ?, ?, ?, ?, ?, ?)",
             (title, artist, album, quality, thumb, source, file_path, created))
         # #1453: get_recently_added_albums drops cards whose play target has
-        # no matching tracks row (a rebuild wipes tracks but keeps
-        # library_history), so the helper lands a tracks row for every
-        # history row it inserts. The fixture artist/album names are
-        # deliberately unlike any test artist/album so the art-backfill
-        # lookups can never match them.
-        conn.execute(
-            "INSERT OR IGNORE INTO artists (id, name)"
-            " VALUES ('ra-fixture-artist', 'Recently Added Fixture Artist')")
-        conn.execute(
-            "INSERT OR IGNORE INTO albums (id, artist_id, title)"
-            " VALUES ('ra-fixture-album', 'ra-fixture-artist',"
-            " 'Recently Added Fixture Album')")
-        conn.execute(
-            "INSERT INTO tracks (album_id, artist_id, title, file_path)"
-            " VALUES ('ra-fixture-album', 'ra-fixture-artist', ?, ?)",
-            (title, file_path))
+        # no matching catalogue file (a rebuild wipes the catalogue but keeps
+        # library_history), so the helper lands a file row for every history
+        # row it inserts. The fixture artist/album names are deliberately
+        # unlike any test artist/album so the art-backfill lookups can never
+        # match them.
+        lib2_seed.track(conn, 'Recently Added Fixture Artist',
+                        'Recently Added Fixture Album', title, path=file_path)
         conn.commit()
 
 
@@ -83,14 +75,12 @@ def test_cap_keeps_counting_tracks_for_kept_cards(tmp_path):
 def test_missing_art_backfills_from_the_library_album_row(tmp_path):
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        # Explicit ids: the soulid_v2 migration rebuilds artists/albums with
-        # TEXT primary keys, so lastrowid-style implicit ids leave id NULL and
-        # the albums FK rejects the row.
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists(name, image_url) VALUES('Ado', 'artist.jpg')"
+        ).lastrowid
         conn.execute(
-            "INSERT INTO artists (id, name, thumb_url) VALUES ('ar1', 'Ado', 'artist.jpg')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title, thumb_url)"
-            " VALUES ('al1', 'ar1', 'Kyougen', 'album.jpg')")
+            "INSERT INTO lib2_albums(primary_artist_id, title, image_url, origin)"
+            " VALUES(?, 'Kyougen', 'album.jpg', 'library')", (artist_id,))
         conn.commit()
     # History row lands with NO art — the common case.
     _land(db, 'Vivarium', 'Ado', 'Kyougen', thumb='')
@@ -104,7 +94,8 @@ def test_feat_credited_history_row_still_finds_the_primary_artists_art(tmp_path)
     retry is what closes it."""
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES ('ar1', 'Camellia', 'cam.jpg')")
+        conn.execute(
+            "INSERT INTO lib2_artists(name, image_url) VALUES('Camellia', 'cam.jpg')")
         conn.commit()
     _land(db, 'crystallized', 'Camellia feat. Nanahira', 'no such album', thumb='')
     cards = db.get_recently_added_albums(limit=20)
@@ -115,7 +106,8 @@ def test_feat_credited_history_row_still_finds_the_primary_artists_art(tmp_path)
 def test_art_falls_back_to_the_artist_thumb_when_no_album_row_matches(tmp_path):
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES ('ar1', 'Ado', 'artist.jpg')")
+        conn.execute(
+            "INSERT INTO lib2_artists(name, image_url) VALUES('Ado', 'artist.jpg')")
         conn.commit()
     _land(db, 'Loose Single', 'Ado', 'Not In Library', thumb='')
     cards = db.get_recently_added_albums(limit=20)
@@ -123,10 +115,10 @@ def test_art_falls_back_to_the_artist_thumb_when_no_album_row_matches(tmp_path):
 
 
 def test_rebuild_wiped_tracks_produces_no_stale_cards(tmp_path):
-    """#1453: a Full Refresh wipes tracks/albums/artists but KEEPS
-    library_history (the Expired Download Cleaner grandfathers pre-rebuild
-    downloads off it). The rail must not surface cards whose play target no
-    longer exists in the tracks table — here the tracks table is empty."""
+    """#1453: a Full Refresh wipes the catalogue but KEEPS library_history
+    (the Expired Download Cleaner grandfathers pre-rebuild downloads off it).
+    The rail must not surface cards whose play target no longer exists in the
+    catalogue — here it has no files at all."""
     db = _db(tmp_path)
     with db._get_connection() as conn:
         conn.execute(
@@ -173,15 +165,13 @@ def _history_only(db, title, album, file_path, created='2026-08-10 12:00:00'):
 
 
 def _track_at(db, file_path):
+    # Library v2 port: a library file under some other album
     with db._get_connection() as conn:
-        conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES ('ra-x', 'RA X')")
-        conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES ('ra-xa', 'ra-x', 'RA XA')")
-        conn.execute("INSERT INTO tracks (album_id, artist_id, title, file_path) VALUES ('ra-xa', 'ra-x', 't', ?)",
-                     (file_path,))
+        lib2_seed.track(conn, 'RA X', 'RA XA', 't', path=file_path)
         conn.commit()
 
 
-POINT_LOOKUP = 'SELECT album_id, artist_id FROM tracks WHERE file_path = ?'
+POINT_LOOKUP = 'SELECT t.album_id, al.primary_artist_id FROM lib2_track_files f'
 
 
 def _track_path_queries(monkeypatch, point_lookups=None):
@@ -195,7 +185,7 @@ def _track_path_queries(monkeypatch, point_lookups=None):
             if flat.startswith(POINT_LOOKUP):
                 if point_lookups is not None:
                     point_lookups.append(flat)
-            elif 'FROM tracks WHERE file_path' in flat:
+            elif 'FROM lib2_track_files WHERE' in flat:
                 seen.append(flat)
             return super().execute(sql, params)
 
@@ -281,21 +271,24 @@ def test_card_carries_the_library_album_its_newest_track_is_in(tmp_path):
     _land(db, 'Track 1', 'Camellia', 'U.U.F.O.', file_path='/m/ufo/1.flac')
     cards = db.get_recently_added_albums(limit=20)
     # _land files every track under the fixture album
-    assert cards[0]['album_id'] == 'ra-fixture-album'
-    assert cards[0]['artist_id'] == 'ra-fixture-artist'
+    with db._get_connection() as conn:
+        album = conn.execute("SELECT id, primary_artist_id FROM lib2_albums"
+                             " WHERE title = 'Recently Added Fixture Album'").fetchone()
+    assert cards[0]['album_id'] == album[0]
+    assert cards[0]['artist_id'] == album[1]
 
 
 def test_a_path_that_moved_roots_finds_the_album_by_name(tmp_path):
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', 'Some Artist')")
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'Moved Album')")
+        album = lib2_seed.album(conn, 'Some Artist', 'Moved Album')
+        artist = lib2_seed.artist(conn, 'Some Artist')
         conn.commit()
     _history_only(db, 'Moved', 'Moved Album', '/downloads/staging/Artist - Album/01 - Moved.flac')
     _track_at(db, r'\\nas\music\Artist - Album\01 - MOVED.flac')
     cards = db.get_recently_added_albums(limit=20)
-    assert cards[0]['album_id'] == 'al1'
-    assert cards[0]['artist_id'] == 'ar1'
+    assert cards[0]['album_id'] == album
+    assert cards[0]['artist_id'] == artist
 
 
 def test_no_library_album_leaves_the_card_single_track(tmp_path):

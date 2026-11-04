@@ -28,9 +28,10 @@ from core.library.expired_cleanup import (
     path_suffix_key,
     select_expired,
 )
+from core.downloads.origin import is_hand_picked
 from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, stop_or_pause
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.expired_download_cleaner")
@@ -137,12 +138,43 @@ def _should_treat_unresolved_as_mapping_error(raw_path, config_manager) -> bool:
 
 def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> dict:
     """Delete one origin-tracked download: the file on disk (resolved through
-    the shared resolver), its library track row, and the history entry. A file
+    the shared resolver), its catalogue row, and the history entry. A file
     that refuses deletion keeps its history row and reports the error. Returns
-    {removed, file_deleted, error}."""
+    {removed, file_deleted, error, library_v2}.
+
+    The Library-v2 subjects are captured BEFORE the file goes, because the
+    catalogue is resolved from the path — once the file is gone there is
+    nothing left to resolve. A capture or a sync that fails leaves the history
+    row in place so the next run retries the whole deletion rather than
+    orphaning a catalogue row nobody will ever revisit.
+    """
     raw_path = entry.get('file_path') or ''
     file_deleted = False
     error = None
+    sync_result = None
+    try:
+        from core.library2.maintenance_sync import annotate_finding_details
+
+        sync_details = annotate_finding_details(
+            db,
+            config_manager,
+            entity_type='track',
+            entity_id=None,
+            file_path=raw_path,
+            details={
+                'history_id': entry.get('id'),
+                'file_path': raw_path,
+                'origin': entry.get('origin'),
+                'origin_context': entry.get('origin_context'),
+            },
+        )
+    except Exception as e:  # do not delete when V2 subjects cannot be captured
+        return {
+            'removed': 0,
+            'file_deleted': False,
+            'error': f'Library-v2 delete preparation failed: {e}',
+            'library_v2': None,
+        }
     if raw_path:
         resolved = resolve_library_file_path(
             raw_path,
@@ -157,16 +189,39 @@ def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> d
                 error = str(e)
         elif resolved is None and _should_treat_unresolved_as_mapping_error(raw_path, config_manager):
             error = f'Could not locate file: {raw_path}. {_path_mapping_hint(config_manager)}'
-        # File gone or deleted → clean up the library track row either way.
+        # File gone or deleted → clean up the catalogue row either way.
         if error is None:
             try:
                 db.delete_track_by_file_path(raw_path)
             except Exception as e:
                 logger.debug("expired cleanup: track row delete failed: %s", e)
+    if error is None:
+        try:
+            from core.library2.maintenance_sync import sync_repair_change
+
+            sync_result = sync_repair_change(
+                db,
+                config_manager,
+                job_id='expired_download_cleaner',
+                finding_type='expired_download',
+                action='deleted_file',
+                entity_type='track',
+                entity_id=None,
+                file_path=raw_path,
+                details=sync_details,
+                result={'library_v2_file_deleted': True},
+            )
+        except Exception as e:  # preserve history row so the job can retry
+            error = f'Library-v2 delete synchronization failed: {e}'
     removed = 0
     if error is None:
         removed = db.delete_library_history_rows([entry['id']])
-    return {'removed': removed, 'file_deleted': file_deleted, 'error': error}
+    return {
+        'removed': removed,
+        'file_deleted': file_deleted,
+        'error': error,
+        'library_v2': sync_result,
+    }
 
 
 @register_job
@@ -351,6 +406,31 @@ class ExpiredDownloadCleanerJob(RepairJob):
             keys.update(_ID_KEY + tid for tid in _mirror_track_ids(t))
         return keys
 
+    @staticmethod
+    def _hand_picked_names(context: JobContext) -> Optional[set]:
+        """Case-folded names history shows were hand-picked downloads (an album
+        picked by hand and retried through the wishlist was recorded under its
+        own name as a "playlist", #1932), or None when that can't be read.
+
+        Those are kept. Every other download of a playlist that is no longer
+        mirrored ages out, as in 3.6.1. This used to ask the other way round
+        ("only if a sync ran under that name"), and sync history keeps 100
+        rows, so every playlist synced long enough ago was kept forever.
+        """
+        try:
+            with context.db._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT playlist_id, playlist_name, is_album_download FROM sync_history"
+                ).fetchall()
+        except Exception as e:
+            logger.debug("expired cleanup: sync history unreadable: %s", e)
+            return None
+        return {
+            str(name).strip().casefold()
+            for pid, name, album in rows
+            if name and is_hand_picked(pid, name, album)
+        }
+
     def _protection_facts(self, context: JobContext):
         """(playlist_membership, watched artist names).
 
@@ -484,6 +564,8 @@ class ExpiredDownloadCleanerJob(RepairJob):
             return result
 
         playlist_membership, watched_names = self._protection_facts(context)
+        hand_picked = None
+        hand_picked_read = False
 
         # Anything downloaded before the library database was last rebuilt is
         # permanently out of scope. A rebuild wipes tracks/albums/artists —
@@ -519,8 +601,14 @@ class ExpiredDownloadCleanerJob(RepairJob):
             if origin == 'playlist' and ctx:
                 entry = playlist_membership.get(ctx)
                 if entry is None:
-                    # origin playlist is not mirrored anywhere: nothing to keep it
-                    c['protected'] = False
+                    # origin playlist is not mirrored anywhere: nothing keeps
+                    # it, unless history shows the name was a hand-picked
+                    # download (unreadable history keeps it, to be safe)
+                    if not hand_picked_read:
+                        hand_picked = self._hand_picked_names(context)
+                        hand_picked_read = True
+                    c['protected'] = (hand_picked is None or ctx in hand_picked
+                                      or is_hand_picked(None, ctx))
                 else:
                     key = normalize_track_key(c.get('artist_name'), c.get('title'))
                     tid = str(c.get('source_track_id') or '').strip()
@@ -552,14 +640,22 @@ class ExpiredDownloadCleanerJob(RepairJob):
             context.update_progress(0, len(expired))
 
         for i, entry in enumerate(expired):
-            if context.check_stop():
+            if stop_or_pause(context):
                 return result
             if not dry_run:
                 try:
                     res = delete_origin_download(
                         context.db, entry, context.config_manager,
                         transfer_folder=context.transfer_folder)
-                    if res.get('removed') or res.get('file_deleted'):
+                    # A Library-v2 capture/sync failure is REPORTED, not raised
+                    # (the history row is deliberately kept so the next run
+                    # retries) — without counting it the run would claim a
+                    # clean sweep while nothing was deleted.
+                    if res.get('error'):
+                        logger.error("expired auto-delete failed for %s: %s",
+                                     entry.get('title'), res['error'])
+                        result.errors += 1
+                    elif res.get('removed') or res.get('file_deleted'):
                         result.auto_fixed += 1
                 except Exception as e:
                     logger.error("expired auto-delete failed for %s: %s", entry.get('title'), e)

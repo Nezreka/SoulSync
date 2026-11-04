@@ -106,16 +106,9 @@ def test_variant_dedup_collapses_cracker_island_pair():
     assert [r["id"] for r in survivors] == ["std"]
 
 
-def test_library_path_disables_dedup_under_edition_preferences():
-    """Source pin: get_artist_detail must pass dedup_variants=False when the
-    stored preference is one_standard/one_complete, keeping today's default
-    (True) under "all"."""
-    src = (_ROOT / "api" / "artist_detail.py").read_text(encoding="utf-8")
-    fn = src[src.index("def get_artist_detail("):]
-    fn = fn[:fn.index("\n@bp.route")]
-    assert "dedup_variants=_read_edition_settings()[0] not in (" in fn
-    assert "EDITION_PREFERENCE_ONE_STANDARD" in fn
-    assert "EDITION_PREFERENCE_ONE_COMPLETE" in fn
+# Upstream's source pin on get_artist_detail's LIBRARY path (dedup_variants
+# under an edition preference) has no subject here: a catalogue artist opens in
+# Library v2, whose editions are grouped per album (lib2_release_editions).
 
 
 def test_annotation_picks_one_edition_when_both_survive(adns):

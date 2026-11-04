@@ -6,7 +6,7 @@
 
 export type Purpose = 'music' | 'video' | 'youtube' | 'podcasts' | 'audiobooks';
 export type LockMode = 'open' | 'pin' | 'password';
-export type ServerKind = 'plex' | 'jellyfin' | 'navidrome' | 'soulsync';
+export type ServerKind = 'plex' | 'jellyfin' | 'navidrome' | 'music_assistant' | 'soulsync';
 export type SourceId =
   | 'soulseek'
   | 'hifi'

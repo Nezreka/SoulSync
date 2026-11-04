@@ -23,6 +23,7 @@ import pytest
 from core.auto_import_worker import AutoImportWorker
 from core.imports.rematch_apply import is_reidentify_copy, staged_destination
 from core.imports.rematch_hints import RematchHint
+from core.library2.schema import ensure_library_v2_schema
 
 
 class _DB:
@@ -126,7 +127,8 @@ def test_the_hint_is_read_for_a_split_out_copy(tmp_path, monkeypatch):
 def library(tmp_path):
     path = str(tmp_path / "library.db")
     conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY, file_path TEXT)")
+    # the catalogue the replace reads: the old track's file is a lib2 file row
+    ensure_library_v2_schema(conn)
     conn.execute("CREATE TABLE auto_import_history (id INTEGER PRIMARY KEY, folder_path TEXT, "
                  "folder_hash TEXT, status TEXT, match_data TEXT)")
     conn.execute("CREATE TABLE rematch_hints (id INTEGER PRIMARY KEY, status TEXT, consumed_at TEXT)")
@@ -153,7 +155,11 @@ def _reidentify_into(tmp_path, library, kept_path, old_path, callback=None):
     staged.parent.mkdir(parents=True, exist_ok=True)
     staged.write_bytes(b"staged copy")
     conn = sqlite3.connect(library)
-    conn.execute("INSERT INTO tracks (id, file_path) VALUES (9, ?)", (str(old_path),))
+    conn.execute("INSERT INTO lib2_artists (id, name) VALUES (1, 'Nickelback')")
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'Music')")
+    conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (9, 1, 'Motivation')")
+    conn.execute("INSERT INTO lib2_track_files (track_id, path, file_state, is_primary)"
+                 " VALUES (9, ?, 'active', 1)", (str(old_path),))
     conn.commit()
     conn.close()
 
@@ -182,7 +188,9 @@ def _reidentify_into(tmp_path, library, kept_path, old_path, callback=None):
 def _rows(library):
     conn = sqlite3.connect(library)
     try:
-        return [r[0] for r in conn.execute("SELECT id FROM tracks")], \
+        return [r[0] for r in conn.execute(
+            "SELECT DISTINCT track_id FROM lib2_track_files"
+            " WHERE COALESCE(file_state, 'active') = 'active'")], \
             conn.execute("SELECT status FROM rematch_hints WHERE id = 1").fetchone()[0]
     finally:
         conn.close()

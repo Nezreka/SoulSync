@@ -330,12 +330,12 @@ class TestArtistNfoBackfillJob:
         album.mkdir(parents=True)
         track = album / "01 - Track.mp3"
         track.write_bytes(b"fake-audio")  # tag reads are stubbed below
+        from tests import lib2_seed
         with db._get_connection() as conn:
-            conn.execute("INSERT INTO artists (id, name, musicbrainz_id) VALUES (1, 'Mammoth', ?)", (MBID,))
-            conn.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Mammoth', 1)")
-            conn.execute("INSERT INTO tracks (id, title, file_path, artist_id, album_id) VALUES (1, 'T', ?, 1, 1)", (str(track),))
+            lib2_seed.artist(conn, 'Mammoth', musicbrainz_id=MBID)
+            lib2_seed.track(conn, 'Mammoth', 'Mammoth', 'T', path=str(track))
             # artist without MBID — must be skipped, not crash
-            conn.execute("INSERT INTO artists (id, name) VALUES (2, 'No MBID')")
+            lib2_seed.track(conn, 'No MBID', 'Other', 'U', path=str(track))
             conn.commit()
         return db, str(artist)
 

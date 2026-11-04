@@ -93,13 +93,11 @@ def test_manual_search_opens_the_file_inspector():
 
 def test_every_track_row_gets_the_search_button():
     # album tracks and singles render through one SheetTrack, so one call
-    # covers both, with the row id, the track and the artist
-    assert _SHEET.count("openWishlistInspector({") == 1
+    # covers both. it opens the shared search with the whole row: id, track,
+    # artist and its library link (the library's Interactive Search, else the
+    # inspector)
+    assert _SHEET.count("openWishlistSearch(track)") == 1
     assert "aria-label={`Interactive Search for ${track.track}`}" in _SHEET
-    fn = _SHEET[_SHEET.index("openWishlistInspector({"):]
-    fn = fn[:fn.index("})")]
-    for field in ("id: track.id", "name: track.track", "artist: track.artist", "album: track.album"):
-        assert field in fn
     # and both sections actually use it
     assert _SHEET.count("<SheetTrack") == 2
 

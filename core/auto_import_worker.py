@@ -31,6 +31,28 @@ AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.
 DISC_FOLDER_RE = re.compile(r'^(?:disc|cd|disk)\s*(\d+)$', re.IGNORECASE)
 
 
+def _owner_breadcrumb(file_path: str, consume: bool = False):
+    """#1504: the owning user profile an AcoustID relocate left next to a
+    staged file, or None. ``consume`` deletes the breadcrumb after reading it
+    so a later staged file with the same basename can never pick up a stale
+    owner."""
+    sidecar = file_path + ".soulsync-owner.json"
+    try:
+        if not os.path.isfile(sidecar):
+            return None
+        with open(sidecar, encoding='utf-8') as handle:
+            owner = json.load(handle).get('owner_profile_id')
+    except Exception as exc:  # noqa: BLE001 - a bad crumb means no owner
+        logger.debug("owner breadcrumb read failed: %s", exc)
+        return None
+    if consume:
+        try:
+            os.remove(sidecar)
+        except OSError as exc:
+            logger.debug("owner breadcrumb cleanup failed: %s", exc)
+    return int(owner) if owner else None
+
+
 @dataclass
 class FolderCandidate:
     path: str
@@ -99,6 +121,26 @@ def _summarize_names(names: List[str], limit: int = 10) -> str:
     return f"{', '.join(names[:limit])} … and {len(names) - limit} more"
 
 
+def _hinted_track_match(candidate, identification: Dict, tracks: List) -> List[Dict]:
+    """A re-identify names the exact track the user picked (#889). When the
+    tracklist matcher turns the file down (its length differs from the
+    release's track, a live take, an extended cut), the user's pick still
+    stands: the file is matched to that track. Only for a hint, and only
+    for the one file a re-identify stages."""
+    if identification.get('method') != 'rematch_hint' or len(candidate.audio_files or []) != 1:
+        return []
+    chosen = str(identification.get('track_id') or '')
+    if not chosen:
+        return []
+    for track in tracks:
+        track_id = track.get('id') if isinstance(track, dict) else getattr(track, 'id', None)
+        if str(track_id or '') == chosen:
+            logger.info("[Auto-Import] Re-identify: '%s' filed as the chosen track %s "
+                        "though the tracklist match turned it down", candidate.name, chosen)
+            return [{'track': track, 'file': candidate.audio_files[0], 'confidence': 1.0}]
+    return []
+
+
 def _read_file_tags(file_path: str) -> Dict[str, Any]:
     """Read embedded tags from an audio file.
 
@@ -128,9 +170,11 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
         'spotify_track_id': '',
     }
     try:
-        from mutagen import File as MutagenFile
-        audio = MutagenFile(file_path, easy=True)
-        if audio:
+        # AIFF/WAV carry raw ID3 the easy view can't map (#1919)
+        from core.metadata.easy_tags import open_easy
+        audio = open_easy(file_path)
+        # an untagged file is falsy to mutagen; its duration still counts (#1920)
+        if audio is not None:
             # Audio length comes off audio.info, not tags. Mutagen returns
             # seconds as a float; convert to int milliseconds to match the
             # metadata-source convention (Spotify/Deezer/iTunes all return
@@ -2045,6 +2089,9 @@ class AutoImportWorker:
             unmatched_files = match_result['unmatched_files']
 
             if not matches:
+                matches = _hinted_track_match(candidate, identification, tracks)
+                unmatched_files = []
+            if not matches:
                 return None
 
             # Compute overall confidence
@@ -2207,6 +2254,9 @@ class AutoImportWorker:
                     source_hint=source,
                     album_name=album_name,
                     quality_profile=gate_profile,
+                    # the USER profile the file is imported for (#1504
+                    # breadcrumb), so another library's copy never skips it
+                    profile_id=_owner_breadcrumb(file_path),
                 )
             except Exception as e:
                 logger.debug("library pre-check failed, importing anyway: %s", e)
@@ -2348,24 +2398,9 @@ class AutoImportWorker:
                 # carry a sidecar with the owning user profile. Read it into
                 # the context as profile_id (the USER profile, not the quality
                 # profile above) so the import lands in the right library.
-                try:
-                    import json as _json
-                    _sidecar = file_path + ".soulsync-owner.json"
-                    if os.path.isfile(_sidecar):
-                        with open(_sidecar, encoding='utf-8') as _sf:
-                            _crumb = _json.load(_sf)
-                        _owner = _crumb.get('owner_profile_id')
-                        if _owner:
-                            context['profile_id'] = int(_owner)
-                        # #1504: delete the breadcrumb after reading it so a
-                        # later staged file with the same basename can never
-                        # pick up a stale owner.
-                        try:
-                            os.remove(_sidecar)
-                        except OSError as exc:
-                            logger.debug("owner breadcrumb cleanup failed: %s", exc)
-                except Exception as exc:
-                    logger.debug("owner breadcrumb read failed: %s", exc)
+                _owner = _owner_breadcrumb(file_path, consume=True)
+                if _owner:
+                    context['profile_id'] = _owner
 
                 self._process_callback(context_key, context, file_path)
                 rejection = import_rejection_reason(context)

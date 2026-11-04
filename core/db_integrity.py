@@ -30,6 +30,10 @@ from typing import Optional
 
 logger = logging.getLogger("db_integrity")
 
+# Pages per backup step when someone watches the copy: 4096 x 4 KiB = 16 MiB,
+# a fresh number on the startup page every fraction of a second.
+_BACKUP_STEP_PAGES = 4096
+
 
 def _close_quietly(conn) -> None:
     """Best-effort close; a failure to close during cleanup must not mask the
@@ -81,7 +85,7 @@ def is_healthy(db_path: str, *, timeout: float = 30.0) -> bool:
 
 
 def safe_backup(src_path: str, dst_path: str, *, verify_source: bool = True,
-                verify_result: bool = True) -> None:
+                verify_result: bool = True, progress=None) -> None:
     """Back up ``src_path`` to ``dst_path`` via the SQLite Online Backup API,
     refusing to produce a backup from (or keep a backup of) a corrupt DB.
 
@@ -89,7 +93,14 @@ def safe_backup(src_path: str, dst_path: str, *, verify_source: bool = True,
     source is unhealthy (``verify_source``) or the produced backup fails its
     own check (``verify_result``). On success ``dst_path`` is a verified-good
     copy.
+
+    ``progress(stage, done, total)`` hears ``check``, ``copy`` with the bytes
+    copied so far, and ``verify``; given one, the copy runs in steps so there
+    is something to report.
     """
+    report = progress or (lambda *_: None)
+    if verify_source:
+        report("check", 0, 0)
     if verify_source and not is_healthy(src_path):
         # Don't immortalize corruption — surface it so the caller can alert
         # and, crucially, NOT rotate out the existing good backups.
@@ -101,7 +112,13 @@ def safe_backup(src_path: str, dst_path: str, *, verify_source: bool = True,
     try:
         src = sqlite3.connect(src_path)
         dst = sqlite3.connect(dst_path)
-        src.backup(dst)
+        if progress is None:
+            src.backup(dst)
+        else:
+            page = src.execute("PRAGMA page_size").fetchone()[0]
+            report("copy", 0, 0)
+            src.backup(dst, pages=_BACKUP_STEP_PAGES, progress=lambda _status, remaining, total:
+                       report("copy", (total - remaining) * page, total * page))
     except BaseException:
         # connect() already created dst_path; don't leave it behind empty
         _close_quietly(dst)
@@ -113,6 +130,8 @@ def safe_backup(src_path: str, dst_path: str, *, verify_source: bool = True,
         _close_quietly(dst)
         _close_quietly(src)
 
+    if verify_result:
+        report("verify", 0, 0)
     if verify_result and not is_healthy(dst_path):
         # The copy itself came out bad — discard it rather than keep a dud.
         try:

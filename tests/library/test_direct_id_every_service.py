@@ -122,8 +122,9 @@ def test_spotify_track_link_while_matching_an_album_gives_its_album(monkeypatch)
 def test_an_id_that_does_not_resolve_falls_back_to_the_search(monkeypatch):
     client = MagicMock()
     client.get_artist.return_value = None
+    # this fork's search rows carry followers/popularity (every Artist has them)
     client.search_artists.return_value = [SimpleNamespace(
-        id=SPOTIFY_ID, name="1905 (search)", image_url=None, genres=[])]
+        id=SPOTIFY_ID, name="1905 (search)", image_url=None, genres=[], followers=0, popularity=0)]
     ss = _wire(monkeypatch, "spotify_enrichment_worker", client)
     rows = ss._search_service("spotify", "artist", SPOTIFY_ID)
     assert rows[0]["name"] == "1905 (search)"

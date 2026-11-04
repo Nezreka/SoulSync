@@ -86,6 +86,12 @@ class LastFMClient:
 
         Returns the session key string, or None on failure.
         """
+        session = self.get_session(token)
+        return session['key'] if session else None
+
+    def get_session(self, token: str) -> Optional[Dict[str, str]]:
+        """``{'key', 'name'}`` for an authorized token, None on failure. The
+        name is the Last.fm account the user signed in as."""
         if not self.api_key or not self.api_secret or not token:
             return None
 
@@ -105,7 +111,7 @@ class LastFMClient:
             if key:
                 self.session_key = key
                 logger.info(f"Last.fm session key obtained for user: {session.get('name', '?')}")
-                return key
+                return {'key': key, 'name': str(session.get('name') or '')}
             else:
                 error = data.get('error', 'Unknown')
                 logger.error(f"Last.fm auth failed: {data.get('message', error)}")

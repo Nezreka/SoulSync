@@ -15,12 +15,161 @@ from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXX
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover, MP4FreeForm
 from mutagen.oggvorbis import OggVorbis
+from mutagen.oggopus import OggOpus
 from mutagen.apev2 import APEv2, APENoHeaderError
 
 logger = logging.getLogger("tag_writer")
 
-# Supported extensions
+# Write support is deliberately narrower than read support.
 SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
+# read_file_tags also reads AIFF and WAV: their tags are plain ID3 (#1919,
+# #1920). writing
+# stays on SUPPORTED_EXTENSIONS.
+READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.aiff', '.aif', '.wav'}
+
+# File-field vocabulary shared by repairs. A selected-field write never
+# derives a second field (for example ALBUMARTIST) from an ARTIST change.
+_TEXT_TAGS = {
+    'title': ('TIT2', 'title', '\xa9nam'),
+    'artist': ('TPE1', 'artist', '\xa9ART'),
+    'album_artist': ('TPE2', 'albumartist', 'aART'),
+    'album': ('TALB', 'album', '\xa9alb'),
+    'year': ('TDRC', 'date', '\xa9day'),
+    'genre': ('TCON', 'genre', '\xa9gen'),
+    'bpm': ('TBPM', 'bpm', 'tmpo'),
+}
+_FIELD_ALIASES = {'albumartist': 'album_artist', 'date': 'year',
+                  'musicbrainz_albumid': 'MUSICBRAINZ_RELEASE_ID',
+                  'musicbrainz_releasegroupid': 'MUSICBRAINZ_RELEASEGROUPID'}
+
+
+def read_tag_field(audio, field: str) -> Any:
+    """Read one field using the same codecs as the partial writer, including Opus."""
+    if audio is None or audio.tags is None:
+        return None
+    field = _FIELD_ALIASES.get(field, field)
+    if field in ('track_number', 'disc_number', 'total_tracks', 'total_discs'):
+        pair = read_number_pair(audio, 'disc' if field in ('disc_number', 'total_discs') else 'track')
+        return pair[1 if field.startswith('total_') else 0]
+    if field in _TEXT_TAGS:
+        id3, vorbis, mp4 = _TEXT_TAGS[field]
+        if isinstance(audio.tags, ID3):
+            return _id3_text(audio.tags, id3)
+        if isinstance(audio, MP4):
+            return _mp4_first(audio, mp4)
+        if isinstance(audio, (FLAC, OggVorbis, OggOpus)):
+            return _vorbis_first(audio, vorbis)
+    if field == 'lyrics':
+        if isinstance(audio.tags, ID3):
+            frames = audio.tags.getall('USLT')
+            return frames[0].text if frames else None
+        if isinstance(audio, MP4):
+            return _mp4_first(audio, '\xa9lyr')
+        return _vorbis_first(audio, 'lyrics') or _vorbis_first(audio, 'unsyncedlyrics')
+    from core.metadata.common import get_mutagen_symbols
+    from core.metadata.musicbrainz_tags import read_tag
+    return read_tag(audio, field.upper(), get_mutagen_symbols())
+
+
+def set_tag_fields(audio, fields: Dict[str, Any]) -> List[str]:
+    """Mutate only selected fields; the caller owns the atomic save."""
+    if audio is None:
+        raise ValueError('Could not open file with Mutagen')
+    if audio.tags is None:
+        audio.add_tags()
+    if not isinstance(audio.tags, ID3) and not isinstance(audio, (FLAC, OggVorbis, OggOpus, MP4)):
+        raise ValueError('Unsupported audio tag format')
+    values = {_FIELD_ALIASES.get(k, k): v for k, v in fields.items() if v is not None}
+    written = []
+    from core.metadata.common import get_mutagen_symbols
+    from core.metadata.musicbrainz_tags import write_tag
+    for field, value in values.items():
+        if field in ('track_number', 'disc_number', 'total_tracks', 'total_discs'):
+            continue
+        if field in _TEXT_TAGS:
+            id3, vorbis, mp4 = _TEXT_TAGS[field]
+            text = ', '.join(str(v) for v in value) if isinstance(value, list) else str(value)
+            if field == 'bpm':
+                text = str(int(round(float(value))))
+            if isinstance(audio.tags, ID3):
+                from mutagen import id3 as frames
+                audio.tags.delall(id3)
+                audio.tags.add(getattr(frames, id3)(encoding=3, text=[text]))
+            elif isinstance(audio, MP4):
+                audio[mp4] = [int(text)] if field == 'bpm' else [text]
+            else:
+                audio[vorbis] = [text]
+        else:
+            if field == 'lyrics' and isinstance(audio.tags, ID3):
+                audio.tags.delall('USLT')
+            write_tag(audio, field.upper(), value, get_mutagen_symbols())
+        written.append(field)
+    for kind, number_key, total_key in (('track', 'track_number', 'total_tracks'), ('disc', 'disc_number', 'total_discs')):
+        if number_key not in values and total_key not in values:
+            continue
+        old_number, old_total = read_number_pair(audio, kind)
+        number, total = values.get(number_key, old_number), values.get(total_key, old_total)
+        if number is None:
+            raise ValueError(f'Cannot write {kind} total without a number')
+        number, total = int(number), int(total or 0)
+        if isinstance(audio.tags, ID3):
+            from core.metadata.track_number_format import format_track_number_tag
+            text = format_track_number_tag(number, total) if kind == 'track' else f'{number}/{total}' if total else str(number)
+            frame = TRCK if kind == 'track' else TPOS
+            audio.tags.delall('TRCK' if kind == 'track' else 'TPOS')
+            audio.tags.add(frame(encoding=3, text=[text]))
+        elif isinstance(audio, MP4):
+            audio['trkn' if kind == 'track' else 'disk'] = [(number, total)]
+        else:
+            # Preserve an existing N/M convention while synchronizing separate
+            # totals. Untagged/bare Vorbis fields retain the native bare format.
+            combined = '/' in str(_vorbis_first(audio, kind + 'number') or '')
+            audio[kind + 'number'] = [f'{number}/{total}' if combined and total else str(number)]
+            if total:
+                audio[kind + 'total'] = audio['total' + kind + 's'] = [str(total)]
+        written.extend(k for k in (number_key, total_key) if k in values)
+    return written
+
+
+def write_tag_fields(file_path: str, fields: Dict[str, Any], *, cover_data=None) -> Dict[str, Any]:
+    """Atomically save selected fields, propagating integrity-check failures."""
+    try:
+        if os.path.splitext(file_path)[1].lower() not in SUPPORTED_EXTENSIONS:
+            return {'success': False, 'error': 'Unsupported format'}
+        audio = MutagenFile(file_path)
+        written = set_tag_fields(audio, fields)
+        if cover_data:
+            if not _embed_cover_art_data(audio, *cover_data):
+                return {'success': False, 'error': 'Cover art could not be embedded'}
+            written.append('cover_art')
+        if not written:
+            return {'success': True, 'written_fields': []}
+        from core.metadata.common import save_audio_file, get_mutagen_symbols
+        if not save_audio_file(audio, get_mutagen_symbols()):
+            return {'success': False, 'error': 'Atomic save aborted by the audio integrity check — tags not written'}
+        return {'success': True, 'written_fields': written}
+    except Exception as exc:
+        return {'success': False, 'error': str(exc)}
+
+
+def read_number_pair(audio, kind='track') -> Tuple[Optional[int], Optional[int]]:
+    """Shared ID3/Vorbis/Opus/MP4 reader, including separate Vorbis totals."""
+    tags = getattr(audio, 'tags', None)
+    if tags is None:
+        return None, None
+    if isinstance(tags, ID3):
+        value = _id3_text(tags, 'TRCK' if kind == 'track' else 'TPOS')
+    elif isinstance(audio, MP4):
+        values = tags.get('trkn' if kind == 'track' else 'disk') or []
+        return tuple(int(v) or None for v in values[0][:2]) if values else (None, None)
+    else:
+        value = _vorbis_first(audio, kind + 'number')
+    parts = str(value or '').split('/')
+    number = _parse_track_num(parts[0])
+    total = _parse_track_num(parts[1]) if len(parts) > 1 else None
+    if not isinstance(tags, ID3):
+        total = _parse_track_num(_vorbis_first(audio, kind + 'total') or _vorbis_first(audio, 'total' + kind + 's')) or total
+    return number, total
 
 
 def read_file_tags(file_path: str) -> Dict[str, Any]:
@@ -41,6 +190,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         'has_cover_art': False,
         'format': None,
         'error': None,
+        'lyrics': None,
         # ReplayGain (None if not present in file)
         'replaygain_track_gain': None,
         'replaygain_track_peak': None,
@@ -55,7 +205,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         return result
 
     ext = os.path.splitext(file_path)[1].lower()
-    if ext not in SUPPORTED_EXTENSIONS:
+    if ext not in READABLE_EXTENSIONS:
         result['error'] = f'Unsupported format: {ext}'
         return result
 
@@ -66,9 +216,21 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             return result
 
         result['format'] = ext.lstrip('.').upper()
+        from core.metadata.musicbrainz_tags import read_tag
+        from core.metadata.common import get_mutagen_symbols
+        symbols = get_mutagen_symbols()
+        if symbols:
+            for key, tag in [('style', 'STYLE'), ('mood', 'MOOD'), ('copyright', 'COPYRIGHT'), ('isrc', 'ISRC')]:
+                result[key] = read_tag(audio, tag, symbols)
+            from core.metadata.source import SOURCE_TAG_CONFIG
+            result['source_ids'] = {tag: value for tag in SOURCE_TAG_CONFIG if tag.endswith('ID')
+                                    and (value := read_tag(audio, tag, symbols))}
+        length = getattr(getattr(audio, 'info', None), 'length', None)
+        if length:
+            result['duration_ms'] = int(length * 1000)
 
         if isinstance(audio.tags, ID3):
-            # MP3
+            # ID3 (MP3 / AIFF / WAV)
             result['title'] = _id3_text(audio.tags, 'TIT2')
             result['artist'] = _id3_text(audio.tags, 'TPE1')
             result['album_artist'] = _id3_text(audio.tags, 'TPE2')
@@ -88,6 +250,9 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                 if getattr(fr, 'desc', '') == 'SOULSYNC_VERIFICATION' and fr.text:
                     result['verification_status'] = str(fr.text[0])
                     break
+            uslt_frames = audio.tags.getall('USLT')
+            if uslt_frames and uslt_frames[0].text:
+                result['lyrics'] = str(uslt_frames[0].text)
 
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             # FLAC / OGG
@@ -105,12 +270,18 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                     result['bpm'] = float(bpm_val)
                 except (ValueError, TypeError):
                     pass
-            if isinstance(audio, FLAC):
-                result['has_cover_art'] = bool(audio.pictures)
-            else:
-                # OGG doesn't have a standard picture field we can easily check
-                result['has_cover_art'] = False
+            # One truth about embedded art across FLAC/Ogg: picture blocks OR
+            # the standard Vorbis-comment `metadata_block_picture`. Reporting
+            # False for Ogg (as this did) contradicted
+            # ``core.metadata.art_apply``, which has always read that comment —
+            # so an arted Ogg showed a permanent "missing cover" gap that no
+            # Cover-Art-Filler scan raised and no apply could close (T-07).
+            result['has_cover_art'] = bool(
+                getattr(audio, 'pictures', None)
+                or (audio.tags is not None and 'metadata_block_picture' in audio.tags)
+            )
             result['verification_status'] = _vorbis_first(audio, 'soulsync_verification')
+            result['lyrics'] = _vorbis_first(audio, 'lyrics') or _vorbis_first(audio, 'unsyncedlyrics')
 
         elif isinstance(audio, MP4):
             # MP4 / M4A
@@ -120,6 +291,12 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             result['album'] = _mp4_first(audio, '\xa9alb')
             result['year'] = _mp4_first(audio, '\xa9day')
             result['genre'] = _mp4_first(audio, '\xa9gen')
+            bpm = _mp4_first(audio, 'tmpo')
+            if bpm is not None:
+                try:
+                    result['bpm'] = float(bpm)
+                except (ValueError, TypeError):
+                    pass
             trkn = audio.tags.get('trkn', []) if audio.tags else []
             if trkn:
                 result['track_number'] = trkn[0][0] if isinstance(trkn[0], tuple) else None
@@ -136,6 +313,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                 except (ValueError, TypeError, OverflowError):
                     pass
             result['has_cover_art'] = bool(audio.tags.get('covr', [])) if audio.tags else False
+            result['lyrics'] = _mp4_first(audio, '\xa9lyr')
             vs = (audio.tags or {}).get('----:com.soulsync:VERIFICATION')
             if vs:
                 raw = vs[0]
@@ -143,6 +321,8 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                     raw.decode('utf-8', 'ignore') if isinstance(raw, bytes) else str(raw)
                 )
 
+        result['track_number'], result['total_tracks'] = read_number_pair(audio)
+        result['disc_number'], result['total_discs'] = read_number_pair(audio, 'disc')
     except Exception as e:
         result['error'] = str(e)
 
@@ -318,6 +498,9 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         ('track_number', 'track_number', 'Track #'),
         ('disc_number', 'disc_number', 'Disc #'),
         ('bpm', 'bpm', 'BPM'),
+        *[(key, key, label) for key, label in [('style', 'Style'), ('mood', 'Mood'),
+            ('copyright', 'Copyright'), ('isrc', 'ISRC'), ('lyrics', 'Lyrics')]
+          if db_data.get(key) not in (None, '')],
     ]
 
     diffs = []
@@ -396,8 +579,11 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
         # #800 — if the change would replace a real file value with a
         # placeholder (Various Artists / [Unknown Album] / …), hold it back:
         # the writer preserves the file's value, so show it as no-change.
+        # A genre borrowed from the artist only fills an empty tag, never
+        # replaces the file's own (same hold-back, same preview).
         protected = False
-        if changed and guard_placeholder_overwrite(db_val, file_val) is None:
+        if changed and (guard_placeholder_overwrite(db_val, file_val) is None
+                        or (db_key == 'genres' and file_str and db_data.get('genres_from_artist'))):
             changed = False
             protected = True
 
@@ -409,6 +595,22 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             'changed': changed,
             'protected': protected,
         })
+
+    for key, db_key, number, label in (('total_tracks', 'track_count', 'track_number', 'Track total'),
+                                       ('total_discs', 'total_discs', 'disc_number', 'Disc total')):
+        actual, expected = file_tags.get(key), db_data.get(db_key)
+        # A missing total is filled too, but only beside a number to write it with.
+        diffs.append({'field': label, 'file_key': key, 'file_value': str(actual or ''), 'db_value': str(expected or ''),
+                      'changed': bool(expected and actual != expected
+                                      and (actual or file_tags.get(number) or db_data.get(number)))})
+
+    if db_data.get('known_source_ids'):
+        from core.metadata.source import known_source_id_tags
+        for tag, expected in known_source_id_tags(db_data).items():
+            actual = (file_tags.get('source_ids') or {}).get(tag)
+            diffs.append({'field': tag.replace('_', ' '), 'file_key': tag,
+                          'file_value': str(actual or ''), 'db_value': str(expected),
+                          'changed': str(actual or '') != str(expected)})
 
     # Cover art — special row
     diffs.append({
@@ -567,6 +769,16 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
                                  year, genre_str, track_num, total_tracks,
                                  disc_num, bpm, artists_list=artists_list)
 
+        total_discs = db_data.get('total_discs')
+        if disc_num is not None and total_discs:
+            if isinstance(audio.tags, ID3):
+                audio.tags.add(TPOS(encoding=3, text=[f'{disc_num}/{total_discs}']))
+            elif isinstance(audio, MP4):
+                audio['disk'] = [(disc_num, total_discs)]
+            else:
+                audio['disctotal'] = [str(total_discs)]
+                audio['totaldiscs'] = [str(total_discs)]
+
         # Embed already-known source IDs (Spotify / iTunes / MusicBrainz) from
         # db_data, reusing the canonical import-time frame writer — no API
         # re-fetch. Only fires when db_data carries id keys, so the plain
@@ -575,7 +787,7 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
             'source', 'source_track_id', 'source_album_id', 'source_artist_id',
             'spotify_track_id', 'spotify_album_id', 'spotify_artist_id',
             'itunes_track_id', 'itunes_album_id', 'itunes_artist_id',
-            'musicbrainz_recording_id', 'musicbrainz_release_id',
+            'musicbrainz_recording_id', 'musicbrainz_release_id', 'known_source_ids',
         ) if db_data.get(k)}
         if _src_meta:
             try:
@@ -584,6 +796,16 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
                     written.append('source_ids')
             except Exception as e:
                 logger.debug("source-id embed skipped for %s: %s", file_path, e)
+
+        from core.metadata.musicbrainz_tags import write_tag
+        from core.metadata.common import get_mutagen_symbols
+        symbols = get_mutagen_symbols()
+        if symbols:
+            for key, tag in [('style', 'STYLE'), ('mood', 'MOOD'), ('copyright', 'COPYRIGHT'), ('isrc', 'ISRC'), ('lyrics', 'LYRICS')]:
+                value = db_data.get(key)
+                if value not in (None, ''):
+                    write_tag(audio, tag, value, symbols)
+                    written.append(key)
 
         # Embed cover art if requested
         if embed_cover:
@@ -602,7 +824,16 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         # format kwargs as before, just routed through the shared atomic helper.
         from types import SimpleNamespace
         from core.metadata.common import save_audio_file
-        save_audio_file(audio, SimpleNamespace(ID3=ID3, FLAC=FLAC, File=MutagenFile))
+        # iss29-E07: a False here means the integrity check aborted the swap —
+        # the original is untouched and NOTHING was written. Reporting success
+        # made lib2's "Write Tags" count the file as written and persist a tag
+        # snapshot for content the file does not contain, so the tag-gap cell
+        # showed the gap forever with no way to act on it.
+        if not save_audio_file(audio, SimpleNamespace(ID3=ID3, FLAC=FLAC, File=MutagenFile)):
+            return {
+                'success': False,
+                'error': 'Atomic save aborted by the audio integrity check — tags not written',
+            }
 
         return {'success': True, 'written_fields': written}
 
@@ -854,6 +1085,13 @@ def _embed_cover_art_data(audio, image_data: bytes, mime_type: str) -> bool:
         elif isinstance(audio, MP4):
             fmt = MP4Cover.FORMAT_JPEG if 'jpeg' in mime_type else MP4Cover.FORMAT_PNG
             audio['covr'] = [MP4Cover(image_data, imageformat=fmt)]
+        elif isinstance(audio, (OggVorbis, OggOpus)):
+            import base64
+            picture = Picture()
+            picture.data, picture.mime, picture.type = image_data, mime_type, 3
+            audio['metadata_block_picture'] = [base64.b64encode(picture.write()).decode('ascii')]
+        else:
+            return False
 
         return True
     except Exception as e:

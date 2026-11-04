@@ -53,11 +53,22 @@ def test_sample_source_resolves_where_playback_does(ws, tmp_path, monkeypatch):
     monkeypatch.setattr(ws.config_manager, "get", fake_get)
     monkeypatch.setattr(ws.media_server_engine, "client", lambda name: None)
     stored = "/mnt/musicBackup/Virtual Mage/Aether/01 - Don't Stop.flac"
-    monkeypatch.setattr(sample_store, "get_track_file_path", lambda track_id: stored)
+    from database.music_database import MusicDatabase
+    from core.library_scope import library_scope
+    from tests.lib2_seed import track as seed_track
+
+    db = MusicDatabase(str(tmp_path / "catalogue.db"))
+    with db._get_connection() as conn:
+        track_id = seed_track(conn, "Virtual Mage", "Aether", "Don't Stop", path=stored)
+        conn.commit()
+    monkeypatch.setattr(sample_api, "get_database", lambda: db)
+    monkeypatch.setattr(sample_store, "get_database", lambda: db)
+    monkeypatch.setattr("core.library_scope.any_own_library_exists", lambda: True)
 
     assert not os.path.isfile(stored)
     assert ws._resolve_library_file_path(stored) == str(track)
-    assert sample_api._resolve_source_path(1, None) == str(track)
+    with library_scope("shared"):
+        assert sample_api._resolve_source_path(track_id, None) == str(track)
 
 
 def test_web_peaks_route_passes_the_stem(ws, monkeypatch):

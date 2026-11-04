@@ -24,7 +24,7 @@ import-light (the pure resolver + its tests never pull a network client).
 from __future__ import annotations
 
 import re
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -280,15 +280,37 @@ def select_preferred_art_url(
     upload) is skipped and the next source is tried instead of winning by
     priority alone.
     """
+    url, _source = select_preferred_art(
+        artist,
+        album,
+        metadata,
+        configured_order,
+        validate=validate,
+    )
+    return url
+
+
+def select_preferred_art(
+    artist: Optional[str],
+    album: Optional[str],
+    metadata: Optional[dict],
+    configured_order,
+    validate: Optional[Callable[[str, str], bool]] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return the preferred URL and its source through the shared resolver.
+
+    ``select_preferred_art_url`` remains the compatibility entry point. Typed
+    consumers can use this result without rebuilding the source-priority
+    decision outside the existing art pipeline.
+    """
     if not isinstance(configured_order, (list, tuple)) or not configured_order:
-        return None
+        return None, None
     from core.metadata.art_sources import effective_art_order, resolve_cover_art
     order = [s for s in effective_art_order(configured_order) if is_art_source_available(s)]
     if not order:
-        return None
+        return None, None
     lookup = build_art_lookup(artist or "", album or "", metadata or {})
-    url, _src = resolve_cover_art(order, lookup, validate=validate)
-    return url
+    return resolve_cover_art(order, lookup, validate=validate)
 
 
 def build_art_lookup(
@@ -507,4 +529,94 @@ def gather_album_art_candidates(
     for s, url in singles:
         _add(url, s)
 
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Artist-photo candidates (deep-dive A9) — same one-candidate-per-source shape
+# as the album picker above, but each source contributes its own artist
+# search's best name-matched result's photo (no album to anchor a match on).
+# ---------------------------------------------------------------------------
+
+_ARTIST_IMAGE_SOURCES: Tuple[str, ...] = ("spotify", "deezer", "itunes", "discogs")
+
+
+def _artist_name_matches(requested: str, got: str) -> bool:
+    """Significant-token-subset tolerance, same as album matching — but this
+    is the ONLY guard here (no album to anchor on), so a same-named different
+    artist can still slip through; worst case is a wrong-but-plausible photo,
+    never worse than the "no picker at all" status quo."""
+    tr, tg = _significant_tokens(requested), _significant_tokens(got)
+    if not tr or not tg:
+        return False
+    return tr <= tg or tg <= tr
+
+
+def _best_artist_match(name: str, results):
+    for r in results or []:
+        got_name = getattr(r, "name", None)
+        if got_name is None and isinstance(r, dict):
+            got_name = r.get("name")
+        if got_name and _artist_name_matches(name, got_name):
+            return r
+    return None
+
+
+def _source_artist_image(source: str, artist_name: str) -> Optional[str]:
+    from core.library.artist_image import pick_artist_image_url
+
+    if source == "spotify":
+        from core.metadata.registry import get_client_for_source
+        client = get_client_for_source("spotify")
+    elif source == "deezer":
+        from core.metadata.registry import get_deezer_client
+        client = get_deezer_client()
+    elif source == "itunes":
+        from core.metadata.registry import get_itunes_client
+        client = get_itunes_client()
+    elif source == "discogs":
+        from core.metadata.registry import get_discogs_client
+        client = get_discogs_client()
+    else:
+        return None
+    if not client:
+        return None
+    results = client.search_artists(artist_name, limit=5)
+    match = _best_artist_match(artist_name, results)
+    return pick_artist_image_url(match) if match else None
+
+
+def gather_artist_image_candidates(
+    artist_name: Optional[str],
+    *,
+    lookup: Optional[Callable[[str, str], Optional[str]]] = None,
+) -> List[dict]:
+    """One candidate photo per configured source, for the artist image picker
+    (deep-dive A9, mirrors ``gather_album_art_candidates``). A source with no
+    client configured, no match, or a lookup error simply contributes
+    nothing — never raises. ``lookup(source, name) -> url|None`` is
+    injectable for tests; production defaults to the live clients."""
+    if not artist_name:
+        return []
+    from concurrent.futures import ThreadPoolExecutor
+
+    do_lookup = lookup or _source_artist_image
+
+    def _safe(source):
+        try:
+            return source, do_lookup(source, artist_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[artist-art] picker task failed (%s): %s", source, exc)
+            return source, None
+
+    with ThreadPoolExecutor(max_workers=len(_ARTIST_IMAGE_SOURCES)) as ex:
+        results = list(ex.map(_safe, _ARTIST_IMAGE_SOURCES))
+
+    candidates: List[dict] = []
+    seen: set = set()
+    for source, url in results:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        candidates.append({"url": url, "source": source})
     return candidates

@@ -1,0 +1,222 @@
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { createContext, type ReactNode, useContext, useMemo, useState } from 'react';
+
+import type { DiscographyRelease } from '../../artist-detail/-artist-detail.types';
+
+import {
+  fetchLibraryV2DiscoveryAlbumStatus,
+  LIBRARY_V2_QUERY_KEY,
+  libraryV2EnabledQueryOptions,
+  monitorLibraryV2DiscoveryAlbum,
+} from '../-library-v2.api';
+import { artistDetailQueryOptions } from '../../artist-detail/-artist-detail.api';
+import styles from './library-v2-page.module.css';
+import { WishlistIcon } from './list-icons';
+
+/**
+ * What Library v2 adds to upstream's artist page.
+ *
+ * That page is upstream's, unchanged, and shows only artists the catalogue
+ * does not hold: the route sends every other one to Library v2, and wraps the
+ * page in the provider below. Its release cards get a bookmark from here,
+ * through one line in `release-card.tsx`, that monitors the whole release.
+ * A click on the card still opens upstream's download dialog, which picks
+ * single tracks (see shell/download-modal-library.ts). Nothing is written
+ * until the user asks.
+ *
+ * Outside the provider (upstream's own tests, any other page that renders a
+ * release card) the card is exactly upstream's.
+ */
+
+interface ArtistPageLibrary {
+  /** The route's source and provider id: the artist the page is about. */
+  source: string;
+  id: string;
+  artistName: string;
+  /** The source that produced the discography, which owns the release ids. */
+  discographySource: string;
+  /** `source:providerId` of every release already on this profile's Wishlist. */
+  wished: ReadonlySet<string>;
+}
+
+interface ArtistPageRelease {
+  source: string;
+  providerId: string;
+  title: string;
+  albumType: string;
+  releaseDate: string | null;
+  imageUrl: string | null;
+  trackCount: number | null;
+}
+
+const ArtistPageLibraryContext = createContext<ArtistPageLibrary | null>(null);
+const EMPTY_SET: ReadonlySet<string> = new Set();
+
+/** `null` unless the card sits on the artist page under the provider. */
+function useArtistPageLibrary(): ArtistPageLibrary | null {
+  return useContext(ArtistPageLibraryContext);
+}
+
+function describeRelease(
+  release: DiscographyRelease,
+  discographySource: string,
+): ArtistPageRelease | null {
+  if (release.id == null || release.id === '') return null;
+  // A gap-fill card (#1067) belongs to the source that listed it.
+  const gapSource = typeof release._gap_source === 'string' ? release._gap_source : '';
+  const year = release.year == null ? '' : String(release.year);
+  return {
+    source: gapSource || discographySource,
+    providerId: String(release.id),
+    title: release.title || release.name || '',
+    albumType: release.album_type || 'album',
+    releaseDate: release.release_date || year || null,
+    imageUrl: release.image_url ?? null,
+    trackCount: typeof release.track_count === 'number' ? release.track_count : null,
+  };
+}
+
+export function ArtistPageLibraryProvider({
+  source,
+  id,
+  name,
+  children,
+}: {
+  source: string;
+  id: string;
+  name: string;
+  children: ReactNode;
+}) {
+  // The page's own query under the same key, so this reads its cache.
+  const detail = useQuery(artistDetailQueryOptions(source, id, name));
+  const artistName = detail.data?.artist?.name || name;
+  const normalizedSource = source.toLowerCase();
+  const discographySource = detail.data?.discography?.source || normalizedSource;
+
+  // one status read for the whole page, per source that owns release ids
+  const idsBySource = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    const discography = detail.data?.discography;
+    for (const bucket of [discography?.albums, discography?.eps, discography?.singles]) {
+      for (const release of bucket ?? []) {
+        const target = describeRelease(release, discographySource);
+        if (target) (out[target.source] ??= []).push(target.providerId);
+      }
+    }
+    return out;
+  }, [detail.data?.discography, discographySource]);
+  const enabled = useQuery(libraryV2EnabledQueryOptions());
+  const statusSources = Object.keys(idsBySource).sort();
+  const status = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'discovery-album-status', idsBySource],
+    queryFn: async () => {
+      const wished = new Set<string>();
+      for (const src of statusSources) {
+        const statuses = await fetchLibraryV2DiscoveryAlbumStatus({
+          source: src,
+          ids: idsBySource[src] ?? [],
+        });
+        for (const [providerId, entry] of Object.entries(statuses)) {
+          if (entry.wished) wished.add(`${src}:${providerId}`);
+        }
+      }
+      return wished;
+    },
+    enabled: enabled.data?.enabled === true && statusSources.length > 0,
+    staleTime: 30_000,
+  });
+  const wished = status.data;
+
+  const value = useMemo<ArtistPageLibrary>(
+    () => ({
+      source: normalizedSource,
+      id,
+      artistName,
+      discographySource,
+      wished: wished ?? EMPTY_SET,
+    }),
+    [normalizedSource, id, artistName, discographySource, wished],
+  );
+
+  return (
+    <ArtistPageLibraryContext.Provider value={value}>{children}</ArtistPageLibraryContext.Provider>
+  );
+}
+
+/** The bookmark on a release card. Renders nothing outside the provider. */
+export function ReleaseMonitorButton({ release }: { release: DiscographyRelease }) {
+  const library = useArtistPageLibrary();
+  if (!library) return null;
+  return <MonitorButton library={library} release={release} />;
+}
+
+function MonitorButton({
+  library,
+  release,
+}: {
+  library: ArtistPageLibrary;
+  release: DiscographyRelease;
+}) {
+  const queryClient = useQueryClient();
+  const enabled = useQuery(libraryV2EnabledQueryOptions());
+  const [state, setState] = useState<'idle' | 'busy' | 'done'>('idle');
+  const target = describeRelease(release, library.discographySource);
+  if (!target) return null;
+
+  const canWish = enabled.data?.enabled === true && enabled.data.canWish;
+  // on the Wishlist already (an add from before this visit), or added just now
+  const monitored = state === 'done' || library.wished.has(`${target.source}:${target.providerId}`);
+  const busy = state === 'busy';
+
+  async function monitor() {
+    if (!target || state !== 'idle') return;
+    setState('busy');
+    try {
+      await monitorLibraryV2DiscoveryAlbum({
+        source: target.source,
+        artistSource: library.source,
+        artistProviderId: library.id,
+        artistName: library.artistName,
+        albumProviderId: target.providerId,
+        albumName: target.title,
+        albumType: target.albumType,
+        releaseDate: target.releaseDate,
+        imageUrl: target.imageUrl,
+        trackCount: target.trackCount,
+      });
+      setState('done');
+      // The artist has a catalogue row now; the route's lookup has to see it.
+      void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+    } catch (error) {
+      setState('idle');
+      window.showToast?.(
+        `Could not add ${target.title || 'this release'} to your Wishlist: ${(error as Error).message}`,
+        'error',
+      );
+    }
+  }
+
+  return (
+    <div className={styles.cardMonitor} onClick={(event) => event.stopPropagation()}>
+      <button
+        type="button"
+        className={`${styles.monitorBtn} ${monitored ? styles.monitorOn : ''}`}
+        aria-label={
+          monitored ? 'On your Wishlist' : busy ? 'Adding to Wishlist' : 'Add to Wishlist'
+        }
+        aria-pressed={monitored}
+        title={
+          monitored
+            ? 'On your Wishlist'
+            : canWish
+              ? 'Add this release to your Wishlist'
+              : 'The Wishlist needs Library access for this profile'
+        }
+        disabled={!canWish || busy || monitored}
+        onClick={() => void monitor()}
+      >
+        <WishlistIcon on={monitored} />
+      </button>
+    </div>
+  );
+}

@@ -140,6 +140,27 @@ describe('ArtistVideosSection', () => {
     expect(document.getElementById('artist-videos-count')?.textContent).toBe('1 video');
   });
 
+  it('keeps a background video search hidden until a matching video arrives', async () => {
+    let finish!: () => void;
+    const responseReady = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const started = vi.fn();
+    server.use(
+      http.post('/api/enhanced-search/source/youtube_videos', async () => {
+        started();
+        await responseReady;
+        return ndjson([JSON.stringify({ type: 'videos', data: [clip('v1')] }) + '\n']);
+      }),
+    );
+    render(<ArtistVideosSection artistName="Aphex Twin" />);
+    await waitFor(() => expect(started).toHaveBeenCalledOnce());
+    expect(screen.queryByRole('heading', { name: 'Music Videos' })).not.toBeInTheDocument();
+    finish();
+    expect(await screen.findByText('Aphex Twin - v1 (Official Video)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Music Videos' })).toBeInTheDocument();
+  });
+
   it('hides itself when YouTube returns no videos', async () => {
     server.use(
       http.post('/api/enhanced-search/source/youtube_videos', () =>

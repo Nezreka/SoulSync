@@ -63,6 +63,27 @@ def test_two_playlists_with_one_name_are_two_playlists(mdb):
     assert a != b
 
 
+def test_a_second_playlist_with_a_taken_name_is_numbered(mdb):
+    """#1927: two copies of one playlist read as one name twice."""
+    names = [mdb.get_mirrored_playlist(up.create_playlist(mdb, 1, n))["name"]
+             for n in ("Chill", "chill", "Chill", "Other")]
+    assert names == ["Chill", "chill (2)", "Chill (3)", "Other"]
+    # another profile's playlist doesn't take the name
+    assert mdb.get_mirrored_playlist(up.create_playlist(mdb, 2, "Chill"))["name"] == "Chill"
+
+
+def test_copying_a_mirror_twice_numbers_the_second_copy(mdb):
+    mirror_id = mdb.mirror_playlist(source="spotify", source_playlist_id="sp1", name="Radar",
+                                    tracks=[_song("One")], profile_id=1)
+    mirror = mdb.get_mirrored_playlist(mirror_id)
+
+    first = up.copy_mirror(mdb, mirror, 1)
+    second = up.copy_mirror(mdb, mirror, 1)
+
+    assert (first["name"], second["name"]) == ("Radar", "Radar (2)")
+    assert mdb.get_mirrored_playlist(second["id"])["name"] == "Radar (2)"
+
+
 def test_blank_name_is_refused(mdb):
     with pytest.raises(up.UserPlaylistError):
         up.create_playlist(mdb, 1, "   ")

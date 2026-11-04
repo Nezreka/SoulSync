@@ -58,16 +58,18 @@ def lib_db(tmp_path):
     db = MusicDatabase(str(tmp_path / 'm.db'))
     conn = db._get_connection()
     c = conn.cursor()
-    c.execute("INSERT INTO artists (id, name, server_source) VALUES ('a1', 'Jillette Johnson', 'plex')")
-    c.execute("""INSERT INTO albums (id, title, artist_id, server_source)
-                 VALUES ('al1', 'Champagne Supernova (OurVinyl Sessions)', 'a1', 'plex')""")
-    c.execute("""INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source)
-                 VALUES ('t1', 'al1', 'a1', 'Champagne Supernova', '/m/cs.mp3', 'plex')""")
+    from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
+
+    artist = seed_artist(c, server_id='a1', name='Jillette Johnson')
+    album = seed_album(c, server_id='al1', artist_id=artist,
+                       title='Champagne Supernova (OurVinyl Sessions)')
+    seed_track(c, server_id='t1', title='Champagne Supernova', album_id=album,
+               artist_id=artist, file_path='/m/cs.mp3')
     # Version-safety control: a live cut on a studio-named album.
-    c.execute("""INSERT INTO albums (id, title, artist_id, server_source)
-                 VALUES ('al2', 'Water In A Whale', 'a1', 'plex')""")
-    c.execute("""INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source)
-                 VALUES ('t2', 'al2', 'a1', 'Cameron', '/m/c.mp3', 'plex')""")
+    album2 = seed_album(c, server_id='al2', artist_id=artist,
+                        title='Water In A Whale')
+    seed_track(c, server_id='t2', title='Cameron', album_id=album2,
+               artist_id=artist, file_path='/m/c.mp3')
     conn.commit()
     conn.close()
     return db

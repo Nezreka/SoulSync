@@ -182,6 +182,23 @@ class AudioDBClient:
             return None
 
     @rate_limited
+    def lookup_artist_by_mbid(self, mbid: str) -> Optional[Dict[str, Any]]:
+        """Lookup an artist by MusicBrainz id, the one lookup that can't land
+        on a namesake."""
+        try:
+            response = self.session.get(
+                f"{self.BASE_URL}/artist-mb.php",
+                params={'i': mbid},
+                timeout=10
+            )
+            response.raise_for_status()
+            artists = (response.json() or {}).get('artists')
+            return artists[0] if artists else None
+        except Exception as e:
+            logger.error(f"Error looking up artist by MBID {mbid}: {e}")
+            return None
+
+    @rate_limited
     def lookup_album_by_id(self, album_id: str) -> Optional[Dict[str, Any]]:
         """Lookup an album directly by AudioDB ID."""
         try:

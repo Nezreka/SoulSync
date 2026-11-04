@@ -6,18 +6,15 @@ from database.music_database import MusicDatabase
 
 
 def _album(db, album_id="alb_evolve"):
-    # id columns are TEXT (GUID) post-migration, so insert explicit ids and a
-    # valid FK rather than relying on integer rowids.
+    """A catalogue album; the media server's own id is what the test names."""
+    from tests.support.catalogue_seed import seed_album, seed_artist
     conn = db._get_connection()
-    cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES ('art_id', 'Imagine Dragons')")
-    cur.execute(
-        "INSERT INTO albums (id, title, artist_id) VALUES (?, 'Evolve', 'art_id')",
-        (album_id,),
-    )
+    artist = seed_artist(conn, server_id='art_id', name='Imagine Dragons')
+    catalogue_id = seed_album(conn, server_id=album_id, title='Evolve',
+                              artist_id=artist)
     conn.commit()
     conn.close()
-    return album_id
+    return catalogue_id
 
 
 def test_set_then_get_roundtrip(tmp_path):

@@ -1078,6 +1078,11 @@ async function openSyncDetailModal(entryId) {
 
         const entry = data.entry;
         const trackResults = entry.track_results || [];
+        // Run results are historical. The API adds current scoped file and
+        // server evidence so a later download no longer appears as a miss.
+        const currentStatus = t => Object.hasOwn(t, 'current_library_match')
+            ? (t.current_library_match?.server_id ? 'matched' : t.current_library_match ? 'owned' : 'unmatched')
+            : (t.status === 'found' ? 'matched' : 'unmatched');
         const name = entry.artist_name
             ? `${entry.artist_name} — ${entry.album_name || entry.playlist_name}`
             : entry.playlist_name || 'Unknown';
@@ -1087,16 +1092,16 @@ async function openSyncDetailModal(entryId) {
         overlay.className = 'discog-modal-overlay';
         overlay.id = 'sync-detail-overlay';
 
-        const found = entry.tracks_found || 0;
+        const found = entry.current_tracks_recognized ?? entry.tracks_found ?? 0;
         const total = entry.total_tracks || 0;
         const downloaded = entry.tracks_downloaded || 0;
 
         let trackRowsHtml = '';
         if (trackResults.length > 0) {
             trackRowsHtml = trackResults.map((t, i) => {
-                const statusIcon = t.status === 'found' ? '✅' : '❌';
-                const statusClass = t.status === 'found' ? 'matched' : 'unmatched';
-                const confPct = Math.round((t.confidence || 0) * 100);
+                const statusClass = currentStatus(t);
+                const statusIcon = statusClass === 'matched' ? '✅' : statusClass === 'owned' ? '⏳' : '❌';
+                const confPct = t.current_library_match ? 100 : Math.round((t.confidence || 0) * 100);
                 const confClass = confPct >= 80 ? 'conf-high' : confPct >= 50 ? 'conf-mid' : 'conf-low';
                 let dlIcon = '';
                 if (t.download_status === 'completed') dlIcon = '✅';
@@ -1105,7 +1110,9 @@ async function openSyncDetailModal(entryId) {
                 else if (t.download_status === 'cancelled') dlIcon = '🚫';
 
                 let dlDisplay = dlIcon;
-                if (!dlDisplay && t.download_status === 'wishlist') {
+                if (t.current_library_match) {
+                    dlDisplay = statusClass === 'matched' ? 'In library' : 'In library · Awaiting server scan';
+                } else if (!dlDisplay && t.download_status === 'wishlist') {
                     // Wing-it fallback stubs (no real metadata) were never actually
                     // wishlisted by the sync — show them as plain, non-clickable.
                     const isWingIt = String(t.source_track_id || '').startsWith('wing_it_');
@@ -1121,7 +1128,7 @@ async function openSyncDetailModal(entryId) {
                 }
 
                 return `
-                    <tr class="sync-detail-row ${statusClass}">
+                    <tr class="sync-detail-row ${statusClass}" data-downloaded="${t.download_status === 'completed'}">
                         <td class="sync-detail-num">${i + 1}</td>
                         <td class="sync-detail-art">
                             ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy">` : '<div class="sync-detail-art-empty"></div>'}
@@ -1161,8 +1168,9 @@ async function openSyncDetailModal(entryId) {
         }
 
         // Count stats for filter bar
-        const matchedCount = trackResults.filter(t => t.status === 'found').length;
-        const unmatchedCount = trackResults.filter(t => t.status !== 'found').length;
+        const matchedCount = trackResults.filter(t => currentStatus(t) === 'matched').length;
+        const unmatchedCount = trackResults.filter(t => currentStatus(t) === 'unmatched').length;
+        const ownedCount = trackResults.filter(t => currentStatus(t) === 'owned').length;
         const downloadedCount = trackResults.filter(t => t.download_status === 'completed').length;
 
         overlay.innerHTML = `
@@ -1180,6 +1188,7 @@ async function openSyncDetailModal(entryId) {
                         <button class="discog-filter active" data-filter="all" onclick="_syncDetailFilter(this, 'all')">All (${total})</button>
                         <button class="discog-filter" data-filter="matched" onclick="_syncDetailFilter(this, 'matched')">Matched (${matchedCount})</button>
                         <button class="discog-filter" data-filter="unmatched" onclick="_syncDetailFilter(this, 'unmatched')">Unmatched (${unmatchedCount})</button>
+                        ${ownedCount > 0 ? `<button class="discog-filter" data-filter="owned" onclick="_syncDetailFilter(this, 'owned')">Awaiting scan (${ownedCount})</button>` : ''}
                         ${downloadedCount > 0 ? `<button class="discog-filter" data-filter="downloaded" onclick="_syncDetailFilter(this, 'downloaded')">Downloaded (${downloadedCount})</button>` : ''}
                     </div>
                 </div>
@@ -1192,7 +1201,7 @@ async function openSyncDetailModal(entryId) {
                                 <th>Track</th>
                                 <th>Artist</th>
                                 <th>Album</th>
-                                <th>Match</th>
+                                <th>Library match</th>
                                 <th>Conf.</th>
                                 <th>Status</th>
                             </tr>
@@ -1203,7 +1212,7 @@ async function openSyncDetailModal(entryId) {
                     </table>
                 </div>
                 <div class="discog-footer">
-                    <div class="discog-footer-info">${found} matched · ${downloaded} downloaded · ${total} total</div>
+                    <div class="discog-footer-info">${found} matched${ownedCount ? ` · ${ownedCount} awaiting scan` : ''} · ${total} total${entry.current_tracks_recognized != null ? `<br>Last sync: ${entry.tracks_found || 0} matched · ${downloaded} downloaded` : ` · ${downloaded} downloaded`}</div>
                     <div class="discog-footer-actions">
                         <button class="discog-cancel-btn" onclick="document.getElementById('sync-detail-overlay')?.remove()">Close</button>
                     </div>
@@ -1233,9 +1242,10 @@ function _syncDetailFilter(btn, filter) {
             row.style.display = row.classList.contains('matched') ? '' : 'none';
         } else if (filter === 'unmatched') {
             row.style.display = row.classList.contains('unmatched') ? '' : 'none';
+        } else if (filter === 'owned') {
+            row.style.display = row.classList.contains('owned') ? '' : 'none';
         } else if (filter === 'downloaded') {
-            const dlCell = row.querySelector('.sync-detail-dl');
-            row.style.display = dlCell && dlCell.textContent.trim() === '✅' ? '' : 'none';
+            row.style.display = row.dataset.downloaded === 'true' ? '' : 'none';
         }
     });
 }

@@ -11,24 +11,26 @@ def db(tmp_path):
     d = MusicDatabase(str(tmp_path / 'm.db'))
     conn = d._get_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO artists (id, name) VALUES (1, 'Daft Punk')")
-    cur.execute("INSERT INTO artists (id, name) VALUES (2, 'Justice')")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (10, 'Discovery', 1)")
-    cur.execute("INSERT INTO albums (id, title, artist_id) VALUES (11, 'Cross', 2)")
-    cur.execute(
-        "INSERT INTO tracks (id, title, artist_id, album_id, file_path) "
-        "VALUES (100, 'One More Time', 1, 10, '/m/omt.flac')")
-    cur.execute(
-        "INSERT INTO tracks (id, title, artist_id, album_id, file_path) "
-        "VALUES (101, 'Aerodynamic', 1, 10, '/m/aero.flac')")
+    # The native catalogue: a recording plus the FILE row that makes it owned.
+    cur.execute("INSERT INTO lib2_artists (id, name, name_key) VALUES (1, 'Daft Punk', 'daft punk')")
+    cur.execute("INSERT INTO lib2_artists (id, name, name_key) VALUES (2, 'Justice', 'justice')")
+    cur.execute("INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (10, 'Discovery', 1)")
+    cur.execute("INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (11, 'Cross', 2)")
+
+    def _track(track_id, title, album_id, path):
+        cur.execute("INSERT INTO lib2_tracks (id, title, album_id) VALUES (?, ?, ?)",
+                    (track_id, title, album_id))
+        if path:
+            cur.execute(
+                "INSERT INTO lib2_track_files (track_id, path, is_primary, file_state) "
+                "VALUES (?, ?, 1, 'active')", (track_id, path))
+
+    _track(100, 'One More Time', 10, '/m/omt.flac')
+    _track(101, 'Aerodynamic', 10, '/m/aero.flac')
     # same title, DIFFERENT artist - must never match on title alone
-    cur.execute(
-        "INSERT INTO tracks (id, title, artist_id, album_id, file_path) "
-        "VALUES (102, 'One More Time', 2, 11, '/m/justice-omt.flac')")
-    # owned row with no file on disk recorded - unplayable, must not match
-    cur.execute(
-        "INSERT INTO tracks (id, title, artist_id, album_id, file_path) "
-        "VALUES (103, 'Digital Love', 1, 10, '')")
+    _track(102, 'One More Time', 11, '/m/justice-omt.flac')
+    # catalogued recording with no file row - unplayable, must not match
+    _track(103, 'Digital Love', 10, None)
     conn.commit()
     conn.close()
     return d
@@ -92,7 +94,10 @@ def test_mix_resolution_scans_candidate_titles_once(db):
         {'artist': 'Daft Punk', 'title': 'Aerodynamic'},
         {'artist': 'Daft Punk', 'title': 'Missing Song'},
     ])
-    selects = [sql for sql in statements if 'FROM tracks t' in sql]
+    # `FROM lib2_tracks t`, not upstream's `FROM tracks t`: the catalogue on
+    # this branch is lib2, and the property under test — one scan for the whole
+    # mix instead of one per entry — is the same either way.
+    selects = [sql for sql in statements if 'FROM lib2_tracks t' in sql]
     assert len(selects) == 1
     assert result['matched'] == 3
     assert [track['file_path'] for track in result['tracks']] == [

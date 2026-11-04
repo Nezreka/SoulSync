@@ -793,7 +793,12 @@ def get_client_for_source(
     if source == "bandcamp":
         return get_bandcamp_client()
 
-    return None
+    # Optional providers use their already-initialized enrichment client.
+    # Never construct a second authenticated client or trigger a login here.
+    from core.enrichment.services import get_service
+    service = get_service(source)
+    worker = service.get_worker() if service else None
+    return getattr(worker, 'client', None)
 
 
 def available_sources(candidates) -> list:

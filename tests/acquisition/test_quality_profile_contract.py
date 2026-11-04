@@ -54,7 +54,9 @@ def _track_payload(quality_profile_id=None):
     return payload
 
 
-def _stored_profile(db, track_id="sp-1"):
+def _stored_profile(db, track_id="sp-1::al1"):
+    # Composite key canonical from the first insert (P1-09) — the payload's
+    # track+album keys the row as "<track>::<album>", not the bare track id.
     row = db.get_wishlist_track(track_id, profile_id=1)
     return row["quality_profile_id"] if row else None
 
@@ -93,7 +95,11 @@ def test_bad_profile_is_rejected_and_nothing_is_written(env, bad):
 
 # ── Download Missing / Begin Analysis ────────────────────────────────────────
 
-def _start_missing(client, quality_profile_id=None, playlist_id="enhanced_search_album_1"):
+def _start_missing(client, quality_profile_id=None, playlist_id="album_1"):
+    # NOT an "enhanced_search_"/"gsearch_" id: that prefix is a confirmed-search
+    # process (core.library2.confirmed_intent) that materializes lib2 rows and
+    # requires full artist/album/track metadata — unrelated to what these
+    # tests pin down (requested_quality_profile_id propagation onto the batch).
     body = {
         "tracks": [{"id": "sp-1", "name": "Song", "artists": [{"name": "Artist"}]}],
         "playlist_name": "Album",

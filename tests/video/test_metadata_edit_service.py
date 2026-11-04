@@ -81,6 +81,22 @@ def test_release_lock_pushes_server_unlock(db):
     assert src.edits[-1] == ("m1", {}, "movie", ["title"])
 
 
+def test_a_members_watched_click_stays_local_and_never_reaches_the_server(db):
+    # #1941: the server account is the admin's, so a member's click would land
+    # in the admin's plex history
+    mid = _seed_movie(db)
+    src = FakeSource()
+    res = med.set_watched(db, "movie", mid, True, source=src, push=False)
+    assert res["ok"] and res["pushed"] is False and src.watched == []
+    conn = db._get_connection()
+    try:
+        assert conn.execute("SELECT play_count FROM movies WHERE id=?", (mid,)).fetchone()[0] == 1
+    finally:
+        conn.close()
+    assert med.set_watched(db, "movie", mid, True, source=src)["pushed"]
+    assert src.watched == [("m1", True, "movie")]
+
+
 def test_set_watched_movie_and_show(db):
     mid, sid = _seed_movie(db), _seed_show(db)
     src = FakeSource()

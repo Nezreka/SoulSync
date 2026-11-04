@@ -8,6 +8,7 @@ release_date, and the profile filter actually filters.
 """
 
 from database.music_database import MusicDatabase
+from tests.support.catalogue_seed import seed_album, seed_artist, seed_track
 
 
 def _db(tmp_path):
@@ -79,9 +80,25 @@ def test_owned_flag_marks_albums_the_library_already_has(tmp_path):
     case-insensitively — track completeness stays the click-time check."""
     db = _db(tmp_path)
     with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', 'Ado')")
-        conn.execute(
-            "INSERT INTO albums (id, artist_id, title) VALUES ('al1', 'ar1', 'kyougen ii')")
+        artist_id = seed_artist(
+            conn, server_id="ar1", name="Ado", server_source="test"
+        )
+        album_id = seed_album(
+            conn,
+            server_id="al1",
+            title="kyougen ii",
+            artist_id=artist_id,
+            server_source="test",
+        )
+        seed_track(
+            conn,
+            server_id="tr1",
+            title="Track 1",
+            album_id=album_id,
+            artist_id=artist_id,
+            server_source="test",
+            file_path="/music/Ado/Kyougen II/01 Track 1.flac",
+        )
         conn.commit()
     releases = db.get_watchlist_recent_releases(limit=20, profile_id=1)
     by_name = {r['album_name']: r['owned'] for r in releases}

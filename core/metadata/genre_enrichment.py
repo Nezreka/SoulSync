@@ -100,6 +100,50 @@ def extract_provider_genres(source: str, entity_type: str, payload: dict) -> lis
     return []  # MusicBrainz is deliberately not a genre source here.
 
 
+def _mapping(value) -> dict:
+    """Return a JSON/object value as a mapping, tolerating corrupt old rows."""
+    if isinstance(value, dict):
+        return value
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(str(value))
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def provider_ids_from_row(row: dict, entity_type: str) -> dict[str, str]:
+    """Read provider identities from either a legacy or Library-v2 row.
+
+    Library v2 promotes Spotify/MusicBrainz and keeps every other provider in
+    ``external_ids``.  The enrichment feature arrived on dev using only the
+    legacy per-provider columns; accepting both shapes keeps its pure candidate
+    logic reusable while the runtime catalogue remains Library v2 only.
+    """
+    external = _mapping(row.get('external_ids'))
+    ids = {str(source): str(value) for source, value in external.items()
+           if source and value not in (None, '')}
+    legacy_fields = {
+        'spotify': ('spotify_artist_id' if entity_type == 'artist' else 'spotify_album_id'),
+        'itunes': ('itunes_artist_id' if entity_type == 'artist' else 'itunes_album_id'),
+        'deezer': 'deezer_id',
+        'discogs': 'discogs_id',
+        'audiodb': 'audiodb_id',
+    }
+    for source, field in legacy_fields.items():
+        value = row.get(field)
+        if source == 'deezer' and not value:
+            value = row.get('deezer_artist_id' if entity_type == 'artist' else 'deezer_album_id')
+        if value not in (None, ''):
+            ids[source] = str(value)
+    if row.get('spotify_id') not in (None, ''):
+        ids['spotify'] = str(row['spotify_id'])
+    if row.get('musicbrainz_id') not in (None, ''):
+        ids['musicbrainz'] = str(row['musicbrainz_id'])
+    return ids
+
+
 def collect_local_candidates(row: dict) -> list[dict]:
     out = []
     for source, field, id_field in [
@@ -111,19 +155,31 @@ def collect_local_candidates(row: dict) -> list[dict]:
             out.append({'raw_genre': value, 'source': source,
                         'source_entity_id': row.get(id_field) if id_field else None,
                         'origin': 'library'})
+    # Native workers keep provider-specific payloads in lib2's enrichment JSON
+    # instead of recreating the wide legacy columns above.
+    enrichment = _mapping(row.get('enrichment'))
+    external_ids = _mapping(row.get('external_ids'))
+    for source, field in (
+        ('discogs', 'genres'), ('discogs', 'styles'), ('lastfm', 'tags'),
+    ):
+        bucket = enrichment.get(source)
+        if not isinstance(bucket, dict):
+            continue
+        for value in parse_values(bucket.get(field)):
+            out.append({
+                'raw_genre': value,
+                'source': source,
+                'source_entity_id': external_ids.get(source),
+                'origin': 'library',
+            })
     return out
 
 
 def collect_cached_candidates(cache, row: dict, entity_type: str) -> tuple[list[dict], int]:
     out, hits = [], 0
-    id_fields = {'spotify': 'spotify_' + ('artist_id' if entity_type == 'artist' else 'album_id'),
-                 'itunes': 'itunes_' + ('artist_id' if entity_type == 'artist' else 'album_id'),
-                 'deezer': 'deezer_id',
-                 'discogs': 'discogs_id', 'audiodb': 'audiodb_id'}
+    provider_ids = provider_ids_from_row(row, entity_type)
     for source in ('spotify', 'itunes', 'deezer', 'discogs', 'audiodb'):
-        source_id = row.get(id_fields[source])
-        if source == 'deezer' and not source_id:
-            source_id = row.get('deezer_artist_id' if entity_type == 'artist' else 'deezer_album_id')
+        source_id = provider_ids.get(source)
         if not source_id or not cache: continue
         payload = cache.get_entity(source, entity_type, str(source_id))
         if payload is None: continue

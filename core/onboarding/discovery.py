@@ -23,6 +23,7 @@ SERVICES = {
     "plex": ((32400,), ("plex",)),
     "jellyfin": ((8096,), ("jellyfin",)),
     "navidrome": ((4533,), ("navidrome",)),
+    "music_assistant": ((8095,), ("music-assistant", "music_assistant", "musicassistant")),
     "slskd": ((5030,), ("slskd",)),
     "prowlarr": ((9696,), ("prowlarr",)),
     "qbittorrent": ((8080, 8090), ("qbittorrent", "qbit")),
@@ -49,6 +50,9 @@ def _fingerprint(service: str, base: str, get) -> bool:
         if service == "navidrome":
             r = get(f"{base}/rest/ping", params={"f": "json"})
             return "subsonic-response" in _text(r)
+        if service == "music_assistant":
+            r = get(f"{base}/info")
+            return r.status_code == 200 and "server_version" in _text(r)
         if service == "slskd":
             r = get(f"{base}/api/v0/session")
             if r.status_code not in (200, 401):

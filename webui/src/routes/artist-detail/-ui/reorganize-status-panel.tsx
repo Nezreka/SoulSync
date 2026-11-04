@@ -192,8 +192,6 @@ function QueuedRow({ item, position }: { item: ReorganizeQueueItem; position: nu
         <div className="reorg-panel-row-title">{item.album_title || 'Unknown album'}</div>
         {isCrossArtist(item) ? (
           <div className="reorg-panel-row-sub">{item.artist_name || 'other artist'}</div>
-        ) : item.source ? (
-          <div className="reorg-panel-row-sub">via {item.source}</div>
         ) : null}
       </div>
       <button

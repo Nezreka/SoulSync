@@ -46,6 +46,8 @@ class _FakeClient:
         self.mode = mode
         self.search_calls = []
         self.exclude_calls = []  # exclude_sources arg per search() call
+        self.search_modes = []
+        self.search_profile_ids = []
         self.hint_calls = []     # track_hint arg per search() call (#1582)
         self._client_map = {}
         for k, v in (subclients or {}).items():
@@ -58,12 +60,40 @@ class _FakeClient:
     def client(self, name):
         return self._client_map.get(name)
 
-    async def search(self, query, timeout=30, exclude_sources=None, progress_callback=None,
-                     track_hint=None):
+    async def search(self, query, timeout=30, exclude_sources=None,
+                     progress_callback=None, search_mode=None,
+                     quality_profile_id=None, track_hint=None):
         self.search_calls.append((query, timeout))
         self.exclude_calls.append(exclude_sources)
+        self.search_modes.append(search_mode)
+        self.search_profile_ids.append(quality_profile_id)
         self.hint_calls.append(track_hint)
         return (self._results, None)
+
+
+def test_worker_passes_the_item_profile_search_mode(monkeypatch):
+    from core.quality import selection
+
+    monkeypatch.setattr(
+        selection, "load_profile_by_id",
+        lambda profile_id=None: {
+            "search_mode": "best_quality",
+            "rank_candidates_by_quality": False,
+            "ranked_targets": [],
+        },
+    )
+    _seed_task(track_info={**_SOLO_TRACK, "quality_profile_id": 7})
+    client = _FakeClient(results=[])
+    deps, _ = _build_deps(
+        soulseek=client, matching=_FakeMatchEngine(queries=["Solo"]))
+
+    tw.download_track_worker("t1", "b1", deps)
+
+    assert client.search_modes and set(client.search_modes) == {"best_quality"}
+    # Upstream's delta: the item's profile reaches the search too, so hybrid
+    # search can decide for THIS item whether to stop at the first source or
+    # pool every source for best-quality selection.
+    assert set(client.search_profile_ids) == {7}
 
 
 class _FakeMatchEngine:
@@ -130,6 +160,41 @@ def _seed_task(task_id='t1', status='pending', track_info=None, **extra):
 # ---------------------------------------------------------------------------
 # Early-return guards
 # ---------------------------------------------------------------------------
+
+def test_existing_wishlist_track_without_duration_can_start_hifi_download(monkeypatch):
+    from core.downloads import validation
+    from core.download_plugins.types import TrackResult
+    from core.matching_engine import MusicMatchingEngine
+
+    monkeypatch.setattr(validation, 'matching_engine', MusicMatchingEngine())
+    _seed_task(track_info={
+        'id': 'sp-1', 'name': 'West Coast', 'artists': ['Lana Del Rey'],
+        'album': 'Ultraviolence', 'duration_ms': None,
+    })
+    candidate = TrackResult(
+        username='hifi', filename='1||Lana Del Rey - West Coast',
+        size=0, bitrate=1411, duration=255_000, quality='flac',
+        free_upload_slots=999, upload_speed=999999, queue_length=0,
+        artist='Lana Del Rey', title='West Coast',
+    )
+    attempts = []
+
+    def attempt(task_id, candidates, track, batch_id, **kwargs):
+        attempts.append((candidates, track.duration_ms))
+        return True
+
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=[candidate], mode='hifi'),
+        matching=_FakeMatchEngine(queries=['lana del rey west coast']),
+        get_valid_candidates=validation.get_valid_candidates,
+        attempt_download_with_candidates=attempt,
+    )
+
+    tw.download_track_worker('t1', None, deps)
+
+    assert attempts == [([candidate], 0)]
+    assert download_tasks['t1']['track_info']['duration_ms'] is None
+
 
 def test_missing_task_frees_batch_slot():
     # A worker dispatched for a task that was deleted before it ran (cleanup /
@@ -448,6 +513,42 @@ def test_no_results_marks_not_found_and_calls_completion():
     assert ('done', ('b1', 't1', False), {}) in rec.calls
 
 
+def test_no_results_reports_acquisition_retry_exhaustion(monkeypatch):
+    track_info = {
+        'id': 'lib2-track:42',
+        'name': 'Money',
+        'artists': ['Pink Floyd'],
+        'album': 'DSOTM',
+        'duration_ms': 383000,
+        '_acquisition_import_id': 'aim1-test',
+    }
+    _seed_task(track_info=track_info)
+    exhausted = []
+    monkeypatch.setattr(
+        tw,
+        '_notify_acquisition_retry_exhausted',
+        lambda context, error: exhausted.append((context, error)) or True,
+    )
+    deps, _ = _build_deps(
+        soulseek=_FakeClient(results=[]),
+        matching=_FakeMatchEngine(queries=['q1']),
+    )
+
+    tw.download_track_worker('t1', None, deps)
+
+    assert download_tasks['t1']['status'] == 'not_found'
+    # Two, not three: upstream reduced the broad fallback searches and this
+    # branch-owned assertion was never updated with it. The property under test
+    # is that exhaustion is reported at all, with the count the shared pipeline
+    # actually ran — so read it from the same source instead of restating it.
+    assert len(exhausted) == 1
+    reported_context, reported_error = exhausted[0]
+    assert reported_context == track_info
+    assert reported_error == (
+        f"No match found after {download_tasks['t1']['query_count']} "
+        "shared-pipeline queries")
+
+
 def test_results_but_no_valid_candidates_stores_raw_for_review():
     """Each query that returns results contributes top 20 to cached_candidates.
     With legacy fallback queries (track-only, cleaned), multiple queries fire."""
@@ -486,8 +587,8 @@ def test_cancellation_mid_query_returns_without_completion():
     _seed_task()
     rec = _Recorder()
 
-    def _cancel_during_search(query, timeout=30, exclude_sources=None, progress_callback=None,
-                              track_hint=None):
+    def _cancel_during_search(query, timeout=30, exclude_sources=None,
+                              progress_callback=None, search_mode=None, track_hint=None):
         download_tasks['t1']['status'] = 'cancelled'
 
         async def _empty():
@@ -750,8 +851,8 @@ def test_search_ticker_never_takes_tasks_lock():
     from core.runtime_state import tasks_lock
 
     class _CallbackUnderLock(_FakeClient):
-        async def search(self, query, timeout=30, exclude_sources=None, progress_callback=None,
-                         track_hint=None):
+        async def search(self, query, timeout=30, exclude_sources=None,
+                         progress_callback=None, search_mode=None, track_hint=None):
             if progress_callback:
                 with tasks_lock:
                     progress_callback([object()] * 3, [], 2)
@@ -1019,8 +1120,12 @@ def test_the_search_carries_the_song_with_its_own_artist():
     sk = _FakeClient(results=[])
     deps, _ = _build_deps(soulseek=sk, matching=_FakeMatchEngine(queries=['q1', 'q2']))
     tw.download_track_worker('t1', 'b1', deps)
-    assert sk.hint_calls and all(h == {"title": "How Far I'll Go", "artist": "Auli'i Cravalho",
-                                       "album": "Moana", "deezer_id": "136340808"} for h in sk.hint_calls)
+    assert sk.hint_calls
+    for hint in sk.hint_calls:
+        assert {k: v for k, v in hint.items() if k != 'catalogue_context'} == {
+            "title": "How Far I'll Go", "artist": "Auli'i Cravalho", "album": "Moana", "deezer_id": "136340808"}
+        assert hint['catalogue_context']['track_info']['artists'] == [{'name': "Auli'i Cravalho"}]
+        assert hint['catalogue_context']['album']['artists'] == [{'name': 'Various Artists'}]
     # one dict for the whole task, so a source can cache in it
     assert len({id(h) for h in sk.hint_calls}) == 1
 

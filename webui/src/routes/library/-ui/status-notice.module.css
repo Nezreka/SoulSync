@@ -1,0 +1,73 @@
+.region {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  max-height: calc(100dvh - 180px);
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(18, 18, 26, 0.96);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: auto;
+}
+
+.message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.indicator {
+  flex: none;
+  font-size: 16px;
+}
+
+.busy .indicator {
+  color: var(--accent-color, #a78bfa);
+}
+
+.ok .indicator {
+  color: #34d399;
+}
+
+.err .indicator {
+  color: #f87171;
+}
+
+.close {
+  flex: none;
+  border: none;
+  padding: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.close:hover,
+.close:focus-visible {
+  opacity: 1;
+}
+
+@media (max-width: 600px) {
+  .region {
+    top: 68px;
+    right: 16px;
+  }
+}

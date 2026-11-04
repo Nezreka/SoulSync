@@ -85,6 +85,7 @@ export function DiscographySection({
             release={release}
             isMusicBrainz={isMusicBrainz}
             isSourceArtist={isSourceArtist}
+            index={index}
             onOpen={onOpen}
             onPlay={onPlay}
           />

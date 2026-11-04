@@ -414,7 +414,7 @@ def season_pack_requests(items: List[Dict[str, Any]], active: Iterable,
     return out
 
 
-def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
+def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any, season: Any = None) -> List[str]:
     """[primary title, *TMDB aliases, *your own] — deduped, primary first. The alias
     set the release-title gate matches against (so a release named by a known aka still
     matches). Best-effort: just the primary when TMDB is unavailable.
@@ -439,6 +439,14 @@ def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
             get_video_db().title_overrides_for(kind, tmdb_id=tmdb_id).get("manual_aliases") or [])
     except Exception:   # noqa: BLE001 - same: an assist never blocks a grab
         logger.debug("manual aliases unavailable for %s %s", kind, tmdb_id, exc_info=True)
+    # an anime's AniList names (romaji, english, that season's synonyms): the
+    # scene names anime releases those ways ("Shingeki no Kyojin"). per season,
+    # so season 2's "JJK2" never accepts a release for season 1
+    try:
+        from api.video import get_video_db
+        aliases = list(aliases) + list(get_video_db().anime_titles_for(kind, tmdb_id, season))
+    except Exception:   # noqa: BLE001 - same: an assist never blocks a grab
+        logger.debug("anime titles unavailable for %s %s", kind, tmdb_id, exc_info=True)
     out, seen = [], set()
     for t in [primary, *aliases]:
         t = str(t or "").strip()
@@ -511,7 +519,10 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
             except Exception:   # noqa: BLE001 - a numbering assist must never break a grab
                 ctx["absolute"] = None
         tmdb_id, kind = item.get("show_tmdb_id"), "show"
-    titles = _acceptable_titles(ctx["title"], kind, tmdb_id)
+    # the anime id map numbers seasons the scene (TVDB) way: alt_season when
+    # TMDB's numbering differs
+    anime_season = ctx.get("alt_season", ctx.get("season")) if kind == "show" else None
+    titles = _acceptable_titles(ctx["title"], kind, tmdb_id, anime_season)
     if len(titles) > 1:
         ctx["titles"] = titles
     # External ids for the indexer search. Prowlarr's structured tvsearch/movie
@@ -686,6 +697,40 @@ def _default_anime_dir() -> str:
         return get_video_db().get_setting("anime_path") or ""
     except Exception:   # noqa: BLE001 - routing falls back to the TV folder
         return ""
+
+
+def _routing_type_for(item: Dict[str, Any]) -> Optional[str]:
+    """``_default_route_type`` for an item that may not come from a wishlist
+    query (a repair grab carries only ``show_tmdb_id``): the library's rule
+    first -- set by hand, an anime-marked library, or a stored hint, never the
+    genre -- and TMDB only for a show in no library with no stored type."""
+    st = item.get("route_series_type")
+    if st:
+        return st
+    tmdb = item.get("show_tmdb_id")
+    if not tmdb:
+        return None
+    try:
+        from api.video import get_video_db
+        st = get_video_db().routing_series_type(tmdb_id=tmdb)
+    except Exception:   # noqa: BLE001 - routing falls back to the TV folder
+        st = None
+    if st and st != "standard":
+        return st
+    return _default_route_type(item)
+
+
+def grab_target_dir(item: Dict[str, Any], media_type: str, root: str) -> str:
+    """``item_target_dir`` for the grab paths that are not the drain or RSS
+    sync (wishlist search now, repair grabs): reads the anime and 4K folders
+    itself, so an anime show's episode goes to the anime folder and a title
+    whose profile says 4K goes to the 4K folder from these paths too."""
+    if not root:
+        return root
+    anime_root = _default_anime_dir() if media_type == "episode" else ""
+    return item_target_dir(item, media_type, root, anime_root,
+                           _default_four_k_dir(media_type),
+                           _routing_type_for, _default_profile_library)
 
 
 def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:

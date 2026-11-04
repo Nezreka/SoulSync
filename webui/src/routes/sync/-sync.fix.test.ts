@@ -152,6 +152,8 @@ describe('the endpoint ladders', () => {
     expect(unmatchApiBase('beatport')).toBe('/api/beatport');
     expect(unmatchApiBase('listenbrainz')).toBe('/api/listenbrainz');
     expect(unmatchApiBase('qobuz')).toBe('/api/qobuz');
+    // its own route: posted to youtube it always 404'd (second #1062 review)
+    expect(unmatchApiBase('ytmusic')).toBe('/api/ytmusic');
     expect(unmatchApiBase('mirrored')).toBe('/api/youtube');
     expect(unmatchApiBase('youtube')).toBe('/api/youtube');
   });

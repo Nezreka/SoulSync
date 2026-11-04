@@ -49,6 +49,18 @@ def test_rename_same_path_is_noop_ok(tmp_path):
     assert ok and f.exists()
 
 
+def test_rename_absolute_and_relative_alias_is_noop_ok(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    f = tmp_path / "Transfer" / "x.flac"
+    f.parent.mkdir()
+    f.write_bytes(b"a")
+
+    ok, err = _rename_track_in_place(str(f), "./Transfer/x.flac")
+
+    assert ok and err is None
+    assert f.exists() and f.read_bytes() == b"a"
+
+
 def test_rename_carries_sibling_format_file(tmp_path):
     # lossy-copy pair: canonical .flac + sibling .opus in the same folder
     src = tmp_path / "old" / "01 - Song.flac"
@@ -58,10 +70,68 @@ def test_rename_carries_sibling_format_file(tmp_path):
     sib.write_bytes(b"opus")
     dst = tmp_path / "new" / "Song.flac"
 
-    ok, _ = _rename_track_in_place(str(src), str(dst))
+    ok, _ = _rename_track_in_place(str(src), str(dst), sibling_paths=[str(sib)])
     assert ok
     assert dst.exists()
     assert (tmp_path / "new" / "Song.opus").exists()    # sibling came along, renamed stem
+
+
+def test_rename_does_not_infer_audio_identity_from_a_matching_stem(tmp_path):
+    src = tmp_path / 'old' / 'Song.flac'
+    src.parent.mkdir()
+    src.write_bytes(b'flac')
+    unrelated = src.with_suffix('.mp3')
+    unrelated.write_bytes(b'ANOTHER RECORDING')
+    dst = tmp_path / 'new' / 'Renamed.flac'
+
+    ok, _ = _rename_track_in_place(str(src), str(dst))
+
+    assert ok and dst.read_bytes() == b'flac'
+    assert unrelated.read_bytes() == b'ANOTHER RECORDING'
+    assert not dst.with_suffix('.mp3').exists()
+
+
+def test_rename_carries_the_track_s_lyrics_sidecar(tmp_path):
+    """A .lrc is part of the track, not release junk — SoulSync writes it
+    itself. The import path has carried it since lilbob5769's report
+    (`move_companion_sidecars`); reorganize moved the audio and stranded the
+    lyrics in the old folder, because it only ever looked for sibling AUDIO.
+
+    Same helper as the import on purpose: a reorganized album and a freshly
+    downloaded one have to end up with the same files next to each other.
+    """
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"flac")
+    (tmp_path / "old" / "01 - Song.lrc").write_text("[00:01.00] la")
+    dst = tmp_path / "new" / "Song.flac"
+
+    ok, _ = _rename_track_in_place(str(src), str(dst))
+
+    assert ok
+    assert (tmp_path / "new" / "Song.lrc").read_text() == "[00:01.00] la"
+    assert not (tmp_path / "old" / "01 - Song.lrc").exists()
+
+
+def test_a_sidecar_problem_never_fails_the_move(tmp_path, monkeypatch):
+    """The audio is already at its destination by the time sidecars are
+    considered. Reporting a failure there would tell the caller the track did
+    not move, and the catalogue would keep pointing at a path nothing is at."""
+    src = tmp_path / "old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"flac")
+    (tmp_path / "old" / "01 - Song.lrc").write_text("la")
+    dst = tmp_path / "new" / "Song.flac"
+
+    def _boom(*_a, **_k):
+        raise OSError("sidecar volume went away")
+
+    monkeypatch.setattr("core.imports.file_ops.move_companion_sidecars", _boom)
+
+    ok, err = _rename_track_in_place(str(src), str(dst))
+
+    assert ok and err is None
+    assert dst.exists()
 
 
 # ── reorganize_album_rename_only (fake preview injected) ──
@@ -230,3 +300,123 @@ def test_an_unresolvable_source_is_skipped_without_creating_folders(tmp_path):
 
     assert not new.parent.exists(), "an empty destination tree was created"
     assert out["moved"] == 0 and out["failed"] == 0 and out["skipped"] == 1
+
+
+# ── empty folders (3.6.1 never left them behind) ──
+
+
+def test_a_failed_move_takes_back_the_folders_it_created(tmp_path, monkeypatch):
+    src = tmp_path / "lib" / "Old" / "01 - Song.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    dst = tmp_path / "lib" / "New Artist" / "New Album" / "Disc 1" / "01 - Song.flac"
+
+    def refuse(_a, _b):
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(os, "rename", refuse)
+
+    ok, err = _rename_track_in_place(str(src), str(dst))
+
+    assert not ok and "Permission denied" in err
+    assert src.exists()
+    assert not (tmp_path / "lib" / "New Artist").exists()
+    assert (tmp_path / "lib").is_dir()  # what was there before stays
+
+
+def test_a_rolled_back_move_leaves_no_empty_destination(tmp_path):
+    src = tmp_path / "lib" / "old" / "01 - A.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"a")
+    new = tmp_path / "lib" / "Artist" / "New Album" / "A - Artist.flac"
+
+    def _boom(track_id, path):
+        raise RuntimeError("database is locked")
+
+    out = _run([{
+        "track_id": "t1", "title": "A", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": True,
+        "current_path_abs": str(src), "new_path_abs": str(new),
+    }], update=_boom)
+
+    assert out["failed"] == 1 and src.exists()
+    assert not (tmp_path / "lib" / "Artist").exists()
+
+
+def test_a_run_sweeps_empty_album_folders_beside_the_one_it_filled(tmp_path, monkeypatch):
+    """3.6.1: leftovers of earlier failed runs (empty album folders, empty
+    Disc-N folders) under the artist folder go; anything with files stays,
+    and nothing above the artist folder is touched"""
+    lib = tmp_path / "lib"
+    artist = lib / "Kendrick Lamar"
+    (artist / "2013 Backseat Freestyle").mkdir(parents=True)
+    (artist / "2012 Old" / "Disc 1").mkdir(parents=True)
+    (artist / "Keep" ).mkdir()
+    (artist / "Keep" / "cover.jpg").write_bytes(b"jpg")
+    (lib / "Empty Top Level").mkdir()
+    src = lib / "incoming" / "01 - Alright.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    (lib / "incoming" / "keep.txt").write_bytes(b"x")
+    new = artist / "2015 To Pimp a Butterfly" / "Disc 1" / "01 - Alright.flac"
+    monkeypatch.setattr("core.imports.paths.library_containing", lambda _p: str(lib))
+
+    out = _run([{
+        "track_id": "t1", "title": "Alright", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": True,
+        "current_path_abs": str(src), "new_path_abs": str(new),
+    }], update=lambda *a, **k: None)
+
+    assert out["moved"] == 1 and new.exists()
+    assert not (artist / "2013 Backseat Freestyle").exists()
+    assert not (artist / "2012 Old").exists()
+    assert (artist / "Keep" / "cover.jpg").exists()
+    assert (lib / "Empty Top Level").is_dir()  # never above the artist folder
+
+
+def test_the_sweep_never_runs_on_a_library_root(tmp_path, monkeypatch):
+    """an "$album/$title" template puts albums straight in the library root:
+    its other empty folders are not ours to remove"""
+    lib = tmp_path / "lib"
+    (lib / "Someone Elses Empty Folder").mkdir(parents=True)
+    src = lib / "incoming" / "01 - Alright.flac"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"audio")
+    (lib / "incoming" / "keep.txt").write_bytes(b"x")
+    new = lib / "To Pimp a Butterfly" / "01 - Alright.flac"
+    monkeypatch.setattr("core.imports.paths.library_containing", lambda _p: str(lib))
+
+    _run([{
+        "track_id": "t1", "title": "Alright", "matched": True, "unchanged": False,
+        "collision": False, "file_exists": True,
+        "current_path_abs": str(src), "new_path_abs": str(new),
+    }], update=lambda *a, **k: None)
+
+    assert (lib / "Someone Elses Empty Folder").is_dir()
+
+
+def test_a_case_only_rename_really_renames_on_case_insensitive_storage(tmp_path):
+    """found in the second #1062 review: on storage that ignores case (WSL's
+    drvfs, Windows, macOS, SMB) the old and new spelling are one file, so the
+    mover returned success without renaming and recorded no move (3.6.1
+    failed it as "destination already exists"). it renames for real now,
+    the file, its same-named sibling and the album and artist folders, and
+    reports the move. on case-sensitive storage it is a plain move."""
+    old_dir = tmp_path / "lib" / "kendrick lamar" / "to pimp a butterfly"
+    old_dir.mkdir(parents=True)
+    src = old_dir / "07 - alright.flac"
+    src.write_bytes(b"audio")
+    sibling = old_dir / "07 - alright.opus"
+    sibling.write_bytes(b"lossy")
+    new = tmp_path / "lib" / "Kendrick Lamar" / "To Pimp a Butterfly" / "07 - Alright.flac"
+    moved = {}
+
+    ok, err = _rename_track_in_place(str(src), str(new), sibling_paths=[str(sibling)],
+                                     moved_paths=moved)
+
+    assert ok and err is None
+    assert moved[str(src)] == str(new)
+    assert "Kendrick Lamar" in os.listdir(tmp_path / "lib")
+    assert "To Pimp a Butterfly" in os.listdir(new.parent.parent)
+    names = os.listdir(new.parent)
+    assert "07 - Alright.flac" in names and "07 - Alright.opus" in names
+    assert (new.parent / "07 - Alright.flac").read_bytes() == b"audio"

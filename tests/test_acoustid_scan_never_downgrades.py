@@ -8,16 +8,16 @@ Reported sequence for one file, in this order:
 
 All three are the same defect seen from different angles. The scan reads the
 file's verification standing from the EMBEDDED TAG and writes its conclusion to
-the CATALOGUE COLUMN (`tracks.verification_status`). When the tag is missing —
-the import's tag write did not stick, the file was copied, a later retag
-dropped it — the scan sees an untagged file, and its "an untagged file a scan
-could not confirm becomes unverified" rule fires against a row the catalogue
-says is verified. The tag is then stamped with that same wrong answer.
+the CATALOGUE COLUMN. When the tag is missing — the import's tag write did not
+stick, the file was copied, a later retag dropped it — the scan sees an
+untagged file, and its "an untagged file a scan could not confirm becomes
+unverified" rule fires against a row the catalogue says is verified. The tag is
+then stamped with that same wrong answer.
 
 Before the cross-script fix this was unreachable for these files: the decision
-was FAIL, which leaves `verification_status` alone — the "Mismatch" of step
-two. Turning that FAIL into an honest SKIP is what walked the file into the
-latent downgrade, so the sequence reads as though the fix caused it.
+was FAIL, which leaves ``verification_status`` alone and only records
+``acoustid_status='fail'`` — the "Mismatch" of step two. Turning that FAIL into
+an honest SKIP is what walked the file into the latent downgrade.
 
 The rule: the tag and the column are two records of one fact, so either one
 saying "verified" is the file standing verified. A scan that cannot confirm
@@ -26,18 +26,19 @@ adds nothing and must take nothing away.
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from types import SimpleNamespace
 
 import pytest
 
 from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
 from core.repair_jobs.base import JobResult
-from database.music_database import MusicDatabase
 
 
 class _Config:
     def get(self, key, default=None):
-        return default
+        return True if key == "features.library_v2" else default
 
     def set(self, *args, **kwargs):
         pass
@@ -47,9 +48,9 @@ class _Client:
     """A fingerprint whose artist is credited in another script — the shape
     that produces an honest SKIP rather than a confirmation."""
 
-    def fingerprint_and_lookup(self, path):
+    def lookup_with_status(self, path):
         return {
-            "best_score": 1.0,
+            "status": "ok", "best_score": 1.0, "recording_mbids": ["mb-1"],
             "recordings": [{"mbid": "mb-1", "title": "APETITAN",
                             "artist": "澤野弘之", "score": 1.0}],
         }
@@ -58,9 +59,9 @@ class _Client:
 class _ConfirmingClient:
     """A fingerprint that agrees with the catalogue outright."""
 
-    def fingerprint_and_lookup(self, path):
+    def lookup_with_status(self, path):
         return {
-            "best_score": 1.0,
+            "status": "ok", "best_score": 1.0, "recording_mbids": ["mb-1"],
             "recordings": [{"mbid": "mb-1", "title": "Apetitan",
                             "artist": "Sawano Hiroyuki", "score": 1.0}],
         }
@@ -69,30 +70,41 @@ class _ConfirmingClient:
 @pytest.fixture
 def scan(tmp_path, monkeypatch):
     """Run one file through the scanner and report what was persisted."""
-    counter = {"n": 0}
-
     def _run(*, db_status, tag_status, client=None):
-        counter["n"] += 1
-        db = MusicDatabase(str(tmp_path / f"m{counter['n']}.db"))
+        db_path = tmp_path / f"scan-{db_status}-{tag_status}.db"
         path = tmp_path / "02 - Apetitan.flac"
         path.write_bytes(b"audio")
 
-        with db._get_connection() as conn:
-            conn.execute("INSERT INTO artists (id, name) VALUES ('a1', 'Sawano Hiroyuki')")
-            conn.execute("INSERT INTO albums (id, title, artist_id) "
-                         "VALUES ('al1', 'AoT Season 2 OST', 'a1')")
-            conn.execute(
-                "INSERT INTO tracks (id, title, artist_id, album_id, file_path, "
-                "duration, verification_status) VALUES ('t1', 'Apetitan', 'a1', "
-                "'al1', ?, 331000, ?)",
-                (str(path), db_status))
-            conn.commit()
+        from core.library2.schema import ensure_library_v2_schema
+
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        ensure_library_v2_schema(conn)
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (7, 'Sawano Hiroyuki')")
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) "
+                     "VALUES (1, 7, 'AoT Season 2 OST')")
+        conn.execute("INSERT INTO lib2_tracks (id, album_id, title, duration) "
+                     "VALUES (42, 1, 'Apetitan', 331000)")
+        conn.execute(
+            "INSERT INTO lib2_track_files (id, track_id, path, format, is_primary, "
+            "verification_status, pipeline_result_json) VALUES (1, 42, ?, 'flac', 1, ?, ?)",
+            (str(path), db_status, json.dumps({})),
+        )
+        conn.commit()
+        conn.close()
+
+        class _DB:
+            def _get_connection(self):
+                c = sqlite3.connect(str(db_path))
+                c.row_factory = sqlite3.Row
+                return c
 
         findings, tags_written = [], []
         context = SimpleNamespace(
-            db=db, transfer_folder=str(tmp_path), config_manager=_Config(),
+            db=_DB(), transfer_folder=str(tmp_path), config_manager=_Config(),
             acoustid_client=None,
             create_finding=lambda **kw: findings.append(kw) or True,
+            report_change=None,
             report_progress=lambda **kw: None,
             update_progress=lambda *a, **kw: None,
             check_stop=lambda: False, wait_if_paused=lambda: False,
@@ -105,9 +117,6 @@ def scan(tmp_path, monkeypatch):
         monkeypatch.setattr(
             "core.tag_writer.write_verification_status",
             lambda _p, status: tags_written.append(status) or True)
-        # Alias resolution lives inside the shared verifier, which is where
-        # the scan reaches it from — the real one would open a database
-        # connection and hit MusicBrainz.
         monkeypatch.setattr(
             "core.acoustid_verification._resolve_expected_artist_aliases",
             lambda _n: [])
@@ -115,14 +124,17 @@ def scan(tmp_path, monkeypatch):
         job = AcoustIDScannerJob()
         monkeypatch.setattr(job, "_resolve_path", lambda p, _c: p)
         tracks = job._load_db_tracks(context)
-        job._scan_file(str(path), "t1", tracks["t1"], client or _Client(),
-                       context, JobResult(), 0.80, 0.70, 0.60)
+        job._scan_file(str(path), "lib2:42", tracks["lib2:42"],
+                       client or _Client(), context, JobResult(),
+                       0.80, 0.70, 0.60)
 
-        with db._get_connection() as conn:
-            stored = conn.execute(
-                "SELECT verification_status FROM tracks WHERE id = 't1'").fetchone()[0]
-        return SimpleNamespace(status=stored, tags_written=tags_written,
-                               findings=findings)
+        c = sqlite3.connect(str(db_path))
+        stored = c.execute(
+            "SELECT verification_status, acoustid_status FROM lib2_track_files "
+            "WHERE id = 1").fetchone()
+        c.close()
+        return SimpleNamespace(status=stored[0], acoustid=stored[1],
+                               tags_written=tags_written, findings=findings)
 
     return _run
 
@@ -132,6 +144,7 @@ def test_an_inconclusive_scan_does_not_demote_a_verified_row(scan):
     out = scan(db_status="verified", tag_status=None)
 
     assert out.status == "verified"
+    assert out.acoustid == "skip"
     assert "unverified" not in out.tags_written
 
 

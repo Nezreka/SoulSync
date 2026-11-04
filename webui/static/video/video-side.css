@@ -1155,6 +1155,13 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border: 1px solid var(--white-a12); backdrop-filter: blur(6px);
 }
 .vd-rt-tag { font-size: 11px; font-weight: 900; padding: 1px 5px; border-radius: var(--radius-xs); letter-spacing: 0.02em; }
+/* a linked chip (a.vd-rt, its hover lift lives with the rating links further
+   down) gets a keyboard focus ring */
+a.vd-rt:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
+/* the provider pages with no score: quieter than a rating */
+.vd-rt--site { font-size: 12px; font-weight: 700; padding: 5px 10px; color: var(--text-2); }
+.vd-rt--site:hover { color: var(--text-1); }
+.vd-rt-out { font-size: 11px; opacity: 0.6; }
 .vd-rt-ic { font-size: 15px; line-height: 1; }
 .vd-rt--imdb .vd-rt-tag { background: #f5c518; color: #000; }
 .vd-rt--mc .vd-rt-tag { background: #fff; color: #000; }
@@ -1164,6 +1171,14 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-rt--trakt .vd-rt-tag { background: #ed1c24; color: #fff; }
 .vd-rt--tvmaze .vd-rt-tag { background: #3dd6c0; color: #00211d; }
 .vd-rt--anilist .vd-rt-tag { background: #02a9ff; color: #fff; }
+/* each season's AniList page, in the About section (the anime layer) */
+.vd-anilist-link {
+    display: inline-flex; align-items: center; gap: 6px; margin: 0 6px 6px 0; padding: 3px 10px;
+    border: 1px solid var(--white-a10); border-radius: var(--radius-pill);
+    color: var(--text-1); font-size: 12px; text-decoration: none;
+}
+.vd-anilist-link:hover { background: var(--white-a06); }
+.vd-anilist-score { color: var(--text-3); font-variant-numeric: tabular-nums; }
 /* DeArrow crowd title (YouTube video expand panel) */
 .vd-dearrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 600; color: #cfe0ff; }
 .vd-dearrow-tag { font-size: 10px; font-weight: 900; letter-spacing: 0.04em; padding: 2px 6px; border-radius: var(--radius-xs);
@@ -4174,7 +4189,11 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     border-radius: 2px; background: linear-gradient(90deg, transparent, hsl(var(--vgm-h, 220), 85%, 62%), transparent);
     box-shadow: 0 0 9px 1px hsla(var(--vgm-h, 220), 85%, 62%, 0.7); animation: vdlScan 0.9s ease-in-out infinite; }
 /* inline per-episode source search */
-.vdl-ep-search { max-height: 0; overflow: hidden; transition: max-height var(--dur-slow) var(--ease-out); }
+/* opens to the results' real height: a max-height cap (2400px) cut a long
+   result list off mid-card with the next episode right under it */
+.vdl-ep-search { display: grid; grid-template-rows: 0fr; overflow: hidden;
+    transition: grid-template-rows var(--dur-slow) var(--ease-out); }
+.vdl-ep-search > * { min-height: 0; }
 .vdl-ep-srcs { display: flex; flex-direction: column; gap: 7px; padding: 3px 14px 12px 42px; }
 .vdl-src--mini { padding: 8px 11px; border-radius: 0; animation: none; }
 .vdl-src--mini .vdl-src-icon { width: 30px; height: 30px; border-radius: 0; }
@@ -4189,7 +4208,7 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdl-results { margin-top: 12px; }
 .vdl-results[hidden] { display: none; }
 .vdl-results--season { margin: 2px 14px 12px 14px; }
-.vdl-ep--open .vdl-ep-search { max-height: 2400px; }   /* room for result cards */
+.vdl-ep--open .vdl-ep-search { grid-template-rows: 1fr; }
 .vdl-res-loading { display: flex; align-items: center; gap: 9px; font-size: 12.5px; font-weight: 600;
     color: var(--white-a60); padding: 9px 2px; }
 .vdl-res-spin { width: 14px; height: 14px; border-radius: var(--radius-circle); flex-shrink: 0;
@@ -4758,6 +4777,19 @@ body[data-side="video"] #gsearch-aura {
 .vms-title { font-size: 22px; font-weight: 700; color: #fff; margin-top: 4px; }
 .vms-scope { font-size: 13px; font-weight: 600; color: var(--white-a60); margin-top: 2px; }
 .vms-sub { font-size: 12px; color: var(--white-a45); margin-top: 8px; }
+.vms-prof { margin-top: 10px; }
+.vms-prof[hidden] { display: none; }
+/* the title's quality profile picker (Get + Manual search) */
+.vdl-prof { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 12px;
+    border-radius: var(--radius-pill); background: var(--white-a06); border: 1px solid var(--white-a12); }
+.vdl-prof-lab { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--white-a50); }
+.vdl-prof-sel { appearance: none; -webkit-appearance: none; border: 0; border-radius: var(--radius-pill);
+    padding: 4px 26px 4px 10px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--text-1); cursor: pointer;
+    background: var(--white-a10) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 9px center; }
+.vdl-prof-sel:hover { background-color: var(--white-a14); }
+.vdl-prof-sel:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
+.vdl-prof-sel:disabled { opacity: 0.55; cursor: progress; }
+.vdl-prof-sel option { background: var(--bg-raised); color: var(--text-1); }
 .vms-body { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 18px; }
 .vms-src-head { font-size: 13px; font-weight: 700; color: var(--white-a85); margin-bottom: 8px; }
 .vms-grabbed { color: #4ade80 !important; border-color: rgba(74,222,128,0.5) !important; }

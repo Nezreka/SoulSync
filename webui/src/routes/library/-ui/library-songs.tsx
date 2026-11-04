@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { type KeyboardEvent, type MouseEvent, useMemo, useState } from 'react';
 
 import { useNowPlaying } from '@/features/playback/use-now-playing';
@@ -10,17 +10,19 @@ import {
   type UserPlaylistTrack,
 } from '@/features/playlists/user-playlists';
 
-import type { LibrarySearch, LibrarySong } from '../-library.types';
+import type { LibrarySearch, LibrarySong } from '../-library-v2.songs';
 
-import { librarySongsQueryOptions } from '../-library.api';
+import { formatQuality, qualityParts } from '../-bitrate';
+import { libraryV2UiPreferencesQueryOptions } from '../-library-v2.api';
 import {
+  deleteLibraryTrackRequest,
+  librarySongsQueryOptions,
   matchParts,
   readSongsResponse,
   songMeta,
   songPlaylistTrack,
   songQueueTrack,
-} from '../-library.helpers';
-import { deleteLibraryTrackRequest } from '../../artist-detail/-artist-detail.manage-actions';
+} from '../-library-v2.songs';
 import { ActionMenu } from '../../artist-detail/-ui/action-menu';
 import { SmartDeleteDialog, TRACK_DELETE_COPY } from '../../artist-detail/-ui/smart-delete-dialog';
 import { SongCopiesDialog } from './library-song-copies';
@@ -106,15 +108,16 @@ function SongRow({
   onCompare,
   onDelete,
 }: RowProps) {
-  const navigate = useNavigate();
-  const albumHref = `/artist-detail/library/${song.artist_id}?album=${song.album_id}`;
-  const openArtist = (album?: boolean) =>
+  const navigate = useNavigate({ from: '/library' });
+  const openArtist = () =>
     void navigate({
       to: '/artist-detail/$source/$id',
       params: { source: 'library', id: String(song.artist_id) },
-      search: album ? { album: String(song.album_id) } : {},
     });
-  const quality = [song.format, song.bitrate ? `${song.bitrate}k` : ''].filter(Boolean).join(' ');
+  // the album opens over the list, and back on it returns here
+  const albumId = Number(song.album_id);
+  const prefsQuery = useQuery(libraryV2UiPreferencesQueryOptions());
+  const quality = formatQuality(song, qualityParts(prefsQuery.data));
   const playable = Boolean(song.file_path);
 
   // the row plays; while songs are ticked it ticks instead, the way a
@@ -207,9 +210,14 @@ function SongRow({
         <div className={styles.meta}>
           <Marked text={song.artist_name} query={query} />
           <span className={styles.dot}>·</span>
-          <a className={styles.album} href={albumHref}>
+          <Link
+            className={styles.album}
+            from="/library"
+            to="/library"
+            search={(previous) => ({ ...previous, album: albumId })}
+          >
             {song.album_title || 'Unknown album'}
-          </a>
+          </Link>
           {songMeta(song) ? (
             <>
               <span className={styles.dot}>·</span>
@@ -218,7 +226,13 @@ function SongRow({
           ) : null}
         </div>
       </div>
-      {quality ? <span className={styles.quality}>{quality}</span> : <span />}
+      {quality.label ? (
+        <span className={styles.quality} title={quality.title}>
+          {quality.label}
+        </span>
+      ) : (
+        <span />
+      )}
       <span className={styles.time}>{duration(song.duration)}</span>
       <div className={styles.actions}>
         <button
@@ -250,8 +264,13 @@ function SongRow({
                   },
                 ]
               : []),
-            { key: 'album', label: 'Open album', onSelect: () => openArtist(true) },
-            { key: 'artist', label: 'Open artist', onSelect: () => openArtist(false) },
+            {
+              key: 'album',
+              label: 'Open album',
+              onSelect: () =>
+                void navigate({ search: (previous) => ({ ...previous, album: albumId }) }),
+            },
+            { key: 'artist', label: 'Open artist', onSelect: openArtist },
             ...(song.copies > 1
               ? [{ key: 'copies', label: `Compare ${song.copies} copies`, onSelect: onCompare }]
               : []),
@@ -291,7 +310,7 @@ async function deleteSongs(songs: LibrarySong[], choice: string): Promise<void> 
   let last: Awaited<ReturnType<typeof deleteLibraryTrackRequest>> | null = null;
   for (const song of songs) {
     try {
-      last = await deleteLibraryTrackRequest(song.id, mode);
+      last = await deleteLibraryTrackRequest(song, mode);
       if (last.extra) window.showToast?.(last.extra, 'warning');
     } catch {
       failed += 1;

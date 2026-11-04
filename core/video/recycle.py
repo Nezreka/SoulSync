@@ -39,8 +39,16 @@ logger = get_logger("video.recycle")
 TRASH_DIRNAME = "ss_recycle"
 
 def _library_roots(db) -> list:
+    """the folders a recycled file can have a trash folder in: the library
+    folders, and every mapped server drive. without the drives, a file on one
+    (found through the drive map) sat under no root and was deleted for good."""
+    from core.video import drive_map
     from core.video.library_roots import library_roots
-    return library_roots(db)
+    roots = list(library_roots(db))
+    for entry in drive_map.load(db):
+        if entry["local"] not in roots:
+            roots.append(entry["local"])
+    return roots
 
 
 def _root_for(path: str, roots) -> Optional[str]:

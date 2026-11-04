@@ -160,13 +160,14 @@ describe('issue fix hand-offs (admin)', () => {
   });
 
   it('find duplicates lands on the duplicate detector, searched', async () => {
+    // as in 3.6.1: the native Duplicate Detector's findings for this item
     stubFetch({
       category: 'duplicate_tracks',
       fix_action: { id: 'find_duplicates', label: 'Find duplicates' },
     });
     renderIssuesRoute(['/issues?issueId=1']);
     fireEvent.click(await screen.findByRole('button', { name: 'Find duplicates' }));
-    expect(takeFindingsFocus()).toEqual({ jobId: 'duplicate_detector', query: 'Album 1' });
+    expect(takeFindingsFocus()).toEqual({ jobId: 'native_duplicate_detector', query: 'Album 1' });
   });
 });
 

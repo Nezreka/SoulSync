@@ -80,6 +80,9 @@ export interface MirroredDetailModalProps {
   onDuplicate?: () => Promise<void>;
   /** a mirror only: an editable copy in My Playlists; the tab opens it. */
   onMakeMine?: () => Promise<void>;
+  /** a mirror only: its copy on the server in the server editor, to swap a
+   *  track for another version you own. the tab closes this once it opens. */
+  onOpenEditor?: () => Promise<void>;
   /** the wing it pool for this playlist. the tab closes this modal first, the
    *  pool is a vanilla overlay that sits under it (#1721). */
   onFindMatches?: () => void;
@@ -420,6 +423,7 @@ export function MirroredDetailModal({
   onRefresh,
   onDuplicate,
   onMakeMine,
+  onOpenEditor,
   onFindMatches,
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
@@ -430,6 +434,7 @@ export function MirroredDetailModal({
   const [addOpen, setAddOpen] = useState(own && tracks.length === 0);
   const [playing, setPlaying] = useState<PlaylistPlayMode | null>(null);
   const [makingMine, setMakingMine] = useState(false);
+  const [openingEditor, setOpeningEditor] = useState(false);
   const [snapshotting, setSnapshotting] = useState(false);
   const saveSnapshot = async () => {
     if (snapshotting) return;
@@ -616,7 +621,7 @@ export function MirroredDetailModal({
       }}
     >
       <div className="mirrored-modal">
-        <div className="mm-hero">
+        <div className={`mm-hero${addOpen && editable ? ' mm-hero--adding' : ''}`}>
           {heroArt ? (
             <div className="mm-hero-bg" style={{ backgroundImage: `url('${heroArt}')` }} />
           ) : null}
@@ -942,6 +947,21 @@ export function MirroredDetailModal({
                 >
                   Sync & download
                 </button>
+                {onOpenEditor ? (
+                  <button
+                    type="button"
+                    className="mm-pill mm-pill--quiet"
+                    title="Edit its copy on your server: swap a track for another version you own, add or remove. Your picks stick on the next sync"
+                    disabled={openingEditor}
+                    aria-busy={openingEditor || undefined}
+                    onClick={() => {
+                      setOpeningEditor(true);
+                      void onOpenEditor().finally(() => setOpeningEditor(false));
+                    }}
+                  >
+                    {openingEditor ? 'Finding it…' : 'Open editor'}
+                  </button>
+                ) : null}
                 <button type="button" className="mm-pill mm-pill--quiet" onClick={onDiscover}>
                   {discoverLabel}
                 </button>

@@ -71,6 +71,8 @@ def test_resolve_audio_path_none_when_nothing_matches(tmp_path):
 def test_resolve_source_path_uses_translation(configured_worker, monkeypatch):
     from core.sample import store as sample_store
 
+    monkeypatch.setattr(sample_api, "_track_exists", lambda track_id: True)
+
     stored = "/mnt/musicBackup/Virtual Mage/Virtual Mage - Aether/01 - Aether.flac"
     monkeypatch.setattr(
         sample_store, "get_track_file_path", lambda track_id: stored
@@ -80,6 +82,8 @@ def test_resolve_source_path_uses_translation(configured_worker, monkeypatch):
 
 def test_resolve_source_path_untranslatable_is_honest(monkeypatch):
     from core.sample import store as sample_store
+
+    monkeypatch.setattr(sample_api, "_track_exists", lambda track_id: True)
 
     sample_worker.configure(config_manager_=_FakeConfig([]), warm=False)
     stored = "/mnt/musicBackup/Artist/Album/01.flac"

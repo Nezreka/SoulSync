@@ -79,13 +79,22 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
             eta = int((size - done) / speed) if (speed > 0 and size > done) else None
         patch = {"status": "downloading", "progress": pct,
                  "speed_bps": speed, "eta_seconds": eta}
-        # the torrent client is holding it back on purpose (its own queue, a
-        # recheck). that's not a stall, so the monitor keeps the clock off it.
-        # usenet's queued also covers grabbing/propagating, which can hang, so
-        # it stays on the clock
-        if str(dl.get("source") or "").lower() == "torrent" \
-                and str(getattr(status, "state", "") or "").lower() == "queued":
+        # the client is holding it back on purpose (its own queue, a recheck).
+        # that's not a stall, so the monitor keeps the clock off it. usenet's
+        # ``queued`` state also covers grabbing/propagating, which can hang, so
+        # a usenet job is held only when the adapter says it is plainly waiting
+        # its turn: SAB runs one job at a time, and the third job in line can
+        # sit behind the others far longer than the stall timeout
+        source = str(dl.get("source") or "").lower()
+        if (source == "torrent"
+                and str(getattr(status, "state", "") or "").lower() == "queued") \
+                or (source == "usenet" and getattr(status, "waiting_in_queue", False) is True):
             patch["_client_queued"] = True
+        # still fetching the NZB (SAB's 'Grabbing' placeholder): the job is about
+        # to drop out of sight while the client adds its files, so the monitor
+        # keeps its new-job grace open instead of treating this as the first report
+        if source == "usenet" and getattr(status, "fetching_nzb", False) is True:
+            patch["_client_adding"] = True
         return patch
     # Completed → locate THIS job's finished video file, then import. Prefer the client's
     # exact content_path (this torrent's own file/folder) — the reliable anti-cross-attribution
@@ -136,19 +145,20 @@ def _usenet_job_dir(dl: dict, save, name, job_name=None) -> Optional[str]:
     multi-file job), the shared parent (scoped to ``<save>/<name>``), or -- sab
     for a single-file job -- the finished FILE itself. For a file the job folder
     is its parent, but only when that folder is named after the job
-    (``job_name``, case-insensitive): a category set up without job folders
-    puts the file straight in the category folder, which must never be
-    treated as the job's own. torrents never get one (the client is still
-    seeding). None unless it really is a folder."""
+    (``job_name``, case-insensitive, or sab's ``<job>.N`` for a repeat name):
+    a category set up without job folders puts the file straight in the
+    category folder, which must never be treated as the job's own. torrents
+    never get one (the client is still seeding). None unless it really is a
+    folder."""
     if str(dl.get("source") or "").lower() != "usenet" or not save:
         return None
     path = _scoped_content(save, name) if name else save
     if path and os.path.isdir(path):
         return str(path)
     if path and os.path.isfile(path) and job_name:
+        from core.downloads.remove_completed import matches_job_name
         parent = os.path.dirname(os.path.abspath(str(path)))
-        if os.path.basename(parent).casefold() == str(job_name).strip().casefold() \
-                and os.path.isdir(parent):
+        if matches_job_name(os.path.basename(parent), job_name) and os.path.isdir(parent):
             return parent
     return None
 

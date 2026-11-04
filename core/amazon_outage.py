@@ -72,8 +72,11 @@ def amazon_enrichment_should_run(config) -> bool:
     needs both an explicit opt-in (amazon_enrichment_paused=False) and a
     self-hosted amazon.base_url. the default points at the dead public host,
     so anyone who opted in before it died goes back to paused."""
-    if config.get("amazon_enrichment_paused", True):
-        return False
+    return not config.get("amazon_enrichment_paused", True) and amazon_host_configured(config)
+
+
+def amazon_host_configured(config) -> bool:
+    """whether amazon.base_url names a self-hosted instance, not the dead default."""
     base = (config.get("amazon.base_url", "") or "").strip().lower()
     host = re.sub(r"^https?://", "", base).split("/", 1)[0]
     return bool(host) and host not in (DEAD_PUBLIC_HOST, "www." + DEAD_PUBLIC_HOST)

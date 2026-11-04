@@ -31,9 +31,11 @@ def _track(track_id="sp1", name="Song", album_id="al1"):
 def _wishlist_profile_id(db, spotify_track_id):
     conn = db._get_connection()
     try:
+        # Rows are keyed `<track>::<album>` since composite ids became canonical.
         row = conn.execute(
-            "SELECT quality_profile_id FROM wishlist_tracks WHERE spotify_track_id=?",
-            (spotify_track_id,),
+            "SELECT quality_profile_id FROM wishlist_tracks "
+            "WHERE spotify_track_id = ? OR spotify_track_id LIKE ?",
+            (spotify_track_id, f"{spotify_track_id}::%"),
         ).fetchone()
         return row["quality_profile_id"] if row else None
     finally:
@@ -109,7 +111,7 @@ def test_get_wishlist_tracks_surfaces_quality_profile_id(db):
     db.add_to_wishlist(_track("sp4"), source_type="manual", user_initiated=True, quality_profile_id=pid)
 
     tracks = db.get_wishlist_tracks(profile_id=1)
-    match = next(t for t in tracks if t["spotify_track_id"] == "sp4")
+    match = next(t for t in tracks if str(t["spotify_track_id"]).split("::")[0] == "sp4")
     assert match["quality_profile_id"] == pid
 
 
@@ -139,14 +141,3 @@ def test_ensure_wishlist_quality_columns_drops_leftover_frozen_columns(db):
         assert "quality_profile_id" in cols_after
     finally:
         conn.close()
-
-
-def test_library_tracks_have_retention_provenance_columns(db):
-    conn = db._get_connection()
-    try:
-        columns = {row[1] for row in conn.execute(
-            "PRAGMA table_info(tracks)").fetchall()}
-    finally:
-        conn.close()
-
-    assert {"acquired_quality_json", "retention_json"} <= columns

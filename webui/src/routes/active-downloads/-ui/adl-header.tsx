@@ -38,6 +38,8 @@ export interface AdlHeaderProps {
     queued: number;
     failed: number;
     total: number;
+    failedClearable: number;
+    finished: number;
     completedOrFailed: number;
   };
   /** how many rows each filter chip would show, keyed by filter value. */
@@ -59,7 +61,12 @@ export interface AdlHeaderProps {
   onOpenHistory: () => void;
   onFilter: (filter: AdlFilter) => void;
   onCancelAll: () => void;
-  onClearCompleted: () => void;
+  /** completed rows only; the review queue and failed rows stay. */
+  onClearFinished: () => void;
+  /** failed, not-found and cancelled rows only; nothing is retried. */
+  onClearFailed: () => void;
+  /** everything finished or failed, review queue included (upstream's clear-all). */
+  onClearEverything: () => void;
   cancelAllPending: boolean;
 }
 
@@ -81,18 +88,40 @@ export function AdlHeader({
   onOpenHistory,
   onFilter,
   onCancelAll,
-  onClearCompleted,
+  onClearFinished,
+  onClearFailed,
+  onClearEverything,
   cancelAllPending,
 }: AdlHeaderProps) {
   const view = viewOf(filter);
   const reviewTab = acoustidEnabled ? REVIEW_TAB : QUARANTINE_ONLY_TAB;
   const menu: ActionMenuItem[] = [];
-  if (counts.completedOrFailed > 0) {
+  if (counts.finished > 0) {
     menu.push({
       key: 'clear',
-      label: `Clear finished (${counts.completedOrFailed})`,
+      label: `Clear finished (${counts.finished})`,
       className: 'dlh-act-clear',
-      onSelect: onClearCompleted,
+      title: 'Clear completed downloads. Failed ones and the review queue stay.',
+      onSelect: onClearFinished,
+    });
+  }
+  if (counts.failedClearable > 0) {
+    menu.push({
+      key: 'clear-failed',
+      label: `Clear failed (${counts.failedClearable})`,
+      className: 'dlh-act-clear-failed',
+      title: 'Take failed downloads off the list without retrying them',
+      onSelect: onClearFailed,
+    });
+  }
+  if (counts.completedOrFailed > 0) {
+    menu.push({
+      key: 'clear-all',
+      label: `Clear everything (${counts.completedOrFailed})`,
+      className: 'dlh-act-clear-all',
+      danger: true,
+      title: 'Clear every finished and failed download, including the review queue',
+      onSelect: onClearEverything,
     });
   }
   if (hasRunningWork) {

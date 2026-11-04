@@ -162,7 +162,9 @@ def test_user_initiated_add_bypasses_and_clears_keeping_source_type(db):
     assert db.add_to_wishlist(track, source_type="album", user_initiated=True) is True
     assert db.is_track_ignored("t7") is False
     # Provenance preserved: the stored row is still source_type='album', NOT 'manual'.
-    row = next(r for r in db.get_wishlist_tracks() if str(r.get("spotify_track_id")) == "t7")
+    # (The row is keyed `<track>::<album>` since composite ids became canonical.)
+    row = next(r for r in db.get_wishlist_tracks()
+               if str(r.get("spotify_track_id", "")).split("::")[0] == "t7")
     assert row.get("source_type") == "album"
 
 

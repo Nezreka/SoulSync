@@ -7,14 +7,11 @@ server_path holds what the server reported and file_path where SoulSync opens
 the file. These run the real save, the real resolver and real files.
 """
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 import core.settings as settings_module
 from core.library import server_paths
-from core.library.navidrome_identity import repair_rekeyed_tracks, resolve_tracks
-from database.music_database import MusicDatabase
 
 _REL = 'The Killers/The Killers - Hot Fuss/11 - Everything Will Be Alright.flac'
 
@@ -57,21 +54,6 @@ def library(tmp_path, monkeypatch):
     return root
 
 
-def _db(tmp_path):
-    db = MusicDatabase(database_path=str(tmp_path / 'music.db'))
-    with db._get_connection() as conn:
-        conn.execute("INSERT INTO artists (id, name, server_source) VALUES ('ar', 'The Killers', 'navidrome')")
-        conn.execute("INSERT INTO albums (id, artist_id, title, server_source) VALUES ('al', 'ar', 'Hot Fuss', 'navidrome')")
-        conn.commit()
-    return db
-
-
-def _paths(db, track_id):
-    with db._get_connection() as conn:
-        row = conn.execute("SELECT file_path, server_path FROM tracks WHERE id = ?", (track_id,)).fetchone()
-    return row[0], row[1]
-
-
 # -- the translator ---------------------------------------------------------
 
 def test_a_path_that_exists_here_is_its_own_local_path(library):
@@ -81,6 +63,16 @@ def test_a_path_that_exists_here_is_its_own_local_path(library):
 def test_resolves_another_mount_and_learns_it(library):
     assert server_paths.local_path_for('/music/' + _REL, settings_module.config_manager) == str(library / _REL)
     assert server_paths._learned == {'/music': str(library).replace('\\', '/')}
+
+
+@pytest.mark.parametrize('reported_local', [True, False])
+def test_relative_library_configuration_returns_absolute_identity(tmp_path, library, monkeypatch, reported_local):
+    monkeypatch.chdir(tmp_path)
+    config = _Config(['./Media/Music'])
+    path = './Media/Music/' + _REL if reported_local else '/music/' + _REL
+    assert server_paths.local_path_for(path, config) == str(library / _REL)
+    if not reported_local:
+        assert server_paths._learned == {'/music': str(library).replace('\\', '/')}
 
 
 def test_learned_mount_skips_the_walk(library, monkeypatch):
@@ -93,98 +85,182 @@ def test_learned_mount_skips_the_walk(library, monkeypatch):
     assert server_paths.local_path_for('/music/The Killers/The Killers - Hot Fuss/01 - Jenny.flac') == str(other)
 
 
-def test_unreachable_gives_none_and_stops_walking(tmp_path, monkeypatch):
-    calls = []
-    import core.library.path_resolver as resolver
-    monkeypatch.setattr(resolver, 'resolve_library_file_path', lambda *a, **k: calls.append(1))
-    for i in range(server_paths._GIVE_UP_AFTER + 50):
-        assert server_paths.local_path_for(f'/music/A/B/{i}.flac') is None
-    assert len(calls) == server_paths._GIVE_UP_AFTER
+def test_unreachable_namespace_stops_expensive_album_scans(tmp_path, monkeypatch):
+    root = tmp_path / 'music'
+    album = root / 'A' / 'Physical Album'
+    album.mkdir(parents=True)
+    (album / 'keep.flac').write_bytes(b'audio')
+    config = _Config([str(root)])
+    scans = []
+    import os
+    real_scandir = os.scandir
+
+    def count_scans(path):
+        scans.append(path)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', count_scans)
+    for i in range(server_paths._GIVE_UP_AFTER):
+        assert server_paths.local_path_for(f'/music/A/B/{i}.flac', config) is None
+    # Each allowed miss scans the artist once per fuzzy strategy, and its
+    # album once for synthesized filenames. Case folding also reads the root
+    # once, then reuses its cached listing for every following miss.
+    assert scans.count(str(root)) == 1
+    assert len(scans) == server_paths._GIVE_UP_AFTER * 3 + 1
+    scans_before_give_up = list(scans)
+    for i in range(server_paths._GIVE_UP_AFTER, server_paths._GIVE_UP_AFTER + 50):
+        assert server_paths.local_path_for(f'/music/A/B/{i}.flac', config) is None
+    assert scans == scans_before_give_up
 
 
 
 def test_a_hit_resets_the_miss_count(library, monkeypatch):
-    """a partly mounted library keeps walking as long as hits interleave"""
-    import core.library.path_resolver as resolver
-    real = resolver.resolve_library_file_path
-    calls = []
-
-    def counting(*a, **k):
-        calls.append(1)
-        return real(*a, **k)
-    monkeypatch.setattr(resolver, 'resolve_library_file_path', counting)
+    """A reachable flat hit re-enables fuzzy scans for its own namespace."""
     for i in range(server_paths._GIVE_UP_AFTER - 1):
-        server_paths.local_path_for(f'/elsewhere/A/B/{i}.flac', settings_module.config_manager)
-    server_paths.local_path_for('/music/' + _REL, settings_module.config_manager)
+        server_paths.local_path_for(f'/music/A/B/{i}.flac', settings_module.config_manager)
+    flat = library / 'playlist/song.flac'
+    flat.parent.mkdir()
+    flat.write_bytes(b'flat hit')
+    assert server_paths.local_path_for('/music/playlist/song.flac', settings_module.config_manager) == str(flat)
+    # No mount is learned from the two-segment tail, so this requires a real
+    # fuzzy directory scan after further misses in that same namespace.
     for i in range(10):
-        server_paths.local_path_for(f'/elsewhere/A/C/{i}.flac', settings_module.config_manager)
-    assert len(calls) == server_paths._GIVE_UP_AFTER + 10
+        server_paths.local_path_for(f'/music/A/C/{i}.flac', settings_module.config_manager)
+    assert server_paths.local_path_for(
+        '/music/The Killers/Wrong Album/11 - Everything Will Be Alright.flac',
+        settings_module.config_manager,
+    ) == str(library / _REL)
+
+
+@pytest.mark.parametrize('reported', ['/flat/playlist/song.flac', '/music/playlist/song.flac'])
+def test_unreachable_files_do_not_hide_a_later_reachable_flat_path(tmp_path, reported):
+    root = tmp_path / 'flat-mounted'
+    target = root / 'playlist/song.flac'
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b'local flat song')
+    config = _Config([str(root)])
+
+    for i in range(server_paths._GIVE_UP_AFTER):
+        assert server_paths.local_path_for(f'/music/Artist/Album/{i}.flac', config) is None
+
+    assert server_paths.local_path_for(reported, config) == str(target)
+
+
+def test_miss_budget_does_not_disable_another_namespaces_fuzzy_lookup(library):
+    for i in range(server_paths._GIVE_UP_AFTER):
+        assert server_paths.local_path_for(
+            f'/unmounted/A/B/{i}.flac', settings_module.config_manager,
+        ) is None
+
+    assert server_paths.local_path_for(
+        '/other-mount/The Killers/Wrong Album/11 - Everything Will Be Alright.flac',
+        settings_module.config_manager,
+    ) == str(library / _REL)
 
 
 # -- the scan save ----------------------------------------------------------
 
-def test_scan_stores_both_paths(tmp_path, library):
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    assert _paths(db, 'nd-1') == (str(library / _REL), '/music/' + _REL)
+# The re-key behavior is exercised in tests/test_navidrome_identity.py.
+# Below, the scan/export behavior uses the native catalogue and mappings.
+
+# The server's observed path belongs to its mapping, never to catalogue ownership.
+def _db(tmp_path, library, server='navidrome'):
+    from database.music_database import MusicDatabase
+    from tests.lib2_seed import track
+    from core.library2.media_mappings import upsert_mapping
+    db = MusicDatabase(str(tmp_path / 'music.db'))
+    with db._get_connection() as conn:
+        tid = track(conn, 'The Killers', 'Hot Fuss', 'Everything Will Be Alright',
+                    path=str(library / _REL), track_number=11, duration=345000)
+        row = conn.execute('SELECT t.album_id, al.primary_artist_id FROM lib2_tracks t '
+                           'JOIN lib2_albums al ON al.id=t.album_id WHERE t.id=?', (tid,)).fetchone()
+        upsert_mapping(conn, 'artist', row[1], server, 'ar')
+        upsert_mapping(conn, 'album', row[0], server, 'al')
+        conn.commit()
+    return db, tid
 
 
-def test_unreachable_file_keeps_todays_behaviour(tmp_path, monkeypatch):
+def _paths(db, tid, server='navidrome'):
+    with db._get_connection() as conn:
+        return tuple(conn.execute('SELECT f.path, m.server_path FROM lib2_track_files f '
+                                  'JOIN lib2_media_server_mappings m ON m.entity_id=f.track_id '
+                                  "AND m.entity_type='track' AND m.server_source=? "
+                                  'WHERE f.track_id=?', (server, tid)).fetchone())
+
+
+def test_scan_keeps_server_path_on_mapping_and_local_file_on_catalogue(tmp_path, library):
+    db, tid = _db(tmp_path, library)
+    assert db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
+    assert _paths(db, tid) == (str(library / _REL), '/music/' + _REL)
+
+
+@pytest.mark.parametrize('server', ['navidrome', 'plex', 'jellyfin'])
+def test_relative_mount_recognizes_file_without_recording_id_or_parent_mapping(tmp_path, library, monkeypatch, server):
+    db, tid = _db(tmp_path, library, server)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(settings_module, 'config_manager', _Config(['./Media/Music']))
+    assert db.insert_or_update_media_track(_Track('new-song', '/music/' + _REL),
+                                           'unmapped-edition', 'unmapped-artist', server_source=server)
+    assert _paths(db, tid, server) == (str(library / _REL), '/music/' + _REL)
+
+
+def test_unresolved_server_mount_preserves_the_imported_local_path(tmp_path, library, monkeypatch):
+    db, tid = _db(tmp_path, library)
     monkeypatch.setattr(settings_module, 'config_manager', _Config([]))
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    assert _paths(db, 'nd-1') == ('/music/' + _REL, '/music/' + _REL)
+    assert db.insert_or_update_media_track(_Track('nd-1', '/different-mount/' + _REL), 'al', 'ar', server_source='navidrome')
+    assert _paths(db, tid) == (str(library / _REL), '/different-mount/' + _REL)
 
 
-def test_rescan_never_swaps_a_working_local_path_for_the_servers(tmp_path, library, monkeypatch):
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    # this time nothing resolves (say the library path setting was cleared)
-    monkeypatch.setattr(settings_module, 'config_manager', _Config([]))
-    server_paths.reset()
-    db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    assert _paths(db, 'nd-1') == (str(library / _REL), '/music/' + _REL)
-
-
-def test_missing_server_path_keeps_both(tmp_path, library):
-    db = _db(tmp_path)
+def test_missing_server_path_keeps_the_last_observation(tmp_path, library):
+    db, tid = _db(tmp_path, library)
     db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
     db.insert_or_update_media_track(_Track('nd-1', None), 'al', 'ar', server_source='navidrome')
-    assert _paths(db, 'nd-1') == (str(library / _REL), '/music/' + _REL)
+    assert _paths(db, tid) == (str(library / _REL), '/music/' + _REL)
 
 
-def test_export_hands_the_server_its_own_path(tmp_path, library):
-    db = _db(tmp_path)
+def test_export_uses_the_selected_servers_own_mount(tmp_path, library):
+    from core.library2.media_mappings import upsert_mapping
+    db, tid = _db(tmp_path, library)
     db.insert_or_update_media_track(_Track('nd-1', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    assert [e['path'] for e in db.get_all_library_tracks_for_export()] == ['/music/' + _REL]
-
-
-# -- navidrome re-keys ------------------------------------------------------
-
-def _stale_and_live(tmp_path, library):
-    """reorganize moved the file: navidrome gave it a new id and a new path,
-    the scan brought the new row in. the old row still carries the old id."""
-    db = _db(tmp_path)
-    db.insert_or_update_media_track(_Track('dead', '/music/old/place.flac'), 'al', 'ar', server_source='navidrome')
     with db._get_connection() as conn:
-        conn.execute("UPDATE tracks SET file_path = ? WHERE id = 'dead'", (str(library / _REL),))
+        upsert_mapping(conn, 'track', tid, 'plex', 'plex-1', server_path='/plex/' + _REL)
         conn.commit()
-    db.insert_or_update_media_track(_Track('live', '/music/' + _REL), 'al', 'ar', server_source='navidrome')
-    songs = {'live': {'id': 'live', 'title': 'Everything Will Be Alright', 'duration': 345,
-                      'path': '/music/' + _REL}}
-    return db, songs
+    assert [e['path'] for e in db.get_all_library_tracks_for_export(server_source='navidrome')] == ['/music/' + _REL]
+    assert [e['path'] for e in db.get_all_library_tracks_for_export(server_source='plex')] == ['/plex/' + _REL]
+    assert [e['path'] for e in db.get_all_library_tracks_for_export(server_source='jellyfin')] == [str(library / _REL)]
+    assert [e['file_path'] for e in db.get_tracks_for_m3u_resolution(server_source='navidrome')] == ['/music/' + _REL]
+    assert _paths(db, tid)[0] == str(library / _REL)
 
 
-def test_playlist_guard_follows_a_rekey_through_the_local_file(tmp_path, library):
-    db, songs = _stale_and_live(tmp_path, library)
-    # the tail fallback would also find it; take it away to prove the new route
-    songs['live']['path'] = '/music/elsewhere/x.flac'
-    assert resolve_tracks([SimpleNamespace(ratingKey='dead')], songs, db)[0].ratingKey == 'live'
-
-
-def test_repair_merges_a_rekeyed_row_through_the_local_file(tmp_path, library):
-    db, songs = _stale_and_live(tmp_path, library)
-    songs['live']['path'] = '/music/elsewhere/x.flac'
-    assert repair_rekeyed_tracks(db, songs) == 1
+@pytest.mark.parametrize('scope,expected', [('shared', '/shared/song.flac'), (7, '/private/song.flac')])
+def test_export_selects_the_mapping_of_the_files_library(tmp_path, library, monkeypatch, scope, expected):
+    from core.library2 import sql_util
+    from core.library2.media_mappings import upsert_mapping
+    db, tid = _db(tmp_path, library)
     with db._get_connection() as conn:
-        assert [r[0] for r in conn.execute("SELECT id FROM tracks")] == ['live']
+        conn.execute('INSERT INTO lib2_track_files(track_id,path,owner_profile_id,is_primary) '
+                     'VALUES(?,?,7,0)', (tid, '/local/private/song.flac'))
+        upsert_mapping(conn, 'track', tid, 'navidrome', 'shared-song', server_path='/shared/song.flac')
+        upsert_mapping(conn, 'track', tid, 'navidrome', 'private-song', 'own:7',
+                       server_path='/private/song.flac')
+        conn.commit()
+    monkeypatch.setattr(sql_util, '_resolve_scope', lambda _: scope)
+    assert [e['path'] for e in db.get_all_library_tracks_for_export('navidrome')] == [expected]
+    assert [e['file_path'] for e in db.get_tracks_for_m3u_resolution('navidrome')] == [expected]
+
+
+def test_mapping_schema_upgrade_keeps_existing_identities(tmp_path):
+    import sqlite3
+    from core.library2.media_mappings import ensure_media_mapping_schema
+    conn = sqlite3.connect(tmp_path / 'old.db')
+    conn.row_factory = sqlite3.Row
+    # Existing catalogue and mapping from before the additive path observation.
+    from core.library2.schema import ensure_library_v2_schema
+    ensure_library_v2_schema(conn)
+    conn.execute('ALTER TABLE lib2_media_server_mappings DROP COLUMN server_path')
+    conn.execute("INSERT INTO lib2_media_server_mappings(entity_type,entity_id,server_source,server_id) "
+                 "VALUES('track',7,'navidrome','nd-old')")
+    ensure_media_mapping_schema(conn)
+    ensure_media_mapping_schema(conn)
+    assert tuple(conn.execute('SELECT server_id, server_path FROM lib2_media_server_mappings').fetchone()) == ('nd-old', None)
+    conn.close()

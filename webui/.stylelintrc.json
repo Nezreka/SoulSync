@@ -136,6 +136,7 @@
     },
     {
       "files": [
+        "src/routes/library/-ui/library-v2-page.module.css",
         "static/style.css",
         "static/video/video-side.css"
       ],
@@ -157,6 +158,9 @@
         "src/routes/issues/-ui/issue-detail-modal.module.css",
         "src/routes/issues/-ui/issue-status.module.css",
         "src/routes/issues/-ui/issues-page.module.css",
+        "src/routes/library/-ui/library-v2-page.module.css",
+        "src/routes/library/-ui/migration-banner.module.css",
+        "src/routes/library/-ui/status-notice.module.css",
         "src/routes/podcasts/-ui/podcasts-page.module.css",
         "src/routes/requests/-ui/requests-page.module.css",
         "src/routes/sample-studio/-ui/sample-studio-page.module.css",
@@ -190,6 +194,9 @@
         "src/routes/issues/-ui/issue-detail-modal.module.css",
         "src/routes/issues/-ui/issue-status.module.css",
         "src/routes/issues/-ui/issues-page.module.css",
+        "src/routes/library/-ui/library-v2-page.module.css",
+        "src/routes/library/-ui/migration-banner.module.css",
+        "src/routes/library/-ui/status-notice.module.css",
         "src/routes/podcasts/-ui/podcasts-page.module.css",
         "src/routes/requests/-ui/requests-page.module.css",
         "src/routes/sample-studio/-ui/sample-studio-page.module.css",
@@ -219,6 +226,9 @@
         "src/routes/import/-ui/import-page.module.css",
         "src/routes/issues/-ui/issue-status.module.css",
         "src/routes/issues/-ui/issues-page.module.css",
+        "src/routes/library/-ui/library-v2-page.module.css",
+        "src/routes/library/-ui/migration-banner.module.css",
+        "src/routes/library/-ui/status-notice.module.css",
         "src/routes/podcasts/-ui/podcasts-page.module.css",
         "src/routes/sample-studio/-ui/sample-studio-page.module.css",
         "src/routes/search/-ui/basic.module.css",
@@ -239,6 +249,7 @@
         "src/features/playlists/add-to-playlist.module.css",
         "src/routes/audiobooks/-ui/audiobook-library.module.css",
         "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/library/-ui/library-v2-page.module.css",
         "src/routes/podcasts/-ui/podcasts-page.module.css",
         "src/routes/sample-studio/-ui/sample-studio-page.module.css",
         "src/routes/search/-ui/basic.module.css",
@@ -257,6 +268,7 @@
       "files": [
         "src/routes/audiobooks/-ui/audiobooks-page.module.css",
         "src/routes/import/-ui/import-page.module.css",
+        "src/routes/library/-ui/library-v2-page.module.css",
         "src/routes/podcasts/-ui/podcasts-page.module.css",
         "src/routes/search/-ui/search.module.css",
         "src/routes/stats/-ui/stats-page.module.css",
@@ -270,6 +282,7 @@
       "files": [
         "src/routes/audiobooks/-ui/audiobook-library.module.css",
         "src/routes/audiobooks/-ui/audiobooks-page.module.css",
+        "src/routes/library/-ui/library-v2-page.module.css",
         "src/routes/podcasts/-ui/podcasts-page.module.css",
         "src/routes/sample-studio/-ui/stems-panel.module.css"
       ],
@@ -297,7 +310,8 @@
     },
     {
       "files": [
-        "src/features/onboarding/onboarding.module.css"
+        "src/features/onboarding/onboarding.module.css",
+        "src/routes/library/-ui/library-v2-page.module.css"
       ],
       "rules": {
         "property-no-deprecated": null

@@ -24,7 +24,9 @@ from typing import Iterable, List
 
 from core.library.residual_files import JUNK_FILES, is_disposable, is_junk, is_release_junk  # noqa: F401 — JUNK_FILES/is_junk re-exported
 from core.repair_jobs import register_job
-from core.repair_jobs.base import is_internal_transfer_dir, JobContext, JobResult, RepairJob, walk_library
+from core.repair_jobs.base import (
+    is_internal_transfer_dir, JobContext, JobResult, RepairJob, stop_or_pause, walk_library,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.empty_folder_cleaner")
@@ -118,7 +120,7 @@ class EmptyFolderCleanerJob(RepairJob):
         for root in roots:
             # topdown=False ⇒ deepest first, so children are decided before parents.
             for dirpath, dirnames, filenames in os.walk(root, topdown=False):
-                if context.check_stop():
+                if stop_or_pause(context):
                     return result
                 real = os.path.realpath(dirpath)
                 if real in protected_roots:

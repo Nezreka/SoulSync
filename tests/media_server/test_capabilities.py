@@ -14,16 +14,17 @@ from core.media_server.contract import ALL_CAPABILITIES, CAPABILITY_METHODS, Cap
 from core.media_server.engine import MediaServerEngine
 from core.media_server.registry import MediaServerRegistry, ServerSpec
 
-SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
+SERVERS = ['plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulsync']
 
 
 def _classes():
     from core.jellyfin_client import JellyfinClient
+    from core.music_assistant_client import MusicAssistantClient
     from core.navidrome_client import NavidromeClient
     from core.plex_client import PlexClient
     from core.soulsync_client import SoulSyncClient
-    return {'plex': PlexClient, 'jellyfin': JellyfinClient,
-            'navidrome': NavidromeClient, 'soulsync': SoulSyncClient}
+    return {'plex': PlexClient, 'jellyfin': JellyfinClient, 'navidrome': NavidromeClient,
+            'music_assistant': MusicAssistantClient, 'soulsync': SoulSyncClient}
 
 
 @pytest.mark.parametrize('server', SERVERS)

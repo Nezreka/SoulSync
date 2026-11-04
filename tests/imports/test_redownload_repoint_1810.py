@@ -4,6 +4,10 @@ the import writer used to insert a fresh row for the new path, then the
 redownload hook repointed the original at the same file, leaving two rows.
 the redownload task now names the row it replaces and the writer repoints
 that row instead.
+
+Library v2 port: the row is a catalogue track, the file a ``lib2_track_files``
+row. The standalone writer files the new file on the named track; the
+autolink gets the same track as ``lib2_entity``.
 """
 from __future__ import annotations
 
@@ -29,13 +33,22 @@ def _wire(monkeypatch, conn):
     monkeypatch.setattr(sample_worker, "enqueue_analysis", lambda *_a, **_k: "pending")
 
 
-def _seed(conn, path, server_source="soulsync", track_id="orig-1"):
+def _seed(conn, path, title="Song One (2009 Remaster)", album="Old Compilation"):
+    """the track being replaced. its own title and album, so nothing but the
+    redownload id can tie the new file to it."""
+    artist = conn.execute(
+        "INSERT INTO lib2_artists (name, name_key) VALUES ('Artist One', 'artist one')").lastrowid
+    album_id = conn.execute(
+        "INSERT INTO lib2_albums (primary_artist_id, title, origin) VALUES (?, ?, 'library')",
+        (artist, album)).lastrowid
+    track = conn.execute(
+        "INSERT INTO lib2_tracks (album_id, title, track_number, server_source, server_id)"
+        " VALUES (?, ?, 1, 'soulsync', 'orig-hash')", (album_id, title)).lastrowid
     conn.execute(
-        "INSERT INTO tracks (id, title, file_path, bitrate, file_size, duration, "
-        "server_source) VALUES (?, 'Song One', ?, 128, 1, 200000, ?)",
-        (track_id, path, server_source),
-    )
+        "INSERT INTO lib2_track_files (track_id, path, size, file_state, is_primary)"
+        " VALUES (?, ?, 1, 'active', 1)", (track, path))
     conn.commit()
+    return track
 
 
 def _context(final_path, redownload_id=None):
@@ -63,67 +76,64 @@ def _write(context):
     )
 
 
-def test_redownload_to_new_filename_repoints_the_original_row(tmp_path, monkeypatch):
+def _files(conn):
+    return [dict(r) for r in conn.execute(
+        "SELECT track_id, path, size FROM lib2_track_files"
+        " WHERE COALESCE(file_state, 'active') = 'active' ORDER BY id")]
+
+
+def test_redownload_to_new_filename_lands_on_the_original_track(tmp_path, monkeypatch):
     conn = _make_soulsync_db()
     _wire(monkeypatch, conn)
-    _seed(conn, str(tmp_path / "01 - song one.mp3"))
+    original = _seed(conn, str(tmp_path / "01 - song one.mp3"))
     new_file = tmp_path / "01 - Song One.flac"
     new_file.write_bytes(b"new audio bytes")
 
-    _write(_context(new_file, redownload_id="orig-1"))
+    _write(_context(new_file, redownload_id=original))
 
-    rows = conn.execute("SELECT * FROM tracks").fetchall()
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["id"] == "orig-1"
-    assert row["file_path"] == str(new_file)
-    assert row["file_size"] == len(b"new audio bytes")
-    assert row["duration"] == 210000
+    assert [r["id"] for r in conn.execute("SELECT id FROM lib2_tracks")] == [original]
+    new_row = next(f for f in _files(conn) if f["path"] == str(new_file))
+    assert new_row["track_id"] == original
+    assert new_row["size"] == len(b"new audio bytes")
 
 
-def test_same_path_redownload_refreshes_file_facts(tmp_path, monkeypatch):
+def test_same_path_redownload_keeps_one_track(tmp_path, monkeypatch):
     conn = _make_soulsync_db()
     _wire(monkeypatch, conn)
     new_file = tmp_path / "01 - Song One.flac"
     new_file.write_bytes(b"replacement")
-    _seed(conn, str(new_file))
+    original = _seed(conn, str(new_file))
 
-    _write(_context(new_file, redownload_id="orig-1"))
+    _write(_context(new_file, redownload_id=original))
 
-    rows = conn.execute("SELECT * FROM tracks").fetchall()
-    assert len(rows) == 1
-    assert rows[0]["id"] == "orig-1"
-    assert rows[0]["file_size"] == len(b"replacement")
+    assert [r["id"] for r in conn.execute("SELECT id FROM lib2_tracks")] == [original]
+    assert [f["track_id"] for f in _files(conn)] == [original]
 
 
-def test_plain_import_still_inserts_its_own_row(tmp_path, monkeypatch):
+def test_plain_import_still_gets_its_own_track(tmp_path, monkeypatch):
     conn = _make_soulsync_db()
     _wire(monkeypatch, conn)
-    _seed(conn, str(tmp_path / "other.mp3"))
+    original = _seed(conn, str(tmp_path / "other.mp3"))
     new_file = tmp_path / "01 - Song One.flac"
     new_file.write_bytes(b"audio")
 
     _write(_context(new_file))
 
-    paths = sorted(r["file_path"] for r in conn.execute("SELECT file_path FROM tracks"))
-    assert paths == sorted([str(tmp_path / "other.mp3"), str(new_file)])
+    tracks = [r["id"] for r in conn.execute("SELECT id FROM lib2_tracks ORDER BY id")]
+    assert len(tracks) == 2 and original in tracks
+    assert next(f for f in _files(conn) if f["path"] == str(new_file))["track_id"] != original
 
 
-def test_redownload_never_repoints_another_servers_row(tmp_path, monkeypatch):
+def test_a_redownload_id_naming_no_track_imports_normally(tmp_path, monkeypatch):
     conn = _make_soulsync_db()
     _wire(monkeypatch, conn)
-    old = str(tmp_path / "old.mp3")
-    _seed(conn, old, server_source="plex")
     new_file = tmp_path / "01 - Song One.flac"
     new_file.write_bytes(b"audio")
 
-    _write(_context(new_file, redownload_id="orig-1"))
+    _write(_context(new_file, redownload_id=9999))
 
-    plex = conn.execute("SELECT file_path FROM tracks WHERE id = 'orig-1'").fetchone()
-    assert plex["file_path"] == old
-    assert conn.execute(
-        "SELECT COUNT(*) FROM tracks WHERE file_path = ?", (str(new_file),)
-    ).fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 1
+    assert [f["path"] for f in _files(conn)] == [str(new_file)]
 
 
 def test_redownload_task_names_the_row_it_replaces(monkeypatch):
@@ -143,3 +153,5 @@ def test_redownload_task_names_the_row_it_replaces(monkeypatch):
         assert rd.redownload_start(123).get_json()["success"] is True
     (task,) = tasks.values()
     assert task["track_info"]["_redownload_library_track_id"] == 123
+    # the autolink files the replacement on that exact catalogue track
+    assert task["track_info"]["lib2_entity"] == {"track_id": 123}

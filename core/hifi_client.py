@@ -1180,6 +1180,9 @@ class HiFiClient(DownloadSourcePlugin):
                     intermediate_path.unlink(missing_ok=True)
                     final_size = out_path.stat().st_size if out_path.exists() else 0
                 else:
+                    # streamed AAC reads 0:00 and won't seek until it's a plain MP4
+                    from core.downloads.mp4_remux import remux_to_plain_mp4
+                    remux_to_plain_mp4(intermediate_path, self._find_ffmpeg())
                     final_size = intermediate_path.stat().st_size if intermediate_path.exists() else 0
 
                 if final_size < MIN_AUDIO_SIZE:

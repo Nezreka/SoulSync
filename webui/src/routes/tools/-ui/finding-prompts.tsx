@@ -35,6 +35,7 @@ import type {
   DeadFileFixAction,
   OrphanFixAction,
   QualityFixAction,
+  RetagFixAction,
 } from '../-tools.types';
 
 import styles from './finding-prompts.module.css';
@@ -42,7 +43,12 @@ import styles from './finding-prompts.module.css';
 // ── Transcribed inline styles ────────────────────────────────────────────────
 
 /** The box's max-width per prompt, in px. */
-const BOX_WIDTH = { 380: styles.box380, 420: styles.box420, 460: styles.box460 };
+const BOX_WIDTH = {
+  380: styles.box380,
+  420: styles.box420,
+  460: styles.box460,
+  480: styles.box480,
+};
 
 const TITLE: CSSProperties = {
   fontSize: '1.1em',
@@ -414,6 +420,55 @@ function BackfillPrompt({
   );
 }
 
+/** Two requests wear one button here: write the library's values into the
+ *  files, and write them EVEN OVER the fields this user edited by hand.
+ *
+ *  lib2 keeps a per-field override layer and a re-tag respects it, so the
+ *  normal apply leaves those alone. That is the right default and the wrong
+ *  thing to make silent — someone who fixed a title six months ago and has
+ *  since fixed the catalogue too needs a way to say "the catalogue wins now".
+ *  The count is what makes the choice informed rather than a coin toss. */
+function RetagPrompt({
+  count,
+  manualCount,
+  resolve,
+}: {
+  count: number;
+  manualCount: number;
+  resolve: (value: RetagFixAction | null) => void;
+}) {
+  const safeCount = Math.max(count - manualCount, 0);
+  return (
+    <PromptOverlay
+      maxWidth={480}
+      title={`Apply Tags (${count})`}
+      body={
+        manualCount > 0
+          ? `${count} finding(s), ${manualCount} of them holding a field you set by hand. Applying keeps your value unless you say otherwise.`
+          : `Write the library's metadata into ${count} file(s)? Nothing here was edited by hand.`
+      }
+      cancelId="_retag-cancel"
+      onCancel={() => resolve(null)}
+    >
+      <div style={ROW_WRAP}>
+        <button id="_retag-safe" type="button" style={GREEN} onClick={() => resolve('safe')}>
+          {manualCount > 0 ? `Keep My Edits (${safeCount} changed)` : `Apply All ${count}`}
+        </button>
+        {manualCount > 0 ? (
+          <button
+            id="_retag-overwrite"
+            type="button"
+            style={INDIGO_LIGHT}
+            onClick={() => resolve('overwrite_manual')}
+          >
+            Overwrite My Edits Too ({count})
+          </button>
+        ) : null}
+      </div>
+    </PromptOverlay>
+  );
+}
+
 // ── The mass-deletion gate ───────────────────────────────────────────────────
 
 /** The exact phrase, compared case-insensitively after trimming. */
@@ -537,10 +592,12 @@ type PendingPrompt =
       resolve: (value: string | null) => void;
     }
   | { kind: 'quality'; resolve: (value: QualityFixAction | null) => void }
+  | { kind: 'backfill'; count: number; resolve: (value: BackfillFixAction | null) => void }
   | {
-      kind: 'backfill';
+      kind: 'retag';
       count: number;
-      resolve: (value: BackfillFixAction | null) => void;
+      manualCount: number;
+      resolve: (value: RetagFixAction | null) => void;
     }
   | { kind: 'witness'; count: number; resolve: (value: boolean) => void };
 
@@ -550,6 +607,7 @@ export interface FindingPrompts {
   promptAcoustid: (candidates?: string[], count?: number) => Promise<string | null>;
   promptQuality: () => Promise<QualityFixAction | null>;
   promptBackfill: (count: number) => Promise<BackfillFixAction | null>;
+  promptRetag: (count: number, manualCount: number) => Promise<RetagFixAction | null>;
   promptWitnessMe: (count: number) => Promise<boolean>;
   /** Render this somewhere inside the findings tab. */
   promptNode: React.ReactNode;
@@ -599,6 +657,13 @@ export function useFindingPrompts(): FindingPrompts {
       }),
     [],
   );
+  const promptRetag = useCallback(
+    (count: number, manualCount: number) =>
+      new Promise<RetagFixAction | null>((resolve) => {
+        setPending({ kind: 'retag', count, manualCount, resolve });
+      }),
+    [],
+  );
   const promptWitnessMe = useCallback(
     (count: number) =>
       new Promise<boolean>((resolve) => {
@@ -626,6 +691,14 @@ export function useFindingPrompts(): FindingPrompts {
     promptNode = (
       <BackfillPrompt count={pending.count} resolve={(v) => settle(pending.resolve as never, v)} />
     );
+  } else if (pending?.kind === 'retag') {
+    promptNode = (
+      <RetagPrompt
+        count={pending.count}
+        manualCount={pending.manualCount}
+        resolve={(v) => settle(pending.resolve as never, v)}
+      />
+    );
   } else if (pending?.kind === 'witness') {
     promptNode = (
       <WitnessMeDialog
@@ -641,6 +714,7 @@ export function useFindingPrompts(): FindingPrompts {
     promptAcoustid,
     promptQuality,
     promptBackfill,
+    promptRetag,
     promptWitnessMe,
     promptNode,
   };

@@ -194,13 +194,20 @@ def collect_vibe(db: Any, playlist: Dict[str, Any]) -> Dict[str, Any]:
             cur = conn.cursor()
             for chunk in _chunks(lib_ids):
                 marks = ",".join("?" * len(chunk))
+                # a playlist row names its track by the catalogue id or by the
+                # media server's id; lib2 answers both (the mapping holds the
+                # latter). the catalogue ids go in as integers: CAST(t.id AS
+                # TEXT) IN (...) defeated the primary key and read every track
+                numeric = [int(v) for v in chunk if str(v).strip().isdigit()] or [-1]
                 cur.execute(
-                    "SELECT COALESCE(NULLIF(al.genres, ''), ar.genres), ar.style, "
-                    "COALESCE(t.mood, al.mood, ar.mood), COALESCE(t.year, al.year) "
-                    "FROM tracks t LEFT JOIN albums al ON al.id = t.album_id "
-                    "LEFT JOIN artists ar ON ar.id = t.artist_id "
-                    f"WHERE t.id IN ({marks})",
-                    chunk,
+                    "SELECT COALESCE(NULLIF(NULLIF(al.genres, ''), '[]'), ar.genres), ar.style, "
+                    "COALESCE(t.mood, al.mood, ar.mood), al.year "
+                    "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
+                    "LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+                    f"WHERE t.id IN ({','.join('?' * len(numeric))}) OR t.id IN ("
+                    "SELECT m.entity_id FROM lib2_media_server_mappings m "
+                    f"WHERE m.entity_type = 'track' AND m.server_id IN ({marks}))",
+                    [*numeric, *chunk],
                 )
                 for g, style, mood, year in cur.fetchall():
                     for tag in _parse_tags(g) + _parse_tags(style):
@@ -211,12 +218,19 @@ def collect_vibe(db: Any, playlist: Dict[str, Any]) -> Dict[str, Any]:
                     if y:
                         years.append(y)
             # the 200 most common artists is plenty to read a vibe
-            names = [n for n, _ in loose_artists.most_common(200)]
+            from core.library2.importer import normalize_name
+            # through the indexed name_key: LOWER(name) IN (...) read every artist
+            weights: Dict[str, int] = {}
+            for n, count in loose_artists.most_common(200):
+                key = normalize_name(n)
+                if key:
+                    weights[key] = weights.get(key, 0) + count
+            names = sorted(weights)
             for chunk in _chunks(names):
                 marks = ",".join("?" * len(chunk))
                 cur.execute(
-                    "SELECT LOWER(name), genres, style, mood FROM artists "
-                    f"WHERE LOWER(name) IN ({marks})",
+                    "SELECT name_key, genres, style, mood FROM lib2_artists "
+                    f"WHERE name_key IN ({marks})",
                     chunk,
                 )
                 seen = set()
@@ -225,7 +239,7 @@ def collect_vibe(db: Any, playlist: Dict[str, Any]) -> Dict[str, Any]:
                     if name in seen:
                         continue
                     seen.add(name)
-                    weight = loose_artists.get(name, 1)
+                    weight = weights.get(name, 1)
                     for tag in _parse_tags(g) + _parse_tags(style):
                         genres[tag] += weight
                     for tag in _parse_tags(mood):

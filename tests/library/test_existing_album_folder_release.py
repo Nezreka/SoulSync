@@ -26,9 +26,10 @@ class _Db:
 
     def _get_connection(self):
         # a fresh connection per call, like the real one (the resolver closes it)
+        # Library v2: the catalogue's album row, release id in musicbrainz_id
         conn = sqlite3.connect(":memory:")
-        conn.execute("CREATE TABLE albums (id TEXT, musicbrainz_release_id TEXT)")
-        conn.execute("INSERT INTO albums VALUES ('1', ?)", (self._row_release_id,))
+        conn.execute("CREATE TABLE lib2_albums (id INTEGER, musicbrainz_id TEXT)")
+        conn.execute("INSERT INTO lib2_albums VALUES (1, ?)", (self._row_release_id,))
         return conn
 
     def get_album_by_spotify_album_id(self, sid):

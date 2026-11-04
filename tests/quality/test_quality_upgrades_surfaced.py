@@ -1,10 +1,11 @@
-"""Quality upgrades surfaced: the library filter, the enhanced-view badges,
-the inspector's upgrade bar, and the "Apply Quality Upgrades" automation."""
+"""Candidate cutoff checks and preserved quality-finding automation contracts.
+
+Native Library-v2 display and audit integration have their own regression tests.
+"""
 
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
@@ -23,21 +24,6 @@ MP3_320 = QualityTarget(label='MP3 320kbps', format='mp3', min_bitrate=320)
 @pytest.fixture()
 def db(tmp_path):
     d = MusicDatabase(database_path=str(tmp_path / "music.db"))
-    c = sqlite3.connect(str(d.database_path))
-    # 'Dupe' is split across two plex rows; Other lives on jellyfin
-    c.executemany("INSERT INTO artists (id, name, server_source) VALUES (?, ?, ?)",
-                  [(1, "Alpha", "plex"), (3, "Dupe", "plex"), (4, "Dupe", "plex"),
-                   (6, "Gamma", "plex"), (7, "Other", "jellyfin")])
-    c.executemany("INSERT INTO albums (id, artist_id, title, server_source) VALUES (?, ?, ?, ?)",
-                  [(10, 1, "A1", "plex"), (11, 3, "D1", "plex"), (12, 4, "D2", "plex"),
-                   (14, 6, "G1", "plex"), (15, 7, "O1", "jellyfin")])
-    rows = [(1, 10, 1), (2, 10, 1), (3, 11, 3), (4, 12, 4), (5, 12, 4), (6, 14, 6), (7, 15, 7)]
-    for tid, alb, art in rows:
-        c.execute("INSERT INTO tracks (id, album_id, artist_id, title, server_source, file_path) "
-                  "VALUES (?, ?, ?, ?, ?, ?)",
-                  (tid, alb, art, f"t{tid}", "jellyfin" if art == 7 else "plex", f"/{tid}.mp3"))
-    c.commit()
-    c.close()
     return d
 
 
@@ -55,76 +41,8 @@ def _finding(db, track_id, *, job='quality_upgrade', status='pending', **details
         conn.close()
 
 
-def _artists(db, **kw):
-    return db.get_library_artists(search_query="", letter="", page=1, limit=50,
-                                  watchlist_filter="all", profile_id=1, **kw)
+# Candidate inspector quality bar
 
-
-# ---------------------------------------------------------------------------
-# library page
-# ---------------------------------------------------------------------------
-
-def test_could_be_better_filter_keeps_only_artists_with_pending_findings(db):
-    _finding(db, 4)                                   # Dupe, the second split row
-    _finding(db, 5, job='quality_upgrade_scanner')    # Dupe again, flag-only job
-    _finding(db, 1, status='resolved')                # Alpha, already handled
-    _finding(db, 7)                                   # jellyfin: not this library
-    r = _artists(db, quality_filter='upgradable')
-    assert [a['name'] for a in r['artists']] == ['Dupe']
-    assert r['artists'][0]['upgradable_count'] == 2
-    assert r['pagination']['total_count'] == 1
-    assert r['upgradable_total'] == 2
-
-
-def test_unfiltered_page_still_carries_counts(db):
-    _finding(db, 6)
-    r = _artists(db)
-    counts = {a['name']: a['upgradable_count'] for a in r['artists']}
-    assert counts == {'Alpha': 0, 'Dupe': 0, 'Gamma': 1}
-    assert r['upgradable_total'] == 1
-    assert [a['name'] for a in _artists(db, quality_filter='bogus')['artists']] == [
-        'Alpha', 'Dupe', 'Gamma']
-
-
-def test_no_findings_means_an_empty_filter_not_an_error(db):
-    r = _artists(db, quality_filter='upgradable')
-    assert r['artists'] == [] and r['upgradable_total'] == 0
-
-
-# ---------------------------------------------------------------------------
-# enhanced view
-# ---------------------------------------------------------------------------
-
-def test_enhanced_payload_marks_tracks_and_counts_albums(db):
-    fid = _finding(db, 2)
-    _finding(db, 2, job='quality_upgrade_scanner', current_format='MP3 128kbps')
-    payload = {'albums': [
-        {'id': 10, 'tracks': [{'id': 1}, {'id': 2}]},
-        {'id': 99, 'tracks': []},
-    ]}
-    upgrades.annotate_enhanced_payload(db, payload)
-    a1 = payload['albums'][0]
-    assert a1['upgradable_count'] == 1
-    assert 'quality_upgrade' not in a1['tracks'][0]
-    # the active finder's finding wins over the flag-only one
-    assert a1['tracks'][1]['quality_upgrade'] == {
-        'finding_id': fid, 'job_id': 'quality_upgrade', 'current': 'MP3 192kbps'}
-    assert payload['albums'][1]['upgradable_count'] == 0
-
-
-def test_lookup_failure_leaves_the_payload_alone():
-    class _Broken:
-        def _get_connection(self):
-            raise sqlite3.OperationalError('locked')
-
-    payload = {'albums': [{'id': 1, 'tracks': [{'id': 1}]}]}
-    upgrades.annotate_enhanced_payload(_Broken(), payload)
-    assert payload['albums'][0]['upgradable_count'] == 0
-
-
-# ---------------------------------------------------------------------------
-# the inspector's upgrade bar
-# ---------------------------------------------------------------------------
 
 def _row(quality, bitrate=None, bit_depth=None, filename='f'):
     return TrackResult(username='peer', filename=filename, size=1, bitrate=bitrate, duration=1,
@@ -246,7 +164,7 @@ def test_automation_applies_the_picked_findings(db):
     _default_id, strict = _profiles(db)
     fid = _finding(db, 1, quality_profile_id=strict, matched_track_data=MATCH)
     seen = []
-    deps = _Deps(db, lambda ids: seen.append(ids) or {'fixed': len(ids), 'failed': 0})
+    deps = _Deps(db, lambda ids, **kwargs: seen.append(ids) or {'fixed': len(ids), 'failed': 0})
     result = auto_apply_quality_upgrades({'_automation_id': 'a1', 'limit': 5}, deps)
     assert seen == [[fid]]
     assert result['applied'] == 1

@@ -28,17 +28,18 @@ def _worker(db, tmp_path):
     return w
 
 
-def _add_genre_finding(db, artist_id, n):
+def _add_genre_finding(db, _artist_id, n):
     """A pending genre_cleanup finding whose fix is a pure DB update."""
+    native_id = n + 1
     with db._get_connection() as conn:
         conn.execute(
-            "INSERT INTO artists (id, name, genres, server_source) VALUES (?, ?, ?, 'test')",
-            (artist_id, f'Artist {n}', json.dumps(['Rock', 'junk'])))
+            "INSERT INTO lib2_artists (id, name, genres) VALUES (?, ?, ?)",
+            (native_id, f'Artist {n}', json.dumps(['Rock', 'junk'])))
         conn.execute(
             "INSERT INTO repair_findings (job_id, finding_type, severity, status, "
             "entity_type, entity_id, title, details_json) VALUES "
             "('genre_cleanup', 'genre_cleanup', 'info', 'pending', 'artist', ?, ?, ?)",
-            (artist_id, f'Off-whitelist genres: Artist {n}',
+            (f'lib2:{native_id}', f'Off-whitelist genres: Artist {n}',
              json.dumps({'kept_genres': ['Rock'], 'removed_genres': ['junk']})))
         conn.commit()
 
@@ -141,7 +142,7 @@ def test_failed_fixes_are_counted_not_fatal(tmp_path):
         _add_genre_finding(db, f'AR{i}', i)
     # Sabotage one finding: entity the fix can't find
     with db._get_connection() as conn:
-        conn.execute("DELETE FROM artists WHERE id = 'AR1'")
+        conn.execute("DELETE FROM lib2_artists WHERE id=2")
         conn.commit()
     w = _worker(db, tmp_path)
 
@@ -186,3 +187,25 @@ def test_a_finished_run_never_reports_already_running(tmp_path):
 
     again = w.start_bulk_fix()
     assert 'already_running' not in again, again
+
+
+def test_a_selection_past_sqlites_variable_limit_still_reads_and_dismisses(tmp_path):
+    """one placeholder per id broke past 32766 ids. _types_for_findings then
+    came back empty (caught at debug), so a Fix All over that many lyrics
+    findings never tripped the LRCLib breaker, and a bulk dismiss failed"""
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    count = 33_000
+    with db._get_connection() as conn:
+        conn.executemany(
+            "INSERT INTO repair_findings (job_id, finding_type, severity, status, "
+            "entity_type, entity_id, title) VALUES "
+            "('missing_lyrics', 'missing_lyrics', 'info', 'pending', 'track', ?, 't')",
+            [(f'lib2:{n}',) for n in range(count)])
+        conn.commit()
+        ids = [r[0] for r in conn.execute("SELECT id FROM repair_findings")]
+    w = _worker(db, tmp_path)
+
+    types = w._types_for_findings(ids)
+    assert len(types) == count and set(types.values()) == {'missing_lyrics'}
+
+    assert w.bulk_update_findings(ids, 'dismiss') == count

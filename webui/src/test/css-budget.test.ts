@@ -40,6 +40,8 @@ const OPTIONAL_HOOKS = new Set([
   '--progress-index',
   '--button-icon-size',
   '--button-icon-font-size',
+  // set by Base UI's positioners on the popup element at runtime
+  '--transform-origin',
 ]);
 
 const DECLARATION = /[\w-]+\s*:\s*([^;{}]+)(?=[;}])/g;

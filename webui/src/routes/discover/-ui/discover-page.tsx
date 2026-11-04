@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchSinCharts, type SinChart } from '@/features/metasync/charts';
@@ -931,6 +932,33 @@ export function DiscoverPage() {
         setDive((d) => (d?.genre === genre ? { genre, data: null, phase: 'error' } : d));
       });
   }, []);
+
+  // the search page's browse tiles land here (#1935): ?genre= opens that
+  // genre's deep dive, ?section= scrolls to the first of those shelves that
+  // is on screen once the page has filled in
+  const searchStr = useRouterState({ select: (state) => state.location.searchStr });
+  useEffect(() => {
+    const params = new URLSearchParams(searchStr);
+    const genre = params.get('genre')?.trim();
+    if (genre) openDive(genre);
+    // shelf ids only, so the selector below never sees anything odd
+    const targets = (params.get('section') ?? '')
+      .split(',')
+      .filter((id) => /^[a-z0-9-]+$/.test(id));
+    if (targets.length === 0) return;
+    const find = () =>
+      targets
+        .map((id) => document.querySelector(`.discovery-zone-section--${id}, #${id}`))
+        .find(Boolean);
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      const target = find();
+      if (!target && ++tries < 40) return;
+      window.clearInterval(timer);
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 150);
+    return () => window.clearInterval(timer);
+  }, [openDive, searchStr]);
 
   // ── Section payloads the render below reads more than once ─────────────
   const season = okData<SeasonData>(page.sections.seasonal?.data) ?? null;

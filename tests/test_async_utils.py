@@ -80,23 +80,15 @@ def test_control_calls_are_not_starved_by_slow_calls(monkeypatch):
 
 def test_run_blocking_has_no_polling_latency_floor():
     """PR #1121 review: the old ``while not done: await sleep(0.05)`` put a
-    50 ms floor under every call and woke the loop 20×/s per in-flight job.
+    50 ms floor under every call. The reliable Python-3.14 fallback must remain
+    well below that old floor.
 
-    Budgeted against the same submissions awaited directly on this machine,
-    not a wall-clock constant — a loaded box or a coverage tracer slows the
-    control equally, so only a returning poll loop can fail this.
+    Five sequential calls under the former 50 ms loop necessarily cost at
+    least 250 ms. Keep a generous budget below that regression boundary; a
+    direct ``asyncio.wrap_future`` control cannot be used on Python 3.14.6
+    because the lost wake-up this helper avoids can hang the control itself.
     """
     calls = 5
-
-    async def control():
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        try:
-            start = time.perf_counter()
-            for _ in range(calls):
-                await asyncio.wrap_future(pool.submit(lambda: None))
-            return time.perf_counter() - start
-        finally:
-            pool.shutdown()
 
     async def probe():
         start = time.perf_counter()
@@ -104,13 +96,9 @@ def test_run_blocking_has_no_polling_latency_floor():
             await run_blocking(lambda: None)
         return time.perf_counter() - start
 
-    baseline = asyncio.run(control())
     elapsed = asyncio.run(probe())
 
-    # 5 sequential calls under the old poll cost ≥250 ms — nowhere near a 10x
-    # multiple of a handful of executor round trips.
-    budget = max(baseline * 10, 0.05)
-    assert elapsed < budget, (
-        f"{calls} run_blocking calls took {elapsed:.3f}s against "
-        f"{baseline:.3f}s awaiting the same submissions (budget {budget:.3f}s)"
+    assert elapsed < 0.10, (
+        f"{calls} run_blocking calls took {elapsed:.3f}s; the short fallback "
+        "appears to have regained the old 50 ms polling floor"
     )

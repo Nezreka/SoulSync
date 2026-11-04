@@ -1076,6 +1076,12 @@ def _completion_recorder(monkeypatch, rec):
 
     monkeypatch.setattr(lc, 'record_sync_history_completion',
                         lambda db, bid, b: rec.append(('history', bid, _held())))
+    # the completion path reads the tasks under the lock and writes after it
+    import core.downloads.history as hist
+    monkeypatch.setattr(hist, 'build_sync_history_completion',
+                        lambda bid, b: rec.append(('history_read', bid, _held())) or {'batch': bid})
+    monkeypatch.setattr(hist, 'write_sync_history_completion',
+                        lambda db, bid, payload: rec.append(('history', bid, _held())))
 
     class _Mat:
         playlist_dir, linked, copied, unchanged, removed_stale, fellback = 'd', 0, 0, 0, 0, False
@@ -1146,7 +1152,10 @@ def test_the_slow_half_runs_with_the_lock_released(monkeypatch, path):
     else:
         lc.check_batch_completion_v2('b1', deps)
     by_kind = {r[0]: r for r in rec}
-    assert by_kind['history'][2] is True, "history is bookkeeping, it stays under the lock"
+    # the history reads download_tasks, so under the lock; the db write held
+    # every downloads page while the write lock was busy, so it is out here
+    assert by_kind['history_read'][2] is True, "the history must read the tasks under the lock"
+    assert by_kind['history'][2] is False, f"{path}: the sync history db write ran under tasks_lock"
     assert by_kind['consistency'][2] is False, f"{path}: album consistency ran under tasks_lock"
     assert by_kind['materialize'][2] is False, f"{path}: playlist materialize ran under tasks_lock"
     # the post-download playlist sync lookup is db work too

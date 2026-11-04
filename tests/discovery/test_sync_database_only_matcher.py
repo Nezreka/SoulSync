@@ -70,29 +70,33 @@ def _run_with_db(track, fake_db):
 
 def test_durable_match_used_when_volatile_cache_is_empty():
     track = SimpleNamespace(name="Valió la Pena - Salsa Version", artists=["Marc Anthony"], id="sp16")
-    dt = SimpleNamespace(id="t99", title="Valió la Pena (Salsa Version)")
+    # the match stores the catalogue id; the sync answers with the server's
+    dt = SimpleNamespace(id="srv99", title="Valió la Pena (Salsa Version)")
     db = MagicMock()
     db.read_sync_match_cache.return_value = None                 # cache wiped by a rescan
     db.check_track_exists.return_value = (None, 0.0)             # fuzzy would FAIL
     db.find_manual_library_match_by_source_track_id.return_value = {
         "library_track_id": "t99", "library_file_path": "/m/x.flac"}
-    db.get_track_by_id.side_effect = lambda i: dt if str(i) == "t99" else None
+    db.server_track_id.side_effect = lambda i, *_a: "srv99" if str(i) == "t99" else None
+    db.get_track_by_server_id.side_effect = lambda i, *_a: dt if str(i) == "srv99" else None
     match, conf = _run_with_db(track, db)
-    assert conf == 1.0 and match.id == "t99"                    # manual pick honored, not re-matched
+    assert conf == 1.0 and match.id == "srv99"                  # manual pick honored, not re-matched
 
 
 def test_durable_match_self_heals_a_stale_library_id():
     track = SimpleNamespace(name="X", artists=["Y"], id="sp1")
-    dt = SimpleNamespace(id="newid", title="X")
+    dt = SimpleNamespace(id="srv-new", title="X")
     db = MagicMock()
     db.read_sync_match_cache.return_value = None
     db.check_track_exists.return_value = (None, 0.0)
     db.find_manual_library_match_by_source_track_id.return_value = {
         "library_track_id": "staleid", "library_file_path": "/m/x.flac"}
-    db.get_track_by_id.side_effect = lambda i: dt if str(i) == "newid" else None   # stale id misses
+    db.server_track_id.side_effect = lambda i, *_a: "srv-new" if str(i) == "newid" else None
+    db.get_track_by_server_id.side_effect = (
+        lambda i, *_a: dt if str(i) == "srv-new" else None)     # stale id misses
     db.find_track_id_by_file_path.return_value = "newid"         # re-resolve via path
     match, conf = _run_with_db(track, db)
-    assert conf == 1.0 and match.id == "newid"
+    assert conf == 1.0 and match.id == "srv-new"
     db.find_track_id_by_file_path.assert_called_once_with("/m/x.flac")
 
 

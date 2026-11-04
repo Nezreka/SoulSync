@@ -69,6 +69,21 @@
   font-size: 14px;
 }
 
+.libraryTarget {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.libraryTarget strong {
+  color: rgb(250, 204, 21);
+  font-weight: 600;
+}
+
+.libraryTarget[data-library-target='shared'] strong {
+  color: rgb(var(--accent-light-rgb));
+}
+
 .modes {
   display: inline-flex;
   padding: 3px;
@@ -278,6 +293,37 @@
   display: flex;
   flex-direction: column;
   gap: 28px;
+}
+
+/* a browse tile's view: the same result cards a search shows */
+.browse {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.browseHead {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.browseTitle {
+  margin: 4px 0 0;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.browseSub {
+  margin: -4px 0 4px;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+}
+
+.chipPlain {
+  padding: 7px 14px;
 }
 
 .sectionHead {
@@ -1187,6 +1233,30 @@
   max-width: 440px;
   color: var(--text-secondary);
   font-size: 13.5px;
+}
+
+.stateHint {
+  margin: 0;
+  max-width: 440px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.stateRetry {
+  padding: 7px 16px;
+  border: 1px solid var(--white-a14);
+  border-radius: var(--radius-pill);
+  background: var(--white-a05);
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.stateRetry:hover,
+.stateRetry:focus-visible {
+  background: var(--white-a10);
 }
 
 .skeletons {

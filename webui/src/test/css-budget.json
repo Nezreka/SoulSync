@@ -1,17 +1,17 @@
 {
   "legacy": {
-    "hex": 3572,
-    "rgbLiterals": 4182,
+    "hex": 3574,
+    "rgbLiterals": 4197,
     "important": 2092,
     "duplicateSelectors": 311
   },
   "modules": {
-    "hex": 621,
-    "rgbLiterals": 349,
-    "important": 219
+    "hex": 723,
+    "rgbLiterals": 875,
+    "important": 243
   },
-  "distinctZIndexValues": 84,
-  "distinctBreakpoints": 54,
+  "distinctZIndexValues": 85,
+  "distinctBreakpoints": 57,
   "duplicateKeyframes": 0,
   "undefinedCustomProperties": 0,
   "stylesheetLinks": [

@@ -67,6 +67,7 @@ def resolve_canonical_for_album(
     fetch_alternates: Optional[
         Callable[[str, str], Optional[List[Dict[str, Any]]]]
     ] = None,
+    candidate_editions: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Pick the canonical release for one album, honoring the source-selection mode.
 
@@ -153,6 +154,14 @@ def resolve_canonical_for_album(
     if winner is None and mode != MODE_ACTIVE_ONLY:
         for source in source_priority:
             _score_linked(source)
+        # Already-known concrete editions are candidates too. The native
+        # catalogue may have a Standard edition beside a linked Deluxe that
+        # clears the floor; best_fit must compare both rather than hiding the
+        # better known edition behind the remote-alternates fallback.
+        for edition in candidate_editions or []:
+            source = edition.get('source')
+            if source in source_priority:
+                _score_edition(source, edition.get('album_id'), edition.get('tracks'))
         winner = _best_clearing_floor(scored)
 
     # #767-2 expansion: no LINKED edition cleared the floor — e.g. a 1-track single
@@ -336,22 +345,67 @@ def default_fetch_alternates(
 
 
 def _lookup_artist_thumb(db, artist_id) -> Optional[str]:
-    """Best-effort artist thumb URL by id. Returns None on missing column / any
-    error (the artists table doesn't have thumb_url in every schema)."""
+    """Best-effort artist image URL by id. Returns None on any error."""
     if not artist_id:
         return None
     conn = None
     try:
         conn = db._get_connection()
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(artists)")
-        if 'thumb_url' not in {r[1] for r in cursor.fetchall()}:
-            return None
-        cursor.execute("SELECT thumb_url FROM artists WHERE id = ?", (str(artist_id),))
-        row = cursor.fetchone()
+        row = conn.execute("SELECT image_url FROM lib2_artists WHERE id = ?",
+                           (str(artist_id),)).fetchone()
         return (row[0] or None) if row else None
     except Exception:
         return None
+    finally:
+        if conn:
+            conn.close()
+
+
+def _catalogue_album_and_tracks(db, album_id):
+    """The album row + its track rows from the catalogue.
+
+    This used to borrow the Reorganizer's loader so the canonical was chosen
+    over exactly the source ids the reorganizer sees. That pipeline is still
+    legacy-bound, and the pin itself now lives on the catalogue row — reading
+    one library and writing the other is how an album ends up pinned to a
+    release it never had. The per-source ids keep the names
+    ``_extract_source_ids`` looks for, so that shared reader is unchanged.
+    """
+    from core.library2.provider_ids import provider_id_sql
+    from core.library_reorganize import _ALBUM_ID_COLUMNS
+
+    ids = ", ".join(f"{provider_id_sql(source, alias='al')} AS {column}"
+                    for source, column in _ALBUM_ID_COLUMNS.items()
+                    if provider_id_sql(source))
+    conn = None
+    try:
+        conn = db._get_connection()
+        album_row = conn.execute(
+            f"""SELECT al.*, al.primary_artist_id AS artist_id,
+                       al.image_url AS thumb_url, ar.name AS artist_name, {ids},
+                       ar.spotify_id AS artist_spotify_id,
+                       json_extract(ar.external_ids, '$.itunes') AS artist_itunes_id,
+                       json_extract(ar.external_ids, '$.deezer') AS artist_deezer_id,
+                       json_extract(ar.external_ids, '$.discogs') AS artist_discogs_id,
+                       ar.musicbrainz_id AS artist_musicbrainz_id
+                  FROM lib2_albums al
+                  JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                 WHERE al.id = ?""",
+            (str(album_id),)).fetchone()
+        if not album_row:
+            return None, []
+        tracks = [dict(row) for row in conn.execute(
+            """SELECT t.*, ar.name AS artist_name, f.path AS file_path
+                 FROM lib2_tracks t
+                 JOIN lib2_albums al ON al.id = t.album_id
+                 JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                 LEFT JOIN lib2_track_files f
+                        ON f.track_id = t.id AND f.is_primary = 1
+                       AND COALESCE(f.file_state, 'active') <> 'deleted'
+                WHERE t.album_id = ?
+                ORDER BY t.track_number""",
+            (str(album_id),)).fetchall()]
+        return dict(album_row), tracks
     finally:
         if conn:
             conn.close()
@@ -373,14 +427,14 @@ def resolve_and_store_canonical_for_album(
     Returns the resolved ``{source, album_id, score}`` or None when unresolved.
     ``store=False`` resolves without writing — used by the backfill job's dry run.
 
-    Uses the SAME album/source-id loader the Reorganizer uses
-    (``load_album_and_tracks`` + ``_extract_source_ids``) so the canonical is
-    chosen over exactly the source IDs the reorganizer sees. Scores off the DB
+    Reads the catalogue row the pin is written to (see
+    ``_catalogue_album_and_tracks``) and extracts its source ids with the same
+    ``_extract_source_ids`` the reorganizer uses. Scores off the DB
     track rows' ``duration`` (stored in ms) + ``title`` — the library's view of
     the files — so no per-file disk reads are needed."""
-    from core.library_reorganize import _extract_source_ids, load_album_and_tracks
+    from core.library_reorganize import _extract_source_ids
 
-    album_data, tracks = load_album_and_tracks(db, album_id)
+    album_data, tracks = _catalogue_album_and_tracks(db, album_id)
     if not album_data or not tracks:
         return None
     source_ids = {s: v for s, v in _extract_source_ids(album_data).items() if v}

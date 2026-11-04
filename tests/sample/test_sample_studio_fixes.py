@@ -15,6 +15,7 @@ Covered here:
   fills; results are merged/deduped.
 """
 
+from tests.lib2_seed import file_track
 import queue
 import subprocess
 import time
@@ -59,12 +60,9 @@ def db_only(tmp_path, monkeypatch):
 def _seed_track(db, track_id, file_path):
     conn = db._get_connection()
     try:
-        conn.execute("INSERT OR IGNORE INTO artists (id, name) VALUES (1, 'R')")
-        conn.execute("INSERT OR IGNORE INTO albums (id, artist_id, title) VALUES (1, 1, 'A')")
-        conn.execute(
-            "INSERT INTO tracks (id, artist_id, album_id, title, file_path) VALUES (?, 1, 1, 'T', ?)",
-            (track_id, file_path),
-        )
+        conn.execute("INSERT OR IGNORE INTO lib2_artists (id, name) VALUES (1, 'R')")
+        conn.execute("INSERT OR IGNORE INTO lib2_albums (id, primary_artist_id, title) VALUES (1, 1, 'A')")
+        file_track(conn, track_id, 1, 'T', file_path)
         conn.commit()
     finally:
         conn.close()
@@ -109,12 +107,12 @@ def test_retry_clears_recorded_error(db_only):
 
     # Without retry: sticky error, no re-queue.
     assert sample_api.fetch_analysis(4243)[0]["status"].startswith("error:")
-    assert "4243" not in sample_worker._pending
+    assert ('shared', '4243') not in sample_worker._pending
 
     # With retry: re-queued to pending, then fails again (it really re-ran).
     payload, _ = sample_api.fetch_analysis(4243, retry=True)
     assert payload["status"] == "pending"
-    assert "4243" in sample_worker._pending
+    assert ('shared', '4243') in sample_worker._pending
     _wait_for_status(4243, "error:")
 
 
@@ -197,7 +195,8 @@ def test_free_text_single_db_call_no_double_cascade(fake_db):
     tracks = sample_api.search_library_tracks(q="Virtual Mage")
     assert calls == [("interactive", "Virtual Mage", 50)], f"extra DB calls: {calls}"
     assert len(tracks) == 50
-    assert all(t["id"] == i for i, t in enumerate(tracks))
+    # the v1 serializer types library ids as strings (#1062 review)
+    assert all(t["id"] == str(i) for i, t in enumerate(tracks))
 
 
 def test_free_text_result_order_is_db_order(fake_db):
@@ -207,14 +206,14 @@ def test_free_text_result_order_is_db_order(fake_db):
     db.rows = [[_row(9, title="Track 0007-03"), _row(1), _row(2)]]
     tracks = sample_api.search_library_tracks(q="Track 0007-03", limit=50)
     assert calls == [("interactive", "Track 0007-03", 50)]
-    assert [t["id"] for t in tracks] == [9, 1, 2]
+    assert [t["id"] for t in tracks] == ["9", "1", "2"]
 
 
 def test_free_text_dedupes_and_caps_at_limit(fake_db):
     db, _ = fake_db
     db.rows = [[_row(1), _row(1), _row(2), _row(3)]]
     tracks = sample_api.search_library_tracks(q="x", limit=2)
-    assert [t["id"] for t in tracks] == [1, 2]
+    assert [t["id"] for t in tracks] == ["1", "2"]
 
 
 def test_search_title_artist_params(fake_db):
@@ -222,7 +221,7 @@ def test_search_title_artist_params(fake_db):
     db.rows = [[_row(9)]]
     tracks = sample_api.search_library_tracks(title="Windowlicker", artist="")
     assert calls == [("dual", "Windowlicker", "", 50)]
-    assert [t["id"] for t in tracks] == [9]
+    assert [t["id"] for t in tracks] == ["9"]
 
 
 def test_search_title_and_artist_keeps_dual_constraint(fake_db):
@@ -230,7 +229,7 @@ def test_search_title_and_artist_keeps_dual_constraint(fake_db):
     db.rows = [[_row(9)]]
     tracks = sample_api.search_library_tracks(title="Windowlicker", artist="Aphex Twin")
     assert calls == [("dual", "Windowlicker", "Aphex Twin", 50)]
-    assert [t["id"] for t in tracks] == [9]
+    assert [t["id"] for t in tracks] == ["9"]
 
 
 def test_search_requires_a_query():

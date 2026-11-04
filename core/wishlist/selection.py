@@ -8,6 +8,17 @@ from core.wishlist.classification import classify_wishlist_track
 from core.wishlist.payloads import sanitize_track_data_for_processing
 
 
+def _dedupe_owner(track: dict[str, Any]) -> tuple[str, Any]:
+    """Whose copy a wishlist track is. The LIBRARY it fills when the caller
+    tagged it (``_wishlist_library``): two profiles on the shared library want
+    one download, but a profile with a library of its own wants its own copy
+    even when the shared library is getting one too (#1199, E-06). Untagged,
+    the profile that wished it (H10)."""
+    if '_wishlist_library' in track:
+        return ('library', track.get('_wishlist_library'))
+    return ('profile', track.get('profile_id'))
+
+
 def sanitize_and_dedupe_wishlist_tracks(
     raw_tracks: Iterable[dict[str, Any]],
     *,
@@ -15,10 +26,10 @@ def sanitize_and_dedupe_wishlist_tracks(
 ) -> tuple[list[dict[str, Any]], int]:
     """Sanitize wishlist tracks and drop duplicate track IDs.
 
-    Duplicates are per (track, owner): the same track wishlisted by two
-    profiles is two owned requests, not a duplicate (H10) — each profile's
-    entry must survive so it can be batched under its own profile and
-    downloaded into its own library.
+    Duplicates are per (track, owner) -- see :func:`_dedupe_owner`: the same
+    track for two owners is two requests, not a duplicate (H10), and each must
+    survive to be batched under its own profile and downloaded into its own
+    library.
     """
     sanitized_tracks: list[dict[str, Any]] = []
     seen_keys: set[tuple[Any, Any]] = set()
@@ -31,7 +42,7 @@ def sanitize_and_dedupe_wishlist_tracks(
             or sanitized_track.get('spotify_track_id')
             or sanitized_track.get('id')
         )
-        dedupe_key = (spotify_track_id, sanitized_track.get('profile_id'))
+        dedupe_key = (spotify_track_id, _dedupe_owner(sanitized_track))
 
         if spotify_track_id and dedupe_key in seen_keys:
             duplicates_found += 1
@@ -53,8 +64,8 @@ def filter_wishlist_tracks_by_category(
     """Filter wishlist tracks by category and return the matches plus total count.
 
     Dedupes per (track, owner) like :func:`sanitize_and_dedupe_wishlist_tracks`
-    (H10): the same track in this category for two profiles is two owned
-    requests and both must reach their owner's batch.
+    (H10): the same track in this category for two owners is two requests and
+    both must reach their owner's batch.
     """
     filtered_tracks: list[dict[str, Any]] = []
     seen_keys: set[tuple[Any, Any]] = set()
@@ -66,7 +77,7 @@ def filter_wishlist_tracks_by_category(
             continue
 
         if spotify_track_id:
-            dedupe_key = (spotify_track_id, track.get('profile_id'))
+            dedupe_key = (spotify_track_id, _dedupe_owner(track))
             if dedupe_key in seen_keys:
                 continue
             seen_keys.add(dedupe_key)

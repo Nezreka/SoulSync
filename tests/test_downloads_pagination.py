@@ -13,38 +13,10 @@ from unittest.mock import patch
 import pytest
 
 
-# api/__init__.py eagerly imports flask_limiter. Stub before import.
-def _install_flask_limiter_stub():
-    if "flask_limiter" in sys.modules:
-        return
-    stub = types.ModuleType("flask_limiter")
+from flask import Flask, Blueprint
 
-    class _Limiter:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def limit(self, *args, **kwargs):
-            def decorator(target):
-                return target
-            return decorator
-
-        def init_app(self, app):
-            pass
-
-    stub.Limiter = _Limiter
-    sys.modules["flask_limiter"] = stub
-
-    util_stub = types.ModuleType("flask_limiter.util")
-    util_stub.get_remote_address = lambda: "127.0.0.1"
-    sys.modules["flask_limiter.util"] = util_stub
-
-
-_install_flask_limiter_stub()
-
-from flask import Flask, Blueprint  # noqa: E402
-
-from api import downloads as downloads_mod  # noqa: E402
-import core.runtime_state as runtime_state  # noqa: E402
+from api import downloads as downloads_mod
+import core.runtime_state as runtime_state
 
 
 def _make_task(status="downloading", when=None):

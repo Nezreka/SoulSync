@@ -224,13 +224,25 @@ def move_existing(name: str, apply: bool = False) -> Dict[str, Any]:
             continue
         if not apply:
             continue
+        moved_on_disk = False
         try:
             os.makedirs(os.path.dirname(item["dst"]), exist_ok=True)
             shutil.move(item["src"], item["dst"])
+            moved_on_disk = True
+            _repoint_moved_album(item["src"], item["dst"])
             item["action"] = "moved"
             result["moved"] += 1
             write_album_sidecars(item["dst"])
-        except OSError as exc:
+        except Exception as exc:
+            # A move is not successful while the catalogue points at the old
+            # folder. Roll the disk back if the native transaction failed.
+            if moved_on_disk and item.get('action') != 'moved':
+                try:
+                    if os.path.lexists(item['src']):
+                        raise OSError('source reappeared during move rollback')
+                    shutil.move(item['dst'], item['src'])
+                except OSError as rollback_error:
+                    item['rollback_error'] = str(rollback_error)
             item["action"] = "failed"
             item["error"] = str(exc)
             result["failed"] += 1
@@ -242,6 +254,30 @@ def move_existing(name: str, apply: bool = False) -> Dict[str, Any]:
             except OSError:
                 pass
     return result
+
+
+def _repoint_moved_album(source: str, destination: str) -> None:
+    """Follow the physical move with the shared native path writer atomically."""
+    from contextlib import closing
+    from core.library2.track_files import repoint_file_path
+
+    with closing(_database()._get_connection()) as conn, conn:
+        prefix = source.rstrip(os.sep) + os.sep
+        paths = conn.execute(
+            "SELECT path FROM lib2_track_files WHERE "
+            "COALESCE(file_state,'active')<>'deleted' "
+            "AND (path=? OR substr(path,1,?)=?) UNION "
+            "SELECT file_path FROM track_downloads WHERE "
+            "file_path=? OR substr(file_path,1,?)=?",
+            (source, len(prefix), prefix, source, len(prefix), prefix),
+        ).fetchall()
+        for row in paths:
+            old = row[0]
+            relative = os.path.relpath(old, source)
+            new = destination if relative == '.' else os.path.join(destination, relative)
+            repoint_file_path(conn, old, new)
+            conn.execute('UPDATE track_downloads SET file_path=? WHERE file_path=?', (new, old))
+            conn.execute('UPDATE manual_metadata_files SET file_path=? WHERE file_path=?', (new, old))
 
 
 # ---------------------------------------------------------------------------

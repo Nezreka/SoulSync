@@ -1514,6 +1514,29 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error updating poster for {artist.title}: {e}")
             return False
     
+    def update_artist_background(self, artist: PlexArtist, image_data: bytes):
+        """Set the artist's background ("art"): the wide picture behind the
+        artist page in Plexamp and the web app (#1957)."""
+        try:
+            upload_url = f"{self.server._baseurl}/library/metadata/{artist.ratingKey}/arts"
+            headers = {
+                'X-Plex-Token': self.server._token,
+                'Content-Type': 'image/jpeg'
+            }
+            response = requests.post(upload_url, data=image_data, headers=headers, timeout=30)
+            response.raise_for_status()
+            artist.refresh()
+            logger.info(f"Updated background for {artist.title}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating background for {artist.title}: {e}")
+            return False
+
+    @staticmethod
+    def artist_has_background(artist) -> bool:
+        art = str(getattr(artist, 'art', '') or '')
+        return bool(art) and 'default' not in art.lower()
+
     def update_album_poster(self, album, image_data: bytes):
         """Update album poster image"""
         try:

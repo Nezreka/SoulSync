@@ -190,14 +190,14 @@ describe('stats route', () => {
     const bubbleLink = await screen.findByRole('link', {
       name: 'Open artist detail for Artist A',
     });
-    expect(bubbleLink).toHaveAttribute('href', '/artist-detail/library/7');
+    expect(bubbleLink).toHaveAttribute('href', '/library?artist=7&view=discovery&immersive=true');
 
     const rankedLink = screen.getByRole('link', { name: 'Artist A' });
-    expect(rankedLink).toHaveAttribute('href', '/artist-detail/library/7');
+    expect(rankedLink).toHaveAttribute('href', '/library?artist=7&view=discovery&immersive=true');
 
     fireEvent.click(bubbleLink);
 
-    await waitFor(() => expect(history.location.pathname).toBe('/artist-detail/library/7'));
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
     // Artist detail is React-owned now, so the click routes there directly
     // rather than handing the URL back to the legacy shell.
     expect(window.SoulSyncWebShellBridge?.navigateToArtistDetail).not.toHaveBeenCalled();

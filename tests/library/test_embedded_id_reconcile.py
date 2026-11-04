@@ -15,291 +15,8 @@ from __future__ import annotations
 
 import sqlite3
 
-from core.library.embedded_id_reconcile import (
-    Fill,
-    ReconcileApplied,
-    ReconcilePlan,
-    ReconcileTotals,
-    apply_reconcile_plan,
-    plan_reconcile,
-    reconcile_library,
-    reconcile_track_row,
-)
-
-
-# ---------------------------------------------------------------------------
-# plan_reconcile — the pure planning layer
-# ---------------------------------------------------------------------------
-
-def test_empty_inputs_yield_empty_plan():
-    plan = plan_reconcile(None, None)
-    assert isinstance(plan, ReconcilePlan)
-    assert plan.has_updates is False
-    assert plan.filled == 0
-    assert plan.conflicts == []
-
-
-def test_fills_all_three_entities_from_one_file():
-    tags = {'spotify_track_id': 'TRK', 'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART'}
-    plan = plan_reconcile(tags, {'track': {}, 'album': {}, 'artist': {}})
-
-    assert plan.filled == 3
-    by_entity = {(f.entity, f.id_column): f.value for f in plan.fills}
-    assert by_entity[('track', 'spotify_track_id')] == 'TRK'
-    assert by_entity[('album', 'spotify_album_id')] == 'ALB'
-    assert by_entity[('artist', 'spotify_artist_id')] == 'ART'
-    # status column pairing is carried on each Fill
-    track_fill = plan.fills_for('track')[0]
-    assert track_fill.status_column == 'spotify_match_status'
-
-
-def test_never_overwrites_an_existing_id():
-    plan = plan_reconcile({'spotify_artist_id': 'NEW'},
-                          {'artist': {'spotify_artist_id': 'EXISTING'}})
-    assert plan.filled == 0
-    assert plan.fills_for('artist') == []
-    assert len(plan.conflicts) == 1
-    c = plan.conflicts[0]
-    assert c['existing'] == 'EXISTING' and c['embedded'] == 'NEW' and c['entity'] == 'artist'
-
-
-def test_matching_existing_id_is_noop_not_conflict():
-    plan = plan_reconcile({'spotify_artist_id': 'SAME'},
-                          {'artist': {'spotify_artist_id': 'SAME'}})
-    assert plan.filled == 0
-    assert plan.conflicts == []
-    assert plan.already_present == 1
-
-
-def test_blank_and_whitespace_values_ignored():
-    tags = {'spotify_artist_id': '   ', 'spotify_album_id': '', 'itunes_track_id': None}
-    plan = plan_reconcile(tags, {'track': {}, 'album': {}, 'artist': {}})
-    assert plan.has_updates is False
-
-
-def test_whitespace_padded_embedded_id_is_trimmed_and_filled():
-    plan = plan_reconcile({'spotify_track_id': '  TRK  '}, {'track': {}})
-    assert plan.fills_for('track')[0].value == 'TRK'
-
-
-def test_single_column_provider_maps_per_entity():
-    # Deezer/Tidal/AudioDB reuse one id column across entity types; fills
-    # must be keyed by entity so they don't collide.
-    tags = {'deezer_track_id': 'DT', 'deezer_album_id': 'DA', 'deezer_artist_id': 'DR'}
-    plan = plan_reconcile(tags, {'track': {}, 'album': {}, 'artist': {}})
-    vals = {f.entity: f.value for f in plan.fills}
-    assert vals == {'track': 'DT', 'album': 'DA', 'artist': 'DR'}
-    assert plan.filled == 3
-
-
-def test_jiosaavn_single_column_provider_maps_per_entity():
-    tags = {'jiosaavn_track_id': 'JT', 'jiosaavn_album_id': 'JA', 'jiosaavn_artist_id': 'JR'}
-    plan = plan_reconcile(tags, {'track': {}, 'album': {}, 'artist': {}})
-    vals = {f.entity: f.value for f in plan.fills}
-    assert vals == {'track': 'JT', 'album': 'JA', 'artist': 'JR'}
-    assert plan.filled == 3
-
-
-def test_mb_album_and_artist_filled_junk_recording_skipped():
-    tags = {'musicbrainz_albumid': 'MBA', 'musicbrainz_artistid': 'MBR', 'musicbrainz_trackid': 'MBT'}
-    plan = plan_reconcile(tags, {'track': {}, 'album': {}, 'artist': {}})
-    cols = {(f.entity, f.id_column): f.value for f in plan.fills}
-    assert cols[('album', 'musicbrainz_release_id')] == 'MBA'
-    assert cols[('artist', 'musicbrainz_id')] == 'MBR'
-    # not an mbid, so not a recording id: never filled
-    assert plan.fills_for('track') == []
-
-
-REC = '1f9df192-a621-4f54-8850-2c5373b7eac9'
-
-
-def test_mb_recording_id_filled_on_the_track():
-    plan = plan_reconcile({'musicbrainz_trackid': REC.upper()},
-                          {'track': {}, 'album': {}, 'artist': {}})
-    assert [(f.entity, f.id_column, f.status_column, f.value) for f in plan.fills] == [
-        ('track', 'musicbrainz_recording_id', 'musicbrainz_match_status', REC)]
-
-
-def test_mb_recording_id_never_overwrites():
-    other = '00000000-0000-0000-0000-000000000000'
-    plan = plan_reconcile({'musicbrainz_trackid': REC},
-                          {'track': {'musicbrainz_recording_id': other}})
-    assert plan.fills == []
-    assert plan.conflicts[0]['column'] == 'musicbrainz_recording_id'
-
-
-def test_lastfm_url_maps_to_track_only():
-    # The file carries a single LASTFM_URL = the TRACK's last.fm url. It must
-    # fill tracks.lastfm_url and NOT be smeared onto album/artist (whose
-    # last.fm urls are different urls entirely).
-    plan = plan_reconcile({'lastfm_url': 'https://last.fm/music/A/_/Song'},
-                          {'track': {}, 'album': {}, 'artist': {}})
-    assert plan.filled == 1
-    f = plan.fills_for('track')[0]
-    assert f.id_column == 'lastfm_url' and f.status_column == 'lastfm_match_status'
-    assert plan.fills_for('album') == [] and plan.fills_for('artist') == []
-
-
-def test_partial_fill_when_one_entity_already_matched():
-    tags = {'spotify_artist_id': 'ART', 'spotify_album_id': 'ALB'}
-    current = {'artist': {'spotify_artist_id': 'ART'}, 'album': {}}
-    plan = plan_reconcile(tags, current)
-    assert plan.filled == 1
-    assert plan.fills_for('album')[0].value == 'ALB'
-    assert plan.fills_for('artist') == []
-    assert plan.already_present == 1
-
-
-# ---------------------------------------------------------------------------
-# apply_reconcile_plan — the DB layer (in-memory sqlite)
-# ---------------------------------------------------------------------------
-
-def _make_db():
-    conn = sqlite3.connect(':memory:')
-    cur = conn.cursor()
-    for table, idcol in (('tracks', 'spotify_track_id'), ('albums', 'spotify_album_id'),
-                         ('artists', 'spotify_artist_id')):
-        cur.execute(f"""CREATE TABLE {table} (id TEXT PRIMARY KEY, {idcol} TEXT,
-            spotify_match_status TEXT, spotify_last_attempted TIMESTAMP)""")
-    cur.execute("INSERT INTO tracks (id) VALUES ('t1')")
-    cur.execute("INSERT INTO albums (id) VALUES ('al1')")
-    cur.execute("INSERT INTO artists (id) VALUES ('ar1')")
-    conn.commit()
-    return conn, cur
-
-
-def test_apply_writes_ids_status_and_timestamp():
-    conn, cur = _make_db()
-    plan = plan_reconcile(
-        {'spotify_track_id': 'TRK', 'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART'},
-        {'track': {}, 'album': {}, 'artist': {}},
-    )
-    applied = apply_reconcile_plan(cur, {'track': 't1', 'album': 'al1', 'artist': 'ar1'}, plan)
-    conn.commit()
-    assert isinstance(applied, ReconcileApplied)
-    assert applied.rows_updated == 3 and applied.ids_filled == 3
-
-    cur.execute("SELECT spotify_track_id, spotify_match_status, spotify_last_attempted FROM tracks WHERE id='t1'")
-    tid, status, attempted = cur.fetchone()
-    assert tid == 'TRK' and status == 'matched' and attempted is not None
-
-
-def test_apply_guard_blocks_overwrite_under_concurrency():
-    # THE headline hardening: a worker fills the column AFTER we planned
-    # (plan saw empty) but BEFORE we apply. The guarded UPDATE must no-op
-    # and leave the worker's value intact.
-    conn, cur = _make_db()
-    plan = plan_reconcile({'spotify_artist_id': 'FROM_FILE'}, {'artist': {}})  # planned: empty
-    # Simulate a concurrent enrichment worker matching it in the meantime.
-    cur.execute("UPDATE artists SET spotify_artist_id='FROM_WORKER', spotify_match_status='matched' WHERE id='ar1'")
-    conn.commit()
-
-    applied = apply_reconcile_plan(cur, {'artist': 'ar1'}, plan)
-    conn.commit()
-    assert applied.ids_filled == 0 and applied.rows_updated == 0  # guard blocked it
-
-    cur.execute("SELECT spotify_artist_id FROM artists WHERE id='ar1'")
-    assert cur.fetchone()[0] == 'FROM_WORKER'  # worker's value preserved
-
-
-def test_apply_guard_treats_empty_string_as_fillable():
-    conn, cur = _make_db()
-    cur.execute("UPDATE artists SET spotify_artist_id='' WHERE id='ar1'")  # empty string, not NULL
-    conn.commit()
-    plan = plan_reconcile({'spotify_artist_id': 'ART'}, {'artist': {}})
-    applied = apply_reconcile_plan(cur, {'artist': 'ar1'}, plan)
-    conn.commit()
-    assert applied.ids_filled == 1
-    cur.execute("SELECT spotify_artist_id FROM artists WHERE id='ar1'")
-    assert cur.fetchone()[0] == 'ART'
-
-
-def test_apply_skips_unknown_columns_without_erroring():
-    # Schema missing a provider's columns must not raise — the plan targets
-    # tidal_id which this minimal schema lacks; it's silently skipped.
-    conn, cur = _make_db()
-    plan = plan_reconcile({'tidal_artist_id': 'TID', 'spotify_artist_id': 'ART'},
-                          {'track': {}, 'album': {}, 'artist': {}})
-    applied = apply_reconcile_plan(cur, {'artist': 'ar1'}, plan)
-    conn.commit()
-    cur.execute("SELECT spotify_artist_id FROM artists WHERE id='ar1'")
-    assert cur.fetchone()[0] == 'ART'
-    assert applied.ids_filled == 1  # only the existing spotify column landed
-
-
-def test_apply_skips_entity_with_no_id():
-    conn, cur = _make_db()
-    plan = plan_reconcile({'spotify_album_id': 'ALB'}, {'album': {}})
-    applied = apply_reconcile_plan(cur, {'track': 't1'}, plan)  # no album id supplied
-    assert applied.rows_updated == 0 and applied.ids_filled == 0
-
-
-def test_apply_empty_plan_is_noop():
-    conn, cur = _make_db()
-    applied = apply_reconcile_plan(cur, {'track': 't1'}, ReconcilePlan())
-    assert applied.rows_updated == 0 and applied.ids_filled == 0
-
-
-# ---------------------------------------------------------------------------
-# reconcile_track_row — the per-track orchestration (id extraction, plan→apply,
-# sibling-map freshening)
-# ---------------------------------------------------------------------------
-
-def test_reconcile_track_row_unreadable_file_is_noop():
-    conn, cur = _make_db()
-    result = reconcile_track_row(cur, {'id': 't1'}, {}, {}, None)
-    assert result.readable is False
-    assert result.applied.ids_filled == 0
-
-
-def test_reconcile_track_row_fills_track_and_parents():
-    conn, cur = _make_db()
-    track_row = {'id': 't1', 'album_id': 'al1', 'artist_id': 'ar1'}
-    album_map = {'al1': {}}
-    artist_map = {'ar1': {}}
-    tags = {'spotify_track_id': 'TRK', 'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART'}
-    result = reconcile_track_row(cur, track_row, album_map, artist_map, tags)
-    conn.commit()
-    assert result.readable is True
-    assert result.applied.ids_filled == 3 and result.applied.rows_updated == 3
-    # parent maps were freshened in place
-    assert album_map['al1']['spotify_album_id'] == 'ALB'
-    assert artist_map['ar1']['spotify_artist_id'] == 'ART'
-
-
-def test_reconcile_sibling_tracks_dont_refill_shared_parent():
-    # Two tracks on the same album/artist. The first fills the album+artist
-    # ids; the second must see them already present (via the freshened map)
-    # and NOT re-apply — proving the map keeps siblings from redundant work.
-    conn, cur = _make_db()
-    cur.execute("INSERT INTO tracks (id) VALUES ('t2')")
-    conn.commit()
-    album_map = {'al1': {}}
-    artist_map = {'ar1': {}}
-    tags = {'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART', 'spotify_track_id': 'T1'}
-
-    r1 = reconcile_track_row(cur, {'id': 't1', 'album_id': 'al1', 'artist_id': 'ar1'},
-                             album_map, artist_map, tags)
-    # Second track: same album/artist ids embedded, its own track id.
-    tags2 = {'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART', 'spotify_track_id': 'T2'}
-    r2 = reconcile_track_row(cur, {'id': 't2', 'album_id': 'al1', 'artist_id': 'ar1'},
-                             album_map, artist_map, tags2)
-    conn.commit()
-
-    assert r1.applied.ids_filled == 3            # track + album + artist
-    assert r2.applied.ids_filled == 1            # only t2's own track id; parents already filled
-    assert r2.conflicts == 0
-
-
-def test_reconcile_track_row_handles_null_parent_ids():
-    conn, cur = _make_db()
-    # Track with no album/artist linkage — only its own id should fill.
-    result = reconcile_track_row(cur, {'id': 't1', 'album_id': None, 'artist_id': None},
-                                 {}, {}, {'spotify_track_id': 'TRK', 'spotify_album_id': 'ALB'})
-    conn.commit()
-    assert result.applied.ids_filled == 1  # album fill has no album id to land on
-    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t1'")
-    assert cur.fetchone()[0] == 'TRK'
+from core.library.embedded_id_reconcile import ReconcileTotals, reconcile_library
+from core.library2.schema import ensure_library_v2_schema
 
 
 # ---------------------------------------------------------------------------
@@ -309,20 +26,13 @@ def test_reconcile_track_row_handles_null_parent_ids():
 def _make_library_db():
     conn = sqlite3.connect(':memory:')
     conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
     cur = conn.cursor()
-    cur.execute("""CREATE TABLE tracks (id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT,
-        file_path TEXT, title TEXT, spotify_track_id TEXT, spotify_match_status TEXT,
-        spotify_last_attempted TIMESTAMP)""")
-    cur.execute("""CREATE TABLE albums (id TEXT PRIMARY KEY, spotify_album_id TEXT,
-        spotify_match_status TEXT, spotify_last_attempted TIMESTAMP)""")
-    cur.execute("""CREATE TABLE artists (id TEXT PRIMARY KEY, spotify_artist_id TEXT,
-        spotify_match_status TEXT, spotify_last_attempted TIMESTAMP)""")
     # Two tracks on the same album/artist, one orphan track with no file.
-    cur.execute("INSERT INTO artists (id) VALUES ('ar1')")
-    cur.execute("INSERT INTO albums (id) VALUES ('al1')")
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t1','al1','ar1','/a.flac','A')")
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t2','al1','ar1','/b.flac','B')")
-    cur.execute("INSERT INTO tracks (id, album_id, artist_id, file_path, title) VALUES ('t3','al1','ar1','','NoFile')")
+    cur.execute("INSERT INTO lib2_artists(id,name) VALUES (1,'Artist')")
+    cur.execute("INSERT INTO lib2_albums(id,primary_artist_id,title) VALUES (1,1,'Album')")
+    cur.execute("INSERT INTO lib2_tracks(id,album_id,title) VALUES (1,1,'A'),(2,1,'B'),(3,1,'NoFile')")
+    cur.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES (1,'/a.flac',1),(2,'/b.flac',1)")
     conn.commit()
     return conn, cur
 
@@ -344,34 +54,34 @@ def test_reconcile_library_whole_library_fills_all():
     assert totals.total == 2 and totals.processed == 2
     # t1: track+album+artist (3); t2: only its own track id (parents already filled) (1)
     assert totals.ids_filled == 4
-    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t2'")
+    cur.execute("SELECT spotify_id FROM lib2_tracks WHERE id=2")
     assert cur.fetchone()[0] == 'TB'
-    cur.execute("SELECT spotify_album_id FROM albums WHERE id='al1'")
+    cur.execute("SELECT spotify_id FROM lib2_albums WHERE id=1")
     assert cur.fetchone()[0] == 'ALB'
 
 
 def test_reconcile_library_scoped_to_given_ids():
     conn, cur = _make_library_db()
     tags = {'/b.flac': {'spotify_track_id': 'TB'}, '/a.flac': {'spotify_track_id': 'TA'}}
-    totals = reconcile_library(conn, _reader(tags), track_ids=['t2'])
+    totals = reconcile_library(conn, _reader(tags), track_ids=[2])
     assert totals.total == 1 and totals.ids_filled == 1
-    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t2'")
+    cur.execute("SELECT spotify_id FROM lib2_tracks WHERE id=2")
     assert cur.fetchone()[0] == 'TB'
-    cur.execute("SELECT spotify_track_id FROM tracks WHERE id='t1'")
+    cur.execute("SELECT spotify_id FROM lib2_tracks WHERE id=1")
     assert cur.fetchone()[0] is None  # not in scope
 
 
 def test_reconcile_library_unreadable_counted():
     conn, cur = _make_library_db()
-    totals = reconcile_library(conn, _reader({}), track_ids=['t1', 't2'])  # reader returns None
+    totals = reconcile_library(conn, _reader({}), track_ids=[1, 2])  # reader returns None
     assert totals.unreadable == 2 and totals.ids_filled == 0
 
 
 def test_reconcile_library_is_idempotent():
     conn, cur = _make_library_db()
     tags = {'/a.flac': {'spotify_track_id': 'TA', 'spotify_album_id': 'ALB', 'spotify_artist_id': 'ART'}}
-    first = reconcile_library(conn, _reader(tags), track_ids=['t1'])
-    second = reconcile_library(conn, _reader(tags), track_ids=['t1'])
+    first = reconcile_library(conn, _reader(tags), track_ids=[1])
+    second = reconcile_library(conn, _reader(tags), track_ids=[1])
     assert first.ids_filled == 3
     assert second.ids_filled == 0  # nothing left to fill
 
@@ -380,21 +90,165 @@ def test_reconcile_library_progress_and_stop():
     conn, cur = _make_library_db()
     seen = []
     reconcile_library(conn, _reader({'/a.flac': {'spotify_track_id': 'TA'}}),
-                      track_ids=['t1', 't2'],
+                      track_ids=[1, 2],
                       on_progress=lambda totals, title: seen.append(title))
     assert seen == ['A', 'B']
 
     # should_stop halts before processing anything
-    totals = reconcile_library(conn, _reader({}), track_ids=['t1', 't2'],
+    totals = reconcile_library(conn, _reader({}), track_ids=[1, 2],
                                should_stop=lambda: True)
     assert totals.processed == 0
 
 
+def test_reconcile_library_native_scope_uses_server_ids():
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    artist = conn.execute(
+        "INSERT INTO lib2_artists(name,server_source,server_id) VALUES('A','plex','a')"
+    ).lastrowid
+    album = conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id,title,server_source,server_id) "
+        "VALUES(?,'Album','plex','al')", (artist,)).lastrowid
+    track = conn.execute(
+        "INSERT INTO lib2_tracks(album_id,title,server_source,server_id) "
+        "VALUES(?,'Song','plex','server-track')", (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) "
+                 "VALUES(?, '/song.flac', 1)", (track,))
+
+    totals = reconcile_library(
+        conn, _reader({'/song.flac': {'spotify_track_id': 't',
+                                      'spotify_album_id': 'al',
+                                      'spotify_artist_id': 'a'}}),
+        track_ids=['server-track'], server_source='plex')
+
+    assert totals.ids_filled == 3
+    assert conn.execute(
+        "SELECT COUNT(*) FROM lib2_provider_attempts WHERE service='spotify' "
+        "AND status='matched'").fetchone()[0] == 3
+
+
+def test_reconcile_library_native_scope_uses_mapping_after_server_switch():
+    conn, _cur = _make_library_db()
+    conn.execute(
+        "UPDATE lib2_tracks SET server_source='jellyfin',server_id='j-track' WHERE id=1"
+    )
+    conn.execute(
+        "INSERT INTO lib2_media_server_mappings "
+        "(entity_type,entity_id,server_source,server_id) "
+        "VALUES('track',1,'plex','p-track')"
+    )
+
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'spotify_track_id': 'mapped'}}),
+        track_ids=['p-track'], server_source='plex',
+    )
+
+    assert totals.processed == 1
+    assert conn.execute(
+        "SELECT spotify_id FROM lib2_tracks WHERE id=1"
+    ).fetchone()[0] == 'mapped'
+
+
+# ---------------------------------------------------------------------------
+# Whose id is it? — an `*_artist_id` tag names the TRACK's performer
+# ---------------------------------------------------------------------------
+
+def _make_compilation_db():
+    """A Various-Artists compilation: the album artist is not the performer."""
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(conn)
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_artists(id,name) VALUES (1,'Various Artists'),(2,'Real Performer')")
+    cur.execute("INSERT INTO lib2_albums(id,primary_artist_id,title) VALUES (1,1,'A Compilation')")
+    cur.execute("INSERT INTO lib2_tracks(id,album_id,title) VALUES (1,1,'Their Song')")
+    cur.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) "
+                "VALUES (1,2,'primary',0)")
+    cur.execute("INSERT INTO lib2_track_files(track_id,path,is_primary) VALUES (1,'/a.flac',1)")
+    conn.commit()
+    return conn, cur
+
+
+def test_artist_tag_lands_on_the_credited_performer_not_the_album_artist():
+    """The bug this pins: every artist tag was written to the album's primary
+    artist, so the first track of a compilation stamped its performer's MBID
+    onto Various Artists — and marked it matched, so enrichment never
+    corrected it."""
+    conn, cur = _make_compilation_db()
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'musicbrainz_artistid': 'PERFORMER-MBID'}}))
+
+    assert totals.ids_filled == 1
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=2").fetchone()[0] == 'PERFORMER-MBID'
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=1").fetchone()[0] is None
+
+
+def test_artist_tag_falls_back_to_the_album_artist_without_credits():
+    conn, cur = _make_compilation_db()
+    cur.execute("DELETE FROM lib2_track_artists")
+    conn.commit()
+
+    reconcile_library(conn, _reader({'/a.flac': {'musicbrainz_artistid': 'ONLY-GUESS'}}))
+
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=1").fetchone()[0] == 'ONLY-GUESS'
+
+
+def test_a_joined_multi_value_tag_is_not_written_as_one_id():
+    """"A feat. B" carries both performers' ids in one frame, and the tag
+    reader joins them with ', '. That string is not an id."""
+    conn, cur = _make_compilation_db()
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'musicbrainz_artistid': 'MBID-A, MBID-B'}}))
+
+    assert totals.ids_filled == 0
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=2").fetchone()[0] is None
+
+
+def test_a_worker_that_wins_the_race_keeps_its_id(monkeypatch):
+    """The window the guard closes: an enrichment worker settles the entity
+    between this job's read and its write. The guard is in the statement, so
+    the fill affects no rows instead of replacing a fresher match."""
+    from core.library2 import worker_support
+
+    real = worker_support.stored_provider_id
+    conn, cur = _make_compilation_db()
+    cur.execute("UPDATE lib2_artists SET musicbrainz_id='WORKER-WON' WHERE id=2")
+    conn.commit()
+    # ...but this job read the row a moment earlier, when it was still empty.
+    # Only that FIRST read is stale; everything after it sees the real row.
+    reads = []
+
+    def _stale_once(*args, **kwargs):
+        reads.append(1)
+        return None if len(reads) == 1 else real(*args, **kwargs)
+
+    monkeypatch.setattr(worker_support, 'stored_provider_id', _stale_once)
+
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'musicbrainz_artistid': 'STALE-TAG'}}))
+
+    assert totals.ids_filled == 0
+    assert totals.conflicts == 1
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_artists WHERE id=2").fetchone()[0] == 'WORKER-WON'
+
+
+# ---------------------------------------------------------------------------
+# Upstream a61506e58: the MusicBrainz recording id is reconciled as well
+# ---------------------------------------------------------------------------
+
+REC = '1f9df192-a621-4f54-8850-2c5373b7eac9'
+
+
 def test_picard_mp3_recording_id_is_read_and_reconciled(tmp_path):
-    # the reported shape: picard keeps the recording id in a UFID frame and
-    # the album / release-group / release-track / artist ids in TXXX frames.
-    # the reader only walked TXXX, so the mp3 never got a recording id while
-    # its flac twin did, and the two copies didn't line up.
+    # picard keeps the recording id in a UFID frame and the album /
+    # release-track ids in TXXX frames. The reader only walked TXXX, so the
+    # mp3 never got a recording id while its flac twin did.
     from mutagen.id3 import ID3, TXXX, UFID
 
     from core.library.file_tags import read_embedded_tags
@@ -405,14 +259,28 @@ def test_picard_mp3_recording_id_is_read_and_reconciled(tmp_path):
     tags.add(UFID(owner='http://musicbrainz.org', data=REC.encode('ascii')))
     tags.add(TXXX(encoding=3, desc='MusicBrainz Release Track Id',
                   text=['aaaaaaaa-0000-0000-0000-000000000001']))
-    tags.add(TXXX(encoding=3, desc='MusicBrainz Album Id', text=['MBA']))
     tags.save(str(path))
 
     embedded = read_embedded_tags(str(path))['tags']
     assert embedded['musicbrainz_trackid'] == REC
-    # the release-track id is a different thing and stays where it was
     assert embedded['musicbrainz_releasetrackid'] == 'aaaaaaaa-0000-0000-0000-000000000001'
 
-    plan = plan_reconcile(embedded, {'track': {}, 'album': {}, 'artist': {}})
-    assert ('track', 'musicbrainz_recording_id', REC) in [
-        (f.entity, f.id_column, f.value) for f in plan.fills]
+    conn, cur = _make_library_db()
+    totals = reconcile_library(conn, _reader({'/a.flac': embedded}))
+
+    assert totals.ids_filled == 1
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_tracks WHERE id=1").fetchone()[0] == REC
+
+
+def test_recording_id_is_lowercased_and_junk_is_not_filled():
+    conn, cur = _make_library_db()
+    reconcile_library(conn, _reader({
+        '/a.flac': {'musicbrainz_trackid': REC.upper()},
+        '/b.flac': {'musicbrainz_trackid': 'not-a-recording-id'},
+    }))
+
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_tracks WHERE id=1").fetchone()[0] == REC
+    assert cur.execute(
+        "SELECT musicbrainz_id FROM lib2_tracks WHERE id=2").fetchone()[0] is None

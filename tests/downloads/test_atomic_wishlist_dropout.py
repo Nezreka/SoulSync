@@ -660,6 +660,17 @@ def test_publish_repoints_each_task_final_file_path(monkeypatch, tmp_path):
 
     batch = {"is_album_download": True}
     transfer, staged, final = _stage_a_track(monkeypatch, tmp_path, batch)
+    # On this branch the import pipeline registers every file in Library v2
+    # (require_library_v2_registration), staged ones included, so the publish
+    # has a row to repoint and a zero would be real evidence of a gap.
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+    with MusicDatabase()._get_connection() as conn:
+        seed_library_track(conn, artist="Hoobastank", album="The Reason",
+                           title="Never There", artist_server_id="ab-hoob",
+                           album_server_id="ab-reason", track_server_id="ab-never",
+                           file_path=staged)
+        conn.commit()
     tasks = {"t1": {"status": "completed", "final_file_path": staged}}
     monkeypatch.setattr(lc, "download_tasks", tasks)
     monkeypatch.setattr(lc, "safe_move_file", safe_move_file, raising=False)

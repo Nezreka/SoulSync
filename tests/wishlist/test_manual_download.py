@@ -153,6 +153,46 @@ def test_start_manual_wishlist_download_batch_returns_immediately_with_placehold
     assert len(executor.submissions) == 1
 
 
+def test_direct_track_batch_bypasses_wishlist_and_disables_failure_requeue():
+    runtime, service, _db, executor, _logger, activity_calls, batch_map, _master_calls = _build_runtime(
+        tracks=[]
+    )
+    direct_track = {
+        "id": "sp-direct",
+        "name": "One Shot",
+        "artists": [{"name": "Direct Artist"}],
+        "album": {"name": "Direct Single", "album_type": "single"},
+        "spotify_data": {
+            "id": "sp-direct",
+            "name": "One Shot",
+            "artists": [{"name": "Direct Artist"}],
+            "album": {"name": "Direct Single", "album_type": "single"},
+        },
+        "source_info": {"lib2_track_id": 77, "lib2_album_id": 8},
+        "quality_profile_id": 3,
+        "_lib2_direct_search": True,
+    }
+
+    payload, status = processing.start_direct_track_download_batch(runtime, [direct_track])
+
+    assert status == 200
+    batch_id = payload["batch_id"]
+    assert batch_map[batch_id]["playlist_id"] == "library_v2_search"
+    assert batch_map[batch_id]["requeue_failed_to_wishlist"] is False
+    assert service.get_wishlist_tracks_for_download() == []
+
+    _run_submitted_bg_job(executor)
+
+    dispatched = _dispatched(executor, runtime)
+    assert len(dispatched) == 1
+    args = dispatched[0][1]
+    assert args[0] == batch_id
+    assert args[1] == "library_v2_search"
+    assert args[2][0]["id"] == "sp-direct"
+    assert batch_map[batch_id]["requeue_failed_to_wishlist"] is False
+    assert activity_calls == [("", "Automatic Search Started", "1 track(s)", "Now")]
+
+
 def test_start_manual_wishlist_download_batch_filters_track_ids_and_starts_batch():
     runtime, _service, _db, executor, logger, activity_calls, batch_map, master_calls = _build_runtime(
         tracks=[
@@ -197,6 +237,23 @@ def test_start_manual_wishlist_download_batch_filters_track_ids_and_starts_batch
     assert batch_map[payload["batch_id"]]["analysis_total"] == 1
     assert batch_map[payload["batch_id"]]["force_download_all"] is True
     assert any("Filtered to 1 specific tracks by ID" in msg for msg in logger.info_messages)
+
+
+def test_a_picked_track_keeps_its_modal_row_when_one_before_it_is_gone():
+    """#1925: the first picked track had already left the wishlist, the second
+    got renumbered to row 0, and its status showed on the first row."""
+    runtime, _service, _db, executor, *_rest = _build_runtime(
+        tracks=[{"id": "track-2", "name": "Song 2", "artists": [{"name": "Artist 2"}],
+                 "album": {"name": "Album 2", "album_type": "album"}}]
+    )
+
+    payload, _ = processing.start_manual_wishlist_download_batch(
+        runtime, track_ids=["track-gone", "track-2"], category=None)
+    _run_submitted_bg_job(executor)
+
+    args = _dispatched(executor, runtime)[0][1]
+    assert args[2][0]["id"] == "track-2"
+    assert args[2][0]["_original_index"] == 1
 
 
 def test_start_manual_wishlist_download_batch_does_not_run_library_cleanup():

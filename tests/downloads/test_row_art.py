@@ -80,9 +80,10 @@ def test_a_failing_lookup_never_costs_the_rows():
 def test_the_db_queries_match_library_and_watchlist_by_lowercased_name(tmp_path):
     db = MusicDatabase(str(tmp_path / 'm.db'))
     conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES (1, 'MARCØS', '/library/a.jpg')")
-    conn.execute("INSERT INTO artists (id, name, thumb_url) VALUES (2, 'Bare', '')")
-    conn.execute("INSERT INTO albums (id, artist_id, title, thumb_url) VALUES (1, 1, 'Marco''s House', '/library/c.jpg')")
+    # the catalogue: lib2 artists keep their folded name key, albums their artist
+    conn.execute("INSERT INTO lib2_artists (id, name, name_key, image_url) VALUES (1, 'MARCØS', 'marcøs', '/library/a.jpg')")
+    conn.execute("INSERT INTO lib2_artists (id, name, name_key, image_url) VALUES (2, 'Bare', 'bare', '')")
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, image_url) VALUES (1, 1, 'Marco''s House', '/library/c.jpg')")
     conn.execute("INSERT INTO watchlist_artists (artist_name, image_url) VALUES ('Watched One', 'http://w.jpg')")
     conn.commit()
     names = dict(db.get_artist_thumbs_by_names(['marcøs', 'watched one', 'bare', 'missing']))

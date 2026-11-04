@@ -1,245 +1,168 @@
-"""#1716 (QT3496): library reorganize started over at the first album every run.
+"""#1716 (QT3496) on Library v2: library reorganize started over every run.
 
-stopping a scan at album 300 (or restarting the container) meant the next run
-re-planned albums 1-300 before reaching anything new, and in live mode a stop
-threw away every move the run had collected, since they were only queued at the
-very end. now the scan saves where it got to, queues moves as it goes, resumes
-right after the last finished album, and goes back to the top after a full pass.
+Stopping a scan at album 300 (or a restart) meant the next run re-planned
+albums 1-300 first. The native job saves the last album it finished (every 25
+and on a stop), resumes right after it, and goes back to the top after a full
+pass. A different dry-run mode or naming starts over; a run scoped to one
+artist never touches the checkpoint. Live mode queues each album as it goes,
+so a stop cannot drop planned moves.
 """
 
 from __future__ import annotations
 
-import pytest
-
-import core.library_reorganize as lr
-import core.reorganize_queue as rq
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.library_reorganize import LibraryReorganizeJob
-from database.music_database import MusicDatabase
 
 KEY = "repair.jobs.library_reorganize.scan_checkpoint"
-DRY = "repair.jobs.library_reorganize.settings.dry_run"
 
 
-def _db(tmp_path, count):
-    db = MusicDatabase(database_path=str(tmp_path / "m.db"))
-    conn = db._get_connection()
-    conn.execute("INSERT INTO artists (id, name) VALUES ('ar1', 'Artist')")
-    for n in range(1, count + 1):
-        album_id = f"a{n:03d}"
-        conn.execute("INSERT INTO albums (id, artist_id, title) VALUES (?, 'ar1', ?)",
-                     (album_id, f"Album {n}"))
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path) "
-                     "VALUES (?, ?, 'ar1', 't', ?)", (n, album_id, f"/m/{n}.flac"))
-    conn.commit()
-    conn.close()
-    return db
-
-
-class _Cfg:
-    def __init__(self, settings=None):
-        self.settings = dict(settings or {})
+class _Config:
+    def __init__(self):
+        self.store = {}
 
     def get(self, key, default=None):
-        return self.settings.get(key, default)
+        return self.store.get(key, default)
 
     def set(self, key, value):
-        self.settings[key] = value
-
-    def get_active_media_server(self):
-        return None
+        self.store[key] = value
 
 
-class _Queue:
-    def __init__(self):
-        self.albums = []
+def _reorganize(monkeypatch, config, albums, *, stop_after=None, scope=None, crash_at=None):
+    planned = []
 
-    def enqueue_many(self, items):
-        self.albums.extend(i["album_id"] for i in items)
-        return {"enqueued": len(items), "already_queued": 0, "total": len(items)}
+    def preview(_db, _cm, album_id, mode="api"):
+        if crash_at is not None and len(planned) == crash_at:
+            raise KeyboardInterrupt  # the process dies mid-scan
+        planned.append(album_id)
+        return {"status": "planned", "tracks": []}
 
-
-class _Boom(BaseException):
-    """stands in for the process dying mid-scan (not caught by the job)."""
-
-
-@pytest.fixture
-def harness(monkeypatch):
-    calls = []
-    queue = _Queue()
-    state = {"die_at": None}
-
-    def preview(**kw):
-        if state["die_at"] is not None and len(calls) == state["die_at"]:
-            raise _Boom()
-        calls.append(kw["album_id"])
-        return {
-            "success": True, "status": "planned", "source": "itunes",
-            "source_album_id": "x", "album": "Album", "artist": "Artist",
-            "tracks": [{"track_id": 1, "title": "t", "current_path": "/m/old.flac",
-                        "new_path": "/m/new.flac", "matched": True, "unchanged": False,
-                        "file_exists": True}],
-        }
-
-    monkeypatch.setattr(lr, "preview_album_reorganize", preview)
-    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "fp1")
-    monkeypatch.setattr(rq, "get_queue", lambda: queue)
-    return calls, queue, state
+    monkeypatch.setattr("core.library2.reorganize_bridge.preview_album_reorganize", preview)
+    monkeypatch.setattr(LibraryReorganizeJob, "_albums",
+                        staticmethod(lambda _ctx: [{"id": a, "title": "", "artist_name": ""}
+                                                   for a in albums]))
+    ctx = JobContext(
+        db=None, transfer_folder="/music", config_manager=config,
+        should_stop=lambda: stop_after is not None and len(planned) >= stop_after,
+    )
+    if scope is not None:
+        ctx.scope = scope
+    try:
+        LibraryReorganizeJob().scan(ctx)
+    except KeyboardInterrupt:
+        pass
+    return planned
 
 
-def _ctx(db, cfg, stop_after=None, calls=None):
-    should_stop = (lambda: len(calls) >= stop_after) if stop_after else None
-    return JobContext(db=db, transfer_folder="/m", config_manager=cfg,
-                      create_finding=lambda **kw: True, should_stop=should_stop)
+def test_reorganize_resumes_where_a_stopped_scan_left_off(monkeypatch):
+    config = _Config()
+    assert _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1) == [10]
+    assert _reorganize(monkeypatch, config, [10, 11, 12]) == [11, 12]
+    assert _reorganize(monkeypatch, config, [10, 11, 12]) == [10, 11, 12]
 
 
-def test_stopped_dry_run_resumes_after_the_last_album_then_wraps(tmp_path, harness):
-    calls, _queue, _ = harness
-    db = _db(tmp_path, 10)
-    cfg = _Cfg()
-
-    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=4, calls=calls))
-    assert calls == ["a001", "a002", "a003", "a004"]
-    assert cfg.settings[KEY]["album_id"] == "a004"
-
-    calls.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert calls == [f"a{n:03d}" for n in range(5, 11)]   # not back at a001
-    assert cfg.settings[KEY] is None                       # full pass done
-
-    calls.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert calls[0] == "a001"                              # next pass from the top
+def test_a_crash_mid_scan_resumes_from_the_last_batch(monkeypatch):
+    config = _Config()
+    albums = list(range(1, 61))
+    _reorganize(monkeypatch, config, albums, crash_at=40)
+    # saved every 25 albums: album 25 was the last one written down
+    assert config.store[KEY]["id"] == 25
+    assert _reorganize(monkeypatch, config, albums)[0] == 26
 
 
-def test_stopped_live_run_keeps_the_moves_it_planned(tmp_path, harness):
-    calls, queue, _ = harness
-    db = _db(tmp_path, 10)
-    cfg = _Cfg({DRY: False})
-
-    result = LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
-    assert queue.albums == ["a001", "a002", "a003"]
-    assert result.auto_fixed == 3
-    assert cfg.settings[KEY]["album_id"] == "a003"
+def test_reorganize_starts_over_when_dry_run_changes(monkeypatch):
+    config = _Config()
+    _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)
+    config.store["repair.jobs.library_reorganize.settings"] = {"dry_run": False}
+    assert _reorganize(monkeypatch, config, [10, 11, 12]) == [10, 11, 12]
 
 
-def test_a_crash_mid_scan_resumes_from_the_last_batch(tmp_path, harness):
-    calls, queue, state = harness
-    db = _db(tmp_path, 40)
-    cfg = _Cfg({DRY: False})
+def test_naming_change_starts_over(monkeypatch):
+    import core.library_reorganize as lr
 
-    state["die_at"] = 30
-    with pytest.raises(_Boom):
-        LibraryReorganizeJob().scan(_ctx(db, cfg))
-    # albums 1-25 were queued with the checkpoint; 26-30 were only in memory
-    assert queue.albums == [f"a{n:03d}" for n in range(1, 26)]
-    assert cfg.settings[KEY]["album_id"] == "a025"
-
-    state["die_at"] = None
-    calls.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert calls[0] == "a026"
-    assert queue.albums == [f"a{n:03d}" for n in range(1, 41)]
+    config = _Config()
+    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "before")
+    _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)
+    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "after")
+    assert _reorganize(monkeypatch, config, [10, 11, 12]) == [10, 11, 12]
 
 
-def test_switching_dry_run_off_starts_over(tmp_path, harness):
-    calls, _queue, _ = harness
-    db = _db(tmp_path, 6)
-    cfg = _Cfg()
-    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
-
-    # a dry-run checkpoint must not let live mode skip albums it never queued
-    cfg.settings[DRY] = False
-    calls.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert calls[0] == "a001"
+def test_checkpoint_album_gone_starts_over(monkeypatch):
+    config = _Config()
+    _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)
+    assert _reorganize(monkeypatch, config, [11, 12]) == [11, 12]
 
 
-def test_naming_change_starts_over(tmp_path, harness, monkeypatch):
-    calls, _queue, _ = harness
-    db = _db(tmp_path, 6)
-    cfg = _Cfg()
-    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
-
-    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "fp2")
-    calls.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert calls[0] == "a001"
+def test_a_gone_checkpoint_album_resumes_at_the_next_one(monkeypatch):
+    """upstream #1857: the album a stop saved was merged away meanwhile. The
+    pass carries on after it instead of re-planning the albums before it."""
+    config = _Config()
+    assert _reorganize(monkeypatch, config, [10, 11, 12, 13], stop_after=2) == [10, 11]
+    assert _reorganize(monkeypatch, config, [10, 12, 13]) == [12, 13]
 
 
-def test_a_dropped_checkpoint_says_what_changed(tmp_path, harness, monkeypatch):
-    import core.repair_jobs.library_reorganize as job_mod
+def test_a_scoped_reorganize_run_never_touches_the_checkpoint(monkeypatch):
+    config = _Config()
+    _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)
+    saved = config.store[KEY]
+    assert _reorganize(monkeypatch, config, [10, 11, 12],
+                       scope={"file_paths": ["/music/a.flac"]}) == [10, 11, 12]
+    assert config.store[KEY] == saved
+
+
+def test_a_pause_holds_between_albums_and_a_stop_while_paused_ends_the_run(monkeypatch):
+    """the job never looked at the pause, so Pause did nothing until it finished"""
+    planned = []
+    monkeypatch.setattr("core.library2.reorganize_bridge.preview_album_reorganize",
+                        lambda _db, _cm, album_id, mode="api": planned.append(album_id) or
+                        {"status": "planned", "tracks": []})
+    monkeypatch.setattr(LibraryReorganizeJob, "_albums",
+                        staticmethod(lambda _ctx: [{"id": a, "title": "", "artist_name": ""}
+                                                   for a in (1, 2, 3)]))
+    stopped = {"value": False}
+    paused_checks = []
+
+    def is_paused():
+        paused_checks.append(len(planned))
+        if len(planned) >= 1:
+            stopped["value"] = True  # the user stops while it waits
+            return True
+        return False
+
+    ctx = JobContext(db=None, transfer_folder="/music", config_manager=_Config(),
+                     should_stop=lambda: stopped["value"], is_paused=is_paused)
+    LibraryReorganizeJob().scan(ctx)
+
+    assert planned == [1]
+    assert paused_checks  # the pause was looked at between albums
+
+
+
+def _restart_lines(monkeypatch):
+    import core.repair_jobs.base as base
     lines = []
-    monkeypatch.setattr(job_mod.logger, "info", lambda msg, *a: lines.append(msg % a))
-    calls, _queue, _ = harness
-    db = _db(tmp_path, 6)
-    cfg = _Cfg()
-    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
-
-    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "fp2")
-    lines.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert any("naming settings changed" in line for line in lines)
+    real = base.logger.info
+    monkeypatch.setattr(base.logger, "info",
+                        lambda msg, *a, **k: lines.append(msg % a) or real(msg, *a, **k))
+    return lines
 
 
-def _drop_album(db, album_id):
-    conn = db._get_connection()
-    conn.execute("DELETE FROM tracks WHERE album_id = ?", (album_id,))
-    conn.execute("DELETE FROM albums WHERE id = ?", (album_id,))
-    conn.commit()
-    conn.close()
+def test_a_restart_says_the_naming_settings_changed(monkeypatch):
+    """3.6.1 said which setting reset the scan, so a reorganize that "started
+    over by itself" could be traced; v2 said only "the scan settings changed\""""
+    import core.library_reorganize as lr
+
+    config = _Config()
+    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "before")
+    _reorganize(monkeypatch, config, [10, 11, 12], stop_after=1)
+    monkeypatch.setattr(lr, "naming_fingerprint", lambda: "after")
+    lines = _restart_lines(monkeypatch)
+    _reorganize(monkeypatch, config, [10, 11, 12])
+    assert any("naming settings changed since the last scan" in line for line in lines), lines
+    assert not any("dry run" in line for line in lines)
 
 
-def test_checkpoint_album_gone_carries_on_after_it(tmp_path, harness):
-    # #1857: the album the scan stopped on vanished (deleted, or the server
-    # gave it a new id). that used to send the scan back to album 1.
-    calls, _queue, _ = harness
-    db = _db(tmp_path, 6)
-    cfg = _Cfg()
-    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
-    assert cfg.settings[KEY]["album_id"] == "a003"
-    _drop_album(db, "a003")
-
-    calls.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert calls == ["a004", "a005", "a006"]
-
-
-def test_checkpoint_album_reidentified_carries_on(tmp_path, harness):
-    # a media server update re-keyed the album the scan stopped on: same
-    # album, new id that sorts elsewhere. the scan keeps its place.
-    calls, _queue, _ = harness
-    db = _db(tmp_path, 6)
-    cfg = _Cfg()
-    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=3, calls=calls))
-    conn = db._get_connection()
-    conn.execute("INSERT INTO albums (id, artist_id, title) VALUES ('z999', 'ar1', 'Album 3')")
-    conn.execute("UPDATE tracks SET album_id = 'z999' WHERE album_id = 'a003'")
-    conn.execute("DELETE FROM albums WHERE id = 'a003'")
-    conn.commit()
-    conn.close()
-
-    calls.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert calls == ["a004", "a005", "a006", "z999"]
-
-
-def test_checkpoint_past_the_last_album_starts_the_next_pass(tmp_path, harness):
-    calls, _queue, _ = harness
-    db = _db(tmp_path, 4)
-    cfg = _Cfg({KEY: {"album_id": "a999", "scan": None}})
-    LibraryReorganizeJob().scan(_ctx(db, cfg, stop_after=1, calls=calls))
-    key = cfg.settings[KEY]["scan"]
-    cfg.settings[KEY] = {"album_id": "a999", "scan": key}
-
-    calls.clear()
-    LibraryReorganizeJob().scan(_ctx(db, cfg))
-    assert calls[0] == "a001"
-
-
-def test_integer_ids_resume_in_sqlite_order():
+def test_a_restart_names_every_part_that_changed(monkeypatch):
     job = LibraryReorganizeJob()
-    rows = [{"id": 2}, {"id": 10}, {"id": "a1"}]
-    ctx = JobContext(db=None, transfer_folder="/m",
-                     config_manager=_Cfg({KEY: {"album_id": 5, "scan": "k"}}))
-    assert job._resume_index(ctx, rows, "k") == 1      # 10, not "a1" or the top
+    assert job._changed_scan_parts("dry|0|a", "live|1|a") == "dry run, recheck placed"
+    assert job._changed_scan_parts(None, "live|1|a") == "dry run, recheck placed, naming settings"
+    assert job._changed_scan_parts("x", "only-one-part") == "the scan settings"

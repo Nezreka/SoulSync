@@ -408,6 +408,85 @@ def iter_musicmap_similar_artist_events(
         }
 
 
+def _fallback_similar_artist_names(artist_name: str,
+                                   searched_source_ids: Dict[str, Optional[str]]) -> List[str]:
+    """Similar artists from the providers' own lists, for an artist MusicMap
+    has no page for (smaller and newer acts: "Gizmo & Mac" is a 404 there).
+    Last.fm's similar artists when a key is set up, then Deezer's related
+    artists, which need no key."""
+    names: List[str] = []
+    seen: set = set()
+
+    def add(name: Any) -> None:
+        key = _normalize_artist_name(str(name or ''))
+        if key and key not in seen and key != _normalize_artist_name(artist_name):
+            seen.add(key)
+            names.append(str(name))
+
+    try:
+        from core.settings import config_manager
+        api_key = config_manager.get('lastfm.api_key', '')
+        if api_key:
+            from core.lastfm_client import LastFMClient
+            for row in LastFMClient(api_key=api_key).get_similar_artists(artist_name, limit=30) or []:
+                add(row.get('name') if isinstance(row, dict) else row)
+    except Exception as exc:  # noqa: BLE001 - the next source still runs
+        logger.debug("Last.fm similar artists for %s failed: %s", artist_name, exc)
+
+    try:
+        deezer_id = searched_source_ids.get('deezer')
+        client = metadata_registry.get_client_for_source('deezer')
+        if client is not None and not deezer_id and hasattr(client, 'search_artists'):
+            hit = _pick_named_artist(client.search_artists(artist_name, limit=5) or [], artist_name)
+            deezer_id = getattr(hit, 'id', None) or (hit.get('id') if isinstance(hit, dict) else None)
+        if client is not None and deezer_id and hasattr(client, '_api_get'):
+            data = client._api_get(f'artist/{deezer_id}/related', {'limit': 30}) or {}
+            for row in data.get('data') or []:
+                add(row.get('name'))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Deezer related artists for %s failed: %s", artist_name, exc)
+    return names
+
+
+def iter_fallback_similar_artist_events(
+    artist_name: str,
+    limit: int = 20,
+    source_override: Optional[str] = None,
+):
+    """The same events as the MusicMap stream, from the providers' own lists.
+    Every name is matched exactly as a MusicMap name is."""
+    lookup_artist_name = clean_musicmap_artist_name(artist_name) or str(artist_name or '').strip()
+    try:
+        source_chain = _get_source_chain_for_lookup(
+            MetadataLookupOptions(source_override=source_override, allow_fallback=True)
+        )
+        searched_source_ids = _resolve_musicmap_artist_source_ids(lookup_artist_name, source_chain)
+        names = _fallback_similar_artist_names(lookup_artist_name, searched_source_ids)
+        yield {'type': 'start', 'artist_name': lookup_artist_name, 'total_found': len(names),
+               'source_priority': source_chain, 'fallback': True}
+        matched = 0
+        seen_ids: set = set()
+        for candidate_name in names:
+            if matched >= limit:
+                break
+            source, payload = _match_musicmap_similar_artist(
+                candidate_name, source_chain, lookup_artist_name, searched_source_ids)
+            if not payload:
+                continue
+            payload_id = str(payload.get('id') or '')
+            if payload_id in seen_ids:
+                continue
+            seen_ids.add(payload_id)
+            matched += 1
+            yield {'type': 'artist', 'artist': payload, 'source': source}
+        yield {'type': 'complete', 'complete': True, 'total': matched, 'total_found': len(names),
+               'artist_name': lookup_artist_name, 'source_priority': source_chain}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error streaming fallback similar artists for %s: %s", artist_name, exc)
+        yield {'type': 'complete', 'complete': True, 'total': 0, 'total_found': 0,
+               'artist_name': lookup_artist_name}
+
+
 def get_musicmap_similar_artists(
     artist_name: str,
     limit: int = 20,

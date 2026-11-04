@@ -9,6 +9,10 @@ nothing ever re-downloaded.
 
 the rows came from review: deleting a wrong download removed the file and
 left its tracks row, so the next sync matched a file that was gone.
+
+Library v2 port: the "row" is the server's mapping of the catalogue track plus
+its active file. The sync detaches the dead server id (delete_stale_tracks),
+the review delete retires the file row.
 """
 
 from __future__ import annotations
@@ -20,7 +24,6 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 import core.library_scope as scope_mod
-from core.database_update_worker import DatabaseUpdateWorker
 from database.music_database import MusicDatabase
 from services.sync_service import PlaylistSyncService
 
@@ -30,48 +33,33 @@ def db(tmp_path, monkeypatch):
     d = MusicDatabase(str(tmp_path / 'lib.db'))
     monkeypatch.setattr('database.music_database.get_database', lambda *a, **k: d)
     monkeypatch.setattr('core.database_update_worker.get_database', lambda path=None: d)
+    monkeypatch.setattr('core.library2.migration_gate.migration_required', lambda database: False)
     scope_mod.invalidate_library_scope_cache()
     yield d
     scope_mod.invalidate_library_scope_cache()
 
 
-class _Track:
-    def __init__(self, k, title):
-        self.ratingKey, self.title, self.trackNumber, self.duration, self.parentIndex = k, title, 1, 200000, 1
-        self.media = [SimpleNamespace(parts=[SimpleNamespace(file=f"/m/{k}.mp3", size=1000)], bitrate=320)]
-
-
-class _Album:
-    ratingKey, title, year, thumb, genres = 'al1', 'Until We Meet Again', 2026, None, []
-
-    def tracks(self):
-        return [_Track('dead1', 'Until We Meet Again')]
-
-
-class _Artist:
-    ratingKey, title, thumb, genres, summary = 'ar1', 'Will Anderson', None, [], ''
-
-    def albums(self):
-        return [_Album()]
-
-
-class _Server:
-    last_fetch_failed = False
-
-    def ensure_connection(self):
-        return True
-
-    def get_all_artists(self):
-        return [_Artist()]
-
-
 def _seed(db, tmp_path):
-    DatabaseUpdateWorker(_Server(), str(tmp_path / 'lib.db'), server_type='plex',
-                         force_sequential=True).run_deep_scan()
+    """what a navidrome scan leaves for one song: the catalogue track, its
+    file, and the server's mapping."""
+    from tests.support.catalogue_seed import seed_library_track
     with db._get_connection() as conn:
-        conn.execute("UPDATE tracks SET server_source = 'navidrome'")
-        conn.execute("UPDATE albums SET server_source = 'navidrome'")
-        conn.execute("UPDATE artists SET server_source = 'navidrome'")
+        track = seed_library_track(
+            conn, artist='Will Anderson', album='Until We Meet Again',
+            title='Until We Meet Again', track_server_id='dead1', server_source='navidrome',
+            track_number=1, duration=200000, file_path='/m/dead1.mp3')
+        conn.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id,"
+                     " server_source, server_id) VALUES ('track', ?, 'navidrome', 'dead1')", (track,))
+        conn.commit()
+
+
+def _move_to(db, server):
+    """hand the seeded rows to another server."""
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_media_server_mappings SET server_source = ?", (server,))
+        for table in ('lib2_tracks', 'lib2_albums', 'lib2_artists', 'lib2_track_files'):
+            conn.execute(f"UPDATE {table} SET server_source = ? WHERE server_source IS NOT NULL",
+                         (server,))
         conn.commit()
 
 
@@ -126,8 +114,16 @@ def _sync(db, dead):
 
 
 def _row_ids(db):
+    """server ids of the tracks the library still holds for a server: an id
+    (mapping or compatibility pair) and a live file."""
     with db._get_connection() as conn:
-        return [r[0] for r in conn.execute("SELECT id FROM tracks").fetchall()]
+        return sorted({r[0] for r in conn.execute(
+            "SELECT COALESCE(m.server_id, t.server_id) FROM lib2_tracks t"
+            " LEFT JOIN lib2_media_server_mappings m"
+            "   ON m.entity_type = 'track' AND m.entity_id = t.id"
+            " WHERE COALESCE(m.server_id, t.server_id) IS NOT NULL"
+            "   AND EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id = t.id"
+            "               AND COALESCE(f.file_state, 'active') = 'active')").fetchall()})
 
 
 def test_the_dead_row_is_what_pulls_the_track_back_off_the_wishlist(db, tmp_path, monkeypatch):
@@ -159,9 +155,7 @@ def test_a_clean_write_leaves_the_library_alone(db, tmp_path):
 def test_only_the_dead_servers_rows_go(db, tmp_path):
     """the delete is scoped to the server the guard spoke for."""
     _seed(db, tmp_path)
-    with db._get_connection() as conn:
-        conn.execute("UPDATE tracks SET server_source = 'plex'")
-        conn.commit()
+    _move_to(db, 'plex')
     _sync(db, dead=['dead1'])
     assert _row_ids(db) == ['dead1']
 
@@ -174,9 +168,14 @@ def test_deleting_a_wrong_file_in_review_drops_its_library_row(db, tmp_path, mon
     f = tmp_path / 'Until We Meet Again.mp3'
     f.write_bytes(b'x')
     with db._get_connection() as conn:
-        conn.execute("UPDATE tracks SET file_path = ?", (str(f),))
-        conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, file_path, server_source) "
-                     "VALUES ('keep', 'al1', 'ar1', 'Other', '/m/other.mp3', 'navidrome')")
+        conn.execute("UPDATE lib2_track_files SET path = ?", (str(f),))
+        album = conn.execute("SELECT id FROM lib2_albums").fetchone()[0]
+        keep = conn.execute("INSERT INTO lib2_tracks (album_id, title, server_source, server_id)"
+                            " VALUES (?, 'Other', 'navidrome', 'keep')", (album,)).lastrowid
+        conn.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id,"
+                     " server_source, server_id) VALUES ('track', ?, 'navidrome', 'keep')", (keep,))
+        conn.execute("INSERT INTO lib2_track_files (track_id, path, file_state, is_primary)"
+                     " VALUES (?, '/m/other.mp3', 'active', 1)", (keep,))
         conn.commit()
     monkeypatch.setattr(ver, 'get_database', lambda: db)
     monkeypatch.setattr(ver, '_get_library_history_row', lambda hid: {'id': hid, 'file_path': str(f)})

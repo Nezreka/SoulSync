@@ -18,6 +18,8 @@ def _capped_library(db, cap, server):
     and unrated titles left out, paged after the filter so counts and pages
     stay honest. walks the filtered set in big pages; only restricted
     profiles ever come through here."""
+    from core.video.watch_scope import current_watcher
+
     from .kids import filter_library_items
     kind = request.args.get("kind", "movies")
     try:
@@ -34,7 +36,8 @@ def _capped_library(db, cap, server):
             status=request.args.get("status", "all"),
             genre=request.args.get("genre") or None,
             resolution=request.args.get("resolution") or None,
-            page=p, limit=500, server_source=server, include_size=False)
+            page=p, limit=500, server_source=server, include_size=False,
+            watcher=current_watcher().rows)
         kept.extend(filter_library_items(db, chunk.get("items") or [], cap, kind))
         if not (chunk.get("pagination") or {}).get("has_next"):
             break
@@ -73,6 +76,8 @@ def register_routes(bp):
                     limit=request.args.get("limit", 75),
                     profile_id=_profile(),
                 ))
+            from core.video.watch_scope import current_watcher
+
             from .kids import video_cap
             cap = video_cap()
             if cap is not None:
@@ -88,6 +93,7 @@ def register_routes(bp):
                 page=request.args.get("page", 1),
                 limit=request.args.get("limit", 75),
                 server_source=resolve_video_server(),
+                watcher=current_watcher().rows,
             ))
         except Exception:
             logger.exception("Failed to query video library")

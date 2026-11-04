@@ -77,14 +77,8 @@ def test_refuses_to_guess_when_two_albums_hold_the_same_filename(library):
         "Beck/Guero/01-01 - E-Pro.flac", config_manager=_Config(str(root))) is None
 
 
-def test_same_album_reachable_from_two_base_dirs_still_resolves(tmp_path):
-    """Ambiguity means two different ALBUMS, not two paths to one album.
-
-    A library is routinely reachable through several configured base dirs — a
-    transfer path plus a music path, duplicate mounts, a symlink. Each yields
-    the same album folder NAME. Comparing full paths treated that as a conflict
-    and refused a perfectly resolvable file.
-    """
+def test_same_album_names_in_independent_roots_are_ambiguous(tmp_path):
+    """Equal album names do not prove that two files are physical aliases."""
     for mount in ("mountA", "mountB"):
         album = tmp_path / mount / "Beck" / "Beck - Guero"
         album.mkdir(parents=True)
@@ -98,8 +92,7 @@ def test_same_album_reachable_from_two_base_dirs_still_resolves(tmp_path):
 
     resolved = resolve_library_file_path(
         "Beck/Guero/01-01 - E-Pro.flac", config_manager=_TwoMounts())
-    assert resolved is not None
-    assert resolved.endswith(os.path.join("Beck - Guero", "01-01 - E-Pro.flac"))
+    assert resolved is None
 
 
 def test_two_different_album_folders_are_still_refused_across_mounts(tmp_path):

@@ -162,6 +162,43 @@ def _reclaim_source(path) -> None:
                     os.path.basename(str(path)), e)
 
 
+def _remove_completed_usenet(db, dl, upd) -> bool:
+    """Remove Completed: take a usenet job out of the client once its import is
+    persisted, per the ``usenet_remove_completed`` setting (off / history /
+    files; default off -- see core.downloads.remove_completed).
+
+    Only a ``completed`` row reaches here; failed and ``import_failed`` rows keep
+    their job, because Manual import needs the files. A season pack qualifies
+    only when every episode it mapped imported and it held no video it could not
+    place. Best-effort: never raises, and a job left behind is the old
+    behavior."""
+    try:
+        if str(dl.get("source") or "").lower() != "usenet" or upd.get("status") != "completed":
+            return False
+        from core.downloads import remove_completed
+        mode = remove_completed.normalize(db.get_setting("usenet_remove_completed"))
+        if mode == remove_completed.OFF:
+            return False
+        ref = str(dl.get("client_ref") or "")
+        if not ref:
+            return False
+        if upd.get("_pack_failed") or upd.get("_pack_unplaced"):
+            logger.info("video import: kept usenet job %s in the client -- the pack left "
+                        "%d episode(s) not imported and %d file(s) unplaced", ref,
+                        int(upd.get("_pack_failed") or 0), int(upd.get("_pack_unplaced") or 0))
+            return False
+        from core.video.client_download import _resolve_path, _run
+        return remove_completed.remove_imported_job(ref, mode, run=_run,
+                                                    label=str(dl.get("title") or ""),
+                                                    resolve=_resolve_path,
+                                                    protected=_protected_roots(),
+                                                    libraries=_library_roots())
+    except Exception:  # noqa: BLE001 - never let client cleanup break the monitor tick
+        logger.warning("video import: remove-completed failed for download %s",
+                       dl.get("id"), exc_info=True)
+        return False
+
+
 def _reclaim_job_dir(path) -> str:
     """Remove a usenet job's own download folder once its import is persisted
     and nothing is left in it (best-effort, never raises). Returns what
@@ -209,6 +246,14 @@ def _protected_roots() -> set:
             roots.add(os.path.abspath(dl_dir))
     except Exception:   # noqa: BLE001
         pass
+    return roots | _library_roots()
+
+
+def _library_roots() -> set:
+    """The video library and transfer folders: a usenet job folder found inside
+    one is never deleted by Remove Completed (a client completing straight
+    into the library). Best-effort."""
+    roots = set()
     try:
         from api.video import get_video_db
         db = get_video_db()
@@ -354,9 +399,22 @@ def _make_organizer(db):
             # each its own download row (durable per-episode wanted rows).
             if settings.get("download_subtitles") and not dl.get("pack_episode"):
                 write_subtitles_for(db, dl, patch["dest_path"], settings, fs)
+            keep_probe(db, patch["dest_path"], probe_info)
         return patch
 
     return organize
+
+
+def keep_probe(db, dest_path, probe_info) -> None:
+    """what ffprobe read off a file that just landed (its audio and subtitle
+    languages), kept so the library shows it once the media server scans the
+    file in: a plex scan sends no stream data. best effort."""
+    if not isinstance(probe_info, dict) or not probe_info.get("ok"):
+        return
+    try:
+        db.record_file_probe(dest_path, os.path.getsize(dest_path), probe_info)
+    except Exception:   # noqa: BLE001 - the languages are a nicety, never the import
+        logger.debug("could not keep the probe for %s", dest_path, exc_info=True)
 
 
 def pack_file_list(root, walker=None, sizer=None):
@@ -525,7 +583,10 @@ def _make_pack_importer(db, organize):
         # immediate searches.
         return {"status": "completed", "progress": 100.0,
                 "dest_path": imported[0][2].get("dest_path"),
-                "_pack_imported": len(imported), "_pack_failed": len(failed)}
+                "_pack_imported": len(imported), "_pack_failed": len(failed),
+                # video files the pack held but placed nowhere (no episode number,
+                # another season): Remove Completed must not delete those
+                "_pack_unplaced": sum(1 for s in skipped if s.get("unplaced"))}
 
     return import_pack
 
@@ -990,6 +1051,17 @@ def _walk(root: str):
 
 _GIVE_UP_AFTER = 8       # consecutive 'transfer gone, no file' polls before failing it
 _misses: dict = {}       # download id -> consecutive missing polls
+# A usenet job SAB has just been handed first sits as a 'Grabbing' placeholder
+# while SAB fetches its NZB (one at a time, so a few grabs queue up), then is in
+# neither the queue nor the history while SAB adds its files one by one -- on a
+# busy SAB a job with ~80 files took minutes (worst seen 245 s during a storage
+# scrub, 121 s without one). Eight 3-second polls ran out first, the row
+# failed, SAB downloaded the job anyway, and the wishlist grabbed it again. So
+# until the client reports a new usenet job in a real state, misses inside this
+# window don't count; each sighting of the placeholder starts the window again.
+_NEW_USENET_GRACE = 300  # seconds
+_grace: dict = {}        # (download id, client ref) -> window start (monotonic), None once reported
+_clock = time.monotonic  # seam for tests
 _STALL_TIMEOUT = 1800    # seconds of zero % movement (queued or frozen) before giving up
 # NB: the stall clock is NOT kept here any more — it lives on the row as
 # `progress_at`. A module dict keyed off process uptime was wiped by every
@@ -1001,6 +1073,38 @@ _requerying: set = set()  # download ids with a requery thread in flight
 
 def _now():
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+
+
+def _grace_key(dl):
+    ref = str(dl.get("client_ref") or "")
+    if str(dl.get("source") or "") != "usenet" or not ref:
+        return None
+    return (dl.get("id"), ref)
+
+
+def _in_new_job_grace(dl, now) -> bool:
+    """True while a usenet row's job is new and the client has not reported it
+    yet -- a miss then means 'still being added', not 'gone'."""
+    key = _grace_key(dl)
+    if key is None:
+        return False
+    start = _grace.setdefault(key, now)
+    return start is not None and now - start < _NEW_USENET_GRACE
+
+
+def _mark_reported(dl) -> None:
+    """The client has reported this job: from now on a miss is a real miss."""
+    key = _grace_key(dl)
+    if key is not None:
+        _grace[key] = None
+
+
+def _restart_grace(dl, now) -> None:
+    """The client is still fetching the job's NZB: the build, and the gap that
+    comes with it, is still ahead, so the window starts again."""
+    key = _grace_key(dl)
+    if key is not None and _grace.get(key, 0) is not None:
+        _grace[key] = now
 
 
 # ── auto-retry ────────────────────────────────────────────────────────────────
@@ -1250,7 +1354,7 @@ def _remove_satisfied_movie_wishes(db, tmdb_id: int, label: str, user_initiated:
             return
         rows = db.get_movie_wishlist_profiles(tmdb_id)
         for profile_id, quality_profile_id in rows:
-            profile = profile_by_id(db, quality_profile_id)
+            profile = profile_by_id(db, quality_profile_id, kind="movie")
             if user_initiated or meets_cutoff(label, profile):
                 db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=profile_id)
             else:
@@ -1275,7 +1379,7 @@ def _remove_satisfied_episode_wishes(db, tmdb_id: int, sn: int, en: int,
             return
         rows = db.get_episode_wishlist_profiles(tmdb_id, sn, en)
         for profile_id, quality_profile_id in rows:
-            profile = profile_by_id(db, quality_profile_id)
+            profile = profile_by_id(db, quality_profile_id, kind="show")
             if user_initiated or meets_cutoff(label, profile):
                 db.remove_from_wishlist("episode", tmdb_id=tmdb_id,
                                         season_number=sn, episode_number=en,
@@ -1310,7 +1414,7 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
             from core.video.quality_profile import profile_by_id
             label = (upd or {}).get("quality_label") or dl.get("quality_label") or ""
             # judged under the profile the grab was made with (per-title, P2)
-            profile = profile_by_id(db, dl.get("quality_profile_id"))
+            profile = profile_by_id(db, dl.get("quality_profile_id"), kind=dl.get("kind"))
             if resolution_rank(label) and not meets_cutoff(label, profile):
                 if not user_initiated:
                     logger.info("video download %s: '%s' landed below the cutoff - kept on the "
@@ -1498,7 +1602,7 @@ def _requery_worker(dl_id) -> None:
             return
         first = db.get_video_download(dl_id) or {}
         # requery under the profile the ORIGINAL grab was judged with (P2)
-        profile = profile_by_id(db, first.get("quality_profile_id"))
+        profile = profile_by_id(db, first.get("quality_profile_id"), kind=first.get("kind"))
         # What the retries actually SAW, so giving up can say why instead of the
         # one generic sentence every exhausted download used to record.
         seen = {"searches": 0, "hits": 0, "accepted": 0, "refusals": []}
@@ -1619,6 +1723,7 @@ def _tick(db) -> bool:
               if d.get("status") != "searching" and d.get("source") != "youtube"]
     if not active:
         _misses.clear()
+        _grace.clear()
         # Rows this tick did not process can still mean work is in flight:
         # 'searching' rows are owned by their requery thread and YouTube rows
         # by their workers / the recovery pump — either keeps the fast cadence.
@@ -1646,6 +1751,8 @@ def _tick(db) -> bool:
         if upd.get("status") == "completed":
             completed_now += 1
         if upd.get("_missing"):
+            if _in_new_job_grace(dl, _clock()):
+                continue
             n = _misses.get(dl["id"], 0) + 1
             _misses[dl["id"]] = n
             if n >= _GIVE_UP_AFTER:
@@ -1656,6 +1763,10 @@ def _tick(db) -> bool:
                                else "Soulseek transfer disappeared")
             continue
         _misses.pop(dl["id"], None)
+        if upd.get("_client_adding"):
+            _restart_grace(dl, _clock())
+        else:
+            _mark_reported(dl)
         if upd.get("status") == "failed":
             # A proven-bad release (importer-proved junk, or a truncated transfer)
             # is blocklisted before the retry so the next candidate isn't the
@@ -1724,10 +1835,13 @@ def _tick(db) -> bool:
             if upd.get("status") == "completed":
                 _reclaim_source(upd.get("_cleanup_source"))
                 _reclaim_job_dir(upd.get("_cleanup_dir"))
+                _remove_completed_usenet(db, dl, upd)
         except Exception:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:
         _misses.pop(k, None)
+    for k in [k for k in _grace if k[0] not in live_ids]:
+        _grace.pop(k, None)
     # Batch complete: we finished ≥1 download this tick AND nothing is left in
     # flight (queued/downloading/searching). Fires once, on the transition to
     # empty — the next tick early-returns. Publishes to the event bridge so the

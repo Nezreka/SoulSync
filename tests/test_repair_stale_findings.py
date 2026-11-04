@@ -60,7 +60,12 @@ def worker():
             resolved_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_error TEXT
+            last_error TEXT,
+            -- The atomic fix claim. Mirrors the production migration in
+            -- MusicDatabase._add_repair_columns; without it fix_finding's
+            -- claiming UPDATE raises "no such column" and every assertion
+            -- below reads the pre-fix row.
+            fix_claimed_at TIMESTAMP
         )
     """)
     conn.commit()

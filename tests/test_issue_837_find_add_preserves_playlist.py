@@ -92,3 +92,23 @@ def test_find_and_add_link_to_existing_track_touches_nothing(client, monkeypatch
 
     assert body['success'] and body['message'] == 'Track linked'
     assert jf.append_calls == [] and jf.update_calls == []
+
+
+def test_a_manual_match_adds_the_servers_id_not_the_catalogue_id(client, monkeypatch):
+    """#1289 item 7 on Library v2: Manual Library Match sends a catalogue id;
+    the playlist gets the server's id for that track, never the row id."""
+    jf = _FakeJellyfin(existing=[])
+    _wire(monkeypatch, jf)
+    db = web_server.get_database()
+    monkeypatch.setattr(db, 'server_track_id',
+                        lambda track_id, server: _GUID if str(track_id) == '7' else None)
+
+    body = client.post('/api/server/playlist/PL1/add-track',
+                       json={'track_id': '7', 'catalogue_track_id': '7',
+                             'playlist_name': 'Disney'}).get_json()
+    assert body['success'] and jf.append_calls[0][1] == [_GUID]
+
+    refused = client.post('/api/server/playlist/PL1/add-track',
+                          json={'track_id': '8', 'catalogue_track_id': '8',
+                                'playlist_name': 'Disney'})
+    assert refused.status_code == 400

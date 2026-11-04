@@ -6,6 +6,7 @@ import {
   backLabelStack,
   popBackOrigin,
   pushArtistOrigin,
+  ensurePageOrigin,
   pushPageOrigin,
   resetGoingBackForTests,
 } from './-artist-detail.back-label';
@@ -76,6 +77,17 @@ describe('the stack across hops', () => {
     expect(backButtonLabel()).toBe('← Back to Aphex Twin');
   });
 
+  it('does not record the same artist hop twice while the target loads', () => {
+    const stack = install([{ type: 'page', pageId: 'wishlist' }]);
+    pushArtistOrigin('21 Savage', '/library?artist=1');
+    pushArtistOrigin('21 Savage', '/library?artist=1&header=compact');
+
+    expect(stack).toEqual([
+      { type: 'page', pageId: 'wishlist' },
+      { type: 'artist', name: '21 Savage', href: '/library?artist=1' },
+    ]);
+  });
+
   it('pops on a back navigation', () => {
     install([
       { type: 'page', pageId: 'search' },
@@ -110,6 +122,19 @@ describe('the stack across hops', () => {
     expect(backButtonLabel()).toBe('← Back to B');
   });
 
+  it('does not swallow a hop on a later visit after returning to the source page', () => {
+    const stack = install([{ type: 'page', pageId: 'search' }]);
+    popBackOrigin();
+
+    pushPageOrigin('/wishlist');
+    pushArtistOrigin('21 Savage', '/library?artist=1');
+
+    expect(stack).toEqual([
+      { type: 'page', pageId: 'wishlist' },
+      { type: 'artist', name: '21 Savage', href: '/library?artist=1' },
+    ]);
+  });
+
   it('ignores a push with no artist name', () => {
     const stack = install([]);
     pushArtistOrigin(null);
@@ -128,6 +153,18 @@ describe('the stack across hops', () => {
 });
 
 describe('pushPageOrigin — arrivals that never touch navigateToArtistDetail', () => {
+  it('keeps the exact source below artist-to-artist steps', () => {
+    const stack = install([{ type: 'page', pageId: 'discover', href: '/discover' }]);
+    ensurePageOrigin('/wishlist', '?tab=music');
+    pushArtistOrigin('21 Savage', '/library?artist=1');
+    ensurePageOrigin('/wishlist', '?tab=music');
+
+    expect(stack).toEqual([
+      { type: 'page', pageId: 'wishlist', href: '/wishlist?tab=music' },
+      { type: 'artist', name: '21 Savage', href: '/library?artist=1' },
+    ]);
+  });
+
   it('names the React page you came from', () => {
     // The Library card is a plain <a href>, so nothing pushed for it and the
     // button read a bare "Back" — the whole reason this function exists.

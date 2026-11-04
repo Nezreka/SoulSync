@@ -295,4 +295,3 @@ def test_get_finding_albums_returns_finding_types_and_error_count(worker):
     assert g['count'] == 2
     assert set(g['finding_types']) == {'quality_upgrade', 'corrupt_audio'}
     assert g['error_count'] == 0
-

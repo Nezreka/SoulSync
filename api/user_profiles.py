@@ -471,7 +471,10 @@ def list_profiles():
                         # where an own-library folder goes on this install (#1199):
                         # a mount under /app in docker, anywhere otherwise
                         'own_library_root_hint': _own_library_root_hint(),
-                        'own_library_supported': _own_library_supported()})
+                        'own_library_supported': _own_library_supported(),
+                        # supported != available: the server may be right and the
+                        # feature still parked, and the UI must say which
+                        'own_library_available': not _own_library_parked()})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -675,8 +678,8 @@ def update_profile(profile_id):
                 if problem:
                     return jsonify({'success': False, 'error': problem}), 400
             library_result = database.set_profile_library(profile_id, mode, root or None)
-            from core.library_scope import invalidate_library_scope_cache
-            invalidate_library_scope_cache()
+            from core.library_scope import library_config_changed
+            library_config_changed()
             try:
                 from core.imports.paths import reset_own_library_fallback_notifications
                 reset_own_library_fallback_notifications()
@@ -729,6 +732,9 @@ def delete_profile(profile_id):
             from api.profiles import _sweep_video_profile_data
             _sweep_video_profile_data(profile_id)
             _audit('profile_deleted', profile_id, target.get('name'))
+            # its folder is no library any more (#1199)
+            from core.library_scope import library_config_changed
+            library_config_changed()
         return jsonify({'success': success})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1190,6 +1196,129 @@ def delete_profile_lastfm():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# --- Per-profile scrobbling (Phonk_Ben_67) ---
+# a profile's own plays to its own accounts. listenbrainz reuses the token the
+# profile saved for its history; last.fm needs signing in, since writing
+# scrobbles takes a session where reading them only took a username. the
+# admin's scrobbling stays in Settings.
+
+_LASTFM_SCROBBLE_STATE_SECONDS = 15 * 60
+_lastfm_scrobble_states = {}  # state -> (profile id, expires at)
+_lastfm_scrobble_states_lock = threading.Lock()
+
+
+def _scrobbling_payload(pid):
+    db = get_database()
+    out = db.get_profile_scrobbling(pid)
+    out['lastfm']['available'] = bool(config_manager.get('lastfm.api_key', '')
+                                      and config_manager.get('lastfm.api_secret', ''))
+    out['listenbrainz']['available'] = bool((db.get_profile_listenbrainz(pid) or {}).get('token'))
+    return out
+
+
+@bp.route('/api/profiles/me/scrobbling', methods=['GET'])
+def get_my_scrobbling():
+    try:
+        pid = get_current_profile_id()
+        if not pid or pid == 1:
+            return jsonify({'success': True, 'managed_in_settings': True})
+        return jsonify({'success': True, **_scrobbling_payload(pid)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/listenbrainz/scrobble', methods=['POST'])
+def set_my_listenbrainz_scrobble():
+    """turn scrobbling this profile's plays to its own listenbrainz on or off."""
+    try:
+        pid = get_current_profile_id()
+        if not pid or pid == 1:
+            return jsonify({'success': False, 'error': 'The admin account is managed in Settings'}), 400
+        enabled = bool((request.json or {}).get('enabled'))
+        if not get_database().set_profile_listenbrainz_scrobble(pid, enabled) and enabled:
+            return jsonify({'success': False, 'error': 'Connect your ListenBrainz account first'}), 400
+        return jsonify({'success': True, **_scrobbling_payload(pid)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/lastfm/scrobble/auth-url', methods=['GET'])
+def my_lastfm_scrobble_auth_url():
+    """where to send the browser to sign this profile into last.fm. the
+    callback only accepts the state handed out here, for this profile."""
+    try:
+        pid = get_current_profile_id()
+        if not pid or pid == 1:
+            return jsonify({'success': False, 'error': 'The admin account is managed in Settings'}), 400
+        api_key = config_manager.get('lastfm.api_key', '')
+        if not api_key or not config_manager.get('lastfm.api_secret', ''):
+            return jsonify({'success': False, 'error':
+                            "Last.fm isn't set up on this server yet, ask the admin to add an API key and secret in Settings."}), 400
+        import secrets
+        from urllib.parse import quote
+        state = secrets.token_urlsafe(24)
+        now = time.time()
+        with _lastfm_scrobble_states_lock:
+            for key in [k for k, (_p, exp) in _lastfm_scrobble_states.items() if exp < now]:
+                _lastfm_scrobble_states.pop(key, None)
+            _lastfm_scrobble_states[state] = (int(pid), now + _LASTFM_SCROBBLE_STATE_SECONDS)
+        callback = request.host_url.rstrip('/') + '/api/profiles/me/lastfm/scrobble/callback?state=' + state
+        return jsonify({'success': True,
+                        'url': f"https://www.last.fm/api/auth/?api_key={api_key}&cb={quote(callback, safe='')}"})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _callback_page(title, body, ok):
+    from html import escape
+    color = '#1db954' if ok else '#e05252'
+    return (f'<html><body style="background:#121212;color:#fff;font-family:sans-serif;'
+            f'text-align:center;padding-top:100px;"><h2 style="color:{color}">{escape(title)}</h2>'
+            f'<p>{escape(body)}</p>' + ('<script>setTimeout(()=>window.close(),3000);</script>' if ok else '')
+            + '</body></html>')
+
+
+@bp.route('/api/profiles/me/lastfm/scrobble/callback', methods=['GET'])
+def my_lastfm_scrobble_callback():
+    """last.fm sends the browser back here with a token. it becomes the
+    profile's scrobbling session, only for the profile that asked."""
+    try:
+        state = request.args.get('state', '')
+        with _lastfm_scrobble_states_lock:
+            pending = _lastfm_scrobble_states.pop(state, None)
+        pid = get_current_profile_id()
+        if not pending or pending[1] < time.time() or pending[0] != pid:
+            return _callback_page("Last.fm sign-in expired",
+                                  "Start it again from My Accounts in SoulSync.", False), 400
+        token = request.args.get('token')
+        if not token:
+            return _callback_page("Last.fm didn't sign you in", "No token came back from Last.fm.", False), 400
+        from core.lastfm_client import LastFMClient
+        session_data = LastFMClient(api_key=config_manager.get('lastfm.api_key', ''),
+                                    api_secret=config_manager.get('lastfm.api_secret', '')).get_session(token)
+        if not session_data:
+            return _callback_page("Last.fm didn't sign you in",
+                                  "Last.fm refused the sign-in. Try again from My Accounts.", False), 400
+        if not get_database().set_profile_lastfm_session(pid, session_data['key'], session_data['name']):
+            return _callback_page("Couldn't save the sign-in", "Try again from My Accounts.", False), 500
+        who = session_data['name'] or 'your account'
+        return _callback_page("Scrobbling to Last.fm",
+                              f"Your plays now scrobble to {who}. You can close this window.", True)
+    except Exception as e:
+        return _callback_page("Something went wrong", str(e), False), 500
+
+
+@bp.route('/api/profiles/me/lastfm/scrobble', methods=['DELETE'])
+def stop_my_lastfm_scrobble():
+    try:
+        pid = get_current_profile_id()
+        if pid and pid != 1:
+            get_database().set_profile_lastfm_session(pid, None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @bp.route('/api/profiles/me/listenbrainz/test', methods=['POST'])
 def test_profile_listenbrainz():
     """Test a ListenBrainz token without saving"""
@@ -1208,6 +1337,19 @@ def test_profile_listenbrainz():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def _media_listening_sources(pid):
+    """the media server whose plays are this profile's own (a linked plex or
+    jellyfin user), so the listening card says where its listening comes from."""
+    try:
+        from core.listening_scope import media_account_owners
+        server = config_manager.get_active_media_server()
+        if server in ('plex', 'jellyfin') and int(pid) in media_account_owners(get_database(), server).values():
+            return [server]
+    except Exception as e:  # noqa: BLE001 - the card just names fewer sources
+        logger.debug("media listening source lookup failed: %s", e)
+    return []
+
+
 @bp.route('/api/profiles/me/connections', methods=['GET'])
 def get_my_connections():
     """Per-profile playlist-service connection status for the My Accounts modal.
@@ -1225,7 +1367,8 @@ def get_my_connections():
             # at the top of My Account
             'listening': {
                 'scope': get_database().listening_history_scope(pid),
-                'sources': [s for s, on in (('listenbrainz', lb_connected), ('lastfm', fm_connected)) if on],
+                'sources': [s for s, on in (('listenbrainz', lb_connected), ('lastfm', fm_connected)) if on]
+                + _media_listening_sources(pid),
             },
             'connections': {
                 'spotify': {'connected': sp_connected, 'account': sp_account},
@@ -1355,6 +1498,15 @@ def _is_docker() -> bool:
     return os.path.exists('/.dockerenv')
 
 
+def _own_library_parked() -> bool:
+    """Whether own libraries are switched off in this build (SCOPE_PARKED)."""
+    try:
+        from core.library_scope import SCOPE_PARKED
+        return bool(SCOPE_PARKED)
+    except Exception:  # noqa: BLE001 - unreadable means treat it as off
+        return True
+
+
 def _own_library_root_hint(name: str = '<name>') -> str:
     """the folder an own library is prefilled with. in docker that is a mount
     the compose file has to provide (same rule as /app/Transfer). outside
@@ -1447,10 +1599,31 @@ def clear_profile_navidrome_login():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+def _home_user_link_closed():
+    """linking a plex home user takes no proof that you are that user (the
+    admin token switches to them), which fits one household on the profile
+    picker. login mode is for people who are not one household: there a
+    member could link anyone in the admin's plex home without a pin and act
+    as them on the server. so in login mode it is for admins only, and
+    members use connect with plex, which proves the account on plex's page."""
+    if not _require_login_enabled():
+        return False
+    pid = get_current_profile_id()
+    if pid is None:
+        return True
+    if int(pid) == 1:
+        return False
+    return not bool((get_database().get_profile(pid) or {}).get('is_admin'))
+
+
 @bp.route('/api/profiles/me/plex-home-users', methods=['GET'])
 def list_plex_home_users():
     """the plex home users a profile can link itself to. names and ids only,
-    and only the flag saying whether one needs a pin."""
+    and only the flag saying whether one needs a pin. a member in login mode
+    gets none (an empty list, not a 4xx, so my account just leaves the
+    picker out)."""
+    if _home_user_link_closed():
+        return jsonify({'success': True, 'users': []})
     try:
         engine = _media_server_engine()
         client = engine.client('plex') if engine is not None else None
@@ -1467,6 +1640,9 @@ def link_plex_home_user():
     switches to that user once (with their profile pin when they have one,
     which is used for that call and not kept) and the user's own server
     access token is stored; the profile's playlists are then theirs."""
+    if _home_user_link_closed():
+        return jsonify({'success': False,
+                        'error': 'Use Connect with Plex to link your own Plex account'}), 403
     try:
         data = request.json or {}
         user_id = str(data.get('user_id') or '').strip()
@@ -1616,7 +1792,14 @@ def oidc_disconnect():
 def unlink_plex_home_user():
     """back to the app account for this profile."""
     try:
-        get_database().set_profile_plex_home_user(get_current_profile_id(), None, None, None)
+        pid = get_current_profile_id()
+        get_database().set_profile_plex_home_user(pid, None, None, None)
+        # its video watch state came from that account; it goes with it (#1941)
+        try:
+            from api.video import get_video_db
+            get_video_db().clear_profile_watch_state(pid)
+        except Exception:   # noqa: BLE001 - never blocks the unlink
+            logger.debug("clearing video watch state for profile %s failed", pid, exc_info=True)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

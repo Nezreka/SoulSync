@@ -24,20 +24,28 @@ def _exec(db, sql, params=()):
     conn.close()
 
 
-def _artist(db, artist_id, name, server='plex', **ids):
-    cols = ['id', 'name', 'server_source', *ids]
-    _exec(db, f"INSERT INTO artists ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-          (artist_id, name, server, *ids.values()))
+# lib2 port: one catalogue for every server; a row is in the library when it
+# has a file, and album art comes from the managed artwork endpoint
+def _artist(db, artist_id, name, **ids):
+    from core.library2.importer import normalize_name
+    _exec(db, "INSERT INTO lib2_artists (id, name, name_key, spotify_id) VALUES (?, ?, ?, ?)",
+          (artist_id, name, normalize_name(name), ids.get('spotify_artist_id')))
 
 
 def _album(db, album_id, artist_id, title, created_at, year=None):
-    _exec(db, "INSERT INTO albums (id, artist_id, title, year, created_at) VALUES (?, ?, ?, ?, ?)",
+    _exec(db, "INSERT INTO lib2_albums (id, primary_artist_id, title, year, added_at) VALUES (?, ?, ?, ?, ?)",
           (album_id, artist_id, title, year, created_at))
 
 
-def _track(db, track_id, album_id, artist_id, title='t'):
-    _exec(db, "INSERT INTO tracks (id, album_id, artist_id, title) VALUES (?, ?, ?, ?)",
-          (track_id, album_id, artist_id, title))
+def _track(db, track_id, album_id, artist_id, title='t', owned=True):
+    _exec(db, "INSERT INTO lib2_tracks (id, album_id, title) VALUES (?, ?, ?)", (track_id, album_id, title))
+    if owned:
+        _exec(db, "INSERT INTO lib2_track_files (track_id, path) VALUES (?, ?)",
+              (track_id, f"/music/{track_id}.flac"))
+
+
+def _cover(album_id):
+    return f"/api/library/v2/artwork/album/{album_id}?size=thumb"
 
 
 def _play(db, title, artist, days_ago=0, owner=1):
@@ -76,9 +84,11 @@ def test_library_falls_back_to_the_name_when_no_id_lands(db):
 
 
 def test_library_ignores_another_servers_rows(db):
-    _artist(db, 1, 'Air', server='jellyfin', spotify_artist_id='sp1')
+    # lib2 port: the catalogue knows the artist (another server scanned it, a
+    # discography) but nothing of theirs is a file in this library
+    _artist(db, 1, 'Air', spotify_artist_id='sp1')
     _album(db, 10, 1, 'Moon Safari', '2026-01-01 00:00:00')
-    _track(db, 100, 10, 1)
+    _track(db, 100, 10, 1, owned=False)
 
     assert db.get_watchlist_artist_overview('Air', {'spotify': 'sp1'})['library'] is None
 
@@ -140,47 +150,40 @@ def test_listening_gives_twelve_months_oldest_first(db):
 def test_top_tracks_carry_their_library_cover(db):
     _artist(db, 1, 'Boards of Canada')
     _album(db, 10, 1, 'Geogaddi', '2026-01-01 00:00:00')
-    _exec(db, "UPDATE albums SET thumb_url = 'geo.jpg' WHERE id = 10")
     _track(db, 100, 10, 1, 'Dawn Chorus')
     _play(db, 'Dawn Chorus', 'Boards of Canada')
     # no linked track, found by its album title instead
     _exec(db, "INSERT INTO listening_history (track_id, title, artist, album, played_at, profile_id) "
               "VALUES ('x', 'Gyroscope', 'Boards of Canada', 'geogaddi', '2026-01-01 00:00:00', 1)")
-    _exec(db, "UPDATE listening_history SET db_track_id = 100 WHERE title = 'Dawn Chorus'")
+    _exec(db, "UPDATE listening_history SET lib2_track_id = 100 WHERE title = 'Dawn Chorus'")
 
     top = db.get_watchlist_artist_overview('Boards of Canada')['listening']['top_tracks']
 
-    assert {t['title']: t['thumb_url'] for t in top} == {'Dawn Chorus': 'geo.jpg', 'Gyroscope': 'geo.jpg'}
+    assert {t['title']: t['thumb_url'] for t in top} == {'Dawn Chorus': _cover(10), 'Gyroscope': _cover(10)}
 
 
 def test_top_track_cover_comes_from_the_active_server(db):
-    # one artist on two servers; plex is active
+    # lib2 port: one artist row for every server, and the cover is served by
+    # SoulSync itself, so no server's art path can leak into the panel
     _artist(db, 1, 'bbno$')
-    _artist(db, 2, 'bbno$', server='jellyfin')
     _album(db, 10, 1, 'two', '2026-01-01 00:00:00')
-    _album(db, 20, 2, 'two', '2026-01-01 00:00:00')
-    _exec(db, "UPDATE albums SET thumb_url = '/library/metadata/10/thumb' WHERE id = 10")
-    _exec(db, "UPDATE albums SET thumb_url = '/Items/abc/Images/Primary' WHERE id = 20")
     _track(db, 100, 10, 1, 'it boy')
-    _track(db, 200, 20, 2, 'it boy')
-    # the play's linked track is the jellyfin row
     _play(db, 'it boy', 'bbno$')
-    _exec(db, "UPDATE listening_history SET db_track_id = 200, album = 'it boy'")
+    _exec(db, "UPDATE listening_history SET lib2_track_id = 100, album = 'it boy'")
 
     top = db.get_watchlist_artist_overview('bbno$')['listening']['top_tracks']
 
-    assert top[0]['thumb_url'] == '/library/metadata/10/thumb'
+    assert top[0]['thumb_url'] == _cover(10)
 
 
 def test_top_track_cover_survives_a_stale_linked_track(db):
     # a rescan gave the song a new id, the play still has the old one
     _artist(db, 1, 'bbno$')
     _album(db, 10, 1, 'bbno$', '2026-01-01 00:00:00')
-    _exec(db, "UPDATE albums SET thumb_url = 'self.jpg' WHERE id = 10")
     _track(db, 100, 10, 1, 'yezzir')
     _play(db, 'yezzir', 'bbno$')
-    _exec(db, "UPDATE listening_history SET db_track_id = 999, album = 'yezzir'")
+    _exec(db, "UPDATE listening_history SET lib2_track_id = 999, album = 'yezzir'")
 
     top = db.get_watchlist_artist_overview('bbno$')['listening']['top_tracks']
 
-    assert top[0]['thumb_url'] == 'self.jpg'
+    assert top[0]['thumb_url'] == _cover(10)

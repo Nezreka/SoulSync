@@ -5,6 +5,8 @@ import { AddSongsPanel } from './add-songs-panel';
 
 const fetchEnhancedSearch = vi.hoisted(() => vi.fn());
 vi.mock('@/routes/search/-search.api', () => ({ fetchEnhancedSearch }));
+const streamSearchTrack = vi.hoisted(() => vi.fn());
+vi.mock('@/routes/search/-search.actions', () => ({ streamSearchTrack }));
 
 let posts: { url: string; body: unknown }[] = [];
 let addReply: unknown = { success: true, added: 1, duplicates: [], track_count: 2 };
@@ -58,6 +60,22 @@ describe('AddSongsPanel', () => {
     expect(screen.getByLabelText('Search for songs')).toHaveFocus();
     expect(await screen.findByText('Played Song')).toBeInTheDocument();
     expect(screen.getByText('From your recent plays')).toBeInTheDocument();
+  });
+
+  it('the cover plays a sample without adding it (#1933)', async () => {
+    const props = setup();
+    fireEvent.change(screen.getByLabelText('Search for songs'), { target: { value: 'found' } });
+
+    fireEvent.click(await screen.findByLabelText('Play a sample of Found Song'));
+
+    expect(streamSearchTrack).toHaveBeenCalledWith({
+      name: 'Found Song',
+      artist: 'Search Artist',
+      album: 'Alb',
+      duration_ms: 200000,
+    });
+    expect(posts).toEqual([]);
+    expect(props.onAdded).not.toHaveBeenCalled();
   });
 
   it('marks a song the playlist already has instead of offering it again', async () => {

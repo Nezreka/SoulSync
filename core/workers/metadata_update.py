@@ -178,41 +178,50 @@ class WebMetadataUpdateWorker:
             return True  # Process if we can't determine status
     
     def _check_db_artist(self, artist_name):
-        """Check SoulSync DB for existing artist metadata (genres, spotify_artist_id).
+        """Check the Library-v2 catalogue for existing artist metadata.
 
-        NOTE: DB thumb_url is a Plex/Jellyfin internal path, NOT a downloadable URL.
-        Photos must be checked via the media server object, not the DB.
+        This is the only path that carries SoulSync data back into the media
+        server: the genres below are pushed to Plex/Jellyfin, and the Spotify id
+        saves a provider search. It used to read the legacy ``artists`` table
+        (``search_artists`` + ``api_get_artist`` for the id); both fields live on
+        the lib2 row, which is the single catalogue everything is moving to
+        (docs §32.3.1).
 
-        Returns (db_artist_dict, has_genres, spotify_artist_id) or (None, False, None) if not found."""
+        NOTE: the stored image url is a media-server internal path, NOT a
+        downloadable URL. Photos must be checked via the media server object,
+        never from the catalogue.
+
+        Returns (artist_dict, has_genres, spotify_id) or (None, False, None).
+        """
         if not self._db:
             return None, False, None
         try:
-            db_artists = self._db.search_artists(artist_name, limit=5)
-            if not db_artists:
+            from core.library2.queries import find_artists_by_name
+
+            conn = self._db._get_connection()
+            try:
+                candidates = find_artists_by_name(conn, artist_name, limit=5)
+            finally:
+                conn.close()
+            if not candidates:
                 return None, False, None
-            # Find best name match
+            # Find best name match. The 0.85 floor is what stops one artist's
+            # genres being pushed onto another; a LIKE match alone is not proof.
             best = None
             best_score = 0.0
             norm_name = self.matching_engine.normalize_string(artist_name)
-            for dba in db_artists:
+            for candidate in candidates:
                 score = self.matching_engine.similarity_score(
-                    norm_name, self.matching_engine.normalize_string(dba.name))
+                    norm_name,
+                    self.matching_engine.normalize_string(candidate["name"]))
                 if score > best_score:
                     best_score = score
-                    best = dba
+                    best = candidate
             if not best or best_score < 0.85:
                 return None, False, None
-            has_genres = bool(best.genres and len(best.genres) > 0)
-            # Get spotify_artist_id from raw DB row (not in dataclass)
-            spotify_artist_id = None
-            try:
-                raw = self._db.api_get_artist(best.id)
-                if raw:
-                    spotify_artist_id = raw.get('spotify_artist_id')
-            except Exception as e:
-                logger.debug("get spotify_artist_id failed: %s", e)
-            return best, has_genres, spotify_artist_id
-        except Exception:
+            return best, bool(best["genres"]), best["spotify_id"]
+        except Exception as e:
+            logger.debug("lib2 artist lookup failed for %r: %s", artist_name, e)
             return None, False, None
 
     def update_artist_metadata(self, artist):
@@ -236,18 +245,31 @@ class WebMetadataUpdateWorker:
 
             # Check what the media server artist is currently missing
             needs_photo = not self.artist_has_valid_photo(artist) if self.server_type != "jellyfin" else True
+            needs_background = self._needs_background(artist)
             needs_genres = not getattr(artist, 'genres', None)
             needs_album_art = self.server_type == "plex"
 
             # If media server already has valid photo + genres + album art, skip entirely
-            if not needs_photo and not needs_genres and not needs_album_art:
+            if not needs_photo and not needs_background and not needs_genres and not needs_album_art:
                 self.media_client.update_artist_biography(artist)
                 return True, "Already up to date"
 
+            changes_made = []
+            # HD artwork first (#1957): a big square photo and a wide background
+            # from fanart.tv / TheAudioDB / Deezer, tied to the artist by id.
+            # Spotify's 640px square stays the photo fallback below.
+            if needs_photo or needs_background:
+                photo_done, art_changes = self._apply_hd_artwork(
+                    artist, db_artist, needs_photo, needs_background)
+                changes_made += art_changes
+                if photo_done:
+                    needs_photo = False
+
             # Determine if we actually need Spotify
-            # Photos and album art MUST come from Spotify (DB only has internal media server paths)
+            # Album art comes from Spotify, and the photo when no HD one was found
             # Genres CAN come from DB if available
-            need_spotify = needs_photo or needs_album_art or (needs_genres and not db_has_genres)
+            need_spotify = self.spotify_client is not None and (
+                needs_photo or needs_album_art or (needs_genres and not db_has_genres))
 
             spotify_artist = None
             highest_score = 0.0
@@ -271,9 +293,8 @@ class WebMetadataUpdateWorker:
                     spotify_artists = self.spotify_client.search_artists(artist_name, limit=5)
                     if not spotify_artists:
                         # Spotify failed — apply DB genres if available, skip photos/art
-                        changes_made = []
                         if needs_genres and db_has_genres and db_artist:
-                            if self._apply_db_genres(artist, db_artist.genres):
+                            if self._apply_db_genres(artist, db_artist["genres"]):
                                 changes_made.append("genres (DB)")
                         if changes_made:
                             self.media_client.update_artist_biography(artist)
@@ -293,9 +314,8 @@ class WebMetadataUpdateWorker:
 
                     if not best_match or highest_score < 0.7:
                         # No good Spotify match — still try DB genres
-                        changes_made = []
                         if needs_genres and db_has_genres and db_artist:
-                            if self._apply_db_genres(artist, db_artist.genres):
+                            if self._apply_db_genres(artist, db_artist["genres"]):
                                 changes_made.append("genres (DB)")
                         if changes_made:
                             self.media_client.update_artist_biography(artist)
@@ -303,8 +323,6 @@ class WebMetadataUpdateWorker:
                         return False, f"No confident match found (best: '{getattr(best_match, 'name', 'N/A')}', score: {highest_score:.2f})"
 
                     spotify_artist = best_match
-
-            changes_made = []
 
             # Update photo (always from Spotify — DB only has media server paths)
             if needs_photo and spotify_artist:
@@ -315,7 +333,7 @@ class WebMetadataUpdateWorker:
             # Update genres — use DB if available, otherwise Spotify
             if needs_genres:
                 if db_has_genres and db_artist:
-                    genres_updated = self._apply_db_genres(artist, db_artist.genres)
+                    genres_updated = self._apply_db_genres(artist, db_artist["genres"])
                     if genres_updated:
                         changes_made.append("genres (DB)")
                     elif spotify_artist:
@@ -341,7 +359,8 @@ class WebMetadataUpdateWorker:
                 if biography_updated:
                     changes_made.append("timestamp")
 
-                source = f"match: '{spotify_artist.name}', score: {highest_score:.2f}" if spotify_artist else "DB cache"
+                source = (f"match: '{spotify_artist.name}', score: {highest_score:.2f}" if spotify_artist
+                          else "library ids")
                 details = f"Updated {', '.join(changes_made)} ({source})"
                 return True, details
             else:
@@ -350,6 +369,39 @@ class WebMetadataUpdateWorker:
 
         except Exception as e:
             return False, str(e)
+
+    def _needs_background(self, artist):
+        """the server shows a wide background behind the artist and this one
+        has none. only plex and jellyfin take one."""
+        check = getattr(self.media_client, 'artist_has_background', None)
+        if (self.server_type not in ('plex', 'jellyfin') or not callable(check)
+                or not hasattr(self.media_client, 'update_artist_background')):
+            return False
+        try:
+            return not check(artist)
+        except Exception:
+            return False
+
+    def _apply_hd_artwork(self, artist, db_artist, need_photo, need_background):
+        """(photo uploaded, change labels) from the HD sources. nothing without
+        an id to tie the pictures to the artist, apart from an exact name match
+        on TheAudioDB."""
+        from core.metadata import artist_artwork as art
+        db_artist = db_artist or {}
+        found = art.candidates(getattr(artist, 'title', '') or '',
+                               mbid=db_artist.get('musicbrainz_id') or '',
+                               deezer_id=db_artist.get('deezer_id') or '')
+        changes, photo_done = [], False
+        if need_photo:
+            picked = art.first_that_fits(found['photos'], art.fits_photo)
+            if picked and self.media_client.update_artist_poster(artist, picked[0]):
+                changes.append(f"HD photo ({picked[1]})")
+                photo_done = True
+        if need_background:
+            picked = art.first_that_fits(found['backgrounds'], art.fits_background)
+            if picked and self.media_client.update_artist_background(artist, picked[0]):
+                changes.append(f"background ({picked[1]})")
+        return photo_done, changes
 
     def _apply_db_genres(self, artist, genres):
         """Apply genres from DB cache to media server."""

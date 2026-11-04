@@ -98,6 +98,8 @@ def normalize_search_result(result: Any, source: str) -> Optional[Dict[str, Any]
         "raw_album_type": str(raw_type or ""),
         "total_tracks": int(total) if isinstance(total, int) else None,
         "year": _year(_get(result, "release_date")),
+        "duration_ms": _get(result, "duration_ms") or None,
+        "track_number": _get(result, "track_number") or None,
         "image_url": _get(result, "image_url") or "",
         "isrc": isrc or None,
     }

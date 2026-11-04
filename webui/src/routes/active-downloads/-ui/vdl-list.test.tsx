@@ -41,6 +41,7 @@ const actions = (): VdlCardActions => ({
   onCancel: vi.fn(),
   onRetry: vi.fn(),
   onBlock: vi.fn(),
+  onRemove: vi.fn(),
   onToggle: vi.fn(),
 });
 
@@ -134,6 +135,35 @@ describe('the row', () => {
     expect(block.className).toContain('danger');
     fireEvent.click(block);
     expect(cardActions.onBlock).toHaveBeenCalled();
+  });
+
+  it('offers Remove from list on a failed row, without retrying', () => {
+    const { container, cardActions } = list([
+      dl({ id: 7, status: 'failed', error: 'x', filename: 'Dune.mkv' }),
+    ]);
+    fireEvent.click(container.querySelector('.dlc-more') as HTMLElement);
+    const remove = screen.getByRole('menuitem', { name: 'Remove from list' });
+    expect(remove.className).not.toContain('danger');
+    fireEvent.click(remove);
+    expect(cardActions.onRemove).toHaveBeenCalledWith(7);
+    expect(cardActions.onRetry).not.toHaveBeenCalled();
+    expect(cardActions.onBlock).not.toHaveBeenCalled();
+  });
+
+  it('offers Remove from list on a cancelled row', () => {
+    const { container } = list([dl({ status: 'cancelled', error: 'Cancelled' })]);
+    fireEvent.click(container.querySelector('.dlc-more') as HTMLElement);
+    expect(screen.getByRole('menuitem', { name: 'Remove from list' })).not.toBeNull();
+  });
+
+  it('keeps Remove from list off rows Manual import or the queue still needs', () => {
+    for (const status of ['import_failed', 'completed', 'downloading', 'queued']) {
+      const { container } = list([dl({ status, error: 'x', dest_path: '/d/x.mkv' })]);
+      const more = container.querySelector('.dlc-more') as HTMLElement | null;
+      if (more) fireEvent.click(more);
+      expect(screen.queryByRole('menuitem', { name: 'Remove from list' }), status).toBeNull();
+      cleanup();
+    }
   });
 
   it('marks a below-cutoff copy as on upgrade watch', () => {

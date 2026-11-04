@@ -39,41 +39,41 @@ def test_react_listens_for_that_exact_event():
     """Both halves of the seam, so a rename on either side fails here rather
     than silently going quiet."""
     live = (
-        _ROOT / "webui" / "src" / "routes" / "library" / "-library.live.ts"
+        _ROOT / "webui" / "src" / "routes" / "library" / "-library-v2.live.ts"
     ).read_text(encoding="utf-8")
     assert "'ss:library-changed'" in live
-
-
-def test_react_page_now_owns_the_ids_the_vanilla_page_had():
-    """Inverted by the cleanup.
-
-    While both pages existed the React page rendered classes only, because
-    getElementById returns whichever node comes first in the document and that
-    was the vanilla one. The vanilla markup is gone now, so React must carry
-    the ids — the guided tour anchors to them (helper.js HELP_CONTENT), and
-    #library-page is what tells the music controls apart from the VIDEO
-    library page, which renders .library-controls of its own.
-    """
     page = (
-        _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-page.tsx"
+        _ROOT / "webui" / "src" / "routes" / "library" / "-ui" / "library-v2-page.tsx"
     ).read_text(encoding="utf-8")
-    for anchor in (
-        "library-page",
-        "library-search-input",
-        "watchlist-filter",
-        "alphabet-selector",
-        "library-artists-grid",
-        "library-pagination",
-        "library-artist-count",
-    ):
-        assert f'id="{anchor}"' in page, f"tour/vanilla anchor #{anchor} is not rendered anywhere"
+    assert "useLibraryChanged()" in page, "the hook exists but the page never mounts it"
 
+
+def test_the_vanilla_library_ids_are_claimed_by_nobody():
+    """Inverted twice.
+
+    While both pages existed the React port rendered classes only, because
+    getElementById returns whichever node comes first in the document and that
+    was the vanilla one. Then the vanilla markup went and the port took the ids
+    over. Library v2 replaced that port outright, and it is CSS-module scoped —
+    it renders none of those ids, and nothing reads them any more: helper.js
+    anchors the library tour on `.nav-button[data-page="library"]`, not on the
+    page's internals.
+
+    What still matters is the half that outlived the ids: nothing in index.html
+    may claim them either, because the VIDEO library page lives in there and a
+    revived music id would resolve by document order all over again.
+    """
     index = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8")
     for anchor in ("library-page", "library-search-input", "library-artists-grid"):
         assert f'id="{anchor}"' not in index, (
-            f"#{anchor} is in index.html AND the React page — duplicate ids, "
-            "getElementById would resolve to whichever comes first"
+            f"#{anchor} is back in index.html — the music library is React-only, "
+            "so a vanilla element answering to it can only be the wrong one"
         )
+
+    helper = (_ROOT / "webui" / "static" / "helper.js").read_text(encoding="utf-8")
+    assert '.nav-button[data-page="library"]' in helper, (
+        "the library tour lost its only anchor"
+    )
 
 
 def test_vanilla_library_list_is_gone():

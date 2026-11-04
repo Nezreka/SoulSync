@@ -328,3 +328,25 @@ def test_missing_provider_state_cannot_unmatch_another_provider(monkeypatch):
     response = app.test_client().post('/api/qobuz/discovery/unmatch', json={'identifier': '123', 'track_index': 0})
     assert response.status_code == 404
     assert row['spotify_data'] == {'id': 'keep'}
+
+
+def test_a_yt_music_unmatch_finds_its_own_discovery_state():
+    """found in the second #1062 review (a 3.6.1-era bug): YT Music had no
+    unmatch route, the modal posted to the YouTube one, which looked in the
+    YouTube states and answered 404, so a wrong match could not be cleared"""
+    from api.source_playlists import bp, ytmusic_discovery_states
+
+    app = Flask(__name__)
+    app.register_blueprint(bp)
+    ytmusic_discovery_states["LM"] = {
+        "discovery_results": [{"status": "Found", "status_class": "found",
+                               "spotify_id": "sp1", "matched_data": {"id": "sp1"}}],
+        "spotify_matches": 1,
+    }
+    try:
+        resp = app.test_client().post("/api/ytmusic/discovery/unmatch",
+                                      json={"identifier": "LM", "track_index": 0})
+        assert resp.status_code == 200 and resp.get_json()["success"] is True
+        assert ytmusic_discovery_states["LM"]["discovery_results"][0]["status_class"] == "not-found"
+    finally:
+        ytmusic_discovery_states.pop("LM", None)

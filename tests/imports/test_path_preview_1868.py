@@ -28,6 +28,10 @@ class _Config:
     def get(self, key, default=None):
         return self._values.get(key, default)
 
+    def get_active_media_server(self):
+        # the fork's transfer root asks whether the server keeps own libraries
+        return "plex"
+
 
 @pytest.fixture()
 def saved(monkeypatch, tmp_path):

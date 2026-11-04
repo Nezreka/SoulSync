@@ -1,16 +1,109 @@
-"""Daily Mix ranks your library's top genres (#daily-mix, boulder sept 30).
+"""Top library genres come from Library v2 (docs §50.4.4.17).
 
-tracks has no genres column on real installs, the genres live on artists.
-get_top_genres_from_library only ever looked at tracks, so it fell back to
-artist NAMES, and the daily mix generator then asked the discovery pool for
-a genre called "Louis Armstrong". every Daily Mix came back empty and Run now
-on it looked like it did nothing.
+``get_top_genres_from_library`` feeds the Daily Mix generator: whatever it
+returns becomes the mix categories, so an empty answer is a discover page with
+no mixes on it. It had no test at all, and the port changed two things worth
+pinning.
+
+**Genres live on the release.** Legacy carried a ``genres`` column on ``tracks``;
+lib2 keeps the list on ``lib2_albums`` and a track inherits its album's, which is
+where the importer and every provider worker write it.
+
+**The fallback trigger became honest.** It used to be "the schema has no genres
+column" — a ``PRAGMA`` probe for a column lib2 always has, so the branch was
+unreachable by construction. The situation it covered is real, though: a library
+nothing has enriched yet still needs categories. It now triggers on there being
+no genres, which is what it always meant.
 """
 
+from __future__ import annotations
+
+import json
 import sqlite3
 from contextlib import contextmanager
 
+import pytest
+
 from core.personalized_playlists import PersonalizedPlaylistsService, rank_library_genres
+
+
+class _Db:
+    def __init__(self):
+        self._conn = sqlite3.connect(":memory:")
+        self._conn.row_factory = sqlite3.Row
+        from core.library2.schema import ensure_library_v2_schema
+        ensure_library_v2_schema(self._conn)
+        self._conn.commit()
+
+    @contextmanager
+    def _get_connection(self):
+        yield self._conn
+
+    def album(self, artist, title, genres=None, origin='library', tracks=1):
+        from core.library2.importer import normalize_name
+
+        artist_id = self._conn.execute(
+            "INSERT INTO lib2_artists(name, name_key, sort_name) VALUES(?,?,?)",
+            (artist, normalize_name(artist), artist)).lastrowid
+        album_id = self._conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, genres, origin) "
+            "VALUES(?,?,?,?)",
+            (artist_id, title, json.dumps(genres) if genres is not None else '[]',
+             origin)).lastrowid
+        for n in range(tracks):
+            track_id = self._conn.execute(
+                "INSERT INTO lib2_tracks(album_id, title) VALUES(?,?)",
+                (album_id, f"{title} {n}")).lastrowid
+            if origin == 'library':
+                self._conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                                   (track_id, f'/music/{track_id}.flac'))
+        self._conn.commit()
+
+
+@pytest.fixture
+def service():
+    db = _Db()
+    return PersonalizedPlaylistsService(db), db
+
+
+class TestGenres:
+    def test_genres_are_counted_off_the_releases(self, service):
+        svc, db = service
+        db.album('A', 'One', ['house', 'techno'])
+        db.album('B', 'Two', ['house'])
+
+        assert svc.get_top_genres_from_library(limit=5) == [('house', 2), ('techno', 1)]
+
+    def test_a_comma_separated_value_is_still_understood(self, service):
+        """Legacy stored the list either way and the importer carries it over."""
+        svc, db = service
+        db._conn.execute(
+            "INSERT INTO lib2_artists(name, name_key, sort_name) VALUES('C','c','C')")
+        db._conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, genres, origin) "
+            "VALUES(1, 'Three', 'jazz, soul', 'library')")
+        track_id = db._conn.execute(
+            "INSERT INTO lib2_tracks(album_id,title) VALUES(1,'Three 1')").lastrowid
+        db._conn.execute("INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)",
+                         (track_id, '/music/three.flac'))
+        db._conn.commit()
+
+        assert dict(svc.get_top_genres_from_library(limit=5)) == {'jazz': 1, 'soul': 1}
+
+    def test_a_provider_only_release_does_not_vote(self, service):
+        """A discography row describes a release we do not have; its genre is
+        not evidence about what the user listens to."""
+        svc, db = service
+        db.album('A', 'Owned', ['house'])
+        db.album('B', 'Merely Listed', ['polka'], origin='discography')
+
+        assert svc.get_top_genres_from_library(limit=5) == [('house', 1)]
+
+    def test_the_limit_is_honored(self, service):
+        svc, db = service
+        db.album('A', 'One', ['house', 'techno', 'jazz'])
+
+        assert len(svc.get_top_genres_from_library(limit=2)) == 2
 
 
 def test_rank_library_genres_weights_and_merges_case():
@@ -30,49 +123,37 @@ def test_rank_library_genres_weights_and_merges_case():
     ]
 
 
-class _Db:
-    def __init__(self, conn):
-        self.conn = conn
+class TestTheFallback:
+    def test_untagged_releases_rank_their_artists_genres(self, service):
+        """No release carries genres: the artists' genres, weighted by how
+        many of your tracks they have -- never the artist NAMES, which made
+        the Daily Mix ask the discovery pool for a genre called "Louis
+        Armstrong" (boulder, sept 30)."""
+        svc, db = service
+        db.album('Louis Armstrong', 'Hot Fives', tracks=9)
+        db.album('Dua Lipa', 'Future Nostalgia', tracks=6)
+        db.album('Calvin Harris', 'Motion', tracks=5)
+        db.album('Nobody Tagged', 'Plain', tracks=20)
+        for name, genres in (('Louis Armstrong', ['Jazz']),
+                             ('Dua Lipa', ['Pop', 'Dance']),
+                             ('Calvin Harris', ['Dance', 'Electro'])):
+            db._conn.execute("UPDATE lib2_artists SET genres=? WHERE name=?",
+                             (json.dumps(genres), name))
+        db._conn.commit()
 
-    @contextmanager
-    def _get_connection(self):
-        yield self.conn
+        names = [g for g, _ in svc.get_top_genres_from_library(limit=3)]
+        assert names == ['Dance', 'Jazz', 'Pop']
 
+    def test_an_unenriched_library_falls_back_to_its_artists(self, service):
+        """No genres anywhere: the mixes have to be built from something, and
+        the top artists are the categories that survived the old dead branch."""
+        svc, db = service
+        db.album('Prolific', 'One', tracks=3)
+        db.album('Occasional', 'Two', tracks=1)
 
-def _library(artist_genres):
-    conn = sqlite3.connect(':memory:')
-    conn.row_factory = sqlite3.Row
-    conn.execute('CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT, genres TEXT)')
-    conn.execute('CREATE TABLE tracks (id INTEGER PRIMARY KEY, artist_id INTEGER, title TEXT)')
-    tid = 1
-    for aid, (name, genres, n_tracks) in enumerate(artist_genres, start=1):
-        conn.execute('INSERT INTO artists VALUES (?, ?, ?)', (aid, name, genres))
-        for _ in range(n_tracks):
-            conn.execute('INSERT INTO tracks VALUES (?, ?, ?)', (tid, aid, f't{tid}'))
-            tid += 1
-    service = PersonalizedPlaylistsService.__new__(PersonalizedPlaylistsService)
-    service.database = _Db(conn)
-    return service
+        assert svc.get_top_genres_from_library(limit=5) == [
+            ('Prolific', 3), ('Occasional', 1)]
 
-
-def test_top_genres_come_from_artists_not_artist_names():
-    # louis armstrong has the most tracks. before the fix he became "genre" #1
-    service = _library([
-        ('Louis Armstrong', '["Jazz"]', 9),
-        ('Dua Lipa', '["Pop", "Dance"]', 6),
-        ('Calvin Harris', '["Dance", "Electro"]', 5),
-        ('Nobody Tagged', None, 20),
-    ])
-    top = service.get_top_genres_from_library(limit=3)
-    names = [g for g, _ in top]
-    assert names == ['Dance', 'Jazz', 'Pop']
-    assert 'Louis Armstrong' not in names
-    assert 'Nobody Tagged' not in names
-
-
-def test_falls_back_to_artist_names_only_with_no_genre_data_at_all():
-    service = _library([('Louis Armstrong', None, 3), ('Dua Lipa', '[]', 1)])
-    assert service.get_top_genres_from_library(limit=2) == [
-        ('Louis Armstrong', 3),
-        ('Dua Lipa', 1),
-    ]
+    def test_an_empty_library_returns_nothing_rather_than_failing(self, service):
+        svc, _db = service
+        assert svc.get_top_genres_from_library(limit=5) == []

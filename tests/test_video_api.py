@@ -656,7 +656,7 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "mdblist_api_key": "",
             "subdl_api_key": "", "subsource_api_key": "",
             "ryd_enabled": True, "sponsorblock_enabled": True, "dearrow_enabled": True,
-            "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
+            "tvmaze_enabled": True, "anilist_enabled": True, "wikidata_enabled": True,
             "billboard_autoplay": True, "watch_region": "US"}
         client.post("/api/video/enrichment/config",
                     json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
@@ -670,7 +670,7 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
             "mdblist_api_key": "",
             "subdl_api_key": "sdl", "subsource_api_key": "sso",
             "ryd_enabled": False, "sponsorblock_enabled": True, "dearrow_enabled": True,
-            "tvmaze_enabled": True, "anilist_enabled": False, "wikidata_enabled": True,
+            "tvmaze_enabled": True, "anilist_enabled": True, "wikidata_enabled": True,
             "billboard_autoplay": False, "watch_region": "GB"}
         assert db.get_setting("tmdb_api_key") == "abc" and db.get_setting("omdb_api_key") == "om"
         assert client.get("/api/video/prefs").get_json() == {
@@ -711,6 +711,8 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             # seeding lifecycle (arr-parity P5) rides the same config payload
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},
+            # Remove Completed (usenet) is opt-in: off until someone picks it
+            "usenet_remove_completed": "off",
             "movies_additional_paths": [], "tv_additional_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",
@@ -719,13 +721,15 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
         client.post("/api/video/downloads/config",
                     json={"download_path": " /mnt/v/dl ", "movies_path": "/media/movies",
                           "tv_path": "/media/tv", "youtube_path": "/media/yt",
-                          "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]})
+                          "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
+                          "usenet_remove_completed": "files"})
         assert client.get("/api/video/downloads/config").get_json() == {
             "download_path": "/mnt/v/dl", "movies_path": "/media/movies",   # trimmed
             "tv_path": "/media/tv", "anime_path": "", "youtube_path": "/media/yt",
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"],
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},
+            "usenet_remove_completed": "files",
             "movies_additional_paths": [], "tv_additional_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",
@@ -2115,4 +2119,108 @@ def test_acquisition_state_does_not_count_specials_or_unaired_as_missing(tmp_pat
         assert body["total"] == 2 and body["counts"]["owned"] == 2
         assert body["specials_missing"] == 1 and body["upcoming"] == 1
     finally:
+        videoapi._video_db = None
+
+
+def _client_with_profile(tmp_path, *, profile_id, is_admin):
+    """_client_as, plus the signed-in profile id web_server stamps on g."""
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    app = Flask(__name__)
+
+    @app.before_request
+    def _stamp_g():
+        from flask import g
+        g.profile_id = profile_id
+        g.is_admin = is_admin
+        g.can_download = True
+
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    return app.test_client()
+
+
+def test_a_watched_click_is_marked_for_whoever_clicked_it(tmp_path, monkeypatch):
+    """#1941: the server owner's click marks the shared state through the server
+    account; a profile linked to its own Plex account marks its own rows on its
+    own account; a profile with no linked account has no watch state to mark."""
+    from core.video import watch_scope as _ws
+    monkeypatch.setattr(_ws, "_video_server", lambda: "plex")  # per-profile state is Plex's
+    from core.video import metadata as med
+    from core.video import watch_scope
+    calls = []
+
+    def fake_set_watched(db, kind, item_id, watched, source=None, push=True,
+                         watcher=None, member_token=None):
+        calls.append((watcher, member_token))
+        return {"ok": True, "watched": watched, "pushed": False}
+    monkeypatch.setattr(med, "set_watched", fake_set_watched)
+    links = {7: {"id": "u7", "title": "Member", "token": "tok-7"}}
+    monkeypatch.setattr(watch_scope, "_plex_link", lambda pid: links.get(pid))
+    try:
+        owner = _client_with_profile(tmp_path, profile_id=1, is_admin=True)
+        assert owner.post("/api/video/detail/movie/1/watched",
+                          json={"watched": True}).status_code == 200
+        linked = _client_with_profile(tmp_path, profile_id=7, is_admin=False)
+        assert linked.post("/api/video/detail/movie/1/watched",
+                           json={"watched": True}).status_code == 200
+        unlinked = _client_with_profile(tmp_path, profile_id=8, is_admin=False)
+        r = unlinked.post("/api/video/detail/movie/1/watched", json={"watched": True})
+        assert r.status_code == 409 and "Connect your Plex" in r.get_json()["error"]
+        assert calls == [(None, None), (7, "tok-7")]
+    finally:
+        import api.video as videoapi
+        videoapi._video_db = None
+
+
+def test_continue_watching_is_the_signed_in_profiles_own(tmp_path, monkeypatch):
+    """#1941: the resume row reads the owner's state for the owner, a linked
+    member's own rows for that member, and nothing for an unlinked member."""
+    from core.video import watch_scope as _ws
+    monkeypatch.setattr(_ws, "_video_server", lambda: "plex")  # per-profile state is Plex's
+    from core.video import watch_scope
+    monkeypatch.setattr(watch_scope, "_plex_link",
+                        lambda pid: {"id": "u7", "title": "M", "token": "t"} if pid == 7 else None)
+    try:
+        owner = _client_with_profile(tmp_path, profile_id=1, is_admin=True)
+        import api.video as videoapi
+        db = videoapi._video_db
+        a = db.upsert_movie("plex", {"server_id": "m1", "title": "Owner's", "runtime_minutes": 100,
+                                     "view_offset_ms": 30 * 60000,
+                                     "last_viewed_at": "2026-10-01 10:00:00",
+                                     "file": {"relative_path": "a.mkv"}})
+        b = db.upsert_movie("plex", {"server_id": "m2", "title": "Member's", "runtime_minutes": 100,
+                                     "file": {"relative_path": "b.mkv"}})
+        db.save_profile_watch_state(7, [("movie", b, 0, "2026-10-02 10:00:00", 40 * 60000)])
+
+        def titles(client):
+            r = client.get("/api/video/dashboard/continue-watching")
+            return [it["title"] for it in r.get_json()["items"]]
+        assert titles(owner) == ["Owner's"]
+        assert titles(_client_with_profile(tmp_path, profile_id=7, is_admin=False)) == ["Member's"]
+        assert titles(_client_with_profile(tmp_path, profile_id=8, is_admin=False)) == []
+        assert a != b
+    finally:
+        import api.video as videoapi
+        videoapi._video_db = None
+
+
+def test_detail_pages_say_whether_the_profile_can_mark_watched(tmp_path, monkeypatch):
+    """#1941: a profile with no watch state of its own gets no watched toggle;
+    the detail payload tells the page so."""
+    from core.video import watch_scope as _ws
+    monkeypatch.setattr(_ws, "_video_server", lambda: "plex")  # per-profile state is Plex's
+    from core.video import watch_scope
+    monkeypatch.setattr(watch_scope, "_plex_link",
+                        lambda pid: {"id": "u7", "title": "M", "token": "t"} if pid == 7 else None)
+    try:
+        owner = _client_with_profile(tmp_path, profile_id=1, is_admin=True)
+        import api.video as videoapi
+        mid = videoapi._video_db.upsert_movie(
+            "plex", {"server_id": "m1", "title": "A", "file": {"relative_path": "a.mkv"}})
+        for pid, admin, can in ((1, True, True), (7, False, True), (8, False, False)):
+            c = owner if pid == 1 else _client_with_profile(tmp_path, profile_id=pid, is_admin=admin)
+            assert c.get(f"/api/video/detail/movie/{mid}").get_json()["can_mark_watched"] is can
+    finally:
+        import api.video as videoapi
         videoapi._video_db = None

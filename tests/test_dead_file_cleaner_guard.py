@@ -1,156 +1,197 @@
-"""Dead File Cleaner — mass-false-positive guard (#828).
-
-macstainless: a Plex-on-macOS user running SoulSync in Docker had all 5,250
-tracks flagged "dead" because their stored /Volumes/... paths don't exist inside
-the container. The resolver returning None means "couldn't find it at any known
-base dir" — for a mis-mounted library that's EVERY track, not a real deletion.
-The job now refuses to flag when a large fraction is unresolvable (a path-mapping
-problem) and reports it as such, mirroring the existing transfer-folder abort.
-"""
+"""Native missing-lifecycle safety tests for Dead File Cleaner (P3)."""
 
 from __future__ import annotations
+
+from types import SimpleNamespace
 
 from core.repair_jobs.base import JobContext
 from core.repair_jobs.dead_file_cleaner import DeadFileCleanerJob
 
 
-class _Cur:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def execute(self, *a, **k):
-        pass
-
-    def fetchall(self):
-        return self._rows
-
-    def fetchone(self):
-        return [len(self._rows)]
-
-    def close(self):
-        pass
-
-
-class _Conn:
-    def __init__(self, rows):
-        self._rows = rows
-
-    def cursor(self):
-        return _Cur(self._rows)
-
-    def close(self):
-        pass
+def _subject(file_id: int, state: str = "active"):
+    return {
+        "file_id": file_id,
+        "track_id": file_id,
+        "album_id": 10,
+        "artist_id": 1,
+        "title": f"Track {file_id}",
+        "artist_name": "Yellowcard",
+        "album_title": "Ocean Avenue",
+        "path": f"/music/{file_id}.flac",
+        "file_state": state,
+        "track_source_ids": {"deezer": f"dz-{file_id}"},
+        "album_source_ids": {},
+        "artist_source_ids": {},
+    }
 
 
-class _Db:
-    def __init__(self, rows):
-        self._rows = rows
+def _run(monkeypatch, before, after=None, *, scan_result=None):
+    calls = []
 
-    def _get_connection(self):
-        return _Conn(self._rows)
+    def active_subjects(_db, _config, **kwargs):
+        calls.append(kwargs)
+        return list(before if len(calls) == 1 else (after or before))
 
-
-class _Cfg:
-    def __init__(self, overrides=None, active_server="plex"):
-        self._o = overrides or {}
-        self._active_server = active_server
-
-    def get(self, key, default=None):
-        return self._o.get(key, default)
-
-    def get_active_media_server(self):
-        return self._active_server
-
-
-def _row(i, path):
-    # (track_id, title, artist, album, file_path, album_thumb, artist_thumb, artist_id)
-    return (i, f"Track {i}", "Yellowcard", "Ocean Avenue", path, None, None, 42)
-
-
-def _run(rows, transfer_folder, cfg_overrides=None, active_server="plex"):
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects",
+        active_subjects,
+    )
+    monkeypatch.setattr(
+        "core.library2.scan.rescan_files",
+        lambda _db, **kwargs: scan_result or {"scanned": len(before)},
+    )
     findings = []
+    context = JobContext(
+        db=SimpleNamespace(),
+        transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: True),
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+    result = DeadFileCleanerJob().scan(context)
+    return result, findings, calls
+
+
+def test_empty_native_catalogue_is_a_noop(monkeypatch):
+    result, findings, calls = _run(monkeypatch, [])
+
+    assert result.scanned == 0
+    assert findings == []
+    assert calls == [{"include_missing": True}]
+
+
+def test_first_healthy_miss_does_not_create_destructive_finding(monkeypatch):
+    before = [_subject(1)]
+    after = [_subject(1, "missing_suspected")]
+
+    result, findings, _calls = _run(monkeypatch, before, after)
+
+    assert result.scanned == 1
+    assert result.findings_created == 0
+    assert findings == []
+
+
+def test_second_healthy_miss_creates_native_finding(monkeypatch):
+    before = [_subject(7, "missing_suspected")]
+    after = [_subject(7, "missing_confirmed")]
+
+    result, findings, _calls = _run(monkeypatch, before, after)
+
+    assert result.findings_created == 1
+    assert findings[0]["entity_id"] == "lib2:7"
+    assert findings[0]["details"]["library_v2"]["file_ids"] == [7]
+    assert findings[0]["details"]["provider_ids"]["track"] == {
+        "deezer": "dz-7"
+    }
+
+
+def test_active_files_never_surface_as_dead(monkeypatch):
+    subjects = [_subject(index) for index in range(30)]
+
+    result, findings, _calls = _run(monkeypatch, subjects, subjects)
+
+    assert result.scanned == 30
+    assert result.errors == 0
+    assert findings == []
+
+
+def test_native_rescan_failure_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects",
+        lambda *_args, **_kwargs: [_subject(1)],
+    )
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("storage health unavailable")
+
+    monkeypatch.setattr("core.library2.scan.rescan_files", fail)
+    context = JobContext(
+        db=SimpleNamespace(),
+        transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: True),
+        create_finding=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not create a finding")
+        ),
+    )
+
+    result = DeadFileCleanerJob().scan(context)
+
+    assert result.errors == 1
+    assert result.findings_created == 0
+
+
+# --- 3.6.1: a library out of reach says why, not "0 findings" --------------------
+
+
+def _unreachable(monkeypatch, *, total, missing, deferred=0, server=None):
+    before = [_subject(i) for i in range(total)]
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: list(before))
+    gone = {i for i in range(missing)}  # the first ``missing`` files are out of reach
+
+    def rescan(_db, **kw):
+        chunk = kw["file_ids"]
+        lost = sum(1 for f in chunk if f in gone)
+        return {"scanned": len(chunk) - lost, "missing": lost,
+                "mass_missing_deferred": lost if deferred else 0}
+    monkeypatch.setattr("core.library2.scan.rescan_files", rescan)
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
     progress = []
-    cfg = _Cfg({'soulseek.download_path': '', **(cfg_overrides or {})}, active_server=active_server)
-    ctx = JobContext(
-        db=_Db(rows),
-        transfer_folder=str(transfer_folder),
-        config_manager=cfg,
-        create_finding=lambda **kw: (findings.append(kw) or True),
+    context = JobContext(
+        db=SimpleNamespace(), transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: default,
+                                       get_active_media_server=lambda: server),
+        create_finding=lambda **_k: (_ for _ in ()).throw(AssertionError("no finding")),
         report_progress=lambda **kw: progress.append(kw),
     )
-    res = DeadFileCleanerJob().scan(ctx)
-    return res, findings, progress
+    return DeadFileCleanerJob().scan(context), progress
 
 
-def test_mass_unresolvable_aborts_without_findings(tmp_path):
-    # 30 tracks all pointing to a /Volumes path that doesn't exist in this env
-    # -> systemic path problem -> abort, zero findings, one error.
-    rows = [_row(i, f"/Volumes/Core/Music/Plex/Yellowcard/{i}.mp3") for i in range(30)]
-    res, findings, _ = _run(rows, tmp_path)
-    assert findings == []
-    assert res.findings_created == 0
-    assert res.errors >= 1
-    assert res.scanned == 30
+def test_a_mass_unreachable_library_says_it_is_a_mapping_problem(monkeypatch):
+    """#828 / 3.6.1: every path unreachable is a mount or mapping problem;
+    the run says so, with an example path and the navidrome advice"""
+    result, progress = _unreachable(monkeypatch, total=600, missing=600, deferred=600,
+                                    server="navidrome")
+    assert result.findings_created == 0
+    assert "600 of 600 files" in result.stopped_early
+    assert "/music/0.flac" in result.stopped_early
+    assert "Report Real Path" in result.stopped_early
+    assert any(p.get("log_type") == "error" and "path-mapping" in p.get("log_line", "")
+               for p in progress)
 
 
-def test_few_unresolvable_creates_findings(tmp_path):
-    # 4 real (resolvable) files + 1 genuinely missing -> fraction 0.2 < 0.5 ->
-    # the one dead file IS reported.
-    rows = []
-    for i in range(4):
-        f = tmp_path / f"real_{i}.mp3"
-        f.write_text("x")
-        rows.append(_row(i, str(f)))
-    rows.append(_row(99, "/no/such/path/dead.mp3"))
-    res, findings, _ = _run(rows, tmp_path,
-                            {'repair.jobs.dead_file_cleaner.min_tracks_for_guard': 4})
-    assert res.findings_created == 1
-    assert len(findings) == 1
-    assert findings[0]['entity_id'] == '99'
-    assert res.errors == 0
+def test_half_a_small_library_unreachable_points_at_music_paths(monkeypatch):
+    result, _ = _unreachable(monkeypatch, total=30, missing=15, server="plex")
+    assert "15 of 30 files" in result.stopped_early
+    assert "Music Paths" in result.stopped_early
 
 
-def test_small_library_all_dead_still_reports(tmp_path):
-    # 3 dead tracks, below the default min_tracks_for_guard (25) -> guard doesn't
-    # apply -> all 3 reported (a tiny library can legitimately be all-dead).
-    rows = [_row(i, f"/no/such/{i}.mp3") for i in range(3)]
-    res, findings, _ = _run(rows, tmp_path)
-    assert res.findings_created == 3
+def test_a_few_missing_files_are_just_missing_files(monkeypatch):
+    result, progress = _unreachable(monkeypatch, total=30, missing=2)
+    assert result.stopped_early == ""
+    assert not any(p.get("log_type") == "error" for p in progress)
 
 
-def test_guard_thresholds_configurable(tmp_path):
-    # Lower min to 4; all 4 dead -> fraction 1.0 >= 0.5 -> abort.
-    rows = [_row(i, f"/no/such/{i}.mp3") for i in range(4)]
-    res, findings, _ = _run(rows, tmp_path,
-                            {'repair.jobs.dead_file_cleaner.min_tracks_for_guard': 4})
-    assert res.findings_created == 0
-    assert res.errors >= 1
+def test_the_saved_guard_settings_still_decide(monkeypatch):
+    """found in the second #1062 review: 3.6.1 read max_unresolved_fraction
+    and min_tracks_for_guard; v2 hardcoded 0.5 / 25 while the Tools page still
+    showed the saved values"""
+    before = [_subject(i) for i in range(30)]
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: list(before))
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda _db, **kw: {
+        "scanned": len(kw["file_ids"]) - 18, "missing": 18})
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
 
+    def run(settings):
+        context = JobContext(
+            db=SimpleNamespace(), transfer_folder="/music",
+            config_manager=SimpleNamespace(
+                get=lambda key, default=None: settings if key.endswith(".settings") else default,
+                get_active_media_server=lambda: None),
+            create_finding=lambda **_k: True)
+        return DeadFileCleanerJob().scan(context).stopped_early
 
-def test_healthy_library_no_abort_no_findings(tmp_path):
-    # 30 fully-resolvable tracks -> 0 dead -> neither aborts nor flags anything.
-    rows = []
-    for i in range(30):
-        f = tmp_path / f"ok_{i}.mp3"
-        f.write_text("x")
-        rows.append(_row(i, str(f)))
-    res, findings, _ = _run(rows, tmp_path)
-    assert res.findings_created == 0
-    assert res.errors == 0
-    assert res.scanned == 30
-    assert findings == []
-
-
-def test_mass_unresolvable_navidrome_reports_real_path_hint(tmp_path, caplog):
-    rows = [_row(i, f"Muse/The Wow! Signal/01-{i:02d} - Hexagons.flac") for i in range(30)]
-    with caplog.at_level("ERROR"):
-        res, findings, progress = _run(rows, tmp_path, active_server="navidrome")
-
-    assert findings == []
-    assert res.errors >= 1
-    progress_text = " ".join(str(p.get("log_line", "")) for p in progress)
-    assert "Report Real Path" in progress_text
-    assert "Muse/The Wow! Signal" in progress_text
-    log_text = " ".join(r.message for r in caplog.records)
-    assert "Report Real Path" in log_text
-    assert "Muse/The Wow! Signal" in log_text
+    assert run({}) != ""                                        # 18 of 30 >= 0.5
+    assert run({"max_unresolved_fraction": 0.9}) == ""          # the user's 0.9
+    assert run({"min_tracks_for_guard": 100}) == ""             # too small a library
+    assert run({"max_unresolved_fraction": "junk"}) != ""       # garbage: default

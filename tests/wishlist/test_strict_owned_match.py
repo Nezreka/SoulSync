@@ -5,6 +5,102 @@ import pytest
 from core.wishlist.library_match import find_owned_match
 
 
+@pytest.mark.parametrize('server', ['navidrome', 'plex', 'jellyfin'])
+@pytest.mark.parametrize('file_exists', [True, False])
+def test_local_import_is_owned_before_server_recognizes_it(tmp_path, server, file_exists):
+    """An existing imported file must not be downloaded again for lack of a server ID."""
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+
+    db = MusicDatabase(database_path=str(tmp_path / 'local_owned.db'))
+    path = tmp_path / 'library' / 'Travis Scott' / 'Single' / 'song.flac'
+    if file_exists:
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b'owned audio')
+    with db._get_connection() as conn:
+        track_id = seed_library_track(
+            conn, artist='Travis Scott', album='Single', title='HIGHEST IN THE ROOM',
+            server_source='soulsync', file_path=str(path),
+        )
+        conn.execute('UPDATE lib2_tracks SET server_source=NULL,server_id=NULL WHERE id=?', (track_id,))
+
+    match = find_owned_match(
+        db, 'HIGHEST IN THE ROOM', [{'name': 'Travis Scott'}], 'Single', server,
+        strict_identity=True,
+    )
+
+    if file_exists:
+        assert match is not None
+        assert match[0].file_path == str(path)
+    else:
+        assert match is None
+
+
+def test_sync_does_not_wishlist_an_owned_unmapped_recording(tmp_path, monkeypatch):
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+    from core.wishlist.service import WishlistService
+    from services.sync_service import PlaylistSyncService
+
+    db = MusicDatabase(database_path=str(tmp_path / 'sync_owned.db'))
+    path = tmp_path / 'owned.flac'
+    path.write_bytes(b'owned audio')
+    with db._get_connection() as conn:
+        tid = seed_library_track(conn, artist='Travis Scott', album='Single',
+                                 title='HIGHEST IN THE ROOM', server_source='soulsync',
+                                 file_path=str(path))
+        conn.execute('UPDATE lib2_tracks SET server_source=NULL,server_id=NULL WHERE id=?', (tid,))
+    wishlist = WishlistService()
+    wishlist._database = db
+    monkeypatch.setattr('core.wishlist_service.get_wishlist_service', lambda: wishlist)
+    track = SimpleNamespace(id='3eekarcy7kvN4yt5ZFzltW', name='HIGHEST IN THE ROOM',
+                            artists=[{'name': 'Travis Scott'}], album='Single', duration_ms=176000)
+    match = SimpleNamespace(spotify_track=track)
+    service = PlaylistSyncService.__new__(PlaylistSyncService)
+    added = service._wishlist_unmatched(SimpleNamespace(id='playlist', name='Playlist'), [match])
+    assert added == 0
+    assert db.get_wishlist_tracks() == []
+
+
+@pytest.mark.parametrize('server', ['navidrome', 'plex', 'jellyfin'])
+def test_sync_only_still_records_local_ownership(tmp_path, monkeypatch, server):
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+    from core.wishlist.service import WishlistService
+    from services.sync_service import PlaylistSyncService
+
+    db = MusicDatabase(database_path=str(tmp_path / 'sync_only.db'))
+    path = tmp_path / 'owned.flac'
+    path.write_bytes(b'owned audio')
+    with db._get_connection() as conn:
+        tid = seed_library_track(conn, artist='Melodysheep', album='One Species',
+                                 title='One Species', server_source='soulsync', file_path=str(path))
+        conn.execute('UPDATE lib2_tracks SET server_source=NULL,server_id=NULL WHERE id=?', (tid,))
+    wishlist = WishlistService()
+    wishlist._database = db
+    monkeypatch.setattr('core.wishlist_service.get_wishlist_service', lambda: wishlist)
+    monkeypatch.setattr('core.settings.config_manager.get_active_media_server', lambda: server)
+    service = PlaylistSyncService.__new__(PlaylistSyncService)
+    service._skip_unmatched_wishlist = True
+    service._find_track_in_media_server = AsyncMock(return_value=(None, 0.0))
+    service._update_progress = Mock()
+    service.clear_progress_callback = Mock()
+    service._resolve_mirrored_server_playlist_id = Mock(return_value='existing-playlist')
+    client = Mock()
+    client.is_connected.return_value = True
+    service._get_active_media_client = lambda: (client, server)
+    track = SimpleNamespace(id='sp-one', name='One Species', artists=['Melodysheep'],
+                            album='One Species', duration_ms=179433)
+    result = asyncio.run(service.sync_playlist(
+        SimpleNamespace(id='auto_mirror_9', name='Verträumt', tracks=[track]), profile_id=1))
+    assert not result.errors
+    assert result.match_details[0]['owned_in_library'] is True
+    assert result.match_details[0]['download_status'] != 'wishlist'
+    assert db.get_wishlist_tracks() == []
+
+
 def _db(title, album, artist='Soul Asylum', track_artist=None):
     row = SimpleNamespace(title=title, album_title=album, artist_name=artist,
                           track_artist=track_artist, file_path='/music/owned.flac')

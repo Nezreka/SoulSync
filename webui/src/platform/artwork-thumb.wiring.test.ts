@@ -18,8 +18,7 @@ import { describe, expect, it } from 'vitest';
 const SURFACES: Array<[string, string]> = [
   ['discover album shelves', 'src/routes/discover/-ui/album-shelves.tsx'],
   ['dashboard content rails', 'src/routes/dashboard/-ui/content-rails.tsx'],
-  ['library artist grid', 'src/routes/library/-ui/library-artist-card.tsx'],
-  ['artist-detail album grid', 'src/routes/artist-detail/-ui/enhanced-view.tsx'],
+  ['library artist + album grids', 'src/routes/library/-ui/library-v2-page.tsx'],
 ];
 
 describe('the named surfaces request a sized image', () => {
@@ -28,8 +27,9 @@ describe('the named surfaces request a sized image', () => {
 
     expect(source).toContain("from '@/platform/artwork-thumb'");
     // Non-greedy across the argument list: a call site may nest parens,
-    // e.g. thumb(String(album.thumb_url), 'card'). every ThumbVariant counts,
-    // 'rail' included: the dashboard asks for the 320px rail size (5a90d6a77).
+    // e.g. thumb(String(album.thumb_url), 'card'). 'rail' joined the list
+    // with the bounded dashboard covers (upstream 5a90d6a77): the point of
+    // this check is that a SIZE is asked for, and rail is one.
     expect(source).toMatch(/thumb\([\s\S]*?'(grid|card|hero|rail)'\)/);
   });
 });

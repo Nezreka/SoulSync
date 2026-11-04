@@ -1,6 +1,6 @@
 """the record labels the label explorer shelf is built from.
 
-it used to be ``SELECT DISTINCT label FROM albums LIMIT 30``: whichever 30
+it used to be the first 30 distinct album labels, in no order: whichever 30
 labels sqlite happened to hit first. on boulder's library that was zalgo-text
 labels and seven "$EBU & someone" variants, so the shelf showed albums from
 labels nobody asked about. now it's the labels you actually play, and when
@@ -8,6 +8,8 @@ nothing has been played yet (a fresh install), the ones you own most of.
 """
 
 from typing import List
+
+from core.library2.sql_util import owned_sql
 
 DEFAULT_LIMIT = 30
 
@@ -31,7 +33,7 @@ def your_labels(conn, limit: int = DEFAULT_LIMIT) -> List[str]:
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT TRIM(al.label) FROM tracks t JOIN albums al ON al.id = t.album_id
+        SELECT TRIM(al.label) FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
         WHERE t.play_count > 0 AND al.label IS NOT NULL AND TRIM(al.label) != ''
         GROUP BY TRIM(al.label)
         ORDER BY SUM(t.play_count) DESC, COUNT(DISTINCT al.id) DESC
@@ -44,10 +46,11 @@ def your_labels(conn, limit: int = DEFAULT_LIMIT) -> List[str]:
         return labels
     # not enough listening yet: fill from the labels you own the most of
     cur.execute(
-        """
-        SELECT TRIM(label) FROM albums
-        WHERE label IS NOT NULL AND TRIM(label) != ''
-        GROUP BY TRIM(label)
+        f"""
+        SELECT TRIM(al.label) FROM lib2_albums al
+        WHERE al.label IS NOT NULL AND TRIM(al.label) != ''
+          AND {owned_sql('album', 'al')}
+        GROUP BY TRIM(al.label)
         ORDER BY COUNT(*) DESC
         LIMIT ?
         """,

@@ -139,7 +139,7 @@ def test_the_drain_fetch_annotates(db, monkeypatch):
 # -- the search and the gate -----------------------------------------------------
 
 def test_search_context_and_queries_carry_it(monkeypatch):
-    monkeypatch.setattr(wl, "_acceptable_titles", lambda p, k, t: [p])
+    monkeypatch.setattr(wl, "_acceptable_titles", lambda p, k, t, s=None: [p])
     ctx = wl.search_context(_row(59, 25, "2026-08-30", alt_season=58, alt_episode=48), "episode")
     assert (ctx["alt_season"], ctx["alt_episode"]) == (58, 48)
     strategies = build_strategies("episode", "60 Minutes", season=59, episode=25,
@@ -171,7 +171,7 @@ def test_the_soulseek_search_asks_for_the_scene_number(monkeypatch, db):
     import api.video as video_api
     import core.video.download_monitor as mon
     import core.video.quality_profile as qp
-    monkeypatch.setattr(wl, "_acceptable_titles", lambda p, k, t: [p])
+    monkeypatch.setattr(wl, "_acceptable_titles", lambda p, k, t, s=None: [p])
     monkeypatch.setattr(video_api, "get_video_db", lambda: db)
     monkeypatch.setattr(qp, "load_for_item", lambda d, item: default_profile())
     queries = []

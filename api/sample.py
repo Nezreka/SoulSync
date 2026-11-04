@@ -42,10 +42,15 @@ class SampleHttpError(Exception):
 
 
 def _track_exists(track_id: str) -> bool:
+    from core.library2.sql_util import owned_sql
+
     db = get_database()
     conn = db._get_connection()
     try:
-        row = conn.execute("SELECT 1 FROM tracks WHERE id = ?", (track_id,)).fetchone()
+        row = conn.execute(
+            f"SELECT 1 FROM lib2_tracks t WHERE t.id = ? AND {owned_sql('track', 't')}",
+            (track_id,),
+        ).fetchone()
         return row is not None
     finally:
         conn.close()
@@ -72,6 +77,8 @@ def _resolve_source_path(track_id: str, stem: str | None) -> str:
     never separated (or separation failed).
     """
     from core.sample import store as sample_store
+
+    _require_track(track_id)
 
     if stem:
         from core.sample import stems as stems_mod
@@ -178,8 +185,16 @@ def fetch_analysis(track_id: str, retry: bool = False):
         from core.sample import worker as sample_worker
 
         row = sample_store.get_analysis(track_id)
-        if row is not None and sample_store.is_current(track_id, row):
-            return _analysis_payload(row, "done"), 200
+        if row is not None:
+            _, signature = sample_worker.track_source(track_id)
+            if signature is None:
+                raise SampleHttpError("FILE_MISSING", "analysis source is not reachable in this library", 409)
+            if sample_store.is_current(track_id, row):
+                return _analysis_payload(row, "done"), 200
+            # Older analyzer results for this exact file can remain visible;
+            # another library's copy cannot supply the waiting-state payload.
+            if row.get("source_sig") != signature:
+                row = None
         # never analyzed, made by an older analyzer, or the file changed since.
         # queue it, and hand back whatever we had so the page isn't blank
         status = sample_worker.enqueue_analysis(track_id, retry=retry)
@@ -329,7 +344,7 @@ def _source_bpm_for_stretch(track_id: str, target_bpm) -> float | None:
     from core.sample import store as sample_store
 
     row = sample_store.get_analysis(track_id)
-    if not row or not row.get("bpm"):
+    if not row or not row.get("bpm") or not sample_store.is_current(track_id, row):
         raise SampleHttpError(
             "BPM_UNKNOWN",
             "target_bpm needs the track's BPM — open it in Studio once so analysis runs",
@@ -350,7 +365,7 @@ def _delay_bpm(track_id: str, target_bpm, fx) -> float | None:
     from core.sample import store as sample_store
 
     row = sample_store.get_analysis(track_id)
-    if not row or not row.get("bpm"):
+    if not row or not row.get("bpm") or not sample_store.is_current(track_id, row):
         raise SampleHttpError(
             "BPM_UNKNOWN",
             "delay follows the beat, so it needs the track's tempo. give the analysis a moment",

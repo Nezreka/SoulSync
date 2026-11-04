@@ -109,6 +109,24 @@ describe('discover route (live)', () => {
     expect(Route.options.component).toBe(DiscoverPage);
   });
 
+  it("?genre= opens that genre's deep dive (#1935: the search page's browse tiles)", async () => {
+    renderRoute(['/discover?genre=hip%20hop']);
+    await screen.findByText('Hero Artist');
+    await waitFor(() =>
+      expect(requested.some((u) => u.includes('/api/discover/genre-deep-dive?genre=hip'))).toBe(
+        true,
+      ),
+    );
+    expect(document.getElementById('genre-deep-dive-modal')).not.toBeNull();
+  });
+
+  it('no ?genre= leaves the deep dive shut', async () => {
+    renderRoute();
+    await screen.findByText('Hero Artist');
+    expect(requested.some((u) => u.includes('/api/discover/genre-deep-dive'))).toBe(false);
+    expect(document.getElementById('genre-deep-dive-modal')).toBeNull();
+  });
+
   it('renders the React page instead of handing /discover to vanilla', async () => {
     renderRoute();
     // The hero is above the fold and unmistakably this page's.

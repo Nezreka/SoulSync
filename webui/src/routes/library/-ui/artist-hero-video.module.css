@@ -1,0 +1,98 @@
+/* the hero's music video: over the photo, under the scrim and the words.
+   discover-premier.css sizes and fades the player itself (.dsc-backdrop-video) */
+.layer {
+  position: absolute;
+  z-index: 0;
+  overflow: hidden;
+  inset: 0;
+  pointer-events: none;
+  transition: background-color 1.4s ease;
+}
+
+/* once the video plays, the photo under it goes dark: at discover's 0.9 the
+   photo showed through the video */
+.layer[data-live='true'] {
+  background-color: var(--bg-raised);
+}
+
+.layer[data-live='true'] :global([class~='dsc-backdrop-video'][class~='ready']) {
+  opacity: 1;
+}
+
+/* the hero is far wider than 16:9, so a video's own black side bars (4:3,
+   pillarboxed uploads) landed on its right edge. zoomed past them */
+.layer :global([class~='dsc-backdrop-video'] iframe) {
+  transform: translate(-50%, -50%) scale(1.36);
+}
+
+.sound {
+  position: absolute;
+  z-index: 3;
+  right: 20px;
+  bottom: 20px;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px 0 12px;
+  border: 1px solid var(--white-a18);
+  border-radius: var(--radius-pill);
+  background: var(--black-a50);
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  animation: soundIn 500ms 900ms var(--ease-out) backwards;
+  backdrop-filter: blur(12px);
+  transition:
+    background var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+
+.sound svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sound:hover {
+  background: var(--white-a20);
+}
+
+.sound:focus-visible {
+  outline: 2px solid var(--text-1);
+  outline-offset: 2px;
+}
+
+.soundOn,
+.soundOn:hover {
+  border-color: transparent;
+  background: rgb(var(--accent-rgb));
+}
+
+@keyframes soundIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sound {
+    animation: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .sound {
+    top: 14px;
+    right: 14px;
+    bottom: auto;
+    width: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .sound span {
+    display: none;
+  }
+}
