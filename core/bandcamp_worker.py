@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
-from core.bandcamp_client import BandcampClient
+from core.bandcamp_client import BandcampClient, search_blocked
 from core.worker_utils import interruptible_sleep
 from core.library2.worker_support import MATCHED, honor_stored_match
 
@@ -117,6 +117,7 @@ class BandcampWorker:
             'enabled': is_source_enabled('bandcamp'),
             'running': is_actually_running and not self.paused,
             'paused': self.paused,
+            'blocked': search_blocked(),
             'idle': is_idle,
             'authenticated': True,  # keyless — always "authenticated"
             'current_item': self.current_item,
@@ -143,6 +144,12 @@ class BandcampWorker:
                 from core.metadata.registry import is_source_enabled
                 if not is_source_enabled('bandcamp'):
                     interruptible_sleep(self._stop_event, 30)
+                    continue
+
+                if search_blocked():
+                    # Bandcamp is answering with a bot check page; an item
+                    # tried now would be written off as not found
+                    interruptible_sleep(self._stop_event, 60)
                     continue
 
                 self.current_item = None
@@ -321,6 +328,8 @@ class BandcampWorker:
             return
 
         result = self.client.search_album(artist_name, album_name)
+        if not result and search_blocked():
+            return   # not an answer: the item stays pending for later
         if result and self._name_matches(album_name, result.get('title', '')):
             self._update_entity('album', album_id, result)
             self.stats['matched'] += 1
@@ -351,6 +360,8 @@ class BandcampWorker:
             return
 
         result = self.client.search_track(artist_name, track_name)
+        if not result and search_blocked():
+            return   # not an answer: the item stays pending for later
         if result and self._name_matches(track_name, result.get('title', '')):
             self._update_entity('track', track_id, result)
             self.stats['matched'] += 1
