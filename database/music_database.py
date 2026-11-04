@@ -17119,16 +17119,32 @@ class MusicDatabase:
                     if not composite:
                         params.append(f"{spotify_track_id}::%")
                     params.append(profile_id)
-                    cursor.execute(
-                        f"""
-                        UPDATE wishlist_tracks
-                           SET retry_count = retry_count + 1,
-                               last_attempted = CURRENT_TIMESTAMP,
-                               failure_reason = COALESCE(?, failure_reason)
-                         WHERE {identity_clause} AND profile_id = ?
-                        """,
-                        params,
-                    )
+                    # a failure moves the track up the backoff ladder only when
+                    # it was due. playlist syncs and batches fail a wished
+                    # track outside the wishlist's own passes too, and counting
+                    # each of them put a song on the 7 day rung after one bad
+                    # afternoon (TheHomeGuy: 5 tries, all Oct 29, then a week
+                    # of waiting while a manual search found it at once). a
+                    # failure while it cools keeps the reason, not the count.
+                    from datetime import datetime as _dt, timezone as _tz
+                    from core.wishlist.retry_backoff import get_active_retry_profile, is_due
+                    retry_profile = get_active_retry_profile(self)
+                    now_utc = _dt.now(_tz.utc).replace(tzinfo=None)
+                    rows = cursor.execute(
+                        f"SELECT id, retry_count, last_attempted FROM wishlist_tracks "
+                        f"WHERE {identity_clause} AND profile_id = ?", params[1:]).fetchall()
+                    changed = 0
+                    for row_id, retry_count, last_attempted in rows:
+                        due = is_due({"retry_count": retry_count, "last_attempted": last_attempted},
+                                     now_utc, retry_profile)
+                        cursor.execute(
+                            "UPDATE wishlist_tracks SET failure_reason = COALESCE(?, failure_reason)"
+                            + (", retry_count = retry_count + 1, last_attempted = CURRENT_TIMESTAMP"
+                               if due else "")
+                            + " WHERE id = ?", (error_message, row_id))
+                        changed += cursor.rowcount
+                    conn.commit()
+                    return changed > 0
                 
                 conn.commit()
                 return cursor.rowcount > 0

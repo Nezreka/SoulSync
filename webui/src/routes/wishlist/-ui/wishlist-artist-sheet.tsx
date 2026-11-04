@@ -257,6 +257,13 @@ function SheetTrack({
         <div className="wlp-sheet-track-why" title={track.failReason || undefined}>
           {line}
         </div>
+        {/* why it keeps failing, on screen: in a tooltip it never reached a
+            phone or a screenshot (TheHomeGuy's Chicken Fried said nothing) */}
+        {track.failing && track.failReason.trim() ? (
+          <div className="wlp-sheet-track-why" title={track.failReason}>
+            {trouble.detail}
+          </div>
+        ) : null}
       </div>
       <button
         type="button"
