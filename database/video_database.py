@@ -3094,6 +3094,18 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def video_downloads_after(self, dl_id: int, limit: int = 200) -> list:
+        """download rows started after this one, oldest first (a retry chain's
+        candidates: the caller decides which are the same item)"""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM video_downloads WHERE id > ? ORDER BY id LIMIT ?",
+                (int(dl_id), int(limit))).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def get_video_download(self, dl_id: int) -> dict | None:
         conn = self._get_connection()
         try:

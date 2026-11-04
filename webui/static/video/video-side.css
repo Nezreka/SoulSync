@@ -4302,6 +4302,25 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     background: rgba(0, 0, 0, 0.22);
     font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace; }
 .vdl-res-track-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+/* what the retry took after this release failed (SeadogsBooty) */
+.vdl-res-track-chain { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.vdl-res-track-chain-head { font-size: 9.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--white-a40); }
+.vdl-res-track-step { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; }
+.vdl-res-track-step-ic { flex-shrink: 0; width: 12px; text-align: center; font-weight: 800; }
+.vdl-res-track-step-rel { flex: 1; min-width: 0; color: var(--white-a70); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+.vdl-res-track-step-st { flex-shrink: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vdl-res-track-step--done .vdl-res-track-step-ic, .vdl-res-track-step--done .vdl-res-track-step-st { color: #8fe7af; }
+.vdl-res-track-step--fail .vdl-res-track-step-ic, .vdl-res-track-step--fail .vdl-res-track-step-st { color: #fbcd7a; }
+.vdl-res-track-step--active .vdl-res-track-step-ic, .vdl-res-track-step--active .vdl-res-track-step-st {
+    color: hsl(var(--vgm-h, 220), 85%, 74%); }
+.vdl-r-chain { flex-shrink: 0; font-size: 9.5px; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 0; color: #08111f; }
+.vdl-r-chain--done { background: #6cd391; }
+.vdl-r-chain--active { background: hsl(var(--vgm-h, 220), 85%, 70%); }
+.vdl-r-chain--fail { background: #f0a830; }
+.vdl-res--chain { border-color: var(--white-a20); }
 .vdl-res-track-state { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700;
     letter-spacing: 0.06em; text-transform: uppercase; color: #fff; }
 .vdl-res-track-pct { font-size: 11px; font-weight: 700; color: var(--white-a60); font-variant-numeric: tabular-nums; }

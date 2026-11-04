@@ -1703,9 +1703,16 @@ def register_routes(bp):
         dl_id = request.args.get("id")
         if dl_id:
             try:
-                return jsonify({"download": db.get_video_download(int(dl_id))})
+                dl = db.get_video_download(int(dl_id))
             except (TypeError, ValueError):
                 return jsonify({"download": None})
+            out = {"download": dl}
+            # chain=1: what was grabbed after this one failed, so the card that
+            # grabbed it can show the replacement (SeadogsBooty)
+            if request.args.get("chain") and dl and dl.get("status") in ("failed", "cancelled"):
+                from core.video.download_monitor import retry_chain
+                out["chain"] = retry_chain(db, dl)
+            return jsonify(out)
         media_id = request.args.get("media_id")
         if media_id:
             media_source = request.args.get("media_source")

@@ -1683,6 +1683,42 @@ REDOWNLOAD_LIMIT = 5
 REDOWNLOAD_WINDOW_HOURS = 48
 
 
+_CHAIN_FIELDS = ("id", "status", "release_title", "filename", "error", "progress",
+                 "quality_label", "size_bytes", "source", "username")
+
+
+def retry_chain(db, dl, limit: int = 10) -> list:
+    """The downloads that followed this one for the same item: what the
+    next-release retry (or a later manual grab) took after it failed, oldest
+    first, so a result card can show which release ended up downloading
+    (SeadogsBooty). Matched on the resolved identity, not media_id: the retry
+    is grabbed by the wishlist search under the tmdb id while a modal grab
+    may carry the library's own id. A season pack covering the episode
+    counts. Never raises."""
+    try:
+        if not dl:
+            return []
+        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if kind == "youtube" or not tmdb_id:
+            return []
+        out = []
+        for row in db.video_downloads_after(int(dl["id"])):
+            k2, t2, s2, e2, c2 = _wishlist_ids(db, row)
+            if k2 != kind or str(t2) != str(tmdb_id):
+                continue
+            if kind == "episode" and en is not None:
+                pack = e2 is None and str((c2 or {}).get("scope") or "") == "season"
+                if not (s2 == sn and (e2 == en or pack)):
+                    continue
+            out.append({k: row.get(k) for k in _CHAIN_FIELDS})
+            if len(out) >= limit:
+                break
+        return out
+    except Exception:  # noqa: BLE001 - a status poll never fails on this
+        logger.debug("retry chain lookup failed for download %s", (dl or {}).get("id"), exc_info=True)
+        return []
+
+
 def _next_release_plan(db, dl, err) -> dict | None:
     """Blocklist the release the client just failed and decide whether to grab
     the next one. None = not ours to retry (the setting is off, not a client

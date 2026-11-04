@@ -802,11 +802,75 @@
         _trackPoll(card, foot, dlId);
     }
 
+    // a failed grab the monitor is replacing: its row says so until the next
+    // release is taken, then the chain carries on from it
+    var RETRYING_RE = /trying the next release/i;
+    var CHAIN_WAIT_MS = 5 * 60 * 1000;
+
+    function _chainLabel(c) {
+        var st = c.status, pct = Math.max(0, Math.min(100, c.progress || 0));
+        if (st === 'completed') return 'Downloaded';
+        if (st === 'failed' || st === 'cancelled') return TRACK_LABEL[st] || 'Failed';
+        if (st === 'downloading') return 'Downloading ' + pct + '%';
+        return TRACK_LABEL[st] || 'Queued';
+    }
+    function _chainKind(st) {
+        return st === 'completed' ? 'done' : (st === 'failed' || st === 'cancelled' ? 'fail' : 'active');
+    }
+
+    // What happened after this card's release failed (SeadogsBooty): every later
+    // grab for the same episode or movie, in order, under the card, and a badge
+    // on the result card of each release it took instead.
+    function _renderChain(card, foot, chain) {
+        var box = foot.querySelector('[data-vdl-track-chain]');
+        if (!chain.length) { if (box) box.remove(); return; }
+        if (!box) {
+            box = document.createElement('div');
+            box.className = 'vdl-res-track-chain';
+            box.setAttribute('data-vdl-track-chain', '');
+            foot.appendChild(box);
+        }
+        box.innerHTML = '<div class="vdl-res-track-chain-head">Then tried</div>' + chain.map(function (c) {
+            var kind = _chainKind(c.status);
+            var ic = kind === 'done' ? '✓' : (kind === 'fail' ? '✕' : '↻');
+            return '<div class="vdl-res-track-step vdl-res-track-step--' + kind + '">' +
+                '<span class="vdl-res-track-step-ic">' + ic + '</span>' +
+                '<span class="vdl-res-track-step-rel" title="' + esc(c.release_title || c.filename || '') + '">' +
+                    esc(c.release_title || c.filename || 'Another release') + '</span>' +
+                '<span class="vdl-res-track-step-st">' + esc(_chainLabel(c)) + '</span></div>';
+        }).join('');
+        var panel = card.closest('.vdl-results');
+        var rows = (panel && panel._rows) || [];
+        chain.forEach(function (c) {
+            var name = c.release_title || c.filename;
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                if (!name || (r.title !== name && r.filename !== name)) continue;
+                var other = panel.querySelector('[data-vdl-card="' + i + '"]');
+                if (!other || other === card) continue;
+                var kind = _chainKind(c.status);
+                other.classList.add('vdl-res--chain');
+                var l1 = other.querySelector('.vdl-r-l1');
+                var badge = other.querySelector('[data-vdl-chain-badge]');
+                if (!badge && l1) {
+                    badge = document.createElement('span');
+                    badge.setAttribute('data-vdl-chain-badge', '');
+                    l1.appendChild(badge);
+                }
+                if (badge) {
+                    badge.className = 'vdl-r-chain vdl-r-chain--' + kind;
+                    badge.textContent = kind === 'done' ? 'Downloaded instead'
+                        : (kind === 'fail' ? 'Also failed' : 'Grabbed instead');
+                }
+            }
+        });
+    }
+
     function _trackPoll(card, foot, dlId) {
         if (foot._t) { clearTimeout(foot._t); foot._t = null; }
         function tick() {
             if (!card.isConnected) return;   // modal closed → stop
-            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId)).then(function (d) {
+            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId) + '&chain=1').then(function (d) {
                 if (!card.isConnected) return;
                 var dl = d && d.download;
                 if (!dl) { foot._t = setTimeout(tick, 2000); return; }
@@ -825,6 +889,19 @@
                         ? '<span class="vdl-res-track-spin"></span>' : '';
                     var ic = st === 'completed' ? '✓ ' : (st === 'failed' || st === 'cancelled' ? '✕ ' : '');
                     stEl.innerHTML = spin + ic + esc(TRACK_LABEL[st] || 'Downloading');
+                }
+                var chain = (d && d.chain) || [];
+                var retrying = st === 'failed' && RETRYING_RE.test(dl.error || '');
+                if (stEl && retrying && !chain.length) {
+                    stEl.innerHTML = '<span class="vdl-res-track-spin"></span>✕ Failed · finding the next release…';
+                }
+                _renderChain(card, foot, chain);
+                var last = chain.length ? chain[chain.length - 1] : null;
+                if (!active) {
+                    // keep following while the replacement is still on its way
+                    if (!foot._chainSince) foot._chainSince = Date.now();
+                    var waiting = retrying && !last && Date.now() - foot._chainSince < CHAIN_WAIT_MS;
+                    if ((last && !(last.status in TRACK_DONE)) || waiting) active = true;
                 }
                 if (active) foot._t = setTimeout(tick, 1700);
             });
@@ -1113,14 +1190,25 @@
         if (!epEl || dlId == null) return;
         if (epEl._eptimer) { clearTimeout(epEl._eptimer); epEl._eptimer = null; }
         epEl._epdl = dlId;
+        var since = Date.now();
         (function tick() {
             if (!epEl.isConnected || epEl._epdl !== dlId) return;
-            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId)).then(function (d) {
+            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId) + '&chain=1').then(function (d) {
                 if (!epEl.isConnected || epEl._epdl !== dlId) return;
                 var dl = d && d.download;
                 if (!dl) { epEl._eptimer = setTimeout(tick, 2200); return; }
-                epStatusRender(epEl, dl);
-                if (!(dl.status in TRACK_DONE)) epEl._eptimer = setTimeout(tick, 2000);
+                // a failed release the monitor replaced: the row shows the newest
+                // attempt, not the first failure (SeadogsBooty)
+                var chain = (d && d.chain) || [];
+                var shown = chain.length ? chain[chain.length - 1] : dl;
+                var retrying = dl.status === 'failed' && RETRYING_RE.test(dl.error || '') && !chain.length;
+                if (retrying && Date.now() - since < CHAIN_WAIT_MS) {
+                    epSearching(epEl);
+                    epEl._eptimer = setTimeout(tick, 2500);
+                    return;
+                }
+                epStatusRender(epEl, shown);
+                if (!(shown.status in TRACK_DONE)) epEl._eptimer = setTimeout(tick, 2000);
             });
         })();
     }
