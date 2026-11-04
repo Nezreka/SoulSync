@@ -13,8 +13,9 @@ class _Scan:
     def __init__(self):
         self.reasons = []
 
-    def request_scan(self, reason):
+    def request_scan(self, reason, scope="full"):
         self.reasons.append(reason)
+        self.scopes = getattr(self, "scopes", []) + [scope]
 
 
 def _wire(monkeypatch):

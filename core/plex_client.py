@@ -1753,6 +1753,37 @@ class PlexClient(MediaServerBase):
             logger.error(f"Failed to trigger library scan for '{section_label}': {e}")
             return False
 
+    def trigger_folder_scan(self, folders: List[str]) -> bool:
+        """Scan only these folders (#1978), given as Plex sees them. Each goes
+        to the music section whose folder holds it; False, with nothing
+        triggered, when any of them sits in no music section, so the caller
+        scans the whole library instead of quietly missing an album."""
+        if not folders or not self.ensure_connection():
+            return False
+        from core.library2.scan_paths import location_for
+        try:
+            sections = self._get_music_sections()
+            if not sections and self.music_library is not None:
+                sections = [self.music_library]
+            plan = []
+            for folder in folders:
+                owner = None
+                for section in sections:
+                    if location_for(folder, list(getattr(section, "locations", None) or [])):
+                        owner = section
+                        break
+                if owner is None:
+                    logger.info(f"Plex folder scan: no music section holds {folder}")
+                    return False
+                plan.append((owner, folder))
+            for section, folder in plan:
+                section.update(path=folder)
+            logger.info(f"Triggered Plex folder scan of {len(plan)} folder(s)")
+            return True
+        except Exception as e:
+            logger.error(f"Plex folder scan failed: {e}")
+            return False
+
     def is_library_scanning(self, library_name: str = "Music") -> bool:
         """Check if Plex library is currently scanning.
 

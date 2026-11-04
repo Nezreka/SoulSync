@@ -50,6 +50,17 @@ class WebScanManager:
         # after it, instead of waiting out the 5-minute floor
         self._scan_baseline = None
         self._seen_scanning = False
+        # folder scans (#1978): a scan asked for only by finished downloads can
+        # scan just the folders that changed. any other request in the same
+        # window (a manual or scheduled scan) makes it a whole-library scan
+        self._pending_downloads_only = True
+        self._queued_downloads_only = True
+        # catalogue clock (utc) of the last scan's trigger. None until this
+        # process has scanned once: downloads from before a restart may never
+        # have been scanned, so the first scan is always the whole library
+        self._last_trigger_utc = None
+        self._roots_cache = {}
+        self.last_scan_kind = None
 
         logger.info(f"WebScanManager initialized with {delay_seconds}s debounce delay")
 
@@ -73,13 +84,15 @@ class WebScanManager:
             logger.error(f"Error determining active media server: {e}")
             return None, None
 
-    def request_scan(self, reason: str = "Download completed", callback=None):
+    def request_scan(self, reason: str = "Download completed", callback=None, scope: str = "full"):
         """
         Request a library scan with smart debouncing logic.
 
         Args:
             reason: Optional reason for the scan request (for logging)
             callback: Optional callback function to call when scan completes
+            scope: "downloads" when finished downloads ask for it, so only the
+                folders that changed need scanning; "full" for anything else
 
         Returns:
             dict: Scan request status and timing info
@@ -99,8 +112,11 @@ class WebScanManager:
             if callback and callback not in self._scan_completion_callbacks:
                 self._scan_completion_callbacks.append(callback)
 
+            downloads_only = scope == "downloads"
             if self._scan_in_progress:
                 # Server is currently scanning - mark that we need another scan later
+                self._queued_downloads_only = (self._queued_downloads_only if self._downloads_during_scan
+                                               else True) and downloads_only
                 self._downloads_during_scan = True
                 logger.info(f"Web scan in progress - queueing follow-up scan ({reason})")
                 return {
@@ -109,6 +125,8 @@ class WebScanManager:
                     "estimated_delay": "after current scan completes"
                 }
 
+            self._pending_downloads_only = (self._pending_downloads_only if self._timer
+                                            else True) and downloads_only
             # Cancel any existing timer and start a new one
             if self._timer:
                 self._timer.cancel()
@@ -190,6 +208,9 @@ class WebScanManager:
 
             self._scan_in_progress = True
             self._downloads_during_scan = False
+            downloads_only = self._pending_downloads_only
+            self._pending_downloads_only = True
+            since = self._last_trigger_utc
             self._timer = None
             self._scan_start_time = time.time()
             self._scan_progress = {"status": "starting", "message": "Initializing scan"}
@@ -223,7 +244,18 @@ class WebScanManager:
                 except Exception as e:
                     logger.debug(f"Web scan: could not read the scan state before triggering ({e})")
                     self._scan_baseline = None
-            success = media_client.trigger_library_scan()
+            folders = (self._folder_scan_plan(media_client, server_type, since)
+                       if downloads_only and since else None)
+            self._last_trigger_utc = self._utc_now(margin_seconds=120)
+            success = False
+            if folders:
+                success = media_client.trigger_folder_scan(folders)
+                self.last_scan_kind = "folders" if success else None
+                if not success:
+                    logger.info("Folder scan refused, scanning the whole library instead")
+            if not success:
+                success = media_client.trigger_library_scan()
+                self.last_scan_kind = "full"
 
             if success:
                 logger.info(f"{server_type.upper()} library scan initiated successfully via web")
@@ -252,6 +284,41 @@ class WebScanManager:
                     "message": f"Scan error: {str(e)}"
                 }
             self._reset_scan_state()
+
+    @staticmethod
+    def _utc_now(margin_seconds: int = 0) -> str:
+        """the catalogue's clock ('YYYY-MM-DD HH:MM:SS', utc), less a margin
+        so a file written while the scan was being triggered is caught next time"""
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time() - margin_seconds))
+
+    def _folder_scan_plan(self, media_client, server_type, since):
+        """the folders, as the server sees them, that changed since the last
+        scan; None means scan the whole library (see core.library2.scan_paths)"""
+        if server_type not in ("plex", "jellyfin") or not callable(
+                getattr(media_client, "trigger_folder_scan", None)):
+            return None
+        try:
+            from core.settings import config_manager
+            if not config_manager.get("media_server.folder_scans", True):
+                return None
+            from contextlib import closing
+
+            from core.library2 import scan_paths
+            from database.music_database import get_database
+            locations = media_client.get_music_library_locations() or []
+            if not locations:
+                return None
+            with closing(get_database()._get_connection()) as conn:
+                cached = self._roots_cache.get(server_type)
+                if not cached or time.time() - cached[0] > 3600:
+                    cached = (time.time(), scan_paths.learn_roots(
+                        scan_paths.server_pairs(conn, server_type)))
+                    self._roots_cache[server_type] = cached
+                return scan_paths.plan_folder_scan(conn, server_type, since, locations,
+                                                   roots=cached[1] or None)
+        except Exception as e:  # noqa: BLE001 - any doubt scans the whole library
+            logger.debug(f"folder scan plan failed, scanning everything: {e}")
+            return None
 
     EXACT_POLL_SECONDS = 10
 
@@ -427,7 +494,10 @@ class WebScanManager:
         # Check if we need another scan due to downloads during this scan
         if downloads_during_scan:
             logger.info("Web scan follow-up needed for downloads during scan")
-            self.request_scan("Follow-up scan for downloads during previous scan")
+            queued_downloads_only = self._queued_downloads_only
+            self._queued_downloads_only = True
+            self.request_scan("Follow-up scan for downloads during previous scan",
+                              scope="downloads" if queued_downloads_only else "full")
 
     def _reset_scan_state(self):
         """Reset internal scan state"""

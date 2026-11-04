@@ -57,14 +57,18 @@ def auto_scan_library(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str,
 
     # If another automation is already tracking the scan, just forward
     # the request — the original tracker keeps emitting progress.
+    # a run that finished downloads (batch_complete) only needs the folders
+    # they changed scanned (#1978); a schedule or a manual run scans everything
+    scope = 'downloads' if 'more_batches_pending' in (config.get('_event_data') or {}) else 'full'
+
     if deps.state.is_scan_library_active():
-        deps.web_scan_manager.request_scan('Automation trigger (additional batch)')
+        deps.web_scan_manager.request_scan('Automation trigger (additional batch)', scope=scope)
         return {'status': 'skipped', 'reason': 'Scan already being tracked'}
 
     deps.state.set_scan_library_id(automation_id)
 
     try:
-        result = deps.web_scan_manager.request_scan('Automation trigger')
+        result = deps.web_scan_manager.request_scan('Automation trigger', scope=scope)
         scan_status_val = result.get('status', 'unknown')
 
         if scan_status_val == 'queued':

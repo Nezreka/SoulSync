@@ -244,7 +244,7 @@ def _after_approved_import(context, batch):
             or automation_engine.is_event_action_enabled('batch_complete', 'scan_library')
         )
         if web_scan_manager and auto_scan_on:
-            web_scan_manager.request_scan("Quarantine approval completed")
+            web_scan_manager.request_scan("Quarantine approval completed", scope="downloads")
     except Exception as scan_exc:  # noqa: BLE001
         logger.warning("[Quarantine] Post-approval media scan failed: %s", scan_exc)
 
