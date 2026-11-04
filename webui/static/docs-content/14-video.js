@@ -771,7 +771,7 @@ After a download completes, a lightweight post-download scan probes your media s
             body: `
 ## Naming & folders
 
-Set your **naming scheme** (how files and folders are named — title, year, edition tags, season/episode patterns) and your **folder layout** once, and every import follows it. Consistent naming keeps Plex/Jellyfin matching clean.
+Set your **naming scheme** (how files and folders are named — title, year, edition tags, season/episode patterns) and your **folder layout** once, and every import follows it. Consistent naming keeps Plex/Jellyfin matching clean. **Colons in titles** picks what a ':' becomes, since file systems don't allow one: deleted (Dexter Resurrection, the default), smart (Dexter - Resurrection, and 12:30 becomes 12-30), space dash space, or a dash. Mass Rename brings files you already have in line.
 
 ## Mass rename
 

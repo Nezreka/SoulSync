@@ -7523,6 +7523,19 @@
                                                 </div>
 
                                                 <div class="form-group">
+                                                    <label for="vo-colon-replacement">Colons in titles:</label>
+                                                    <select id="vo-colon-replacement">
+                                                        <option value="delete">Delete (Dexter Resurrection)</option>
+                                                        <option value="smart">Smart (Dexter - Resurrection, 12:30 becomes 12-30)</option>
+                                                        <option value="space_dash_space">Space dash space (Dexter - Resurrection)</option>
+                                                        <option value="dash">Dash (Dexter- Resurrection)</option>
+                                                    </select>
+                                                    <small class="settings-hint">File systems don't allow a colon, so
+                                                        it's replaced in movie and episode names. Mass Rename can
+                                                        bring files you already have in line.</small>
+                                                </div>
+
+                                                <div class="form-group">
                                                     <label>YouTube Path Template:</label>
                                                     <input type="text" id="vo-youtube-template"
                                                         placeholder="$channel/Season $year/$channel - $sxe - $title">
