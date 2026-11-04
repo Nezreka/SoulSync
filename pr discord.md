@@ -1,13 +1,11 @@
-**SoulSync 3.6.2 is out** :musical_note:
+**SoulSync 3.6.3 is out** :musical_note:
 
-Library v2 is here. SoulSync now keeps its own library instead of mirroring your media server: watchlist any artist, wishlist any album or single song, see the songs you're missing, pick a release yourself with interactive search, and watch live download state and one history feed for every artist, album and song. Quality is checked before you grab, your own edits survive refreshes, delete removes the real files with a preview first, and the library works on a phone. Your existing library is upgraded on the first start, in the background. A huge thank you to @nick2000713, who built all of it.
+A hot fix for 3.6.2. On a big library the Library page could time out with "Could not load your library". The artist list's membership check walked every album for every artist; it uses its indexes now and loads in a second or two, and the first visit after a restart is warmed in the background.
 
-Every artist now opens one artist page, and just browsing an artist no longer writes it into your library. Unmatched files are fingerprinted and matched in the background with a review to confirm them.
+When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, SoulSync now blocklists that release and grabs the next one your quality profile ranks right away, instead of waiting for the next wishlist pass. You only get the failed notification when nothing else could be taken. It's on by default, with a switch on the usenet client card (thanks @SeadogsBooty). Cancel also takes a torrent or usenet download out of the client now.
 
-Music Assistant joins as a fifth media server (thanks @splitsec2), and Plex and Jellyfin get HD artist photos and wide backgrounds (#1957). Profiles get their own Jellyfin plays and their own ListenBrainz or Last.fm scrobbling, and on the video side every profile linked to its own Plex account keeps its own watch state, with Watched Cleanup waiting for everyone who watches (#1941, thanks @PapaBearDoes).
+Jellyfin on localhost no longer costs two seconds per connection on Windows, Discover's decades, labels and undiscovered albums shelves are much faster, and MusicBrainz lookups stop paying a wasted request per album.
 
-Open editor works on a playlist before its first sync (#1958), you can export the wishlist as CSV or JSON, and Tidal AAC no longer shows 0:00, with a new Tools job that fixes the files you already have. Bulk imports keep one artist in one folder (#1953, #1954) and the import inbox stops timing out (#1955).
-
-Syncs, Discover and the library are much faster on big libraries. SABnzbd jobs stop downloading twice on a busy SAB (#1964, #1965). Plus fixes from @PapaBearDoes, @SimpleSimonLA and @TaunGadd, and a lot more.
+Fixes: a failing wishlist sync waits before retrying instead of using up its tries in a second, Bandcamp's bot check no longer marks albums as not found, a blocked audiobook release stays out of that profile's searches, and Settings > MetaSync says whether your install is being counted.
 
 Full notes on GitHub.

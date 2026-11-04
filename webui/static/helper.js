@@ -3442,6 +3442,15 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
+    '3.6.3': [
+        { date: 'November 2026 · 3.6.3' },
+        { title: 'The Library page loads again', desc: 'On a big library the artist list could time out with "Could not load your library". It loads in a second or two now, and the first visit after a restart is warmed in the background.', page: 'library' },
+        { title: 'A failed download is replaced', desc: 'When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, that release is blocklisted and the next one your quality profile ranks is grabbed right away. You only hear about it when nothing else could be taken. Switch it off on the usenet client card (thanks @SeadogsBooty).' },
+        { title: 'Cancel means cancel', desc: 'Cancelling a torrent or usenet video download takes it out of the client too, instead of letting it download to the end for nothing.' },
+        { title: 'Faster', desc: 'Jellyfin on localhost no longer costs two seconds per connection on Windows, Discover\'s decades, labels and undiscovered albums shelves are much faster, and MusicBrainz lookups stop wasting a request per album.' },
+        { title: 'Fixes', desc: 'A failing wishlist sync waits before retrying, Bandcamp\'s bot check no longer marks albums as not found, a blocked audiobook release stays out of that profile\'s searches, and Settings > MetaSync says whether your install is counted.' },
+        { title: 'Earlier versions', desc: '3.6.2 brought Library v2, built by @nick2000713: SoulSync keeps its own library now. Open Older Versions for everything in it.' },
+    ],
     '3.6.2': [
         { date: 'November 2026 · 3.6.2' },
         { title: 'Library v2', desc: 'SoulSync keeps its own library now instead of mirroring your media server. Watchlist any artist, wishlist any album or single song, and see the songs you\'re missing as real rows. Built by @nick2000713, thank you.', page: 'library' },
@@ -3462,12 +3471,11 @@ const WHATS_NEW = {
         { title: 'Your own watch state', desc: 'A profile linked to its own Plex account keeps its own watched marks and resume points: Continue Watching, Next Up and the detail pages show your own plays, and marking something watched marks it on your own Plex (thanks @PapaBearDoes) (#1941).' },
         { title: 'Watched Cleanup waits for everyone', desc: 'Once profiles keep their own watch state, a movie is only cleaned up when everyone who watched anything in the last 90 days has watched it, and anyone part way through holds it back.', page: 'tools' },
         { title: 'Video', desc: 'Manual searches use the title\'s profile and ids, Search now files anime and 4K like the drain, and SABnzbd jobs stop downloading twice on a busy SAB (thanks @PapaBearDoes). Every file shows its audio and subtitle languages, and AniList joins as an anime layer.' },
-        { title: 'Faster everywhere', desc: 'Playlist syncs match about 15x faster and keep their matches across scans, Discover\'s For you builds in 1.6s, startup repairs stop holding the database\'s write lock, a big wishlist sync backlog no longer stalls every page, the Library page loads again on a big library, and Jellyfin on localhost stops costing two seconds a connection on Windows.' },
+        { title: 'Faster everywhere', desc: 'Playlist syncs match about 15x faster and keep their matches across scans, Discover\'s For you builds in 1.6s, startup repairs stop holding the database\'s write lock, and a big wishlist sync backlog no longer stalls every page.' },
         { title: 'Fixes', desc: 'AIFF and WAV tags read in scans and ISRCs kept (thanks @TaunGadd), album-bundle staging publishes atomically (thanks @SimpleSimonLA), a live version no longer counts as the studio song you own, Plex Home links are admin only in login mode, a database hang that could freeze every page after a while is gone, and "Library upgrade in progress" no longer sits for hours on an upgraded library.' },
         { title: 'Your back catalogue', desc: 'Discography Refresh set to library walks every artist you have a release by and finds the releases you\'re missing, with Auto add to wishlist like 3.6.1\'s Discography Backfill (thanks @nick2000713, #1972).', page: 'tools' },
         { title: 'Checked against 3.6.1', desc: 'Library v2 was checked against everything 3.6.1 did and the gaps were closed: reorganize keeps a release\'s MusicBrainz folder suffix, the Songs tab sorts in a fraction of a second, a rematch drops the old guest artists, issues and genre cleanups from before the upgrade carry over, Single/Album Dedup users keep a dedup, and Re-tag\'s Auto Apply turns on again.', page: 'library' },
         { title: 'Pick a profile when you get a title', desc: 'Get and Manual search have a Profile picker, even for a movie or show that isn\'t in your library yet: the pick judges that search, sticks to its wishlist entries and the title keeps it when it lands. Settings > Quality sets which profile new movies and new shows use (thanks @SeadogsBooty for the idea).' },
-        { title: 'A failed download is replaced', desc: 'When SABnzbd or the torrent client fails a movie or episode, that release is blocklisted and the next one your quality profile ranks is grabbed right away. You only hear about it when nothing else could be taken (thanks @SeadogsBooty).' },
         { title: 'Every rating opens its site', desc: 'A title\'s ratings row links each score to its site and adds IMDb, TMDB, TVDB and Letterboxd, on preview pages too.' },
         { title: 'Earlier versions', desc: '3.6.1 moved the video side onto React and added 4K libraries, folders that check themselves, the Songs tab and rebuilt daily mixes.' },
     ],
@@ -3498,6 +3506,17 @@ const WHATS_NEW = {
 // Section shape: { title, description, features: [bullet strings],
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
+    {
+        title: '3.6.3: hot fix',
+        description: 'A fix for the Library page timing out on big libraries in 3.6.2, plus a round of speedups and fixes.',
+        features: [
+            'The Library page loads in a second or two on a big library again, and is warmed after a restart.',
+            'A release SABnzbd or the torrent client fails is blocklisted and replaced by the next one your profile ranks, with a notification only when nothing else could be taken (thanks @SeadogsBooty).',
+            'Cancel takes a torrent or usenet video download out of the client.',
+            'Jellyfin on localhost stops costing two seconds per connection on Windows, and Discover\'s decades, labels and undiscovered albums are much faster.',
+            'Wishlist sync retries wait their turn, Bandcamp\'s bot check stops marking albums as not found, and audiobook blocklists apply per profile.',
+        ],
+    },
     {
         title: '3.6.2: Library v2',
         description: 'SoulSync keeps its own library now instead of mirroring your media server. It runs on the same search, download, quality and tagging pipeline, so your watchlist and wishlist work the way they always did, with a lot more on top. Library v2 was built by @nick2000713. Thank you, Nick.',
