@@ -27,7 +27,7 @@ from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_m
 ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from utils.logging_config import get_logger, setup_logging
+from utils.logging_config import app_log_path, get_logger, setup_logging
 from utils.async_helpers import run_async
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
@@ -39,7 +39,7 @@ from core.settings import config_manager
 
 # Setup logging early to avoid any import-time logs from being swallowed
 _log_level = config_manager.get('logging.level', 'INFO')
-_log_path = config_manager.get('logging.path', 'logs/app.log')
+_log_path = app_log_path(config_manager.get('logging.path', 'logs/app.log'))
 _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 

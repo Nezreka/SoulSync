@@ -81,6 +81,15 @@ if not _os.environ.get('SOULSYNC_IMAGE_CACHE_DIR'):
     _os.environ['SOULSYNC_IMAGE_CACHE_DIR'] = _TEST_IMAGE_CACHE_DIR
     _atexit.register(lambda: _shutil.rmtree(_TEST_IMAGE_CACHE_DIR, ignore_errors=True))
 
+# the logs too: web_server and acoustid_client log to logging.path, which the
+# test config leaves at the default logs/app.log in the checkout. every run
+# wrote its errors into the developer's live log and, from WSL, rotated the
+# file the windows server held open. Same pattern as the image cache.
+if not _os.environ.get('SOULSYNC_LOG_FILE'):
+    _TEST_LOG_DIR = _tempfile.mkdtemp(prefix='soulsync-test-logs-')
+    _os.environ['SOULSYNC_LOG_FILE'] = _os.path.join(_TEST_LOG_DIR, 'app.log')
+    _atexit.register(lambda: _shutil.rmtree(_TEST_LOG_DIR, ignore_errors=True))
+
 # the audiobook db had the same gap: its own path (AUDIOBOOK_DATABASE_PATH,
 # default database/audiobooks.db) was never redirected, so any test importing
 # web_server started the audiobook download monitor against the real file
