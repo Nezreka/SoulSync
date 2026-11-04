@@ -21,6 +21,12 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# localhost connects try the loopback address that answers, before any client
+# opens one: ::1 first cost ~2s per connection to an IPv4-only server on
+# windows (utils/localhost_connect.py)
+from utils.localhost_connect import install as _install_localhost_connect
+_install_localhost_connect()
 from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_mimetypes
 # Register correct web-asset MIME types before the app serves anything — a bad OS
 # registry (Windows: .js -> text/plain) otherwise blanks the module-loaded React
