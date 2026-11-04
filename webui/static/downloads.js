@@ -1350,7 +1350,45 @@ function notifyWishlistChanged() {
 }
 
 
-async function openDownloadMissingWishlistModal(category = null, selectedTrackIds = null) {
+/**
+ * The rows of a wishlist batch already running, from the batch itself (#1982).
+ * Reopening one fetched the wishlist again by the batch's cycle, but a
+ * playlist run's cycle is "playlist", which no wishlist track is, and an
+ * auto run's cycle may have moved on: the modal opened with 0 tracks and an
+ * empty table while 32 downloaded. Each task keeps its row's index, so a row
+ * sits where the status poll looks for it. null when the batch has no tasks
+ * yet (still analysing).
+ */
+async function _wishlistBatchTracks(batchId) {
+    try {
+        const response = await fetch(`/api/playlists/${encodeURIComponent(batchId)}/download_status`);
+        if (!response.ok) return null;
+        const data = await response.json();
+        const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+        if (!tasks.length) return null;
+        const tracks = [];
+        tasks.forEach(task => {
+            const i = Number(task.track_index);
+            if (!Number.isInteger(i) || i < 0) return;
+            const ti = task.track_info || {};
+            const artist = ti.artist || ti.artist_name || '';
+            tracks[i] = {
+                ...ti,
+                name: ti.name || ti.track_name || ti.title || 'Unknown track',
+                artists: Array.isArray(ti.artists) && ti.artists.length ? ti.artists : (artist ? [artist] : []),
+            };
+        });
+        for (let i = 0; i < tracks.length; i++) {
+            if (!tracks[i]) tracks[i] = { name: '…', artists: [] };
+        }
+        return tracks.length ? tracks : null;
+    } catch (e) {
+        console.warn('wishlist batch tracks unavailable', e);
+        return null;
+    }
+}
+
+async function openDownloadMissingWishlistModal(category = null, selectedTrackIds = null, batchId = null) {
     showLoadingOverlay('Loading wishlist...');
     const playlistId = "wishlist"; // Use a consistent ID for wishlist
 
@@ -1376,8 +1414,11 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
     window.currentWishlistCategory = category;
 
     // Fetch actual wishlist tracks from the server
-    let tracks;
-    try {
+    let tracks = batchId ? await _wishlistBatchTracks(batchId) : null;
+    // only the wishlist's own categories filter it; a playlist run's
+    // "playlist" cycle matched no track at all (#1982)
+    if (category !== 'albums' && category !== 'singles') category = null;
+    if (!tracks) try {
         // Build API URL with optional category filter
         const apiUrl = category ? `/api/wishlist/tracks?category=${category}` : '/api/wishlist/tracks';
 
