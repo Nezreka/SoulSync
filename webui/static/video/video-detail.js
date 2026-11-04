@@ -718,12 +718,13 @@
     function renderRatings(d) {
         var host = q('[data-vd-ratings]');
         if (!host) return;
-        // each score opens its own site (library pages; previews stay in-app)
+        // each score opens its own site, previews included: a title you don't
+        // own yet is exactly the one you look up elsewhere before getting it.
+        // in-app NAVIGATION (cast, more like this, search) still stays in-app
         var q1 = encodeURIComponent(String(d.title || ''));
-        var linked = d.source !== 'tmdb';
         function chip(cls, inner, url, tip) {
             var attrs = 'class="vd-rt ' + cls + '"' + (tip ? ' title="' + esc(tip) + '"' : '');
-            return (linked && url)
+            return url
                 ? '<a ' + attrs + ' href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + inner + '</a>'
                 : '<span ' + attrs + '>' + inner + '</span>';
         }
@@ -761,8 +762,27 @@
             items.push(chip('vd-rt--anilist', '<span class="vd-rt-tag">AniList</span>' + anScore + '%',
                 (anMain && anMain.site_url) || ('https://anilist.co/search/anime?search=' + q1), 'AniList'));
         }
+        // the providers with no score here still get a way out, so this row is
+        // the one place for every external page (SeadogsBooty's request)
+        siteLinks(d).forEach(function (s) {
+            if (s.label === 'IMDb' && d.imdb_rating) return;   // its score chip links already
+            items.push(chip('vd-rt--site', '<span class="vd-rt-site">' + esc(s.label) + '</span>' +
+                '<span class="vd-rt-out" aria-hidden="true">↗</span>', s.url, 'Open on ' + s.label));
+        });
         host.innerHTML = items.join('');
         host.hidden = !items.length;
+    }
+
+    // the external pages a title has, in one list for the ratings row and the
+    // More menu's "Open on"
+    function siteLinks(d) {
+        var out = [];
+        if (d.imdb_id) out.push({ label: 'IMDb', url: 'https://www.imdb.com/title/' + d.imdb_id + '/' });
+        if (d.tmdb_id) out.push({ label: 'TMDB', url: 'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id });
+        if (d.tvdb_id) out.push({ label: 'TVDB', url: 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series' });
+        // Letterboxd is film-only; it deep-links by TMDB id (#1039, QT3496)
+        if (d.kind === 'movie' && d.tmdb_id) out.push({ label: 'Letterboxd', url: 'https://letterboxd.com/tmdb/' + d.tmdb_id + '/' });
+        return out;
     }
 
     function renderCast(d) {
@@ -832,13 +852,7 @@
             '<span class="vd-manage-ic" aria-hidden="true">↗</span> ' + esc(label) + '</a>';
     }
     function externalLinks(d) {
-        if (d.source === 'tmdb') return '';   // preview items keep everything in-app
-        var out = '';
-        if (d.imdb_id) out += moreLink('IMDb', 'https://www.imdb.com/title/' + d.imdb_id + '/');
-        if (d.tmdb_id) out += moreLink('TMDB', 'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id);
-        if (d.tvdb_id) out += moreLink('TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series');
-        // Letterboxd is film-only; it deep-links by TMDB id (#1039, QT3496)
-        if (d.kind === 'movie' && d.tmdb_id) out += moreLink('Letterboxd', 'https://letterboxd.com/tmdb/' + d.tmdb_id + '/');
+        var out = siteLinks(d).map(function (s) { return moreLink(s.label, s.url); }).join('');
         if (d.wikidata_url) out += moreLink('Official site', d.wikidata_url);
         return out;
     }

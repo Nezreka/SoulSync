@@ -1155,6 +1155,14 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border: 1px solid var(--white-a12); backdrop-filter: blur(6px);
 }
 .vd-rt-tag { font-size: 11px; font-weight: 900; padding: 1px 5px; border-radius: var(--radius-xs); letter-spacing: 0.02em; }
+/* a chip that opens its site says so on hover */
+a.vd-rt { text-decoration: none; transition: border-color 0.15s ease, background 0.15s ease; }
+a.vd-rt:hover { border-color: var(--white-a30); background: var(--black-a60); }
+a.vd-rt:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
+/* the provider pages with no score: quieter than a rating */
+.vd-rt--site { font-size: 12px; font-weight: 700; padding: 5px 10px; color: var(--white-a70, rgba(255,255,255,0.7)); }
+.vd-rt--site:hover { color: #fff; }
+.vd-rt-out { font-size: 11px; opacity: 0.6; }
 .vd-rt-ic { font-size: 15px; line-height: 1; }
 .vd-rt--imdb .vd-rt-tag { background: #f5c518; color: #000; }
 .vd-rt--mc .vd-rt-tag { background: #fff; color: #000; }
