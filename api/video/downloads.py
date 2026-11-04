@@ -1724,6 +1724,26 @@ def register_routes(bp):
             return jsonify({"download": match[0] if match else None})
         return jsonify({"download": None})
 
+    @bp.route("/search-filters", methods=["GET"])
+    def video_search_filters():
+        """This profile's saved manual-search filters (SeadogsBooty)."""
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id
+        from core.video import search_filters
+        return jsonify({"filters": search_filters.load(get_video_db(), int(get_current_profile_id() or 1))})
+
+    @bp.route("/search-filters", methods=["PUT"])
+    def video_search_filters_save():
+        """Replace this profile's saved filters with the posted list (cleaned:
+        unknown fields and operators are dropped, a filter needs a name)."""
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id
+        from core.video import search_filters
+        body = request.get_json(silent=True) or {}
+        saved = search_filters.save(get_video_db(), int(get_current_profile_id() or 1),
+                                    body.get("filters"))
+        return jsonify({"ok": True, "filters": saved})
+
     @bp.route("/downloads/cancel", methods=["POST"])
     def video_downloads_cancel():
         from . import get_video_db

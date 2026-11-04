@@ -491,6 +491,10 @@ Episodes are treated as facts: a scan that no longer sees an episode **demotes**
             body: `
 Assign a title its own **quality profile** ("this show is always 1080p, that movie is 4K"). Pick it from the title's Manage panel, or right in **Get** / **Manual search** with the **Profile** picker, even for a title that isn't in your library yet: the pick judges that search and grab, sticks to the title's wishlist entries, and the title keeps it when it lands, so its upgrades use it too.
 
+**Filter and sort the results.** Every manual search (movie, show, season or episode) has a bar over its results: type to narrow by name, group or indexer, sort by best match, size, age, quality, format score, seeders, indexer or grabs, and open **Filters** to build conditions (resolution is 1080, codec is HEVC, group contains MeGusta, size less than 1 GB) matched on all or any of them. Name a filter to save it for every later search on your profile. The head says how many results there are, how many meet your profile and how many match your filter. It only changes what you see: Auto and the wishlist still rank releases by your profile.
+
+**When a grab fails and SoulSync takes the next release**, the card you grabbed lists what it tried after (each release and whether it downloaded or failed too), and the result card of the release that replaced it is marked *Grabbed instead* or *Downloaded instead*. The episode row shows the newest attempt.
+
 A title with no profile of its own uses its kind's default: set **New movies use** and **New shows use** under Settings > Quality (both start on **Default**). Set a show's **series type** so numbering and matching behave correctly:
 
 | Series type | For |

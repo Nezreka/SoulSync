@@ -1634,7 +1634,7 @@ body.max-performance .nav-button.active:hover {
     padding: 10px 12px;
     border-radius: var(--radius-control);
     border: 1px solid var(--white-a06);
-    background: rgba(255, 255, 255, 0.025);
+    background: var(--white-a03);
     text-decoration: none;
     transition: background var(--dur-base) ease, border-color var(--dur-base) ease, transform var(--dur-base) ease;
 }
