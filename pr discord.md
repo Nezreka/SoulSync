@@ -8,6 +8,8 @@ After downloads, Plex and Jellyfin now scan only the album folders that changed 
 
 Admins can also tag every song on a Plex playlist with a mood from the server playlist editor, to build a Plex smart playlist on it (thanks wolf39us).
 
-Fixes: a failing wishlist sync waits before retrying instead of using up its tries in a second, Bandcamp's bot check no longer marks albums as not found, a blocked audiobook release stays out of that profile's searches, and Settings > MetaSync says whether your install is being counted.
+Anime that TMDB lumps into one season is split by AniList when you have no TVDB key, search previews of anime get the AniList layer (thanks Thibs), and imported episodes carry their title in the file name.
+
+Fixes: the library upgrade no longer sits paused forever (thanks Skowl), downloaded episodes stop showing as missing (thanks c5pie), a retried release keeps its quality profile and an episode's manual search stays inside the panel (thanks SeadogsBooty), a few failed playlist syncs no longer put a wished song on the week-long retry wait (thanks TheHomeGuy), a failing wishlist sync waits before retrying instead of using up its tries in a second, Bandcamp's bot check no longer marks albums as not found, a blocked audiobook release stays out of that profile's searches, and Settings > MetaSync says whether your install is being counted.
 
 Full notes on GitHub.
