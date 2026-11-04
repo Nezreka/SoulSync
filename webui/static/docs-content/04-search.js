@@ -10,6 +10,10 @@ registerDocsSection({
             body: `
 Type an artist, album, or track name and results appear in a categorized dropdown as you type. Results come from your primary metadata source (Deezer by default).
 
+## Browse tiles
+
+With nothing typed, the page offers browse tiles (Top trending, New releases and six genres). They show what's charting on Deezer right now (its public charts, no account needed, refreshed every few hours), with a genre tile blending its Deezer genres. When Deezer is off, unreachable or has nothing for a tile (Ambient has no Deezer genre), the tile falls back to what your own metadata sources know. Everything opens in the normal result cards, so preview and download work the same.
+
 ## Result categories
 
 - **In Your Library** — matches already in your collection, marked with ownership badges

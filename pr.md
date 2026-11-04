@@ -27,6 +27,10 @@ a hot fix for 3.6.2. on a big library the library page could time out with "coul
 - **discover's decades, labels and undiscovered albums stop reading whole tables:** decades read every pool row in full to get at the year (6.9s, 0.3s now), labels started from every album to find the played tracks, and undiscovered albums built a key for each of 70k owned albums to drop the ones by its 25 artists (3.9s to 0.2s). an owned album by "BJÖRK" also stops showing as undiscovered when you listened to "björk".
 - **musicbrainz lookups by release id stop paying a 404 first.** the library's post-import check asked for each album as a release group, got a 404 (a second at musicbrainz's rate limit) and an error in the log, then asked again as a release. ids known to be releases go straight there now.
 
+## search
+
+- **browse tiles show what's charting on deezer (thanks cremonies, #1984).** top trending and the genre tiles read deezer's public charts now (no account needed, kept a few hours), a two-genre tile like electronic & dance blends both, and when deezer is off or has nothing for a tile it falls back to your own metadata like before.
+
 ## fixes
 
 - **interactive search says wrong artist when it's the wrong artist (thanks cremonies, #1980).** on streaming sources the length check ran first, so every other artist's song of the same name read as wrong length and the right one got lost in them. wrong artists are labelled as such now, the closest misses sort to the top, and when nothing passes the filtered results show instead of an empty table.
