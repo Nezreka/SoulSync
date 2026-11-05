@@ -307,6 +307,39 @@ def test_sources_and_source_folder(client):
     assert client.resolve_path({'item_id': 'a/all.flac::3', 'provider_domain': 'filesystem_local', 'provider_instance': SRC}) is None
 
 
+def _ma_2_10_9(client, monkeypatch, folder_setting):
+    """2.10.9 keeps the folder in setup data it never sends, and has no
+    storage/source_folder yet (#1992)"""
+    answer = client.fake.__call__
+
+    def fake(command, args):
+        if command == 'config/providers/get_value':
+            raise MusicAssistantError(f"Config key path not found for provider {SRC}")
+        if command == 'storage/source_folder':
+            raise MusicAssistantError("Invalid Command: storage/source_folder")
+        return answer(command, args)
+    client._transport = fake
+    monkeypatch.setattr('core.music_assistant_client.config_manager.get',
+                        lambda key, default=None: folder_setting if key == 'music_assistant.source_folder'
+                        else {'base_url': 'http://ma:8095', 'token': 'tok', 'source_instance': SRC}
+                        if key == 'music_assistant' else default)
+
+
+def test_a_server_that_wont_say_its_folder_uses_the_one_from_settings(client, monkeypatch):
+    _ma_2_10_9(client, monkeypatch, ' /media/music/ ')
+    assert client.source_folder() == '/media/music'
+    assert client.resolve_path({'item_id': 'a/b.flac', 'provider_domain': 'filesystem_local', 'provider_instance': SRC}) == '/media/music/a/b.flac'
+    ok, message = client.test_connection()
+    assert ok, message
+
+
+def test_without_the_setting_the_test_asks_for_the_folder_not_the_token(client, monkeypatch):
+    _ma_2_10_9(client, monkeypatch, '')
+    ok, message = client.test_connection()
+    assert not ok
+    assert 'Source folder' in message and 'token' not in message
+
+
 def test_descriptor_and_registry_know_the_server():
     from core.media_server import specs
     from core.media_server.registry import build_default_registry

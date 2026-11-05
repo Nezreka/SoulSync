@@ -547,6 +547,9 @@ class ConfigManager:
                 "token": "",
                 # instance id of the Local files / SMB source the scan reads
                 "source_instance": "",
+                # the folder that source reads, as music assistant sees it. only
+                # used when music assistant won't say (2.10.9 keeps it private)
+                "source_folder": "",
                 "auto_detect": True,
                 "request_timeout_seconds": 30
             },

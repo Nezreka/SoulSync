@@ -3267,6 +3267,8 @@ async function loadSettingsData() {
         const maToken = document.getElementById('music_assistant-token');
         if (maUrl) maUrl.value = settings.music_assistant?.base_url || '';
         if (maToken) maToken.value = settings.music_assistant?.token || '';
+        const maFolder = document.getElementById('music_assistant-source-folder');
+        if (maFolder) maFolder.value = settings.music_assistant?.source_folder || '';
         if (maUrl && maUrl.value && maToken && maToken.value) loadMusicAssistantSources(true);
 
         // Set active server and toggle visibility
@@ -6834,7 +6836,8 @@ async function saveSettings(quiet = false) {
         music_assistant: {
             base_url: _cfgStr('music_assistant-url', { trim: true }),
             token: _cfgStr('music_assistant-token', { trim: true }),
-            source_instance: _cfgStr('music_assistant-source')
+            source_instance: _cfgStr('music_assistant-source'),
+            source_folder: _cfgStr('music_assistant-source-folder', { trim: true })
         },
         navidrome: {
             base_url: document.getElementById('navidrome-url').value,
