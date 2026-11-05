@@ -1342,6 +1342,10 @@ def _register_matched_download_context(context_key: str, context: dict) -> None:
         context['library_owner_id'] = _selected_library_owner()
     with matched_context_lock:
         matched_downloads_context[context_key] = context
+    # a new grab of a file we already processed once (same deezer id, same
+    # name) is a new download. the key stayed in the processed set until a
+    # restart, so the poll skipped it and the file sat in downloads (#1983)
+    processed_download_ids.discard(context_key)
 
 
 IS_SHUTTING_DOWN = False
@@ -7768,8 +7772,12 @@ def start_download():
                         context_key, data.get('title'), data.get('artist'),
                         _skip_checks, _requesting_profile)
 
-                # Extract track name from filename for activity
-                track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
+                # Extract track name from filename for activity. a streaming
+                # 'id||name' isn't a path, a '/' in its title would cut it (#1983)
+                if '||' in filename:
+                    track_name = filename.split('||', 1)[1]
+                else:
+                    track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
                 _track_quick_download(
                     download_id,
                     title=data.get('title') or track_name,
