@@ -48,7 +48,8 @@ beforeEach(() => {
   posts = [];
   stored = [];
   localStorage.clear();
-  document.body.innerHTML = '<nav class="sidebar-nav"><a class="nav-button" data-page="podcasts"></a></nav>';
+  document.body.innerHTML =
+    '<nav class="sidebar-nav"><a class="nav-button" data-page="podcasts"></a></nav>';
   server.use(
     http.get('*/api/profiles/me/features', () => HttpResponse.json(payload(stored))),
     http.post('*/api/profiles/me/features', async ({ request }) => {
@@ -79,7 +80,10 @@ describe('the feature picker', () => {
   it('lists every feature as on for a fresh profile', async () => {
     await openPicker();
     for (const f of FEATURES) expect(switchFor(f.label)).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('radio', { name: /Everything/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: /Everything/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
   });
 
   it('a switch saves on its own and the sidebar follows', async () => {
