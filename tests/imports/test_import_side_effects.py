@@ -136,6 +136,40 @@ def test_record_soulsync_library_entry_writes_artist_album_and_track(tmp_path, m
     assert track_row["quality_profile_explicit"] == 0
 
 
+@pytest.mark.parametrize("value,expected", [
+    ("Games (Remixed)", None),  # what #1989's library had in track_count
+    ("12", 12),
+    (12, 12),
+])
+def test_record_soulsync_library_entry_keeps_text_out_of_the_track_count(
+        tmp_path, monkeypatch, value, expected):
+    conn = _make_soulsync_db()
+    final_path = tmp_path / "song.flac"
+    final_path.write_bytes(b"audio")
+    monkeypatch.setattr(side_effects, "get_database", lambda: _FakeDB(conn))
+    monkeypatch.setattr(
+        side_effects,
+        "_get_config_manager",
+        lambda: SimpleNamespace(get_active_media_server=lambda: "soulsync"),
+    )
+
+    side_effects.record_soulsync_library_entry(
+        {
+            "source": "spotify",
+            "artist": {"id": "sp-artist", "name": "Artist One"},
+            "album": {"id": "sp-album", "name": "Games (Remixed)", "total_tracks": value},
+            "track_info": {"id": "sp-track", "name": "Games", "duration_ms": 230490,
+                           "_source": "spotify"},
+            "original_search_result": {"title": "Games", "_source": "spotify"},
+            "_final_processed_path": str(final_path),
+        },
+        {"name": "Artist One"},
+        {"is_album": True, "album_name": "Games (Remixed)"},
+    )
+
+    assert _album_row(conn)["track_count"] == expected
+
+
 def test_recording_identity_does_not_pair_a_stale_selected_comment_with_new_mbid():
     context = {
         "source": "musicbrainz",
