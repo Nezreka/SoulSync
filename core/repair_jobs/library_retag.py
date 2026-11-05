@@ -41,6 +41,28 @@ logger = get_logger("repair_jobs.library_retag")
 _BATCH = 100
 
 
+def _resolve_clean(db, job_id: str, track_ids: list) -> None:
+    """A track whose tags now check out has nothing left to fix. Its open
+    finding stayed open forever: a check that changed (a joiner or a curly
+    apostrophe no longer counts) left thousands of rows nobody could act on."""
+    if not track_ids:
+        return
+    conn = db._get_connection()
+    try:
+        ids = [f"lib2:{t}" for t in track_ids]
+        conn.execute(
+            "UPDATE repair_findings SET status = 'resolved', user_action = 'obsolete', "
+            "resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+            "WHERE job_id = ? AND status = 'pending' AND finding_type = 'library_retag' "
+            f"AND entity_type = 'track' AND entity_id IN ({','.join('?' for _ in ids)})",
+            [job_id, *ids])
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 - tidying old rows never fails a scan
+        logger.debug("[Library Re-tag] resolving clean findings failed: %s", exc)
+    finally:
+        conn.close()
+
+
 def _describe(entry: dict, manual_fields: list) -> str:
     changed = [d.get("field") for d in entry.get("diff") or [] if d.get("field")]
     head = (f"{len(changed)} tag field(s) differ from the library: "
@@ -160,6 +182,7 @@ class LibraryRetagJob(RepairJob):
                 contexts = retag.track_contexts(conn, batch, lyrics=options['lyrics'] == 'fetch')
             finally:
                 conn.close()
+            clean = []
             for row in contexts:
                 files = by_track[row['id']]
                 row.update(file_id=files[0].get('file_id'), file_path=files[0]['path'],
@@ -178,6 +201,7 @@ class LibraryRetagJob(RepairJob):
                     result.errors += 1
                     continue
                 if not entry.get("has_changes"):
+                    clean.append(int(entry['track_id']))
                     continue
                 diff = entry.get("diff") or []
                 manual_fields = [d.get("field") for d in diff if d.get("manual")]
@@ -231,6 +255,7 @@ class LibraryRetagJob(RepairJob):
                     result.findings_created += 1
                 else:
                     result.findings_skipped_dedup += 1
+            _resolve_clean(context.db, self.job_id, clean)
             if context.update_progress:
                 context.update_progress(done, total)
         return result

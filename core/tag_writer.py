@@ -547,6 +547,9 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             if _normalize_date_str(file_str) == _normalize_date_str(db_str):
                 changed = False
 
+        if changed and file_key in ('artist', 'album_artist') and _same_artist_names(file_val, db_val):
+            changed = False
+
         if changed and db_key == 'genres' and db_val:
             # If the file genres contain the database genres, do not flag as
             # changed (prevents overwriting a rich genre list with a generic
@@ -1127,6 +1130,30 @@ def _parse_track_num(val) -> Optional[int]:
         return int(str(val).split('/')[0])
     except (ValueError, IndexError):
         return None
+
+
+def _artist_name_set(value) -> set:
+    """the artists a tag names, spelling aside"""
+    import re as _re
+    from core.library2.importer import split_artist_credits
+    from core.text.normalize import normalize_for_comparison
+    if isinstance(value, (list, tuple)):
+        value = '; '.join(str(v) for v in value if v)
+    # a <Vocal: Eliana> note is a credit role, never part of a name
+    text = _re.sub(r'<[^<>]*>', '', str(value or ''))
+    return {n for n in (normalize_for_comparison(p) for p in split_artist_credits(text)) if n}
+
+
+def _same_artist_names(file_val, db_val) -> bool:
+    """Do both sides name the same artists? "8ruki, Flee" and "8ruki; Flee",
+    "Jim O’Rourke" and "Jim O'Rourke", "Tōru" and "Toru", and
+    "Hiroyuki Sawano <Vocal: Eliana>" and "Hiroyuki Sawano" all did, and the
+    re-tag job reported every one as a mismatch: 20k of 24k on one library."""
+    try:
+        names = _artist_name_set(file_val)
+        return bool(names) and names == _artist_name_set(db_val)
+    except Exception:  # noqa: BLE001 - a compare helper never breaks the diff
+        return False
 
 
 def _normalize_for_compare(val) -> str:

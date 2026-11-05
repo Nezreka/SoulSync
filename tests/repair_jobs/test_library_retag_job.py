@@ -175,3 +175,27 @@ def test_full_depth_refreshes_only_scoped_subjects_before_preview(subjects, monk
     assert order[0] == ('refresh', [2])
     assert order[1][0] == 'preview'
     assert findings[0]['details']['enrichment_depth'] == 'full'
+
+
+def test_a_track_that_now_checks_out_has_its_old_finding_resolved(subjects, monkeypatch, tmp_path):
+    """the check got smarter (a joiner or a curly apostrophe isn't a mismatch
+    any more) and thousands of findings it had raised stayed open, with
+    nothing left to fix (Storm)"""
+    import sqlite3
+
+    path = str(tmp_path / "f.db")
+    with sqlite3.connect(path) as conn:
+        conn.execute("CREATE TABLE repair_findings (id INTEGER PRIMARY KEY, job_id TEXT, "
+                     "finding_type TEXT, entity_type TEXT, entity_id TEXT, status TEXT, "
+                     "user_action TEXT, resolved_at TEXT, updated_at TEXT)")
+        conn.executemany(
+            "INSERT INTO repair_findings(job_id, finding_type, entity_type, entity_id, status) "
+            "VALUES ('library_retag', 'library_retag', 'track', ?, 'pending')",
+            [("lib2:1",), ("lib2:2",)])
+    _preview(monkeypatch, {1: _entry(1, diff=[]), 2: _entry(2, diff=[_row()])})
+    ctx, findings = _context()
+    ctx.db = SimpleNamespace(_get_connection=lambda: sqlite3.connect(path))
+    LibraryRetagJob().scan(ctx)
+    with sqlite3.connect(path) as conn:
+        status = dict(conn.execute("SELECT entity_id, status FROM repair_findings"))
+    assert status == {"lib2:1": "resolved", "lib2:2": "pending"}
