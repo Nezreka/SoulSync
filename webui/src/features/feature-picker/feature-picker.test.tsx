@@ -167,3 +167,51 @@ describe('reachable', () => {
     );
   });
 });
+
+describe('pausing what nobody uses (admins)', () => {
+  function adminServer(everyoneHid: boolean) {
+    const bgPosts: unknown[] = [];
+    let paused = false;
+    const withBg = (off: string[]) => ({
+      ...payload(off),
+      background: {
+        podcasts: { paused, everyone_hid: everyoneHid },
+        audiobooks: { paused: false, everyone_hid: false },
+      },
+    });
+    server.use(
+      http.get('*/api/profiles/me/features', () => HttpResponse.json(withBg(['podcasts']))),
+      http.post('*/api/profiles/me/features/background', async ({ request }) => {
+        const body = (await request.json()) as { paused: boolean };
+        bgPosts.push(body);
+        paused = body.paused;
+        return HttpResponse.json({ success: true, background: withBg(['podcasts']).background });
+      }),
+    );
+    return bgPosts;
+  }
+
+  it('offers the pause once every profile hid the part', async () => {
+    const posts = adminServer(true);
+    await openPicker();
+    const pause = await screen.findByRole('switch', { name: /Also pause its background jobs/ });
+    expect(pause).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(pause);
+    await waitFor(() => expect(posts).toEqual([{ feature: 'podcasts', paused: true }]));
+    await waitFor(() => expect(pause).toHaveAttribute('aria-checked', 'true'));
+  });
+
+  it('says why not when someone else still uses it', async () => {
+    adminServer(false);
+    await openPicker();
+    await screen.findByText(/Other profiles still use podcasts/);
+    expect(screen.queryByRole('switch', { name: /Also pause/ })).toBeNull();
+  });
+
+  it('a profile without the admin view sees neither', async () => {
+    await openPicker();
+    fireEvent.click(switchFor('Podcasts'));
+    await waitFor(() => expect(posts).toEqual([{ off: ['podcasts'] }]));
+    expect(screen.queryByText(/background jobs/)).toBeNull();
+  });
+});

@@ -225,7 +225,9 @@ Each switch saves right away. What's off leaves the sidebar, its dashboard card 
 
 Search, Library, Watchlist, Wishlist, Downloads and Settings are always there, on the music side and the video side.
 
-This is a preference, not a lock. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back. To stop someone from opening a page at all, use **page access** in their profile instead.
+This is a preference, not a lock. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back.
+
+Once **every** profile has Podcasts or Audiobooks hidden, an admin sees **Also pause its background jobs** under it. Paused, its scheduled checks and downloads stop. If anyone turns the part back on, they start again by themselves. **Run now** on the Automations page always works. The video side's jobs have their own switch on the video Automations page. To stop someone from opening a page at all, use **page access** in their profile instead.
 
 First-run setup asks what SoulSync is for and starts you off with the rest hidden. A music-only install, for example, starts without podcasts, audiobooks and the video side. Profiles that existed before see a one-time card above **Customize** until they pick something (**Keep everything** counts).
 `

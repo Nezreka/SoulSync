@@ -177,8 +177,37 @@
   padding: 12px 16px;
   cursor: pointer;
 }
-.row + .row {
+.row + .row,
+.subRow + .row,
+.subNote + .row {
   border-top: 1px solid var(--white-a06);
+}
+
+/* the background pause under a hidden part (admins only) */
+.subRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px 12px 66px;
+  cursor: pointer;
+}
+
+.subText {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.subNote {
+  margin: 0;
+  padding: 0 16px 12px 66px;
+  font-size: 12.5px;
+  color: var(--text-3);
 }
 .row:hover {
   background: var(--white-a03);

@@ -9,7 +9,7 @@
  */
 
 import { Dialog } from '@base-ui/react/dialog';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 
 import type { FeatureDef, FeaturesPayload, FeaturesSave } from '@/shell/features';
 
@@ -96,6 +96,25 @@ export function FeaturePicker() {
     save({ off: next }, next);
   };
 
+  const pauseBackground = async (feature: string, paused: boolean) => {
+    setError('');
+    try {
+      const res = await fetch('/api/profiles/me/features/background', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ feature, paused }),
+      });
+      const body = (await res.json().catch(() => null)) as {
+        success?: boolean;
+        background?: FeaturesPayload['background'];
+      } | null;
+      if (!res.ok || !body?.success) throw new Error('save');
+      setData((prev) => (prev ? { ...prev, background: body.background } : prev));
+    } catch {
+      setError("That didn't save. Check your connection and try again.");
+    }
+  };
+
   const pickPreset = (id: string) => {
     const preset = data?.presets.find((p) => p.id === id);
     if (preset) save({ preset: id }, preset.off);
@@ -178,23 +197,51 @@ export function FeaturePicker() {
                 {rows.map((f) => {
                   const on = !off.includes(f.id);
                   const labelId = `fp-${f.id}`;
+                  const bg = data?.background?.[f.id];
                   return (
-                    <label key={f.id} className={styles.row} data-on={on || undefined}>
-                      <span className={styles.icon} aria-hidden="true">
-                        <FeatureIcon id={f.id} />
-                      </span>
-                      <span className={styles.text}>
-                        <span className={styles.rowTitle} id={labelId}>
-                          {f.label}
+                    <Fragment key={f.id}>
+                      <label className={styles.row} data-on={on || undefined}>
+                        <span className={styles.icon} aria-hidden="true">
+                          <FeatureIcon id={f.id} />
                         </span>
-                        <span className={styles.rowDesc}>{f.desc}</span>
-                      </span>
-                      <Switch
-                        aria-labelledby={labelId}
-                        checked={on}
-                        onCheckedChange={(next) => toggle(f.id, next)}
-                      />
-                    </label>
+                        <span className={styles.text}>
+                          <span className={styles.rowTitle} id={labelId}>
+                            {f.label}
+                          </span>
+                          <span className={styles.rowDesc}>{f.desc}</span>
+                        </span>
+                        <Switch
+                          aria-labelledby={labelId}
+                          checked={on}
+                          onCheckedChange={(next) => toggle(f.id, next)}
+                        />
+                      </label>
+                      {/* jobs are install-wide (#1909): an admin can stop them
+                        once nobody uses the part */}
+                      {!on && bg ? (
+                        bg.everyone_hid ? (
+                          <label className={styles.subRow}>
+                            <span className={styles.subText} id={`${labelId}-bg`}>
+                              Also pause its background jobs
+                              <span className={styles.rowDesc}>
+                                Hidden for every profile. Turning it back on for anyone resumes
+                                them.
+                              </span>
+                            </span>
+                            <Switch
+                              aria-labelledby={`${labelId}-bg`}
+                              checked={bg.paused}
+                              onCheckedChange={(next) => void pauseBackground(f.id, next)}
+                            />
+                          </label>
+                        ) : (
+                          <p className={styles.subNote}>
+                            Other profiles still use {f.label.toLowerCase()}, so its background jobs
+                            keep running.
+                          </p>
+                        )
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </div>

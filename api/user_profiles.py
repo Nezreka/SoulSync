@@ -1473,7 +1473,11 @@ def get_profile_features():
     try:
         db, pid = get_database(), get_current_profile_id()
         off = ui_features.load_off(db, pid)
-        return jsonify({'success': True, **ui_features.payload(off, ui_features.has_chosen(db, pid))})
+        body = {'success': True, **ui_features.payload(off, ui_features.has_chosen(db, pid))}
+        # install-wide, so only an admin sees or changes it
+        if is_admin_request():
+            body['background'] = ui_features.background_state(db)
+        return jsonify(body)
     except Exception as e:
         logger.error("features read failed: %s", e)
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -1500,10 +1504,36 @@ def save_profile_features():
             off = data['off']
         else:
             return jsonify({'success': False, 'error': 'Send off, preset or purposes'}), 400
-        saved = ui_features.save_off(get_database(), profile_id, off)
-        return jsonify({'success': True, **ui_features.payload(saved)})
+        db = get_database()
+        saved = ui_features.save_off(db, profile_id, off)
+        body = {'success': True, **ui_features.payload(saved)}
+        if is_admin_request():
+            # hiding a part can make it hidden for everyone, the pause line
+            # in the picker follows straight away
+            body['background'] = ui_features.background_state(db)
+        return jsonify(body)
     except Exception as e:
         logger.error("features save failed: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/features/background', methods=['POST'])
+def set_feature_background():
+    """pause a part's background jobs (#1909). admin only, install-wide. it
+    only bites while every profile has the part hidden."""
+    from core import ui_features
+    if not is_admin_request():
+        return jsonify({'success': False, 'error': 'Admin only'}), 403
+    data = request.json or {}
+    feature = data.get('feature')
+    if feature not in ui_features.BACKGROUND_FEATURES:
+        return jsonify({'success': False, 'error': 'That part has no background pause'}), 400
+    try:
+        db = get_database()
+        ui_features.set_paused(db, feature, bool(data.get('paused')))
+        return jsonify({'success': True, 'background': ui_features.background_state(db)})
+    except Exception as e:
+        logger.error("background pause save failed: %s", e)
         return jsonify({'success': False, 'error': str(e)}), 500
 
 

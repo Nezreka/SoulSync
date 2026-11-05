@@ -201,6 +201,91 @@ def has_chosen(db, profile_id: Optional[int]) -> bool:
         return True
 
 
+# --- pausing what nobody uses (#1909) ---------------------------------------
+#
+# hiding is per profile, but background jobs are per install. so a part can
+# only stop running once EVERY profile has it hidden, and only when an admin
+# says so. the video side already has its own master switch for its jobs
+# (and ships paused), so this covers the two spoken-word sides.
+
+BACKGROUND_FEATURES = ("podcasts", "audiobooks")
+_PAUSED_KEY = "ui_features_paused"
+
+
+def feature_for_automation(auto: Optional[Dict[str, Any]]) -> Optional[str]:
+    """which hideable part an automation works for, if any."""
+    auto = auto or {}
+    action = str(auto.get("action_type") or "")
+    trigger = str(auto.get("trigger_type") or "")
+    if action.startswith("audiobook_") or trigger.startswith("audiobook_"):
+        return "audiobooks"
+    if "podcast" in action or "podcast" in trigger:
+        return "podcasts"
+    return None
+
+
+def _profile_hides(db, profile: Dict[str, Any], feature: str) -> bool:
+    """this profile doesn't use the feature: hid it, or can't open it."""
+    pages = next((f["pages"] for f in FEATURES if f["id"] == feature), [])
+    allowed = profile.get("allowed_pages")
+    if not profile.get("is_admin") and isinstance(allowed, list) and pages:
+        if not any(p in allowed for p in pages):
+            return True
+    return feature in load_off(db, profile.get("id"))
+
+
+def everyone_hid(db, feature: str) -> bool:
+    """True only when every profile has this part hidden (or can't reach it).
+    can't read the profiles, or the list came back as the error fallback
+    (no allowed_pages key), then it's in use."""
+    try:
+        profiles = db.get_all_profiles() or []
+    except Exception:  # noqa: BLE001 - unknown means someone might use it
+        return False
+    if not profiles or any("allowed_pages" not in p for p in profiles):
+        return False
+    return all(_profile_hides(db, p, feature) for p in profiles)
+
+
+def load_paused(db) -> List[str]:
+    try:
+        raw = db.get_metadata(_PAUSED_KEY)
+        wanted = set(json.loads(raw)) if raw else set()
+    except Exception:  # noqa: BLE001 - unreadable means nothing paused
+        return []
+    return [f for f in BACKGROUND_FEATURES if f in wanted]
+
+
+def set_paused(db, feature: str, paused: bool) -> List[str]:
+    if feature not in BACKGROUND_FEATURES:
+        raise ValueError(f"{feature} can't be paused")
+    now = set(load_paused(db))
+    if paused:
+        now.add(feature)
+    else:
+        now.discard(feature)
+    clean = [f for f in BACKGROUND_FEATURES if f in now]
+    db.set_metadata(_PAUSED_KEY, json.dumps(clean))
+    if load_paused(db) != clean:
+        raise RuntimeError("couldn't save the background pause")
+    return clean
+
+
+def background_paused(db, feature: Optional[str]) -> bool:
+    """the engine's question: skip this part's jobs right now? the admin asked
+    AND nobody uses it. a profile switching it back on resumes it with no
+    second step."""
+    if feature not in BACKGROUND_FEATURES:
+        return False
+    return feature in load_paused(db) and everyone_hid(db, feature)
+
+
+def background_state(db) -> Dict[str, Dict[str, bool]]:
+    paused = set(load_paused(db))
+    return {f: {"paused": f in paused, "everyone_hid": everyone_hid(db, f)}
+            for f in BACKGROUND_FEATURES}
+
+
 def payload(off: Iterable[str], chosen: bool = True) -> Dict[str, Any]:
     clean = normalize_off(list(off))
     return {
@@ -216,4 +301,6 @@ def payload(off: Iterable[str], chosen: bool = True) -> Dict[str, Any]:
 
 __all__ = ["FEATURES", "FEATURE_IDS", "GROUPS", "PRESETS", "normalize_off", "preset_for",
            "hidden_pages", "off_from_purposes", "seed_from_purposes", "load_off", "save_off", "clear", "has_chosen",
+           "BACKGROUND_FEATURES", "feature_for_automation", "everyone_hid", "load_paused",
+           "set_paused", "background_paused", "background_state",
            "payload"]

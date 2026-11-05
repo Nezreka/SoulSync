@@ -196,3 +196,20 @@ def test_finishing_setup_hides_what_wasnt_picked(db):
     c = _client(pid)
     assert c.post('/api/setup/complete', json={'purposes': ['music', 'podcasts']}).get_json()['success']
     assert uf.load_off(db, pid) == ['audiobooks', 'video']
+
+
+def test_only_an_admin_sees_or_sets_the_background_pause(db):
+    """jobs are install-wide, so pausing them is an admin call."""
+    member = db.create_profile(name=f'm_{os.urandom(3).hex()}')
+    cm, ca = _client(member), _client(1)
+    assert 'background' not in cm.get('/api/profiles/me/features').get_json()
+    r = cm.post('/api/profiles/me/features/background', json={'feature': 'podcasts', 'paused': True})
+    assert r.status_code == 403
+
+    body = ca.get('/api/profiles/me/features').get_json()
+    assert set(body['background']) == {'podcasts', 'audiobooks'}
+    r = ca.post('/api/profiles/me/features/background', json={'feature': 'podcasts', 'paused': True})
+    assert r.get_json()['background']['podcasts']['paused'] is True
+    assert ca.post('/api/profiles/me/features/background',
+                   json={'feature': 'video', 'paused': True}).status_code == 400
+    ca.post('/api/profiles/me/features/background', json={'feature': 'podcasts', 'paused': False})

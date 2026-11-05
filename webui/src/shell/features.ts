@@ -28,6 +28,8 @@ export interface FeatureDef {
 export interface FeaturesPayload {
   /** false until this profile saves a choice; the dashboard offers the picker */
   chosen?: boolean;
+  /** admins only: podcasts / audiobooks jobs, paused and hidden-by-everyone */
+  background?: Record<string, { paused: boolean; everyone_hid: boolean }>;
   features: FeatureDef[];
   groups: { id: string; label: string }[];
   presets: { id: string; label: string; desc: string; off: string[] }[];

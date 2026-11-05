@@ -1684,7 +1684,9 @@ Session routes (the signed-in browser, not an API key) behind **Customize** in t
 | `{"preset": "simple"}` | `simple` (music, Discover, playlist sync and import) or `full` (everything) |
 | `{"purposes": ["music", "podcasts"]}` | what first-run setup asks; hides podcasts, audiobooks or video when they weren't picked |
 
-and answers with the same shape as `GET`. Feature ids: `discover`, `playlists`, `explorer`, `import`, `stats`, `music_videos`, `sample_studio`, `podcasts`, `audiobooks`, `video`, `video_discover`, `video_calendar`, `chat`, `automations`, `tools`. Search, library, watchlist, wishlist, downloads and settings can't be hidden, on either side.
+and answers with the same shape as `GET`. Admins also get `background`: for `podcasts` and `audiobooks`, whether their jobs are `paused` and whether `everyone_hid` them.
+
+`POST /api/profiles/me/features/background` (admin only) takes `{"feature": "podcasts", "paused": true}`. A paused part's scheduled and event automations are skipped only while every profile has it hidden (a profile that can't open the page counts as hidden); turning it back on for anyone resumes them. Run now still runs. The video side's jobs have their own master switch on the video Automations page. Feature ids: `discover`, `playlists`, `explorer`, `import`, `stats`, `music_videos`, `sample_studio`, `podcasts`, `audiobooks`, `video`, `video_discover`, `video_calendar`, `chat`, `automations`, `tools`. Search, library, watchlist, wishlist, downloads and settings can't be hidden, on either side.
 
 ---
 
