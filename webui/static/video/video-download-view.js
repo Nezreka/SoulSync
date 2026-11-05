@@ -1561,9 +1561,11 @@
         return s;
     }
 
-    function autoGrabEpisode(container, st, sn, en, src) {
+    function autoGrabEpisode(container, st, sn, en, src, willRetry) {
         // Resolves once the search SETTLES (throttle the searches, not the grabs); the
-        // row then tracks the live download itself.
+        // row then tracks the live download itself. willRetry: a search that ERRORED
+        // (an indexer timeout, not "nothing found") is left on Searching, the caller
+        // tries it again
         return new Promise(function (resolve) {
             var epEl = _epEl(container, sn, en);
             epSearching(epEl);
@@ -1578,7 +1580,8 @@
                             epTrack(epEl, r.id);
                             document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
                         } else {
-                            epNoRelease(epEl, r.error || panel._error);
+                            r = Object.assign({}, r, { errored: !!panel._error });
+                            if (!(r.errored && willRetry)) epNoRelease(epEl, r.error || panel._error);
                         }
                         resolve(r);
                     });
@@ -1644,17 +1647,31 @@
             if (btn) btn.textContent = 'Grabbing…';
             toast('Grabbing ' + eps.length + ' episode' + (eps.length > 1 ? 's' : '') +
                 ' — each row shows live status', 'info');
-            var idx = 0, active = 0, done = 0, MAX = 3;
+            // queue entries are [episode, tries]. an episode whose search errored
+            // (Prowlarr took past its 75s, an indexer refused) goes to the back for
+            // one more try, and from then on one search runs at a time: three at
+            // once is what backs Prowlarr up past its timeout on a slow indexer,
+            // and every episode after the first few failed (SeadogsBooty, Dexter S1)
+            var queue = eps.map(function (en) { return [en, 0]; });
+            var n = 0, active = 0, MAX = 3;
+            function finished() { return !queue.length && !active; }
             function pump() {
-                while (active < MAX && idx < eps.length) {
+                while (active < MAX && queue.length) {
+                    var item = queue.shift();
                     active++;
                     // Round-robin the sources so one dead indexer can't sink the season.
-                    var src = sources[idx % sources.length];
-                    autoGrabEpisode(container, st, sn, eps[idx++], src).then(function () {
-                        active--; done++;
-                        if (done >= eps.length) { if (btn) { btn.disabled = false; btn.textContent = 'Grab season'; } }
-                        else pump();
-                    });
+                    var src = sources[n++ % sources.length];
+                    (function (en, tries) {
+                        autoGrabEpisode(container, st, sn, en, src, tries === 0).then(function (r) {
+                            active--;
+                            if (r && !r.ok && r.errored && tries === 0) {
+                                MAX = 1;
+                                queue.push([en, 1]);
+                            }
+                            if (finished()) { if (btn) { btn.disabled = false; btn.textContent = 'Grab season'; } }
+                            else pump();
+                        });
+                    })(item[0], item[1]);
                 }
             }
             pump();

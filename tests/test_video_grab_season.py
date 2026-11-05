@@ -172,7 +172,7 @@ def test_the_per_episode_fallback_survives():
 
 def test_the_fallback_spreads_episodes_across_sources():
     fn = _grab_season()
-    assert "sources[idx % sources.length]" in fn
+    assert "sources[n++ % sources.length]" in fn
 
 
 def test_the_pack_search_is_scoped_to_the_season():
@@ -360,3 +360,66 @@ def test_season_and_show_pack_searches_name_a_source():
     assert "season_end: st.maxSeason || 5, source: showSrc }" in js
     fn = js[js.index("function _packSource("):js.index("function _noSourceInto(")]
     assert "'usenet'" in fn and "'torrent'" in fn
+
+
+# ── an errored search gets one more try (SeadogsBooty, Dexter S1) ────────────
+# three episode searches at once backed Prowlarr up past its 75s timeout and
+# every episode after the first few came back "Not grabbed: Prowlarr did not
+# answer within 75s". an errored search is not "nothing found": it goes to the
+# back of the queue once, one search at a time from then on.
+
+_RETRY_HARNESS = r"""
+const fs = require('fs');
+const src = fs.readFileSync('webui/static/video/video-grab.js', 'utf8');
+const calls = { search: [], grab: [], states: {} };
+const seen = {};
+global.window = {}; global.document = { dispatchEvent() {} };
+global.CustomEvent = function () {};
+global.fetch = (url, opt) => {
+  const body = opt && opt.body ? JSON.parse(opt.body) : null;
+  const reply = (x) => Promise.resolve({ ok: true, json: () => Promise.resolve(x) });
+  if (url.indexOf('/downloads/config') >= 0) return reply({ download_mode: 'usenet' });
+  if (url.indexOf('/search/start') >= 0) {
+    if (body.scope === 'season') return reply({ results: [] });
+    const ep = body.episode;
+    seen[ep] = (seen[ep] || 0) + 1;
+    calls.search.push(ep);
+    // ep 2 times out once, ep 3 every time, ep 4 simply has nothing
+    if ((ep === 2 && seen[ep] === 1) || ep === 3)
+      return reply({ error: 'Prowlarr: Prowlarr did not answer within 75s' });
+    if (ep === 4) return reply({ results: [] });
+    return reply({ results: [{ accepted: true, username: 'idx', title: 'Show.S01E0' + ep }] });
+  }
+  if (url.indexOf('/downloads/grab') >= 0) {
+    calls.grab.push(body.search_ctx.episode);
+    return reply({ ok: true, id: 7 });
+  }
+  return reply({});
+};
+eval(src);
+(async () => {
+  const res = await global.window.VideoGrab.season(
+    { title: 'Show', season: 1, episodes: [1, 2, 3, 4] },
+    (en, state) => { calls.states[en] = state; });
+  console.log(JSON.stringify({ res, calls }));
+})();
+"""
+
+
+@pytest.mark.skipif(_node() is None, reason="node not available")
+def test_an_errored_episode_search_is_tried_once_more():
+    out = subprocess.run([_node(), "-e", _RETRY_HARNESS], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    d = json.loads(out.stdout.strip())
+    assert sorted(d["calls"]["grab"]) == [1, 2], "the timed-out episode came back on its retry"
+    assert d["res"]["grabbed"] == 2
+    assert d["calls"]["search"].count(2) == 2 and d["calls"]["search"].count(3) == 2
+    assert d["calls"]["search"].count(4) == 1, "nothing found is an answer, not an error"
+    assert d["calls"]["states"]["3"] == "none" and d["calls"]["states"]["4"] == "none"
+
+
+def test_the_modal_retries_an_errored_episode_once():
+    js = _js()
+    fn = js[js.index("function grabSeason("):js.index("function perEpisode()") + 2000]
+    assert "queue.push([en, 1])" in fn and "MAX = 1" in fn
+    assert "errored: !!panel._error" in js

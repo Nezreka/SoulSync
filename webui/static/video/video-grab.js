@@ -57,7 +57,13 @@
     // Mirrors the modal's _pollSearch heuristic, minus the DOM streaming.
     function runSearch(params) {
         return postJSON('/api/video/downloads/search/start', params).then(function (d) {
-            if (!d || d.error) return [];
+            if (!d || d.error) {
+                // an errored search (Prowlarr past its timeout) is not "nothing
+                // found": the season loop tries it again
+                var none = [];
+                none.error = (d && d.error) || 'search failed';
+                return none;
+            }
             if (!d.id) return d.results || [];   // immediate / mock
             return pollSearch(d.id, params, d.poll_ms);
         });
@@ -99,7 +105,7 @@
             episode: opts.episode, source: src };
         return runSearch(params).then(function (rows) {
             var best = bestRow(rows);
-            if (!best) return { ok: false, error: 'no release found' };
+            if (!best) return { ok: false, error: rows.error || 'no release found', errored: !!rows.error };
             var payload = {
                 kind: 'show', title: opts.title, release_title: best.title,
                 source: src, size_bytes: best.size_bytes, quality_label: best.quality_label,
@@ -196,25 +202,32 @@
         });
     }
 
+    // queue entries are [episode, tries]. an episode whose search errored goes to
+    // the back for one more try and the loop drops to one search at a time: three
+    // at once backs Prowlarr up past its timeout on a slow indexer (SeadogsBooty)
     function perEpisode(opts, eps, total, sources, onEp) {
-        var idx = 0, active = 0, grabbed = 0, MAX = 3;
+        var queue = eps.map(function (en) { return [en, 0]; });
+        var n = 0, active = 0, grabbed = 0, MAX = 3;
         return new Promise(function (resolve) {
-            function launch(en, n) {
+            function launch(en, tries) {
                 active++;
                 if (onEp) onEp(en, 'searching');
                 // Round-robin the sources so one dead indexer can't sink a season.
-                episode({ title: opts.title, source: sources[n % sources.length],
+                episode({ title: opts.title, source: sources[n++ % sources.length],
                     season: opts.season, episode: en,
                     mediaId: opts.mediaId, mediaSource: opts.mediaSource, year: opts.year, poster: opts.poster })
                     .then(function (r) {
                         active--;
                         if (r.ok) { grabbed++; if (onEp) onEp(en, 'grabbing'); }
+                        else if (r.errored && tries === 0) { MAX = 1; queue.push([en, 1]); }
                         else if (onEp) { onEp(en, 'none'); }
-                        if (idx >= eps.length && active === 0) resolve({ grabbed: grabbed, total: total });
+                        if (!queue.length && active === 0) resolve({ grabbed: grabbed, total: total });
                         else pump();
                     });
             }
-            function pump() { while (active < MAX && idx < eps.length) { launch(eps[idx], idx); idx++; } }
+            function pump() {
+                while (active < MAX && queue.length) { var item = queue.shift(); launch(item[0], item[1]); }
+            }
             pump();
         });
     }
