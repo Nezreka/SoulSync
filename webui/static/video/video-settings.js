@@ -1512,7 +1512,9 @@
             lg.hidden = lmode === 'off';
             lg.innerHTML = LANG_ORDER.map(function (k) {
                 var on = langs.indexOf(k) !== -1;
-                return '<button type="button" class="vq-chip' + (on ? ' on' : '') + '" data-vq-lang="' + k + '">' + (LANG_LABEL[k] || k) + '</button>';
+                // vq-chip--pick: a language you want, not a tag you reject. it
+                // used to share the reject chip's red ⊘ (SeadogsBooty)
+                return '<button type="button" class="vq-chip vq-chip--pick' + (on ? ' on' : '') + '" data-vq-lang="' + k + '" aria-pressed="' + (on ? 'true' : 'false') + '">' + (LANG_LABEL[k] || k) + '</button>';
             }).join('');
         }
 

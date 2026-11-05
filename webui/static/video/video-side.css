@@ -3920,6 +3920,10 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vq-chip:hover { color: #fff; border-color: var(--white-a25); }
 .vq-chip.on { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.55); color: #fecaca; }
 .vq-chip.on::before { content: '⊘ '; font-weight: 800; }
+/* audio languages are things you WANT (prefer / require), so a picked one is
+   the accent with a tick, never the reject chip's red ⊘ */
+.vq-chip.vq-chip--pick.on { background: rgba(var(--accent-rgb), 0.18); border-color: rgba(var(--accent-rgb), 0.6); color: var(--white-a90); }
+.vq-chip.vq-chip--pick.on::before { content: '✓ '; }
 /* preference rows (label + segmented control) */
 .vq-prefs { display: flex; flex-direction: column; gap: 11px; }
 .vq-pref-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
