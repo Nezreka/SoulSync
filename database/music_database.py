@@ -23787,24 +23787,48 @@ class MusicDatabase:
             if conn:
                 conn.close()
 
-    def delete_track_by_file_path(self, file_path):
-        """Retire only the file row whose stored path matches. Returns count."""
+    def delete_track_by_file_path(self, file_path, *, release_wish=False, profile_id=1):
+        """Retire only the file row whose stored path matches. Returns count.
+
+        ``release_wish``: the user threw the song away, so stop wanting it too.
+        without it the track stays wanted with no file and the hourly wishlist
+        reconcile queues it again, so a deleted download came back the next
+        night. the review reject leaves it off on purpose, it wants a better copy.
+        """
         if not file_path:
             return 0
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             from core.library2.track_files import set_file_state
-            file_ids = [row[0] for row in cursor.execute(
-                "SELECT id FROM lib2_track_files WHERE path=? AND track_id IS NOT NULL "
-                "AND COALESCE(file_state,'active')<>'deleted'", (file_path,))]
-            for file_id in file_ids:
-                set_file_state(conn, file_id, 'deleted')
+            rows = cursor.execute(
+                "SELECT id, track_id FROM lib2_track_files WHERE path=? AND track_id IS NOT NULL "
+                "AND COALESCE(file_state,'active')<>'deleted'", (file_path,)).fetchall()
+            for row in rows:
+                set_file_state(conn, row[0], 'deleted')
             conn.commit()
-            return len(file_ids)
+            if release_wish and rows:
+                self._release_deleted_tracks(conn, [row[1] for row in rows], profile_id)
+            return len(rows)
         except Exception as e:
             logger.debug(f"Error deleting track by path: {e}")
             return 0
+
+    def _release_deleted_tracks(self, conn, track_ids, profile_id):
+        """Unmonitor tracks whose file the user deleted and drop their wishlist
+        rows. a track with another live file keeps its monitoring."""
+        try:
+            from core.library2.monitor_sync import release_removed_wishes
+            from core.library2.mirror_outbox import drain, enqueue_projected_tracks
+            release_removed_wishes(conn, track_ids, profile_id=profile_id)
+            outbox_ids = enqueue_projected_tracks(
+                conn, track_ids, profile_id=profile_id, user_initiated=False)
+            conn.commit()
+            if outbox_ids:
+                drain(self, ids=outbox_ids)
+        except Exception as e:  # noqa: BLE001 - the file is already gone, this only stops a re-grab
+            conn.rollback()
+            logger.warning("deleted tracks %s stay wanted: %s", track_ids, e)
 
     def get_library_history(self, event_type=None, page=1, limit=50,
                             exclude_download_sources=()):

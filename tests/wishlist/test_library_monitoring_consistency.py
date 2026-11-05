@@ -206,3 +206,47 @@ def test_unresolvable_identity_keeps_the_add_and_does_not_abort_reconcile(db, mo
     result = reconcile_track_wishlist(db)
     assert result['intent_failed'] == 1 and result['intent_repaired'] == 1
     assert len(db.get_wishlist_tracks()) == 2 and len(state(db)) == 1
+
+
+def _downloaded_then_deleted(db, tmp_path, release_wish):
+    """a playlist song lands, then the user deletes it from download origins"""
+    db.add_to_wishlist(track(), source_type='playlist')
+    track_id = state(db)[0]['id']
+    path = str(tmp_path / 'song.flac')
+    with db._get_connection() as conn:
+        conn.execute('INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)', (track_id, path))
+        conn.execute('DELETE FROM wishlist_tracks')  # a finished download leaves the queue
+        conn.commit()
+    assert db.delete_track_by_file_path(path, release_wish=release_wish) == 1
+    return track_id
+
+
+def test_a_deleted_download_is_queued_again_when_the_wish_stays(db, tmp_path):
+    """the review reject wants a better copy, so the reconcile re-queues it"""
+    from core.library2.monitor_sync import reconcile_track_wishlist
+    _downloaded_then_deleted(db, tmp_path, release_wish=False)
+    assert reconcile_track_wishlist(db)['added'] == 1
+
+
+def test_a_deleted_download_stays_gone_when_the_wish_is_released(db, tmp_path):
+    """deleting from download origins came back on the wishlist the next hour
+    and downloaded again overnight, with the playlist long gone"""
+    from core.library2.monitor_sync import reconcile_track_wishlist
+    track_id = _downloaded_then_deleted(db, tmp_path, release_wish=True)
+    assert state(db) == [{'id': track_id, 'monitored': 0, 'wanted': 0, 'rule': 0}]
+    assert reconcile_track_wishlist(db)['added'] == 0
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM wishlist_tracks').fetchone()[0] == 0
+
+
+def test_releasing_a_deleted_download_also_drops_its_requeued_wishlist_row(db, tmp_path):
+    from core.library2.monitor_sync import reconcile_track_wishlist
+    path = str(tmp_path / 'song.flac')
+    db.add_to_wishlist(track(), source_type='playlist')
+    with db._get_connection() as conn:
+        conn.execute('INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)', (state(db)[0]['id'], path))
+        conn.commit()
+    assert db.delete_track_by_file_path(path, release_wish=True) == 1
+    reconcile_track_wishlist(db)
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM wishlist_tracks').fetchone()[0] == 0

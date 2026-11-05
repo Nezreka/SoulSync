@@ -192,7 +192,8 @@ def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> d
         # File gone or deleted → clean up the catalogue row either way.
         if error is None:
             try:
-                db.delete_track_by_file_path(raw_path)
+                # nobody played it, so don't queue it again either
+                db.delete_track_by_file_path(raw_path, release_wish=True)
             except Exception as e:
                 logger.debug("expired cleanup: track row delete failed: %s", e)
     if error is None:

@@ -104,8 +104,8 @@ def test_automatic_delete_syncs_v2_before_removing_retry_history(monkeypatch, tm
     calls = []
 
     class _DB:
-        def delete_track_by_file_path(self, value):
-            calls.append(("legacy", value))
+        def delete_track_by_file_path(self, value, **kwargs):
+            calls.append(("legacy", value, kwargs))
 
         def delete_library_history_rows(self, ids):
             calls.append(("history", ids))
@@ -142,6 +142,8 @@ def test_automatic_delete_syncs_v2_before_removing_retry_history(monkeypatch, tm
     assert outcome["removed"] == 1
     assert outcome["library_v2"]["reason"] == "synchronized"
     assert [call[0] for call in calls] == ["legacy", "sync", "history"]
+    # nobody played it, so the wish goes too or the reconcile grabs it again
+    assert calls[0][2] == {"release_wish": True}
 
 
 def test_sync_failure_keeps_history_row_for_retry(monkeypatch, tmp_path):
@@ -150,7 +152,7 @@ def test_sync_failure_keeps_history_row_for_retry(monkeypatch, tmp_path):
     history_calls = []
 
     class _DB:
-        def delete_track_by_file_path(self, _value):
+        def delete_track_by_file_path(self, _value, **_kwargs):
             return 1
 
         def delete_library_history_rows(self, ids):

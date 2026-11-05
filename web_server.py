@@ -9115,7 +9115,8 @@ def delete_download_origins():
                     failed_ids.add(row['id'])
                     continue
                 files_missing += 1  # already gone — still clean up the rows
-            db.delete_track_by_file_path(raw_path)
+            db.delete_track_by_file_path(raw_path, release_wish=True,
+                                         profile_id=get_current_profile_id() or 1)
         removed = db.delete_library_history_rows(
             [r['id'] for r in rows if r['id'] not in failed_ids])
         return jsonify({
