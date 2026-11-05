@@ -61,6 +61,7 @@ export interface MirroredDetailModalProps {
   onDelete: () => void;
   /** 1150 — Edit Source. */
   onEditSource: () => void;
+  onExport?: () => void;
   /** 1151 — Auto-Sync (runMirroredPlaylistPipeline). */
   onRunPipeline: () => void;
   /** pull the source + discover the new tracks, nothing pushed (#1413) */
@@ -414,6 +415,7 @@ export function MirroredDetailModal({
   onClose,
   onDelete,
   onEditSource,
+  onExport,
   onRunPipeline,
   onRefreshFromSource,
   onDiscover,
@@ -1025,6 +1027,7 @@ export function MirroredDetailModal({
                           ]
                         : []),
                       ...(!own ? [{ label: 'Edit source link', onSelect: onEditSource }] : []),
+                      ...(onExport ? [{ label: 'Export playlist', onSelect: onExport }] : []),
                       // a live beatport list follows the chart, so last week's
                       // tracks drop out. a snapshot keeps today's as its own
                       // playlist that never refreshes

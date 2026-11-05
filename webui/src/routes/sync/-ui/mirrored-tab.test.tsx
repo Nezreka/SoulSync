@@ -697,7 +697,7 @@ describe('MirroredTab — export (#903)', () => {
     runCardAction('Export');
     await waitFor(() => expect(screen.getByText('Export playlist')).toBeInTheDocument());
     // The picker names the card's shown name (607).
-    expect(screen.getByText('Road Trip → ListenBrainz')).toBeInTheDocument();
+    expect(screen.getByText('Road Trip', { selector: '#pl-export-modal div' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByText('Sync to ListenBrainz'));
     expect(screen.queryByText('Export playlist')).not.toBeInTheDocument();
