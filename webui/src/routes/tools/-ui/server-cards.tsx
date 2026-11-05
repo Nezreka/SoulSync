@@ -304,7 +304,7 @@ export function MediaScanCard() {
 const JELLYFIN_DESCRIPTION =
   'HD artist photos and backgrounds from fanart.tv, TheAudioDB and Deezer, plus genres, for Jellyfin artists missing them.';
 const PLEX_DESCRIPTION =
-  'HD artist photos and backgrounds from fanart.tv, TheAudioDB and Deezer, plus genres and album art, for Plex artists missing them.';
+  'HD artist photos and backgrounds from fanart.tv, TheAudioDB and Deezer, plus genres, album art and biographies, for Plex artists missing them.';
 const DEFAULT_DESCRIPTION = 'Updates artist photos, genres, and album art from Spotify.';
 
 export function MetadataUpdaterCard() {

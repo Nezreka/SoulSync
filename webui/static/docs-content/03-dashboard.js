@@ -695,6 +695,7 @@ The **\<Server\> Metadata Updater** card (e.g. "Plex Metadata Updater") is shown
 - **Artist photo**: a big square photo for artists without one. fanart.tv first, then TheAudioDB, then Deezer, with Spotify's 640px photo as the last resort.
 - **Artist background**: the wide picture Plexamp and the Plex web app (and Jellyfin's backdrop) show behind an artist page, for artists without one. From fanart.tv, then TheAudioDB.
 - Genres from your library, and on Plex, album art.
+- **Biography** (Plex only): an artist with an empty summary gets the Last.fm bio your library already has. A summary with any text in it is left alone.
 
 Pictures are tied to the artist by its MusicBrainz or Deezer id (TheAudioDB by name only on an exact match), so a namesake's photo never lands on the wrong artist, and art the server already has is never replaced. fanart.tv needs a free key: **Settings → Connections → fanart.tv** (the video side's fanart.tv key is used when that's empty). Spotify is optional.
 
