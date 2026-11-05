@@ -307,3 +307,60 @@ it('a late response cannot restore a superseded job', async () => {
   });
   expect(text()).toBe('Pushing to ListenBrainz…');
 });
+
+describe('local M3U export', () => {
+  it('downloads local paths without a server or background job', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:playlist');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    responder = (url) =>
+      url.includes('mirrored-playlists')
+        ? {
+            display_name: 'Local Mix',
+            tracks: [
+              { track_name: 'Song', artist_name: 'Artist', duration_ms: 123000 },
+              { track_name: 'Missing' },
+            ],
+          }
+        : { success: true, m3u_content: '#EXTM3U', stats: { found: 1 } };
+    render(<Harness mode="m3u" />);
+    await act(async () => {
+      fireEvent.click(screen.getByText('go'));
+    });
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/mirrored-playlists/3',
+      '/api/generate-playlist-m3u',
+    ]);
+    expect(calls[1].body).toEqual({
+      playlist_name: 'Local Mix',
+      context_type: 'playlist',
+      save_to_disk: false,
+      tracks: [
+        { name: 'Song', artist: 'Artist', duration_ms: 123000 },
+        { name: 'Missing', artist: '', duration_ms: 0 },
+      ],
+    });
+    expect(click).toHaveBeenCalledOnce();
+    expect(text()).toBe('Downloaded M3U (1/2 in library)');
+  });
+  it('reports generation errors', async () => {
+    responder = (url) =>
+      url.includes('mirrored-playlists')
+        ? { tracks: [{ track_name: 'Song' }] }
+        : { success: false, error: 'Library unavailable' };
+    render(<Harness mode="m3u" />);
+    await act(async () => {
+      fireEvent.click(screen.getByText('go'));
+    });
+    expect(text()).toBe('Library unavailable');
+  });
+  it('reports empty playlists without generating a file', async () => {
+    responder = () => ({ tracks: [] });
+    render(<Harness mode="m3u" />);
+    await act(async () => {
+      fireEvent.click(screen.getByText('go'));
+    });
+    expect(calls).toHaveLength(1);
+    expect(text()).toBe('No tracks available to export');
+  });
+});

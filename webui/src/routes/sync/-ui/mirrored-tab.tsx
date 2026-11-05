@@ -1505,6 +1505,13 @@ export function MirroredTab({
       )}
       {detail && (
         <MirroredDetailModal
+          onExport={() => {
+            const row = rows?.find((r) => r.id === detail.playlistId);
+            if (row) {
+              setDetail(null);
+              setExporting(row);
+            }
+          }}
           playlistId={detail.playlistId}
           data={detail.data}
           now={now}

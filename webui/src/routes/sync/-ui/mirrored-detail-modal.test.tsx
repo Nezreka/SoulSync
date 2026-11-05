@@ -462,3 +462,11 @@ describe('MirroredDetailModal — open editor', () => {
     expect(screen.queryByRole('button', { name: 'Open editor' })).toBeNull();
   });
 });
+
+it('opens export from the mirrored playlist detail menu', () => {
+  const onExport = vi.fn();
+  renderModal({ name: 'Local Mix', source: 'spotify', tracks: [] }, { onExport });
+  openMore();
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Export playlist' }));
+  expect(onExport).toHaveBeenCalledOnce();
+});

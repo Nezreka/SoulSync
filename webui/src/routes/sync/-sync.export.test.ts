@@ -35,6 +35,7 @@ const STATS = readFileSync(resolve(process.cwd(), 'static/stats-automations.js')
 describe('EXPORT_DESTINATIONS (669-684)', () => {
   it('offers the four modes in the vanilla order, ListenBrainz push accented', () => {
     expect(EXPORT_DESTINATIONS.map((d) => d.mode)).toEqual([
+      'm3u',
       'push',
       'download',
       'spotify',
@@ -45,12 +46,13 @@ describe('EXPORT_DESTINATIONS (669-684)', () => {
 
   it('carries the vanilla copy verbatim', () => {
     expect(EXPORT_DESTINATIONS.map((d) => d.title)).toEqual([
+      'Download .m3u file',
       'Sync to ListenBrainz',
       'Download .jspf file',
       'Sync to Spotify',
       'Sync to Deezer',
     ]);
-    for (const dest of EXPORT_DESTINATIONS) {
+    for (const dest of EXPORT_DESTINATIONS.filter((d) => d.mode !== 'm3u')) {
       expect(STATS).toContain(dest.title);
       expect(STATS).toContain(dest.detail);
     }
