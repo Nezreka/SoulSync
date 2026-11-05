@@ -1100,6 +1100,15 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 download_tasks[task_id]['status'] = 'not_found'
                 _diag_summary = ' | '.join(search_diagnostics) if search_diagnostics else 'no queries attempted'
                 download_tasks[task_id]['error_message'] = f'No match found for "{track_name}" by {artist_name or "Unknown"} after {len(search_queries)} queries. Breakdown: {_diag_summary}'
+                # a file DID download, it was quarantined, and the retry found no
+                # other copy. saying "no match found" hid the file waiting in
+                # quarantine (#2001)
+                _quarantined = download_tasks[task_id].get('last_quarantine_reason')
+                if _quarantined:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = (
+                        f'Downloaded, but quarantined ({_quarantined}). No other copy passed, '
+                        f'the file is waiting in Downloads, Quarantine.')
                 # Store raw results so the user can review what Soulseek returned
                 if all_raw_results and not download_tasks[task_id].get('cached_candidates'):
                     download_tasks[task_id]['cached_candidates'] = all_raw_results

@@ -671,6 +671,16 @@ def _is_staging_task(task_id) -> bool:
         return bool(download_tasks.get(task_id, {}).get('staging_match'))
 
 
+def _remember_quarantine(task_id, reason) -> None:
+    """if the retry this precedes finds nothing, the task says the file was
+    quarantined and why, not "no match found" (#2001)"""
+    if not task_id or not reason:
+        return
+    with tasks_lock:
+        if task_id in download_tasks:
+            download_tasks[task_id]['last_quarantine_reason'] = str(reason)
+
+
 def _requeue_quarantined_task_for_retry(task_id, batch_id, trigger) -> bool:
     """Ask the download monitor to re-run this task on its next-best candidate.
 
@@ -2949,6 +2959,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             # Requeue-first, fail-second — the same order the direct path uses.
             # A successful requeue means the task is live again on its next-best
             # candidate, so it must not be marked failed.
+            _remember_quarantine(task_id, reason)
             if _requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
                 logger.info(
                     f"Task {task_id} quarantined by the {trigger} guard — "
@@ -3015,6 +3026,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             # source flagged used) picks the runner-up match instead.
             with matched_context_lock:
                 matched_downloads_context.pop(context_key, None)
+            _remember_quarantine(task_id, f"verification failed: {failure_msg}")
             if _requeue_quarantined_task_for_retry(task_id, batch_id, 'acoustid'):
                 logger.info(
                     f"AcoustID mismatch for task {task_id} — retrying next-best candidate: {failure_msg}"
@@ -3080,6 +3092,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             # file and retry the next-best candidate before failing.
             with matched_context_lock:
                 matched_downloads_context.pop(context_key, None)
+            _remember_quarantine(task_id, f"integrity check failed: {failure_msg}")
             if _requeue_quarantined_task_for_retry(task_id, batch_id, 'integrity'):
                 logger.info(
                     f"Integrity check failed for task {task_id} — retrying next-best candidate: {failure_msg}"
