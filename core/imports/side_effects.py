@@ -8,6 +8,7 @@ import os
 from typing import Any, Dict, Optional
 
 from core.settings import config_manager
+from core.imports.paths import _coerce_int
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
@@ -826,7 +827,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # fill-only writers + enrichment to resolve.
             total_tracks = _own_provider_album.get("total_tracks") or 0
         else:
-            total_tracks = album_ctx.get("total_tracks", 0) or 0
+            # goes straight into track_count, so a number or unknown. an album's
+            # title sat there until it stopped the library v2 migration (#1989)
+            total_tracks = _coerce_int(album_ctx.get("total_tracks"), 0)
         if _album_ctx_distrusted:
             # The batch's summed duration is a stranger's album total — use
             # the track's own duration (the only duration this import
