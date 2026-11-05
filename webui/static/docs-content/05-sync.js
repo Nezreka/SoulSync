@@ -10,7 +10,7 @@ registerDocsSection({
             body: `
 The Sync page imports playlists from **Spotify**, **YouTube**, **YouTube Music**, **Tidal**, **Qobuz**, **Deezer**, **Beatport**, **iTunes** links, **ListenBrainz**, and **Last.fm** — as well as **Server Playlists** from your connected media server and track lists from files. Once imported, playlists are **mirrored** — they persist in your SoulSync instance and can be refreshed, discovered, and synced to your wishlist for downloading.
 
-![Playlist sync page](sync-overview.jpg)
+![The Sync page's Mirrored view with the mirrored playlists and source filter chips](sync-overview.jpg)
 
 ## The sync lifecycle
 
@@ -41,7 +41,7 @@ If Spotify is connected, opening the Spotify panel from **+ Add playlist** lists
 - Nothing is imported until you ask: loading the list doesn't create any mirrors
 - **Keep your own copy** (the button on a playlist's cover) puts it in **My Playlists** instead of Mirrored: an editable playlist that never refreshes from the source, so **Sync & download** leaves its songs as they are. Good as a base to build on. The songs remember where they came from, so identifying them stays exact. Offered on the account, link, ListenBrainz and Last.fm tabs; Beatport has its own frozen copy, **Save snapshot**
 
-![Spotify playlists loaded](sync-spotify.jpg)
+![The Spotify tab before sign-in, reporting no playlists found](sync-spotify.jpg)
 
 > [!TIP]
 > Spotify-sourced playlists are auto-discovered at confidence 1.0 during refresh — no separate discovery step needed.
@@ -53,6 +53,8 @@ If Spotify is connected, opening the Spotify panel from **+ Add playlist** lists
             lede: 'Sync any public Spotify playlist or album by URL — no Spotify account or OAuth required.',
             body: `
 Sync Spotify playlists and albums **without OAuth credentials**. Paste any public Spotify playlist or album URL and SoulSync will load the tracks for download. Useful when you don't want to connect a Spotify account, or want to sync from someone else's public playlist.
+
+![The Add a playlist modal with its paste-a-link field for public playlist URLs](sync-spotify-public.jpg)
 
 - Paste any \`open.spotify.com/playlist/...\` or \`open.spotify.com/album/...\` URL
 - Works without Spotify API credentials
@@ -67,7 +69,7 @@ Sync Spotify playlists and albums **without OAuth credentials**. Paste any publi
             body: `
 Paste a YouTube playlist URL into the input field and click **Parse Playlist**. SoulSync extracts the track list, imports it, and opens it under **Mirrored**, where each track is matched to official metadata in the background.
 
-![YouTube playlist import](sync-youtube.jpg)
+![Mirrored playlists filtered to YouTube, showing the Morning Run playlist](sync-youtube.jpg)
 
 > [!WARNING]
 > YouTube titles are often non-standard (e.g. "Artist - Song (Official Video)"). The [discovery pipeline](#sync-discovery) handles most of these, but edge cases may need manual fixes.
@@ -79,6 +81,8 @@ Paste a YouTube playlist URL into the input field and click **Parse Playlist**. 
             lede: 'Load your Tidal playlists once Tidal is authenticated in Settings.',
             body: `
 Requires Tidal authentication in Settings. Once connected, click **Refresh** to list your Tidal playlists, then **Import** the ones you want (or **Import all**). Refresh only lists them; nothing is fetched or mirrored until you import.
+
+![Mirrored playlists filtered to Tidal, showing the Focus Flow playlist](sync-tidal.jpg)
 
 Like YouTube playlists, Tidal playlists go through the [discovery pipeline](#sync-discovery) to match tracks to official metadata before syncing.
 
@@ -92,6 +96,8 @@ Like YouTube playlists, Tidal playlists go through the [discovery pipeline](#syn
             lede: 'Your personal Deezer playlists, loaded with the same ARL token you use for downloads.',
             body: `
 If you have a **Deezer ARL token** configured (Settings → Connections → Sources), the Deezer panel, opened from **+ Add playlist**, lists your personal playlists, working just like Spotify's.
+
+![The Deezer tab asking for an ARL token in Settings before playlists can load](sync-deezer.jpg)
 
 - Requires an ARL token (a browser cookie from deezer.com, configured in Settings → Connections → Sources)
 - **Import** loads the playlist's tracks (a big one takes a while, with progress shown) and opens it under **Mirrored**
@@ -108,6 +114,8 @@ If you have a **Deezer ARL token** configured (Settings → Connections → Sour
             body: `
 Import any public Deezer playlist by URL without needing an ARL token. Paste a Deezer playlist URL and click **Load Playlist**: SoulSync loads it, imports it and opens it under **Mirrored**.
 
+![The Add a playlist modal with a Deezer playlist URL pasted and recognised](sync-deezer-link.jpg)
+
 - Paste any \`deezer.com/playlist/...\` URL or raw playlist ID
 - Pasting one that's already in opens it instead of loading it again
 - Previously loaded URLs appear in the history bar for quick re-access
@@ -123,6 +131,8 @@ If ListenBrainz is configured in Settings, **+ Add playlist** opens a ListenBrai
 - **Your Playlists** — playlists you've created on ListenBrainz
 - **Collaborative** — playlists shared with you by other users
 - **Created For You** — auto-generated playlists based on your listening history
+
+![Mirrored playlists filtered to ListenBrainz, showing the Weekly Discovery playlist](sync-listenbrainz.jpg)
 
 Each playlist has an **Import** button (or **Open** once it's in), and **Import all** brings in everything not in yet. Importing opens it under **Mirrored**, where it identifies itself in the background. A weekly series (Weekly Jams, Weekly Exploration) is one playlist in SoulSync: importing any week files it under the series, and refreshing it picks up the newest week. **Last.fm Radio** works the same way.
 
@@ -159,7 +169,7 @@ Top 100 and Hype charts with full track listings.
 
 Opening a chart, top 10 or release list imports it into SoulSync and lands you on it under **Mirrored**, where it identifies itself like any other playlist. Opening one that's already in just opens it. A live list (Top 100, Hype 100, a genre's top 10) stays live: refreshing the playlist pulls today's list. To keep today's version as it is, use **⋯ → Save snapshot** in the playlist's window; that saves a copy that never changes.
 
-![Beatport genre browser](sync-beatport.jpg)
+![The Beatport tab with its chart carousel, Top 100 and Hype entries and Top 10 lists](sync-beatport.jpg)
 
 > [!NOTE]
 > Beatport data is cached for 24 hours (not configurable). The system automation **Refresh Beatport Cache** runs every 24 hours to keep content fresh.
@@ -171,6 +181,8 @@ Opening a chart, top 10 or release list imports it into SoulSync and lands you o
             lede: 'Turn a CSV, M3U, plain text track list, or NewPipe backup into mirrored playlists.',
             body: `
 Import track lists from **CSV, TSV, M3U/M3U8, or plain text files**, or your playlists from a **NewPipe backup**. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.
+
+![The Add a playlist modal's import-from-file option for CSV, TSV, TXT and M3U files](sync-import-file.jpg)
 
 - **CSV/TSV** — auto-detects columns; map Artist, Title, and Album from dropdowns
 - **M3U/M3U8** — read automatically: artist, title, and duration come from \`#EXTINF\` lines (or the file name for simple playlists). Round-trips with SoulSync's own M3U export
@@ -192,7 +204,7 @@ Every playlist you import is **mirrored**. The Mirrored tab is where playlists a
 - Download progress survives page refresh
 - Each profile has its own mirrored playlists
 
-![Mirrored playlist cards](sync-mirror.jpg)
+![The mirrored playlist grid with source-branded cards and live status](sync-mirror.jpg)
 
 ## Where each track stands
 
@@ -247,6 +259,8 @@ Mirrored playlists can refresh and re-sync on a schedule from the **Bulk schedul
             body: `
 The **Activity** button in the page header opens a modal with two tabs. **Syncs you ran** shows every playlist sync, album download, and wishlist processing operation with timestamps, track counts, and completion status; **Scheduled runs** covers auto-sync pipeline runs.
 
+![The Activity modal's Syncs you ran tab with found, downloaded and failed counts for each run](sync-history.jpg)
+
 - Shows playlist name, source, track count, and completion stats
 - Filter by source (Spotify, YouTube, Tidal, etc.)
 - Entries update in-place when the same playlist is re-synced
@@ -258,6 +272,8 @@ The **Activity** button in the page header opens a modal with two tabs. **Syncs 
             lede: 'Export any mirrored playlist as an M3U file for external players and media servers.',
             body: `
 Export any mirrored playlist as an **M3U file** for use in external media players or media servers. Open **Download Missing** on a playlist and use the **📋 Export as M3U** button in the download-missing modal.
+
+![A mirrored playlist's card menu with the Export option](sync-m3u.jpg)
 
 M3U files reference the actual file paths in your library, so they work with any M3U-compatible player.
 
@@ -274,6 +290,8 @@ M3U files reference the actual file paths in your library, so they work with any
             lede: 'How raw playlist titles become matched, official metadata ready to download.',
             body: `
 For non-Spotify playlists (YouTube, Tidal, Deezer links, files), tracks need to be **discovered** before syncing. Discovery matches raw titles to official Spotify/iTunes metadata using fuzzy matching with a 0.7 confidence threshold.
+
+![The Wing It Pool: discovery's best-effort guesses linking source tracks to catalogue metadata, held for review before they stick. Late Night Drive has 20 guesses waiting and none resolved yet](sync-discovery.jpg)
 
 ::: steps
 1. Import a playlist (YouTube, Tidal, or any non-Spotify source)
@@ -294,6 +312,8 @@ A track identification couldn't find is skipped by a download too. **Download Mi
             lede: 'Browse every playlist across all sources in one visual tree.',
             body: `
 A visual tree-based browser for exploring playlists across all sources. Navigate through your server playlists, Spotify playlists, and mirrored playlists in a unified interface.
+
+![The Playlist Explorer listing every playlist with its track counts per source](sync-explorer.jpg)
 
 Click any playlist to expand and view its tracks, then download or sync directly — without jumping between tabs.
 `
