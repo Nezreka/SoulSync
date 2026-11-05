@@ -636,9 +636,19 @@
     align-items: flex-start;
     padding-top: 12vh;
     opacity: 0;
-    transition: opacity 0.16s ease;
+    /* closed, it stays in the DOM: invisible but still a full-screen layer on
+       top of the page, eating every click and scroll until a reload (#2002).
+       hidden after the fade, so it never catches anything while closed */
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.16s ease, visibility 0s linear 0.16s;
 }
-.dd-palette-overlay.open { opacity: 1; }
+.dd-palette-overlay.open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity 0.16s ease, visibility 0s;
+}
 .dd-palette {
     width: min(620px, calc(100vw - 40px));
     max-height: 62vh;
