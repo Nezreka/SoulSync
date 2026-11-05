@@ -1298,10 +1298,11 @@
                 '<button class="vdl-season-search" type="button" data-vdl-season-search="' + sn + '" title="Search this season as a pack">⌕</button>' +
                 '<span class="vdl-season-chev" aria-hidden="true">⌄</span>' +
             '</div>' +
-            '<div class="vdl-season-body">' +
+            // one inner wrapper so the body can open on grid rows (see video-side.css)
+            '<div class="vdl-season-body"><div class="vdl-season-inner">' +
                 '<div class="vdl-results vdl-results--season" data-vdl-season-results hidden></div>' +
                 '<div class="vdl-season-eps"><div class="vdl-season-empty">Loading…</div></div>' +
-            '</div>' +
+            '</div></div>' +
         '</div>';
     }
 
