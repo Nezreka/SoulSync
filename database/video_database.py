@@ -22,6 +22,7 @@ import os
 import re
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -856,6 +857,9 @@ class VideoDatabase:
         # Recently-Added ranks shows by their newest episode's add-date — MAX(added_at)
         # per show over a 200k-episode table, so index it.
         "CREATE INDEX IF NOT EXISTS idx_episodes_show_added ON episodes(show_id, added_at)",
+        # and movies by theirs: without it the dashboard read every movie row
+        # (wide ones, 1.9s on 9k movies) to sort for the newest 20
+        "CREATE INDEX IF NOT EXISTS idx_movies_server_added ON movies(server_source, added_at)",
         # Perf sweep (Aug 2026): movies had a tmdb_id index from day one, shows
         # never did — every library_ids_for_tmdb/watchlist_state/calendar
         # lookup was a full shows scan (measured 224ms EACH on a 3.4k-show
@@ -4702,17 +4706,26 @@ class VideoDatabase:
         p = ([server_source] if server_source else [])
         conn = self._get_connection()
         try:
+            # each half takes its own newest `limit` first. one ORDER BY over
+            # the union read every movie row (wide ones) before it could sort,
+            # this way movies walk idx_movies_server_added and stop
             rows = conn.execute(
                 "SELECT kind, id, title, year, added_at FROM ("
-                f"  SELECT 'movie' AS kind, id, title, year, added_at FROM movies WHERE {m_where}"
+                "  SELECT * FROM ("
+                f"    SELECT 'movie' AS kind, id, title, year, added_at FROM movies WHERE {m_where}"
+                "    ORDER BY added_at DESC, id DESC LIMIT ?)"
                 "   UNION ALL "
-                "  SELECT 'show' AS kind, s.id AS id, s.title AS title, s.year AS year, "
-                "         COALESCE(MAX(e.added_at), s.added_at) AS added_at "
-                "  FROM shows s LEFT JOIN episodes e ON e.show_id = s.id "
-                f"  WHERE {s_where} GROUP BY s.id "
-                "  HAVING COALESCE(MAX(e.added_at), s.added_at) IS NOT NULL"
+                # a show's newest episode is one seek on idx_episodes_show_added.
+                # the old GROUP BY over a join walked every episode (~1s at 105k)
+                "  SELECT * FROM ("
+                "    SELECT kind, id, title, year, added_at FROM ("
+                "      SELECT 'show' AS kind, s.id AS id, s.title AS title, s.year AS year, "
+                "             COALESCE((SELECT MAX(e.added_at) FROM episodes e WHERE e.show_id = s.id), "
+                "                      s.added_at) AS added_at "
+                f"      FROM shows s WHERE {s_where}"
+                "    ) WHERE added_at IS NOT NULL ORDER BY added_at DESC, id DESC LIMIT ?)"
                 ") ORDER BY added_at DESC, id DESC LIMIT ?",
-                p + p + [limit]).fetchall()
+                p + [limit] + p + [limit] + [limit]).fetchall()
             return [dict(r) for r in rows]
         except sqlite3.Error:
             logger.exception("recently_added query failed")
@@ -4876,6 +4889,20 @@ class VideoDatabase:
         out.sort(key=lambda x: str(x.get("last_viewed_at") or ""), reverse=True)
         return out[:limit]
 
+    # library size per server, for the dashboard. summing every media file is
+    # ~1.6s on a 114k-file library and the total only moves when a scan runs
+    _SIZE_TTL = 600.0
+    _size_cache: dict = {}
+
+    def _library_size(self, conn, server_source, size_sql, sv) -> int:
+        key = (str(self.database_path), server_source)
+        hit = VideoDatabase._size_cache.get(key)
+        if hit and time.monotonic() - hit[0] < VideoDatabase._SIZE_TTL:
+            return hit[1]
+        size = conn.execute(size_sql, (sv + sv) if server_source else ()).fetchone()[0]
+        VideoDatabase._size_cache[key] = (time.monotonic(), size)
+        return size
+
     def dashboard_stats(self, server_source=None) -> dict:
         """Live counts for the video dashboard, straight from video.db. Library
         counts are scoped to the active video server (``server_source``) so Plex
@@ -4908,7 +4935,7 @@ class VideoDatabase:
                     "episodes": scalar(
                         "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id"
                         + (sw + " AND" if sw else " WHERE") + " e.has_file=1", sv),
-                    "size_bytes": scalar(size_sql, (sv + sv) if server_source else ()),
+                    "size_bytes": self._library_size(conn, server_source, size_sql, sv),
                 },
                 # video_downloads is the live queue. the old downloads table is
                 # never written, so reading it kept these tiles at 0
