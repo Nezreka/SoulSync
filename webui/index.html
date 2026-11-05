@@ -1048,12 +1048,18 @@
                             <h1 class="vsr-hero-title">Search</h1>
                             <p class="vsr-hero-sub">Movies, TV shows &amp; people &mdash; everything stays in-app</p>
                             <div class="vsr-tabs" role="tablist" aria-label="Search mode">
+                                <!-- named for what each searches (#1909). "enhanced" and
+                                     "basic" said nothing about that; data-vsr-tab keeps the
+                                     old ids so the code is unchanged -->
                                 <button class="vsr-tab active" type="button" role="tab" aria-selected="true"
-                                    data-vsr-tab="enhanced" aria-controls="vsr-enhanced-panel">Enhanced</button>
+                                    data-vsr-tab="enhanced" aria-controls="vsr-enhanced-panel"
+                                    title="Movies, shows and people, by title">Titles</button>
                                 <button class="vsr-tab" type="button" role="tab" aria-selected="false"
-                                    data-vsr-tab="basic" aria-controls="vsr-basic-panel">Basic</button>
+                                    data-vsr-tab="basic" aria-controls="vsr-basic-panel"
+                                    title="Search your indexers for exact releases">Releases</button>
                                 <button class="vsr-tab" type="button" role="tab" aria-selected="false"
-                                    data-vsr-tab="fresh" aria-controls="vsr-fresh-panel">Fresh Releases</button>
+                                    data-vsr-tab="fresh" aria-controls="vsr-fresh-panel"
+                                    title="The newest releases going around">Fresh</button>
                             </div>
                             <div class="vsr-panel active" data-vsr-panel="enhanced" id="vsr-enhanced-panel"
                                 role="tabpanel">
