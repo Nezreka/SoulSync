@@ -78,7 +78,7 @@ export function WeekCard({
             {w.owned}
             <small>/{w.aired}</small>
           </span>
-          <span className={styles.weekCaption}>aired episodes in</span>
+          <span className={styles.weekCaption}>aired episodes in your library</span>
         </div>
         {w.aired ? (
           <div className={styles.meter} role="img" aria-label={weekLine(w)}>
@@ -155,7 +155,7 @@ export function CountTiles({
     </button>
   );
   return (
-    <div className="header-quick-nav dash-tiles">
+    <div className={`header-quick-nav dash-tiles ${styles.tiles}`}>
       {tile('watchlist', 'video-watchlist', watchlist ?? 0, 'On your watchlist')}
       {tile('wishlist', 'video-wishlist', wishlist ?? 0, 'On your wishlist')}
       {issues > 0
