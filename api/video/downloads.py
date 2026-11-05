@@ -730,6 +730,16 @@ def register_routes(bp):
         rid = db.add_video_blocklist(row)
         return jsonify({"success": bool(rid), "id": rid})
 
+    @bp.route("/downloads/blocklist/retry-failed", methods=["POST"])
+    def video_downloads_block_retry_failed():
+        """Block every failed row's release and grab the next one for each,
+        searched one title at a time in the background (admin, like a block)."""
+        from . import get_video_db
+        from core.video.download_monitor import block_and_retry_failed, ensure_started
+        res = block_and_retry_failed(get_video_db())
+        ensure_started(get_video_db)
+        return jsonify({"ok": True, **res})
+
     @bp.route("/downloads/blocklist/<int:row_id>", methods=["DELETE"])
     def video_downloads_blocklist_remove(row_id):
         from . import get_video_db
@@ -1693,9 +1703,16 @@ def register_routes(bp):
         dl_id = request.args.get("id")
         if dl_id:
             try:
-                return jsonify({"download": db.get_video_download(int(dl_id))})
+                dl = db.get_video_download(int(dl_id))
             except (TypeError, ValueError):
                 return jsonify({"download": None})
+            out = {"download": dl}
+            # chain=1: what was grabbed after this one failed, so the card that
+            # grabbed it can show the replacement (SeadogsBooty)
+            if request.args.get("chain") and dl and dl.get("status") in ("failed", "cancelled"):
+                from core.video.download_monitor import retry_chain
+                out["chain"] = retry_chain(db, dl)
+            return jsonify(out)
         media_id = request.args.get("media_id")
         if media_id:
             media_source = request.args.get("media_source")
@@ -1706,6 +1723,26 @@ def register_routes(bp):
             # download (or else the most recent) for this title is simply match[0].
             return jsonify({"download": match[0] if match else None})
         return jsonify({"download": None})
+
+    @bp.route("/search-filters", methods=["GET"])
+    def video_search_filters():
+        """This profile's saved manual-search filters (SeadogsBooty)."""
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id
+        from core.video import search_filters
+        return jsonify({"filters": search_filters.load(get_video_db(), int(get_current_profile_id() or 1))})
+
+    @bp.route("/search-filters", methods=["PUT"])
+    def video_search_filters_save():
+        """Replace this profile's saved filters with the posted list (cleaned:
+        unknown fields and operators are dropped, a filter needs a name)."""
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id
+        from core.video import search_filters
+        body = request.get_json(silent=True) or {}
+        saved = search_filters.save(get_video_db(), int(get_current_profile_id() or 1),
+                                    body.get("filters"))
+        return jsonify({"ok": True, "filters": saved})
 
     @bp.route("/downloads/cancel", methods=["POST"])
     def video_downloads_cancel():
@@ -1718,7 +1755,13 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Download not found."}), 404
         if dl["status"] in ("completed", "failed", "cancelled"):
             return jsonify({"ok": True, "already": True})
-        cancel_download(dl.get("username"), dl.get("filename"))   # best-effort; mark regardless
+        if dl.get("source") in ("torrent", "usenet"):
+            # the client kept downloading a cancelled grab to the end, and
+            # nothing would ever import it. unfinished, so its files go too
+            from core.video.client_grab import remove as remove_client_job
+            remove_client_job(dl.get("source"), dl.get("client_ref"), delete_files=True)
+        else:
+            cancel_download(dl.get("username"), dl.get("filename"))   # best-effort; mark regardless
         import time
         db.update_video_download(dl["id"], status="cancelled", error="Cancelled",
                                  completed_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))

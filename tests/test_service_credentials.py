@@ -77,17 +77,20 @@ def db(tmp_path):
 
 
 def test_create_get_roundtrip_encrypts_payload(db, tmp_path):
+    # long enough that random base64 can't contain it: a 3-letter 'sek' turned
+    # up inside a ciphertext once and failed the run (CI, Nov 4 2026)
+    SECRET = 'plaintext-client-secret-7f3a'
     cid = db.create_service_credential('spotify', "Brock's Spotify",
-                                       {'client_id': 'abc', 'client_secret': 'sek'})
+                                       {'client_id': 'abc', 'client_secret': SECRET})
     assert cid
     got = db.get_service_credential(cid)
     assert got['service'] == 'spotify' and got['label'] == "Brock's Spotify"
-    assert got['payload'] == {'client_id': 'abc', 'client_secret': 'sek'}
+    assert got['payload'] == {'client_id': 'abc', 'client_secret': SECRET}
     # The on-disk payload must be ciphertext, never the plaintext secret.
     import sqlite3
     raw = sqlite3.connect(str(tmp_path / 'creds.db')).execute(
         "SELECT payload FROM service_credentials WHERE id = ?", (cid,)).fetchone()[0]
-    assert 'sek' not in raw and raw.startswith('gAAAAA')
+    assert SECRET not in raw and raw.startswith('gAAAAA')
 
 
 def test_duplicate_label_per_service_rejected(db):

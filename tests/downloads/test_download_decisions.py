@@ -172,6 +172,23 @@ def test_duration_mismatch_on_strict_source(env):
     assert d.detail == '5:00 vs expected 3:58'
 
 
+def test_a_wrong_artist_reads_wrong_artist_not_wrong_length(env):
+    """#1980: the length check ran before the artist check on strict sources,
+    so every other artist's song of the same name was filed as wrong length,
+    and the requested artist's own version of another length was lost in them."""
+    noel = _Track(name='The First Noel (Remastered 1999)', artists=('Frank Sinatra',),
+                  duration_ms=162_000)
+    others = [_row(username='deezer_dl', filename=f'dz||{i}', artist=a, title='The First Noel',
+                   duration=d)
+              for i, (a, d) in enumerate((('Christafari', 245_000), ('Josh Groban', 230_000),
+                                          ('David Arkenstone', 260_000)))]
+    sinatra = _row(username='deezer_dl', filename='dz||s', artist='Frank Sinatra',
+                   title='The First Noel', duration=210_000)
+    pairs = evaluate_candidates(others + [sinatra], noel, 'q')
+    assert [_decision_for(pairs, r).code for r in others] == ['artist_mismatch'] * 3
+    assert _decision_for(pairs, sinatra).code == 'duration_mismatch'
+
+
 def test_artist_mismatch_torrent(env):
     tor = _row(username='torrent', filename='t||1', artist='Hope Sandoval Tribute Band', duration=None)
     d = _decision_for(evaluate_candidates([tor], WANT, 'q'), tor)

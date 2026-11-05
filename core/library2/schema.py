@@ -1349,6 +1349,17 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                        "ON lib2_albums(musicbrainz_release_group_id)")
     except Exception as e:  # noqa: BLE001
         logger.error("release-group index failed (will retry next start): %s", e)
+    # Played tracks (Discover's label explorer ranks labels by plays). Partial:
+    # a few thousand of 300k tracks have plays, and without it the query
+    # walked every album and its tracks, 5.8s live (Nov 4 2026).
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_played "
+                       "ON lib2_tracks(album_id, play_count) WHERE play_count > 0")
+        # a stray from testing that index against a dev server that reloads
+        # on edits (Nov 4 2026); a no-op everywhere else
+        cursor.execute("DROP INDEX IF EXISTS idx_x_played")
+    except Exception as e:  # noqa: BLE001
+        logger.error("played-tracks index failed (will retry next start): %s", e)
     # Multi-file primary model (audit P1-07 / ADR-03): elect a primary where
     # missing, repair accidental extras, and keep the invariant via triggers
     # so every write path participates without changes.
@@ -1692,6 +1703,20 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("recording-home pass failed (will retry next start): %s", e)
+
+    if not _stopped():
+        # the legacy plex updater's "-updatedAt<date>" marker was imported as
+        # the biography of every artist it touched (core/library2/summary_markers.py)
+        try:
+            from core.library2.summary_markers import repair_artist_summaries
+            fixed = repair_artist_summaries(cursor)
+            stats["artist_summary_markers"] = fixed
+            if fixed["cleared"] or fixed["cleaned"]:
+                logger.info("Removed SoulSync's update markers from %d artist biographies",
+                            fixed["cleared"] + fixed["cleaned"])
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("artist summary marker pass failed (will retry next start): %s", e)
 
     return stats
 

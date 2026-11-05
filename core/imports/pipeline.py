@@ -1947,7 +1947,8 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             # scan from batch_complete, scanning here too would run it twice
             if web_scan_manager and _auto_scan_on and not context.get('batch_id'):
                 threading.Thread(
-                    target=lambda: web_scan_manager.request_scan("Simple download completed"),
+                    target=lambda: web_scan_manager.request_scan("Simple download completed",
+                                                                 scope="downloads"),
                     daemon=True,
                 ).start()
 

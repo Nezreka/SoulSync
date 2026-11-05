@@ -87,6 +87,9 @@ def load(db) -> dict:
         # rule as the seed sweep. See core.downloads.remove_completed.
         "usenet_remove_completed": remove_completed.normalize(
             db.get_setting("usenet_remove_completed")),
+        # A usenet/torrent download the client failed: blocklist that release
+        # and grab the next one the profile ranks, arr style. On by default.
+        "redownload_failed": (db.get_setting("redownload_failed") or "1") != "0",
     }
 
 
@@ -110,6 +113,8 @@ def save(db, body: Any) -> dict:
     if "usenet_remove_completed" in body:
         db.set_setting("usenet_remove_completed",
                        remove_completed.normalize(body.get("usenet_remove_completed")))
+    if "redownload_failed" in body:
+        db.set_setting("redownload_failed", "1" if body.get("redownload_failed") else "0")
     return load(db)
 
 

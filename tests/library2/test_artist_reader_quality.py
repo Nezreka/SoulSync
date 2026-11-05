@@ -253,3 +253,41 @@ def test_could_be_better_is_kept_and_an_assignment_lands_at_once(catalogue):
     conn.commit()
     assert names() == ["Low"]
 
+
+
+def test_concurrent_cold_filter_clicks_count_the_library_once(catalogue, monkeypatch):
+    # every click before the first cold count finished started its own ~40s
+    # count; under load one request took 21 minutes (Nov 3 2026)
+    import sqlite3
+    import threading
+    import time
+
+    from core.library2 import artist_reader
+
+    calls = []
+
+    def slow_count(conn, predicate, params, owner):
+        calls.append(1)
+        time.sleep(0.3)
+        return {1: 2}
+
+    monkeypatch.setattr(artist_reader, "_count_upgradable", slow_count)
+    conn, _ = catalogue
+    conn.commit()
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+    results = []
+
+    def click():
+        conn = sqlite3.connect(path)
+        try:
+            results.append(artist_reader.library_upgradable_counts(conn))
+        finally:
+            conn.close()
+
+    threads = [threading.Thread(target=click) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1
+    assert results == [{1: 2}] * 4

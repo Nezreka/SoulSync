@@ -473,6 +473,15 @@ _SIBLING_OPS = {
 }
 
 
+# a row that failed waits before its next try: 30s, doubling, an hour at most.
+# without it the background drainer took the same failing row first in every
+# batch, 0.1s apart, so a transient error ("database is locked") spent all
+# MAX_ATTEMPTS in about a second and the wishlist write was failed for good.
+# a drain of the caller's own rows (ids=) is not held back.
+_RETRY_DUE = ("(attempts = 0 OR processed_at IS NULL OR processed_at <= "
+              "datetime('now', '-' || MIN(30 * (1 << MIN(attempts - 1, 7)), 3600) || ' seconds'))")
+
+
 def drain(db, *, limit: int = 500, ids: Optional[Iterable[int]] = None) -> Dict[str, int]:
     """Process pending outbox rows. Returns ``{"done": n, "failed": m}``.
 
@@ -497,7 +506,7 @@ def drain(db, *, limit: int = 500, ids: Optional[Iterable[int]] = None) -> Dict[
             if wanted_ids is None:
                 rows = [dict(r) for r in conn.execute(
                     f"SELECT {columns} FROM lib2_mirror_outbox "
-                    "WHERE status='pending' ORDER BY id LIMIT ?", (limit,))]
+                    f"WHERE status='pending' AND {_RETRY_DUE} ORDER BY id LIMIT ?", (limit,))]
             else:
                 rows = [dict(r) for r in conn.execute(
                     f"SELECT {columns} FROM lib2_mirror_outbox "

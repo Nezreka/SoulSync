@@ -1484,3 +1484,59 @@ def test_fix_search_response_includes_recording_disambiguation(monkeypatch):
         response = search_musicbrainz_tracks()
 
     assert response.get_json()['tracks'][0]['disambiguation'] == 'live'
+
+
+def test_a_release_id_is_asked_as_a_group_once(monkeypatch):
+    # the post-import reconcile asks get_album by release id, album after
+    # album: each paid a 404 (a second at mb's rate limit) and an ERROR line
+    import core.musicbrainz_search as mbs
+    monkeypatch.setattr(mbs, "_RELEASE_NOT_GROUP", {})
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_release_group.return_value = None
+    client._client.get_release.return_value = {
+        'id': 'rel-1', 'title': 'Album', 'date': '2020-01-01',
+        'artist-credit': [{'name': 'Artist'}],
+        'release-group': {'id': 'rg-1', 'primary-type': 'Album', 'secondary-types': []},
+        'media': [{'position': 1, 'tracks': []}],
+    }
+    assert client.get_album('rel-1') is not None
+    assert client.get_album('rel-1') is not None
+    assert client._client.get_release_group.call_count == 1
+    assert client._client.get_release.call_count == 2
+
+
+def test_an_unknown_id_is_not_remembered_as_a_release(monkeypatch):
+    import core.musicbrainz_search as mbs
+    monkeypatch.setattr(mbs, "_RELEASE_NOT_GROUP", {})
+    client = MusicBrainzSearchClient()
+    client._client = MagicMock()
+    client._client.get_release_group.return_value = None
+    client._client.get_release.return_value = None
+    assert client.get_album('gone') is None
+    assert client.get_album('gone') is None
+    assert client._client.get_release_group.call_count == 2
+
+
+def test_the_release_memory_stays_bounded(monkeypatch):
+    import core.musicbrainz_search as mbs
+    monkeypatch.setattr(mbs, "_RELEASE_NOT_GROUP", {})
+    monkeypatch.setattr(mbs, "_RELEASE_NOT_GROUP_MAX", 3)
+    for n in range(5):
+        mbs._remember_release_id(f"r{n}")
+    assert list(mbs._RELEASE_NOT_GROUP) == ["r2", "r3", "r4"]
+
+
+def test_a_release_group_404_is_not_an_error(monkeypatch):
+    import requests
+    from core import musicbrainz_client as mbc
+
+    resp = requests.Response()
+    resp.status_code = 404
+    err = requests.HTTPError("404 Client Error", response=resp)
+    client = mbc.MusicBrainzClient.__new__(mbc.MusicBrainzClient)
+    monkeypatch.setattr(client, "_get", lambda *a, **k: (_ for _ in ()).throw(err), raising=False)
+    logged = []
+    monkeypatch.setattr(mbc.logger, "error", lambda msg, *a, **k: logged.append(msg))
+    assert client.get_release_group("rel-1") is None
+    assert logged == []

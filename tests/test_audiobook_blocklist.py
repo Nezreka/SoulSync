@@ -119,6 +119,52 @@ def test_a_blocked_release_never_appears_in_results(db):
     assert [r.guid for r in ranked] == ["good"]
 
 
+def _as_profile(pid):
+    from core.profile_context import set_background_profile
+    return set_background_profile(pid)
+
+
+def test_another_profiles_block_applies_to_that_profiles_search(db):
+    # the search read profile 1's list only: a release profile 2 blocked kept
+    # being offered and grabbed for profile 2
+    from core.profile_context import reset_background_profile
+    bad = _release(guid="bad", title="Project Hail Mary bad rip")
+    good = _release(guid="good", title="Project Hail Mary M4B")
+    db.block_release(bad.to_dict(), reason="by hand", profile_id=2)
+    token = _as_profile(2)
+    try:
+        with patch("core.audiobook_database.get_audiobook_db", return_value=db):
+            ranked = rank_releases([bad, good], BOOK, 0.0, "any")
+    finally:
+        reset_background_profile(token)
+    assert [r.guid for r in ranked] == ["good"]
+
+
+def test_one_profiles_block_is_not_anothers(db):
+    from core.profile_context import reset_background_profile
+    bad = _release(guid="bad", title="Project Hail Mary bad rip")
+    db.block_release(bad.to_dict(), reason="by hand", profile_id=2)
+    token = _as_profile(3)
+    try:
+        with patch("core.audiobook_database.get_audiobook_db", return_value=db):
+            assert len(rank_releases([bad], BOOK, 0.0, "any")) == 1
+    finally:
+        reset_background_profile(token)
+
+
+def test_the_monitors_blocks_apply_to_every_profile(db):
+    # a failed download is blocked as profile 1, the shared list
+    from core.profile_context import reset_background_profile
+    bad = _release(guid="bad", title="Project Hail Mary bad rip")
+    db.block_release(bad.to_dict(), reason="The download failed")
+    token = _as_profile(2)
+    try:
+        with patch("core.audiobook_database.get_audiobook_db", return_value=db):
+            assert rank_releases([bad], BOOK, 0.0, "any") == []
+    finally:
+        reset_background_profile(token)
+
+
 def test_an_empty_blocklist_hides_nothing(db):
     with patch("core.audiobook_database.get_audiobook_db", return_value=db):
         assert len(rank_releases([_release()], BOOK, 0.0, "any")) == 1

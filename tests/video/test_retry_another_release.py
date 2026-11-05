@@ -19,6 +19,9 @@ from flask import Flask
 from database.video_database import VideoDatabase
 
 
+PROFILES_SEARCHED: list = []
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     import api.video as videoapi
@@ -34,10 +37,13 @@ def client(tmp_path, monkeypatch):
         g.can_download = True
 
     searches = []
+    PROFILES_SEARCHED.clear()
     import core.video.wishlist_search as ws
     monkeypatch.setattr(ws, "manual_search",
-                        lambda scope, tmdb_id, season_number=None, episode_number=None:
+                        lambda scope, tmdb_id, season_number=None, episode_number=None,
+                        profile_id=1:
                         searches.append((scope, tmdb_id, season_number, episode_number))
+                        or PROFILES_SEARCHED.append(profile_id)
                         or {"queued": 1, "skipped": 0, "total": 1})
     # the monitor thread must not actually start in tests
     import core.video.download_monitor as mon
@@ -99,3 +105,21 @@ def test_plain_retry_on_torrent_routes_to_next_not_502(client):
 def test_unknown_download_404(client):
     http, _db, _s = client
     assert http.post("/api/video/downloads/retry", json={"id": 9999}).status_code == 404
+
+
+def test_retry_searches_the_profile_that_wished_it(client):
+    # it searched profile 1's wishlist only: a title profile 2 wished found
+    # no item there and "retry with another" did nothing
+    http, db, searches = client
+    dl_id = _failed_torrent_movie(db, tmdb_id=604)
+    db.add_movie_to_wishlist(604, "The Matrix Reloaded", profile_id=2)
+    conn = db._get_connection()
+    try:
+        conn.execute("DELETE FROM video_wishlist WHERE tmdb_id=604 AND profile_id<>2")
+        conn.commit()
+    finally:
+        conn.close()
+    res = http.post("/api/video/downloads/retry", json={"id": dl_id, "next": True})
+    assert res.get_json().get("wishlist_search") is True
+    assert searches == [("movie", 604, None, None)]
+    assert PROFILES_SEARCHED == [2]

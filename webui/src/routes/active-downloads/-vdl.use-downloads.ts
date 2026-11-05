@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { VdlDownload, VdlFilter, VdlMeta, VdlView, VdlYtMeta } from './-vdl.types';
 
 import {
+  blockAndRetryFailedVideoDownloads,
   blockVideoRelease,
   cancelVideoDownload,
   clearEverythingVideoDownloads,
@@ -100,6 +101,9 @@ export interface VdlDownloadsController {
   removeOne: (id: number) => Promise<void>;
   cancelAll: () => Promise<void>;
   retryAllFailed: () => Promise<void>;
+  /** failed rows (not YouTube) whose release can be blocked and replaced */
+  blockableFailedCount: number;
+  blockAndRetryAllFailed: () => Promise<void>;
   clearFinished: () => Promise<void>;
   clearFailed: () => Promise<void>;
   clearEverything: () => Promise<void>;
@@ -360,6 +364,36 @@ export function useVideoDownloads(): VdlDownloadsController {
     await refresh();
   }, [refresh]);
 
+  const blockAndRetryAllFailed = useCallback(async () => {
+    const n = downloadsRef.current.filter(
+      (d) => d.status === 'failed' && d.kind !== 'youtube',
+    ).length;
+    const ok = await window.showConfirmDialog?.({
+      title: 'Block and retry failed',
+      message:
+        `Block the release of all ${n} failed download${n === 1 ? '' : 's'} and grab the next ` +
+        'best release for each? The titles are searched one at a time in the background.',
+      confirmText: 'Block and retry',
+      cancelText: 'Cancel',
+    });
+    if (!ok) return;
+    setRetryAllPending(true);
+    try {
+      const res = await blockAndRetryFailedVideoDownloads();
+      if (!okOf(res)) toast(res?.error || 'Could not block and retry', 'error');
+      else
+        toast(
+          `Blocked ${Number(res?.blocked) || 0}, searching for ${Number(res?.searching) || 0} ` +
+            'replacement' +
+            (Number(res?.searching) === 1 ? '' : 's'),
+          'success',
+        );
+    } finally {
+      setRetryAllPending(false);
+    }
+    await refresh();
+  }, [refresh]);
+
   const clearFinished = useCallback(async () => {
     await clearVideoDownloads();
     toast('Cleared finished downloads', 'success');
@@ -393,6 +427,9 @@ export function useVideoDownloads(): VdlDownloadsController {
   };
   const hasRunningWork = counts.active > 0;
   const retryableCount = downloads.filter(vdlIsRetryable).length;
+  const blockableFailedCount = downloads.filter(
+    (d) => d.status === 'failed' && d.kind !== 'youtube',
+  ).length;
   const liveSpeedBps = downloads.reduce(
     (sum, d) => sum + (d.status === 'downloading' ? Number(d.speed_bps) || 0 : 0),
     0,
@@ -423,6 +460,8 @@ export function useVideoDownloads(): VdlDownloadsController {
     removeOne,
     cancelAll,
     retryAllFailed,
+    blockableFailedCount,
+    blockAndRetryAllFailed,
     clearFinished,
     clearFailed,
     clearEverything,

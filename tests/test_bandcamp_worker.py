@@ -323,3 +323,29 @@ def test_the_worker_holds_no_legacy_sql_at_all():
     usage = count_legacy_usage(pathlib.Path("core/bandcamp_worker.py").read_text())
 
     assert (usage.reads, usage.writes) == (0, 0)
+
+
+
+def test_a_blocked_search_leaves_the_item_pending(worker, monkeypatch):
+    # a bot check page came back as "no results", and every album the worker
+    # tried was written off as not_found (Nov 4 2026)
+    import core.bandcamp_worker as bw
+    monkeypatch.setattr(bw, "search_blocked", lambda: True)
+    worker.client = _FakeClient(search_result=None)
+
+    worker._process_album(1, 'Pending Album', 'Artist')
+    worker._process_track(1, 'Pending Track', 'Artist')
+
+    assert _status(worker) is None
+    assert _status(worker, 'track') is None
+    assert worker.stats['not_found'] == 0
+
+
+def test_an_empty_answer_while_reachable_is_still_not_found(worker, monkeypatch):
+    import core.bandcamp_worker as bw
+    monkeypatch.setattr(bw, "search_blocked", lambda: False)
+    worker.client = _FakeClient(search_result=None)
+
+    worker._process_album(1, 'Pending Album', 'Artist')
+
+    assert _status(worker) == 'not_found'

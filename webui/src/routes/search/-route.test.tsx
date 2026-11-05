@@ -121,6 +121,29 @@ describe('the search route', () => {
     expect(document.getElementById('enh-explore-section')).toBeNull();
   });
 
+  it("#1984: a genre tile shows what's charting on Deezer when Deezer answers", async () => {
+    const asked: string[] = [];
+    server.use(
+      http.get('/api/search/browse/deezer', ({ request }) => {
+        asked.push(new URL(request.url).searchParams.get('tile') ?? '');
+        return HttpResponse.json({
+          success: true,
+          available: true,
+          tracks: [{ name: 'Apple', artist_name: 'Charli xcx', entity_id: '1', source: 'deezer' }],
+          albums: [
+            { name: 'GET MEAN', artist_name: 'Boy Harsher', entity_id: '5', source: 'deezer' },
+          ],
+          artists: [],
+        });
+      }),
+    );
+    await renderRoute('/search?browse=genre%3Aelectronic');
+    expect((await screen.findAllByText('Apple')).length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Electronic & dance' })).toBeInTheDocument();
+    expect(screen.getByText('Charting on Deezer right now in this genre')).toBeInTheDocument();
+    expect(asked).toEqual(['genre:electronic']);
+  });
+
   it('a browse url opens straight onto its view, and typing takes over', async () => {
     server.use(
       http.get('/api/discover/recent-releases', () =>

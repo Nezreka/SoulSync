@@ -371,3 +371,25 @@ def test_no_typed_query_keeps_the_generated_variants():
     stub, _ = _typed_search("   ", [])
     assert stub.queries[0] == "Andy Weir Project Hail Mary"
     assert len(stub.queries) > 1
+
+
+def test_the_search_thread_runs_as_the_profile_that_asked(monkeypatch):
+    # the search runs off the request, so whose blocklist applies has to
+    # travel with it; it ran as profile 1 for everyone
+    import threading
+
+    import core.audiobook_search_job as job
+    import core.profile_context as pc
+
+    seen = []
+    done = threading.Event()
+
+    def fake_run(*_args):
+        seen.append(pc.get_background_profile())
+        done.set()
+
+    monkeypatch.setattr(job, "_run_search", fake_run)
+    monkeypatch.setattr(pc, "get_current_profile_id", lambda: 4)
+    job.start({"asin": "B0TEST", "title": "Book"})
+    assert done.wait(5)
+    assert seen == [4]

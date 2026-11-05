@@ -199,9 +199,11 @@ class _StubScanManager:
     request_responses: List[dict] = field(default_factory=list)
     status_responses: List[dict] = field(default_factory=list)
     request_calls: List[str] = field(default_factory=list)
+    request_scopes: List[str] = field(default_factory=list)
 
-    def request_scan(self, label: str) -> dict:
+    def request_scan(self, label: str, scope: str = 'full') -> dict:
         self.request_calls.append(label)
+        self.request_scopes.append(scope)
         return self.request_responses.pop(0) if self.request_responses else {'status': 'queued'}
 
     def get_scan_status(self) -> dict:
@@ -229,6 +231,14 @@ class TestScanLibrary:
         auto_scan_library(
             {'_automation_id': 'a', '_event_data': {'more_batches_pending': 'false'}}, deps)
         assert scanner.request_calls == ['Automation trigger']
+        # the last batch of a download run: only its folders need scanning (#1978)
+        assert scanner.request_scopes == ['downloads']
+
+    def test_a_scheduled_or_manual_run_scans_everything(self):
+        scanner = _StubScanManager(status_responses=[{'status': 'idle'}])
+        deps = _build_deps(web_scan_manager=scanner)
+        auto_scan_library({'_automation_id': 'a'}, deps)
+        assert scanner.request_scopes == ['full']
 
     def test_already_tracked_returns_skipped(self):
         # Pre-set the state flag — handler should short-circuit.
@@ -279,7 +289,7 @@ class TestScanLibrary:
 
     def test_state_cleanup_on_exception(self):
         class ExplodingScanner:
-            def request_scan(self, _):
+            def request_scan(self, _, scope='full'):
                 raise RuntimeError('boom')
 
             def get_scan_status(self):

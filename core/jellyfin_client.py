@@ -765,6 +765,32 @@ class JellyfinClient(MediaServerBase):
                 self.user_id is not None and 
                 self.music_library_id is not None)
 
+    def trigger_folder_scan(self, folders: List[str]) -> bool:
+        """Tell Jellyfin these folders changed (#1978), given as Jellyfin sees
+        them, instead of refreshing the whole library. False, with nothing
+        sent, when any of them is outside its music folders."""
+        if not folders or not self.ensure_connection():
+            return False
+        from core.library2.scan_paths import location_for
+        locations = self.get_music_library_locations()
+        if not all(location_for(f, locations) for f in folders):
+            logger.info("Jellyfin folder scan: a folder is outside the music libraries")
+            return False
+        try:
+            import requests
+            response = requests.post(
+                f"{self.base_url}/Library/Media/Updated",
+                headers={'X-Emby-Token': self.api_key, 'Authorization': self._auth_header(),
+                         'Content-Type': 'application/json'},
+                json={"Updates": [{"Path": f, "UpdateType": "Modified"} for f in folders]},
+                timeout=10)
+            response.raise_for_status()
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Jellyfin folder scan failed: {e}")
+            return False
+        logger.info(f"Triggered Jellyfin folder scan of {len(folders)} folder(s)")
+        return True
+
     def get_music_library_locations(self) -> List[str]:
         """the folders behind the music library, as jellyfin sees them.
         the selected library when one is set, every music library otherwise"""

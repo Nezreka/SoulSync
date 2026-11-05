@@ -736,6 +736,9 @@ class AniListWorker(VideoBackfillWorker):
         main = self.db.anime_main_entry(item["kind"], item["id"])
         cols = {"anilist_score": (main or {}).get("score")}
         self.db.backfill_mark("anilist", item["kind"], item["id"], "ok", columns=cols)
+        if item["kind"] == "show":
+            # a season TMDB lumped gets split by these entries on the next sync
+            self.db.requeue_lumped_anime(item["id"])
 
     def record_empty(self, item):
         self.db.backfill_mark("anilist", item["kind"], item["id"], "not_found")

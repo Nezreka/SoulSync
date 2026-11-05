@@ -9936,6 +9936,31 @@ async function refreshMetaSyncStatus() {
             if (p.last_exchange_error) line += ' — last error: ' + _msEscape(p.last_exchange_error);
             lines.push(line);
         });
+        // Step 3: is this install actually counted? A node starts in dry
+        // run and sends nothing; an older node doesn't report dry_run at all
+        const nodeUrl = document.getElementById('metasync-node-url')?.value.trim() || '';
+        const openNode = /^https?:\/\//i.test(nodeUrl)
+            ? ' <a href="' + _msEscape(nodeUrl) + '" target="_blank" rel="noopener noreferrer">Open MetaSync</a>'
+            : '';
+        if (s.dry_run === true && pools.length) {
+            const u = s.unsent_report;
+            lines.push(u && u.week
+                ? 'Step 3: dry run is on. Your report for ' + _msEscape(u.week) + ' is ready (' +
+                  _msEscape(u.signal_count) + ' anonymous album signals) and nothing was sent, so this install ' +
+                  'isn\'t counted yet. Check it and press Start sending in MetaSync.' + openNode
+                : 'Step 3: dry run is on, so MetaSync builds your weekly report but sends nothing yet.' + openNode);
+        } else if (s.dry_run === false && pools.length) {
+            lines.push('Step 3: sending. One anonymous report a week, nothing else.');
+        }
+        const net = s.network;
+        if (net && Number.isInteger(net.installs) && Number.isInteger(net.publish_threshold)) {
+            lines.push('The network: ' + net.installs + ' install' + (net.installs === 1 ? '' : 's') +
+                ' reported ' + _msEscape(net.week || 'last week') + '. ' +
+                (net.installs < net.publish_threshold
+                    ? 'Charts from the network start at ' + net.publish_threshold +
+                      ' installs per album; until then they fill from ListenBrainz.'
+                    : 'An album charts once ' + net.publish_threshold + ' installs report it in a week.'));
+        }
         if (s.pairing_status === 'pending') lines.push('A pairing request is waiting for approval in the MetaSync dashboard.');
         _msDetail(lines.join('<br>'));
     } catch (e) {

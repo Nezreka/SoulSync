@@ -152,3 +152,14 @@ def test_the_sweep_turns_the_daily_mixes_over_for_every_profile(ws):
         # checked: it's today's
         if isinstance(stored, dict) and stored.get('mixes'):
             assert stored['day'] == date.today().isoformat()
+
+
+def test_the_sweep_also_warms_the_library_member_list(ws):
+    # the first Library click after a restart computed membership on the
+    # request (~5s on 30k artists); the warmer asks for the first page now
+    from core.library2 import member_version
+
+    member_version.clear()
+    stats = ws._discover_warm_sweep(paths=ws._LIBRARY_WARM_PATHS, recompute=False)
+    assert stats['failed'] == []
+    assert member_version._cache

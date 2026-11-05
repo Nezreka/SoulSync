@@ -414,7 +414,7 @@ Movies and shows can come from either Plex or Jellyfin and render the same way.
 
 The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site). An episode's **⋯** menu marks just that episode watched or unwatched, and the season's **⋯** marks the whole season; both sync to your server like the show-wide toggle.
 
-The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze, AniList). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. An anime also gets its other names (romaji and Japanese), the studio that animated it, the next episode's countdown while it airs, and a link to each season on AniList. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
+The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze, AniList). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. An anime also gets its other names (romaji and Japanese), the studio that animated it, the next episode's countdown while it airs, and a link to each season on AniList, on a search preview too. When TMDB lumps an anime into one long season (Jujutsu Kaisen's 59 episodes), the episode list is split into the seasons TVDB, your server and release names use, from TVDB when you have a key and from AniList's seasons when you don't. If your server numbers the show TMDB's way, SoulSync keeps its numbering. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
 
 A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons.
 
@@ -490,6 +490,10 @@ Episodes are treated as facts: a scan that no longer sees an episode **demotes**
             lede: 'Give individual titles their own quality profile and tell shows how their numbering works.',
             body: `
 Assign a title its own **quality profile** ("this show is always 1080p, that movie is 4K"). Pick it from the title's Manage panel, or right in **Get** / **Manual search** with the **Profile** picker, even for a title that isn't in your library yet: the pick judges that search and grab, sticks to the title's wishlist entries, and the title keeps it when it lands, so its upgrades use it too.
+
+**Filter and sort the results.** Every manual search (movie, show, season or episode) has a bar over its results: type to narrow by name, group or indexer, sort by best match, size, age, quality, format score, seeders, indexer or grabs, and open **Filters** to build conditions (resolution is 1080, codec is HEVC, group contains MeGusta, size less than 1 GB) matched on all or any of them. Name a filter to save it for every later search on your profile. The head says how many results there are, how many meet your profile and how many match your filter. It only changes what you see: Auto and the wishlist still rank releases by your profile.
+
+**When a grab fails and SoulSync takes the next release**, the card you grabbed lists what it tried after (each release and whether it downloaded or failed too), and the result card of the release that replaced it is marked *Grabbed instead* or *Downloaded instead*. The episode row shows the newest attempt.
 
 A title with no profile of its own uses its kind's default: set **New movies use** and **New shows use** under Settings > Quality (both start on **Default**). Set a show's **series type** so numbering and matching behave correctly:
 
@@ -650,6 +654,7 @@ The **Downloads** page is the mission-control view for video acquisition. Every 
 |--------|--------------|
 | **Grab** | Queue the selected release for download |
 | **Retry** | Re-attempt a failed or stalled grab |
+| **Block and retry failed** | (menu, admin) Blocklist every failed release and grab the next best release for each, one title at a time |
 | **Cancel** | Stop an in-flight download and remove it from the queue |
 | **Clear** | Remove completed items from the queue view |
 
@@ -736,6 +741,15 @@ When a grab turns out to be a bad file — corrupt, mislabeled, wrong title — 
 - **Retry** and automatic re-queries skip them.
 - A **manual grab** always overrides the blocklist, in case you know better.
 
+## When the download client fails a release
+
+When SABnzbd or the torrent client reports a movie or episode as failed, or a torrent stalls, SoulSync blocklists that release and searches again straight away, so the next release your quality profile ranks is grabbed: the next one from the same group at the same quality first, then lower qualities the profile still accepts. You get the **download failed** notification only when it gives up:
+
+- no other release your profile accepts was found (the item stays on the wishlist), or
+- 5 releases of the same title (or episode) failed in 2 days. A client that fails everything, like a full disk or a wrong category, would otherwise blocklist every release there is, so it stops and asks you to check the client.
+
+The replaced job is taken out of the client with its partial files, so a stalled torrent doesn't keep going next to its replacement; one it gave up on stays for you to look at. A job the client simply lost (deleted by hand, connection trouble) isn't treated as a bad release. **Cancel** on a torrent or usenet download takes it out of the client too. Turn it off with **When a video download fails, grab the next best release** in Settings, on the usenet client's card.
+
 ## Recycle bin
 
 When an upgrade replaces an existing file, the old file isn't deleted outright — it lands in a **recycle bin** first. If the "upgrade" turns out to be worse, you can recover the original.
@@ -761,7 +775,7 @@ After a download completes, a lightweight post-download scan probes your media s
             body: `
 ## Naming & folders
 
-Set your **naming scheme** (how files and folders are named — title, year, edition tags, season/episode patterns) and your **folder layout** once, and every import follows it. Consistent naming keeps Plex/Jellyfin matching clean.
+Set your **naming scheme** (how files and folders are named — title, year, edition tags, season/episode patterns) and your **folder layout** once, and every import follows it. Consistent naming keeps Plex/Jellyfin matching clean. **Colons in titles** picks what a ':' becomes, since file systems don't allow one: deleted (Dexter Resurrection, the default), smart (Dexter - Resurrection, and 12:30 becomes 12-30), space dash space, or a dash. Mass Rename brings files you already have in line.
 
 ## Mass rename
 

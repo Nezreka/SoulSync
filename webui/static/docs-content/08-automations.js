@@ -164,7 +164,7 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
 
 | Action | What it does |
 |--------|--------------|
-| **Scan Library** | Trigger a media server library scan |
+| **Scan Library** | Trigger a media server library scan. After downloads, Plex and Jellyfin scan only the album folders that changed; a schedule or a manual run scans everything |
 | **Update Database** | Refresh the library database (incremental or full) |
 | **Update Database (Hourly)** | Lightweight incremental refresh that catches files added outside SoulSync |
 | **Deep Scan Library** | Full library comparison without losing enrichment data |

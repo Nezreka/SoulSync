@@ -165,13 +165,15 @@ def _one(item: Dict[str, Any], media_type: str, target: str, *, all_sources: boo
 
 
 def _run_batch(todo: List[Dict[str, Any]], media_type: str, *, all_sources: bool = False,
-               cap=None) -> None:
+               cap=None) -> int:
+    """Search and grab each item; the number grabbed."""
+    grabbed = 0
     try:
         target = vpw._default_target_dir(media_type)
         if not target:
             logger.warning("manual search: no %s library folder set — dropping %d item(s)",
                            media_type, len(todo))
-            return
+            return 0
         budget = _Budget(cap)
         with ThreadPoolExecutor(max_workers=3, thread_name_prefix="wl-manual") as ex:
             grabbed = sum(1 for ok in ex.map(
@@ -181,13 +183,23 @@ def _run_batch(todo: List[Dict[str, Any]], media_type: str, *, all_sources: bool
                     (", %d skipped (stopped by cancel all)" % budget.stopped) if budget.stopped else "")
     finally:
         _finish(todo, media_type)
+    return grabbed
 
 
 def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
-                  *, all_sources: bool = False, profile_id: int = 1) -> Dict[str, Any]:
+                  *, all_sources: bool = False, profile_id: int = 1,
+                  wait: bool = False, quality_profile_id=None) -> Dict[str, Any]:
     """Kick a background search for one wished item (or a season/show of
     episodes). Returns immediately: {queued, skipped, total}. 'skipped' =
-    already downloading / already being searched."""
+    already downloading / already being searched.
+
+    ``wait`` runs the search on the calling thread instead and adds
+    'grabbed', for a caller that has to know whether anything was taken (the
+    monitor's next-release retry, which says so when nothing was).
+
+    ``quality_profile_id`` ranks under that quality profile whatever the
+    wishlist row says: the next-release retry keeps the profile the failed
+    grab was ranked by (SeadogsBooty's retry fell back to Default)."""
     from api.video import get_video_db
     media_type = "movie" if scope == "movie" else "episode"
     items = get_video_db().wishlist_manual_search_items(
@@ -196,6 +208,8 @@ def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
     if media_type == "episode":
         from core.video.numbering import annotate
         items = annotate(items)
+    if quality_profile_id:
+        items = [dict(it, quality_profile_id=int(quality_profile_id)) for it in items]
     if not items:
         return {"queued": 0, "skipped": 0, "total": 0}
     todo = _prepare(items, media_type, user_initiated=True)
@@ -203,6 +217,10 @@ def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
         _finish(todo, media_type)
         return {"queued": 0, "skipped": len(items) - len(todo), "total": len(items),
                 "missing_target": media_type}
+    if todo and wait:
+        grabbed = _run_batch(todo, media_type, all_sources=all_sources)
+        return {"queued": len(todo), "skipped": len(items) - len(todo), "total": len(items),
+                "grabbed": grabbed}
     if todo:
         threading.Thread(target=_run_batch, args=(todo, media_type), kwargs={"all_sources": all_sources},
                          daemon=True, name="wishlist-manual-search").start()

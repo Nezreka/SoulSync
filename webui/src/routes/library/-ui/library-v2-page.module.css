@@ -8676,6 +8676,14 @@ textarea.searchInput {
     border-radius: var(--radius-xl);
   }
 
+  /* the toolbar doesn't stick here, so its name tag would appear in a bar
+     already scrolled off the top. worse, it wrapped the bar to a second row
+     (48 to 86px), which pushed the hero's edge back into view, which took the
+     tag away again: the page jumped up and down as you scrolled past the hero */
+  .detailView .toolbarIdentity {
+    display: none;
+  }
+
   .detailView .toolButton {
     min-height: 34px;
     padding: 0 12px;
@@ -9554,11 +9562,15 @@ textarea.searchInput {
   }
 
   /* a folded biography: four lines, the fourth fading, "Read more" alone
-     under them (a mask, so the overflow the toggle is measured from stays) */
+     under them. only a mask: the box keeps the four-line clamp it has
+     without the toggle. this rule used to set display: block, which turned
+     the clamp off, so with "Read more" showing the bio was its full height
+     (3,800px for a long one) under the fade; the size watcher then measured
+     it as fitting, took the toggle away, the clamp came back, and round it
+     went: the whole page jumped up and down on phones (Nov 4 2026) */
   .premierHero
     :global(.artist-hero-bio):not(:global(.expanded)):has(> :global(.artist-hero-bio-toggle))
     :global(.bio-text) {
-    display: block;
     mask-image: linear-gradient(to bottom, black calc(3 * 1.65em), transparent calc(4 * 1.65em));
   }
 

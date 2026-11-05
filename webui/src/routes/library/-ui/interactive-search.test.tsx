@@ -469,6 +469,67 @@ describe('library v2 interactive grab', () => {
     Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
   });
 
+  it('#1980: with nothing passing, the filtered hits show by themselves, nearest miss first', async () => {
+    const hit = (title: string, artist: string, decision: object) => ({
+      result_type: 'track',
+      username: 'deezer_dl',
+      filename: `dz::${artist}`,
+      size: 1,
+      title,
+      artist,
+      quality: 'mp3',
+      decision,
+    });
+    const wrongArtist = (artist: string) =>
+      hit('The First Noel', artist, {
+        accepted: false,
+        code: 'artist_mismatch',
+        detail: `${artist} vs Frank Sinatra`,
+        stage: 'identity',
+      });
+    server.use(
+      http.get('/api/search/sources', () =>
+        HttpResponse.json({
+          mode: 'deezer',
+          sources: [{ name: 'deezer_dl', display_name: 'Deezer' }],
+        }),
+      ),
+      http.post('/api/search', () =>
+        HttpResponse.json({
+          results: [
+            wrongArtist('Christafari'),
+            wrongArtist('Josh Groban'),
+            hit('The First Noel', 'Frank Sinatra', {
+              accepted: false,
+              code: 'duration_mismatch',
+              detail: '3:30 vs expected 2:42',
+              stage: 'duration',
+            }),
+          ],
+        }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <InteractiveSearchModal
+          canWrite
+          initialQuery="x"
+          entity={{ trackId: 1 }}
+          onClose={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText('Frank Sinatra')).toBeInTheDocument();
+    const artists = screen
+      .getAllByText(/^(Frank Sinatra|Christafari|Josh Groban)$/)
+      .map((el) => el.textContent);
+    expect(artists[0]).toBe('Frank Sinatra');
+    expect(screen.getByRole('button', { name: 'All filtered · 3' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
   it('iss27-01: merges results from the sources that succeed when one source search fails', async () => {
     server.use(
       http.get('/api/search/sources', () =>

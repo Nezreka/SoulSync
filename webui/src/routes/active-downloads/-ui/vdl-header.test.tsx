@@ -40,6 +40,35 @@ const openMenu = (container: HTMLElement) =>
   fireEvent.click(container.querySelector('.dlc-more') as HTMLElement);
 
 describe('video header actions', () => {
+  it('offers Block and retry failed beside Retry failed, for whoever may block', () => {
+    // c5pie: block every failed release and grab the next, in one go
+    const p = props({
+      counts: { ...counts, failed: 5, removable: 5, total: 5 },
+      retryableCount: 5,
+      blockableFailedCount: 4,
+      onBlockRetryAll: vi.fn(),
+    });
+    const { container } = render(<VdlHeader {...p} />);
+    openMenu(container);
+    const items = screen.getAllByRole('menuitem').map((el) => el.textContent);
+    expect(items.indexOf('Retry failed (5)')).toBeLessThan(
+      items.indexOf('Block and retry failed (4)'),
+    );
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Block and retry failed (4)' }));
+    expect(p.onBlockRetryAll).toHaveBeenCalledTimes(1);
+    expect(p.onRetryAll).not.toHaveBeenCalled();
+  });
+
+  it('hides Block and retry failed when nothing can be blocked', () => {
+    const p = props({
+      counts: { ...counts, failed: 2, removable: 2, total: 2 },
+      retryableCount: 2,
+    });
+    const { container } = render(<VdlHeader {...p} />);
+    openMenu(container);
+    expect(screen.queryByRole('menuitem', { name: /^Block and retry/ })).toBeNull();
+  });
+
   it('offers Clear failed with the failed + cancelled count, and it never retries', () => {
     const p = props({
       counts: { ...counts, completed: 54, failed: 45, removable: 44, total: 99 },

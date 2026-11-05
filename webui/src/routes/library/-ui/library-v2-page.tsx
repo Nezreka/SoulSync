@@ -7875,19 +7875,63 @@ function AudiobookRouteSetting({ name }: { name: string }) {
   );
 }
 
-/** True once `ref` has scrolled up past the top of the view. Without an
- *  IntersectionObserver (jsdom) it stays false. */
+/** The element that scrolls `el`: the shell's `.main-content`, or the page. */
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+  }
+  return null;
+}
+
+/** True once `ref` has scrolled up past the top of the view.
+ *
+ *  It compares the scroll position with where `ref` sits while the answer is
+ *  still false. It used to ask an IntersectionObserver whether `ref` was on
+ *  screen, but the answer changes the toolbar above it (the name tag wraps
+ *  it to a second row), which moved `ref` back on screen, which took the tag
+ *  away again: measured, 9 to 11 flips across one slow pass over the hero on
+ *  every width, and the page jumping up and down on phones. The position it
+ *  is compared with is only taken while false, so the tag can't move it, and
+ *  the browser's scroll anchoring moves the scroll the same way as the
+ *  answer. Without layout (jsdom) it stays false. */
 function useScrolledPast(ref: { current: HTMLElement | null }, key: unknown) {
   const [past, setPast] = useState(false);
+  const pastRef = useRef(false);
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry) return;
-      setPast(!entry.isIntersecting && entry.boundingClientRect.top < 0);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
+    if (!el) return;
+    const scroller = scrollParentOf(el);
+    const target: HTMLElement | Window = scroller ?? window;
+    const scrollTop = () => (scroller ? scroller.scrollTop : window.scrollY);
+    const topOf = () =>
+      el.getBoundingClientRect().top -
+      (scroller ? scroller.getBoundingClientRect().top : 0) +
+      scrollTop();
+    let edge = topOf();
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      if (!pastRef.current) edge = topOf();
+      const next = el.getBoundingClientRect().height >= 0 && scrollTop() > edge;
+      if (next !== pastRef.current) {
+        pastRef.current = next;
+        setPast(next);
+      }
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    target.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    update();
+    return () => {
+      target.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [ref, key]);
   return past;
 }

@@ -17,6 +17,7 @@ import type { SourceVerticalConfig } from './-sync.sources';
 import type { SourceSkipped } from './-sync.state';
 import type { RawDiscoveryResult } from './-sync.transform';
 
+import { MIRRORS_CHANGED_EVENT } from './-sync.events';
 import { isServiceExport } from './-sync.export';
 import {
   PIPELINE_RUN_FAILED,
@@ -587,11 +588,19 @@ export async function postRetryFailedDiscovery(
   );
 }
 
+function announceMirrorsChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(MIRRORS_CHANGED_EVENT));
+}
+
 /** DELETE /api/mirrored-playlists/<id> (deleteMirroredPlaylist, 2023). */
 export async function deleteMirroredPlaylist(
   playlistId: number | string,
 ): Promise<{ success?: boolean; error?: string }> {
-  return readJson(await fetch(`/api/mirrored-playlists/${playlistId}`, { method: 'DELETE' }));
+  const result = await readJson<{ success?: boolean; error?: string }>(
+    await fetch(`/api/mirrored-playlists/${playlistId}`, { method: 'DELETE' }),
+  );
+  if (result && !result.error) announceMirrorsChanged();
+  return result;
 }
 
 /**
@@ -602,13 +611,20 @@ export async function deleteMirroredPlaylist(
 export async function deleteMirroredPlaylists(
   playlistIds: readonly number[],
 ): Promise<{ success?: boolean; error?: string; deleted?: number[]; not_deleted?: number[] }> {
-  return readJson(
+  const result = await readJson<{
+    success?: boolean;
+    error?: string;
+    deleted?: number[];
+    not_deleted?: number[];
+  }>(
     await fetch('/api/mirrored-playlists/batch-delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: playlistIds }),
     }),
   );
+  if (result?.deleted?.length) announceMirrorsChanged();
+  return result;
 }
 
 /** PATCH .../custom-name (editMirroredCustomName, auto-sync.js 2389). */

@@ -1529,6 +1529,7 @@ class MusicDatabase:
             self._add_profile_support_v2(cursor)
             self._add_profile_support_v3(cursor)
             self._add_profile_support_v4(cursor)
+            self._ensure_discovery_pool_decade_index(cursor)
             self._fix_profile_one_owner_rows(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_sides(cursor)
@@ -4740,6 +4741,22 @@ class MusicDatabase:
             "CREATE INDEX IF NOT EXISTS idx_metadata_match_provenance_origin "
             "ON metadata_match_provenance(origin, service)"
         )
+
+    def _ensure_discovery_pool_decade_index(self, cursor):
+        """Discover's decade shelves group the pool by its release year.
+
+        the only index on the filter was profile_id, so every call read each
+        pool row in full (track json and all, ~300MB on a 227k-row pool) to
+        get at release_date: 6.9s live, 25s cold (Nov 4 2026). this one covers
+        the query. after the profile migrations, which add profile_id."""
+        try:
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_discovery_pool_profile_release "
+                           "ON discovery_pool (profile_id, release_date)")
+            # a stray from testing that index against a dev server that reloads
+            # on edits (Nov 4 2026); a no-op everywhere else
+            cursor.execute("DROP INDEX IF EXISTS idx_x_rel")
+        except Exception as e:  # noqa: BLE001 - an index is an assist, retried next start
+            logger.debug("discovery_pool decade index skipped: %s", e)
 
     def _add_profile_support(self, cursor):
         """Add multi-profile support: profiles table + profile_id on per-profile tables"""
@@ -17102,16 +17119,32 @@ class MusicDatabase:
                     if not composite:
                         params.append(f"{spotify_track_id}::%")
                     params.append(profile_id)
-                    cursor.execute(
-                        f"""
-                        UPDATE wishlist_tracks
-                           SET retry_count = retry_count + 1,
-                               last_attempted = CURRENT_TIMESTAMP,
-                               failure_reason = COALESCE(?, failure_reason)
-                         WHERE {identity_clause} AND profile_id = ?
-                        """,
-                        params,
-                    )
+                    # a failure moves the track up the backoff ladder only when
+                    # it was due. playlist syncs and batches fail a wished
+                    # track outside the wishlist's own passes too, and counting
+                    # each of them put a song on the 7 day rung after one bad
+                    # afternoon (TheHomeGuy: 5 tries, all Oct 29, then a week
+                    # of waiting while a manual search found it at once). a
+                    # failure while it cools keeps the reason, not the count.
+                    from datetime import datetime as _dt, timezone as _tz
+                    from core.wishlist.retry_backoff import get_active_retry_profile, is_due
+                    retry_profile = get_active_retry_profile(self)
+                    now_utc = _dt.now(_tz.utc).replace(tzinfo=None)
+                    rows = cursor.execute(
+                        f"SELECT id, retry_count, last_attempted FROM wishlist_tracks "
+                        f"WHERE {identity_clause} AND profile_id = ?", params[1:]).fetchall()
+                    changed = 0
+                    for row_id, retry_count, last_attempted in rows:
+                        due = is_due({"retry_count": retry_count, "last_attempted": last_attempted},
+                                     now_utc, retry_profile)
+                        cursor.execute(
+                            "UPDATE wishlist_tracks SET failure_reason = COALESCE(?, failure_reason)"
+                            + (", retry_count = retry_count + 1, last_attempted = CURRENT_TIMESTAMP"
+                               if due else "")
+                            + " WHERE id = ?", (error_message, row_id))
+                        changed += cursor.rowcount
+                    conn.commit()
+                    return changed > 0
                 
                 conn.commit()
                 return cursor.rowcount > 0

@@ -214,6 +214,9 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
     The batch predicate has to select exactly what ``upsert_mapping`` will write.
     It is the loop's only exit condition, so a row the SELECT keeps returning and
     the write keeps skipping — a blank ``server_id`` was one — spins here forever.
+    two rows stamped with the same server id were another: each write moves the
+    id to its row and unmaps the other, which the next batch picked up again,
+    for days. a row whose id another row already holds is left to that row.
     """
     changed = 0
     sources = sorted(MEDIA_SERVER_SOURCES)
@@ -229,8 +232,15 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
                            SELECT 1 FROM lib2_media_server_mappings m
                             WHERE m.entity_type=? AND m.entity_id=old.id
                               AND m.server_source=old.server_source)
+                       AND NOT EXISTS (
+                           SELECT 1 FROM lib2_media_server_mappings h
+                            WHERE h.server_source=old.server_source
+                              AND h.entity_type=?
+                              AND h.server_id=TRIM(old.server_id)
+                              AND h.server_library_id=''
+                              AND h.entity_id<>old.id)
                      LIMIT ?""",
-                (*sources, entity_type, max(1, int(batch_size))),
+                (*sources, entity_type, entity_type, max(1, int(batch_size))),
             ).fetchall()
             if not rows:
                 break

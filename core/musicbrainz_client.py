@@ -882,7 +882,12 @@ class MusicBrainzClient:
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            logger.error(f"Error fetching release-group {mbid}: {e}")
+            # a 404 is how get_album finds out an id is a release, not a
+            # group, which it asks about all the time: not an error
+            if http_error_status(e) == 404:
+                logger.debug(f"release-group {mbid} not found")
+            else:
+                logger.error(f"Error fetching release-group {mbid}: {e}")
             return None
 
     def get_recording(self, mbid: str, includes: Optional[List[str]] = None,
