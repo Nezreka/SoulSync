@@ -412,10 +412,14 @@ def _with_clean_numbers(row: Any, columns: Iterable[str]) -> Any:
 def _clear_text_numbers(cursor) -> None:
     """What an attempt before #1989 wrote until it stopped. A resume doesn't walk
     those rows again, and the finalize reads them as numbers."""
+    # one pass per table. this runs at every import start, and a column at a
+    # time was 17 full scans of tables that hold a million rows on a big library
     for table, columns in _LIB2_NUMBER_COLUMNS.items():
-        for column in columns:
-            cursor.execute(f"UPDATE {table} SET {column}=? WHERE typeof({column})='text'",
-                           (_LIB2_NUMBER_DEFAULTS.get(column),))
+        sets = ", ".join(f"{column}=CASE WHEN typeof({column})='text' THEN ? ELSE {column} END"
+                         for column in columns)
+        where = " OR ".join(f"typeof({column})='text'" for column in columns)
+        cursor.execute(f"UPDATE {table} SET {sets} WHERE {where}",
+                       tuple(_LIB2_NUMBER_DEFAULTS.get(column) for column in columns))
 
 
 def _legacy_rows(
