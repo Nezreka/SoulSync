@@ -47,12 +47,40 @@ export function ModeTabs({
   const mode = modeOf(state.activeSource);
   // music videos switched off (#1909): no Videos tab, unless you're on it
   const videosOn = useFeatureOn('music_videos');
-  const tabs: { mode: SearchMode; source: string; label: string; icon: React.ReactNode }[] = [
-    { mode: 'catalog', source: catalogSource, label: 'Catalog', icon: <DiscIcon /> },
+  // the hint says what each one searches. "files" alone meant nothing to
+  // someone who'd never used soulseek (#1909)
+  const tabs: {
+    mode: SearchMode;
+    source: string;
+    label: string;
+    hint: string;
+    icon: React.ReactNode;
+  }[] = [
+    {
+      mode: 'catalog',
+      source: catalogSource,
+      label: 'Catalog',
+      hint: 'Artists, albums and tracks from a music catalogue. Downloads arrive tagged and filed.',
+      icon: <DiscIcon />,
+    },
     ...(videosOn || mode === 'videos'
-      ? [{ mode: 'videos' as const, source: 'youtube_videos', label: 'Videos', icon: <FilmIcon /> }]
+      ? [
+          {
+            mode: 'videos' as const,
+            source: 'youtube_videos',
+            label: 'Videos',
+            hint: 'Music videos from YouTube.',
+            icon: <FilmIcon />,
+          },
+        ]
       : []),
-    { mode: 'files', source: 'soulseek', label: 'Files', icon: <FileIcon /> },
+    {
+      mode: 'files',
+      source: 'soulseek',
+      label: 'Files',
+      hint: 'Search your download sources directly and pick the exact file.',
+      icon: <FileIcon />,
+    },
   ];
   return (
     <div className={styles.modes} id="enh-source-row" role="tablist" aria-label="What to search">
@@ -62,6 +90,7 @@ export function ModeTabs({
           type="button"
           role="tab"
           data-source={tab.source}
+          title={tab.hint}
           aria-selected={mode === tab.mode}
           onClick={(event) => {
             // the page re-renders on select and detaches this node; stopping

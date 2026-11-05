@@ -201,3 +201,14 @@ describe('ModeTabs with music videos switched off (#1909)', () => {
     expect(tab('youtube_videos')).not.toBeNull();
   });
 });
+
+describe('ModeTabs say what they search (#1909)', () => {
+  it('gives every tab a plain hint', () => {
+    renderTabs();
+    expect(tab('soulseek').getAttribute('title')).toBe(
+      'Search your download sources directly and pick the exact file.',
+    );
+    expect(tab('youtube_videos').getAttribute('title')).toBe('Music videos from YouTube.');
+    expect(tab('spotify').getAttribute('title')).toMatch(/tagged and filed/);
+  });
+});
