@@ -76,7 +76,7 @@ Further down, a **spotlight** puts one new release from the artist you've played
 
 A row of genre pills in the **Explore & Build** zone near the bottom of the Discover page. Each pill shows an artist count and whether the genre has been explored — click one to open a **Genre Deep Dive** of that genre's artists.
 
-![Genre browser](disc-genre-browser.jpg)
+![The Genre Map graph with its genre clusters and top-artists panel](disc-genre-browser.jpg)
 
 ## Because You Listen To
 
@@ -105,7 +105,7 @@ If ListenBrainz is configured, the Discover page also shows personalized playlis
             body: `
 Search for 1–5 seed artists, select them, and click **Generate**. SoulSync finds similar artists, pulls their albums, and assembles a 50-track playlist mixing your picks with new discoveries. You can then download the generated playlist or sync it to your media server.
 
-![Build custom playlist](disc-build-playlist.jpg)
+![The Build a mix modal with seed artists, genres, tags and mix sliders](disc-build-playlist.jpg)
 
 > [!TIP]
 > Mixing artists from adjacent genres is a great way to build party or workout playlists that stay coherent but varied.
@@ -131,8 +131,6 @@ Both can be synced to your media server with live progress tracking.
             body: `
 Browse discovery pool content by **decade** — a **Decades** shelf of mix cards from the 1950s through the 2020s. Each decade pulls top tracks from pool artists active in that era.
 
-![Time Machine decade browser](disc-time-machine.jpg)
-
 > [!TIP]
 > Time Machine is perfect for themed listening — throw on the 70s mix for a dinner party or the 90s mix for a nostalgia trip.
 `
@@ -148,6 +146,8 @@ Three interactive canvas-based visualization modes for exploring artist relation
 - **Genre Map** — browse all artists by genre with a sidebar picker. Ring-packed clusters, no artist cap. Great for exploring genres you don't normally listen to
 - **Artist Explorer** — deep-dive any artist. Ring 1 shows direct similar artists, Ring 2 shows the extended network. Exploring an unknown artist fetches similar artists in real-time and caches them
 
+![The Explore and Build hub with the Artist Map mode panels and Artist Web](disc-artist-map.jpg)
+
 **Controls:** mouse wheel to zoom, click to explore, hover for tooltips with genre tags. Keyboard shortcuts: **F** / **0** to fit the view, **S** to focus search, **D** to toggle the perf overlay, **H** to toggle similar artists, **+** / **-** to zoom, **Esc** to close.
 `
         },
@@ -157,6 +157,8 @@ Three interactive canvas-based visualization modes for exploring artist relation
             lede: 'Analytics about your library and listening activity.',
             body: `
 The Stats page shows analytics about your music library and listening activity, split into two tabs: **Listening** and **Library**.
+
+![Listening Stats with the activity chart, listening heatmap and top artists, albums and tracks](disc-stats.jpg)
 
 Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
@@ -183,6 +185,8 @@ registerDocsSection({
             lede: 'Soulseek chat rooms and the community room, proxied through your slskd connection.',
             body: `
 Open **Chat** in the sidebar — "Soulseek rooms & private messages". Everything here rides on your Soulseek connection: if slskd isn't configured, the page says **"Soulseek (slskd) isn't configured — set it up in Settings to join the chat."** and there is nothing to join yet.
+
+![The Chat page with its Friends, Blocklist and Bookmarks entries and the Direct Messages section](chat-rooms.jpg)
 
 ## Layout
 
@@ -255,6 +259,8 @@ Room and profile settings save to the server; mention sound and now-playing shar
             title: 'Private Messages',
             lede: 'One-to-one Soulseek conversations, with unread tracking that follows you around the app.',
             body: `
+![The Chat sidebar's Direct Messages section, where private conversations are listed](chat-pm.jpg)
+
 ## Starting a conversation
 
 - Click a username anywhere → user card → **Message**
@@ -289,6 +295,8 @@ PMs are **plain-text only** — the formatting toolbar, GIF, poll, now-playing, 
             lede: 'A room-wide YouTube jukebox: queue tracks, vote on what plays next, and let Auto-DJ keep it fed.',
             body: `
 The Jukebox lives in the Chat page header and the right-rail panel (toggled by the room-head **♫ Jukebox** button — "Room jukebox — listen together, vote on what plays next"). Everything is YouTube-based, and jukebox state is derived from the room's protocol events, so every SoulSync client in the room agrees on the queue.
+
+![The community room head with the Jukebox and Watch Together buttons](chat-jukebox.jpg)
 
 The headbar shows the **♫ Jukebox** brand, **♪ N listening**, the **📻 Auto-DJ** toggle ("Auto-DJ: when the queue runs dry, keep the music going with related tracks"), an **Add a song or paste a YouTube link…** input (200 chars) with an **Add** button, and a results dropdown.
 

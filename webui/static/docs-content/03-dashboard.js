@@ -23,7 +23,7 @@ The dashboard is organized into bands that appear when they have something to sh
 
 Stats update in real time over WebSocket — no page refresh needed.
 
-![Dashboard overview](dash-overview.jpg)
+![The dashboard with library stats, worker orbs, alerts, and content rails](dash-overview.jpg)
 
 > [!TIP]
 > Click the **version number** in the sidebar footer to open the **What's New** modal with release notes. It glows when an update is available: green for routine, yellow for major, red for critical.
@@ -37,6 +37,8 @@ Stats update in real time over WebSocket — no page refresh needed.
 ## Where it lives
 
 Download history now lives on the **Active Downloads** page. Completed and failed downloads stay listed there with a persistent history — clearing the list removes the rows, never your files.
+
+![The Active Downloads page, where finished downloads stay listed. The Recent History bar along the bottom holds the full history; it is empty here because no transfers have run yet](dash-history.jpg)
 
 Each history entry is expandable — click to reveal source provenance details:
 
@@ -57,6 +59,8 @@ Each history entry is expandable — click to reveal source provenance details:
 ## Retired by design
 
 The floating **"Search everything…"** bar that used to sit above the media player has been **deliberately removed**. It duplicated the Search page, and the two were easy to confuse.
+
+![The Search page that replaced the retired floating search bar](dash-search-now.jpg)
 
 ## Where to search now
 
@@ -114,7 +118,7 @@ Background library repair jobs — findings land on the Tools page.
 Deterministic SoulIDs generated for artists, albums, and tracks.
 :::
 
-![Enrichment workers status](dash-workers.jpg)
+![Worker orbs in the dashboard header with a status tooltip](dash-workers.jpg)
 
 > [!NOTE]
 > Workers retry "not found" items every 30 days and errored items every 7 days. You can pause/resume any worker from the dashboard.
@@ -139,7 +143,7 @@ The dashboard sidebar holds three live cards, top to bottom:
 
 The dashboard footer holds quick settings toggles.
 
-![Dashboard tool cards](dash-tools.jpg)
+![Dashboard sidebar with the playlist sync rail, automations card, and quick navigation tiles](dash-tools.jpg)
 
 > [!TIP]
 > The old per-tool dashboard cards (Database Updater, Metadata Updater, Retag, Backup Manager, repair jobs) now live on the dedicated **Tools** page, organized into Operations and Tools tabs.
@@ -156,7 +160,7 @@ Retagging is now part of the **Tools** page findings workflow. When a repair sca
 
 The retag operation writes title, artist, album artist, album, track number, disc number, year, and genre. Cover art can optionally be re-embedded.
 
-![Retag tool interface](dash-retag.jpg)
+![Retag tool comparing current file tags against corrected metadata](dash-retag.jpg)
 
 > [!TIP]
 > Run a **Metadata Updater** scan from Tools first if tags look wrong everywhere — it refreshes the reference metadata that retag compares against.
@@ -177,7 +181,7 @@ The **Backup Manager** is a server card on the **Tools** page. It protects your 
 - **Delete** — remove individual backups.
 - **Rolling cleanup** — automatically keeps only the 5 most recent backups to save disk space.
 
-![Backup manager](dash-backup.jpg)
+![Backup Manager with timestamped database backups and restore controls](dash-backup.jpg)
 
 > [!TIP]
 > The **Auto-Backup Database** system automation creates a backup every 3 days automatically. Adjust the interval in [Automations](#auto-system).
@@ -191,6 +195,8 @@ The **Backup Manager** is a server card on the **Tools** page. It protects your 
 ## Where it lives now
 
 Repair and maintenance moved to the **Tools** page, which has two tabs:
+
+![Tools page Operations tab with the library health score and findings cards](dash-repair.jpg)
 
 - **Operations** — the findings inbox. Repair scans surface problems here (missing tags, duplicates, dead files, …) and you fix them individually or in bulk.
 - **Tools** — launcher cards for scans and maintenance: **Media Server Scan**, **Metadata Updater**, **Backup Manager**, **Download Blacklist**, **Metadata Cache**, **Discovery Pool**, and more.
@@ -265,6 +271,8 @@ Library v2 handles catalogue identity and wanted quality upgrades directly. The 
 
 The dashboard does not render an activity feed. Recent activity shows up in the bands that own it:
 
+![Dashboard bands where recent activity surfaces, including alerts and listening history](dash-activity.jpg)
+
 - **Alerts band** — exceptions that need a human (a service disconnected, a scan failed, etc.). Renders nothing while every core connection is healthy.
 - **Active downloads** — downloads in progress, full-width, with live progress. Finished work moves to the history on the Active Downloads page.
 - **Automations card** — recent and upcoming automation runs, in the sidebar.
@@ -279,6 +287,8 @@ Stats and bands update in real time over WebSocket — no page refresh needed. F
             lede: 'Everything the Stats page measures — Listening analytics, Year in Listening, and Library health.',
             body: `
 The **Stats** page (title **"Listening Stats"**) has two tabs — **Listening** and **Library** — with the tab, range, and story kept in the URL (\`?tab=\`, \`?range=\`, \`?story=\`).
+
+![Listening Stats page with play totals, activity chart, and top artists](dash-stats.jpg)
 
 Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
@@ -341,6 +351,8 @@ No data yet? You'll see 📊 **"No Listening Data Yet"** — enable Listening St
             lede: 'Batches, download clients, and the human review pipeline — approve, quarantine, or recover every file.',
             body: `
 The **Active Downloads** page is poll-driven and has three views: **Downloads**, **Review** (labeled **Quarantine** when AcoustID isn't configured), and **Clients**.
+
+![Active Downloads page with batches, live counts, and status filters](dash-downloads.jpg)
 
 ## Header
 
@@ -410,6 +422,8 @@ Retention: **"keep deleted files:"** — keep forever, or auto-delete after 7 / 
             body: `
 Enrichment workers call third-party metadata APIs, and every call is tracked per service. Open a worker's rate graph from the **Manage Workers** modal — the **📈 API Graph** button ("24-hour API call history") on any worker.
 
+![API rate monitor gauge showing a service's call rate against its limit](dash-api-monitor.jpg)
+
 > [!NOTE]
 > The old equalizer-bar grid that used to live in the Services card is retired. Rate graphs now open per-worker from the Manage Workers modal — the gauge registries and the rate detail modal in \`api-monitor.js\` are the surviving live code.
 
@@ -454,6 +468,8 @@ The tracker also logs rate-limit **events** (bans, peaks, escalations — last 2
             body: `
 The **Config Migration** card ("Export every setting (music + video) as one JSON file to move to a new install, or import one here.") opens the export/import modal via **Export / Import Config**. **Admin only.**
 
+![Config Migration modal for exporting or importing every setting as one JSON file](dash-config-migration.jpg)
+
 ## Export tab
 
 Shows the bundle JSON in a preview pane, with:
@@ -483,6 +499,8 @@ A secrets-redacted bundle never blanks your existing credentials — each settin
             body: `
 The **Manual Library Match** card ("Map wishlist and playlist source tracks to library tracks you already own") stops SoulSync re-downloading things you already have. Open it with **Open Library Match** (it can also launch prefilled from sync-history rows).
 
+![Manual Library Match modal with source track and library track search panels](dash-manual-match.jpg)
+
 ## The modal
 
 Two side-by-side search panels:
@@ -510,6 +528,8 @@ Matches store the library file's path, so they re-resolve after rescans — and 
             body: `
 The **Import IDs from File Tags** card ("Read provider IDs (Spotify, MusicBrainz, iTunes, Deezer…) already embedded in your files and fill them into the database — lets enrichment workers skip redundant API lookups. Only fills blanks; never overwrites an existing match.").
 
+![Reconcile IDs card reading provider IDs embedded in file tags](dash-reconcile.jpg)
+
 Card stats: **IDs Filled** / **Rows Updated** / **Conflicts** / **Unreadable**.
 
 ## What it reconciles
@@ -536,6 +556,8 @@ The button shows **Starting…** then **Scanning…** (disabled while busy) — 
             body: `
 The **Media Server Scan** card ("Manually trigger Plex media library scan for music") has one button: **📡 Scan Library**. Card stats: **Last Scan** / **Status**.
 
+![Media Server Scan card with last scan time and status](dash-media-scan.jpg)
+
 > [!NOTE]
 > The card only appears when your active media server is **Plex**. Jellyfin and Navidrome detect new files in real time, so no manual scan is offered for them.
 
@@ -559,6 +581,8 @@ After the scan, SoulSync updates its own database automatically via the **Auto-U
             lede: 'One-click automatic duplicate removal — best copy wins, losers go to the recycle bin.',
             body: `
 The **Duplicate Cleaner** card ("Detect and remove duplicate tracks in output folder") is fully automatic — **there are no review or keep options on the card; removal happens on click**. Card stats: **Files Scanned** / **Duplicates Found** / **Deleted** / **Space Freed**.
+
+![Duplicate Cleaner card with files scanned, duplicates found, and space freed](dash-duplicates.jpg)
 
 ## How it decides
 
@@ -588,6 +612,8 @@ Protected from ever being flagged: intentionally created **lossy companions** (t
             body: `
 The **\<Server\> Database Updater** card (e.g. "Plex Database Updater") shows **Last Full Refresh** (date or "Never") plus stats: **Artists** / **Albums** / **Tracks** / **Size (MB)**. Starting or stopping a run **requires admin**.
 
+![Database Updater card with library counts and the three update modes](dash-db-updater.jpg)
+
 ## The three modes
 
 Pick from the update-type select, then click **Update Database** (the button stays as **Stop Update** while running — even during "Starting…" so a wedged start is cancellable):
@@ -605,6 +631,8 @@ Progress shows phase text plus "N / M artists (P%)"; the card stats refresh when
             lede: 'Blocked download sources that will never be used again.',
             body: `
 The **Download Blacklist** card ("Blocked sources that won't be used for future downloads") holds a **per-profile** list of download sources — Soulseek users or service backends — excluded from all future download matching. Card stat: **Blocked: N**. Open it with **View Blacklist**.
+
+![Download Blacklist card and its blocked sources list](dash-blacklist.jpg)
 
 ## How sources get blacklisted
 
@@ -629,6 +657,8 @@ Empty state: "No blocked sources. Sources can be blacklisted from the Source Inf
             lede: 'Browse, inspect, and clear the cached API responses behind enrichment.',
             body: `
 The **Metadata Cache** card ("Cached API responses from Spotify & iTunes") shows stats for **Artists** / **Albums** / **Tracks** / **Hits** — summed over first-party sources only (Spotify + iTunes + Deezer + Beatport). Discogs and MusicBrainz are deliberately excluded here and appear only in Cache Health.
+
+![Metadata Cache browser with cached artists, albums, and tracks by source](dash-metadata-cache.jpg)
 
 ## Browse Cache
 
@@ -672,6 +702,8 @@ Tabs All/Artists/Albums/Tracks with counts, "Filter by name…" search, **Clear 
             body: `
 The **Discovery Pool** card ("View and fix matched/failed discovery results across all mirrored playlists") records how tracks in **mirrored playlists** (synced from external sources like YouTube/Spotify) were matched — "discovered" — to metadata providers. Card stats: **Matched:** / **Failed:**. Open it with **Open Discovery Pool**.
 
+![Discovery Pool modal listing matched and failed mirrored-playlist tracks](dash-discovery-pool.jpg)
+
 ## The modal
 
 Header shows **N Matched**, **N Failed**, and a playlist filter (All Playlists + each mirrored playlist). Two lists:
@@ -691,6 +723,8 @@ A "Filter tracks…" search box and ← Back navigation round it out; closing th
             lede: 'Re-check your artists against every enrichment service and push fresh art to your server.',
             body: `
 The **\<Server\> Metadata Updater** card (e.g. "Plex Metadata Updater") is shown for **Plex and Jellyfin only** — hidden for anything else. It re-checks your library's artists against all connected enrichment services and pushes the results to your media server:
+
+![Metadata Updater card pushing fresh artist art and metadata to the media server](dash-metadata-updater.jpg)
 
 - **Artist photo**: a big square photo for artists without one. fanart.tv first, then TheAudioDB, then Deezer, with Spotify's 640px photo as the last resort.
 - **Artist background**: the wide picture Plexamp and the Plex web app (and Jellyfin's backdrop) show behind an artist page, for artists without one. From fanart.tv, then TheAudioDB.

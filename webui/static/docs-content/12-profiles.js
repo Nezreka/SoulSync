@@ -20,7 +20,7 @@ Profiles give everyone their own space inside a shared SoulSync installation. Ea
 
 **Shared across all profiles**: settings, and the music library by default — though a profile can have its **own library** instead (\`library_mode == 'own'\`), with its own output folder on Plex or Jellyfin. **Automations are per-profile**: each profile runs its own automations; only system automations are shared across profiles. Profiles are about personalization and permissions, not separate servers — and access to the Automations page is a grantable permission, not admin-only.
 
-![Profile picker](profiles-picker.jpg)
+![The profile picker: Admin, Mags and the PIN-protected Guest profile](profiles-picker.jpg)
 `
         },
         {
@@ -29,6 +29,8 @@ Profiles give everyone their own space inside a shared SoulSync installation. Ea
             lede: 'Set up profiles with avatars, PINs, and per-profile controls.',
             body: `
 Admins manage profiles from the Profiles panel, which has three tabs: **People**, **Invites**, and **Activity** (the audit log).
+
+![The Profiles panel: People, Invites and Activity tabs, with profile cards and their roles](profiles-overview.jpg)
 
 ![Create profile](profiles-create.jpg)
 
@@ -62,7 +64,7 @@ On your own profile the menu says **Sign out other devices**; on someone else's 
             title: 'Permissions & Limits',
             lede: 'Control what each profile can see, download, and request.',
             body: `
-![Profile permissions](profiles-permissions.jpg)
+![Profile permissions for the Guest profile: access presets, Music on, Movies & TV off, and kids limits](profiles-permissions.jpg)
 
 ## Side access
 
@@ -98,6 +100,8 @@ Every browser or phone signed in as a profile is tracked. From your own profile 
             lede: 'Each profile connects its own music services and media-server identity.',
             body: `
 Service credentials are **not** shared: every profile connects its own accounts from the **My Account** modal in the sidebar. Connecting your own account only changes your playlists and stats — the admin's accounts in Settings are untouched.
+
+![The My Account modal: your media server identity (none set up for Mags here) and your own Spotify, Tidal, ListenBrainz and Last.fm connections](profiles-accounts.jpg)
 
 ## Music services
 
@@ -140,6 +144,8 @@ Your plays never go to the admin's accounts, and the admin's never go to yours.
             body: `
 A profile has two separate secrets — don't mix them up:
 
+![The PIN entry dialog shown when opening a PIN-protected profile](profiles-security.jpg)
+
 ## PIN
 
 A short (4–20 digits) code asked **when anyone opens the profile**, for privacy within the household. Admins can set or clear anyone's PIN from the profile editor. Clearing a PIN only turns off the launch lock for profile 1 (the admin profile) — clearing anyone else's PIN leaves the launch lock as it was.
@@ -178,6 +184,8 @@ Passwords aren't deleted. They just aren't used, and work again when the switch 
             body: `
 A profile without download rights doesn't download — everything it adds to its wishlist becomes a **request** for an admin. The **Requests** page is visible to admins (to work the queue) and to members who ask (to follow their own), and a badge on the nav item counts what's waiting.
 
+![The Requests page: status tabs for waiting, on the way, available and declined requests](profiles-requests.jpg)
+
 ## How asking works
 
 Requests are grouped the way a person thinks of them: an **album** or a single **track**. Asks land in the **Waiting** tab, newest first, with the profile's remaining request quota shown.
@@ -208,6 +216,8 @@ Every profile can choose its own home page:
 - **Discover** — the non-admin default: new releases, recommendations, trending
 
 Anyone can change their own home page; admins can set or change anyone's. A home page has to be in the profile's allowed pages — picking a new allowed-pages list resets a home page that was locked out.
+
+![A member profile's home: Mags' dashboard with her week in listening, playlist sync and recently played](profiles-home.jpg)
 `
         },
         {
@@ -216,6 +226,8 @@ Anyone can change their own home page; admins can set or change anyone's. A home
             lede: 'Every profile hides the parts of SoulSync it does not need.',
             body: `
 SoulSync does a lot. **Customize**, at the bottom of the sidebar, opens **Make SoulSync yours** (admins also find it under Settings → Appearance).
+
+![Make SoulSync yours: the Everything and Simple presets, the parts that are always here, and a switch for every optional part. All 13 extras are on for Admin here](prof-features.jpg)
 
 - **Simple** keeps the music core plus Discover, playlist sync and Import (where downloads that need a hand wait).
 - **Everything** is SoulSync the way it ships.

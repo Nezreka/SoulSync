@@ -10,6 +10,8 @@ registerDocsSection({
             body: `
 Automations follow a simple **WHEN → DO → THEN** model: a trigger fires, an action runs, and optional follow-up steps (usually notifications) happen after.
 
+![Automations list showing each automation's trigger, action and run status](auto-overview.jpg)
+
 ::: cards
 ### ⏰ Schedules
 Run maintenance on a timer — process the wishlist every 30 minutes, scan the watchlist nightly, back up the database every few days.
@@ -40,7 +42,7 @@ Click **+ New Automation** to open the builder. Blocks from the sidebar drop int
 3. **THEN** (follow-ups) — up to 5 post-actions that run after DO completes, typically notifications or signals.
 :::
 
-![Automation builder](auto-builder.jpg)
+![Automation builder with WHEN, DO and THEN slots](auto-builder.jpg)
 
 ## Conditions
 
@@ -61,6 +63,8 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
             title: 'All Triggers',
             lede: 'Every event and schedule that can start an automation.',
             body: `
+![Builder with the trigger picker open](auto-triggers.jpg)
+
 ## Time-based
 
 | Trigger | What it does |
@@ -142,6 +146,8 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
             title: 'All Actions',
             lede: 'Every task an automation can perform.',
             body: `
+![Builder with the action picker open](auto-actions.jpg)
+
 ## Wishlist & downloads
 
 | Action | What it does |
@@ -214,6 +220,8 @@ Automations can be organized into named **groups** (e.g. "Nightly Operations", "
             lede: 'What happens after the action: notifications, webhooks, and signal chaining.',
             body: `
 After the DO action completes, up to **5 THEN actions** run:
+
+![Builder showing the THEN follow-up actions area](auto-then.jpg)
 
 - **Discord Webhook** — post a message to a Discord channel
 - **Pushbullet** — push notification to phone or desktop
