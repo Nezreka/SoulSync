@@ -1263,6 +1263,12 @@ def register_routes(bp):
             if note:
                 out["note"] = note
             return jsonify(out)
+        # no source is not a demo. the season-pack and whole-show searches sent
+        # none and the user got placeholder releases marked DEMO DATA instead of
+        # their indexers (SeadogsBooty). say what's missing instead.
+        if not source:
+            return jsonify({"queries": queries,
+                            "error": "Pick a download source to search on Settings → Downloads."})
         # remaining mock sources (e.g. youtube placeholder) resolve in one shot
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                           episode=want_episode, season_end=season_end, source=source)

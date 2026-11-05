@@ -774,9 +774,20 @@
         resultsEl.hidden = false;
         resultsEl.classList.remove('vdl-res-noanim');
         resultsEl.innerHTML = '<div class="vdl-res-loading"><span class="vdl-res-spin"></span>Searching ' + esc(scopeWord(params.scope)) + '…</div>';
+        // every way a search can end calls onDone. the error and closed-panel
+        // exits used to return without it, so Grab season's per-episode promise
+        // never settled: the row sat on Searching forever, nothing reached the
+        // client and the pump never freed its slot (SeadogsBooty, MobLand S1)
+        resultsEl._error = null;
         postJSON('/api/video/downloads/search/start', params).then(function (d) {
-            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
-            if (d && d.error) { _setScanning(triggerRows, false); resultsEl.innerHTML = '<div class="vdl-res-empty vdl-res-err">⚠ ' + esc(d.error) + '</div>'; return; }
+            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
+            if (d && d.error) {
+                _setScanning(triggerRows, false);
+                resultsEl._error = d.error;
+                resultsEl.innerHTML = '<div class="vdl-res-empty vdl-res-err">⚠ ' + esc(d.error) + '</div>';
+                if (onDone) onDone();
+                return;
+            }
             if (!d || !d.id) {   // mock / immediate
                 _setScanning(triggerRows, false);
                 renderResults(resultsEl, params, d ? d.results : [], !!(d && d.live), true);
@@ -794,7 +805,7 @@
         var started = Date.now(), lastN = -1, stable = 0, total = 0;
         var MAX_MS = Math.min(80000, pollMs || 60000);
         function tick() {
-            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
+            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
             var qs = '?id=' + encodeURIComponent(id) + '&scope=' + encodeURIComponent(params.scope || 'movie') +
                 '&title=' + encodeURIComponent(params.title || '') +
                 (params.season != null ? '&season=' + params.season : '') +
@@ -803,7 +814,7 @@
                     '&media_source=' + encodeURIComponent(params.media_source || '') : '') +
                 (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '');
             getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
-                if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
+                if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
                 var rows = (d && d.results) || [];
                 total = (d && d.total_files) || total;
                 if (rows.length === lastN) { stable++; } else { stable = 0; lastN = rows.length; }
@@ -1389,14 +1400,20 @@
             var sn = ss.getAttribute('data-vdl-season-search');
             var sc = container.querySelector('.vdl-season[data-vdl-season="' + sn + '"]');
             if (sc) sc.classList.add('vdl-season--open');
-            searchInto(container, sc && sc.querySelector('[data-vdl-season-results]'),
-                { scope: 'season', title: st.title, season: +sn }, [ss]);
+            var seasonEl = sc && sc.querySelector('[data-vdl-season-results]');
+            var packSrc = _packSource(st);
+            if (!packSrc) { _noSourceInto(seasonEl); return; }
+            searchInto(container, seasonEl,
+                { scope: 'season', title: st.title, season: +sn, source: packSrc }, [ss]);
             return;
         }
         // Whole-show search → complete-series pack.
         if (e.target.closest('[data-vdl-search-show]')) {
-            searchInto(container, container.querySelector('[data-vdl-show-results]'),
-                { scope: 'series', title: st.title, season_end: st.maxSeason || 5 },
+            var showEl = container.querySelector('[data-vdl-show-results]');
+            var showSrc = _packSource(st);
+            if (!showSrc) { _noSourceInto(showEl); return; }
+            searchInto(container, showEl,
+                { scope: 'series', title: st.title, season_end: st.maxSeason || 5, source: showSrc },
                 [e.target.closest('[data-vdl-search-show]')]);
             return;
         }
@@ -1471,11 +1488,15 @@
         var s = epEl.querySelector('[data-vdl-ep-status]');
         if (s) s.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--active"><span class="vdl-ep-dl-spin"></span>Searching…</span>';
     }
-    function epNoRelease(epEl) {
+    // why, when there is one: a refused grab or a search error used to read as
+    // a plain "No release found" and looked like an empty search
+    function epNoRelease(epEl, reason) {
         if (!epEl) return;
         epEl.classList.remove('vdl-ep--dl-active');
         var s = epEl.querySelector('[data-vdl-ep-status]');
-        if (s) s.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--none">No release found</span>';
+        if (s) s.innerHTML = reason
+            ? '<span class="vdl-ep-dl vdl-ep-dl--none" title="' + esc(reason) + '">Not grabbed: ' + esc(reason) + '</span>'
+            : '<span class="vdl-ep-dl vdl-ep-dl--none">No release found</span>';
     }
 
     // Poll one episode's download by id and paint its row until it finishes. Robust to
@@ -1517,7 +1538,8 @@
         }
         if (!best) return Promise.resolve({ ok: false });
         return sendGrab(buildGrabPayload(panel, best)).then(function (res) {
-            return (res && res.ok) ? { ok: true, id: res.id } : { ok: false };
+            return (res && res.ok) ? { ok: true, id: res.id }
+                : { ok: false, error: (res && res.error) || 'the download client refused it' };
         });
     }
 
@@ -1552,7 +1574,7 @@
                             epTrack(epEl, r.id);
                             document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
                         } else {
-                            epNoRelease(epEl);
+                            epNoRelease(epEl, r.error || panel._error);
                         }
                         resolve(r);
                     });
@@ -1576,14 +1598,34 @@
         });
     }
 
+    // where a season or whole-show PACK search goes. packs live on usenet and
+    // torrent indexers, so those first in the user's order, then whatever else
+    // is set up. these searches used to send no source at all, and the server
+    // answered with its placeholder releases marked DEMO DATA (SeadogsBooty)
+    function _packSource(st) {
+        var list = (st.sources || []).filter(function (s) { return SRC_META[s]; });
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] === 'usenet' || list[i] === 'torrent') return list[i];
+        }
+        return list[0] || null;
+    }
+
+    function _noSourceInto(el) {
+        if (!el) return;
+        el.hidden = false;
+        el.innerHTML = '<div class="vdl-res-empty">No download source configured — pick one on Settings → Downloads.</div>';
+    }
+
     function grabSeason(container, st, sn) {
         // EVERY configured source, not just the first. Asking only sources[0] meant a
         // show that Soulseek had but Prowlarr didn't was reported as unavailable.
         var sources = (st.sources || []).filter(function (s) { return SRC_META[s]; });
         if (!sources.length) { toast('No download source configured', 'error'); return; }
-        var eps = [];
+        var eps = [], seasonTotal = 0;
         for (var k in st.epMeta) {
-            if (k.indexOf(sn + '_') === 0 && st.epMeta[k].state === 'missing') eps.push(+k.split('_')[1]);
+            if (k.indexOf(sn + '_') !== 0) continue;
+            seasonTotal++;
+            if (st.epMeta[k].state === 'missing') eps.push(+k.split('_')[1]);
         }
         eps.sort(function (a, b) { return a - b; });
         if (!eps.length) { toast('No missing episodes in this season', 'info'); return; }
@@ -1618,6 +1660,9 @@
         // 22 separate searches for a 22-episode season. Falls back the moment no
         // source has an acceptable pack — the per-episode path is still the one
         // that works for a half-owned season.
+        // a pack only pays off when the whole season is missing. on a half-owned
+        // season it would download the episodes you already have again
+        if (eps.length < seasonTotal) { perEpisode(); return; }
         toast('Looking for a season pack…', 'info');
         var i = 0;
         (function next() {

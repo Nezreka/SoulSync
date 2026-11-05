@@ -156,7 +156,10 @@ def test_a_pack_is_tried_before_any_per_episode_search():
     every source has been asked for a pack and come back empty."""
     fn = _grab_season()
     assert "if (i >= sources.length) { perEpisode(); return; }" in fn
-    assert fn.count("perEpisode()") == 2, "defined once, called from exactly one place"
+    # defined once, called when no source had a pack, and straight away for a
+    # half-owned season (a pack would re-download what you have)
+    assert fn.count("perEpisode()") == 3
+    assert "if (eps.length < seasonTotal) { perEpisode(); return; }" in fn
     assert "Looking for a season pack" in fn
 
 
@@ -295,3 +298,65 @@ def test_the_detail_page_no_longer_pins_the_season_to_one_source():
     assert "VideoGrab.pickSource()" not in fn
     assert "Looking for a season pack" in fn
     assert "res.pack" in fn, "a pack must not report as 'grabbing N of N episodes'"
+
+
+# ── a search that ends badly still ends (SeadogsBooty, MobLand S1) ───────────
+# Grab season showed "Grabbing 10 episodes", every row sat on Searching, and
+# nothing reached SABnzbd. searchInto only called its done callback on
+# success: an error answer or a closed panel returned without it, so each
+# episode's promise never settled and the 3-wide pump never freed a slot.
+
+_SEARCH_HARNESS = r"""
+const fs = require('fs');
+const src = fs.readFileSync('webui/static/video/video-download-view.js', 'utf8');
+const body = src.slice(src.indexOf('function searchInto('), src.indexOf('function _pollSearch('));
+function el(connected) {
+  return { isConnected: connected, hidden: true, innerHTML: '', classList: { remove() {}, toggle() {} } };
+}
+async function run(answer, connected) {
+  const env = {
+    postJSON: () => Promise.resolve(answer),
+    withIdentity: (c, r, p) => p, _setScanning() {}, esc: (x) => String(x),
+    scopeWord: () => 'season', renderResults() {}, _pollSearch() {},
+  };
+  const f = new Function(...Object.keys(env), body + '; return searchInto;')(...Object.values(env));
+  const res = el(connected);
+  let done = 0;
+  f({}, res, { scope: 'episode', source: 'usenet' }, [], () => { done++; });
+  await new Promise((r) => setTimeout(r, 20));
+  return { done, error: res._error || null, html: res.innerHTML };
+}
+(async () => {
+  console.log(JSON.stringify({
+    error: await run({ error: 'Prowlarr: 401' }, true),
+    closed: await run({ results: [] }, false),
+    ok: await run({ results: [] }, true),
+  }));
+})();
+"""
+
+
+@pytest.mark.skipif(_node() is None, reason="node not available")
+def test_a_search_that_errors_or_closes_still_calls_done():
+    out = subprocess.run([_node(), "-e", _SEARCH_HARNESS], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    d = json.loads(out.stdout.strip())
+    assert d["error"]["done"] == 1, "an indexer error must settle the episode"
+    assert d["error"]["error"] == "Prowlarr: 401", "and the row gets the reason"
+    assert d["closed"]["done"] == 1
+    assert d["ok"]["done"] == 1
+
+
+def test_the_episode_row_says_why_it_was_not_grabbed():
+    js = _js()
+    assert "epNoRelease(epEl, r.error || panel._error)" in js
+    assert "Not grabbed: " in js
+
+
+def test_season_and_show_pack_searches_name_a_source():
+    """they sent none, and the server answered with DEMO DATA placeholders."""
+    js = _js()
+    assert "{ scope: 'season', title: st.title, season: +sn, source: packSrc }" in js
+    assert "season_end: st.maxSeason || 5, source: showSrc }" in js
+    fn = js[js.index("function _packSource("):js.index("function _noSourceInto(")]
+    assert "'usenet'" in fn and "'torrent'" in fn
