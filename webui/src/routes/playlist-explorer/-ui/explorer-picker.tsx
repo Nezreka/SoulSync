@@ -11,7 +11,12 @@ import { useMemo } from 'react';
 
 import type { ExplorerMode, MirroredPlaylist } from '../-explorer.types';
 
-import { explorerCardView, groupPlaylistsBySource, type ExplorerCardView } from '../-explorer.core';
+import {
+  explorerCardView,
+  explorerSourceLabel,
+  groupPlaylistsBySource,
+  type ExplorerCardView,
+} from '../-explorer.core';
 
 /** What the Discover button on a card is currently saying (explorerStartDiscovery :196, :201). */
 export type DiscoverButtonState = 'idle' | 'starting' | 'open';
@@ -85,7 +90,7 @@ function PickerCard({
           <div className="explorer-picker-card-art-placeholder">♫</div>
         )}
         <div className="explorer-picker-card-art-shade" />
-        <span className="explorer-picker-card-source">{source}</span>
+        <span className="explorer-picker-card-source">{explorerSourceLabel(source)}</span>
       </div>
       <div className="explorer-picker-card-info">
         <div className="explorer-picker-card-name-row">
