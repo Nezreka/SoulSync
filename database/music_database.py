@@ -2139,6 +2139,7 @@ class MusicDatabase:
                 logger.error(f"lidarr_compat schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
             self._purge_beatport_positional_matches(cursor)
+            self._purge_fake_provider_ids(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
             # version. Additive backstop — runs last, gates nothing.
             self._sync_migration_ledger(cursor)
@@ -2250,6 +2251,7 @@ class MusicDatabase:
         'sample_stems_v1':            ('table', 'sample_stems'),
         'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
         'beatport_positional_purged': ('table', '_beatport_positional_purged'),
+        'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
     }
 
     def _record_migration(self, cursor, name):
@@ -4658,6 +4660,47 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error purging beatport positional matches: {e}")
 
+
+    def _purge_fake_provider_ids(self, cursor):
+        """one-time: drop provider ids an import filed under the wrong name
+        (#1996). 'webui_modal' is a screen, not a provider, and a last.fm page
+        url sat under deezer, so the deezer worker asked for it on every pass.
+        where the same id also sits under its real provider nothing is lost,
+        anything else gets matched again by name."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = {r[0] for r in cursor.fetchall()}
+            if '_fake_provider_ids_purged' in tables:
+                return
+            from core.imports.side_effects import _URL_ID_PROVIDERS
+            counts = {}
+            for table in ('lib2_artists', 'lib2_albums', 'lib2_tracks'):
+                if table not in tables:
+                    continue
+                cursor.execute(
+                    f"SELECT id, external_ids FROM {table} WHERE external_ids LIKE '%webui_modal%' "
+                    "OR external_ids LIKE '%://%'")
+                fixed = 0
+                for row_id, raw in cursor.fetchall():
+                    try:
+                        ids = json.loads(raw)
+                    except (TypeError, ValueError):
+                        continue
+                    if not isinstance(ids, dict):
+                        continue
+                    kept = {k: v for k, v in ids.items()
+                            if k != 'webui_modal'
+                            and not ('://' in str(v) and k not in _URL_ID_PROVIDERS)}
+                    if kept != ids:
+                        cursor.execute(f"UPDATE {table} SET external_ids=? WHERE id=?",
+                                       (json.dumps(kept), row_id))
+                        fixed += 1
+                counts[table] = fixed
+            cursor.execute("CREATE TABLE _fake_provider_ids_purged (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'fake_provider_ids_purged')
+            logger.info("fake provider id purge: %s", counts)
+        except Exception as e:
+            logger.error(f"Error purging fake provider ids: {e}")
 
     def _drop_retired_match_provenance_triggers(self, cursor):
         """Remove the trigger set that used to fill this table.

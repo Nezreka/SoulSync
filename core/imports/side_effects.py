@@ -140,6 +140,16 @@ _SOULSYNC_FILLABLE_COLUMNS = {
 }
 
 
+# the providers whose ids are page urls
+_URL_ID_PROVIDERS = frozenset({"lastfm", "bandcamp"})
+
+
+def _known_id_providers() -> frozenset:
+    from core.library2.match_status import SERVICES
+    from core.metadata.registry import METADATA_SOURCE_PRIORITY
+    return frozenset(name for name, _label, _columns in SERVICES) | frozenset(METADATA_SOURCE_PRIORITY)
+
+
 def _fill_external_id(cursor, table: str, row_id: Any, source: Optional[str],
                       value: Optional[str]) -> None:
     """Record the provider id this import came from, without clobbering.
@@ -151,6 +161,13 @@ def _fill_external_id(cursor, table: str, row_id: Any, source: Optional[str],
     provider = (source or "").strip().lower()
     identifier = str(value or "").strip()
     if not provider or not identifier or table not in _SOULSYNC_FILLABLE_COLUMNS:
+        return
+    # only a real provider, and only an id that can be one. 'webui_modal' is a
+    # screen, not a provider, and a last.fm page url landed under deezer, so
+    # the deezer worker asked for it on every pass (#1996)
+    if provider not in _known_id_providers():
+        return
+    if "://" in identifier and provider not in _URL_ID_PROVIDERS:
         return
     try:
         if provider in ("spotify", "musicbrainz"):
