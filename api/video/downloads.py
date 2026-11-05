@@ -413,6 +413,9 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "resolution": parsed.get("resolution"), "source": parsed.get("source"),
             "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
             "audio": parsed.get("audio"), "group": parsed.get("group"),
+            # audio languages the name tags, for the Language filter. none
+            # tagged usually means the original language only
+            "languages": list(parsed.get("languages") or []), "multi": bool(parsed.get("multi")),
             "repack": parsed.get("repack") or parsed.get("proper"),
             # torrent/usenet grab carriers (present only for Prowlarr hits) — the magnet/NZB
             # URL + protocol the grab hands to the shared torrent/usenet client.
