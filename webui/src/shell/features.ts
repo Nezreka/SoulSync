@@ -11,6 +11,8 @@
  * page load would flash the full sidebar and then shrink it.
  */
 
+import { refreshHiddenPageNote, watchHiddenPageNote } from './hidden-page-note';
+
 export const FEATURES_CHANGED_EVENT = 'ss:features-changed';
 export const FEATURES_CACHE_KEY = 'ss_features';
 const HIDDEN = 'nav-feature-hidden';
@@ -24,6 +26,8 @@ export interface FeatureDef {
 }
 
 export interface FeaturesPayload {
+  /** false until this profile saves a choice; the dashboard offers the picker */
+  chosen?: boolean;
   features: FeatureDef[];
   groups: { id: string; label: string }[];
   presets: { id: string; label: string; desc: string; off: string[] }[];
@@ -116,6 +120,8 @@ function publish(payload: FeaturesPayload): void {
   state.hiddenPages = payload.hidden_pages.slice();
   writeCache(state.off, state.hiddenPages);
   applyFeatures(state.off, state.hiddenPages);
+  refreshNote();
+  renderOffer(payload.chosen);
   window.dispatchEvent(new CustomEvent(FEATURES_CHANGED_EVENT, { detail: { off: state.off } }));
 }
 
@@ -188,8 +194,54 @@ declare global {
   }
 }
 
+/** turn one feature back on, from the hidden-page note */
+export function showFeature(id: string): Promise<FeaturesPayload> {
+  return saveFeatures({ off: state.off.filter((x) => x !== id) });
+}
+
+function refreshNote(): void {
+  refreshHiddenPageNote(state.payload, showFeature);
+}
+
+const OFFER_CLASS = 'sidebar-customize-offer';
+
+/** once per profile, until they pick anything (keep everything counts):
+ *  people who installed before #1909 never see setup again, so the
+ *  customize button says what it's for, right where it lives */
+export function renderOffer(chosen: boolean | undefined, root: Document = document): void {
+  const box = root.querySelector<HTMLElement>('.sidebar-customize');
+  if (!box) return;
+  const existing = box.querySelector(`.${OFFER_CLASS}`);
+  const offer = chosen === false;
+  box.classList.toggle('has-offer', offer);
+  if (!offer) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const card = root.createElement('div');
+  card.className = OFFER_CLASS;
+  const title = root.createElement('strong');
+  title.textContent = 'Only use part of SoulSync?';
+  const text = root.createElement('span');
+  text.textContent = 'Hide the rest. It keeps working and comes back any time.';
+  const keep = root.createElement('button');
+  keep.type = 'button';
+  keep.className = 'sidebar-customize-keep';
+  keep.textContent = 'Keep everything';
+  keep.addEventListener('click', () => {
+    keep.disabled = true;
+    saveFeatures({ preset: 'full' }).catch(() => {
+      keep.disabled = false;
+    });
+  });
+  card.append(title, text, keep);
+  box.prepend(card);
+}
+
 export function installFeatures(): void {
   primeFromCache();
+  watchHiddenPageNote(refreshNote);
   window.SoulSyncFeatures = {
     load: loadFeatures,
     save: saveFeatures,

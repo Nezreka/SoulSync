@@ -1894,8 +1894,8 @@ const HELPER_CONTENT = {
 
     // Save Button
     '.save-settings': {
-        title: 'Save Settings',
-        description: 'Save all settings changes. Some changes take effect immediately; others require a restart.',
+        title: 'Saved as you go',
+        description: 'Settings save themselves a moment after you change them. Click to save right away. A few changes need a restart to take effect.',
     },
 
     // ─── DASHBOARD: ENRICHMENT SERVICES ────────────────────────────
@@ -2481,7 +2481,7 @@ const HELPER_TOURS = {
             { page: 'settings', selector: '.stg-tab[data-tab="advanced"]', title: 'Advanced Tab', description: 'Power-user settings, logging configuration, and system-level options. Most users won\'t need to touch this.' },
 
             // Save
-            { page: 'settings', selector: '.save-button', title: 'Save Settings', description: 'Don\'t forget to save! Changes aren\'t applied until you click this button. Some settings (like download source changes) take effect immediately after saving. 🎉' },
+            { page: 'settings', selector: '.save-button', title: 'Saved as you go', description: 'Settings save themselves a moment after you change them. This shows when they\'re saved, and clicking it saves right away.' },
         ]
     },
     'issues-tour': {
@@ -3444,7 +3444,8 @@ const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
     '3.6.3': [
         { date: 'November 2026 · 3.6.3' },
-        { title: 'Show only what you use', desc: 'Customize, at the bottom of the sidebar, hides the parts of SoulSync you don\'t use. Pick Simple (music, Discover and playlists) or Everything, or switch single parts like podcasts, audiobooks, the video side, chat or tools. They leave the sidebar, the dashboard and the tabs that lead to them, keep working, and come back with one switch. Each profile picks its own, and setup starts you off with what you said SoulSync is for (thanks neonmaus, #1909).' },
+        { title: 'Show only what you use', desc: 'Customize, at the bottom of the sidebar, hides the parts of SoulSync you don\'t use. Pick Simple (music, Discover, playlists and import) or Everything, or switch single parts like podcasts, audiobooks, the video side, chat or tools. They leave the sidebar, the dashboard and the tabs that lead to them, keep working, and come back with one switch. Each profile picks its own, and setup starts you off with what you said SoulSync is for (thanks neonmaus, #1909).' },
+        { title: 'Settings save as you go', desc: 'The Save Settings button and the toast after every change are gone. The top of Settings says All changes saved, Save now while a change is waiting, or Retry save if one failed.', page: 'settings' },
         { title: 'The Library page loads again', desc: 'On a big library the artist list could time out with "Could not load your library". It loads in a second or two now, and the first visit after a restart is warmed in the background.', page: 'library' },
         { title: 'A failed download is replaced', desc: 'When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, that release is blocklisted and the next one your quality profile ranks is grabbed right away. You only hear about it when nothing else could be taken, and the replacement is ranked by the same quality profile as the one that failed. Switch it off on the usenet client card (thanks @SeadogsBooty).' },
         { title: 'Anime seasons from AniList', desc: 'When TMDB lumps an anime into one long season (Jujutsu Kaisen\'s 59 episodes), the episode list is split into the seasons your server and release names use, from AniList when there\'s no TVDB key. Search previews of anime show AniList\'s score, other names and season links too (thanks Thibs).' },

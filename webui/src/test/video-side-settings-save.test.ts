@@ -77,6 +77,8 @@ describe('the music auto-save on the video side', () => {
     const timers: unknown[] = [];
     const deps = `let settingsAutoSaveTimer = null;
 const _qpHandleProfileControlChange = () => false;
+// the save status the button shows (#1909), not what this test is about
+const setSettingsSaveState = () => {};
 ${extractFunction('_isVideoOwnedField', SETTINGS)}
 ${extractFunction('debouncedAutoSaveSettings', SETTINGS)}
 return debouncedAutoSaveSettings;`;

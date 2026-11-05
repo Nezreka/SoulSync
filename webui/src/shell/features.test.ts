@@ -4,10 +4,9 @@
  * the load/save round trip.
  */
 
+import { HttpResponse, http } from 'msw';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-
-import { HttpResponse, http } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { server } from '@/test/msw';
@@ -19,6 +18,7 @@ import {
   getFeatures,
   installFeatures,
   isFeatureOn,
+  renderOffer,
   loadFeatures,
   saveFeatures,
 } from './features';
@@ -183,7 +183,9 @@ describe('load and save', () => {
 
   it('keeps what it had when the server does not answer', async () => {
     server.use(
-      http.get('*/api/profiles/me/features', () => HttpResponse.json(payload(['tools'], ['tools']))),
+      http.get('*/api/profiles/me/features', () =>
+        HttpResponse.json(payload(['tools'], ['tools'])),
+      ),
     );
     await loadFeatures();
     server.use(http.get('*/api/profiles/me/features', () => HttpResponse.error()));
@@ -223,5 +225,40 @@ describe('load and save', () => {
     installFeatures();
     expect(window.SoulSyncFeatures?.isOn('stats')).toBe(false);
     expect(document.documentElement.getAttribute('data-features-off')).toBe('stats');
+  });
+});
+
+describe('the one-time offer above Customize', () => {
+  const box = () => document.querySelector('.sidebar-customize')!;
+  beforeEach(() => {
+    document.body.innerHTML =
+      '<div class="sidebar-customize"><button class="sidebar-customize-btn"></button></div>';
+  });
+
+  it('shows only to a profile that never chose', () => {
+    renderOffer(false);
+    expect(box().querySelector('.sidebar-customize-offer')).not.toBeNull();
+    expect(box().classList.contains('has-offer')).toBe(true);
+    renderOffer(false);
+    expect(box().querySelectorAll('.sidebar-customize-offer')).toHaveLength(1);
+    renderOffer(true);
+    expect(box().querySelector('.sidebar-customize-offer')).toBeNull();
+    // an older server that doesn't send it never nags
+    renderOffer(undefined);
+    expect(box().querySelector('.sidebar-customize-offer')).toBeNull();
+  });
+
+  it('keep everything is a choice, so the offer goes', async () => {
+    let body: unknown = null;
+    server.use(
+      http.post('*/api/profiles/me/features', async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json({ ...payload([], []), chosen: true });
+      }),
+    );
+    renderOffer(false);
+    (box().querySelector('.sidebar-customize-keep') as HTMLButtonElement).click();
+    await expect.poll(() => box().querySelector('.sidebar-customize-offer')).toBeNull();
+    expect(body).toEqual({ preset: 'full' });
   });
 });

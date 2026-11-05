@@ -74,16 +74,18 @@ GROUPS = [
     {"id": "advanced", "label": "For tinkerers"},
 ]
 
-# simple = the music core plus discover and playlist sync. that's the list
-# people asked for in #1909: download, library, follow artists, discover,
-# playlists for plexamp.
+# simple = the music core plus discover, playlist sync and import. that's the
+# list people asked for in #1909 (download, library, follow artists,
+# discover, playlists for plexamp). import stays because it's the inbox:
+# downloads the auto-import can't identify wait there, hiding it strands them.
+SIMPLE_KEEPS = ("discover", "playlists", "import")
 PRESETS: Dict[str, List[str]] = {
     "full": [],
-    "simple": [fid for fid in FEATURE_IDS if fid not in ("discover", "playlists")],
+    "simple": [fid for fid in FEATURE_IDS if fid not in SIMPLE_KEEPS],
 }
 
 PRESET_LABELS = {
-    "simple": {"label": "Simple", "desc": "Music, Discover and playlists. Everything else tucked away."},
+    "simple": {"label": "Simple", "desc": "Music, Discover, playlists and import. Everything else tucked away."},
     "full": {"label": "Everything", "desc": "Every part of SoulSync, the way it ships."},
 }
 
@@ -178,9 +180,21 @@ def clear(db, profile_id: int) -> None:
     db.set_metadata(_key(profile_id), "[]")
 
 
-def payload(off: Iterable[str]) -> Dict[str, Any]:
+def has_chosen(db, profile_id: Optional[int]) -> bool:
+    """did this profile ever save a choice (or get one from setup)? the
+    dashboard offers the picker once to everyone who hasn't."""
+    if profile_id is None:
+        return True
+    try:
+        return db.get_metadata(_key(profile_id)) is not None
+    except Exception:  # noqa: BLE001 - can't tell, don't nag
+        return True
+
+
+def payload(off: Iterable[str], chosen: bool = True) -> Dict[str, Any]:
     clean = normalize_off(list(off))
     return {
+        "chosen": bool(chosen),
         "features": FEATURES,
         "groups": GROUPS,
         "presets": [{"id": k, **PRESET_LABELS[k], "off": v} for k, v in PRESETS.items()],
@@ -191,5 +205,5 @@ def payload(off: Iterable[str]) -> Dict[str, Any]:
 
 
 __all__ = ["FEATURES", "FEATURE_IDS", "GROUPS", "PRESETS", "normalize_off", "preset_for",
-           "hidden_pages", "off_from_purposes", "seed_from_purposes", "load_off", "save_off", "clear",
+           "hidden_pages", "off_from_purposes", "seed_from_purposes", "load_off", "save_off", "clear", "has_chosen",
            "payload"]

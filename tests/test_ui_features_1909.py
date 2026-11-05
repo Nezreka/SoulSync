@@ -31,10 +31,10 @@ def test_the_core_can_never_be_hidden():
 
 def test_simple_is_what_the_thread_asked_for():
     """neonmaus: downloading, library, artist following, discover and
-    playlists for plexamp. simple keeps exactly discover and playlist sync on
-    top of the core and hides the rest."""
+    playlists for plexamp. simple keeps discover, playlist sync and import
+    (the inbox unmatched downloads wait in) on top of the core."""
     on = [fid for fid in uf.FEATURE_IDS if fid not in uf.PRESETS['simple']]
-    assert on == ['discover', 'playlists']
+    assert on == ['discover', 'playlists', 'import']
     assert uf.PRESETS['full'] == []
 
 
@@ -138,10 +138,16 @@ def test_routes_save_per_profile(db):
 
     first = ca.get('/api/profiles/me/features').get_json()
     assert first['success'] and first['off'] == [] and first['preset'] == 'full'
+    # never chose: the dashboard offers the picker
+    assert first['chosen'] is False
     assert {f['id'] for f in first['features']} == set(uf.FEATURE_IDS)
 
     r = ca.post('/api/profiles/me/features', json={'preset': 'simple'}).get_json()
     assert r['preset'] == 'simple' and 'video-dashboard' in r['hidden_pages']
+    assert r['chosen'] is True
+    # "keep everything" is a choice too, the offer doesn't come back
+    ca.post('/api/profiles/me/features', json={'preset': 'full'})
+    assert ca.get('/api/profiles/me/features').get_json()['chosen'] is True
 
     # b never sees a's choice
     assert cb.get('/api/profiles/me/features').get_json()['off'] == []

@@ -217,7 +217,7 @@ Anyone can change their own home page; admins can set or change anyone's. A home
             body: `
 SoulSync does a lot. **Customize**, at the bottom of the sidebar, opens **Make SoulSync yours** (admins also find it under Settings → Appearance).
 
-- **Simple** keeps the music core plus Discover and playlist sync.
+- **Simple** keeps the music core plus Discover, playlist sync and Import (where downloads that need a hand wait).
 - **Everything** is SoulSync the way it ships.
 - Or switch single parts: Discover, Playlist sync, Playlist Explorer, Import, Listening stats, Music videos, Sample Studio, Podcasts, Audiobooks, Movies & TV, Chat & Arcade, Automations and Tools.
 
@@ -225,9 +225,9 @@ Each switch saves right away. What's off leaves the sidebar, its dashboard card 
 
 Search, Library, Watchlist, Wishlist, Downloads and Settings are always there.
 
-This is a preference, not a lock. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens. To stop someone from opening a page at all, use **page access** in their profile instead.
+This is a preference, not a lock. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back. To stop someone from opening a page at all, use **page access** in their profile instead.
 
-First-run setup asks what SoulSync is for and starts you off with the rest hidden. A music-only install, for example, starts without podcasts, audiobooks and the video side.
+First-run setup asks what SoulSync is for and starts you off with the rest hidden. A music-only install, for example, starts without podcasts, audiobooks and the video side. Profiles that existed before see a one-time card above **Customize** until they pick something (**Keep everything** counts).
 `
         },
     ]

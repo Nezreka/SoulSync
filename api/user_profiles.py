@@ -1471,8 +1471,9 @@ def get_profile_features():
     """the hideable parts of soulsync, the presets, and what's off for me"""
     from core import ui_features
     try:
-        off = ui_features.load_off(get_database(), get_current_profile_id())
-        return jsonify({'success': True, **ui_features.payload(off)})
+        db, pid = get_database(), get_current_profile_id()
+        off = ui_features.load_off(db, pid)
+        return jsonify({'success': True, **ui_features.payload(off, ui_features.has_chosen(db, pid))})
     except Exception as e:
         logger.error("features read failed: %s", e)
         return jsonify({'success': False, 'error': str(e)}), 500
