@@ -185,3 +185,19 @@ describe('SourcePicker', () => {
     expect(item('amazon').textContent).toContain('🛒');
   });
 });
+
+describe('ModeTabs with music videos switched off (#1909)', () => {
+  afterEach(() => {
+    delete window.SoulSyncFeatures;
+  });
+
+  it('has no Videos tab, but keeps it while you are on it', () => {
+    window.SoulSyncFeatures = { isOn: (id: string) => id !== 'music_videos' } as never;
+    renderTabs();
+    expect(tab('youtube_videos')).toBeNull();
+    expect(tab('soulseek')).not.toBeNull();
+    cleanup();
+    renderTabs({ activeSource: 'youtube_videos' });
+    expect(tab('youtube_videos')).not.toBeNull();
+  });
+});

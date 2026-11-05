@@ -4928,6 +4928,13 @@ def setup_complete_endpoint():
     # what setup was told soulsync is for, the dashboard checklist reads it
     if isinstance(purposes, list):
         config_manager.set('setup.purposes', [str(p) for p in purposes][:10])
+        # and hide what wasn't picked (#1909). setup used to say "switch the
+        # rest on whenever you like" and then show everything anyway
+        try:
+            from core import ui_features
+            ui_features.seed_from_purposes(get_database(), get_current_profile_id(), purposes)
+        except Exception as e:  # noqa: BLE001 - setup still finishes, the picker can fix it
+            logger.warning("setup: couldn't save visible features: %s", e)
     return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])

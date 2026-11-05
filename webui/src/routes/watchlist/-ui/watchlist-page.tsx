@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 
 import { AudiobookRouteBadge } from '@/features/audiobook-routes/audiobook-route-badge';
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
+import { useFeatureOn } from '@/platform/features';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 
@@ -215,6 +216,9 @@ export function WatchlistPage() {
   );
 
   const isLabelsTab = search.tab === 'labels';
+  // podcasts / audiobooks switched off (#1909) drop their tab
+  const podcastsOn = useFeatureOn('podcasts');
+  const audiobooksOn = useFeatureOn('audiobooks');
   const isPodcastsTab = search.tab === 'podcasts';
   const isAudiobooksTab = search.tab === 'audiobooks';
 
@@ -587,24 +591,28 @@ export function WatchlistPage() {
         >
           Labels
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={search.tab === 'podcasts'}
-          className={`${styles.tab} ${search.tab === 'podcasts' ? styles.tabActive : ''}`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'podcasts' }) })}
-        >
-          Podcasts
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={search.tab === 'audiobooks'}
-          className={`${styles.tab} ${search.tab === 'audiobooks' ? styles.tabActive : ''}`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'audiobooks' }) })}
-        >
-          Audiobooks
-        </button>
+        {podcastsOn || search.tab === 'podcasts' ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={search.tab === 'podcasts'}
+            className={`${styles.tab} ${search.tab === 'podcasts' ? styles.tabActive : ''}`}
+            onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'podcasts' }) })}
+          >
+            Podcasts
+          </button>
+        ) : null}
+        {audiobooksOn || search.tab === 'audiobooks' ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={search.tab === 'audiobooks'}
+            className={`${styles.tab} ${search.tab === 'audiobooks' ? styles.tabActive : ''}`}
+            onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'audiobooks' }) })}
+          >
+            Audiobooks
+          </button>
+        ) : null}
       </div>
 
       {scanStatus ? <WatchlistScanDeck frame={scanStatus} /> : null}

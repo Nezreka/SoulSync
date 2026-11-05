@@ -165,6 +165,10 @@ SoulSync uses a **sidebar navigation** layout. The left sidebar holds links to e
 - **Issues / Requests** — library problems to fix; track requests from other profiles
 - **Settings** — services, download preferences, quality profiles, and more
 
+## Show only what you use
+
+That's a lot of pages, and most people use a few. **Customize**, at the bottom of the sidebar, opens **Make SoulSync yours**. Pick **Simple** (music, Discover and playlists) or **Everything**, then switch single parts on or off. A part you switch off leaves the sidebar, the dashboard and the tabs that lead to it. It keeps working in the background, and it comes back with the same switch. Each profile picks its own. See [Show Only What You Use](#prof-features).
+
 ## Video side pages
 
 - **Video Dashboard, Search, Discover, Library** — the movie/TV equivalents of the music pages

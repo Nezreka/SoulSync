@@ -210,5 +210,25 @@ Every profile can choose its own home page:
 Anyone can change their own home page; admins can set or change anyone's. A home page has to be in the profile's allowed pages — picking a new allowed-pages list resets a home page that was locked out.
 `
         },
+        {
+            id: 'prof-features',
+            title: 'Show Only What You Use',
+            lede: 'Every profile hides the parts of SoulSync it does not need.',
+            body: `
+SoulSync does a lot. **Customize**, at the bottom of the sidebar, opens **Make SoulSync yours** (admins also find it under Settings → Appearance).
+
+- **Simple** keeps the music core plus Discover and playlist sync.
+- **Everything** is SoulSync the way it ships.
+- Or switch single parts: Discover, Playlist sync, Playlist Explorer, Import, Listening stats, Music videos, Sample Studio, Podcasts, Audiobooks, Movies & TV, Chat & Arcade, Automations and Tools.
+
+Each switch saves right away. What's off leaves the sidebar, its dashboard card and the tabs that lead to it (the Videos tab in search, the Podcasts and Audiobooks tabs on the watchlist and wishlist). Turning off Movies & TV also hides the music/video switch.
+
+Search, Library, Watchlist, Wishlist, Downloads and Settings are always there.
+
+This is a preference, not a lock. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens. To stop someone from opening a page at all, use **page access** in their profile instead.
+
+First-run setup asks what SoulSync is for and starts you off with the rest hidden. A music-only install, for example, starts without podcasts, audiobooks and the video side.
+`
+        },
     ]
 });

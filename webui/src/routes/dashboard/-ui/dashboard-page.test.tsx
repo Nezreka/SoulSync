@@ -72,4 +72,20 @@ describe('the page shell', () => {
     });
     expect(setPage).toHaveBeenCalledWith('dashboard');
   });
+
+  it('leaves out the cards of what the profile switched off (#1909)', async () => {
+    const off = new Set(['playlists', 'automations']);
+    window.SoulSyncFeatures = { isOn: (id: string) => !off.has(id) } as never;
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<DashboardPage />);
+    });
+    delete window.SoulSyncFeatures;
+    const side = Array.from(view.container.querySelectorAll('.dash-side > [data-card]')).map(
+      (card) => card.getAttribute('data-card'),
+    );
+    expect(side).toEqual([]);
+    // watchlist and wishlist are the core, they stay
+    expect(view.container.querySelector('.dash-side #watchlist-button')).not.toBeNull();
+  });
 });

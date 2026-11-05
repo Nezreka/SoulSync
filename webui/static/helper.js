@@ -3444,6 +3444,7 @@ const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
     '3.6.3': [
         { date: 'November 2026 · 3.6.3' },
+        { title: 'Show only what you use', desc: 'Customize, at the bottom of the sidebar, hides the parts of SoulSync you don\'t use. Pick Simple (music, Discover and playlists) or Everything, or switch single parts like podcasts, audiobooks, the video side, chat or tools. They leave the sidebar, the dashboard and the tabs that lead to them, keep working, and come back with one switch. Each profile picks its own, and setup starts you off with what you said SoulSync is for (thanks neonmaus, #1909).' },
         { title: 'The Library page loads again', desc: 'On a big library the artist list could time out with "Could not load your library". It loads in a second or two now, and the first visit after a restart is warmed in the background.', page: 'library' },
         { title: 'A failed download is replaced', desc: 'When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, that release is blocklisted and the next one your quality profile ranks is grabbed right away. You only hear about it when nothing else could be taken, and the replacement is ranked by the same quality profile as the one that failed. Switch it off on the usenet client card (thanks @SeadogsBooty).' },
         { title: 'Anime seasons from AniList', desc: 'When TMDB lumps an anime into one long season (Jujutsu Kaisen\'s 59 episodes), the episode list is split into the seasons your server and release names use, from AniList when there\'s no TVDB key. Search previews of anime show AniList\'s score, other names and season links too (thanks Thibs).' },
@@ -3918,7 +3919,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // First-launch welcome prompt
         const hasSetup = localStorage.getItem('soulsync_setup');
         const hasDismissed = localStorage.getItem('soulsync_setup_welcome_dismissed');
-        if (!hasSetup && !hasDismissed) {
+        // the flag above is per browser, so a set-up install still greeted
+        // every new browser (and every household member) with "new here?".
+        // the server knows whether setup is done, ask it (#1909)
+        const showWelcomeTip = () => {
             const floatBtn = document.getElementById('helper-float-btn');
             if (floatBtn) {
                 floatBtn.classList.add('first-launch-pulse');
@@ -3942,6 +3946,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }, 12000);
             }
+        };
+        if (!hasSetup && !hasDismissed) {
+            fetch('/api/setup/status')
+                .then(r => (r.ok ? r.json() : null))
+                .then(d => { if (d && d.setup_complete === false) showWelcomeTip(); })
+                .catch(() => { /* no answer, no nag */ });
         }
 
         // What's New badge

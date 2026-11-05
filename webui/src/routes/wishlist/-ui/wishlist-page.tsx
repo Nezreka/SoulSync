@@ -3,6 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
+import { useFeatureOn } from '@/platform/features';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 import { clearAudiobookWishlist } from '@/routes/audiobooks/-audiobooks.api';
@@ -108,6 +109,9 @@ function MusicWishlistPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const queryClient = useQueryClient();
 
+  // audiobooks switched off (#1909): one list, so no tab row at all
+  const audiobooksOn = useFeatureOn('audiobooks');
+  const showMediaTabs = audiobooksOn || media === 'audiobooks';
   const [abReloadKey, setAbReloadKey] = useState(0);
   const [exporting, setExporting] = useState(false);
   // The audiobook search box lives in WishlistAudiobooks; the audio plays listed
@@ -493,24 +497,26 @@ function MusicWishlistPage() {
           isolation the video side keeps between movies, shows and channels:
           they share a page and nothing else — different database, different
           search, different acquisition chain. */}
-      <div className="wlp-media-tabs" role="tablist" aria-label="Wishlist media type">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={media === 'music'}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, media: 'music' }) })}
-        >
-          Music
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={media === 'audiobooks'}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, media: 'audiobooks' }) })}
-        >
-          Audiobooks
-        </button>
-      </div>
+      {showMediaTabs ? (
+        <div className="wlp-media-tabs" role="tablist" aria-label="Wishlist media type">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={media === 'music'}
+            onClick={() => void navigate({ search: (prev) => ({ ...prev, media: 'music' }) })}
+          >
+            Music
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={media === 'audiobooks'}
+            onClick={() => void navigate({ search: (prev) => ({ ...prev, media: 'audiobooks' }) })}
+          >
+            Audiobooks
+          </button>
+        </div>
+      ) : null}
 
       {media === 'audiobooks' ? (
         <>

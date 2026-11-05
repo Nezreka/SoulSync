@@ -58,6 +58,7 @@ Most self-hosted media setups are a relay race: one app wants things, another se
 - **It checks its work.** Downloads are fingerprinted, sanity checked, quality ranked and quarantined when they don't hold up. Nothing lands in your library on faith.
 - **It explains itself.** Stuck wishlist rows show exactly which releases were refused and why. Every download has an audit trail.
 - **It's one app for the whole house.** Music, movies, TV, YouTube, podcasts and audiobooks, with profiles so everyone gets their own taste, playlists and history.
+- **It's only as big as you want it.** Use one part or all of it. **Customize** in the sidebar hides what you don't use, and each profile picks its own.
 
 ## At a glance
 
@@ -313,6 +314,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 ## Profiles & access
 
 - **Profiles** with avatars, PINs, a home page, page access, music / video access, and a download permission.
+- **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** (music, Discover and playlists) or **Everything**, then switch single parts on or off: Discover, playlist sync, Explorer, Import, stats, music videos, Sample Studio, podcasts, audiobooks, the video side, chat, automations and tools. Hidden parts leave the sidebar, the dashboard and the tabs that lead to them, but keep working, and a link to them still opens. First-run setup starts you off with what you said SoulSync is for. Search, library, watchlist, wishlist, downloads and settings never hide.
 - Per-profile watchlists, wishlists, playlists, queues and listening history.
 - Non-admins get a **My Account** panel for their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Security**:

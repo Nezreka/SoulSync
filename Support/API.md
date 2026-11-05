@@ -1670,6 +1670,22 @@ Delete a profile and all its per-profile data (watchlist, wishlist, discovery po
 }
 ```
 
+#### What a profile shows: `GET` / `POST /api/profiles/me/features`
+
+Session routes (the signed-in browser, not an API key) behind **Customize** in the sidebar. Each profile hides the parts of SoulSync it doesn't use. This is a preference, not access: hidden pages still open from a link and their background jobs keep running. Page access stays with `allowed_pages`.
+
+`GET` returns the list of features that can be hidden (`features`, each with `id`, `label`, `desc`, `group` and the page ids it owns), the `groups`, the `presets`, what is `off` for this profile, which `preset` that matches (`full`, `simple` or `custom`) and the resulting `hidden_pages`.
+
+`POST` takes one of:
+
+| Body | Effect |
+|------|--------|
+| `{"off": ["podcasts", "video"]}` | exactly these off, unknown ids dropped |
+| `{"preset": "simple"}` | `simple` (music, Discover and playlist sync) or `full` (everything) |
+| `{"purposes": ["music", "podcasts"]}` | what first-run setup asks; hides podcasts, audiobooks or video when they weren't picked |
+
+and answers with the same shape as `GET`. Feature ids: `discover`, `playlists`, `explorer`, `import`, `stats`, `music_videos`, `sample_studio`, `podcasts`, `audiobooks`, `video`, `chat`, `automations`, `tools`. Search, library, watchlist, wishlist, downloads and settings can't be hidden.
+
 ---
 
 ### Retag Queue

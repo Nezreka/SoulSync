@@ -790,6 +790,54 @@
                     </a>
                 </nav>
 
+                <!-- what this profile chose to see (#1909). the full rule and the
+                     server's answer live in shell/features.ts; this only replays the
+                     last cached answer before paint so the sidebar doesn't flash
+                     every item and then shrink. -->
+                <script>
+                    (function () {
+                        var c = null;
+                        try { c = JSON.parse(localStorage.getItem('ss_features') || 'null'); } catch (e) { }
+                        if (!c || !Array.isArray(c.pages)) return;
+                        document.documentElement.setAttribute('data-features-off', (c.off || []).join(' '));
+                        var pages = {};
+                        c.pages.forEach(function (p) { pages[p] = true; });
+                        document.querySelectorAll('.sidebar-nav .nav-button').forEach(function (b) {
+                            var id = b.getAttribute('data-page') || b.getAttribute('data-video-page');
+                            if (pages[id]) b.classList.add('nav-feature-hidden');
+                        });
+                        document.querySelectorAll('.sidebar-nav .nav-section-label').forEach(function (label) {
+                            var el = label.nextElementSibling, any = false;
+                            while (el && !el.classList.contains('nav-section-label')) {
+                                if (el.classList.contains('nav-button') && !el.classList.contains('nav-feature-hidden')
+                                    && el.style.display !== 'none') { any = true; break; }
+                                el = el.nextElementSibling;
+                            }
+                            if (!any) label.classList.add('nav-feature-hidden');
+                        });
+                        if (Array.isArray(c.off) && c.off.indexOf('video') !== -1) {
+                            var t = document.querySelector('.side-toggle');
+                            if (t) t.classList.add('nav-feature-hidden');
+                        }
+                    })();
+                </script>
+
+                <!-- one place to choose what shows, for every profile (#1909) -->
+                <div class="sidebar-customize">
+                    <button type="button" class="sidebar-customize-btn" id="sidebar-customize-btn"
+                        onclick="window.openFeaturePicker && window.openFeaturePicker()"
+                        title="Choose what shows in SoulSync" aria-label="Customize SoulSync">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="4" y1="7" x2="20" y2="7" />
+                            <line x1="4" y1="17" x2="20" y2="17" />
+                            <circle cx="9" cy="7" r="2.2" fill="currentColor" stroke="none" />
+                            <circle cx="15" cy="17" r="2.2" fill="currentColor" stroke="none" />
+                        </svg>
+                        <span class="nav-text">Customize</span>
+                    </button>
+                </div>
+
                 <!-- Spacer -->
                 <div class="sidebar-spacer"></div>
 
@@ -9320,6 +9368,20 @@
 
                                 <!-- Third Column - Database, Metadata, Playlist Sync, Logging -->
                                 <div class="settings-third-column">
+                                    <!-- what shows in the app (#1909). per profile, so it lives in
+                                         the picker, this is just a door to it -->
+                                    <div class="settings-group" data-stg="appearance">
+                                        <h3>Show only what you use</h3>
+                                        <div class="form-group">
+                                            <small class="settings-hint">Hide the parts of SoulSync you don't use,
+                                                like podcasts, audiobooks or the video side. They keep working and
+                                                come back with one switch. Each profile picks its own.</small>
+                                            <button type="button" class="test-button" id="settings-open-feature-picker"
+                                                onclick="window.openFeaturePicker && window.openFeaturePicker()">Customize
+                                                SoulSync</button>
+                                        </div>
+                                    </div>
+
                                     <!-- UI Appearance -->
                                     <div class="settings-group" data-stg="appearance">
                                         <h3>UI Appearance</h3>

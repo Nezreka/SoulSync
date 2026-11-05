@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { useFeatureOn } from '@/platform/features';
+
 import type { SearchControllerState } from '../-search.use-controller';
 
 import { sourceLabel, visibleSources } from '../-search.helpers';
@@ -43,9 +45,13 @@ export function ModeTabs({
   onSelect: (source: string) => void;
 }) {
   const mode = modeOf(state.activeSource);
+  // music videos switched off (#1909): no Videos tab, unless you're on it
+  const videosOn = useFeatureOn('music_videos');
   const tabs: { mode: SearchMode; source: string; label: string; icon: React.ReactNode }[] = [
     { mode: 'catalog', source: catalogSource, label: 'Catalog', icon: <DiscIcon /> },
-    { mode: 'videos', source: 'youtube_videos', label: 'Videos', icon: <FilmIcon /> },
+    ...(videosOn || mode === 'videos'
+      ? [{ mode: 'videos' as const, source: 'youtube_videos', label: 'Videos', icon: <FilmIcon /> }]
+      : []),
     { mode: 'files', source: 'soulseek', label: 'Files', icon: <FileIcon /> },
   ];
   return (
