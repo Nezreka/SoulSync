@@ -38,6 +38,11 @@ NOT_DISC = [
     "A.Show.S02.COMPLETE.BLURAY.1080p.x265-GROUP",
     "A.Show.COMPLETE.SERIES.1080p.WEB-DL.DDP5.1-GROUP",
     "The.Iso.Show.S01E01.1080p.WEB-GROUP",
+    # a group called iSO, and tv packs that say complete bluray plus a codec
+    "Some.Movie.2020.2160p.WEB-DL.DDP5.1.H.264-iSO",
+    "Some.Movie.2020.1080p.HEVC-ISO",
+    "A.Show.S01.Complete.Bluray.1080p.HEVC-GROUP",
+    "A.Show.S03.COMPLETE.BluRay.720p.H264-GROUP",
     "Iso.2020.1080p.BluRay.x264-GROUP",
 ]
 

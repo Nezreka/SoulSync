@@ -74,13 +74,18 @@ _COMPLETE = re.compile(r"\b(complete|collection|all\s?seasons)\b", re.I)
 # downloads 30-90 GB that can only fail. 'COMPLETE' alone is a TV series pack
 # (_COMPLETE above), so only COMPLETE sitting right before (UHD) BLURAY counts.
 # ISO counts only as the last word or right before the group, so a title that
-# contains the word ('The.Iso.Show') isn't caught.
+# contains the word ('The.Iso.Show') isn't caught, and it has to follow a dot or
+# space so a group called iSO ('...H.264-iSO') isn't either.
 _DISC = re.compile(
-    r"\bcomplete[ ._-]+(?:uhd[ ._-]+)?blu-?ray\b"
-    r"|\bbdmv\b|\bbd(?:25|50|66|100)\b|\bbr-?disk\b|\bdvd(?:5|9|-?r)\b"
-    r"|\biso(?=-[A-Za-z0-9]+\s*$|\s*$)", re.I)
+    r"\bbdmv\b|\bbd(?:25|50|66|100)\b|\bbr-?disk\b|\bdvd(?:5|9|-?r)\b"
+    r"|(?<=[ ._])iso(?=-[A-Za-z0-9]+\s*$|\s*$)", re.I)
+# COMPLETE BLURAY is looser: 'Show.S01.Complete.Bluray.1080p.HEVC' is a tv pack
+_COMPLETE_BD = re.compile(r"\bcomplete[ ._-]+(?:uhd[ ._-]+)?blu-?ray\b", re.I)
 # An encoder name or REMUX means a single playable file, whatever else the name says
 _ENCODE = re.compile(r"\b(x26[45]|remux)\b", re.I)
+# and for COMPLETE BLURAY, any codec or web/rip source does too
+_PLAYABLE = re.compile(
+    r"\b(x26[45]|h\.?26[45]|hevc|xvid|divx|remux|web-?dl|webrip|bdrip|brrip|hdtv)\b", re.I)
 _GROUP = re.compile(r"-([A-Za-z0-9]{2,})\s*$")
 # Daily/date-named releases — 'The.Daily.Show.2026.07.08.Guest.1080p...' (Sonarr's
 # daily-series naming). Dots/spaces/dashes between the parts; month/day validated.
@@ -170,7 +175,8 @@ def parse_release(title: Any) -> dict:
         "repack": bool(re.search(r"\brepack\b", t, re.I)),
         "proper": bool(re.search(r"\bproper\b", t, re.I)),
         "three_d": bool(re.search(r"\b3d\b", t, re.I)),
-        "disc_image": bool(_DISC.search(t)) and not _ENCODE.search(t),
+        "disc_image": (bool(_DISC.search(t)) and not _ENCODE.search(t))
+                      or (bool(_COMPLETE_BD.search(t)) and not _PLAYABLE.search(t)),
         "season": None,
         "season_end": None,
         "episode": None,
