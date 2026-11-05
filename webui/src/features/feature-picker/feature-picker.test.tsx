@@ -18,8 +18,15 @@ const FEATURES = [
   { id: 'podcasts', label: 'Podcasts', desc: 'Shows.', group: 'more', pages: ['podcasts'] },
   { id: 'video', label: 'Movies & TV', desc: 'Video.', group: 'more', pages: ['video-dashboard'] },
   { id: 'tools', label: 'Tools', desc: 'Repair.', group: 'advanced', pages: ['tools'] },
+  {
+    id: 'video_calendar',
+    label: 'Calendar',
+    desc: 'Dates.',
+    group: 'video',
+    pages: ['video-calendar'],
+  },
 ];
-const SIMPLE = ['music_videos', 'podcasts', 'video', 'tools'];
+const SIMPLE = ['music_videos', 'podcasts', 'video', 'tools', 'video_calendar'];
 
 function payload(off: string[]) {
   return {
@@ -28,6 +35,7 @@ function payload(off: string[]) {
     groups: [
       { id: 'music', label: 'Music' },
       { id: 'more', label: 'More than music' },
+      { id: 'video', label: 'Movies & TV' },
       { id: 'advanced', label: 'For tinkerers' },
     ],
     presets: [
@@ -48,7 +56,8 @@ beforeEach(() => {
   posts = [];
   stored = [];
   localStorage.clear();
-  document.body.innerHTML = '<nav class="sidebar-nav"><a class="nav-button" data-page="podcasts"></a></nav>';
+  document.body.innerHTML =
+    '<nav class="sidebar-nav"><a class="nav-button" data-page="podcasts"></a></nav>';
   server.use(
     http.get('*/api/profiles/me/features', () => HttpResponse.json(payload(stored))),
     http.post('*/api/profiles/me/features', async ({ request }) => {
@@ -79,7 +88,10 @@ describe('the feature picker', () => {
   it('lists every feature as on for a fresh profile', async () => {
     await openPicker();
     for (const f of FEATURES) expect(switchFor(f.label)).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByRole('radio', { name: /Everything/ })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: /Everything/ })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
   });
 
   it('a switch saves on its own and the sidebar follows', async () => {
@@ -117,12 +129,22 @@ describe('the feature picker', () => {
     expect(switchFor('Tools')).toHaveAttribute('aria-checked', 'true');
   });
 
+  it("offers the video side's own switches only while the side is on", async () => {
+    await openPicker();
+    expect(switchFor('Calendar')).toBeInTheDocument();
+    fireEvent.click(switchFor('Movies & TV'));
+    await waitFor(() => expect(screen.queryByRole('switch', { name: 'Calendar' })).toBeNull());
+    fireEvent.click(switchFor('Movies & TV'));
+    await screen.findByRole('switch', { name: 'Calendar' });
+  });
+
   it('skips what the profile cannot open anyway', async () => {
     (window as G).isPageAllowed = (page: string) => page !== 'tools';
     (window as G).profileAllowedSides = () => 'music';
     await openPicker();
     expect(screen.queryByRole('switch', { name: 'Tools' })).toBeNull();
     expect(screen.queryByRole('switch', { name: 'Movies & TV' })).toBeNull();
+    expect(screen.queryByRole('switch', { name: 'Calendar' })).toBeNull();
     // no pages of its own: lives inside pages they have
     expect(switchFor('Music videos')).toBeInTheDocument();
   });

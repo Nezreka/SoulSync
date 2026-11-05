@@ -27,6 +27,20 @@ def test_the_core_can_never_be_hidden():
     for page in ('dashboard', 'search', 'library', 'watchlist', 'wishlist',
                  'active-downloads', 'settings', 'help', 'issues', 'requests'):
         assert page not in owned
+    # the video side's own core, the same rule (#1909 follow-up)
+    for page in ('video-dashboard', 'video-search', 'video-library', 'video-watchlist',
+                 'video-wishlist', 'video-downloads', 'video-settings', 'video-help'):
+        owners = [f['id'] for f in uf.FEATURES if page in f['pages']]
+        assert owners == ['video'], f'{page} hides with more than the video side: {owners}'
+
+
+def test_video_extras_hide_on_their_own():
+    pages = uf.hidden_pages(['video_discover', 'video_calendar'])
+    assert pages == ['video-discover', 'video-calendar']
+    # simple already drops the whole video side, these go with it
+    assert {'video_discover', 'video_calendar'} <= set(uf.PRESETS['simple'])
+    # setup with video picked keeps them
+    assert 'video_calendar' not in uf.off_from_purposes(['video'])
 
 
 def test_simple_is_what_the_thread_asked_for():

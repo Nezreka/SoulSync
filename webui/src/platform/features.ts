@@ -22,6 +22,8 @@ export type FeatureId =
   | 'podcasts'
   | 'audiobooks'
   | 'video'
+  | 'video_discover'
+  | 'video_calendar'
   | 'chat'
   | 'automations'
   | 'tools';

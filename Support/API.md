@@ -1684,7 +1684,7 @@ Session routes (the signed-in browser, not an API key) behind **Customize** in t
 | `{"preset": "simple"}` | `simple` (music, Discover, playlist sync and import) or `full` (everything) |
 | `{"purposes": ["music", "podcasts"]}` | what first-run setup asks; hides podcasts, audiobooks or video when they weren't picked |
 
-and answers with the same shape as `GET`. Feature ids: `discover`, `playlists`, `explorer`, `import`, `stats`, `music_videos`, `sample_studio`, `podcasts`, `audiobooks`, `video`, `chat`, `automations`, `tools`. Search, library, watchlist, wishlist, downloads and settings can't be hidden.
+and answers with the same shape as `GET`. Feature ids: `discover`, `playlists`, `explorer`, `import`, `stats`, `music_videos`, `sample_studio`, `podcasts`, `audiobooks`, `video`, `video_discover`, `video_calendar`, `chat`, `automations`, `tools`. Search, library, watchlist, wishlist, downloads and settings can't be hidden, on either side.
 
 ---
 

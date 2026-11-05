@@ -7,7 +7,8 @@ a hidden page still opens from a link, and what a profile may open is still
 allowed_pages (core.permissions). admins set that, everyone sets this.
 
 the core never hides: dashboard, search, library, watchlist, wishlist,
-downloads, settings, help. without those soulsync isn't soulsync.
+downloads, settings, help, on both sides. without those soulsync isn't
+soulsync.
 
 stored per profile in the metadata table as a json list of the features that
 are OFF, so a feature added later shows up for everyone by default.
@@ -55,6 +56,14 @@ FEATURES: List[Dict[str, Any]] = [
          "video-library", "video-watchlist", "video-wishlist", "video-requests",
          "video-downloads", "video-automations", "video-chat", "video-tools",
          "video-settings", "video-issues", "video-help"]},
+    # inside the video side. only offered while the video side is on; the
+    # video dashboard keeps its "what's airing next" either way, that's its job
+    {"id": "video_discover", "label": "Video Discover",
+     "desc": "Trending, upcoming and recommended movies and shows.",
+     "group": "video", "pages": ["video-discover"]},
+    {"id": "video_calendar", "label": "Calendar",
+     "desc": "Episode air dates and movie releases, plus the iCal feed.",
+     "group": "video", "pages": ["video-calendar"]},
     {"id": "chat", "label": "Chat & Arcade",
      "desc": "Talk with other SoulSync users and play games.",
      "group": "more", "pages": ["chat", "video-chat"]},
@@ -71,6 +80,7 @@ FEATURE_IDS = tuple(f["id"] for f in FEATURES)
 GROUPS = [
     {"id": "music", "label": "Music"},
     {"id": "more", "label": "More than music"},
+    {"id": "video", "label": "Movies & TV"},
     {"id": "advanced", "label": "For tinkerers"},
 ]
 

@@ -12,6 +12,8 @@ const PATHS: Record<string, string> = {
     'M12 13a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM12 15v6M7.8 15.5a6 6 0 1 1 8.4 0M5 18.5a10 10 0 1 1 14 0',
   audiobooks: 'M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2zM4 21a2 2 0 0 1 2-2h12v2',
   video: 'M3 5h18v12H3zM8 21h8M12 17v4',
+  video_discover: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z',
+  video_calendar: 'M4 5h16v16H4zM4 10h16M9 3v4M15 3v4',
   chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   automations: 'M13 2 3 14h9l-1 8 10-12h-9z',
   tools: 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z',

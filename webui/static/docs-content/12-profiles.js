@@ -219,11 +219,11 @@ SoulSync does a lot. **Customize**, at the bottom of the sidebar, opens **Make S
 
 - **Simple** keeps the music core plus Discover, playlist sync and Import (where downloads that need a hand wait).
 - **Everything** is SoulSync the way it ships.
-- Or switch single parts: Discover, Playlist sync, Playlist Explorer, Import, Listening stats, Music videos, Sample Studio, Podcasts, Audiobooks, Movies & TV, Chat & Arcade, Automations and Tools.
+- Or switch single parts: Discover, Playlist sync, Playlist Explorer, Import, Listening stats, Music videos, Sample Studio, Podcasts, Audiobooks, Movies & TV (or just Video Discover and Calendar inside it), Chat & Arcade, Automations and Tools.
 
 Each switch saves right away. What's off leaves the sidebar, its dashboard card and the tabs that lead to it (the Videos tab in search, the Podcasts and Audiobooks tabs on the watchlist and wishlist). Turning off Movies & TV also hides the music/video switch.
 
-Search, Library, Watchlist, Wishlist, Downloads and Settings are always there.
+Search, Library, Watchlist, Wishlist, Downloads and Settings are always there, on the music side and the video side.
 
 This is a preference, not a lock. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back. To stop someone from opening a page at all, use **page access** in their profile instead.
 

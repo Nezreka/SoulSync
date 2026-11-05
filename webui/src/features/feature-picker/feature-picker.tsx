@@ -30,7 +30,7 @@ type ShellGlobals = {
 
 /** a feature this profile could open. no pages = lives inside other pages. */
 export function reachable(feature: FeatureDef, g: ShellGlobals = window as ShellGlobals): boolean {
-  if (feature.id === 'video') {
+  if (feature.id === 'video' || feature.group === 'video') {
     const sides = typeof g.profileAllowedSides === 'function' ? g.profileAllowedSides() : 'both';
     if (sides === 'music') return false;
   }
@@ -101,7 +101,10 @@ export function FeaturePicker() {
     if (preset) save({ preset: id }, preset.off);
   };
 
-  const features = (data?.features ?? []).filter((f) => reachable(f));
+  // the video side's own switches mean nothing while the whole side is off
+  const features = (data?.features ?? []).filter(
+    (f) => reachable(f) && !(f.group === 'video' && off.includes('video')),
+  );
   const presetNow =
     data?.presets.find((p) => p.off.length === off.length && p.off.every((x) => off.includes(x)))
       ?.id ?? 'custom';
