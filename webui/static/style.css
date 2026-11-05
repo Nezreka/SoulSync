@@ -59822,6 +59822,7 @@ body.max-performance #page-particles-canvas {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    /* holds Select All now (#1909), its label inherits the head's caps */
     margin-bottom: 10px;
     color: rgba(255, 255, 255, 0.48);
     font-size: 12px;
