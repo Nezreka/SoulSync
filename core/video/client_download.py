@@ -14,7 +14,7 @@ import os
 from typing import Any, Callable, Optional
 
 from core.video.season_pack import is_pack_download
-from core.video.slskd_search import _is_video
+from core.video.slskd_search import VIDEO_EXTS, _is_video
 from utils.logging_config import get_logger
 
 logger = get_logger("video.client_download")
@@ -132,7 +132,16 @@ def process_client_download(dl: dict, *, get_status: Callable[[str, str], Any],
     if not src:
         if dl.get("dest_path"):
             return {"status": "completed", "progress": 100.0, "dest_path": dl.get("dest_path")}
-        return {"progress": 100.0}   # complete but the file isn't visible yet — keep polling
+        patch = {"progress": 100.0}   # complete but the file isn't visible yet — keep polling
+        # The job's own content IS there, just with nothing playable in it (a
+        # disc image, unextracted rars). Tag it, transient, so the monitor's
+        # at-completion timeout can tell a junk release from a path problem.
+        # Nothing acts on the tag before that timeout: a torrent client may
+        # still be moving files in.
+        junk = nothing_playable(save, name) if save else None
+        if junk:
+            patch["_nothing_playable"] = junk
+        return patch
     if organizer is not None:
         return _with_job_dir(organizer(dl, src), job_dir, src)
     return {"status": "completed", "progress": 100.0, "dest_path": src}
@@ -263,6 +272,38 @@ def find_video_file(root, name=None) -> Optional[str]:
         scoped = _scoped_content(root, name)
         return _largest_video(scoped) if scoped else None
     return _largest_video(root)
+
+
+def nothing_playable(root, name=None) -> Optional[str]:
+    """What a finished job holds when it holds files but no playable video, e.g.
+    ``'.iso, .jpg, .nfo + a sample'``; None when its content isn't there, is
+    empty, or has a real video. Scoped like :func:`find_video_file`, so a
+    missing job folder (a path-mapping problem) is never reported as junk."""
+    if not root:
+        return None
+    path = _scoped_content(root, name) if name else str(root)
+    if not path or not os.path.exists(path):
+        return None
+    if os.path.isfile(path):
+        names = [os.path.basename(path)]
+    else:
+        names = [f for _d, _s, files in os.walk(path) for f in files]
+    if not names:
+        return None
+    exts, sample = set(), False
+    for f in names:
+        if _is_video(f):
+            return None                     # a real video: not this case
+        ext = os.path.splitext(f)[1].lower() or "(no extension)"
+        if ext.lstrip(".") in VIDEO_EXTS:   # _is_video already said it's a sample
+            sample = True
+            continue
+        exts.add(ext)
+    if not exts:
+        return None                         # only samples: let the old path report it
+    ordered = sorted(exts)
+    shown = ", ".join(ordered[:5]) + (", ..." if len(ordered) > 5 else "")
+    return shown + (" + a sample" if sample else "")
 
 
 def find_content_dir(root, name=None) -> Optional[str]:
