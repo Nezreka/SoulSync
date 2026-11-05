@@ -948,6 +948,19 @@ class VideoEnrichmentEngine:
         d["anime"] = {"main": slim(main), "entries": [slim(r) for r in rows]}
         if main.get("score"):
             d["anilist_score"] = main["score"]
+        # split TMDB's lumped seasons the way the library does (Thibs: Frieren
+        # and JJK showed one season on a preview). the season fetch below reads
+        # the same map, so a split season loads its slice of the TMDB season
+        if kind == "show" and d.get("seasons"):
+            from core.video.numbering import split_preview_seasons
+            seasons, source = split_preview_seasons(d["seasons"], rows)
+            if source:
+                d["seasons"] = seasons
+                d["season_count"] = len(seasons)
+                try:
+                    self._cache_put(("anime_split", tmdb_id), {"source": source, "rows": rows})
+                except AttributeError:
+                    pass   # an engine built without its cache (tests)
 
     def _fill_tmdb_ratings(self, d) -> None:
         imdb_id = d.get("imdb_id")
@@ -969,7 +982,26 @@ class VideoEnrichmentEngine:
 
     def tmdb_season(self, tv_id, season_number) -> dict | None:
         """One season's episodes for a TMDB (un-owned) show — lazy-loaded when the
-        season is selected on the search detail page. Nothing is owned."""
+        season is selected on the search detail page. Nothing is owned. A season
+        the preview split (anime, see _fill_preview_anime) is its slice of the
+        TMDB season it came from, renumbered."""
+        split = None
+        try:
+            split = self._cache_get(("anime_split", tv_id))
+        except AttributeError:
+            split = None
+        src = (split or {}).get("source", {}).get(int(season_number)) if split else None
+        if src is not None:
+            raw = self._tmdb_season_raw(tv_id, src)
+            if not raw:
+                return None
+            from core.video.numbering import anilist_regroup
+            groups, _moved = anilist_regroup(src, raw.get("episodes") or [], split["rows"])
+            return dict(raw, season_number=int(season_number),
+                        episodes=groups.get(int(season_number), []))
+        return self._tmdb_season_raw(tv_id, season_number)
+
+    def _tmdb_season_raw(self, tv_id, season_number) -> dict | None:
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return None
