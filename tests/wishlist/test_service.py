@@ -446,3 +446,54 @@ def test_get_wishlist_summary_groups_by_source_type_and_limits_recent_failures()
     }
     assert summary["recent_failures"][1]["artist"] == "Artist B"
     assert summary["recent_failures"][-1]["name"] == "Song E"
+
+
+def _modal_track(track_id="sp-d"):
+    return {
+        "failure_reason": "no candidates",
+        "spotify_track": {
+            "id": track_id,
+            "name": "Detailed Song",
+            "artists": [{"name": "Artist"}],
+            "album": {"name": "Album"},
+        },
+    }
+
+
+def test_failed_track_detailed_returns_the_database_outcome():
+    fake_db = _FakeWishlistDatabase()
+    service = _build_service(fake_db)
+
+    outcome = service.add_failed_track_from_modal(_modal_track(), profile_id=2, detailed=True)
+
+    assert outcome["status"] == "created"
+    assert fake_db.add_calls[0]["spotify_track_data"]["id"] == "sp-d"
+    assert fake_db.add_calls[0]["profile_id"] == 2
+    # the detailed call must not also run the legacy bool path
+    assert len(fake_db.add_calls) == 1
+
+
+def test_failed_track_detailed_early_exits_report_a_status():
+    fake_db = _FakeWishlistDatabase()
+    service = _build_service(fake_db)
+
+    no_data = service.add_failed_track_from_modal({"track_info": {}}, detailed=True)
+    podcast = service.add_failed_track_from_modal(
+        dict(_modal_track(), origin="podcast"), detailed=True)
+
+    assert no_data["status"] == "rejected" and no_data["created"] is False
+    assert podcast["status"] == "rejected" and podcast["reason"] == "podcast_not_eligible"
+    assert fake_db.add_calls == []
+
+
+def test_failed_track_detailed_exception_is_an_error_outcome():
+    class _Boom(_FakeWishlistDatabase):
+        def add_to_wishlist_detailed(self, **kwargs):
+            raise RuntimeError("db locked")
+
+    service = _build_service(_Boom())
+
+    outcome = service.add_failed_track_from_modal(_modal_track(), detailed=True)
+
+    assert outcome["status"] == "error"
+    assert "db locked" in outcome["reason"]
