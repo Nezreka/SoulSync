@@ -45,12 +45,23 @@ describe('the header (2229-2243)', () => {
     );
   });
 
-  it('renders the action buttons in order, with their tooltips', () => {
+  it('has one main action and the rest behind More (#1909)', () => {
+    const { container } = renderShell({ onAddPlaylist: vi.fn() });
+    const btns = [...container.querySelectorAll('.sync-header-actions > button')];
+    expect(btns.map((b) => b.textContent)).toEqual(['+ Add playlist', 'More']);
+    // the six tools are not on the page until More is opened
+    expect(document.querySelector('.sync-more-menu')).toBeNull();
+  });
+
+  function openMore(container: HTMLElement) {
+    fireEvent.click(container.querySelector('.sync-more-btn') as HTMLElement);
+    return [...document.querySelectorAll('.sync-more-menu [role="menuitem"]')] as HTMLElement[];
+  }
+
+  it('lists the tools in order, each with a line saying what it is for', () => {
     const { container } = renderShell();
-    const btns = Array.from(container.querySelectorAll('.sync-header-actions button')).filter(
-      (b) => b.textContent !== '+ Add playlist',
-    );
-    expect(btns.map((b) => b.textContent)).toEqual([
+    const items = openMore(container);
+    expect(items.map((i) => i.querySelector('.sync-more-name')?.textContent)).toEqual([
       'Bulk schedule',
       'Match Review',
       'Wing It Pool',
@@ -58,43 +69,32 @@ describe('the header (2229-2243)', () => {
       'Activity',
       'Download Origins',
     ]);
-    expect(btns[0].getAttribute('title')).toBe(
+    for (const item of items)
+      expect(item.querySelector('.sync-more-desc')?.textContent).toBeTruthy();
+    expect(items[0].getAttribute('title')).toBe(
       'Schedule many mirrored playlists at once, and review the pipeline',
     );
-    expect(btns[5].getAttribute('title')).toBe('See every track your playlist syncs downloaded');
-    // Only the bulk-schedule button carries the extra hook class the vanilla
-    // gives it; the CLASS keeps its auto-sync name because vanilla CSS and the
-    // dashboard tile both still select on it. Only the LABEL changed.
-    const byLabel = (label: string) =>
-      [...container.querySelectorAll('.sync-header-actions button')].find(
-        (b) => b.textContent === label,
-      ) as HTMLElement;
-    expect(byLabel('Bulk schedule').className).toContain('auto-sync-manager-btn');
-    expect(byLabel('Library Match').className).not.toContain('auto-sync-manager-btn');
+    // the old hook classes ride on the items
+    expect(items[0].className).toContain('auto-sync-manager-btn');
+    expect(items[3].className).not.toContain('auto-sync-manager-btn');
   });
 
-  it('routes each button to its own seam, Bulk schedule and Activity to React', () => {
-    // Selected by LABEL, not index: the row gained two buttons when the pool
-    // modals moved up from the Mirrored tab, and index-based assertions all
-    // silently pointed at the wrong control.
+  it('routes each item to its own seam, Bulk schedule and Activity to React', () => {
     window.openManualLibraryMatchTool = vi.fn();
     window.openDownloadOriginsModal = vi.fn();
     window.openDiscoveryPoolModal = vi.fn();
     window.openWingItPoolModal = vi.fn();
     const { container, props } = renderShell();
-    const click = (label: string) => {
-      const btn = [...container.querySelectorAll('.sync-header-actions button')].find(
-        (b) => b.textContent === label,
+    const click = (name: string) => {
+      const item = openMore(container).find(
+        (i) => i.querySelector('.sync-more-name')?.textContent === name,
       ) as HTMLElement;
-      fireEvent.click(btn);
+      fireEvent.click(item);
     };
-
     click('Bulk schedule');
     expect(props.onAutoSync).toHaveBeenCalledTimes(1);
     click('Library Match');
     expect(window.openManualLibraryMatchTool).toHaveBeenCalledTimes(1);
-    // Activity is React, not a window seam: it holds the sync history AND the
-    // scheduled-run history, and the vanilla modal knows only the first.
     click('Activity');
     expect(props.onActivity).toHaveBeenCalledTimes(1);
     click('Match Review');
@@ -102,15 +102,22 @@ describe('the header (2229-2243)', () => {
     click('Wing It Pool');
     expect(window.openWingItPoolModal).toHaveBeenCalledTimes(1);
     click('Download Origins');
-    // 2241: the shared modal is scoped by this literal.
+    // the shared modal is scoped by this literal
     expect(window.openDownloadOriginsModal).toHaveBeenCalledWith('playlist');
   });
 
   it('does not throw when a vanilla seam is missing', () => {
     const { container } = renderShell();
-    const btns = [...container.querySelectorAll('.sync-header-actions button')];
+    const names = openMore(container).map((i) => i.querySelector('.sync-more-name')?.textContent);
+    // close it again, so each pass below opens it fresh
+    fireEvent.click(container.querySelector('.sync-more-btn') as HTMLElement);
     expect(() => {
-      for (const btn of btns) fireEvent.click(btn as HTMLElement);
+      for (const name of names) {
+        const item = openMore(container).find(
+          (i) => i.querySelector('.sync-more-name')?.textContent === name,
+        ) as HTMLElement;
+        fireEvent.click(item);
+      }
     }).not.toThrow();
   });
 });

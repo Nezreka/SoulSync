@@ -1200,7 +1200,14 @@ describe('MirroredTab — finding one playlist among many', () => {
   const LIBRARY = [
     ROW,
     { ...ROW, id: 4, name: 'Discover Weekly', source_playlist_id: 'tp2' },
-    { ...ROW, id: 5, name: 'Deep Focus', custom_name: 'Monday', source_playlist_id: 'tp3' },
+    {
+      ...ROW,
+      id: 5,
+      name: 'Deep Focus',
+      custom_name: 'Monday',
+      source_playlist_id: 'tp3',
+      source: 'spotify_public',
+    },
   ];
 
   async function renderLibrary() {
@@ -1257,12 +1264,26 @@ describe('MirroredTab — finding one playlist among many', () => {
     expect(input.value).toBe('');
   });
 
-  it('the source chips do NOT shrink to the search result', async () => {
-    // Chips that vanished as you typed would move under the cursor.
+  it('the source list does NOT shrink to the search result', async () => {
+    // Options that vanished as you typed would move under the cursor.
     const input = await renderLibrary();
-    const before = document.querySelectorAll('.library-source').length;
+    const options = () => document.querySelectorAll('.library-source-select option');
+    const before = options().length;
+    expect(before).toBeGreaterThan(2);
     fireEvent.change(input, { target: { value: 'zzzz' } });
-    expect(document.querySelectorAll('.library-source')).toHaveLength(before);
+    expect(options()).toHaveLength(before);
+  });
+
+  it('filters by one source from a dropdown, named the way people say it (#1909)', async () => {
+    await renderLibrary();
+    const select = document.querySelector('.library-source-select select') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.textContent)).toContain('Spotify Link');
+    fireEvent.change(select, { target: { value: 'spotify_public' } });
+    expect(screen.queryByText('Road Trip')).toBeNull();
+    expect(screen.queryByText('Discover Weekly')).toBeNull();
+    expect(document.querySelectorAll('.pl-grid > *')).toHaveLength(1);
+    fireEvent.change(select, { target: { value: '' } });
+    expect(screen.getByText('Road Trip')).toBeInTheDocument();
   });
 });
 

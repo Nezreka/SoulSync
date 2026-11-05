@@ -233,7 +233,7 @@ Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** 
 
 ## Auto-sync schedules
 
-Mirrored playlists can refresh and re-sync on a schedule from the **Bulk schedule** button:
+Mirrored playlists can refresh and re-sync on a schedule from **More → Bulk schedule** in the page header:
 
 - Pick an interval per playlist — from every hour up to weekly (1, 2, 4, 8, 12, 16, 24, 48, 72, or 168 hours)
 - Weekly schedules let you choose specific days
@@ -245,7 +245,7 @@ Mirrored playlists can refresh and re-sync on a schedule from the **Bulk schedul
             title: 'Sync History',
             lede: 'A log of every sync operation — what ran, when, and how it went.',
             body: `
-The **Activity** button in the page header opens a modal with two tabs. **Syncs you ran** shows every playlist sync, album download, and wishlist processing operation with timestamps, track counts, and completion status; **Scheduled runs** covers auto-sync pipeline runs.
+**More → Activity** in the page header opens a modal with two tabs. **Syncs you ran** shows every playlist sync, album download, and wishlist processing operation with timestamps, track counts, and completion status; **Scheduled runs** covers auto-sync pipeline runs.
 
 - Shows playlist name, source, track count, and completion stats
 - Filter by source (Spotify, YouTube, Tidal, etc.)

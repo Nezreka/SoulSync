@@ -708,6 +708,10 @@ const HELPER_CONTENT = {
         description: 'View a log of all sync operations — playlist syncs, album downloads, and wishlist processing. Shows timestamps, track counts, and completion status.',
         docsId: 'sync-history'
     },
+    '.sync-more-btn': {
+        title: 'More tools',
+        description: 'Bulk scheduling, match review, the Wing It pool, linking a track by hand, activity and download origins.',
+    },
     '.sync-header': {
         title: 'Playlist Sync',
         description: 'Import and sync playlists from multiple sources. Select playlists, match tracks to your library, and download what\'s missing.',
@@ -2326,7 +2330,7 @@ const HELPER_TOURS = {
         steps: [
             // Header
             { page: 'sync', selector: '.sync-header', title: 'Playlist Sync', description: 'Import playlists from any streaming service, match tracks to your download sources, and sync them to your media server. Everything happens from this page.' },
-            { page: 'sync', selector: '.sync-history-btn', title: 'Sync History', description: 'View a log of all past sync operations — when they ran, how many tracks matched, and which ones failed. Useful for tracking down missing tracks.' },
+            { page: 'sync', selector: '.sync-more-btn', title: 'More tools', description: 'Bulk scheduling, match review, the Wing It pool, linking a track by hand, activity and download origins. Each one says what it is for.' },
 
             // Source tabs (left to right)
             { page: 'sync', selector: '.sync-tab-button[data-tab="spotify"]', title: 'Spotify Playlists', description: 'If Spotify is connected, click "Refresh" to load all your playlists. Select ones you want, then hit Start Sync in the sidebar.' },

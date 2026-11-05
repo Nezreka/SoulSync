@@ -11825,6 +11825,36 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     align-items: center;
 }
 
+/* the header is add playlist + one More menu now (#1909) */
+.sync-more-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sync-more-menu {
+    min-width: 300px;
+    max-width: min(360px, calc(100vw - 16px));
+}
+.sync-more-menu .lib-menu-item {
+    padding: 9px 12px;
+}
+.sync-more-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.sync-more-name {
+    font-weight: 600;
+    color: var(--white-a90);
+}
+.sync-more-desc {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--white-a50);
+    white-space: normal;
+}
+
 .auto-sync-bulk-menu-custom-row {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -37490,7 +37520,8 @@ div.artist-hero-badge {
 #enhanced-search-input {
     flex-grow: 1; background: transparent; border: none; outline: none;
     font-family: 'Segoe UI', sans-serif; font-size: 16px; font-weight: 500;
-    color: #ffffff; padding: 14px 0;
+    /* the input leads the search box now (#1909), so it keeps a left inset */
+    color: #ffffff; padding: 14px 0 14px 14px;
 }
 #enhanced-search-input::placeholder { color: rgba(255, 255, 255, 0.38); font-weight: 400; }
 .enhanced-cancel-btn {
@@ -37582,7 +37613,7 @@ div.artist-hero-badge {
 @media (max-width: 480px) {
     #enhanced-search-input {
         font-size: 13px;
-        padding: 10px 0;
+        padding: 10px 0 10px 12px;
     }
 
     /* Better album/track results on mobile */
