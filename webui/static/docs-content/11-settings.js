@@ -10,6 +10,8 @@ registerDocsSection({
             body: `
 SoulSync needs credentials for the services it queries for metadata and enrichment. The Settings search finds any setting by name — handy when you're not sure which tab it lives under.
 
+Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed.
+
 ## Service list
 
 - **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync. Redirect URIs must be **HTTPS** for anything that isn't a loopback address (NAS, Docker, remote host) — see [Connecting services](#gs-connecting).

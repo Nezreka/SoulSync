@@ -15,7 +15,7 @@ def test_movie_below_cutoff_keeps_high_profile_wish():
     try:
         # profile 10 (1080p cutoff): 1080p meets. profile 20 (4K cutoff): 1080p doesn't.
         qe.meets_cutoff = lambda label, profile: profile == "p1080"
-        qp.profile_by_id = lambda db, pid: "p1080" if pid == 10 else "p4k"
+        qp.profile_by_id = lambda db, pid, kind=None: "p1080" if pid == 10 else "p4k"
         dm._remove_satisfied_movie_wishes(db, 123, "1080p", user_initiated=False)
     finally:
         qe.meets_cutoff = orig_meets
@@ -36,7 +36,7 @@ def test_movie_meeting_all_cutoffs_removes_all():
     orig_profile = qp.profile_by_id
     try:
         qe.meets_cutoff = lambda label, profile: True
-        qp.profile_by_id = lambda db, pid: "p1080"
+        qp.profile_by_id = lambda db, pid, kind=None: "p1080"
         dm._remove_satisfied_movie_wishes(db, 123, "1080p", user_initiated=False)
     finally:
         qe.meets_cutoff = orig_meets
@@ -56,7 +56,7 @@ def test_episode_below_cutoff_keeps_high_profile_wish():
     orig_profile = qp.profile_by_id
     try:
         qe.meets_cutoff = lambda label, profile: profile == "p1080"
-        qp.profile_by_id = lambda db, pid: "p1080" if pid == 10 else "p4k"
+        qp.profile_by_id = lambda db, pid, kind=None: "p1080" if pid == 10 else "p4k"
         dm._remove_satisfied_episode_wishes(db, 456, 1, 2, "1080p", user_initiated=False)
     finally:
         qe.meets_cutoff = orig_meets

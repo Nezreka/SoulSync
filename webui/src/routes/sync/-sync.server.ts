@@ -339,6 +339,8 @@ export interface CompareResponse {
   order_status?: { out_of_order?: boolean } | null;
   server_order?: unknown[];
   tracks?: CompareTrack[];
+  /** this profile may add a plex mood to the playlist's songs (admin, plex) */
+  can_tag?: boolean;
 }
 
 /**
@@ -888,6 +890,28 @@ export async function adoptServerPlaylist(
     body: JSON.stringify({ name: playlistName }),
   });
   return (await response.json()) as AdoptResponse;
+}
+
+export interface TagMoodResponse {
+  success: boolean;
+  error?: string;
+  tag?: string;
+  total?: number;
+}
+
+/** add a mood tag to every song on a plex playlist (admin, plex only), so a
+ *  plex smart playlist can start from "mood is <tag>". runs in the background */
+export async function tagServerPlaylistMood(
+  playlistId: string,
+  playlistName: string,
+  tag: string,
+): Promise<TagMoodResponse> {
+  const response = await fetch(`/api/server/playlist/${playlistId}/tag-mood`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: playlistName, tag }),
+  });
+  return (await response.json()) as TagMoodResponse;
 }
 
 /* ── M3U export (632-696) ─────────────────────────────────────────────────── */

@@ -106,6 +106,8 @@ afterEach(() => {
 });
 
 function openAutoSync() {
+  // Bulk schedule lives in the header's More menu (#1909)
+  fireEvent.click(screen.getByRole('button', { name: 'More playlist tools' }));
   fireEvent.click(screen.getByText('Bulk schedule'));
 }
 

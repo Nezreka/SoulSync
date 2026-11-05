@@ -64,6 +64,11 @@ class ResumePoint(NamedTuple):
     run_id: str
 
 
+def _clean_summary(text):
+    from core.library2.summary_markers import clean_summary
+    return clean_summary(text)
+
+
 def _rebuild_album_artist_credits(cursor: Any, album_ids: Set[int]) -> None:
     """Replace derived album credits from current album/track ownership."""
 
@@ -198,6 +203,24 @@ def split_artist_credits(*sources: str) -> List[str]:
     return out
 
 
+# "<frontman> & The <band>": the band an artist leads, filed on that artist's
+# own album ("Bob Marley & The Wailers" on Bob Marley's Legend, "Nick Cave &
+# The Bad Seeds", "Tom Petty and the Heartbreakers", "Marina and the
+# Diamonds"). It carries the album artist as one of its parts and is still one
+# artist, so the album-artist anchor must not read it as a list.
+_FRONTMAN_BAND_RE = re.compile(
+    r"^\s*(?P<lead>.+?)\s*(?:&|\band\b|\+)\s*(?P<band>the\s+\S.*)$", re.IGNORECASE)
+
+
+def leads_a_band(name: str, anchors) -> bool:
+    """True for "<one of ``anchors``> & The <band>" without a feat. / x / vs."""
+    display = unwrap_bytes_repr(name or "")
+    if _EXPLICIT_CREDIT_RE.search(display):
+        return False  # "A & The B feat. C" says it's a list
+    match = _FRONTMAN_BAND_RE.match(display)
+    return bool(match) and normalize_name(match.group("lead")) in set(anchors)
+
+
 def featured_from_title(title: str) -> List[str]:
     """Extract featured-artist names embedded in a track title's ``(feat. X)`` tail."""
     names: List[str] = []
@@ -248,9 +271,12 @@ def _credit_names_for_import(
     # "any part is known" would not be. Most of a big library's guest
     # credits look like this; keeping them whole made ~18k ghost artists
     # out of 300k tracks, each one later looked up online one by one.
+    # The one exception is the band a frontman leads ("Nick Cave & The Bad
+    # Seeds" on a Nick Cave album): that name is the band, see leads_a_band.
     if album_artist:
         anchor = normalize_name(album_artist)
-        if anchor and any(normalize_name(piece) == anchor for piece in pieces):
+        if (anchor and any(normalize_name(piece) == anchor for piece in pieces)
+                and not leads_a_band(display, {anchor})):
             return pieces
     return [display]
 
@@ -1742,7 +1768,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "image_url": _pick(row, "thumb_url", "banner_url"),
                 "art_locked": _pick(row, "art_locked"),
                 "genres": _normalize_genres(_pick(row, "genres")),
-                "summary": _pick(row, "summary"),
+                # the plex summary carries the legacy updater's "-updatedAt…"
+                # bookkeeping, which is not a biography
+                "summary": _clean_summary(_pick(row, "summary")),
                 # §17.7 remainder: AudioDB-sourced fields + MusicBrainz aliases
                 # had no lib2 destination column at all.
                 "style": _pick(row, "style"),
@@ -3491,6 +3519,7 @@ __all__ = [
     "apply_monitoring_from_watchlist_wishlist",
     "reconcile_import_monitoring",
     "split_artist_credits",
+    "leads_a_band",
     "featured_from_title",
     "normalize_name",
 ]

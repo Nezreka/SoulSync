@@ -61,6 +61,24 @@
     font-size: 13px; font-weight: 700; white-space: nowrap; cursor: pointer; box-shadow: none;
 }
 #settings-page .save-button:disabled { opacity: .5; cursor: wait; }
+/* settings save as you go (#1909): at rest the button is a quiet status,
+   it only asks for attention while a change is waiting or a save failed */
+#settings-page .save-button[data-state="idle"],
+#settings-page .save-button[data-state="saved"],
+#settings-page .save-button[data-state="saving"] {
+    background: transparent; border-color: var(--white-a10); color: var(--white-a65); font-weight: 600;
+}
+#settings-page .save-button[data-state="idle"]:hover,
+#settings-page .save-button[data-state="saved"]:hover { border-color: var(--white-a20); color: var(--white-a90); }
+#settings-page .save-button[data-state="idle"] .save-state-icon,
+#settings-page .save-button[data-state="saved"] .save-state-icon { color: var(--accent); }
+#settings-page .save-button[data-state="saving"] { cursor: progress; }
+#settings-page .save-button[data-state="saving"] .save-state-icon,
+#settings-page .save-button[data-state="pending"] .save-state-icon { display: none; }
+#settings-page .save-button[data-state="error"] {
+    background: transparent; border-color: rgba(var(--danger-rgb), .6); color: var(--danger-light);
+}
+#settings-page .save-button[data-state="error"] .save-state-icon { display: none; }
 #settings-page .settings-columns {
     display: flex !important; flex-direction: column !important; gap: 18px !important;
     width: 100%; margin: 0; padding: 0;

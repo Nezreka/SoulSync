@@ -9,7 +9,9 @@ from core.library2.maintenance_subjects import subject_details
 from core.lookup_failures import LookupFailures, watch_lookup_failures
 from core.repair_jobs import register_job
 from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, drop_hand_tagged, whole_library_run,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.cover_art")
@@ -76,8 +78,9 @@ class MissingCoverArtJob(RepairJob):
         try:
             with watching as health:
                 finished = self._scan_albums(context, result, albums, source_order, memory, health)
-            if memory and finished:
-                # only a scan that saw every album may forget the missing ones
+            if memory and finished and whole_library_run(context):
+                # only a scan that saw every album may forget the missing ones,
+                # and a run in one library saw that library's albums only
                 memory.prune(str(subject['album_id']) for subject in albums)
         finally:
             if memory:

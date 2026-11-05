@@ -351,14 +351,17 @@ def _vibe_artist_names(database, season_key: str) -> set:
         like, params = _vibe_like_clause(
             [LASTFM_TAGS_SQL.format(alias="ar"), "ar.genres", "ar.mood", "ar.style"],
             tags)
+        # the artists you have: lib2_artists also holds featured credits and
+        # discography, wishlist and watchlist rows (same as 139ba4181)
         cursor.execute(
-            f"SELECT ar.name FROM lib2_artists ar WHERE {like}", params)
+            f"SELECT ar.name FROM lib2_artists ar WHERE ({like}) AND {owned_sql('artist', 'ar')}",
+            params)
         names = {str(r["name"]).lower() for r in cursor.fetchall()}
         like, params = _vibe_like_clause(_ALBUM_VIBE_COLUMNS, tags)
         cursor.execute(f"""
             SELECT DISTINCT ar.name FROM lib2_albums al
             JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-            WHERE {like}
+            WHERE ({like}) AND {owned_sql('album', 'al')}
         """, params)
         names.update(str(r["name"]).lower() for r in cursor.fetchall())
     return names
@@ -495,14 +498,20 @@ def lastfm_tag_tracks(database, lastfm_client, season_key: str,
     try:
         with database._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT LOWER(name) AS n FROM lib2_artists")
-            known = {r["n"] for r in cursor.fetchall()}
+            # "does not have" is the artists with files here. every lib2 row
+            # (watchlist, wishlist, discography, featured guests) read as had,
+            # so the artists you only watch were never suggested. name_key is
+            # the stored fold, LOWER() only folds A-Z
+            cursor.execute(
+                f"SELECT ar.name_key AS n FROM lib2_artists ar WHERE {owned_sql('artist', 'ar')}")
+            known = {r["n"] for r in cursor.fetchall() if r["n"]}
 
+        from core.library2.importer import normalize_name
         out = []
         for tag in tags:
             artists = lastfm_client.get_tag_top_artists(tag, limit=12) or []
             fresh = [a.get("name") for a in artists
-                     if a.get("name") and a["name"].lower() not in known][:5]
+                     if a.get("name") and normalize_name(a["name"]) not in known][:5]
             for name in fresh:
                 for track in (lastfm_client.get_artist_top_tracks(name, limit=2) or []):
                     title = track.get("name")

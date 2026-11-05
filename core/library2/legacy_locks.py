@@ -60,8 +60,8 @@ def carry_legacy_genre_locks(conn: Any) -> Dict[str, int]:
         logger.warning("3.6.1 genre locks not carried yet: %s", exc)
         try:
             conn.rollback()
-        except Exception as rollback_exc:  # noqa: BLE001
-            logger.debug("Upgrade repair rollback failed: %s", rollback_exc)
+        except Exception as rb_exc:  # noqa: BLE001
+            logger.debug("legacy genre lock rollback failed: %s", rb_exc)
     return stats
 
 

@@ -185,3 +185,30 @@ describe('SourcePicker', () => {
     expect(item('amazon').textContent).toContain('🛒');
   });
 });
+
+describe('ModeTabs with music videos switched off (#1909)', () => {
+  afterEach(() => {
+    delete window.SoulSyncFeatures;
+  });
+
+  it('has no Videos tab, but keeps it while you are on it', () => {
+    window.SoulSyncFeatures = { isOn: (id: string) => id !== 'music_videos' } as never;
+    renderTabs();
+    expect(tab('youtube_videos')).toBeNull();
+    expect(tab('soulseek')).not.toBeNull();
+    cleanup();
+    renderTabs({ activeSource: 'youtube_videos' });
+    expect(tab('youtube_videos')).not.toBeNull();
+  });
+});
+
+describe('ModeTabs say what they search (#1909)', () => {
+  it('gives every tab a plain hint', () => {
+    renderTabs();
+    expect(tab('soulseek').getAttribute('title')).toBe(
+      'Search your download sources directly and pick the exact file.',
+    );
+    expect(tab('youtube_videos').getAttribute('title')).toBe('Music videos from YouTube.');
+    expect(tab('spotify').getAttribute('title')).toMatch(/tagged and filed/);
+  });
+});

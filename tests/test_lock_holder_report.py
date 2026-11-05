@@ -150,8 +150,12 @@ def test_a_slow_query_is_logged_with_its_caller_once(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert rows == [(2000,)]
-    assert len(lines) == 1, "the same statement is logged once per window"
-    assert "test_lock_holder_report.py" in lines[0] and "SELECT count(*) FROM t" in lines[0]
+    # only this statement's lines: with the threshold at 0, SQL another thread
+    # runs in the window (a background refresh an earlier test started, the pool
+    # putting back a dropped connection) is logged too
+    mine = [line for line in lines if "SELECT count(*) FROM t" in line]
+    assert len(mine) == 1, "the same statement is logged once per window"
+    assert "test_lock_holder_report.py" in mine[0]
 
 
 def test_a_fast_query_logs_nothing(tmp_path, monkeypatch):

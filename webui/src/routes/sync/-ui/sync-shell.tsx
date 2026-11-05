@@ -37,6 +37,7 @@ import {
   normalizeSyncTab,
   type SyncTabId,
 } from '../-sync.shell';
+import { ActionMenu } from '../../artist-detail/-ui/action-menu';
 
 export interface SyncShellProps {
   /** One node per tab id. A tab with no entry renders an empty panel. */
@@ -203,25 +204,52 @@ export function SyncShell({
                 + Add playlist
               </button>
             )}
-            {SYNC_HEADER_ACTIONS.map((action, index) => (
-              <Fragment key={action.key}>
-                {/* Divides the two actions that CHANGE something from the four
-                    that only report what already happened. */}
-                {index === 1 && <span className="sync-header-divider" />}
+            {/* everything else this page can do, behind one button (#1909).
+                six equal buttons beside the one you came for made a new user
+                read all seven to find it. same names as the windows they open,
+                with a line each saying what they're for. */}
+            <ActionMenu
+              align="right"
+              className="sync-more-menu"
+              trigger={(props) => (
                 <button
                   type="button"
-                  className={`btn btn--sm btn--secondary sync-history-btn${
-                    action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''
-                  }`}
-                  title={action.title}
-                  onClick={() => {
-                    runHeaderAction(action.key, onAutoSync, onActivity);
-                  }}
+                  className="btn btn--sm btn--secondary sync-more-btn"
+                  aria-label="More playlist tools"
+                  title="Scheduling, match review, activity and more"
+                  {...props}
                 >
-                  {action.label}
+                  More
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="14"
+                    height="14"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
                 </button>
-              </Fragment>
-            ))}
+              )}
+              items={SYNC_HEADER_ACTIONS.map((action) => ({
+                key: action.key,
+                // the vanilla hook classes ride on the items, so nothing that
+                // selects them loses them
+                className: `sync-history-btn${action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''}`,
+                title: action.title,
+                label: (
+                  <span className="sync-more-item">
+                    <span className="sync-more-name">{action.label}</span>
+                    <span className="sync-more-desc">{action.desc}</span>
+                  </span>
+                ),
+                onSelect: () => runHeaderAction(action.key, onAutoSync, onActivity),
+              }))}
+            />
           </div>
         </div>
       </div>

@@ -275,12 +275,46 @@ def next_pending(
     return None
 
 
+# a worker's pending count, kept per library and service. the status loop asks
+# a RUNNING worker for fresh stats every 2s, and right after a start nearly
+# every enrichment worker is running: that was several COUNT(*) passes over the
+# catalogue per worker per tick, 1-15s each on a 313k-track library (Nov 3
+# 2026). the number is only shown, so 30s old is fine
+PENDING_COUNT_TTL = 30.0
+_pending_lock = threading.Lock()
+_pending_cache: Dict[tuple, tuple] = {}  # key -> (monotonic time, count)
+
+
 def pending_count(conn, service: str, *,
                   retry_after_days: int = DEFAULT_RETRY_AFTER_DAYS,
                   entity_types: tuple = ENTITY_ORDER,
                   retry_statuses: tuple = _RETRYABLE,
                   require_provider_id: bool = False) -> int:
-    """How many items still need this provider looked at."""
+    """How many items still need this provider looked at (up to
+    ``PENDING_COUNT_TTL`` old)."""
+    if PENDING_COUNT_TTL <= 0:  # the test suite: always exact
+        return _pending_count(conn, service, retry_after_days=retry_after_days,
+                              entity_types=entity_types, retry_statuses=retry_statuses,
+                              require_provider_id=require_provider_id)
+    key = (_db_file(conn), str(service).strip().lower(), int(retry_after_days),
+           tuple(entity_types), tuple(retry_statuses), bool(require_provider_id))
+    now = time.monotonic()
+    with _pending_lock:
+        hit = _pending_cache.get(key)
+    if hit is not None and now - hit[0] < PENDING_COUNT_TTL:
+        return hit[1]
+    total = _pending_count(conn, service, retry_after_days=retry_after_days,
+                           entity_types=entity_types, retry_statuses=retry_statuses,
+                           require_provider_id=require_provider_id)
+    if not key[0].startswith("conn:"):
+        with _pending_lock:
+            _pending_cache[key] = (time.monotonic(), total)
+    return total
+
+
+def _pending_count(conn, service: str, *, retry_after_days: int,
+                   entity_types: tuple, retry_statuses: tuple,
+                   require_provider_id: bool) -> int:
     total = 0
     key = str(service).strip().lower()
     for entity_type in entity_types:
@@ -335,6 +369,9 @@ def status_counts(conn, service: str, entity_type: str, *,
 PROGRESS_SNAPSHOT_TTL = 120.0
 _progress_lock = threading.Lock()
 _progress_snapshots: Dict[str, Dict[str, Any]] = {}  # db file -> {"at", "data", "refreshing"}
+# the first compute per library, while it runs: at start every status call
+# found no snapshot and ran the whole ~30s pass itself, all at once
+_progress_first: Dict[str, threading.Event] = {}
 
 
 def _db_file(conn) -> str:
@@ -405,11 +442,30 @@ def _progress_snapshot(conn) -> Dict[str, Dict[str, Any]]:
                                  name="lib2-progress-refresh").start()
             if not stale or not key.startswith("conn:"):
                 return snap["data"]
+        running = None if key.startswith("conn:") else _progress_first.get(key)
+        if running is None and not key.startswith("conn:"):
+            first = _progress_first[key] = threading.Event()
+        else:
+            first = None
+    if running is not None:
+        # another caller is computing the first snapshot: wait for it
+        running.wait(timeout=120)
+        with _progress_lock:
+            snap = _progress_snapshots.get(key)
+        if snap and snap.get("data") is not None:
+            return snap["data"]
+        return _compute_progress(conn)
     # first read for this library: compute it here, on the caller's connection
-    data = _compute_progress(conn)
-    with _progress_lock:
-        _progress_snapshots[key] = {"at": time.monotonic(), "data": data, "refreshing": False}
-    return data
+    try:
+        data = _compute_progress(conn)
+        with _progress_lock:
+            _progress_snapshots[key] = {"at": time.monotonic(), "data": data, "refreshing": False}
+        return data
+    finally:
+        if first is not None:
+            with _progress_lock:
+                _progress_first.pop(key, None)
+            first.set()
 
 
 def progress_breakdown(conn, service: str, *,
@@ -439,6 +495,9 @@ def progress_breakdown(conn, service: str, *,
 def _reset_progress_snapshots() -> None:
     with _progress_lock:
         _progress_snapshots.clear()
+        _progress_first.clear()
+    with _pending_lock:
+        _pending_cache.clear()
 
 
 # --- Batch-first selection -------------------------------------------------

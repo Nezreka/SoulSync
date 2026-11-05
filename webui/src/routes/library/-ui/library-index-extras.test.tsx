@@ -175,11 +175,20 @@ describe('the header', () => {
     expect(window.startLibraryRadio).toHaveBeenCalled();
   });
 
-  it('Export opens the artists export', async () => {
+  it('Export opens the artists export, from the header\'s More (#1909)', async () => {
     renderPage();
     await screen.findByText('Aphex Twin');
-    fireEvent.click(screen.getByText(/Export$/));
+    fireEvent.click(screen.getByRole('button', { name: 'More library actions' }));
+    fireEvent.click(screen.getByText('Export artists'));
     expect(await screen.findByRole('dialog')).toBeTruthy();
+  });
+
+  it('keeps Radio out front and the library-wide jobs behind More', async () => {
+    renderPage();
+    await screen.findByText('Aphex Twin');
+    expect(screen.queryByRole('button', { name: /Automatic Search/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Watch All/ })).toBeNull();
+    expect(screen.getByRole('button', { name: /Radio/ })).toBeInTheDocument();
   });
 });
 

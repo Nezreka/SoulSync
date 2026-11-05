@@ -560,7 +560,7 @@ async function _rehydrateModal(processInfo, userRequested = false) {
                 console.log(`💧 [Rehydrate] User requested - creating wishlist modal for active process: ${batch_id}`);
 
                 // Create the modal with current server state (pass category filter for auto-processing)
-                await openDownloadMissingWishlistModal(current_cycle);
+                await openDownloadMissingWishlistModal(current_cycle, null, batch_id);
                 const process = activeDownloadProcesses[playlist_id];
                 if (!process) {
                     console.error('❌ [Rehydrate] Failed to create wishlist process in activeDownloadProcesses');

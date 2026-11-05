@@ -226,6 +226,7 @@ def test_wing_it_track_on_the_wishlist_accrues_backoff(tmp_path):
     svc = _ForwardingService(db)
 
     for _ in range(4):
+        _age(db, 200)          # passes days apart: a failure counts when it was due
         assert record_failed_attempt(
             svc, {'id': 'wing_it_e6e3736d43fb'}, 'Not found', 1) is True
 
@@ -254,6 +255,7 @@ def test_manual_run_clears_the_retry_clock_on_failing_tracks(tmp_path):
     _wishlisted_track(db, sp_id='trk2')
     svc = _ForwardingService(db)
     for _ in range(4):
+        _age(db, 200)          # passes days apart: a failure counts when it was due
         record_failed_attempt(svc, {'id': 'trk1'}, 'No matching track found', 1)
     record_failed_attempt(svc, {'id': 'trk2'}, 'No matching track found', 1)
 
@@ -361,6 +363,7 @@ def _wishlist_singles(tmp_path, monkeypatch):
     for i in range(3):
         _wishlisted_track(db, sp_id=f'u{i}')
         for _ in range(4):
+            _age(db, 200)      # passes days apart: a failure counts when it was due
             db.update_wishlist_retry(f'u{i}', success=False,
                                      error_message='No matching track found')
 
@@ -409,3 +412,52 @@ def test_a_scheduled_run_keeps_its_old_cadence(_wishlist_singles):
     assert batches == {}
     assert get_wishlist_cycle(lambda: db) == 'singles'      # toggled for next tick
     assert {r['retry_count'] for r in db.get_wishlist_tracks()} == {4}
+
+
+# ── one bad afternoon is not a week of waiting (TheHomeGuy) ─────────────────
+
+def _row(db):
+    return db.get_wishlist_tracks()[0]
+
+
+def _age(db, hours):
+    with db._get_connection() as conn:
+        conn.execute("UPDATE wishlist_tracks SET last_attempted = datetime('now', ?)",
+                     (f"-{int(hours)} hours",))
+        conn.commit()
+
+
+def test_failures_while_cooling_keep_the_reason_not_the_count(tmp_path):
+    # playlist syncs and batches fail a wished track outside the wishlist's own
+    # passes. counting each put Chicken Fried on the 7 day rung in one day
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
+    _wishlisted_track(db)
+
+    for n in range(5):
+        assert db.update_wishlist_retry("trk1", False, f"fail {n}", profile_id=1)
+    row = _row(db)
+    assert row['retry_count'] == 2, "the first two count, the rest landed in the 4h cooldown"
+    assert row['failure_reason'] == 'fail 4'
+
+    _age(db, 5)                               # the 4h cooldown is over
+    db.update_wishlist_retry("trk1", False, "after the wait", profile_id=1)
+    assert _row(db)['retry_count'] == 3
+
+    db.update_wishlist_retry("trk1", False, "too soon", profile_id=1)
+    assert _row(db)['retry_count'] == 3       # 24h now
+    _age(db, 25)
+    db.update_wishlist_retry("trk1", False, "a day on", profile_id=1)
+    assert _row(db)['retry_count'] == 4
+
+
+def test_a_failure_while_cooling_does_not_move_the_retry_clock(tmp_path):
+    from database.music_database import MusicDatabase
+    db = MusicDatabase(database_path=str(tmp_path / 'm.db'))
+    _wishlisted_track(db)
+    db.update_wishlist_retry("trk1", False, "1", profile_id=1)
+    db.update_wishlist_retry("trk1", False, "2", profile_id=1)
+    _age(db, 3)
+    before = _row(db)['last_attempted']
+    db.update_wishlist_retry("trk1", False, "while cooling", profile_id=1)
+    assert _row(db)['last_attempted'] == before

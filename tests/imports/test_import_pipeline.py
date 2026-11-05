@@ -274,6 +274,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     mark_calls = []
     completion_calls = []
     scan_calls = []
+    scan_scopes = []
     activity_calls = []
     wishlist_calls = []
 
@@ -292,7 +293,9 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
     runtime = types.SimpleNamespace(
         automation_engine=None,
         on_download_completed=lambda batch, task, success: completion_calls.append((batch, task, success)),
-        web_scan_manager=types.SimpleNamespace(request_scan=lambda reason: scan_calls.append(reason)),
+        web_scan_manager=types.SimpleNamespace(
+            request_scan=lambda reason, scope="full": (scan_calls.append(reason),
+                                                       scan_scopes.append(scope))),
         repair_worker=None,
     )
 
@@ -345,6 +348,7 @@ def test_verification_wrapper_handles_simple_download(tmp_path, monkeypatch):
         assert completion_calls == [(batch_id, task_id, True)]
         assert context_key not in runtime_state.matched_downloads_context
         assert scan_calls == ["Simple download completed"]
+        assert scan_scopes == ["downloads"]   # only the changed folders (#1978)
         assert wishlist_calls
         _wl_context, _wl_kwargs = wishlist_calls[0]
         assert _wl_context["search_result"]["is_simple_download"] is True

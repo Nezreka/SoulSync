@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import threading
 from contextlib import closing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 from utils.logging_config import get_logger
 
@@ -124,6 +124,37 @@ def upgrade_opted_in(conn, track_id: int, profile_id: int = 1) -> bool:
         logger.debug("upgrade opt-in lookup failed for track %s: %s", track_id, exc)
         return True
     return not (row and str(row[0] or "") in _IMPORTED_BASELINE_REASONS)
+
+
+def intent_profile_ids(conn, *, track_ids: Iterable[int] = (),
+                       album_ids: Iterable[int] = (),
+                       artist_ids: Iterable[int] = ()) -> Set[int]:
+    """Every profile with a wish or a rule on these rows.
+
+    Each profile's wishlist holds its own row for a track, so taking rows out
+    of the catalogue has to withdraw them for each of these profiles, not only
+    for whoever clicked. The ids go in as one json parameter, an artist with a
+    big catalogue would pass SQLite's variable limit otherwise.
+    """
+    groups = (("track", [int(i) for i in track_ids]),
+              ("album", [int(i) for i in album_ids]),
+              ("artist", [int(i) for i in artist_ids]))
+    profiles: Set[int] = set()
+    for entity_type, ids in groups:
+        if not ids:
+            continue
+        payload = json.dumps(ids)
+        rows = conn.execute(
+            """SELECT profile_id FROM lib2_monitor_rules
+                WHERE entity_type=? AND entity_id IN (SELECT value FROM json_each(?))""",
+            (entity_type, payload)).fetchall()
+        if entity_type == "track":
+            rows += conn.execute(
+                """SELECT profile_id FROM lib2_wanted_tracks
+                    WHERE track_id IN (SELECT value FROM json_each(?))""",
+                (payload,)).fetchall()
+        profiles.update(int(r[0]) for r in rows if r[0] is not None)
+    return profiles
 
 
 def enqueue_tracks(conn, track_ids: List[int], monitored: bool, *,
@@ -406,44 +437,34 @@ def _superseded_ids(conn, rows: List[Dict[str, Any]]) -> set:
     removed. ``retry_failed`` made it worse by resetting arbitrarily old failed
     rows with no ordering check at all. Rather than serializing the whole
     drain behind one stuck entity, drop the rows that are provably obsolete.
+
+    Each row carries its ``entity_key`` (schema trigger), so this is one
+    indexed lookup per batch. It used to json-parse every row newer than the
+    oldest pending one, which with a backlog was the whole backlog, per drain.
+    A row without a key (a build before the column, before the backfill ran)
+    falls back to parsing just that row.
     """
-    pending: list[tuple[int, tuple]] = []
-    families: set[str] = set()
+    keyed: Dict[int, str] = {}
     for row in rows:
-        try:
-            key = _row_key(row)
-        except (TypeError, ValueError):
-            key = None
+        key = row.get("entity_key")
         if key is None:
-            continue
-        pending.append((row["id"], key))
-        families.add(key[0])
-    if not pending:
+            try:
+                parts = _row_key(row)
+            except (TypeError, ValueError):
+                parts = None
+            if parts is None:
+                continue
+            key = "|".join(str(p) for p in parts)
+        keyed[int(row["id"])] = str(key)
+    if not keyed:
         return set()
-
-    # One pass over the candidate rows instead of a query per pending row: the
-    # newest id per entity is all that matters, and a drain batch is small.
-    lowest_pending = min(row_id for row_id, _ in pending)
-    newest_by_key: Dict[tuple, int] = {}
-    ops = sorted({op for family in families for op in _SIBLING_OPS[family]})
-    marks = ",".join("?" for _ in ops)
-    for candidate in conn.execute(
-        f"""SELECT id, op, payload, profile_id FROM lib2_mirror_outbox
-             WHERE id > ? AND op IN ({marks}) ORDER BY id""",
-        (lowest_pending, *ops),
-    ):
-        try:
-            key = _row_key(candidate)
-        except (TypeError, ValueError):
-            continue
-        if key is None:
-            continue
-        newest_by_key[key] = max(newest_by_key.get(key, 0), int(candidate["id"]))
-
-    return {
-        row_id for row_id, key in pending
-        if newest_by_key.get(key, 0) > row_id
+    newest = {
+        str(r[0]): int(r[1]) for r in conn.execute(
+            "SELECT entity_key, MAX(id) FROM lib2_mirror_outbox "
+            "WHERE entity_key IN (SELECT value FROM json_each(?)) GROUP BY entity_key",
+            (json.dumps(sorted(set(keyed.values()))),))
     }
+    return {row_id for row_id, key in keyed.items() if newest.get(key, 0) > row_id}
 
 
 _SIBLING_OPS = {
@@ -452,19 +473,45 @@ _SIBLING_OPS = {
 }
 
 
-def drain(db, *, limit: int = 500) -> Dict[str, int]:
+# a row that failed waits before its next try: 30s, doubling, an hour at most.
+# without it the background drainer took the same failing row first in every
+# batch, 0.1s apart, so a transient error ("database is locked") spent all
+# MAX_ATTEMPTS in about a second and the wishlist write was failed for good.
+# a drain of the caller's own rows (ids=) is not held back.
+_RETRY_DUE = ("(attempts = 0 OR processed_at IS NULL OR processed_at <= "
+              "datetime('now', '-' || MIN(30 * (1 << MIN(attempts - 1, 7)), 3600) || ' seconds'))")
+
+
+def drain(db, *, limit: int = 500, ids: Optional[Iterable[int]] = None) -> Dict[str, int]:
     """Process pending outbox rows. Returns ``{"done": n, "failed": m}``.
 
     Safe to call from anywhere (request handlers, jobs): idempotent ops,
     per-row commits, serialized per process.
+
+    ``ids``: only these rows (the ones the caller just queued), then the rest
+    of the queue moves on in the background. A request that drained without
+    them worked through the OLDEST pending rows first, so behind a backlog a
+    click waited on hundreds of other wishlist writes, and every other request
+    that drained queued up behind it on the lock.
     """
     done = failed = superseded = 0
+    wanted_ids = None if ids is None else sorted({int(i) for i in ids})
+    if wanted_ids is not None and not wanted_ids:
+        return {"done": 0, "failed": 0, "superseded": 0}
     with _drain_lock:
         with closing(db._get_connection()) as conn:
-            rows = [dict(r) for r in conn.execute(
-                "SELECT id, op, payload, profile_id, user_initiated, attempts "
-                "FROM lib2_mirror_outbox WHERE status='pending' ORDER BY id LIMIT ?",
-                (limit,))]
+            columns = "id, op, payload, profile_id, user_initiated, attempts"
+            if _has_entity_key(conn):
+                columns += ", entity_key"
+            if wanted_ids is None:
+                rows = [dict(r) for r in conn.execute(
+                    f"SELECT {columns} FROM lib2_mirror_outbox "
+                    f"WHERE status='pending' AND {_RETRY_DUE} ORDER BY id LIMIT ?", (limit,))]
+            else:
+                rows = [dict(r) for r in conn.execute(
+                    f"SELECT {columns} FROM lib2_mirror_outbox "
+                    "WHERE status='pending' AND id IN (SELECT value FROM json_each(?)) "
+                    "ORDER BY id", (json.dumps(wanted_ids),))]
             obsolete = _superseded_ids(conn, rows)
         if obsolete:
             with closing(db._get_connection()) as conn:
@@ -535,7 +582,82 @@ def drain(db, *, limit: int = 500) -> Dict[str, int]:
         finally:
             conn.close()
 
+    if wanted_ids is not None:
+        drain_soon(db)
     return {"done": done, "failed": failed, "superseded": superseded}
+
+
+_key_column: Dict[str, bool] = {}
+
+
+def _has_entity_key(conn) -> bool:
+    try:
+        path = next((str(r[2]) for r in conn.execute("PRAGMA database_list") if r[1] == "main"), "")
+    except Exception:  # noqa: BLE001
+        path = ""
+    if path and path in _key_column:
+        return _key_column[path]
+    present = "entity_key" in {r[1] for r in conn.execute("PRAGMA table_info(lib2_mirror_outbox)")}
+    if path and present:
+        _key_column[path] = True
+    return present
+
+
+# The queue's background drainer. Small batches, the lock released between
+# them, so a request draining its own rows waits for one small batch at most.
+BACKGROUND_BATCH = 50
+BACKGROUND_PAUSE = 0.1
+_background_lock = threading.Lock()
+_background: Dict[str, Any] = {"thread": None}
+
+
+def queue_mark(conn) -> int:
+    """The newest outbox row id now: pass it to ``drain_since`` after a change
+    that queues rows through code that doesn't hand their ids back."""
+    return int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM lib2_mirror_outbox").fetchone()[0])
+
+
+def drain_since(db, mark: int) -> Dict[str, int]:
+    """Drain the pending rows queued after ``mark`` (a delete's own
+    withdrawals), not the oldest rows of whatever backlog sits in front."""
+    with closing(db._get_connection()) as conn:
+        ids = [int(r[0]) for r in conn.execute(
+            "SELECT id FROM lib2_mirror_outbox WHERE id > ? AND status='pending'", (int(mark),))]
+    return drain(db, ids=ids)
+
+
+# the test suite turns it off: a thread outliving its test would drain a
+# temporary database that is already gone
+BACKGROUND_DRAIN = True
+
+
+def drain_soon(db) -> bool:
+    """Work through the pending queue in the background; True when a drainer
+    was started. One per process: a drainer already running picks up what
+    was queued since. It stops when the queue is empty or a batch got nothing
+    done (failing rows keep their spaced-out retries for a later drain)."""
+    if not BACKGROUND_DRAIN:
+        return False
+    with _background_lock:
+        thread = _background.get("thread")
+        if thread is not None and thread.is_alive():
+            return False
+
+        def _run():
+            import time
+            try:
+                while True:
+                    result = drain(db, limit=BACKGROUND_BATCH)
+                    if not (result.get("done") or result.get("superseded")):
+                        break
+                    time.sleep(BACKGROUND_PAUSE)
+            except Exception as e:  # noqa: BLE001 - the next drain picks it up
+                logger.warning("mirror outbox background drain stopped: %s", e)
+
+        thread = threading.Thread(target=_run, daemon=True, name="lib2-mirror-drain")
+        _background["thread"] = thread
+        thread.start()
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -560,9 +682,9 @@ def outbox_status(conn) -> Dict[str, Any]:
 
 def retry_failed(conn) -> int:
     """Flip current failed rows back to pending; retire obsolete ones first."""
+    columns = "id, op, payload, profile_id" + (", entity_key" if _has_entity_key(conn) else "")
     failed = [dict(row) for row in conn.execute(
-        "SELECT id, op, payload, profile_id FROM lib2_mirror_outbox "
-        "WHERE status='failed' ORDER BY id")]
+        f"SELECT {columns} FROM lib2_mirror_outbox WHERE status='failed' ORDER BY id")]
     obsolete = _superseded_ids(conn, failed)
     if obsolete:
         marks = ",".join("?" for _ in obsolete)
@@ -589,8 +711,24 @@ def prune_done(conn, *, keep: int = 500) -> int:
     drain replays 100 and resurrects the entry the user removed. That is exactly
     the dd28-13 failure the supersede logic exists to prevent.
     """
-    # The entity key lives inside the JSON payload, so the "is this row still
-    # load-bearing?" question is answered in Python rather than in the DELETE.
+    if _has_entity_key(conn):
+        # keyed rows answer "is this row still load-bearing?" in the DELETE,
+        # off the index. the Python pass below parsed every pending and failed
+        # row and every newer one, after every drain that did anything: twice
+        # the backlog, per drain, behind a backlog
+        cur = conn.execute(
+            """DELETE FROM lib2_mirror_outbox
+                WHERE status='done'
+                  AND id NOT IN (SELECT id FROM lib2_mirror_outbox WHERE status='done'
+                                  ORDER BY id DESC LIMIT ?)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM lib2_mirror_outbox stuck
+                       WHERE stuck.entity_key = lib2_mirror_outbox.entity_key
+                         AND stuck.id < lib2_mirror_outbox.id
+                         AND stuck.status IN ('pending', 'failed'))""",
+            (keep,))
+        return cur.rowcount
+    # no key column (a table an older schema made): parse the payloads
     protected = _ids_superseding_stuck_rows(conn)
     exclude = ""
     params: list = [keep]
@@ -643,5 +781,7 @@ def _ids_superseding_stuck_rows(conn) -> set:
 
 __all__ = [
     "enqueue_tracks", "enqueue_projected_tracks", "enqueue_artist_watchlist", "drain",
+    "drain_soon", "drain_since", "queue_mark",
+    "intent_profile_ids",
     "outbox_status", "retry_failed", "prune_done", "MAX_ATTEMPTS",
 ]

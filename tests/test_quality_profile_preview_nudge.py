@@ -154,7 +154,7 @@ def test_the_banner_explains_intuitive_save_behaviour(index_html):
     end = index_html.index("</div>", start)
     banner = index_html[start:end]
     assert "Changes autosave to this profile" in banner
-    assert "Save Settings saves it too" in banner
+    assert "the save status at the top saves it right away too" in banner
 
 
 def test_conversion_copy_distinguishes_acquisition_from_retained_output(

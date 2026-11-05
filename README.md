@@ -58,6 +58,7 @@ Most self-hosted media setups are a relay race: one app wants things, another se
 - **It checks its work.** Downloads are fingerprinted, sanity checked, quality ranked and quarantined when they don't hold up. Nothing lands in your library on faith.
 - **It explains itself.** Stuck wishlist rows show exactly which releases were refused and why. Every download has an audit trail.
 - **It's one app for the whole house.** Music, movies, TV, YouTube, podcasts and audiobooks, with profiles so everyone gets their own taste, playlists and history.
+- **It's only as big as you want it.** Use one part or all of it. **Customize** in the sidebar hides what you don't use, and each profile picks its own.
 
 ## At a glance
 
@@ -227,7 +228,7 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
 
 **Library**
 - Movies, shows and YouTube channels from **Plex** or **Jellyfin**, with incremental, full and deep scans, per-title sync, and a path resolver for mismatched Docker / NAS mounts.
-- **15 enrichment workers**: TMDB, TVDB, OMDb (IMDb, Rotten Tomatoes, Metacritic), fanart.tv, OpenSubtitles, Trakt, TVmaze, AniList (anime, linked by id through the anime-lists map: romaji and English names in release searches, score, studio, next episode), Wikidata, SponsorBlock, DeArrow, Return YouTube Dislike, streaming (where-to-watch), Mediastinger (credits scenes) and awards — plus a background YouTube upload-date enricher.
+- **15 enrichment workers**: TMDB, TVDB, OMDb (IMDb, Rotten Tomatoes, Metacritic), fanart.tv, OpenSubtitles, Trakt, TVmaze, AniList (anime, linked by id through the anime-lists map: romaji and English names in release searches, score, studio, next episode, and the season split for anime TMDB lumps into one season, no TVDB key needed), Wikidata, SponsorBlock, DeArrow, Return YouTube Dislike, streaming (where-to-watch), Mediastinger (credits scenes) and awards — plus a background YouTube upload-date enricher.
 - **Bulk edit & field locks**: edits are written to SoulSync and pushed to your server, and locked fields are never overwritten by enrichment.
 
 **Detail pages**
@@ -262,8 +263,11 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - Prowlarr (structured and text queries, TV query ladder including anime and daily shows) and **RSS sync**.
   - qBittorrent, Transmission, Deluge, SABnzbd, NZBGet and slskd.
   - Seeding goals, **season packs**, and stall detection.
+  - **Failed download handling**: a release SABnzbd or the torrent client fails is blocklisted and the next one your profile ranks is grabbed right away, with a notification only when nothing else could be taken.
 - **Quality profiles**:
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
+  - **Per-title profiles**: pick one in Get / Manual search (even before the title is in your library; it keeps it when it lands) or the title's Manage panel, with separate defaults for new movies and new shows.
+  - **Manual search results** can be filtered (conditions on resolution, codec, group, size, age, indexer, format score and more, matched on all or any), sorted, and saved as named filters per profile. A failed grab shows which release replaced it. **Colons in titles** can become " - " instead of being dropped.
   - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
   - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
   - **Your library's folders**: every folder your Plex / Jellyfin libraries read, Movies or TV, asked from the server. The ones SoulSync already reaches are ticked; tell it where it reaches the rest (checked against a sample of real files) and each becomes a full library folder: files found, renamed to your templates, recycled into that drive's own bin, languages read.
@@ -310,6 +314,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 ## Profiles & access
 
 - **Profiles** with avatars, PINs, a home page, page access, music / video access, and a download permission.
+- **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** (music, Discover, playlists and import) or **Everything**, then switch single parts on or off: Discover, playlist sync, Explorer, Import, stats, music videos, Sample Studio, podcasts, audiobooks, the video side (or just its Discover and Calendar), chat, automations and tools. Hidden parts leave the sidebar, the dashboard and the tabs that lead to them, but keep working, unless an admin pauses podcast or audiobook jobs once every profile has hidden them. A link to one still opens, with a note that brings it back in one click. First-run setup starts you off with what you said SoulSync is for, and profiles from before ask once, right above the Customize button. Search, library, watchlist, wishlist, downloads and settings never hide.
 - Per-profile watchlists, wishlists, playlists, queues and listening history.
 - Non-admins get a **My Account** panel for their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Security**:

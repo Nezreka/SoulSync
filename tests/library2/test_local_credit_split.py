@@ -179,3 +179,52 @@ def test_an_identified_band_name_with_no_anchor_is_left_alone(conn):
     _credited_track(conn, other, band)
     split_combined_credits_locally(conn)
     assert conn.execute("SELECT name FROM lib2_artists WHERE id=?", (band,)).fetchone()[0] == "Earth, Wind & Fire"
+
+
+# ── the band a frontman leads ────────────────────────────────────────────────
+# "<artist> & The <band>" carries the album artist as a part and is still one
+# artist. the anchor rule read it as a list: "Nick Cave & The Bad Seeds" on a
+# Nick Cave album became Nick Cave plus a new, unidentified "The Bad Seeds".
+
+@pytest.mark.parametrize("band, lead", [
+    ("Nick Cave & The Bad Seeds", "Nick Cave"),
+    ("Tom Petty and the Heartbreakers", "Tom Petty"),
+    ("Marina and the Diamonds", "Marina"),
+    ("Florence + the Machine", "Florence"),
+])
+def test_the_band_a_frontman_leads_stays_whole_at_import(band, lead):
+    assert _credit_names_for_import(band, _known(lead), album_artist=lead) == [band]
+
+
+def test_a_list_with_the_album_artist_still_splits_at_import():
+    assert _credit_names_for_import("Drake & Future", _known("Drake"),
+                                    album_artist="Drake") == ["Drake", "Future"]
+    assert _credit_names_for_import("Bob Marley & The Wailers feat. Lauryn Hill",
+                                    _known("Bob Marley"), album_artist="Bob Marley") == [
+        "Bob Marley", "The Wailers", "Lauryn Hill"]
+
+
+def test_an_identified_band_a_frontman_leads_is_not_split(conn):
+    lead = _artist(conn, "Bob Marley", spotify="sp-marley")
+    band = _artist(conn, "Bob Marley & The Wailers", spotify="sp-wailers")
+    conn.execute("INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored, "
+                 "provenance) VALUES('artist', ?, 3, 1, 'user_explicit')", (band,))
+    track = _credited_track(conn, lead, band)
+
+    stats = split_combined_credits_locally(conn)
+
+    assert stats["split"] == 0
+    assert _exists(conn, band)
+    assert _credits(conn, track) == ["Bob Marley", "Bob Marley & The Wailers"]
+    assert conn.execute("SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_id=?",
+                        (band,)).fetchone()[0] == 1
+
+
+def test_an_anchored_list_with_an_id_still_splits(conn):
+    lead = _artist(conn, "Drake", spotify="sp-drake")
+    ghost = _artist(conn, "Drake & Future", spotify="sp-wrong-match")
+    track = _credited_track(conn, lead, ghost)
+
+    assert split_combined_credits_locally(conn)["split"] == 1
+    assert not _exists(conn, ghost)
+    assert set(_credits(conn, track)) == {"Drake", "Future"}

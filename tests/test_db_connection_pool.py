@@ -298,3 +298,60 @@ def test_idle_connections_are_capped_across_files(tmp_path, monkeypatch):
     assert list(cp._idle) == [str(d.database_path) for d in dbs[3:]]
     for d in dbs:
         d.close()
+
+
+# --- a finalizer never takes the pool lock -----------------------------------
+# Nov 3 2026 (SeadogsBooty, all 32 request threads hung): a thread inside
+# _give_back's `with _lock:` allocated, garbage collection finalized a dropped
+# proxy on that same thread, and its __del__ ran _give_back -> `with _lock:`
+# again. the lock is not reentrant, so the thread waited on itself forever and
+# every request that wanted a connection queued behind it.
+
+def _finalize_while_holding_the_lock(proxy_holder):
+    """drop the last reference to a proxy while this thread holds cp._lock,
+    the way a gc pass inside a locked section does. returns True when the
+    finalizer came back (False = it deadlocked)."""
+    done = threading.Event()
+
+    def run():
+        with cp._lock:
+            proxy_holder.clear()       # last reference: __del__ runs right here
+            gc.collect()
+        done.set()
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    return done.wait(5)
+
+
+def test_a_connection_finalized_inside_the_pool_lock_does_not_deadlock(db):
+    proxy = db._get_connection()
+    raw = proxy._slot.raw
+    holder = [proxy]
+    del proxy
+
+    assert _finalize_while_holding_the_lock(holder), "the finalizer deadlocked on the pool lock"
+    # and the connection still goes back to the pool: the next checkout drains it
+    again = db._get_connection()
+    assert again._slot.raw is raw
+    again.close()
+
+
+def test_an_abandoned_write_transaction_is_rolled_back_at_once(db):
+    """the finalizer only queues the connection for the pool, but it must not
+    keep the database's write lock until that queue is drained"""
+    proxy = db._get_connection()
+    proxy.execute("CREATE TABLE IF NOT EXISTS w(x)")
+    proxy.commit()
+    proxy.execute("BEGIN IMMEDIATE")
+    proxy.execute("INSERT INTO w VALUES (1)")
+    del proxy
+    gc.collect()
+
+    other = sqlite3.connect(db.database_path, timeout=0)
+    try:
+        other.execute("BEGIN IMMEDIATE")          # would raise 'database is locked'
+        assert other.execute("SELECT COUNT(*) FROM w").fetchone()[0] == 0
+        other.rollback()
+    finally:
+        other.close()

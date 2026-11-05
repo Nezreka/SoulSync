@@ -9,7 +9,11 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 
-import { DEEZER_PLAYLIST_PROGRESS_EVENT, deezerProgressLabel } from '../-sync.events';
+import {
+  DEEZER_PLAYLIST_PROGRESS_EVENT,
+  deezerProgressLabel,
+  MIRRORS_CHANGED_EVENT,
+} from '../-sync.events';
 import {
   canCopyAsMine,
   copyPlaylistAsMine,
@@ -102,19 +106,26 @@ export function useImporter(): Importer {
 
   useEffect(() => {
     let alive = true;
-    indexReady.current = fetchMirrorIndex()
-      .catch(
-        // not knowing what's in only costs an "Open" label; importing still
-        // works, and the backend dedupes a second import of the same playlist
-        () => new Map<string, number>(),
-      )
-      .then((found) => {
-        if (!alive) return;
-        indexRef.current = found;
-        setIndex(found);
-      });
+    const load = () => {
+      indexReady.current = fetchMirrorIndex()
+        .catch(
+          // not knowing what's in only costs an "Open" label; importing still
+          // works, and the backend dedupes a second import of the same playlist
+          () => new Map<string, number>(),
+        )
+        .then((found) => {
+          if (!alive) return;
+          indexRef.current = found;
+          setIndex(found);
+        });
+    };
+    load();
+    // a mirror deleted anywhere (the Mirrored tab, a batch delete) re-reads
+    // the index, or this tab kept offering Open and Edit for it (#1979)
+    window.addEventListener(MIRRORS_CHANGED_EVENT, load);
     return () => {
       alive = false;
+      window.removeEventListener(MIRRORS_CHANGED_EVENT, load);
     };
   }, []);
 

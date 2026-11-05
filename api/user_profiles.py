@@ -731,6 +731,11 @@ def delete_profile(profile_id):
         if success:
             from api.profiles import _sweep_video_profile_data
             _sweep_video_profile_data(profile_id)
+            try:
+                from core import ui_features
+                ui_features.clear(database, profile_id)
+            except Exception as e:  # noqa: BLE001 - a leftover pref is harmless
+                logger.debug("features clear for %s failed: %s", profile_id, e)
             _audit('profile_deleted', profile_id, target.get('name'))
             # its folder is no library any more (#1199)
             from core.library_scope import library_config_changed
@@ -1458,6 +1463,79 @@ def delete_profile_spotify_creds():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# --- what this profile chose to see (#1909) ---
+
+@bp.route('/api/profiles/me/features', methods=['GET'])
+def get_profile_features():
+    """the hideable parts of soulsync, the presets, and what's off for me"""
+    from core import ui_features
+    try:
+        db, pid = get_database(), get_current_profile_id()
+        off = ui_features.load_off(db, pid)
+        body = {'success': True, **ui_features.payload(off, ui_features.has_chosen(db, pid))}
+        # install-wide, so only an admin sees or changes it
+        if is_admin_request():
+            body['background'] = ui_features.background_state(db)
+        return jsonify(body)
+    except Exception as e:
+        logger.error("features read failed: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/features', methods=['POST'])
+def save_profile_features():
+    """save what's off. takes {off: [...]}, {preset: 'simple'|'full'} or
+    {purposes: [...]} (the setup answer)."""
+    from core import ui_features
+    try:
+        data = request.json or {}
+        profile_id = get_current_profile_id()
+        if profile_id is None:
+            return jsonify({'success': False, 'error': 'Pick a profile first.'}), 400
+        if 'preset' in data:
+            preset = data.get('preset')
+            if preset not in ui_features.PRESETS:
+                return jsonify({'success': False, 'error': 'Unknown preset'}), 400
+            off = ui_features.PRESETS[preset]
+        elif 'purposes' in data:
+            off = ui_features.off_from_purposes(data.get('purposes') or [])
+        elif isinstance(data.get('off'), list):
+            off = data['off']
+        else:
+            return jsonify({'success': False, 'error': 'Send off, preset or purposes'}), 400
+        db = get_database()
+        saved = ui_features.save_off(db, profile_id, off)
+        body = {'success': True, **ui_features.payload(saved)}
+        if is_admin_request():
+            # hiding a part can make it hidden for everyone, the pause line
+            # in the picker follows straight away
+            body['background'] = ui_features.background_state(db)
+        return jsonify(body)
+    except Exception as e:
+        logger.error("features save failed: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@bp.route('/api/profiles/me/features/background', methods=['POST'])
+def set_feature_background():
+    """pause a part's background jobs (#1909). admin only, install-wide. it
+    only bites while every profile has the part hidden."""
+    from core import ui_features
+    if not is_admin_request():
+        return jsonify({'success': False, 'error': 'Admin only'}), 403
+    data = request.json or {}
+    feature = data.get('feature')
+    if feature not in ui_features.BACKGROUND_FEATURES:
+        return jsonify({'success': False, 'error': 'That part has no background pause'}), 400
+    try:
+        db = get_database()
+        ui_features.set_paused(db, feature, bool(data.get('paused')))
+        return jsonify({'success': True, 'background': ui_features.background_state(db)})
+    except Exception as e:
+        logger.error("background pause save failed: %s", e)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @bp.route('/api/profiles/me/server-library', methods=['GET'])
 def get_profile_server_library():

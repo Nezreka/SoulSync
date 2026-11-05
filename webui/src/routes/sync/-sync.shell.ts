@@ -211,6 +211,8 @@ export interface SyncHeaderAction {
   key: string;
   label: string;
   title: string;
+  /** the line under the name in the More menu: what it's for, in plain words */
+  desc: string;
 }
 
 /**
@@ -239,21 +241,25 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
     key: 'auto-sync',
     label: 'Bulk schedule',
     title: 'Schedule many mirrored playlists at once, and review the pipeline',
+    desc: 'Set when lots of playlists sync, in one place.',
   },
   {
     key: 'discovery-pool',
     label: 'Match Review',
     title: 'View matched and failed identification tracks',
+    desc: "Tracks that found a match, and the ones that didn't.",
   },
   {
     key: 'wing-it-pool',
     label: 'Wing It Pool',
     title: 'Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them',
+    desc: 'Tracks Wing It matched on a best guess. Confirm or fix them.',
   },
   {
     key: 'library-match',
     label: 'Library Match',
     title: 'Manually link source tracks to library tracks',
+    desc: 'Point a playlist track at the right song in your library.',
   },
   // One "what happened" surface. Syncs you ran and runs the schedule ran were
   // two buttons answering the same question, and you had to know which had run
@@ -262,10 +268,12 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
     key: 'activity',
     label: 'Activity',
     title: 'Syncs you ran and scheduled pipeline runs',
+    desc: 'Syncs you ran, and the ones the schedule ran.',
   },
   {
     key: 'download-origins',
     label: 'Download Origins',
     title: 'See every track your playlist syncs downloaded',
+    desc: 'Every track your playlist syncs downloaded.',
   },
 ];

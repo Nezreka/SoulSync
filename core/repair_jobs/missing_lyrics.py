@@ -21,6 +21,7 @@ from core.library.path_resolver import resolve_library_file_path
 from core.repair_jobs import register_job
 from core.repair_jobs.base import (
     JobContext, JobResult, RepairJob, get_scope_file_paths, scoped_file_subjects,
+    whole_library_run,
 )
 from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
 from utils.logging_config import get_logger
@@ -628,9 +629,10 @@ class MissingLyricsJob(RepairJob):
             self._refresh_pending_findings(context, pending_refreshes)
             if memory:
                 # the keep-set is this run's rows: only a library-wide pass may
-                # prune, a scoped one would forget everything outside its scope
-                if (completed_scan and not enumeration_failed
-                        and get_scope_file_paths(context) is None):
+                # prune, a scoped one would forget everything outside its scope.
+                # one library is a scope too: a run started by hand only reads
+                # the library it was started in
+                if completed_scan and not enumeration_failed and whole_library_run(context):
                     # Guarded on purpose: a prune failure must never
                     # stop close() from committing this run's entries,
                     # and must never replace the scan's own result.

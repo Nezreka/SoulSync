@@ -1551,6 +1551,11 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
         keys = [normalize_name(piece) for piece in pieces]
         if len(keys) < 2 or not all(key in owners for key in keys):
             continue
+        from core.library2.importer import leads_a_band
+        if leads_a_band(name or "", {keys[0]}):
+            # "Bob Marley & The Wailers" is a band with its own catalogue,
+            # even with Bob Marley and The Wailers both in the library
+            continue
         components = []
         for key in keys:
             if owners[key] != gid and owners[key] not in components:
@@ -1604,11 +1609,13 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
         conn.execute(f"DELETE FROM lib2_album_artists WHERE album_id IN ({marks})", albums)
         conn.execute(f"DELETE FROM lib2_albums WHERE id IN ({marks})", albums)
         _rehome_and_delete_combined(conn, gid, components[0], components)
+        # one ghost, one transaction: this runs on every start (the short
+        # credit pass) and committing once at the end held the write lock
+        # across every candidate's checks
+        conn.commit()
         logger.info("cleared collaboration ghost %r: %d untouched catalogue album(s) dropped",
                     name, len(albums))
         cleared += 1
-    if cleared:
-        conn.commit()
     return cleared
 
 
@@ -1631,7 +1638,7 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
     of its parts, so it is never split here. A ghost that owns an album, or
     that no rule covers, is left for the online pass. Commits per batch.
     """
-    from core.library2.importer import normalize_name, split_artist_credits
+    from core.library2.importer import leads_a_band, normalize_name, split_artist_credits
 
     identified: Dict[str, int] = {}
     anyone: Dict[str, int] = {}
@@ -1680,7 +1687,12 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
                 "JOIN lib2_albums al ON al.id=t.album_id "
                 "JOIN lib2_artists pa ON pa.id=al.primary_artist_id "
                 "WHERE ta.artist_id=?", (gid,))}
-            anchored = any(k in anchors for k in keys)
+            # the album's own artist as a part is a list, except the band that
+            # artist leads ("Nick Cave & The Bad Seeds" on a Nick Cave album).
+            # with an id it is that band's id, and splitting it made a new,
+            # unidentified "The Bad Seeds" and dropped everyone's watch on it
+            anchored = (any(k in anchors for k in keys)
+                        and not leads_a_band(name or "", anchors))
             if len(pieces) < 2 or not (
                     anchored or (not settled and all(k in identified for k in keys))):
                 stats["left"] += 1

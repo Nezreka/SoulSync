@@ -67,6 +67,7 @@ _UPGRADE_FRESH = 30.0
 _upgrade_cache: Dict[Any, Dict[str, Any]] = {}
 _upgrade_lock = threading.Lock()
 _upgrade_refreshing: set = set()
+_upgrade_cold: Dict[Any, threading.Lock] = {}
 
 
 def _upgrade_fingerprint(conn) -> Tuple[Any, ...]:
@@ -121,13 +122,24 @@ def library_upgradable_counts(conn) -> Dict[int, int]:
     cached = _cached_counts(conn, owner)
     if cached is not None:
         return cached
-    fingerprint = _upgrade_fingerprint(conn)
-    profiles = _profiles_state(conn)
-    counts = _count_upgradable(conn, "", {}, owner)
-    _upgrade_cache[_upgrade_key(conn, owner)] = {
-        "at": time.monotonic(), "fingerprint": fingerprint, "profiles": profiles,
-        "counts": counts}
-    return counts
+    # one cold count per library at a time. it's ~40s of sql on a big library,
+    # and every click that arrived before the first finished used to start its
+    # own: under load one request took 21 minutes (Nov 3 2026). the rest wait
+    # for the first and read what it stored.
+    key = _upgrade_key(conn, owner)
+    with _upgrade_lock:
+        cold = _upgrade_cold.setdefault(key, threading.Lock())
+    with cold:
+        cached = _cached_counts(conn, owner)
+        if cached is not None:
+            return cached
+        fingerprint = _upgrade_fingerprint(conn)
+        profiles = _profiles_state(conn)
+        counts = _count_upgradable(conn, "", {}, owner)
+        _upgrade_cache[key] = {
+            "at": time.monotonic(), "fingerprint": fingerprint, "profiles": profiles,
+            "counts": counts}
+        return counts
 
 
 def _refresh_in_background(key, owner: str) -> None:

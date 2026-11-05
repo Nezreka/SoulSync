@@ -64,7 +64,7 @@ import {
 } from '../-sync.api';
 import { patchMirroredSourceRef } from '../-sync.api';
 import { patchMirroredPreferences } from '../-sync.api';
-import { getMirroredSourceRef } from '../-sync.autosync';
+import { autoSyncSourceLabel, getMirroredSourceRef } from '../-sync.autosync';
 import { autoSyncCanSchedulePlaylist } from '../-sync.autosync';
 import { autoSyncPipelineCoversPlaylist } from '../-sync.autosync';
 import { autoSyncPlaylistHealth, detectBrowserTimezone } from '../-sync.autosync';
@@ -110,7 +110,6 @@ import { MirroredDetailModal } from './mirrored-detail-modal';
 import { PlaylistCard, playlistCardPrimaryLabel } from './playlist-card';
 import { PlaylistSearch } from './playlist-search';
 import { ScheduleMenu } from './schedule-menu';
-import { SourceIcon } from './source-icon';
 import { SourceRefModal } from './source-ref-modal';
 import { hydrateStatesForLoaded } from './url-import-tab';
 import { usePopoverDismiss } from './use-popover-dismiss';
@@ -349,6 +348,16 @@ function MirroredCardMenu({
   );
 }
 
+/** a source id as people say it: spotify_public is "Spotify Link" */
+export function sourceFilterLabel(source: string): string {
+  const known = autoSyncSourceLabel(source);
+  if (known !== source) return known;
+  return source
+    .split('_')
+    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
+    .join(' ');
+}
+
 export function MirroredTab({
   vertical,
   onOpen,
@@ -373,15 +382,11 @@ export function MirroredTab({
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<LibrarySort>('state');
   const [sources, setSources] = useState<ReadonlySet<string>>(() => new Set());
-  const toggleSource = useCallback((source: string) => {
-    setSources((prev) => {
-      const next = new Set(prev);
-      if (!next.delete(source)) next.add(source);
-      return next;
-    });
-  }, []);
   const clearSources = useCallback(() => {
     setSources(new Set());
+  }, []);
+  const setSourcesTo = useCallback((source: string) => {
+    setSources(new Set([source]));
   }, []);
 
   /**
@@ -1211,25 +1216,28 @@ export function MirroredTab({
               </select>
             </label>
           )}
-          {/* Source demoted to a filter, which is what it always actually was. */}
+          {/* Source demoted to a filter, which is what it always actually was.
+              a dropdown now (#1909): ten chips were a second wall of buttons
+              under the status filters, and almost nobody filters by source. */}
           {sourceList.length > 1 && (
-            <div className="library-sources">
-              {sourceList.map((source) => (
-                <button
-                  key={source}
-                  type="button"
-                  className={`library-source${sources.has(source) ? ' active' : ''}`}
-                  onClick={() => toggleSource(source)}
-                >
-                  <SourceIcon source={source} /> {source}
-                </button>
-              ))}
-              {sources.size > 0 && (
-                <button type="button" className="library-source-clear" onClick={clearSources}>
-                  Clear
-                </button>
-              )}
-            </div>
+            <label className="library-sort library-source-select">
+              <span>Source</span>
+              <select
+                value={sources.size === 1 ? [...sources][0] : ''}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  if (!next) clearSources();
+                  else setSourcesTo(next);
+                }}
+              >
+                <option value="">All sources</option>
+                {sourceList.map((source) => (
+                  <option key={source} value={source}>
+                    {sourceFilterLabel(source)}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
         </div>
       )}

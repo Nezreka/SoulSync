@@ -10,7 +10,7 @@ lib2 artist because it controls lib2's own discography re-expansion policy.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 
 WATCHLIST_BOOLEAN_FIELDS = (
@@ -259,10 +259,39 @@ def update_artist_settings(
     return get_artist_settings(conn, artist_id, profile_id=profile_id)
 
 
+def watching_profile_ids(conn, artist_id: int) -> List[int]:
+    """Every profile whose watchlist holds this artist, matched the way
+    ``get_artist_settings`` finds one row. each profile keeps its own
+    watchlist, so taking an artist out of the library has to reach all of
+    them, not only the profile that clicked delete."""
+    try:
+        artist = _artist_row(conn, artist_id)
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist_artists'"
+        ).fetchone():
+            return []
+        if "profile_id" in _columns(conn, "watchlist_artists"):
+            profiles = sorted({int(r[0]) for r in conn.execute(
+                "SELECT DISTINCT profile_id FROM watchlist_artists WHERE profile_id IS NOT NULL")})
+        else:
+            profiles = [1]
+    except ArtistSettingsError:
+        return []
+    watching = []
+    for profile_id in profiles:
+        try:
+            _watchlist_row(conn, artist, profile_id)
+        except ArtistSettingsError:
+            continue
+        watching.append(profile_id)
+    return watching
+
+
 __all__ = [
     "ArtistSettingsError",
     "MONITOR_NEW_ITEMS",
     "WATCHLIST_BOOLEAN_FIELDS",
     "get_artist_settings",
     "update_artist_settings",
+    "watching_profile_ids",
 ]

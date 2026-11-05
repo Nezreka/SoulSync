@@ -13,7 +13,6 @@ import { albumQueueRows, queueableRows } from '../-library-v2.play';
 import { getServiceUrl } from '../-library-v2.service-links';
 import { filterJiosaavnEntries } from '../../artist-detail/-artist-detail.enrichment';
 import { loadTopTracks, trackArtistLabel } from '../../artist-detail/-artist-detail.top-tracks';
-import { ExportArtistsModal } from './export-modal';
 import extras from './library-index-extras.module.css';
 import { songsStripQueryOptions } from './library-songs';
 import styles from './library-v2-page.module.css';
@@ -401,24 +400,6 @@ export function LibraryRadioButton() {
     >
       <LineIcon name="radio" /> Radio
     </button>
-  );
-}
-
-/** Export artists (watchlist or library, JSON / CSV / text). */
-export function LibraryExportButton() {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        type="button"
-        className={styles.btnGhost}
-        title="Export artists: pick watchlist or whole library, as JSON / CSV / text"
-        onClick={() => setOpen(true)}
-      >
-        <LineIcon name="download" /> Export
-      </button>
-      {open ? <ExportArtistsModal initialScope="library" onClose={() => setOpen(false)} /> : null}
-    </>
   );
 }
 

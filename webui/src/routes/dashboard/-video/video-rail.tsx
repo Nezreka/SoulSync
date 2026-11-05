@@ -7,6 +7,8 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { useFeatureOn } from '@/platform/features';
+
 import type { CalendarPayload } from '../../calendar/-calendar.types';
 
 import { CALENDAR_QUERY_KEY, wishlistMissing } from '../../calendar/-calendar.api';
@@ -29,6 +31,8 @@ export function WeekCard({
 }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  // calendar switched off (#1909): the week still counts, no link to it
+  const calendarOn = useFeatureOn('video_calendar');
   if (!data) return null;
   const w = weekSummary(data.episodes, today);
   const airing = data.automations?.airing ?? null;
@@ -58,9 +62,15 @@ export function WeekCard({
     <article className="dash-card dash-side-card" data-card="week">
       <header className="dash-side-head">
         <h3 className="dash-side-title">This week</h3>
-        <button type="button" className="dash-side-link" onClick={() => goVideo('video-calendar')}>
-          Calendar
-        </button>
+        {calendarOn ? (
+          <button
+            type="button"
+            className="dash-side-link"
+            onClick={() => goVideo('video-calendar')}
+          >
+            Calendar
+          </button>
+        ) : null}
       </header>
       <div className={styles.week}>
         <div className={styles.weekFigure}>

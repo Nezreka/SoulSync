@@ -128,6 +128,39 @@ def _expected_duration_sec(db, dl) -> float | None:
         return None
 
 
+def _with_episode_title(db, dl):
+    """The download with its episode's title in ``search_ctx``, for the
+    template's $episodetitle. no grab path put it there (the wishlist search,
+    the manual search, a retry), so every import named the file without it
+    (SeadogsBooty). from the library's episode row, else the wishlist row,
+    else TMDB's season (cached). unchanged when it's known or not an episode."""
+    from core.video.importer import _scope_of, _search_ctx
+    try:
+        if _scope_of(dl) != "episode":
+            return dl
+        ctx = _search_ctx(dl)
+        if ctx.get("episode_title") or ctx.get("episode") is None or ctx.get("season") is None:
+            return dl
+        _kind, tmdb_id, sn, en, _c = _wishlist_ids(db, dl)
+        if not tmdb_id:
+            return dl
+        title = db.episode_title_for(tmdb_id, sn, en)
+        if not title:
+            from database.video_database import real_episode_title
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            season = get_video_enrichment_engine().tmdb_season(int(tmdb_id), int(sn)) or {}
+            for e in season.get("episodes") or []:
+                if e.get("episode_number") == int(en) and real_episode_title(e.get("title")):
+                    title = str(e["title"]).strip()
+                    break
+        if not title:
+            return dl
+        return {**dl, "search_ctx": json.dumps({**ctx, "episode_title": title})}
+    except Exception:   # noqa: BLE001 - a title lookup never blocks an import
+        logger.debug("episode title lookup failed for download %s", dl.get("id"), exc_info=True)
+        return dl
+
+
 def _soulseek_size_error(dl, src) -> str | None:
     """Error text when a finished Soulseek transfer's bytes fall well short of what
     was advertised — the backstop for truncations the duration check can't see
@@ -379,6 +412,7 @@ def _make_organizer(db):
             probe_info = prober(src) if prober is not None else None
         except Exception:   # noqa: BLE001 - a probe crash must not block the import
             probe_info = None
+        dl = _with_episode_title(db, dl)
         plan = plan_import(dl, src, list_dir=fs.list_dir, probe=probe_info,
                            settings=settings, library_dir=_owned_library_dir(db, dl, settings),
                            expected_duration_sec=_expected_duration_sec(db, dl),
@@ -1159,13 +1193,76 @@ def retry_another_release(db, dl) -> dict:
         if tmdb_id:
             if already_failed:
                 _wishlist_failed(db, dl)   # make sure the row is back on the wishlist
-            from core.video.wishlist_search import manual_search
-            scope = "movie" if kind == "movie" else ("episode" if en is not None else "show")
-            manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en)
-            kicked = True
+            kicked = _search_again_now(db, dl)
     except Exception:
         logger.exception("video download %s: wishlist search kick failed", dl.get("id"))
     return {"status": "failed", "wishlist_search": kicked}
+
+
+def block_and_retry_failed(db) -> dict:
+    """Block every failed row's release and grab the next release for each.
+
+    The bulk twin of a row's block-and-retry. Every block lands first, then
+    one background thread searches the titles one at a time: a retry per row
+    fired at once started a search per row together, which is a flood of
+    indexer calls for a list of 40. A title failed twice is searched once
+    (the second finds the first's grab in flight and skips)."""
+    rows = [r for r in (db.failed_video_downloads() or [])
+            if str(r.get("kind") or "") != "youtube"]
+    blocked = 0
+    for dl in rows:
+        if dl.get("username") and dl.get("filename"):
+            _blocklist_release(db, dl, "Blocked with retry failed: %s" % (dl.get("error") or "failed"))
+            blocked += 1
+        _wishlist_failed(db, dl)   # back on the wishlist, so the search finds it
+
+    def run():
+        for dl in rows:
+            try:
+                _search_again_now(db, dl, wait=True)
+            except Exception:  # noqa: BLE001 - one title must not stop the rest
+                logger.exception("video download %s: block-and-retry search failed", dl.get("id"))
+
+    if rows:
+        threading.Thread(target=run, daemon=True, name="video-block-retry-failed").start()
+    return {"blocked": blocked, "searching": len(rows)}
+
+
+def _search_again_now(db, dl, *, wait: bool = False) -> bool:
+    """Run the wishlist search for this download's item now, for every profile
+    that has it wished. The search ranks under that wish's profile and the
+    blocklist drops what already failed, so the next best release is grabbed.
+
+    It used to search profile 1's wishlist only: a show another profile wished
+    found no item there, and "retry with another" quietly did nothing."""
+    kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+    if kind == "youtube" or not tmdb_id:
+        return False
+    from core.video.wishlist_search import manual_search
+    scope = "movie" if kind == "movie" else ("episode" if en is not None else "show")
+    try:
+        profiles = db.wishlist_profiles_for_media(
+            kind, int(tmdb_id), season_number=sn, episode_number=en)
+    except Exception:  # noqa: BLE001 - fall back to the default profile
+        profiles = []
+    # the in-flight key is per item, not per profile, so a second profile's
+    # search is skipped while the first runs: one grab, not one per profile.
+    # ``wait``: True only when something was grabbed (or another search or
+    # download already has the item, which is handled too)
+    # the retry ranks under the profile the failed grab was ranked by. the
+    # wishlist row often has none (a profile picked in the search modal for a
+    # show not in the library yet), and the replacement fell back to Default
+    keep = {"quality_profile_id": dl["quality_profile_id"]} if dl.get("quality_profile_id") else {}
+    handled = False
+    for pid in profiles or [1]:
+        res = manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en,
+                            profile_id=int(pid), **({"wait": True} if wait else {}), **keep) or {}
+        if not wait:
+            continue
+        if res.get("grabbed") or (res.get("skipped") and not res.get("queued")):
+            handled = True
+            break
+    return handled if wait else True
 
 
 def _archive_history(db, dl, upd) -> None:
@@ -1354,7 +1451,7 @@ def _remove_satisfied_movie_wishes(db, tmdb_id: int, label: str, user_initiated:
             return
         rows = db.get_movie_wishlist_profiles(tmdb_id)
         for profile_id, quality_profile_id in rows:
-            profile = profile_by_id(db, quality_profile_id)
+            profile = profile_by_id(db, quality_profile_id, kind="movie")
             if user_initiated or meets_cutoff(label, profile):
                 db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=profile_id)
             else:
@@ -1379,7 +1476,7 @@ def _remove_satisfied_episode_wishes(db, tmdb_id: int, sn: int, en: int,
             return
         rows = db.get_episode_wishlist_profiles(tmdb_id, sn, en)
         for profile_id, quality_profile_id in rows:
-            profile = profile_by_id(db, quality_profile_id)
+            profile = profile_by_id(db, quality_profile_id, kind="show")
             if user_initiated or meets_cutoff(label, profile):
                 db.remove_from_wishlist("episode", tmdb_id=tmdb_id,
                                         season_number=sn, episode_number=en,
@@ -1414,7 +1511,7 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
             from core.video.quality_profile import profile_by_id
             label = (upd or {}).get("quality_label") or dl.get("quality_label") or ""
             # judged under the profile the grab was made with (per-title, P2)
-            profile = profile_by_id(db, dl.get("quality_profile_id"))
+            profile = profile_by_id(db, dl.get("quality_profile_id"), kind=dl.get("kind"))
             if resolution_rank(label) and not meets_cutoff(label, profile):
                 if not user_initiated:
                     logger.info("video download %s: '%s' landed below the cutoff - kept on the "
@@ -1518,7 +1615,8 @@ def _blocked_users(db):
         return frozenset()
 
 
-def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True) -> None:
+def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True,
+                   client_failure: bool = False) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
     hand off to a requery thread; if nothing left, mark it failed for real — and
     put it back on the wishlist so it isn't silently lost.
@@ -1529,7 +1627,12 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True) -> None:
     nothing, and — because the requery path clears the error on its way through —
     it would replace a message naming the real cause with "No working release found
     after retries", pointing the user at their indexer instead of at the path
-    mapping that actually broke."""
+    mapping that actually broke.
+
+    ``client_failure`` = the torrent/usenet client failed THIS release (SAB
+    said failed, or the transfer stalled). That release is blocklisted and
+    the item searched again at once, so the next release the profile ranks is
+    grabbed instead of the item waiting hours for the wishlist's next pass."""
     from core.video.retry import plan_retry
     plan = plan_retry(dl, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db)) \
         if allow_retry else {"action": "fail"}
@@ -1540,15 +1643,137 @@ def _fail_or_retry(db, dl, error_msg, *, allow_retry: bool = True) -> None:
         _spawn_requery(dl["id"])
         return
     err = error_msg or "Download failed"
+    redownload = _next_release_plan(db, dl, err) if (client_failure and allow_retry) else None
+    if redownload and redownload.get("retry"):
+        err = "%s · trying the next release" % err
+    elif redownload and redownload.get("gave_up"):
+        err = redownload["gave_up"]
     completed = _now()
     db.update_video_download(dl["id"], status="failed", error=err, completed_at=completed)
     _wishlist_failed(db, dl)
     _archive_history(db, dl, {"status": "failed", "error": err, "completed_at": completed})
+    if redownload and redownload.get("retry"):
+        # the failed release is blocklisted and won't be imported: out of the
+        # client with its partial files, or a stalled torrent kept going next
+        # to its replacement
+        try:
+            from core.video.client_grab import remove as remove_client_job
+            remove_client_job(dl.get("source"), dl.get("client_ref"), delete_files=True)
+        except Exception:  # noqa: BLE001 - leaving it behind is the old behaviour
+            logger.debug("video download %s: client remove failed", dl.get("id"), exc_info=True)
+        # the notification waits for the outcome: a release that got replaced
+        # isn't something to come and fix
+        _spawn_next_release(db, dl, err)
+        return
+    _publish_failed(dl, err)
+
+
+def _publish_failed(dl, err) -> None:
     try:
         from core.video.download_events import publish
         publish("video_download_failed", {**_event_payload(dl), "error": err})
     except Exception:
         logger.exception("video download %s: failed-event publish failed", dl.get("id"))
+
+
+# How many releases of one title the client may fail in a row (48h) before
+# the retry stops and asks: a misconfigured client fails everything, and
+# without a cap it would blocklist every release there is.
+REDOWNLOAD_LIMIT = 5
+REDOWNLOAD_WINDOW_HOURS = 48
+
+
+_CHAIN_FIELDS = ("id", "status", "release_title", "filename", "error", "progress",
+                 "quality_label", "size_bytes", "source", "username")
+
+
+def retry_chain(db, dl, limit: int = 10) -> list:
+    """The downloads that followed this one for the same item: what the
+    next-release retry (or a later manual grab) took after it failed, oldest
+    first, so a result card can show which release ended up downloading
+    (SeadogsBooty). Matched on the resolved identity, not media_id: the retry
+    is grabbed by the wishlist search under the tmdb id while a modal grab
+    may carry the library's own id. A season pack covering the episode
+    counts. Never raises."""
+    try:
+        if not dl:
+            return []
+        kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+        if kind == "youtube" or not tmdb_id:
+            return []
+        out = []
+        for row in db.video_downloads_after(int(dl["id"])):
+            k2, t2, s2, e2, c2 = _wishlist_ids(db, row)
+            if k2 != kind or str(t2) != str(tmdb_id):
+                continue
+            if kind == "episode" and en is not None:
+                pack = e2 is None and str((c2 or {}).get("scope") or "") == "season"
+                if not (s2 == sn and (e2 == en or pack)):
+                    continue
+            out.append({k: row.get(k) for k in _CHAIN_FIELDS})
+            if len(out) >= limit:
+                break
+        return out
+    except Exception:  # noqa: BLE001 - a status poll never fails on this
+        logger.debug("retry chain lookup failed for download %s", (dl or {}).get("id"), exc_info=True)
+        return []
+
+
+def _next_release_plan(db, dl, err) -> dict | None:
+    """Blocklist the release the client just failed and decide whether to grab
+    the next one. None = not ours to retry (the setting is off, not a client
+    grab, no title to search for). {'retry': True} or {'gave_up': message}."""
+    if str(dl.get("source") or "") not in ("torrent", "usenet"):
+        return None
+    try:
+        from core.video.download_config import load as load_download_config
+        if not load_download_config(db).get("redownload_failed", True):
+            return None
+    except Exception:  # noqa: BLE001 - an unreadable setting keeps the default (on)
+        logger.debug("redownload setting unreadable", exc_info=True)
+    kind, tmdb_id, sn, en, _ctx = _wishlist_ids(db, dl)
+    if kind == "youtube" or not tmdb_id or not (dl.get("username") and dl.get("filename")):
+        return None
+    _blocklist_release(db, dl, "Download failed: %s" % err)
+    try:
+        failed = db.recent_failed_release_count(
+            media_source=dl.get("media_source"), media_id=dl.get("media_id"),
+            season_number=sn, episode_number=en, hours=REDOWNLOAD_WINDOW_HOURS)
+    except Exception:  # noqa: BLE001 - can't count: retry, the wishlist backoff still paces it
+        logger.debug("failed-release count unreadable", exc_info=True)
+        failed = 1
+    if failed >= REDOWNLOAD_LIMIT:
+        return {"gave_up": ("%s · %d releases failed in a row, stopped trying the next one. "
+                            "Check the download client, then search again" % (err, failed))}
+    return {"retry": True}
+
+
+def _next_release_now(db, dl, err) -> bool:
+    """Search the item again and grab what ranks next. When nothing is taken
+    the row says so and the failure is announced, since that one needs a person.
+    True when something was grabbed (or the item is already in hand)."""
+    try:
+        grabbed = _search_again_now(db, dl, wait=True)
+    except Exception:  # noqa: BLE001
+        logger.exception("video download %s: next-release search failed", dl.get("id"))
+        grabbed = False
+    if grabbed:
+        logger.info("video download %s: %s failed in the client, grabbed the next release",
+                    dl.get("id"), dl.get("release_title") or dl.get("filename"))
+        return True
+    final = ("%s, and no other release your profile accepts was found. "
+             "It stays on the wishlist" % err.replace(" · trying the next release", ""))
+    try:
+        db.update_video_download(dl["id"], error=final)
+    except Exception:  # noqa: BLE001
+        logger.debug("video download %s: final error not saved", dl.get("id"), exc_info=True)
+    _publish_failed(dl, final)
+    return False
+
+
+def _spawn_next_release(db, dl, err) -> None:
+    threading.Thread(target=_next_release_now, args=(db, dl, err), daemon=True,
+                     name="video-next-release-%s" % dl.get("id")).start()
 
 
 def _search_for_retry(query, max_seconds=55):
@@ -1602,7 +1827,7 @@ def _requery_worker(dl_id) -> None:
             return
         first = db.get_video_download(dl_id) or {}
         # requery under the profile the ORIGINAL grab was judged with (P2)
-        profile = profile_by_id(db, first.get("quality_profile_id"))
+        profile = profile_by_id(db, first.get("quality_profile_id"), kind=first.get("kind"))
         # What the retries actually SAW, so giving up can say why instead of the
         # one generic sentence every exhausted download used to record.
         seen = {"searches": 0, "hits": 0, "accepted": 0, "refusals": []}
@@ -1773,7 +1998,8 @@ def _tick(db) -> bool:
             # same file from the same user.
             if upd.get("_bad_release") and dl.get("username") and dl.get("filename"):
                 _blocklist_release(db, dl, upd.get("error") or "Bad release")
-            _fail_or_retry(db, dl, upd.get("error"))      # auto-retry before truly failing
+            _fail_or_retry(db, dl, upd.get("error"),      # auto-retry before truly failing
+                           client_failure=dl.get("source") in ("torrent", "usenet"))
             continue
         # Stall/queue timeout — a transfer sitting with no % movement for too long
         # (queued behind a dead peer, frozen mid-download, or finished with its file
@@ -1803,7 +2029,8 @@ def _tick(db) -> bool:
                 # finished and then couldn't be found does not — the bytes are
                 # already on disk, and searching again just repeats the same import.
                 _fail_or_retry(db, dl, stall.reason(_verdict, _idle, at_completion=_at_completion),
-                               allow_retry=not _at_completion)
+                               allow_retry=not _at_completion,
+                               client_failure=dl.get("source") in ("torrent", "usenet"))
                 continue
             if _verdict in (stall.MOVED, stall.SEEDED):
                 upd["progress_at"] = _now()      # restart (or start) the clock

@@ -1782,7 +1782,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         if outbox_ids:
             from core.library2.mirror_outbox import drain
-            drain(db)
+            drain(db, ids=outbox_ids)
         if create and artist_id is not None and not known:
             # Adopted from one provider's search result — resolve the rest so
             # the artist arrives matched, not matched-to-one.
@@ -1899,7 +1899,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         if outbox_ids:
             from core.library2.mirror_outbox import drain
-            drain(db)
+            drain(db, ids=outbox_ids)
         if not track_ids:
             _schedule_tracklist_resolve(album_id)
 
@@ -2085,7 +2085,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         if outbox_ids:
             from core.library2.mirror_outbox import drain
-            drain(db)
+            drain(db, ids=outbox_ids)
         if created:
             # A row created from one provider's payload knows one provider. Everything downstream —
             # tracklist resolution, artwork, matching — walks the stored ids, so resolve the rest in
@@ -3140,13 +3140,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """Reset failed mirror ops and drain the outbox once."""
         db = get_database()
         with closing(db._get_connection()) as conn:
-            from core.library2.mirror_outbox import drain, outbox_status, prune_done, retry_failed
+            from core.library2.mirror_outbox import drain_soon, outbox_status, prune_done, retry_failed
             retried = retry_failed(conn)
             prune_done(conn)
             conn.commit()
-            result = drain(db)
-            return jsonify({"success": True, "retried": retried, **result,
-                            **outbox_status(conn)})
+            # the queue works through in the background; draining 500 rows
+            # inside this request held it (and the drain lock) for minutes
+            # behind a backlog
+            started = drain_soon(db)
+            return jsonify({"success": True, "retried": retried, "draining": True,
+                            "started": started, **outbox_status(conn)})
 
     @_route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
     def lib2_set_monitored(entity, eid):
@@ -3261,7 +3264,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
             mirrored = mirror_pending = 0
             if outbox_ids:
-                drain_mirror_outbox(db)
+                drain_mirror_outbox(db, ids=outbox_ids)
                 marks = ",".join("?" for _ in outbox_ids)
                 mirrored = conn.execute(
                     f"SELECT COUNT(*) FROM lib2_mirror_outbox "
@@ -4186,9 +4189,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # Enqueue the wishlist un-mirrors BEFORE the rows vanish (the payload
         # builder needs them) and in the SAME transaction as the deletes —
         # the route drains the outbox after committing (audit P0-04).
-        from core.library2.mirror_outbox import enqueue_tracks
-        unmirrored = len(enqueue_tracks(conn, track_ids, False,
-                                        profile_id=_intent_profile())) if track_ids else 0
+        # every profile that wished for one of them: the delete below drops
+        # every profile's wanted rows, and each wishlist holds its own copy.
+        # only the clicking profile's was withdrawn, so the others kept
+        # searching for tracks of an album that is gone
+        from core.library2.mirror_outbox import enqueue_tracks, intent_profile_ids
+        unmirrored = 0
+        if track_ids:
+            profiles = intent_profile_ids(conn, track_ids=track_ids, album_ids=album_ids)
+            for profile_id in sorted(profiles | {_intent_profile()}):
+                unmirrored += len(enqueue_tracks(conn, track_ids, False, profile_id=profile_id))
         removed_albums = 0
         for aid_ in album_ids:
             conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (aid_,))
@@ -4397,13 +4407,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     f" WHERE entity_type='track' AND entity_id IN ({marks})", ids))
             except Exception as exc:  # noqa: BLE001 - the acting profile still updates
                 logger.debug("profiles for re-projection unknown: %s", exc)
+            outbox_ids: List[int] = []
             for profile_id in sorted(profiles):
                 for track_id in ids:
                     recompute_wanted_for_entity(conn, "tracks", track_id, profile_id=profile_id)
-                enqueue_projected_tracks(conn, ids, profile_id=profile_id)
+                outbox_ids.extend(enqueue_projected_tracks(conn, ids, profile_id=profile_id))
             conn.commit()
-        from core.library2.mirror_outbox import drain as drain_mirror_outbox
-        drain_mirror_outbox(db)
+        # just these rows: a bare drain worked through the oldest rows of the
+        # whole queue first, so behind a backlog the delete hung
+        from core.library2.mirror_outbox import drain
+        drain(db, ids=outbox_ids)
 
     @_route(
         "/api/library/v2/<entity>/<int:eid>/file-remove",
@@ -4561,9 +4574,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # asked before the rows go: a media-server artist comes back on the
             # server's next sync, and the answer says so (3.6.1 did)
             servers = _artist_media_servers(conn, artist_id)
-            from core.library2.mirror_outbox import drain as drain_mirror_outbox
-            from core.library2.mirror_outbox import enqueue_artist_watchlist
-            enqueue_artist_watchlist(conn, artist_id, False, profile_id=_intent_profile())
+            from core.library2.artist_settings import watching_profile_ids
+            from core.library2.mirror_outbox import (
+                drain_since, enqueue_artist_watchlist, intent_profile_ids, queue_mark,
+            )
+            mark = queue_mark(conn)
+            # off every watchlist that has it, each profile keeps its own. only
+            # the clicking profile's was removed, and another profile's
+            # watchlist scan kept finding new releases for a deleted artist
+            watchers = (set(watching_profile_ids(conn, artist_id))
+                        | intent_profile_ids(conn, artist_ids=[artist_id])
+                        | {_intent_profile()})
+            for profile_id in sorted(watchers):
+                enqueue_artist_watchlist(conn, artist_id, False, profile_id=profile_id)
             stats = _unmonitor_tracks_and_delete(db, conn, artist_id=artist_id)
             # Detach the artist from releases owned by OTHER primary artists
             # (featured/various credits). Those albums, tracks, files and
@@ -4582,7 +4605,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 (artist_id,))
             conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
             conn.commit()
-            drain_mirror_outbox(db)
+            # this delete's own withdrawals, not the oldest rows of a backlog
+            drain_since(db, mark)
             _delete_artwork_files(db, "artist", artist_id)
         return jsonify({"success": True, **stats, "media_servers": servers,
                         "returns_on_rescan": bool(servers)})
@@ -4594,10 +4618,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             row = conn.execute("SELECT id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
             if not row:
                 return _fail("Album not found", 404)
+            from core.library2.mirror_outbox import drain_since, queue_mark
+            mark = queue_mark(conn)
             stats = _unmonitor_tracks_and_delete(db, conn, album_ids=[album_id])
             conn.commit()
-            from core.library2.mirror_outbox import drain as drain_mirror_outbox
-            drain_mirror_outbox(db)
+            # this delete's own withdrawals, not the oldest rows of a backlog
+            drain_since(db, mark)
         return jsonify({"success": True, **stats})
 
     @_route("/api/library/v2/artists/<int:artist_id>/duplicates")
@@ -5129,7 +5155,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             outbox = enqueue_projected_tracks(conn, picked, profile_id=profile, user_initiated=True)
             conn.commit()
         if outbox:
-            drain(db)
+            drain(db, ids=outbox)
         return _start_scoped_search(entity, eid, only_track_ids=set(picked))
 
     # -- §73/I6: live queue status for track/album rows -------------------------

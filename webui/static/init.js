@@ -2122,6 +2122,13 @@ function updateProfileIndicator() {
     });
     document.body.classList.toggle('video-admin', !!currentProfile.is_admin);
 
+    // what this profile chose to see (#1909). goes on top of the permission
+    // filter above: the cached answer right away, the server's when it lands
+    if (window.SoulSyncFeatures) {
+        window.SoulSyncFeatures.apply();
+        window.SoulSyncFeatures.load();
+    }
+
     // Toggle download capability
     if (canDownload()) {
         document.body.classList.remove('downloads-disabled');

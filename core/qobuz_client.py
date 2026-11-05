@@ -625,7 +625,11 @@ class QobuzClient(DownloadSourcePlugin):
                 _qobuz_set_rate_limit(retry_after)
                 return None
             elif resp.status_code != 200:
-                logger.warning(f"Qobuz API error: {endpoint} returned HTTP {resp.status_code}")
+                # which id was refused: "album/get returned 400" alone can't
+                # be chased. ids only, never the signature or tokens
+                asked = {k: v for k, v in (params or {}).items()
+                         if k.endswith("_id") or k in ("query", "type", "extra")}
+                logger.warning(f"Qobuz API error: {endpoint} returned HTTP {resp.status_code} for {asked}")
                 return None
 
             return resp.json()

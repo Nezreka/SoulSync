@@ -187,3 +187,25 @@ def test_a_finished_run_never_reports_already_running(tmp_path):
 
     again = w.start_bulk_fix()
     assert 'already_running' not in again, again
+
+
+def test_a_selection_past_sqlites_variable_limit_still_reads_and_dismisses(tmp_path):
+    """one placeholder per id broke past 32766 ids. _types_for_findings then
+    came back empty (caught at debug), so a Fix All over that many lyrics
+    findings never tripped the LRCLib breaker, and a bulk dismiss failed"""
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    count = 33_000
+    with db._get_connection() as conn:
+        conn.executemany(
+            "INSERT INTO repair_findings (job_id, finding_type, severity, status, "
+            "entity_type, entity_id, title) VALUES "
+            "('missing_lyrics', 'missing_lyrics', 'info', 'pending', 'track', ?, 't')",
+            [(f'lib2:{n}',) for n in range(count)])
+        conn.commit()
+        ids = [r[0] for r in conn.execute("SELECT id FROM repair_findings")]
+    w = _worker(db, tmp_path)
+
+    types = w._types_for_findings(ids)
+    assert len(types) == count and set(types.values()) == {'missing_lyrics'}
+
+    assert w.bulk_update_findings(ids, 'dismiss') == count

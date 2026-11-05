@@ -54,6 +54,34 @@ _ITEM_TITLE_RE = re.compile(r'<p class="title">\s*([^<\n]+)')
 _ITEM_IMG_RE = re.compile(r'<img src="([^"]+)"')
 
 
+# Bandcamp answers its search api with a "Client Challenge" bot check page
+# (html, 200) to some clients. it isn't results and retrying doesn't change
+# it: 125 tries and 125 warnings in 45 minutes on Boulder's install (Nov 4
+# 2026), and the enrichment worker wrote every album it tried off as
+# not_found. searches stop for a while instead, shared by every client like
+# the rate-limit state above, and the worker leaves its items pending.
+_BLOCKED_FOR = 30 * 60
+_blocked_until = 0.0
+
+
+def search_blocked() -> bool:
+    """True while Bandcamp is answering searches with a bot check page."""
+    return time.time() < _blocked_until
+
+
+def _note_search_blocked(response) -> None:
+    global _blocked_until
+    first = not search_blocked()
+    _blocked_until = time.time() + _BLOCKED_FOR
+    if first:
+        title = re.search(r"<title>([^<]{0,80})</title>", response.text or "", re.I)
+        logger.warning(
+            "Bandcamp answered a search with a page (%s), not results: "
+            "pausing Bandcamp searches for %d minutes",
+            title.group(1).strip() if title else response.headers.get("Content-Type", "?"),
+            _BLOCKED_FOR // 60)
+
+
 class BandcampRateLimitedError(requests.exceptions.RequestException):
     """Raised immediately while Bandcamp is inside a 429/503 backoff window.
 
@@ -242,6 +270,8 @@ class BandcampClient:
 
     @rate_limited
     def _search_raw(self, query: str, item_type: str = '', limit: int = 10) -> List[Dict[str, Any]]:
+        if search_blocked():
+            return []
         payload = {
             'search_text': query,
             'search_filter': item_type,
@@ -267,7 +297,7 @@ class BandcampClient:
         try:
             data = response.json()
         except ValueError:
-            logger.warning("Bandcamp search returned non-JSON response")
+            _note_search_blocked(response)
             return []
 
         results = ((data or {}).get('auto') or {}).get('results') or []

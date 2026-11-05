@@ -41,6 +41,10 @@ from utils.logging_config import get_logger
 
 logger = get_logger("library2.monitor_sync")
 
+# tracks per committed batch of a full wanted recompute (the quality-profile
+# refresh uses the same size)
+_RECOMPUTE_BATCH = 2000
+
 
 # ---------------------------------------------------------------------------
 # Watchlist → Library demonitor (event-driven reverse edge)
@@ -262,7 +266,7 @@ def demonitor_lib2_artists_for_removed_watchlist(
             ))
         conn.commit()
         if outbox_ids:
-            drain(db)
+            drain(db, ids=outbox_ids)
         mirrored = _completed_outbox_count(conn, outbox_ids)
         logger.info(
             "watchlist→library demonitor: %d matched, %d demonitored, %d tracks mirrored",
@@ -557,7 +561,7 @@ def demonitor_lib2_tracks_for_removed_wishlist(
         )
         conn.commit()
         if outbox_ids:
-            drain(db)
+            drain(db, ids=outbox_ids)
         stats["tracks_mirrored"] = _completed_outbox_count(conn, outbox_ids)
         logger.info("wishlist→library release: %s", stats)
         return stats
@@ -933,7 +937,7 @@ def reconcile_artist_watchlist(
             stats["track_mirrors"] = len(track_ops)
         conn.commit()
         if outbox_ids:
-            drain(db)
+            drain(db, ids=outbox_ids)
         stats["mirrored"] = _completed_outbox_count(conn, outbox_ids)
         logger.info(
             "artist/watchlist reconcile: %d scanned, %d flags changed, %d mirrors",
@@ -1069,7 +1073,14 @@ def reconcile_track_wishlist(
                     stats['intent_failed'] += 1
                     logger.warning("wishlist row %s: intent not restored: %s", row['id'], exc)
                 conn.execute('RELEASE wl_row')
-        recompute_stats = recompute_wanted(conn, profile_id=profile_id)
+        conn.commit()
+        # in batches, committed as it goes: one full recompute in a single
+        # transaction held the write lock ~23s on a 313k-track library at
+        # every start, and chat, enrichment and caches all queued behind it.
+        # each batch reads before it writes, and only changed rows are written
+        recompute_stats = recompute_wanted(
+            conn, profile_id=profile_id, batch_size=_RECOMPUTE_BATCH,
+            on_batch=lambda _done, _total: conn.commit())
         conn.commit()
         from core.library2.validation import notify_changes
         notify_changes()

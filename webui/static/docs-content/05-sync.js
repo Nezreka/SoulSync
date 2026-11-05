@@ -214,6 +214,8 @@ Open a playlist and the line under its title says where its tracks are: **in lib
 
 The **Server** tab lists the playlists on your media server. Open one to compare it with the SoulSync playlist that syncs to it: matched, missing and extra tracks side by side, with Find & Add, swap, unmatch, reorder and M3U export.
 
+On Plex, an admin also gets **Tag in Plex**: it adds a mood (the playlist's name, or one you type) to every song on the playlist, in Plex only, never in your files. Then make a Plex smart playlist on *Mood is <tag>* and add rules on top, like dropping songs rated under three stars and adding ones rated three and up.
+
 **Open editor** is also on a mirrored playlist and on its card in the source tab it came from. For a playlist that hasn't synced yet there is no server playlist to edit, so the editor shows each song next to the library track it will sync as instead. Swap any of them for another version you have (the extended mix over the radio edit), pick one for a song it didn't find, or mark one as *not this one* so the sync downloads it. Your picks are used when you sync.
 
 - **Adopt into My Playlists**: a playlist made on the server instead of in SoulSync offers to be adopted. It becomes one of your playlists under the same name, each track stays paired with the server track it came from (so a sync never drops one it can't match), and syncing it updates that same server playlist
@@ -231,7 +233,7 @@ Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** 
 
 ## Auto-sync schedules
 
-Mirrored playlists can refresh and re-sync on a schedule from the **Bulk schedule** button:
+Mirrored playlists can refresh and re-sync on a schedule from **More → Bulk schedule** in the page header:
 
 - Pick an interval per playlist — from every hour up to weekly (1, 2, 4, 8, 12, 16, 24, 48, 72, or 168 hours)
 - Weekly schedules let you choose specific days
@@ -243,7 +245,7 @@ Mirrored playlists can refresh and re-sync on a schedule from the **Bulk schedul
             title: 'Sync History',
             lede: 'A log of every sync operation — what ran, when, and how it went.',
             body: `
-The **Activity** button in the page header opens a modal with two tabs. **Syncs you ran** shows every playlist sync, album download, and wishlist processing operation with timestamps, track counts, and completion status; **Scheduled runs** covers auto-sync pipeline runs.
+**More → Activity** in the page header opens a modal with two tabs. **Syncs you ran** shows every playlist sync, album download, and wishlist processing operation with timestamps, track counts, and completion status; **Scheduled runs** covers auto-sync pipeline runs.
 
 - Shows playlist name, source, track count, and completion stats
 - Filter by source (Spotify, YouTube, Tidal, etc.)

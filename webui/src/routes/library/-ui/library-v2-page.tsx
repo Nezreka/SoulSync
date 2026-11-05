@@ -191,6 +191,7 @@ import {
   checkWatchlistRequest,
   toggleWatchlistRequest,
 } from '../../artist-detail/-artist-detail.watchlist-button';
+import { ActionMenu } from '../../artist-detail/-ui/action-menu';
 import { AppearsOnSection } from '../../artist-detail/-ui/appears-on-section';
 import { ArtistVideosSection } from '../../artist-detail/-ui/artist-videos-section';
 import { ConcertsSection } from '../../artist-detail/-ui/concerts-section';
@@ -230,7 +231,6 @@ import {
   ClassicCardBadges,
   LibraryActiveFilters,
   LibraryAlphabetBar,
-  LibraryExportButton,
   LibraryRadioButton,
   LibrarySearchFallback,
   LibrarySearchInput,
@@ -5015,9 +5015,7 @@ function ArtistIndexView() {
         </div>
         <div className={styles.headerActions}>
           <LibraryRadioButton />
-          <LibraryExportButton />
-          <GlobalAutomaticSearchButton />
-          <MonitorAllUnmonitoredButton />
+          <LibraryMoreMenu />
           <ImportButton
             hasArtists={
               artists.length > 0 || hasActiveArtistFilters || (pagination?.total_count ?? 0) > 0
@@ -7875,19 +7873,63 @@ function AudiobookRouteSetting({ name }: { name: string }) {
   );
 }
 
-/** True once `ref` has scrolled up past the top of the view. Without an
- *  IntersectionObserver (jsdom) it stays false. */
+/** The element that scrolls `el`: the shell's `.main-content`, or the page. */
+function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+  }
+  return null;
+}
+
+/** True once `ref` has scrolled up past the top of the view.
+ *
+ *  It compares the scroll position with where `ref` sits while the answer is
+ *  still false. It used to ask an IntersectionObserver whether `ref` was on
+ *  screen, but the answer changes the toolbar above it (the name tag wraps
+ *  it to a second row), which moved `ref` back on screen, which took the tag
+ *  away again: measured, 9 to 11 flips across one slow pass over the hero on
+ *  every width, and the page jumping up and down on phones. The position it
+ *  is compared with is only taken while false, so the tag can't move it, and
+ *  the browser's scroll anchoring moves the scroll the same way as the
+ *  answer. Without layout (jsdom) it stays false. */
 function useScrolledPast(ref: { current: HTMLElement | null }, key: unknown) {
   const [past, setPast] = useState(false);
+  const pastRef = useRef(false);
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(([entry]) => {
-      if (!entry) return;
-      setPast(!entry.isIntersecting && entry.boundingClientRect.top < 0);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
+    if (!el) return;
+    const scroller = scrollParentOf(el);
+    const target: HTMLElement | Window = scroller ?? window;
+    const scrollTop = () => (scroller ? scroller.scrollTop : window.scrollY);
+    const topOf = () =>
+      el.getBoundingClientRect().top -
+      (scroller ? scroller.getBoundingClientRect().top : 0) +
+      scrollTop();
+    let edge = topOf();
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      if (!pastRef.current) edge = topOf();
+      const next = el.getBoundingClientRect().height >= 0 && scrollTop() > edge;
+      if (next !== pastRef.current) {
+        pastRef.current = next;
+        setPast(next);
+      }
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    target.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    update();
+    return () => {
+      target.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+      if (frame) cancelAnimationFrame(frame);
+    };
   }, [ref, key]);
   return past;
 }
@@ -14357,52 +14399,15 @@ export function describeLibraryV2ArtworkCacheProgress(state: LibraryV2ImportStat
  * then the existing Wishlist processor sees one complete missing+upgrade
  * queue. Starting the processor first creates a race where the just-enqueued
  * upgrades can miss the active cycle. */
-/** Monitor every unmonitored artist that has a provider id.
- *
- * Lives next to Automatic Search because it is the same kind of thing: one
- * global action over the whole library. It opens a modal rather than acting
- * directly, and that modal needs a SECOND, explicit confirmation before it
- * fires -- this adds potentially thousands of artists to the monitor list in
- * one go, each of which then starts fetching a discography, and it sits one
- * pixel from a button people click routinely.
- *
- * "Watch" is the word here too (dev's Watchlist); Library v2 had renamed it monitoring.
- */
-function MonitorAllUnmonitoredButton() {
-  const canWrite = useLibraryV2CanWrite();
-  const [open, setOpen] = useState(false);
-
-  return (
-    <>
-      {/* Same class pair as Automatic Search, which it sits next to. `.btnGhost`
-          alone is NOT enough: `.automaticSearchButton` is what constrains the
-          icon to 15x15 and makes the button an inline-flex row, so without it
-          the SVG renders at its natural size and the button towers over its
-          neighbour. (The class name is historical — the rule itself is the
-          generic "ghost button with a leading icon" in this header.) */}
-      <button
-        type="button"
-        className={`${styles.btnGhost} ${styles.automaticSearchButton}`}
-        data-requires-write=""
-        disabled={!canWrite}
-        title="Add every artist in your library to your Watchlist"
-        onClick={() => setOpen(true)}
-      >
-        <WatchlistIcon />
-        Watch All
-      </button>
-      {open ? <WatchAllModal onClose={() => setOpen(false)} /> : null}
-    </>
-  );
-}
-
-export function GlobalAutomaticSearchButton() {
+/** the global Automatic Search run, shared by its button and the header's
+ *  More menu (#1909), so both show the same progress line. */
+function useGlobalAutomaticSearch() {
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWrite();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function runSearch() {
+  async function run() {
     if (!canWrite) return;
     setBusy(true);
     setMessage('Finding missing tracks and quality upgrades…');
@@ -14428,6 +14433,11 @@ export function GlobalAutomaticSearchButton() {
     }
   }
 
+  return { canWrite, busy, message, run };
+}
+
+export function GlobalAutomaticSearchButton() {
+  const { canWrite, busy, message, run } = useGlobalAutomaticSearch();
   return (
     <span className={styles.automaticSearchWrap}>
       <button
@@ -14436,7 +14446,7 @@ export function GlobalAutomaticSearchButton() {
         data-requires-write=""
         disabled={busy || !canWrite}
         title="Search every missing Wishlist track and every file below its quality-profile cutoff"
-        onClick={() => void runSearch()}
+        onClick={() => void run()}
       >
         <SvgIcon name="automatic" />
         Automatic Search
@@ -14445,6 +14455,91 @@ export function GlobalAutomaticSearchButton() {
         <span className={styles.automaticSearchMessage} role="status">
           {message}
         </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** the library header's More (#1909). Radio stays out front, it's what you
+ *  open your library for; the three library-wide jobs live here with a line
+ *  each, instead of four equal buttons a new user had to decode. */
+export function LibraryMoreMenu() {
+  const search = useGlobalAutomaticSearch();
+  const [exporting, setExporting] = useState(false);
+  const [watching, setWatching] = useState(false);
+  const item = (key: string, name: string, desc: string) => (
+    <span className="sync-more-item" data-library-action={key}>
+      <span className="sync-more-name">{name}</span>
+      <span className="sync-more-desc">{desc}</span>
+    </span>
+  );
+  return (
+    <span className={styles.automaticSearchWrap}>
+      <ActionMenu
+        align="right"
+        className="sync-more-menu"
+        trigger={(props) => (
+          <button
+            type="button"
+            className={`${styles.btnGhost} ${styles.automaticSearchButton} library-more-btn`}
+            aria-label="More library actions"
+            title="Automatic Search, Watch All and Export"
+            {...props}
+          >
+            More
+            <svg
+              viewBox="0 0 24 24"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        )}
+        items={[
+          {
+            key: 'automatic-search',
+            label: item(
+              'automatic-search',
+              'Automatic Search',
+              'Find missing tracks and better copies of what you have.',
+            ),
+            disabled: search.busy || !search.canWrite,
+            title:
+              'Search every missing Wishlist track and every file below its quality-profile cutoff',
+            onSelect: () => void search.run(),
+          },
+          {
+            key: 'watch-all',
+            label: item(
+              'watch-all',
+              'Watch All',
+              'Add every artist in your library to your Watchlist.',
+            ),
+            disabled: !search.canWrite,
+            onSelect: () => setWatching(true),
+          },
+          {
+            key: 'export',
+            label: item('export', 'Export artists', 'Save your artist list as JSON, CSV or text.'),
+            onSelect: () => setExporting(true),
+          },
+        ]}
+      />
+      {search.message ? (
+        <span className={styles.automaticSearchMessage} role="status">
+          {search.message}
+        </span>
+      ) : null}
+      {watching ? <WatchAllModal onClose={() => setWatching(false)} /> : null}
+      {exporting ? (
+        <ExportArtistsModal initialScope="library" onClose={() => setExporting(false)} />
       ) : null}
     </span>
   );

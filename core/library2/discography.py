@@ -303,23 +303,30 @@ def _release_type_included(track_count: Any, filters: Dict[str, bool]) -> bool:
     return filters.get("include_singles", True)
 
 
-def _artist_content_filters(conn, artist_id: int) -> Dict[str, bool]:
-    """The admin watchlist's Live/Remix/Acoustic/Compilation/Instrumental
-    opt-ins for one artist, same semantics ``core.watchlist_scanner
+def _artist_content_filters(conn, artist_id: int, profile_id: int = 1) -> Dict[str, bool]:
+    """The watchlist's release types and Live/Remix/Acoustic/Compilation/
+    Instrumental opt-ins for one artist, same semantics ``core.watchlist_scanner
     ._should_include_track`` used to enforce before the native discography
-    path replaced it (review A3). Best-effort: an artist with no watchlist
-    row (e.g. a V2-native import) falls back to the same exclude-by-default
-    values a fresh watchlist row would have."""
-    try:
-        from core.library2.artist_settings import get_artist_settings
+    path replaced it (review A3).
 
-        settings = get_artist_settings(conn, artist_id)
+    Read from the watchlist of the profile the releases are wished for. It
+    always read the admin's row, so a member who turned singles off for an
+    artist still got its singles. A profile without a row of its own for the
+    artist reads the admin's, and an artist on no watchlist (e.g. a V2-native
+    import) falls back to the same exclude-by-default values a fresh
+    watchlist row would have."""
+    from core.library2.artist_settings import get_artist_settings
+
+    for pid in dict.fromkeys((int(profile_id or 1), 1)):
+        try:
+            settings = get_artist_settings(conn, artist_id, profile_id=pid)
+        except Exception:  # noqa: BLE001 - no row for this profile, try the next
+            continue
         return {
             key: bool(settings.get(key, default))
             for key, default in _CONTENT_FILTER_DEFAULTS.items()
         }
-    except Exception:  # noqa: BLE001
-        return dict(_CONTENT_FILTER_DEFAULTS)
+    return dict(_CONTENT_FILTER_DEFAULTS)
 
 
 def _full_release_date_key(release_date: Any) -> Optional[tuple[int, int, int]]:
@@ -481,11 +488,14 @@ def expand_artist_discography(database, artist_id: int) -> Dict[str, Any]:
 
 def _expand_artist_discography(
     database, artist_id: int, *, defer_auto_monitor: bool = False,
+    filter_profile_id: int = 1,
 ) -> Dict[str, Any]:
     """Fetch + persist the artist's full discography. Returns stats.
 
     Safe to re-run: existing rows are enriched, not duplicated; pruning only
     touches pristine provider-only rows that vanished from the provider.
+    ``filter_profile_id`` is the profile whose watchlist settings decide which
+    new releases are auto-monitored (the one they are wished for).
     """
     import json
 
@@ -581,7 +591,8 @@ def _expand_artist_discography(
         monitor_new_policy = artist["monitor_new_items"] or "all"
         eligible_reexpansion = bool(had_discography and artist["monitored"])
         content_filters = (
-            _artist_content_filters(conn, artist_id) if eligible_reexpansion else None
+            _artist_content_filters(conn, artist_id, filter_profile_id)
+            if eligible_reexpansion else None
         )
         existing_dates = [
             key
@@ -851,6 +862,29 @@ def _track_content_excluded(
     return False
 
 
+def approve_release(db, config_manager, album_id: int, *, profile_id: int = 1) -> int:
+    """Put one catalogue release on ``profile_id``'s wishlist: monitor it, queue
+    its tracklist and wish for its tracks. What Fix on a discography finding
+    does, and what the back catalogue's auto add does without the click.
+    Returns the tracks mirrored; raises LookupError when the album is gone."""
+    from contextlib import closing as _closing
+
+    with _closing(db._get_connection()) as conn:
+        cursor = conn.execute(
+            """UPDATE lib2_albums
+                  SET monitored=1, tracklist_status='pending',
+                      tracklist_error=NULL, tracklist_retry_at=NULL,
+                      updated_at=CURRENT_TIMESTAMP
+                WHERE id=?""",
+            (int(album_id),),
+        )
+        if cursor.rowcount == 0:
+            raise LookupError("Library-v2 album no longer exists")
+        conn.commit()
+    return auto_monitor_releases(db, config_manager, [int(album_id)],
+                                 wishlist_profile_id=int(profile_id or 1))
+
+
 def auto_monitor_releases(db, config_manager, album_ids: List[int],
                           *, wishlist_profile_id: int = 1) -> int:
     """Make freshly discovered releases genuinely wanted.
@@ -968,7 +1002,7 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                 filters = filters_cache[content_artist_id]
             else:
                 filters = filters_cache[content_artist_id] = _artist_content_filters(
-                    conn, content_artist_id)
+                    conn, content_artist_id, wishlist_profile_id)
 
             if not filters.get("include_other_artists", False):
                 vetoed = set(vetoed) | _uncredited_track_ids(conn, album_id, album_track_ids)
@@ -1103,12 +1137,9 @@ def _refresh_one_artist(
     """The original single-artist refresh sequence, unchanged: one lock held
     across fetch + auto-monitor + track-number-collision repair."""
     with _sync_lock(database, artist_id):
-        stats = (
-            _expand_artist_discography(database, artist_id)
-            if auto_monitor
-            else _expand_artist_discography(
-                database, artist_id, defer_auto_monitor=True)
-        )
+        stats = _expand_artist_discography(
+            database, artist_id, defer_auto_monitor=not auto_monitor,
+            filter_profile_id=wishlist_profile_id)
         album_ids = stats.get("auto_monitor_album_ids") or []
         mirrored = 0
         if album_ids and auto_monitor:
@@ -1174,6 +1205,7 @@ def refresh_artist_discography(
 
 
 __all__ = [
+    "approve_release",
     "auto_monitor_releases",
     "expand_artist_discography",
     "refresh_artist_discography",

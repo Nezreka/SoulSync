@@ -711,6 +711,8 @@
                 if (smd) smd.value = d.seed_mode || 'soulsync';
                 var urc = document.getElementById('video-usenet-remove-completed');
                 if (urc) urc.value = d.usenet_remove_completed || 'off';
+                var rdf = document.getElementById('video-redownload-failed');
+                if (rdf) rdf.checked = d.redownload_failed !== false;
                 _videoSeedRules = d.seed_overrides || {};
                 renderSeedIndexers();
                 wireSeedIndexers();
@@ -751,6 +753,7 @@
                 seed_mode: val('video-seed-mode') || 'soulsync',
                 seed_overrides: _videoSeedRules,
                 usenet_remove_completed: val('video-usenet-remove-completed') || 'off',
+                redownload_failed: !!(document.getElementById('video-redownload-failed') || { checked: true }).checked,
             })
         }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
           .catch(function () { /* ignore */ });
@@ -1138,6 +1141,8 @@
         // Remove Completed (usenet) saves when it changes, like the folders above.
         var urcSel = document.getElementById('video-usenet-remove-completed');
         if (urcSel && !urcSel._vdWired) { urcSel._vdWired = true; urcSel.addEventListener('change', function () { saveDownloads(true); }); }
+        var rdfBox = document.getElementById('video-redownload-failed');
+        if (rdfBox && !rdfBox._vdWired) { rdfBox._vdWired = true; rdfBox.addEventListener('change', function () { saveDownloads(true); }); }
         // a 4K switch shows its folder; switching one off keeps the path for next time
         document.querySelectorAll('[data-video-4k-toggle]').forEach(function (box) {
             if (box._vdWired) return;
@@ -1212,6 +1217,54 @@
         }
         var del = document.querySelector('[data-vq-profile-delete]');
         if (del) del.classList.toggle('hidden', !named);
+        renderKindDefaults();
+    }
+
+    // New movies use / New shows use: the profile a title of that kind gets
+    // when nothing picked one for it (0 = Default)
+    var _vqKindDefaults = null;
+    function renderKindDefaults() {
+        var sels = document.querySelectorAll('[data-vq-kind-default]');
+        if (!sels.length) return;
+        function fill(defs) {
+            for (var i = 0; i < sels.length; i++) {
+                var sel = sels[i], kind = sel.getAttribute('data-vq-kind-default');
+                var cur = (defs && defs[kind]) || 0;
+                sel.innerHTML = _vqProfiles.map(function (p) {
+                    return '<option value="' + p.id + '"' + (p.id === cur ? ' selected' : '') + '>' +
+                        String(p.name).replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</option>';
+                }).join('');
+                if (!sel._vqWired) {
+                    sel._vqWired = true;
+                    sel.addEventListener('change', onKindDefaultChange);
+                }
+            }
+        }
+        if (_vqKindDefaults) { fill(_vqKindDefaults); return; }
+        fill(null);
+        fetch(QUALITY_URL + '/defaults', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) { _vqKindDefaults = d; fill(d); } })
+            .catch(function () { /* an older server: the selects stay on Default */ });
+    }
+    function onKindDefaultChange(e) {
+        var sel = e.currentTarget, kind = sel.getAttribute('data-vq-kind-default');
+        sel.disabled = true;
+        fetch(QUALITY_URL + '/defaults', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ kind: kind, profile_id: parseInt(sel.value, 10) || 0 })
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+            .then(function (res) {
+                sel.disabled = false;
+                if (!res.ok) {
+                    if (typeof showToast === 'function') showToast((res.d && res.d.error) || 'Could not save the default', 'error');
+                    _vqKindDefaults = null; renderKindDefaults(); return;
+                }
+                _vqKindDefaults = res.d;
+                if (typeof showToast === 'function') showToast('New ' + (kind === 'movie' ? 'movies' : 'shows') + ' use ' +
+                    (sel.options[sel.selectedIndex] || {}).text, 'success');
+            })
+            .catch(function () { sel.disabled = false; });
     }
 
     function loadQuality() {
@@ -1220,6 +1273,7 @@
             .then(function (d) {
                 if (!d || !Array.isArray(d.profiles) || !d.profiles.length) return;
                 _vqProfiles = d.profiles;
+                _vqKindDefaults = null;   // a deleted profile may have been a default
                 var cur = _vqSelected();
                 _vqSelectedId = cur ? cur.id : 0;
                 _videoQuality = (cur || d.profiles[0]).profile;
@@ -1725,13 +1779,23 @@
     var _ORG_MOVIE_EG = { title: 'The Matrix', titlefirst: 'T', year: '1999', quality: 'Bluray-1080p',
         resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', audiolangs: 'EN', sublangs: 'EN+ES',
         tmdbid: '603', imdbid: 'tt0133093' };
-    var _ORG_EP_EG = { series: 'Breaking Bad', season: '01', seasonraw: '1', episode: '01', episodetitle: 'Pilot',
-        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264',
-        audiolangs: 'EN', sublangs: 'EN', tvdbid: '81189',
-        tmdbid: '1396', imdbid: 'tt0903747' };
+    // a title with a colon, so the colon setting shows in the preview
+    var _ORG_EP_EG = { series: 'Dexter: Resurrection', season: '01', seasonraw: '1', episode: '01',
+        episodetitle: 'A Beating Heart', year: '2025', quality: 'WEBDL-1080p', resolution: '1080p',
+        source: 'WEBDL', codec: 'H264', audiolangs: 'EN', sublangs: 'EN', tvdbid: '448003',
+        tmdbid: '259909', imdbid: 'tt31846306' };
     var _ORG_YT_EG = { channel: 'Veritasium', title: 'How Electricity Actually Works', year: '2024',
         date: '2024-03-15', month: '03', day: '15', sxe: 's2024e0315', videoid: 'oI_X2cMHNe0' };
 
+    // mirror of core/video/organization.replace_colons
+    function _orgColons(v, mode) {
+        var s = String(v == null ? '' : v);
+        if (s.indexOf(':') === -1) return s;
+        if (mode === 'dash') return s.split(':').join('-');
+        if (mode === 'space_dash_space') return s.replace(/\s*:\s*/g, ' - ');
+        if (mode === 'smart') return s.replace(/\s*:(?:\s+|$)/g, ' - ').split(':').join('-');
+        return s;
+    }
     function _orgSanitize(v) {
         return String(v == null ? '' : v).replace(/[\\/:*?"<>|\x00-\x1f]/g, '')
             .replace(/\s+/g, ' ').trim().replace(/[ .]+$/, '');
@@ -1739,10 +1803,13 @@
     // Client-side mirror of core/video/organization.render_template + _tidy_component
     // (kept in lockstep) so the preview matches what actually lands on disk.
     function _orgRender(tmpl, vals) {
+        var cm = document.getElementById('vo-colon-replacement');
+        var mode = cm ? cm.value : 'delete';
+        var clean = function (v) { return _orgSanitize(_orgColons(v, mode)); };
         var keys = Object.keys(vals).sort(function (a, b) { return b.length - a.length; });
         var out = String(tmpl || '');
-        keys.forEach(function (k) { out = out.split('${' + k + '}').join(_orgSanitize(vals[k])); });
-        keys.forEach(function (k) { out = out.split('$' + k).join(_orgSanitize(vals[k])); });
+        keys.forEach(function (k) { out = out.split('${' + k + '}').join(clean(vals[k])); });
+        keys.forEach(function (k) { out = out.split('$' + k).join(clean(vals[k])); });
         return out.split('/').map(function (p) {
             p = p.replace(/\{\s*(?:[A-Za-z]+-)?\s*\}/g, '');   // '{imdb-}' / '{}' from an empty id
             p = p.replace(/\s+-\s+(?=(\s|$))/g, ' ').replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
@@ -2240,6 +2307,7 @@
         set('vo-episode-template', _videoOrg.episode_template || '');
         set('vo-youtube-template', _videoOrg.youtube_template || '');
         set('vo-transfer-mode', _videoOrg.transfer_mode || 'copy');
+        set('vo-colon-replacement', _videoOrg.colon_replacement || 'delete');
         chk('vo-verify', _videoOrg.verify_with_ffprobe);
         chk('vo-replace', _videoOrg.replace_existing);
         chk('vo-subs', _videoOrg.carry_subtitles);
@@ -2292,6 +2360,7 @@
             episode_template: val('vo-episode-template'),
             youtube_template: val('vo-youtube-template'),
             transfer_mode: val('vo-transfer-mode'),
+            colon_replacement: val('vo-colon-replacement') || 'delete',
             verify_with_ffprobe: on('vo-verify'),
             replace_existing: on('vo-replace'),
             carry_subtitles: on('vo-subs'),
@@ -2375,7 +2444,9 @@
             el.addEventListener('input', renderOrgPreview);          // live preview while typing
             el.addEventListener('change', function () { saveOrganization(false); });
         });
-        ['vo-transfer-mode', 'vo-verify', 'vo-replace', 'vo-subs', 'vo-artwork', 'vo-nfo',
+        var colonSel = document.getElementById('vo-colon-replacement');
+        if (colonSel) colonSel.addEventListener('change', renderOrgPreview);
+        ['vo-colon-replacement', 'vo-transfer-mode', 'vo-verify', 'vo-replace', 'vo-subs', 'vo-artwork', 'vo-nfo',
             'vo-subs-dl', 'vo-recycle', 'vo-recycle-days', 'vo-recycle-path',
             'vo-sponsorblock', 'vo-yt-subs', 'vo-min-free', 'vo-yt-follow-count',
             'vo-sub-min-score', 'vo-sub-daily-quota', 'vo-sub-upgrade-delta',

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 
 import { AudiobookRouteBadge } from '@/features/audiobook-routes/audiobook-route-badge';
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
+import { useFeatureOn } from '@/platform/features';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 
@@ -215,6 +216,9 @@ export function WatchlistPage() {
   );
 
   const isLabelsTab = search.tab === 'labels';
+  // podcasts / audiobooks switched off (#1909) drop their tab
+  const podcastsOn = useFeatureOn('podcasts');
+  const audiobooksOn = useFeatureOn('audiobooks');
   const isPodcastsTab = search.tab === 'podcasts';
   const isAudiobooksTab = search.tab === 'audiobooks';
 
@@ -587,24 +591,28 @@ export function WatchlistPage() {
         >
           Labels
         </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={search.tab === 'podcasts'}
-          className={`${styles.tab} ${search.tab === 'podcasts' ? styles.tabActive : ''}`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'podcasts' }) })}
-        >
-          Podcasts
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={search.tab === 'audiobooks'}
-          className={`${styles.tab} ${search.tab === 'audiobooks' ? styles.tabActive : ''}`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'audiobooks' }) })}
-        >
-          Audiobooks
-        </button>
+        {podcastsOn || search.tab === 'podcasts' ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={search.tab === 'podcasts'}
+            className={`${styles.tab} ${search.tab === 'podcasts' ? styles.tabActive : ''}`}
+            onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'podcasts' }) })}
+          >
+            Podcasts
+          </button>
+        ) : null}
+        {audiobooksOn || search.tab === 'audiobooks' ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={search.tab === 'audiobooks'}
+            className={`${styles.tab} ${search.tab === 'audiobooks' ? styles.tabActive : ''}`}
+            onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'audiobooks' }) })}
+          >
+            Audiobooks
+          </button>
+        ) : null}
       </div>
 
       {scanStatus ? <WatchlistScanDeck frame={scanStatus} /> : null}
@@ -707,22 +715,14 @@ export function WatchlistPage() {
                 </select>
               </div>
 
-              <div className="watchlist-batch-bar">
-                <label
-                  className="watchlist-select-all-label"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  <SelectAllCheckbox
-                    checked={selection.allSelected}
-                    indeterminate={selection.indeterminate}
-                    onChange={toggleSelectAll}
-                  />
-                  <span>Select All</span>
-                </label>
-                <span className="watchlist-batch-count">
-                  {selection.selectedCount > 0 ? `${selection.selectedCount} selected` : ''}
-                </span>
-                {selection.selectedCount > 0 ? (
+              {/* the batch bar only once something is picked (#1909). Select
+                  All lives in the roster's head line instead of its own
+                  full-width row above every card */}
+              {selection.selectedCount > 0 ? (
+                <div className="watchlist-batch-bar">
+                  <span className="watchlist-batch-count">
+                    {`${selection.selectedCount} selected`}
+                  </span>
                   <button
                     type="button"
                     className="btn btn--secondary watchlist-batch-remove-btn"
@@ -731,13 +731,23 @@ export function WatchlistPage() {
                   >
                     Remove Selected
                   </button>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
 
               <div className="watchlist-command-layout">
                 <div className="watchlist-roster-panel">
                   <div className="watchlist-roster-head">
-                    <span>Artists</span>
+                    <label
+                      className="watchlist-select-all-label"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <SelectAllCheckbox
+                        checked={selection.allSelected}
+                        indeterminate={selection.indeterminate}
+                        onChange={toggleSelectAll}
+                      />
+                      <span>Artists</span>
+                    </label>
                     <span>{visibleArtists.length} shown</span>
                   </div>
                   <div className="watchlist-artists-grid watchlist-artists-grid--rows">
@@ -906,7 +916,10 @@ function WatchlistArtistCard({
         </span>
       </div>
       <div className="watchlist-row-stats">
-        <span>{releaseTypeText(artist)}</span>
+        {/* the rule pills below already name the release types (#1909), the
+            text said it twice. it stays for the default-rules case, where
+            there are no pills */}
+        {pills.length > 0 ? null : <span>{releaseTypeText(artist)}</span>}
         <span>
           {artist.date_added
             ? `Added ${new Date(artist.date_added).toLocaleDateString()}`

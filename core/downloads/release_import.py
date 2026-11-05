@@ -276,7 +276,6 @@ def _owned_in_library(track: dict, album_name: str, owner=None) -> bool:
     """Ownership in the library the request was filed in (``owner``: its
     profile id, None for the shared one), as the missing-track analysis decides it."""
     from core.library_scope import reset_library_scope, scope_for_owner, set_library_scope
-    from core.settings import config_manager
     from database.music_database import MusicDatabase
 
     title = str(track.get("name") or track.get("title") or "")
@@ -285,10 +284,12 @@ def _owned_in_library(track: dict, album_name: str, owner=None) -> bool:
     token = set_library_scope(scope_for_owner(owner))
     try:
         db = MusicDatabase()
-        server = config_manager.get_active_media_server()
+        # a live file in that library is ownership, whether the active media
+        # server has mapped it or not (#1952): scoped to the server, a song
+        # imported before the next server scan was fetched a second time
         for name in filter(None, names):
             found, confidence = db.check_track_exists(
-                title, str(name), confidence_threshold=0.7, server_source=server, album=album_name,
+                title, str(name), confidence_threshold=0.7, server_source=None, album=album_name,
                 include_downloads=True)
             if found and confidence >= 0.7:
                 return True

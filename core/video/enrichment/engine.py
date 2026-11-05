@@ -889,6 +889,7 @@ class VideoEnrichmentEngine:
             d["episode_total"] = sum(s["episode_total"] for s in seasons)
             d["episode_owned"] = 0
         self._fill_tmdb_ratings(d)
+        self._fill_preview_anime(kind, tmdb_id, d)
         self._cache_put(("detail", kind, tmdb_id, region), d)
         # Stamp ownership AFTER caching so library state is never baked in —
         # the cached-hit path above re-stamps the same rails per call.
@@ -913,6 +914,40 @@ class VideoEnrichmentEngine:
             return []
         self._cache_put(("posters", kind, tmdb_id), out)
         return out
+
+    def _fill_preview_anime(self, kind, tmdb_id, d) -> None:
+        """the anime layer for a title that isn't in the library (Frieren from
+        search, Thibs): the AniList worker only links library titles, so a
+        preview the id map knows asks AniList itself, one request, cached
+        with the rest of the detail. never raises."""
+        try:
+            if str(self.db.get_setting("anilist_enabled") or "0") != "1":
+                return
+            entries = []
+            if kind == "show" and d.get("tvdb_id"):
+                entries = self.db.anime_map_entries("show", tvdb_id=d.get("tvdb_id"))
+            if not entries:
+                entries = self.db.anime_map_entries(kind, tmdb_id=tmdb_id, imdb_id=d.get("imdb_id"))
+            if not entries:
+                return
+            from core.video import anilist
+            from core.video.enrichment.backfill import _http_post_json
+            facts = anilist.by_ids(_http_post_json, [e["anilist_id"] for e in entries])
+        except Exception:   # noqa: BLE001 - AniList being down never breaks a preview
+            logger.debug("preview anime layer failed for %s %s", kind, tmdb_id, exc_info=True)
+            return
+        rows = [{**e, **facts[e["anilist_id"]]} for e in entries if e["anilist_id"] in facts]
+        if not rows:
+            return
+        rows.sort(key=lambda r: (r.get("tvdb_season") if r.get("tvdb_season") is not None else 999,
+                                 r.get("tvdb_offset") or 0, r["anilist_id"]))
+        regular = [r for r in rows if (r.get("tvdb_season") or 0) >= 1 and r.get("format") != "MOVIE"]
+        main = (regular or rows)[0]
+        public = self.db._ANIME_PUBLIC
+        slim = lambda r: {k: r.get(k) for k in public}   # noqa: E731
+        d["anime"] = {"main": slim(main), "entries": [slim(r) for r in rows]}
+        if main.get("score"):
+            d["anilist_score"] = main["score"]
 
     def _fill_tmdb_ratings(self, d) -> None:
         imdb_id = d.get("imdb_id")

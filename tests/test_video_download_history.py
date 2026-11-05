@@ -123,3 +123,19 @@ def test_newest_first_ordering_in_the_feed(db):
                                       completed_at="2026-06-01 00:00:00"))
     titles = [i["title"] for i in db.query_download_history()["items"]]
     assert titles == ["New", "Old"]
+
+
+def test_the_tv_probe_target_is_the_newest_episode_grab_not_an_old_pack(db):
+    # c5pie: an episode's grab is kind 'episode' (only a season pack is
+    # 'show'). the probe matched 'show' only, so it asked the server about a
+    # weeks-old pack, heard "present", and skipped every tv rescan after
+    # single-episode grabs; the episodes stayed missing
+    db.record_download_history(_episode(id=10, release_title="Show.S01.1080p.PACK",
+                                        dest_path="/tv/Show/Season 01",
+                                        completed_at="2026-10-28 10:00:00"))
+    db.record_download_history(_episode(id=11, kind="episode", title="Gabriel DropOut",
+                                        dest_path="/tv/Gabriel DropOut/Season 01/e06.mkv",
+                                        completed_at="2026-10-31 12:00:00"))
+    latest = db.latest_completed_download("show")
+    assert latest["title"] == "Gabriel DropOut" and latest["kind"] == "episode"
+    assert db.latest_completed_download("movie") is None

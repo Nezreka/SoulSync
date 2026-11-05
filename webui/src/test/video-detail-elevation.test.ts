@@ -175,7 +175,8 @@ describe('round two', () => {
     const render = fn<(d: unknown) => void>(
       'renderRatings',
       `function esc(s) { return String(s == null ? '' : s); }
-       function q(sel) { return globalThis.__host.querySelector(sel); }`,
+       function q(sel) { return globalThis.__host.querySelector(sel); }
+       ${extractFunction('siteLinks', SRC)}`,
     );
     (globalThis as Record<string, unknown>).__host = host;
     render(d);
@@ -224,16 +225,40 @@ describe('round two', () => {
     expect(aot.querySelector('.vd-rt--anilist')?.textContent).toContain('85%');
   });
 
-  it('a preview keeps everything in-app', () => {
+  it('a preview links its ratings and provider pages too', () => {
+    // a title you don't own yet is the one you look up elsewhere first
+    // (SeadogsBooty); in-app navigation still stays in-app
     const el = ratings({
       source: 'tmdb',
       kind: 'movie',
       title: 'Heat',
       imdb_id: 'tt0113277',
       imdb_rating: 8.3,
+      tmdb_id: 949,
     });
-    expect(el.querySelector('a')).toBeNull();
-    expect(el.querySelector('span.vd-rt--imdb')).not.toBeNull();
+    expect(el.querySelector('a.vd-rt--imdb')?.getAttribute('href')).toBe(
+      'https://www.imdb.com/title/tt0113277/',
+    );
+    const sites = [...el.querySelectorAll('a.vd-rt--site')].map((a) => a.textContent);
+    // IMDb's score chip already links, so it gets no second pill
+    expect(sites).toEqual(['TMDB↗', 'Letterboxd↗']);
+  });
+
+  it('a provider with no score still gets a link, imdb included', () => {
+    const el = ratings({
+      source: 'library',
+      kind: 'show',
+      title: 'Severance',
+      imdb_id: 'tt11280740',
+      tmdb_id: 95396,
+      tvdb_id: 371980,
+    });
+    const hrefs = [...el.querySelectorAll('a.vd-rt--site')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual([
+      'https://www.imdb.com/title/tt11280740/',
+      'https://www.themoviedb.org/tv/95396',
+      'https://thetvdb.com/?id=371980&tab=series',
+    ]);
   });
 
   it('a channel shows six playlists and folds the rest behind one button', () => {

@@ -1605,6 +1605,101 @@ body.max-performance .nav-button.active:hover {
     box-shadow: 0 4px 20px rgba(98, 126, 234, 0.12);
 }
 
+/* the support modal's "my other projects": quieter than the support links
+   above, so the ask stays the ask */
+.support-projects {
+    margin-top: 26px;
+    padding-top: 20px;
+    border-top: 1px solid var(--white-a08);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+
+.support-projects-label {
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--white-a40);
+    margin-bottom: 2px;
+}
+
+.support-project {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--white-a06);
+    background: var(--white-a03);
+    text-decoration: none;
+    transition: background var(--dur-base) ease, border-color var(--dur-base) ease, transform var(--dur-base) ease;
+}
+
+.support-project:hover {
+    background: rgba(var(--accent-rgb), 0.08);
+    border-color: rgba(var(--accent-rgb), 0.28);
+    transform: translateY(-1px);
+}
+
+.support-project:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.7);
+    outline-offset: 2px;
+}
+
+.support-project-icon {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-card);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.12);
+}
+
+.support-project-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.support-project-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.support-project-name {
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--white-a90);
+}
+
+.support-project-desc {
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--white-a50);
+}
+
+.support-project-go {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: var(--white-a30);
+    transition: color var(--dur-base) ease;
+}
+
+.support-project:hover .support-project-go {
+    color: rgb(var(--accent-light-rgb));
+}
+
 /* Version Section */
 .version-section {
     display: flex;
@@ -11728,6 +11823,36 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     display: flex;
     gap: 8px;
     align-items: center;
+}
+
+/* the header is add playlist + one More menu now (#1909) */
+.sync-more-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sync-more-menu {
+    min-width: 300px;
+    max-width: min(360px, calc(100vw - 16px));
+}
+.sync-more-menu .lib-menu-item {
+    padding: 9px 12px;
+}
+.sync-more-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.sync-more-name {
+    font-weight: 600;
+    color: var(--white-a90);
+}
+.sync-more-desc {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--white-a50);
+    white-space: normal;
 }
 
 .auto-sync-bulk-menu-custom-row {
@@ -37395,7 +37520,8 @@ div.artist-hero-badge {
 #enhanced-search-input {
     flex-grow: 1; background: transparent; border: none; outline: none;
     font-family: 'Segoe UI', sans-serif; font-size: 16px; font-weight: 500;
-    color: #ffffff; padding: 14px 0;
+    /* the input leads the search box now (#1909), so it keeps a left inset */
+    color: #ffffff; padding: 14px 0 14px 14px;
 }
 #enhanced-search-input::placeholder { color: rgba(255, 255, 255, 0.38); font-weight: 400; }
 .enhanced-cancel-btn {
@@ -37487,7 +37613,7 @@ div.artist-hero-badge {
 @media (max-width: 480px) {
     #enhanced-search-input {
         font-size: 13px;
-        padding: 10px 0;
+        padding: 10px 0 10px 12px;
     }
 
     /* Better album/track results on mobile */
@@ -59696,6 +59822,7 @@ body.max-performance #page-particles-canvas {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    /* holds Select All now (#1909), its label inherits the head's caps */
     margin-bottom: 10px;
     color: rgba(255, 255, 255, 0.48);
     font-size: 12px;
@@ -67758,6 +67885,138 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .nav-section-label.collapsed .nav-section-chevron { transform: rotate(-90deg); }
 .nav-item-hidden { display: none !important; }
 
+/* what this profile chose to hide (#1909, shell/features.ts). the html
+   attribute is set before paint, the doubled class out-ranks every display
+   rule on nav items and the side toggle without another !important. */
+html[data-features-off] .nav-feature-hidden.nav-feature-hidden { display: none; }
+
+/* the way into the picker. quiet on purpose, it's not a page. */
+.sidebar-customize {
+    padding: 6px 12px 0;
+}
+.sidebar-customize-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 34px;
+    padding: 0 12px 0 16px;
+    background: transparent;
+    border: 1px dashed var(--white-a14);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--white-a60);
+    cursor: pointer;
+    transition: background var(--dur-xfast) ease, color var(--dur-xfast) ease, border-color var(--dur-xfast) ease;
+}
+.sidebar-customize-btn:hover,
+.sidebar-customize-btn:focus-visible {
+    background: var(--white-a05);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: var(--white-a90);
+}
+.sidebar-customize-btn svg {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+}
+/* a page this profile hid, opened from a link (#1909, shell/hidden-page-note.ts).
+   sits over the top of the content column, not the sidebar */
+.hidden-page-note {
+    position: fixed;
+    top: 14px;
+    left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: calc(100vw - var(--sidebar-w) - 32px);
+    padding: 7px 8px 7px 16px;
+    border: 1px solid var(--white-a14);
+    border-radius: var(--radius-pill);
+    background: var(--bg-raised);
+    box-shadow: 0 10px 30px var(--black-a45);
+    color: var(--white-a90);
+    font-size: 13px;
+}
+.hidden-page-note-show {
+    padding: 5px 14px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: rgb(var(--accent-rgb));
+    color: var(--black-a90);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+}
+.hidden-page-note-show:disabled { opacity: 0.6; cursor: default; }
+.hidden-page-note-close {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-circle);
+    background: transparent;
+    color: var(--white-a60);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+}
+.hidden-page-note-close:hover { background: var(--white-a08); color: var(--white-a90); }
+@media (max-width: 768px) {
+    .hidden-page-note {
+        left: 50%;
+        max-width: calc(100vw - 32px);
+    }
+}
+/* the one-time offer above the button (shell/features.ts renderOffer) */
+.sidebar-customize-offer {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+    padding: 12px 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: var(--radius-lg);
+    background: rgba(var(--accent-rgb), 0.08);
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--white-a65);
+}
+.sidebar-customize-offer strong {
+    font-size: 13px;
+    color: var(--white-a90);
+}
+.sidebar-customize-keep {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--white-a60);
+    cursor: pointer;
+}
+.sidebar-customize-keep:hover { color: var(--white-a90); text-decoration: underline; }
+.sidebar-customize.has-offer .sidebar-customize-btn {
+    border-style: solid;
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: var(--white-a90);
+}
+html[data-sidebar="collapsed"] .sidebar-customize-offer { display: none; }
+html[data-sidebar="collapsed"] .sidebar-customize { padding: 6px 0 0; }
+html[data-sidebar="collapsed"] .sidebar-customize-btn {
+    width: 44px;
+    margin: 0 auto;
+    padding: 0;
+    justify-content: center;
+}
+
 /* ══ Collapsible sidebar (#1155, wishx) ═══════════════════════════════════
    One toggle, two states: full width, or just wide enough for the icons.
    The state is an attribute on <html> so --sidebar-w resolves before first
@@ -67848,7 +68107,7 @@ html[data-sidebar="collapsed"] .nav-section-label {
     pointer-events: none;
     overflow: hidden;
 }
-html[data-sidebar="collapsed"] .nav-item-hidden { display: flex !important; }
+html[data-sidebar="collapsed"] .nav-item-hidden:not(.nav-feature-hidden) { display: flex !important; }
 
 /* The header's 24px side padding eats 48px of a 68px sidebar, leaving a 20px
    content box — everything inside it overflowed right and got clipped by the
@@ -77428,3 +77687,34 @@ body.src-modal-open { overflow: hidden; }
 }
 .server-adopt-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.28); }
 .server-adopt-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* tag every song on a plex playlist with a mood (wolf39us) */
+.server-tag-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.server-tag-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.server-tag-input {
+    width: 180px;
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--white-a12);
+    border-radius: var(--radius-pill);
+    background: var(--white-a04);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+.server-tag-hint {
+    flex-basis: 100%;
+    font-size: 11px;
+    color: var(--text-secondary);
+}

@@ -332,7 +332,7 @@ def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
     if not outbox_ids:
         return 0
     conn.commit()
-    drain(db)
+    drain(db, ids=outbox_ids)
     return _done_count(conn, outbox_ids)
 
 
@@ -355,7 +355,7 @@ def mirror_projected_tracks_wishlist(
     if not outbox_ids:
         return 0
     conn.commit()
-    drain(db)
+    drain(db, ids=outbox_ids)
     return _done_count(conn, outbox_ids)
 
 

@@ -274,7 +274,14 @@ def test_a_section_header_becomes_a_divider_not_a_nameless_chevron(css):
 def test_collapsed_forces_every_item_visible(css):
     """A section the user collapsed earlier must not stay hidden behind a
     divider they cannot expand."""
-    assert 'html[data-sidebar="collapsed"] .nav-item-hidden { display: flex !important; }' in css
+    assert ('html[data-sidebar="collapsed"] .nav-item-hidden:not(.nav-feature-hidden) '
+            '{ display: flex !important; }') in css
+
+
+def test_collapsed_does_not_bring_back_what_a_profile_hid(css):
+    """#1909: a feature the profile switched off stays gone in the icon
+    sidebar too. the force-show above undoes a folded section, not a choice."""
+    assert 'html[data-features-off] .nav-feature-hidden.nav-feature-hidden { display: none; }' in css
 
 
 def test_the_saved_section_state_is_not_destroyed(js):

@@ -163,9 +163,15 @@ def process_one(row: Dict[str, Any], db: Any = None, auto_grab: bool = True) -> 
         # The narrator choice is the listener's, made when they wished for the
         # book, and the automatic path must honour it exactly as the manual one
         # does — a book is always one narrator, never a mixture.
-        releases = search_all_sources(
-            book, limit=10, narrator_mode=row.get("narrator_mode") or "exact",
-        )
+        # searched as the profile that wished it, so its own blocks apply
+        from core.profile_context import reset_background_profile, set_background_profile
+        _profile_token = set_background_profile(profile_id)
+        try:
+            releases = search_all_sources(
+                book, limit=10, narrator_mode=row.get("narrator_mode") or "exact",
+            )
+        finally:
+            reset_background_profile(_profile_token)
     except Exception as exc:                                # noqa: BLE001
         logger.warning("Audiobook wishlist search failed for %s: %s", asin, exc)
         database.mark_wishlist_status(asin, STATUS_FAILED, profile_id=profile_id,

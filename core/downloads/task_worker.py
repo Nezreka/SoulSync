@@ -967,7 +967,12 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                                 deps.store_batch_source(batch_id, used_username, used_filename)
                             return  # Success, exit the worker
                         else:
-                            search_diagnostics.append(f'"{query}": {result_count} results, {len(candidates)} passed filters but download failed to start')
+                            with tasks_lock:
+                                _why = list((download_tasks.get(task_id) or {}).get('start_failures') or ())
+                            search_diagnostics.append(
+                                f'"{query}": {result_count} results, {len(candidates)} passed filters '
+                                f'but download failed to start'
+                                + (f' (why: {"; ".join(_why[:2])})' if _why else ''))
                     else:
                         search_diagnostics.append(f'"{query}": {result_count} results but none passed quality/artist filters')
                         # Strip SoundCloud preview snippets before caching for the

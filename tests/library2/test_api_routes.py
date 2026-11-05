@@ -76,6 +76,10 @@ def api(tmp_path, monkeypatch):
     # The trigger's debounce/runner and both migration hooks have own tests.
     monkeypatch.setattr('core.library2.unmapped_trigger.schedule_unmapped_artist_reconcile',
                         lambda *args, **kwargs: True)
+    # a job kind still marked running by an earlier test must not 409 this one
+    from api import library_v2 as _api_module
+    from core.library2.job_registry import JobRegistry
+    monkeypatch.setattr(_api_module, "_job_registry", JobRegistry())
     db_path = str(tmp_path / "lib2.db")
     conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
@@ -149,6 +153,26 @@ def api(tmp_path, monkeypatch):
            "ep": ep_id, "album_track": album_track,
            "single_track": single_track, "ep_track": ep_track}
     yield app.test_client(), db, ids
+    # the routes hand their work to "lib2-*" threads. one left running into the
+    # next test ran against that test's monkeypatched fakes (the same row ids
+    # in every fresh db) and held its job kind, so under xdist load a later
+    # test saw a resolve it never asked for or a 409 for a retag it never ran
+    _join_route_threads()
+
+
+def _join_route_threads(timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    for thread in list(threading.enumerate()):
+        if thread is not threading.current_thread() and thread.name.startswith("lib2-"):
+            thread.join(max(0.0, deadline - time.monotonic()))
+
+
+def _patience(seconds: float = 30.0):
+    """Polls until a deadline, not a fixed count: 200 x 10ms was two seconds,
+    which a loaded xdist worker overran and then failed on a stale status."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        yield
 
 
 def _conn(db: FakeDB) -> sqlite3.Connection:
@@ -156,7 +180,7 @@ def _conn(db: FakeDB) -> sqlite3.Connection:
 
 
 def _wait_for_job(client, job_id: str):
-    for _ in range(300):
+    for _ in _patience():
         state = client.get(
             "/api/library/v2/jobs/status", query_string={"job_id": job_id},
         ).get_json()
@@ -1500,7 +1524,7 @@ def test_bulk_monitor_updates_rules_projection_and_sets_hand_set_tracks(api):
     assert response.status_code == 200
     started = response.get_json()
     assert started["job_id"]
-    for _ in range(200):
+    for _ in _patience():
         status = client.get(
             "/api/library/v2/jobs/status",
             query_string={"job_id": started["job_id"]},
@@ -1548,7 +1572,7 @@ def test_bulk_monitor_album_allowlist_excludes_hidden_releases(api):
     )
     assert response.status_code == 200
     job_id = response.get_json()["job_id"]
-    for _ in range(200):
+    for _ in _patience():
         status = client.get(
             "/api/library/v2/jobs/status",
             query_string={"job_id": job_id},
@@ -1631,7 +1655,7 @@ def test_artist_actions_include_linked_alias_releases(api, monkeypatch):
         json={"scope": "all", "monitored": False},
     )
     job_id = response.get_json()["job_id"]
-    for _ in range(200):
+    for _ in _patience():
         status = client.get(
             "/api/library/v2/jobs/status", query_string={"job_id": job_id},
         ).get_json()
@@ -1816,6 +1840,46 @@ def test_delete_artist_removes_rows_mirrors_and_artwork(api):
     assert db.watchlist_removes and db.watchlist_removes[0]["ext_id"] == "sp-drake"
     assert not art.exists()
     assert not thumb.exists()
+
+
+def _seed_other_profiles_intent(db, ids, profile_id=3):
+    with _conn(db) as conn:
+        conn.execute(
+            "INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored, "
+            "provenance) VALUES('artist', ?, ?, 1, 'user_explicit')", (ids["artist"], profile_id))
+        conn.execute(
+            "INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, "
+            "projection_version) VALUES(?, ?, 1, 'track_rule:user_explicit', 1)",
+            (profile_id, ids["ep_track"]))
+        conn.commit()
+
+
+def test_delete_artist_withdraws_every_profiles_wish_and_watch(api):
+    """profile 3 watches the artist and wished for one of its tracks. the
+    admin deletes the artist: the delete drops every profile's wanted rows,
+    so the withdrawals go out for profile 3 too, not only for the profile
+    that clicked. before, profile 3's wishlist kept searching for the track
+    and its watchlist kept finding new releases of a deleted artist."""
+    client, db, ids = api
+    _seed_other_profiles_intent(db, ids)
+
+    resp = client.delete(f"/api/library/v2/artists/{ids['artist']}").get_json()
+
+    assert resp["success"] is True
+    assert {r["profile_id"] for r in db.wishlist_removes} == {1, 3}
+    assert {r["profile_id"] for r in db.watchlist_removes} == {1, 3}
+
+
+def test_delete_album_withdraws_every_profiles_wish(api):
+    client, db, ids = api
+    _seed_other_profiles_intent(db, ids)
+
+    resp = client.delete(f"/api/library/v2/albums/{ids['ep']}").get_json()
+
+    assert resp["success"] is True
+    assert {r["profile_id"] for r in db.wishlist_removes} == {1, 3}
+    # an album delete leaves the artist on everyone's watchlist
+    assert db.watchlist_removes == []
 
 
 def test_delete_featured_artist_keeps_owner_album(api):
@@ -3952,7 +4016,7 @@ def test_resolved_tracklist_gets_every_provider_id_it_can(api, monkeypatch):
 
     client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
     _drain(resolved)
-    for _ in range(200):
+    for _ in _patience():
         if len(chain) >= 2:
             break
         time.sleep(0.01)
@@ -4033,7 +4097,7 @@ def test_album_resolve_stops_polling_when_no_provider_answers(api, monkeypatch):
     _drain(resolved)
 
     with closing(_conn(db)) as conn:
-        for _ in range(200):
+        for _ in _patience():
             status = conn.execute(
                 "SELECT tracklist_status FROM lib2_albums WHERE id=?",
                 (ids["single"],)).fetchone()[0]

@@ -15,11 +15,18 @@ import sqlite3
 import types
 import collections
 import functools
+import contextlib
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# localhost connects try the loopback address that answers, before any client
+# opens one: ::1 first cost ~2s per connection to an IPv4-only server on
+# windows (utils/localhost_connect.py)
+from utils.localhost_connect import install as _install_localhost_connect
+_install_localhost_connect()
 from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_mimetypes
 # Register correct web-asset MIME types before the app serves anything — a bad OS
 # registry (Windows: .js -> text/plain) otherwise blanks the module-loaded React
@@ -27,7 +34,7 @@ from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_m
 ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from utils.logging_config import get_logger, setup_logging
+from utils.logging_config import app_log_path, get_logger, setup_logging
 from utils.async_helpers import run_async
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
@@ -39,13 +46,13 @@ from core.settings import config_manager
 
 # Setup logging early to avoid any import-time logs from being swallowed
 _log_level = config_manager.get('logging.level', 'INFO')
-_log_path = config_manager.get('logging.path', 'logs/app.log')
+_log_path = app_log_path(config_manager.get('logging.path', 'logs/app.log'))
 _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.2"
+_SOULSYNC_BASE_VERSION = "3.6.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -4921,6 +4928,13 @@ def setup_complete_endpoint():
     # what setup was told soulsync is for, the dashboard checklist reads it
     if isinstance(purposes, list):
         config_manager.set('setup.purposes', [str(p) for p in purposes][:10])
+        # and hide what wasn't picked (#1909). setup used to say "switch the
+        # rest on whenever you like" and then show everything anyway
+        try:
+            from core import ui_features
+            ui_features.seed_from_purposes(get_database(), get_current_profile_id(), purposes)
+        except Exception as e:  # noqa: BLE001 - setup still finishes, the picker can fix it
+            logger.warning("setup: couldn't save visible features: %s", e)
     return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])
@@ -17524,6 +17538,8 @@ def get_server_playlist_tracks(playlist_id):
             "source_track_count": len(source_tracks),
             "order_status": order_status,
             "server_order": server_order,
+            # the "Tag in Plex" mood action (admin, plex): see tag-mood below
+            "can_tag": active_server == 'plex' and is_admin_request(),
         })
     except Exception as e:
         logger.error(f"Error getting server playlist tracks: {e}")
@@ -17562,6 +17578,39 @@ def adopt_server_playlist_route(playlist_id):
     except Exception as e:
         logger.error(f"Error adopting server playlist {playlist_id}: {e}", exc_info=True)
         return jsonify({"success": False, "error": "Could not adopt the playlist"}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/tag-mood', methods=['POST'])
+def server_playlist_tag_mood(playlist_id):
+    """Add a mood tag to every song on a plex playlist (wolf39us), so a plex
+    smart playlist can be built on "mood is <tag>". Plex metadata only; it
+    is the household's shared library, so admin only. Runs in the background
+    (one plex call per song) and answers with how many songs it will look at."""
+    try:
+        if not is_admin_request():
+            return jsonify({"success": False, "error": "Admin only"}), 403
+        data = request.get_json(silent=True) or {}
+        tag = str(data.get('tag') or '').strip()
+        if not tag or len(tag) > 100:
+            return jsonify({"success": False, "error": "Give the tag a name (100 characters at most)"}), 400
+        active_server = config_manager.get_active_media_server()
+        if active_server != 'plex':
+            return jsonify({"success": False, "error": "Tagging songs needs Plex"}), 400
+        client, playlist_id, playlist_name, refusal = _server_playlist_guard(
+            active_server, playlist_id, str(data.get('name') or ''))
+        if refusal is not None:
+            return refusal
+        tracks = client.playlist_tracks_for_tagging(playlist_id)
+
+        def _run():
+            counts = client.tag_tracks_mood(tracks, tag)
+            logger.info(f"[ServerPlaylist] mood '{tag}' on playlist '{playlist_name}': {counts}")
+
+        threading.Thread(target=_run, daemon=True, name='plex-playlist-mood').start()
+        return jsonify({"success": True, "tag": tag, "total": len(tracks)})
+    except Exception as e:
+        logger.error(f"Error tagging server playlist {playlist_id}: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Could not tag the playlist"}), 500
 
 
 @app.route('/api/server/playlist/<playlist_id>/align', methods=['POST'])
@@ -21980,7 +22029,14 @@ _DISCOVER_WARM_PATHS = [
 from core.discovery.warm_refresh import refresh as refresh_discover_caches  # noqa: E402
 
 
-def _discover_warm_sweep(paths=None):
+# the Library page's first view. its member list is cached per process and
+# keyed by the counter in core.library2.member_version, so the first click
+# after a restart (or after an import moved the counter) computed it on the
+# request: ~5s on a 30k-artist library. warmed with the discover shelves.
+_LIBRARY_WARM_PATHS = ['/api/library/v2/artists?sort=name&monitored=all&page=1']
+
+
+def _discover_warm_sweep(paths=None, recompute=True):
     """one pass over the discover shelves, as every profile.
 
     the shelf caches are per profile, and a request with no profile is refused
@@ -22019,7 +22075,7 @@ def _discover_warm_sweep(paths=None):
                     # recompute, don't read. a sweep inside the 30 min ttl
                     # otherwise finds every answer still valid and refreshes
                     # nothing, so every other sweep was a no-op
-                    with refresh_discover_caches():
+                    with (refresh_discover_caches() if recompute else contextlib.nullcontext()):
                         status = client.get(p).status_code
                 except Exception as e:
                     logger.debug(f"discover warmup {p} as profile {pid} failed: {e}")
@@ -22050,6 +22106,11 @@ def _start_discover_warmer():
         _t.sleep(15)  # let boot finish before the first sweep
         while True:
             started = _t.time()
+            # library first: it's the page people open first. a cache hit when
+            # nothing changed, so it costs nothing on a quiet library
+            lib = _discover_warm_sweep(_LIBRARY_WARM_PATHS, recompute=False)
+            if lib['failed']:
+                logger.debug(f"Library warmup: {lib['failed'][:3]}")
             stats = _discover_warm_sweep()
             took = _t.time() - started
             if stats['failed']:

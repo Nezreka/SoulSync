@@ -148,12 +148,42 @@ function debouncedAutoSaveSettings(event) {
     if (document.querySelector('.stg-tab.active')?.dataset.tab === 'logs') return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     settingsAutoSaveTimer = setTimeout(() => saveSettings(true), 2000);
+    setSettingsSaveState('pending');
 }
 
 function handleManualSaveClick() {
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
     saveSettings(false);
+}
+
+// settings save themselves (#1909). the old Save Settings button and an
+// "auto-saved" toast after every keystroke told two stories, and the tour
+// still said nothing applied until you clicked. the button is now the one
+// quiet status, and still saves right away when clicked (the video side
+// hangs its own saves on that click).
+const SETTINGS_SAVE_LABELS = {
+    idle: 'All changes saved',
+    pending: 'Save now',
+    saving: 'Saving…',
+    saved: 'Saved',
+    error: 'Retry save',
+};
+let _settingsSavedTimer = null;
+
+function setSettingsSaveState(state) {
+    const btn = document.getElementById('save-settings');
+    if (!btn || !SETTINGS_SAVE_LABELS[state]) return;
+    if (_settingsSavedTimer) { clearTimeout(_settingsSavedTimer); _settingsSavedTimer = null; }
+    btn.dataset.state = state;
+    const label = btn.querySelector('span');
+    if (label) label.textContent = SETTINGS_SAVE_LABELS[state];
+    btn.title = state === 'idle' || state === 'saved'
+        ? 'Settings save as you go. Click to save again now.'
+        : '';
+    if (state === 'saved') {
+        _settingsSavedTimer = setTimeout(() => setSettingsSaveState('idle'), 2000);
+    }
 }
 
 function syncMetadataSourceSelection(source) {
@@ -1690,16 +1720,6 @@ async function _stgRefreshAfterSave() {
             .filter(Boolean);
         if (expandedServices.length > 0) {
             _stgVerifyServices(expandedServices, { force: true });
-        }
-        const btn = document.getElementById('save-settings');
-        if (btn) {
-            const origHTML = btn.innerHTML;
-            btn.classList.add('is-saved');
-            btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg><span>Saved</span>';
-            setTimeout(() => {
-                btn.classList.remove('is-saved');
-                btn.innerHTML = origHTML;
-            }, 2000);
         }
     } catch (e) {
         console.warn('[Settings Status] Post-save refresh failed:', e);
@@ -7324,6 +7344,7 @@ async function saveSettings(quiet = false) {
 
     try {
         if (!quiet) showLoadingOverlay('Saving settings...');
+        setSettingsSaveState('saving');
 
         // Save main settings
         const response = await fetch(API.settings, {
@@ -7366,22 +7387,27 @@ async function saveSettings(quiet = false) {
         }
 
         if (result.success && qualityProfileSaved && lookbackSaved) {
-            showToast(quiet ? 'Settings auto-saved' : 'Settings saved successfully', 'success');
+            // the button says Saved, a toast on every keystroke was noise
+            setSettingsSaveState('saved');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else if (result.success && qualityProfileSaved && !lookbackSaved) {
+            setSettingsSaveState('saved');
             showToast('Settings saved, but discovery lookback period failed to save', 'warning');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else if (result.success && !qualityProfileSaved) {
+            setSettingsSaveState('saved');
             showToast('Settings saved, but quality profile failed to save', 'warning');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else {
+            setSettingsSaveState('error');
             showToast(`Failed to save settings: ${result.error}`, 'error', 'set-services');
         }
     } catch (error) {
         console.error('Error saving settings:', error);
+        setSettingsSaveState('error');
         showToast('Failed to save settings', 'error', 'set-services');
     } finally {
         if (!quiet) hideLoadingOverlay();
@@ -9936,6 +9962,31 @@ async function refreshMetaSyncStatus() {
             if (p.last_exchange_error) line += ' — last error: ' + _msEscape(p.last_exchange_error);
             lines.push(line);
         });
+        // Step 3: is this install actually counted? A node starts in dry
+        // run and sends nothing; an older node doesn't report dry_run at all
+        const nodeUrl = document.getElementById('metasync-node-url')?.value.trim() || '';
+        const openNode = /^https?:\/\//i.test(nodeUrl)
+            ? ' <a href="' + _msEscape(nodeUrl) + '" target="_blank" rel="noopener noreferrer">Open MetaSync</a>'
+            : '';
+        if (s.dry_run === true && pools.length) {
+            const u = s.unsent_report;
+            lines.push(u && u.week
+                ? 'Step 3: dry run is on. Your report for ' + _msEscape(u.week) + ' is ready (' +
+                  _msEscape(u.signal_count) + ' anonymous album signals) and nothing was sent, so this install ' +
+                  'isn\'t counted yet. Check it and press Start sending in MetaSync.' + openNode
+                : 'Step 3: dry run is on, so MetaSync builds your weekly report but sends nothing yet.' + openNode);
+        } else if (s.dry_run === false && pools.length) {
+            lines.push('Step 3: sending. One anonymous report a week, nothing else.');
+        }
+        const net = s.network;
+        if (net && Number.isInteger(net.installs) && Number.isInteger(net.publish_threshold)) {
+            lines.push('The network: ' + net.installs + ' install' + (net.installs === 1 ? '' : 's') +
+                ' reported ' + _msEscape(net.week || 'last week') + '. ' +
+                (net.installs < net.publish_threshold
+                    ? 'Charts from the network start at ' + net.publish_threshold +
+                      ' installs per album; until then they fill from ListenBrainz.'
+                    : 'An album charts once ' + net.publish_threshold + ' installs report it in a week.'));
+        }
         if (s.pairing_status === 'pending') lines.push('A pairing request is waiting for approval in the MetaSync dashboard.');
         _msDetail(lines.join('<br>'));
     } catch (e) {

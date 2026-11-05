@@ -713,6 +713,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "seed_mode": "soulsync", "seed_overrides": {},
             # Remove Completed (usenet) is opt-in: off until someone picks it
             "usenet_remove_completed": "off",
+            "redownload_failed": True,
             "movies_additional_paths": [], "tv_additional_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",
@@ -730,6 +731,7 @@ def test_downloads_config_save_load(tmp_path, monkeypatch):
             "seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
             "seed_mode": "soulsync", "seed_overrides": {},
             "usenet_remove_completed": "files",
+            "redownload_failed": True,
             "movies_additional_paths": [], "tv_additional_paths": [],
             # the optional 4K libraries, off until switched on
             "movies_4k_enabled": False, "movies_4k_path": "",

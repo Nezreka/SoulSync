@@ -50,6 +50,8 @@ class FakeDb:
                     id INTEGER PRIMARY KEY, album_id INTEGER,
                     title TEXT, track_number INTEGER, duration INTEGER,
                     track_artist TEXT);
+                CREATE TABLE lib2_track_artists (
+                    track_id INTEGER, artist_id INTEGER, role TEXT);
                 CREATE TABLE lib2_track_files (
                     id INTEGER PRIMARY KEY, track_id INTEGER, path TEXT,
                     is_primary INTEGER DEFAULT 1, file_state TEXT DEFAULT 'active',
@@ -99,6 +101,20 @@ def _own(conn, track_id, path=None):
     conn.execute(
         "INSERT INTO lib2_track_files (track_id, path, is_primary, file_state)"
         " VALUES (?, ?, 1, 'active')", (track_id, path or f"/m/{track_id}.flac"))
+
+
+def _owned_release(db, artist_id, album_id, title="Owned Album", **album_cols):
+    """an album of the artist's with a file on disk: what makes an artist one
+    the library has"""
+    cols = {"id": album_id, "primary_artist_id": artist_id, "title": title, **album_cols}
+    with db._get_connection() as conn:
+        conn.execute(
+            f"INSERT INTO lib2_albums ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+            tuple(cols.values()))
+        conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (?, ?, 'Song')",
+                     (album_id * 100, album_id))
+        _own(conn, album_id * 100)
+        conn.commit()
 
 
 def _seed_plays(db, artist, title, album, month, count, year=2025):
@@ -178,13 +194,13 @@ class TestRewind:
 class TestVibeArtistNames:
     def test_matches_via_artist_tags_and_album_tags(self, db):
         _seed_artist(db, 1, 'Surf Rockers', lastfm_tags='["surf", "rock"]')
+        _owned_release(db, 1, 10)
         _seed_artist(db, 2, 'Album Tagged')
+        _owned_release(db, 2, 20, 'Beach Days', enrichment=_enrichment(["tropical"]))
         _seed_artist(db, 3, 'Nothing Seasonal', lastfm_tags='["metal"]')
-        with db._get_connection() as conn:
-            conn.execute("INSERT INTO lib2_albums (primary_artist_id, title,"
-                         " enrichment) VALUES (2, 'Beach Days', ?)",
-                         (_enrichment(["tropical"]),))
-            conn.commit()
+        _owned_release(db, 3, 30)
+        # tagged, but only a watchlist / discography row: not one the library has
+        _seed_artist(db, 4, 'Watched Surfer', lastfm_tags='["surf"]')
         names = sv._vibe_artist_names(db, 'summer')
         assert names == {'surf rockers', 'album tagged'}
 
@@ -202,6 +218,7 @@ class TestVibePoolTracks:
 
     def test_only_vibe_tagged_artists_and_capped(self, db):
         _seed_artist(db, 1, 'Surfy', lastfm_tags='["surf"]')
+        _owned_release(db, 1, 10)
         for i in range(4):
             self._seed_pool(db, 'Surfy', f'Wave {i}', 90 - i, track_id=f's{i}')
         self._seed_pool(db, 'Metalhead', 'Doom', 99, track_id='m1')
@@ -298,21 +315,25 @@ class TestLastfmTagChain:
     class FakeLastfm:
         def get_tag_top_artists(self, tag, limit=12):
             return [{'name': 'Known Artist'}, {'name': 'Fresh Face'},
-                    {'name': 'Artless Fresh'}]
+                    {'name': 'Artless Fresh'}, {'name': 'Only Watched'}]
 
         def get_artist_top_tracks(self, artist, limit=2):
             return [{'name': f'{artist} Song'}]
 
     def test_known_and_artless_artists_are_dropped(self, db):
         _seed_artist(db, 1, 'Known Artist')
+        _owned_release(db, 1, 10)
+        # a watchlist / wishlist row with no file yet is not an artist you have
+        _seed_artist(db, 2, 'Only Watched')
         with db._get_connection() as conn:
-            conn.execute("INSERT INTO discovery_pool (source, artist_name,"
-                         " album_cover_url) VALUES ('spotify', 'Fresh Face', 'https://f.jpg')")
+            for name in ('Fresh Face', 'Only Watched'):
+                conn.execute("INSERT INTO discovery_pool (source, artist_name,"
+                             " album_cover_url) VALUES ('spotify', ?, 'https://f.jpg')", (name,))
             conn.commit()
         rows = sv.lastfm_tag_tracks(db, self.FakeLastfm(), 'summer')
         names = {r['artist_name'] for r in rows}
         # known stays out (the user has them), artless stays out (grey circles)
-        assert names == {'Fresh Face'}
+        assert names == {'Fresh Face', 'Only Watched'}
         assert all(r['album_cover_url'] == 'https://f.jpg' for r in rows)
 
     def test_no_client_no_rows(self, db):
@@ -404,6 +425,7 @@ class TestVibePoolTracksSourceIds:
         """H13: a Deezer-only pool row (deezer_track_id set, itunes_track_id NULL)
         must be found for source='deezer', with the provider-correct key."""
         _seed_artist(db, 1, 'Surfy', lastfm_tags='["surf"]')
+        _owned_release(db, 1, 10)
         self._seed_pool_deezer(db)
         rows = sv.vibe_pool_tracks(db, 'summer', 'deezer', limit=40)
         assert len(rows) == 1
@@ -413,6 +435,7 @@ class TestVibePoolTracksSourceIds:
 
     def test_spotify_source_still_uses_spotify_id_column(self, db):
         _seed_artist(db, 1, 'Surfy', lastfm_tags='["surf"]')
+        _owned_release(db, 1, 10)
         with db._get_connection() as conn:
             conn.execute(
                 "INSERT INTO discovery_pool (source, spotify_track_id, track_name,"

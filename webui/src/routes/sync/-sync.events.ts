@@ -12,6 +12,11 @@ import { useEffect } from 'react';
 
 export const SYNC_LOGS_EVENT = 'ss:sync-logs';
 
+/** Told when mirrored playlists are deleted, so every source tab's "In
+ *  SoulSync" index re-reads (#1979: a tab kept its stale index, and its Open
+ *  and Edit buttons pointed at a playlist that was gone). */
+export const MIRRORS_CHANGED_EVENT = 'soulsync:mirrored-changed';
+
 export interface SyncLogsFrame {
   logs?: unknown;
 }

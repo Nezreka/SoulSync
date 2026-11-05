@@ -93,6 +93,15 @@ RESOLVED_RECURRENCE_GRACE_DAYS = 7
 #   empty_folder names a directory that is empty by definition
 _ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
 
+# a selection of finding ids as ONE bound parameter. a placeholder per id
+# broke past SQLite's variable limit (32766) on a big library, which is how
+# many findings a library-wide job can leave
+_JSON_IDS = "SELECT value FROM json_each(?)"
+
+
+def _json_ids(ids) -> str:
+    return json.dumps([int(i) for i in ids])
+
 
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
@@ -234,7 +243,6 @@ JOB_CATEGORIES = {
     'missing_lyrics': 'Artwork & lyrics',
     # Filling gaps in what you own, rather than repairing what you have.
     'monitored_discography_refresh': 'Collection gaps',
-    'discography_backfill': 'Collection gaps',
     'album_catalogue_backfill': 'Collection gaps',
     'album_completeness': 'Collection gaps',
     'album_edition_review': 'Tags & metadata',
@@ -603,6 +611,46 @@ class RepairWorker:
             self.enabled = config_manager.get('repair.master_enabled', True)
             self._migrate_legacy_job_configs(config_manager)
 
+    @staticmethod
+    def _merge_migrated_configs(configs: List[dict], existing: Optional[dict],
+                                *, force_review: bool = False) -> dict:
+        """Merge old job configs without silently weakening automation.
+
+        Activation is the union of the old jobs, the shortest positive
+        interval wins, and settings merge in the caller's stable priority
+        order. Explicit fields already stored under the new id always win.
+        """
+        valid = [dict(cfg) for cfg in configs if isinstance(cfg, dict)]
+        current = dict(existing) if isinstance(existing, dict) else {}
+        merged: dict = {}
+        if valid:
+            merged['enabled'] = any(bool(cfg.get('enabled', False)) for cfg in valid)
+            intervals = []
+            for cfg in valid:
+                try:
+                    value = float(cfg.get('interval_hours'))
+                    if value > 0:
+                        intervals.append(value)
+                except (TypeError, ValueError):
+                    pass
+            if intervals:
+                shortest = min(intervals)
+                merged['interval_hours'] = int(shortest) if shortest.is_integer() else shortest
+        settings: dict = {}
+        for cfg in valid:
+            if isinstance(cfg.get('settings'), dict):
+                settings.update(cfg['settings'])
+        if isinstance(current.get('settings'), dict):
+            settings.update(current['settings'])
+        if force_review and 'mode' not in (current.get('settings') or {}):
+            settings['mode'] = 'review'
+        if settings:
+            merged['settings'] = settings
+        for key in ('enabled', 'interval_hours'):
+            if key in current:
+                merged[key] = current[key]
+        return merged
+
     def _migrate_legacy_job_configs(self, config_manager) -> None:
         """Migrate stable pre-V2 repair identities once, without deleting them."""
         # The quality-upgrade lineage (quality_upgrade → quality_upgrade_scanner
@@ -611,13 +659,27 @@ class RepairWorker:
         # is nothing to migrate those saved configs INTO, and folding them into
         # an unrelated job would let a long-disabled quality scanner switch it
         # off. They are left in place, inert.
-        # Discography Backfill is a live job again under its own id, so its
-        # saved config stays its own and is not folded into the watchlist
-        # refresh any more.
+        disc_old = config_manager.get('repair.jobs.discography_backfill', None)
+        disc_new = config_manager.get('repair.jobs.monitored_discography_refresh', None)
+        if isinstance(disc_old, dict):
+            # The old job was review-first. Preserve that contract explicitly;
+            # the native job's review mode creates album-level findings and
+            # only materializes/wishlists after approval.
+            merged = self._merge_migrated_configs(
+                [disc_old], disc_new, force_review=True)
+            settings = merged.setdefault('settings', {})
+            settings.setdefault('migration_source', 'discography_backfill')
+            # the old job walked every library artist, not only the watchlist.
+            # its per-run limit, owned-tracks floor and release filters carry
+            # over under the same keys
+            settings.setdefault('artists', 'library')
+            config_manager.set('repair.jobs.monitored_discography_refresh', merged)
 
         # P3 implementation-prefix renames are lossless one-to-one copies.
         from core.repair_jobs import JOB_ID_MIGRATIONS
         for old_id, new_id in JOB_ID_MIGRATIONS.items():
+            if old_id == 'discography_backfill':
+                continue
             old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
             new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
             if new_cfg is None and isinstance(old_cfg, dict):
@@ -3511,17 +3573,18 @@ class RepairWorker:
             return {'success': False, 'error': str(exc)}
 
     def _fix_legacy_discography_track(self, entity_type, entity_id, file_path, details):
-        """Approve a Discography Backfill finding: wishlist the missing track."""
+        """Approve a preserved pre-V2 discography finding."""
         track_data = details.get('track_data')
         if not track_data:
             return {'success': False, 'error': 'Legacy discography finding has no track payload'}
         try:
             outcome = self._wishlist_add(
                 spotify_track_data=track_data,
-                failure_reason='Discography backfill — missing from library',
+                failure_reason='Discography backfill (migrated review finding)',
                 source_type='repair',
                 source_info={
-                    'job': 'discography_backfill',
+                    'job': 'monitored_discography_refresh',
+                    'legacy_job': 'discography_backfill',
                     'artist': details.get('artist_name', ''),
                 },
                 profile_id=self._owner_profile(details, track_data),
@@ -3566,14 +3629,14 @@ class RepairWorker:
             if profile_id == 1:
                 conn.executemany('UPDATE lib2_tracks SET monitored=1 WHERE id=?', [(t,) for t in live])
             recompute_wanted(conn, profile_id=profile_id, track_ids=live)
-            enqueue_projected_tracks(conn, live, profile_id=profile_id, user_initiated=True)
+            outbox_ids = enqueue_projected_tracks(conn, live, profile_id=profile_id, user_initiated=True)
             conn.commit()
         except Exception as exc:  # noqa: BLE001
             conn.rollback()
             return {'success': False, 'error': str(exc)}
         finally:
             conn.close()
-        drain(self.db)
+        drain(self.db, ids=outbox_ids)
         return {'success': True, 'action': 'monitored_missing',
                 'message': f'Monitoring {len(live)} missing track{"s" if len(live) != 1 else ""}'}
 
@@ -3582,35 +3645,24 @@ class RepairWorker:
         album_id = details.get('lib2_album_id') or _lib2_id(entity_id)
         if album_id is None:
             return {'success': False, 'error': 'Not a Library-v2 album finding'}
-        conn = self.db._get_connection()
-        try:
-            cursor = conn.execute(
-                """UPDATE lib2_albums
-                      SET monitored=1, tracklist_status='pending',
-                          tracklist_error=NULL, tracklist_retry_at=NULL,
-                          updated_at=CURRENT_TIMESTAMP
-                    WHERE id=?""",
-                (int(album_id),),
-            )
-            if cursor.rowcount == 0:
-                return {'success': False, 'error': 'Library-v2 album no longer exists'}
-            conn.commit()
-        finally:
-            conn.close()
         try:
             from core.library2 import ADMIN_PROFILE_ID
-            from core.library2.discography import auto_monitor_releases
-            mirrored = auto_monitor_releases(
-                self.db, self._config_manager, [int(album_id)],
-                wishlist_profile_id=ADMIN_PROFILE_ID,
+            from core.library2.discography import approve_release
+            # a back catalogue finding names the library that holds the
+            # artist (#1504); a new-release finding is the admin's as before
+            mirrored = approve_release(
+                self.db, self._config_manager, int(album_id),
+                profile_id=int(details.get('owner_profile_id') or ADMIN_PROFILE_ID),
             )
-            return {
-                'success': True,
-                'action': 'approved_new_release',
-                'mirrored_tracks': mirrored,
-            }
+        except LookupError as exc:
+            return {'success': False, 'error': str(exc)}
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
+        return {
+            'success': True,
+            'action': 'approved_new_release',
+            'mirrored_tracks': mirrored,
+        }
 
     def _fix_quality_profile_audit(self, entity_type, entity_id, file_path, details):
         """Revalidate a reviewed native file before opting its track into monitoring."""
@@ -3678,7 +3730,7 @@ class RepairWorker:
                     conn, [tid], profile_id=owner, user_initiated=not scheduled,
                 )
                 conn.commit()
-            drain(self.db)
+            drain(self.db, ids=outbox_ids)
             if not outbox_ids:
                 return {'success': False, 'error': 'No upgrade could be queued'}
             marks = ','.join('?' for _ in outbox_ids)
@@ -6570,9 +6622,8 @@ class RepairWorker:
             params = list(fixable_types)
 
             if finding_ids:
-                id_placeholders = ','.join(['?'] * len(finding_ids))
-                where_parts.append(f"id IN ({id_placeholders})")
-                params.extend(finding_ids)
+                where_parts.append(f"id IN ({_JSON_IDS})")
+                params.append(_json_ids(finding_ids))
             if job_id:
                 where_parts.append("job_id = ?")
                 params.append(job_id)
@@ -6759,9 +6810,8 @@ class RepairWorker:
                 where.append("finding_type=?")
                 params.append(finding_type)
             if finding_ids:
-                marks = ','.join('?' for _ in finding_ids)
-                where.append(f"id IN ({marks})")
-                params.extend(finding_ids)
+                where.append(f"id IN ({_JSON_IDS})")
+                params.append(_json_ids(finding_ids))
             if safe_only and DESTRUCTIVE_FINDING_TYPES:
                 destructive = sorted(DESTRUCTIVE_FINDING_TYPES)
                 marks = ','.join('?' for _ in destructive)
@@ -6788,10 +6838,13 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            placeholders = ','.join(['?'] * len(ids))
+            # one json parameter: Fix All over 32k+ findings (track numbers
+            # flagged nearly every track, d8e924b69 for the history) broke
+            # the query, the types came back empty and the LRCLib breaker
+            # never tripped
             cursor.execute(
-                f"SELECT id, finding_type FROM repair_findings WHERE id IN ({placeholders})",
-                list(ids))
+                f"SELECT id, finding_type FROM repair_findings WHERE id IN ({_JSON_IDS})",
+                (_json_ids(ids),))
             return {row[0]: row[1] for row in cursor.fetchall()}
         except Exception as e:
             logger.debug("Could not read finding types for bulk run: %s", e)
@@ -7004,22 +7057,20 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            placeholders = ','.join(['?'] * len(finding_ids))
-
             if action == 'dismiss':
                 cursor.execute(f"""
                     UPDATE repair_findings
                     SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id IN ({placeholders})
-                """, finding_ids)
+                    WHERE id IN ({_JSON_IDS})
+                """, (_json_ids(finding_ids),))
             else:
                 cursor.execute(f"""
                     UPDATE repair_findings
                     SET status = 'resolved', user_action = ?, resolved_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id IN ({placeholders})
-                """, [action] + finding_ids)
+                    WHERE id IN ({_JSON_IDS})
+                """, (action, _json_ids(finding_ids)))
 
             conn.commit()
             return cursor.rowcount

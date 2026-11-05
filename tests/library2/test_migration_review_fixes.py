@@ -90,6 +90,38 @@ def test_the_mapping_backfill_terminates_on_a_blank_server_id(conn):
     assert [row["server_id"] for row in mapped] == ["p-7"]
 
 
+def test_the_mapping_backfill_terminates_when_two_rows_share_a_server_id(conn):
+    """Two old rows stamped with the same server id (a stale stamp) took turns.
+
+    ``upsert_mapping`` moves a server id to the row it is writing, deleting
+    the other row's mapping; the next batch saw that row unmapped again and
+    took the id back. The upgrade sat on this step for days (Skowl).
+    """
+    from core.library2.media_mappings import backfill_legacy_mappings
+
+    _artist(conn, "Old", server_source="navidrome", server_id="nd-1")
+    _artist(conn, "New", server_source="navidrome", server_id="nd-1")
+    _artist(conn, "Spaced", server_source="navidrome", server_id=" nd-1 ")
+    _artist(conn, "Other", server_source="navidrome", server_id="nd-2")
+
+    passes = []
+
+    def _on_batch():
+        passes.append(1)
+        if len(passes) > 4:
+            raise AssertionError("backfill_legacy_mappings did not terminate")
+
+    for size in (1, 10):
+        conn.execute("DELETE FROM lib2_media_server_mappings")
+        passes.clear()
+        backfill_legacy_mappings(conn.cursor(), connection=conn, batch_size=size,
+                                 on_batch=_on_batch)
+        mapped = conn.execute(
+            "SELECT server_id FROM lib2_media_server_mappings "
+            "WHERE entity_type='artist' ORDER BY server_id").fetchall()
+        assert [row["server_id"] for row in mapped] == ["nd-1", "nd-2"]
+
+
 # ── LV2-MIG-02 ─────────────────────────────────────────────────────────────
 
 def test_an_import_does_not_stamp_disc_one_over_a_known_disc(conn):

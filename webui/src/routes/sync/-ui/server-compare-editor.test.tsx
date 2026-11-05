@@ -986,3 +986,28 @@ describe('ServerCompareEditor — unmatch', () => {
     expect(document.querySelector('[data-status="extra"]')).toBeNull();
   });
 });
+
+describe('ServerCompareEditor — tag every song in Plex (wolf39us)', () => {
+  it('tags the playlist with a mood named after it, when the server allows it', async () => {
+    payload = { ...(payload as object), can_tag: true };
+    writePayload = { success: true, tag: 'Road Trip', total: 2 };
+    renderEditor();
+    fireEvent.click(await screen.findByRole('button', { name: 'Tag in Plex' }));
+    const input = screen.getByRole('textbox') as HTMLInputElement;
+    expect(input.value).toBe('Road Trip');
+    fireEvent.change(input, { target: { value: 'mom' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Tag every song' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url.endsWith('/tag-mood'))).toEqual({
+        url: '/api/server/playlist/7/tag-mood',
+        body: { name: 'Road Trip', tag: 'mom' },
+      }),
+    );
+  });
+
+  it('is not offered when the server says no (not admin, or not plex)', async () => {
+    renderEditor();
+    await screen.findByRole('button', { name: /Export|M3U/i });
+    expect(screen.queryByRole('button', { name: 'Tag in Plex' })).toBeNull();
+  });
+});

@@ -23,7 +23,7 @@ import shutil
 import logging
 import logging.handlers
 
-from utils.logging_config import get_logger
+from utils.logging_config import app_log_path, get_logger
 from core.settings import config_manager
 
 # fpcalc binary location (downloaded automatically if needed)
@@ -32,7 +32,7 @@ CHROMAPRINT_VERSION = "1.5.1"
 
 _acoustid_logger = logging.getLogger("soulsync.acoustid")
 _acoustid_logger.setLevel(logging.DEBUG)
-_acoustid_log_path = Path(config_manager.get('logging.path', 'logs/app.log')).parent / "acoustid.log"
+_acoustid_log_path = Path(app_log_path(config_manager.get('logging.path', 'logs/app.log'))).parent / "acoustid.log"
 _acoustid_log_path.parent.mkdir(parents=True, exist_ok=True)
 if not _acoustid_logger.handlers:
     _acoustid_file_handler = logging.handlers.RotatingFileHandler(

@@ -884,9 +884,11 @@ def _rename_track_in_place(
         # Best-effort by design: the audio is already at its destination here.
         # Failing the move over a sidecar would report a track that did not
         # move, and leave the catalogue pointing at a path nothing is at.
+        # The plain-lyrics .txt goes along too: it stayed behind, the old folder
+        # was never empty enough to prune and the moved track lost its lyrics.
         try:
-            from core.imports.file_ops import move_companion_sidecars
-            move_companion_sidecars(current_abs, new_abs)
+            from core.imports.file_ops import LIBRARY_SIDECAR_EXTS, move_companion_sidecars
+            move_companion_sidecars(current_abs, new_abs, exts=LIBRARY_SIDECAR_EXTS)
         except Exception as sidecar_err:  # noqa: BLE001
             logger.warning("[Reorganize/rename] sidecar move failed for %s: %s",
                            os.path.basename(new_abs), sidecar_err)
@@ -1072,10 +1074,10 @@ def reorganize_album_rename_only(
               processed=summary['moved'] + summary['skipped'] + summary['failed'])
 
     for src_dir in src_dirs_touched:
-        targets = dest_dirs.get(src_dir) or set()
-        if len(targets) == 1:
+        album_dst = _album_destination(dest_dirs.get(src_dir))
+        if album_dst:
             try:
-                _carry_album_files(src_dir, next(iter(targets)))
+                _carry_album_files(src_dir, album_dst)
             except Exception as e:  # noqa: BLE001 - the tracks moved; the extras stay put
                 logger.warning("[Reorganize/rename] album files in %s stayed: %s", src_dir, e)
         if cleanup_empty_dir_fn:
@@ -1087,6 +1089,10 @@ def reorganize_album_rename_only(
             _prune_empty_source_dirs(src_dir)   # #985: library-safe prune (transfer-dir-independent)
         except Exception as e:
             logger.debug("[Reorganize/rename] source prune of %s failed: %s", src_dir, e)
+    try:
+        _tidy_album_and_artist_dirs(src_dirs_touched, dest_dirs)
+    except Exception as e:  # noqa: BLE001 - the tracks moved; the extras stay put
+        logger.warning("[Reorganize/rename] album / artist folder tidy failed: %s", e)
 
     # leftovers of earlier failed runs beside the albums this run wrote into
     artist_dirs = {os.path.dirname(_album_dir_of(d))
@@ -1177,12 +1183,38 @@ _DISC_DIR_RE = re.compile(r'^(disc|disk|cd|vol|volume)\s*\.?\s*\d+$', re.IGNOREC
 
 
 # the album's own files beside its tracks: artwork, cue sheets, rip logs,
-# booklets. a track's .lrc/.txt goes with the track itself, and an .m3u stays:
-# it's a playlist the reorganize rewrites in place to point at the new paths
+# checksums, booklets and notes. a track's .lrc/.txt goes with the track
+# itself (so a .txt still here is the album's), and an .m3u stays: it's a
+# playlist the reorganize rewrites in place to point at the new paths
 _ALBUM_FILE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp',
-                    '.cue', '.nfo', '.log', '.pdf'}
+                    '.cue', '.nfo', '.log', '.pdf', '.txt', '.sfv', '.md5',
+                    '.accurip', '.ffp'}
+# folders of artwork a rip keeps beside the tracks, moved whole
+_ALBUM_FILE_DIRS = {'scans', 'artwork', 'art', 'covers', 'booklet'}
+# what a source folder still holding tracks looks like. one list: a second,
+# shorter one further down this module used to replace this one, so a .wv,
+# .ape, .aiff or .dsf left behind didn't count and its cover was carried off
 _AUDIO_EXTS = {'.flac', '.mp3', '.m4a', '.mp4', '.aac', '.ogg', '.opus', '.wav',
                '.aiff', '.aif', '.alac', '.ape', '.wv', '.wma', '.dsf', '.dff'}
+# the artist folder's own files: what Plex/Jellyfin/Kodi and SoulSync's own
+# artist.nfo / artist image writer put there
+_ARTIST_FILE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.nfo'}
+# caches the OS drops into any folder it shows. like .DS_Store they're never
+# the user's, and they kept an emptied folder from being pruned
+_OS_JUNK_NAMES = {'thumbs.db', 'ehthumbs.db', 'desktop.ini'}
+
+
+def _is_junk(name: str) -> bool:
+    return name.startswith('.') or name.casefold() in _OS_JUNK_NAMES
+
+
+def _move_entry(src: str, dst: str) -> None:
+    try:
+        os.rename(src, dst)
+    except OSError as e:
+        if getattr(e, 'errno', None) != errno.EXDEV:
+            raise
+        shutil.move(src, dst)
 
 
 def _carry_album_files(src_dir: str, dst_dir: str) -> List[str]:
@@ -1202,26 +1234,130 @@ def _carry_album_files(src_dir: str, dst_dir: str) -> List[str]:
     moved = []
     for name in names:
         src = os.path.join(src_dir, name)
-        if not os.path.isfile(src) or os.path.splitext(name)[1].lower() not in _ALBUM_FILE_EXTS:
+        if os.path.isdir(src):
+            if name.casefold() not in _ALBUM_FILE_DIRS:
+                continue
+        elif not os.path.isfile(src) or os.path.splitext(name)[1].lower() not in _ALBUM_FILE_EXTS:
             continue
         dst = os.path.join(dst_dir, name)
         if os.path.lexists(dst):
             continue
-        try:
-            os.rename(src, dst)
-        except OSError as e:
-            if getattr(e, 'errno', None) != errno.EXDEV:
-                raise
-            shutil.move(src, dst)
+        _move_entry(src, dst)
         moved.append(dst)
     if moved:
         logger.info("[Reorganize/rename] carried %d album file(s) to %s", len(moved), dst_dir)
     return moved
 
 
+def _album_destination(targets) -> Optional[str]:
+    """The one album folder a source folder's tracks went to, or None.
+
+    One target is that folder. Several are only one album when they are its
+    disc folders (a flat album filed into ``Disc 1`` / ``Disc 2``): its cover
+    and cue go to the album folder above them. Anything else is ambiguous and
+    the extras stay where they are.
+    """
+    targets = {os.path.normpath(t) for t in (targets or ()) if t}
+    if len(targets) == 1:
+        return next(iter(targets))
+    parents = {os.path.dirname(t) for t in targets}
+    if (len(parents) == 1
+            and all(_DISC_DIR_RE.match(os.path.basename(t)) for t in targets)):
+        return next(iter(parents))
+    return None
+
+
+def _album_root(path: str) -> str:
+    """``Album`` for ``Album/Disc 1``, the folder itself otherwise."""
+    path = os.path.normpath(path)
+    return os.path.dirname(path) if _DISC_DIR_RE.match(os.path.basename(path)) else path
+
+
+def _has_subdirs(dir_path: str) -> bool:
+    try:
+        return any(os.path.isdir(os.path.join(dir_path, name))
+                   for name in os.listdir(dir_path) if not _is_junk(name))
+    except OSError:
+        return True  # unreadable: assume it still holds something
+
+
+def _carry_artist_files(src_dir: str, dst_dir: str) -> List[str]:
+    """artist.jpg / artist.nfo and the like, once the old artist folder's last
+    album has moved to ``dst_dir``. Never over a file already there."""
+    if (not os.path.isdir(dst_dir)
+            or os.path.normcase(os.path.normpath(src_dir)) == os.path.normcase(os.path.normpath(dst_dir))):
+        return []
+    try:
+        names = os.listdir(src_dir)
+    except OSError:
+        return []
+    if any(os.path.splitext(n)[1].lower() in _AUDIO_EXTS for n in names):
+        return []  # a loose track still lives here: its artist files stay with it
+    moved = []
+    for name in names:
+        src = os.path.join(src_dir, name)
+        if (_is_junk(name) or not os.path.isfile(src)
+                or os.path.splitext(name)[1].lower() not in _ARTIST_FILE_EXTS):
+            continue
+        dst = os.path.join(dst_dir, name)
+        if os.path.lexists(dst):
+            continue
+        _move_entry(src, dst)
+        moved.append(dst)
+    if moved:
+        logger.info("[Reorganize/rename] carried %d artist file(s) to %s", len(moved), dst_dir)
+    return moved
+
+
+def _inside_a_library_root(dir_path: str) -> bool:
+    """True when ``dir_path`` sits below a library root, never the root itself.
+    Fails closed: no roots, or none that contains it, means no."""
+    try:
+        from core.library2.file_delete import _containing_root, _library_roots
+        roots = _library_roots()
+        return bool(roots) and _containing_root(dir_path, roots) is not None
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[Reorganize] library root check failed for %s: %s", dir_path, e)
+        return False
+
+
+def _tidy_album_and_artist_dirs(src_dirs, dest_dirs) -> None:
+    """What the per-folder prune can't see once the tracks have moved.
+
+    - an album folder above disc folders: ``Album/Disc 1`` and ``Disc 2`` went,
+      ``Album/cover.jpg`` stayed and the old album folder with it
+    - the artist folder: when its last album moved to one new artist folder,
+      its artist.jpg / artist.nfo follow and the folder goes. Only below a
+      library root (never the root), only with no other folder left in it.
+    """
+    album_moves: Dict[str, Set[str]] = {}
+    for src_dir in src_dirs:
+        album_dst = _album_destination(dest_dirs.get(src_dir))
+        if album_dst:
+            album_moves.setdefault(_album_root(src_dir), set()).add(_album_root(album_dst))
+    artist_moves: Dict[str, Set[str]] = {}
+    for old_album, new_albums in album_moves.items():
+        if len(new_albums) != 1:
+            continue
+        new_album = next(iter(new_albums))
+        if os.path.isdir(old_album) and not _has_subdirs(old_album):
+            _carry_album_files(old_album, new_album)
+            _rmdir_if_empty(old_album)
+        if not os.path.isdir(old_album):
+            artist_moves.setdefault(os.path.dirname(old_album), set()).add(
+                os.path.dirname(new_album))
+    for old_artist, new_artists in artist_moves.items():
+        if (len(new_artists) != 1 or not os.path.isdir(old_artist)
+                or _has_subdirs(old_artist) or not _inside_a_library_root(old_artist)):
+            continue
+        _carry_artist_files(old_artist, next(iter(new_artists)))
+        _rmdir_if_empty(old_artist)
+
+
 def _rmdir_if_empty(dir_path: str) -> bool:
-    """rmdir ``dir_path`` if it holds no non-hidden entries (clearing hidden junk like
-    .DS_Store first) and isn't a protected/configured root. Returns True if removed."""
+    """rmdir ``dir_path`` if it holds no entries but junk (hidden files like
+    .DS_Store, Thumbs.db, desktop.ini, cleared first) and isn't a
+    protected/configured root. Returns True if removed."""
     try:
         from core.imports.file_ops import protected_root_dirs
         if os.path.normpath(dir_path) in protected_root_dirs():
@@ -1232,12 +1368,12 @@ def _rmdir_if_empty(dir_path: str) -> bool:
         entries = os.listdir(dir_path)
     except OSError:
         return False
-    if any(not e.startswith('.') for e in entries):
+    if any(not _is_junk(e) for e in entries):
         return False  # real content remains
     try:
-        for hidden in entries:
+        for junk in entries:
             try:
-                os.remove(os.path.join(dir_path, hidden))
+                os.remove(os.path.join(dir_path, junk))
             except OSError:
                 pass
         os.rmdir(dir_path)
@@ -1272,14 +1408,6 @@ def _prune_empty_source_dirs(start_dir: str) -> None:
 
 
 # Sidecar / cleanup helpers --------------------------------------------------
-
-
-# Audio extensions used to decide whether a source directory still has
-# tracks the user might care about (i.e. a per-track failure left audio
-# behind that we shouldn't strip the cover art from).
-_AUDIO_EXTS = frozenset(
-    {'.flac', '.mp3', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.wma', '.mp4'}
-)
 
 
 def _move_sibling_to_destination(sibling_src: str, canonical_dst: str) -> Optional[str]:

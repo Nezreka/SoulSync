@@ -2,7 +2,7 @@
 import json
 from core.repair_jobs import register_job
 from core.library2.sql_util import ANY_OWNER, owned_sql
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, stop_or_pause
 from core.metadata.genre_enrichment import (collect_cached_candidates, collect_local_candidates,
     extract_provider_genres, parse_values, propose_genres, provider_ids_from_row,
     whitelist_from_config)
@@ -88,7 +88,7 @@ class GenreEnrichmentJob(RepairJob):
             'cap_limited_entities': 0}
         try:
             for index, (kind, row) in enumerate(iter_entities(), start=1):
-                if context.check_stop(): return result
+                if stop_or_pause(context): return result
                 result.scanned += 1; stats['entities_scanned'] += 1
                 existing = parse_values(row.get('genres'))
                 if existing: stats['entities_with_existing_genres'] += 1

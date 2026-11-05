@@ -17,7 +17,7 @@ files, never findings.
 from __future__ import annotations
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, stop_or_pause
 from utils.logging_config import get_logger
 
 logger = get_logger("repair.skip_audit_cleanup")
@@ -88,7 +88,7 @@ class Lib2SkipsCleanupJob(RepairJob):
 
             gone = set()
             for row in rows:
-                if context.check_stop():
+                if stop_or_pause(context):
                     break
                 result.scanned += 1
                 path = row["file_path"]

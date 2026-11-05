@@ -53,6 +53,10 @@ DEFAULTS = {
     # for shows a metadata agent can match, and YouTube channels aren't on TVDB,
     # so those folders never indexed (the "Plex isn't picking it up" report).
     "youtube_template": "$channel/Season $year/$channel - $sxe - $title",
+    # what a ':' in a title becomes (SeadogsBooty): file systems refuse it, so it
+    # was always dropped ("Dexter Resurrection"). delete keeps that, so nothing
+    # already named reads as misnamed after an update.
+    "colon_replacement": "delete",
     "verify_with_ffprobe": True,
     "replace_existing": True,
     "transfer_mode": "copy",
@@ -107,6 +111,7 @@ DEFAULTS = {
 }
 
 _TRANSFER_MODES = ("copy", "move")
+COLON_MODES = ("delete", "dash", "space_dash_space", "smart")
 
 # The pre-$sxe default (see youtube_template above) — recognised and upgraded at
 # render time so existing saved settings get the Plex-indexable naming too.
@@ -185,6 +190,9 @@ def normalize(raw: Any) -> dict:
             d["youtube_follow_count"] = max(0, min(100, int(raw.get("youtube_follow_count"))))
         except (TypeError, ValueError):
             pass
+    cm = str(raw.get("colon_replacement") or "").strip().lower()
+    if cm in COLON_MODES:
+        d["colon_replacement"] = cm
     tm = str(raw.get("transfer_mode") or "").strip().lower()
     if tm in _TRANSFER_MODES:
         d["transfer_mode"] = tm
@@ -364,11 +372,33 @@ def _youtube_values(f: dict) -> dict:
     }
 
 
-def render_template(template: Any, values: dict) -> str:
+def replace_colons(text: Any, mode: Any = "delete") -> str:
+    """A title's colons the way the user picked, before the path is sanitised
+    (which drops any colon left). delete: "Dexter Resurrection"; dash:
+    "Dexter- Resurrection"; space_dash_space: "Dexter - Resurrection"; smart:
+    a colon followed by a space reads as " - ", one between characters (a
+    time, "12:30") as "-"."""
+    s = str(text if text is not None else "")
+    if ":" not in s:
+        return s
+    mode = str(mode or "delete").strip().lower()
+    if mode == "dash":
+        return s.replace(":", "-")
+    if mode == "space_dash_space":
+        return re.sub(r"\s*:\s*", " - ", s)
+    if mode == "smart":
+        s = re.sub(r"\s*:(?:\s+|$)", " - ", s)
+        return s.replace(":", "-")
+    return s
+
+
+def render_template(template: Any, values: dict, colon: Any = "delete") -> str:
     """Substitute ``$token`` / ``${token}`` from ``values`` into ``template``. Each
     value is path-sanitised first (so a title with '/' can't spawn a folder), and
-    tokens are replaced longest-name-first ($episodetitle before $episode)."""
-    clean = {k: sanitize(v) for k, v in (values or {}).items()}
+    tokens are replaced longest-name-first ($episodetitle before $episode).
+    ``colon`` is the colon_replacement setting."""
+    clean = {k: sanitize(replace_colons(v, colon) if isinstance(v, str) else v)
+             for k, v in (values or {}).items()}
     out = str(template or "")
     for tok in sorted(clean, key=len, reverse=True):
         out = out.replace("${" + tok + "}", clean[tok])
@@ -413,7 +443,7 @@ def episode_folders_below_series(settings: Any, fields: dict) -> list | None:
     values = _episode_values(fields if isinstance(fields, dict) else {})
     out = []
     for seg in folders[idx + 1:]:
-        part = _tidy_component(render_template(seg, values))
+        part = _tidy_component(render_template(seg, values, settings.get("colon_replacement")))
         if part:
             out.append(part)
     return out
@@ -447,7 +477,7 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
         base = (sanitize(fields.get("title")) or "download") + _ext(ext)
         return {"dir": root, "filename": base, "path": os.path.join(root, base)}
 
-    rendered = render_template(tmpl, values)
+    rendered = render_template(tmpl, values, settings.get("colon_replacement"))
     parts = [p for p in (_tidy_component(seg) for seg in rendered.split("/")) if p]
     if not parts:
         parts = ["download"]
@@ -459,4 +489,5 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
 __all__ = [
     "DEFAULTS", "default_settings", "normalize", "load", "save",
     "render_template", "render_path", "episode_folders_below_series",
+    "COLON_MODES", "replace_colons",
 ]

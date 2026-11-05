@@ -9,7 +9,9 @@ from core.library2.maintenance_subjects import (
 from collections import defaultdict
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects, stop_or_pause,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.live_commentary_cleaner")
@@ -135,9 +137,11 @@ class LiveCommentaryCleanerJob(RepairJob):
         # whole album, the way 3.6.1 filed it, not one per track
         by_album = str(settings.get("scope") or "tracks").strip().lower() == "albums"
         album_groups: dict = {}
-        for subject in subjects:
-            if context.check_stop():
+        for index, subject in enumerate(subjects):
+            if stop_or_pause(context):
                 return result
+            if getattr(context, "update_progress", None) and index % 25 == 0:
+                context.update_progress(index, len(subjects))
             result.scanned += 1
             content_type = _detect_content_type(subject.get("title"), "")
             album_matched = False
@@ -195,7 +199,7 @@ class LiveCommentaryCleanerJob(RepairJob):
                 else:
                     result.findings_skipped_dedup += 1
         for album_id, (content_type, type_label, members) in album_groups.items():
-            if context.check_stop():
+            if stop_or_pause(context):
                 return result
             self._album_finding(context, result, album_id, content_type, type_label, members)
         return result
