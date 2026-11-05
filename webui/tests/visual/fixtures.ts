@@ -1093,13 +1093,114 @@ const settings = [
   http.get('*/api/dev-mode', () => HttpResponse.json({ enabled: false })),
 ];
 
+/** The live library routes use v2, including redirected legacy artist links. */
+const libraryV2 = [
+  http.get('*/api/library/v2/enabled', () =>
+    HttpResponse.json({ success: true, enabled: true, can_write: true, can_wish: true }),
+  ),
+  http.get('*/api/library/v2/ui-preferences', () =>
+    HttpResponse.json({
+      success: true,
+      preferences: {
+        artist_table: {
+          columns: { quality_profile: true, genres: true, added: false, size: false },
+          column_order: ['quality_profile', 'genres', 'added', 'size'],
+        },
+        track_table: {
+          columns: {},
+          column_order: [],
+          column_widths: {},
+          visible_match_providers: {},
+          show_all_match_providers: false,
+          quality_show_format: true,
+          quality_show_resolution: true,
+          quality_show_bitrate: true,
+          edit_via_title: true,
+        },
+      },
+    }),
+  ),
+  http.get('*/api/library/v2/artists', () =>
+    HttpResponse.json({
+      success: true,
+      artists: ARTIST_NAMES.map((name, i) => ({
+        id: i + 1,
+        name,
+        image_url: null,
+        remote_image_url: null,
+        provider_ids: { musicbrainz: 'mb' + i, ...(i % 2 ? { spotify: 'sp' + i } : {}) },
+        album_count: i + 1,
+        track_count: 10 + i * 7,
+        monitored: i % 3 === 0,
+        total_size_bytes: 0,
+        genres: [],
+      })),
+      pagination: {
+        page: 1,
+        limit: 75,
+        total_count: ARTIST_NAMES.length,
+        total_pages: 1,
+        has_prev: false,
+        has_next: false,
+      },
+    }),
+  ),
+  http.get('*/api/library/v2/artists/42', () =>
+    HttpResponse.json({
+      success: true,
+      artist: {
+        id: 42,
+        name: 'Aphex Twin',
+        discography_synced_at: '2025-01-13 09:00:00',
+        image_url: null,
+        remote_image_url: null,
+        provider_ids: {},
+        media_server_sources: [],
+        genres: [],
+        monitored: false,
+        monitor_new_items: 'all',
+        quality_profile: null,
+        summary: null,
+        style: null,
+        mood: null,
+        label: null,
+        albums: ['Selected Ambient Works 85-92', 'Richard D. James Album', 'Drukqs', 'Syro'].map(
+          (title, i) => ({
+            id: i + 1,
+            title,
+            album_type: 'album',
+            year: 1992 + i * 7,
+            release_date: null,
+            image_url: null,
+            remote_image_url: null,
+            monitored: false,
+            origin: i < 2 ? 'library' : 'discography',
+            track_count: 10,
+            tracks_present: i < 2 ? 10 : 0,
+            tracks_missing: i < 2 ? 0 : 10,
+            total_size_bytes: 0,
+            user_overrides: {},
+          }),
+        ),
+        eps: [],
+        singles: [],
+        album_count: 4,
+        single_count: 0,
+        discography_count: 4,
+        total_size_bytes: 0,
+        user_overrides: {},
+      },
+    }),
+  ),
+];
+
 /** Handlers per route, on top of `shellHandlers`. */
 export const routeHandlers: Record<string, RequestHandler[]> = {
-  library: [libraryArtists],
+  library: [...libraryV2, libraryArtists],
   watchlist: watchlistArtists,
   issues,
   stats,
-  'artist-detail': artistDetail,
+  'artist-detail': [...libraryV2, ...artistDetail],
   audiobooks,
   automations,
   chat,

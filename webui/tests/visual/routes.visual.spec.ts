@@ -1,5 +1,6 @@
+import type { RequestHandler } from 'msw';
+
 import { expect, test, type Page } from '@playwright/test';
-import { http, type RequestHandler } from 'msw';
 
 import { routeHandlers, shellHandlers, stateHandlers } from './fixtures';
 import { installShell, ORIGIN } from './harness';
@@ -36,18 +37,20 @@ const ROUTES: Shot[] = [
       await page.waitForLoadState('networkidle');
     },
   },
-  { name: 'library', path: '/library' },
+  {
+    name: 'library',
+    path: '/library',
+    act: async (page) => {
+      await expect(page.getByText('Aphex Twin', { exact: true })).toBeVisible();
+    },
+  },
   {
     name: 'artist-detail',
     path: '/artist-detail/library/42',
-    // The Back label is a race in the app. On a cold load, init.js awaits its
-    // snapshot hydration and then calls navigateToArtistDetail, which pushes
-    // onto the label stack: the artist itself once React has synced it into
-    // the vanilla state, a Library page origin if not yet. The React page reads
-    // the stack only on mount and when the payload lands, so it showed
-    // "← Back" or, when init.js won, "← Back to Library". Hold init.js until
-    // React has read it.
-    handlers: (page) => [afterArtistSynced(page), ...routeHandlers['artist-detail']],
+    // Legacy artist links now redirect into Library v2. Assert the fixture loaded.
+    act: async (page) => {
+      await expect(page.getByRole('heading', { name: 'Aphex Twin', exact: true })).toBeVisible();
+    },
   },
   { name: 'watchlist', path: '/watchlist' },
   { name: 'wishlist', path: '/wishlist' },
@@ -197,34 +200,6 @@ async function freezeAnimations(page: Page) {
   });
 }
 
-/**
- * Holds init.js's first snapshot hydration (it awaits that before calling
- * navigateToArtistDetail) until the artist-detail page has synced its artist
- * into the vanilla state. That sync is the effect after the one that sets the
- * Back label, so by then the label has been read from the stack init.js has
- * not touched yet (see the artist-detail shot).
- */
-function afterArtistSynced(page: Page): RequestHandler {
-  return http.all('*/api/artist_bubbles/hydrate', async () => {
-    await expect
-      .poll(
-        () =>
-          page.evaluate(
-            () =>
-              (window as { artistDetailPageState?: { currentArtistName?: string | null } })
-                .artistDetailPageState?.currentArtistName ?? null,
-          ),
-        {
-          message: 'artist-detail never synced its artist into the vanilla state',
-          intervals: [50],
-          timeout: 15_000,
-        },
-      )
-      .not.toBeNull();
-    // Returning nothing hands the request on (here, to the `{}` default).
-  });
-}
-
 async function settle(page: Page) {
   await expect
     .poll(() => page.evaluate(() => document.querySelector('.page.active')?.id ?? ''), {
@@ -319,6 +294,7 @@ async function shoot(page: Page, viewport: string, shot: Shot) {
   await page.goto(`${ORIGIN}${shot.path}`);
   await settle(page);
   await shot.act?.(page);
+  await expect(page.locator('.app-error-boundary')).toHaveCount(0);
   await freezeAnimations(page);
   expect(missing, 'static files missing; run `npm run build`').toEqual([]);
   // Soft, so a difference above the fold still lets the full shot run and

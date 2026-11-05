@@ -120,14 +120,14 @@ def _lossy_companion_exts(conn) -> set:
         if config_manager.get("lossy_copy.enabled", False):
             codec = str(config_manager.get("lossy_copy.codec", "mp3")).lower()
             exts.add(LOSSY_CODEC_EXTS.get(codec, ".mp3"))
-    except Exception:  # noqa: BLE001 - optional
-        pass
+    except Exception as exc:  # noqa: BLE001 - optional
+        logger.debug("Could not read global lossy-copy settings: %s", exc)
     try:
         for (codec,) in conn.execute(
                 "SELECT lossy_copy_codec FROM quality_profiles WHERE lossy_copy_enabled = 1"):
             exts.add(LOSSY_CODEC_EXTS.get(str(codec or "mp3").lower(), ".mp3"))
-    except Exception:  # noqa: BLE001 - an older schema has no profiles
-        pass
+    except Exception as exc:  # noqa: BLE001 - an older schema has no profiles
+        logger.debug("Could not read lossy-copy quality profiles: %s", exc)
     return exts
 
 
