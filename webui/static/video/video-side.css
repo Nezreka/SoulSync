@@ -469,6 +469,38 @@ body[data-side="video"] .dashboard-header-sweep {
     justify-content: center;
     margin: 4px 0;
 }
+/* one toolbar (#1909). the music library css stacks .library-controls as a
+   column, and there the search box's flex: 1 1 240px became 240px of HEIGHT:
+   a big empty block with the glass icon floating in it, then the filters
+   centred under it. here it's a wrapping row: the tabs on their own line,
+   search left and filters right on the next, the alphabet under them. */
+#video-library-page .library-controls {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+#video-library-page .library-controls::before {
+    content: "";
+    order: -1;
+    flex-basis: 100%;
+    height: 0;
+}
+#video-library-page .video-library-tabs { order: -2; }
+#video-library-page .library-controls > .library-search-container { flex: 1 1 240px; }
+#video-library-page .video-library-filters {
+    flex: 0 1 auto;
+    margin: 0 0 0 auto;
+    justify-content: flex-end;
+}
+#video-library-page .library-controls > .alphabet-selector {
+    order: 1;
+    flex-basis: 100%;
+}
+@media (max-width: 640px) {
+    #video-library-page .library-controls > .library-search-container { flex-basis: 100%; max-width: none; }
+    #video-library-page .video-library-filters { flex-basis: 100%; margin: 0; }
+}
 /* Phones: the centered no-wrap row (3 selects + Select) overflowed BOTH edges
    — wrap it into a tidy 2-up grid instead. */
 @media (max-width: 640px) {
