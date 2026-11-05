@@ -1354,6 +1354,14 @@
    the screen. Cap the pill and let it clip its own label instead; the
    input keeps the rest. */
 @media (max-width: 640px) {
+  /* a phone needs the width for what you type; the logo says which
+     catalogue and the button's label still names it (#1909) */
+  .source .sourceLabel {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
   .searchBox {
     max-width: 100%;
     box-sizing: border-box;
