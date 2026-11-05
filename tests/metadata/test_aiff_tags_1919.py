@@ -71,16 +71,20 @@ def test_the_easy_view_matches_mutagens_keys(tagged_aiff):
     assert tags.get('missing', ['']) == ['']
 
 
-def test_selected_aiff_tag_write_preserves_other_tags(tagged_aiff):
+@pytest.mark.parametrize('extension', ['aiff', 'aif'])
+def test_selected_aiff_tag_write_preserves_other_tags(tagged_aiff, extension):
     from core.tag_writer import write_tag_fields
 
-    result = write_tag_fields(str(tagged_aiff), {'title': 'Other'})
+    path = tagged_aiff.rename(tagged_aiff.with_suffix('.' + extension))
+    before = _sound_chunk(path)
+    result = write_tag_fields(str(path), {'title': 'Other'})
 
     assert result['success'] is True
-    tags = open_easy(str(tagged_aiff))
+    tags = open_easy(str(path))
     assert tags.get('title') == ['Other']
     assert tags.get('artist') == ['A Hundred Drums, VEIL']
     assert tags.get('album') == ['Shockwave EP']
+    assert _sound_chunk(path) == before
 
 
 def _sound_chunk(path):

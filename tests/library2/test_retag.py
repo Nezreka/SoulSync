@@ -90,7 +90,8 @@ def test_preview_reports_missing_file(imported_conn):
 
 
 @pytest.mark.parametrize('extension', ['aiff', 'aif'])
-def test_aiff_library_preview_and_write(imported_conn, legacy_db, tmp_path, extension):
+@pytest.mark.parametrize('options', [None, {'fields': ['title', 'artist'], 'cover_art': 'skip'}])
+def test_aiff_library_preview_and_write(imported_conn, legacy_db, tmp_path, extension, options):
     from tests.metadata.test_aiff_tags_1919 import _aiff, _sound_chunk
     from core.tag_writer import read_file_tags
 
@@ -102,7 +103,7 @@ def test_aiff_library_preview_and_write(imported_conn, legacy_db, tmp_path, exte
     preview = retag.tag_preview(retag.track_contexts(imported_conn, [track_id]))
     assert not preview[0].get('error')
     assert preview[0]['has_changes'] is True
-    stats = retag.write_tags(legacy_db, [track_id], embed_cover=False)
+    stats = retag.write_tags(legacy_db, [track_id], embed_cover=False, options=options)
     assert stats['written'] == 1, stats
     assert stats['failed'] == 0
     tags = read_file_tags(str(path))

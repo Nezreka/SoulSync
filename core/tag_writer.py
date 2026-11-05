@@ -1,6 +1,8 @@
 """
-Tag Writer — reads current file tags and writes DB metadata into audio file tags.
-Supports MP3 and AIFF/AIF (ID3v2.4), FLAC, OGG Vorbis, and MP4/M4A.
+Read audio-file tags and write database metadata back to audio files.
+
+Supported formats are MP3, AIFF (.aiff and .aif), FLAC, Ogg Vorbis,
+Ogg Opus, and MP4/M4A. MP3 and AIFF files use ID3v2.4 tags.
 Reuses the same Mutagen patterns as _enhance_file_metadata in web_server.py.
 """
 
