@@ -272,8 +272,10 @@ export function VideoHero({
             {profileName ? (
               <>
                 <span className="hello-greet-lead">{lead}, </span>
-                <span className="hello-greet-name">{profileName}</span>
-                {question ? '?' : null}
+                <span className="hello-greet-name">
+                  {profileName}
+                  {question ? '?' : null}
+                </span>
               </>
             ) : (
               greeting

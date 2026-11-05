@@ -218,6 +218,25 @@ describe('the hello strip', () => {
     );
   });
 });
+describe('a late-night greeting', () => {
+  it('keeps its question mark on the name, not on a line of its own', async () => {
+    // the name is a block, so a ? after it wrapped under it ("up late,
+    // BoulderBadgeDad" then a lone "?")
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(2026, 10, 5, 2, 0, 0));
+    try {
+      window._currentProfileName = 'BoulderBadgeDad';
+      const view = await mountHeader();
+      const name = view.container.querySelector('.hello-greet-name')!;
+      expect(name.textContent).toBe('BoulderBadgeDad?');
+      view.unmount();
+    } finally {
+      delete window._currentProfileName;
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('state rendering', () => {
   it('writes the pill state class onto the button and the strings into the tooltip', async () => {
     const view = await mountHeader();
