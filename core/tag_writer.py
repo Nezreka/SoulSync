@@ -1,6 +1,8 @@
 """
-Tag Writer — reads current file tags and writes DB metadata into audio file tags.
-Supports MP3 (ID3v2.4), FLAC, OGG Vorbis, and MP4/M4A.
+Read audio-file tags and write database metadata back to audio files.
+
+Supported formats are MP3, AIFF (.aiff and .aif), FLAC, Ogg Vorbis,
+Ogg Opus, and MP4/M4A. MP3 and AIFF files use ID3v2.4 tags.
 Reuses the same Mutagen patterns as _enhance_file_metadata in web_server.py.
 """
 
@@ -21,11 +23,10 @@ from mutagen.apev2 import APEv2, APENoHeaderError
 logger = logging.getLogger("tag_writer")
 
 # Write support is deliberately narrower than read support.
-SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
-# read_file_tags also reads AIFF and WAV: their tags are plain ID3 (#1919,
-# #1920). writing
-# stays on SUPPORTED_EXTENSIONS.
-READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.aiff', '.aif', '.wav'}
+SUPPORTED_EXTENSIONS = {'.mp3', '.aiff', '.aif', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
+# WAV remains read-only; AIFF uses the existing ID3 writers and the shared
+# container-aware atomic save helper.
+READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.wav'}
 
 # File-field vocabulary shared by repairs. A selected-field write never
 # derives a second field (for example ALBUMARTIST) from an ARTIST change.
