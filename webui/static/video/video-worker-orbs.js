@@ -75,6 +75,10 @@
     let errorHeat = 0;           // 0..1 aggregate "stress" — bumps on real worker errors, decays over time
     let state = 'idle';
     let animFrame = null;
+    let intervalId = null;
+    // firefox throttles rAF to ~1fps on a canvas it thinks is covered, so it
+    // runs off a timer like the music orbs do
+    const _isFirefox = !!(window.CSS && CSS.supports && CSS.supports('-moz-appearance', 'none'));
     let onDashboard = false;
     let expandProgress = 0;
     let staggerTimers = [];
@@ -564,6 +568,11 @@
     })();
 
     function startLoop() {
+        if (_isFirefox) {
+            if (intervalId) return;
+            intervalId = setInterval(tick, 1000 / 60);
+            return;
+        }
         if (animFrame) return;
         tick();
     }
@@ -573,10 +582,16 @@
             cancelAnimationFrame(animFrame);
             animFrame = null;
         }
+        if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+        }
     }
 
     function tick() {
-        animFrame = requestAnimationFrame(tick);
+        if (!_isFirefox) {
+            animFrame = requestAnimationFrame(tick);
+        }
         if (!canvas || !ctx) return;
 
         // Yield the frame to active scrolling (orbs freeze, resume on idle).
@@ -587,6 +602,8 @@
         // difference is invisible, and the canvas GPU cost drops by two thirds
         // for the hours the dashboard sits idle. Wakes re-run every frame.
         if (sleepLevel > 0.95 && frameCount % 3 !== 0) return;
+        // reduce effects draws every other frame instead of turning them off
+        if (sleepLevel <= 0.95 && window._reduceEffectsActive && frameCount % 2 !== 0) return;
         const time = frameCount / 60;
         const w = canvas.width;
         const h = canvas.height;
@@ -1035,7 +1052,10 @@
     // ── Page awareness (video side) ──
 
     function isEnabled() {
-        return window._videoWorkerOrbsEnabled !== false && !window._reduceEffectsActive;
+        // the same switches as the music orbs: the worker orbs toggle and max
+        // performance. reduce effects used to turn these off outright, so with
+        // it on the music orbs ran and these never left the buttons
+        return window._workerOrbsEnabled !== false && !window._maxPerfActive;
     }
 
     function onVideoDashboard() {

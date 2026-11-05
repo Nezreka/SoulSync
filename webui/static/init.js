@@ -137,6 +137,8 @@ function applyWorkerOrbsSetting(enabled) {
             window.workerOrbs.setPage('_disabled');
         }
     }
+    // the video orbs read the same flag and decide for themselves
+    if (window.videoWorkerOrbs) window.videoWorkerOrbs.refresh();
 }
 
 function initAccentColorListeners() {
@@ -287,6 +289,7 @@ function applyMaxPerformance(enabled) {
             window.workerOrbs.setPage(activeId);
         }
     }
+    if (window.videoWorkerOrbs) window.videoWorkerOrbs.refresh();
     _syncMaxPerfDependentToggles(enabled);
 }
 
