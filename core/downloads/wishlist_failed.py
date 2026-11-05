@@ -21,6 +21,7 @@ from core.wishlist.processing import (
     record_failed_attempt as _record_failed_attempt,
     recover_uncaptured_failed_tracks as _recover_uncaptured_failed_tracks,
     remove_completed_tracks_from_wishlist as _remove_completed_tracks_from_wishlist,
+    resolve_failed_track_requeue_provenance as _resolve_failed_track_requeue_provenance,
     resolve_wishlist_source_type_for_batch as _resolve_wishlist_source_type_for_batch,
 )
 from core.wishlist.resolution import (
@@ -59,10 +60,14 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
     wishlist_added_count = 0
     error_count = 0
 
-    # Create source_context identical to sync.py
-    source_context = _build_wishlist_source_context(batch)
-    batch_source_type = _resolve_wishlist_source_type_for_batch(batch)
     owner_profile_id = batch.get('profile_id', 1)
+
+    # Build the batch-level pair once for the whole loop, so every
+    # track of the batch shares one source_context timestamp; the
+    # per-track resolver copies it before applying any track
+    # provenance. The pair is also the resolver's fail-safe fallback.
+    batch_source_context = _build_wishlist_source_context(batch)
+    batch_source_type = _resolve_wishlist_source_type_for_batch(batch)
 
     # Process each failed track (matching sync.py's loop) with safety limit
     max_failed_tracks = min(failed_count, 50)  # Safety limit on the expensive add
@@ -93,10 +98,28 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
 
             logger.error(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
 
+            # Per-track provenance beats the batch label: a playlist-origin
+            # track that failed inside a wishlist album batch must go back
+            # on the wishlist AS a playlist track, or its row loses the
+            # playlist it came from and a later success never re-syncs that
+            # playlist (#1981). Tracks without their own playlist
+            # provenance keep the batch-level pair.
+            try:
+                track_source_type, track_source_context = (
+                    _resolve_failed_track_requeue_provenance(
+                        batch, track_data, batch_context=batch_source_context))
+            except Exception as e:
+                # The resolver is provenance polish, not a gate: its
+                # failure must never skip the re-add or the attempt
+                # stamp below, so fall back to the precomputed
+                # batch-level pair (copied, like the resolver copies).
+                logger.exception(f"[Wishlist Processing] Provenance resolution failed for {track_name}, falling back to batch provenance: {e}")
+                track_source_type = batch_source_type
+                track_source_context = dict(batch_source_context)
             success = wishlist_service.add_failed_track_from_modal(
                 track_info=failed_track_info,
-                source_type=batch_source_type,
-                source_context=source_context,
+                source_type=track_source_type,
+                source_context=track_source_context,
                 profile_id=owner_profile_id,
             )
             # Count the attempt EITHER way — a fresh add becomes
