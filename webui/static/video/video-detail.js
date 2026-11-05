@@ -36,6 +36,11 @@
     var seasonView = 'rail';
     var menuOpen = false;
     var missingOnly = false;
+    // a viewing preference, kept per browser. specials stay in the data, the
+    // counts and the acquisition plan, they only leave the season nav (SeadogsBooty)
+    var SPECIALS_KEY = 'soulsync.video.hideSpecials';
+    var hideSpecials = false;
+    try { hideSpecials = localStorage.getItem(SPECIALS_KEY) === '1'; } catch (e) { hideSpecials = false; }
     var currentId = null;
     var currentKind = 'show';
     var currentSource = 'library';  // 'library' (video.db) or 'tmdb' (live preview)
@@ -77,6 +82,36 @@
     // Falls back to specials only when that's all there is.
     // Specials are extras: they go after the real seasons in every season nav
     // (the library tab already lists them last), not first at "0%".
+    // the seasons the nav shows. hiding specials never empties it: a show that
+    // only has specials keeps them
+    function navSeasons() {
+        var all = (data && data.seasons) || [];
+        if (!hideSpecials) return all;
+        var real = all.filter(function (s) { return s.season_number !== 0; });
+        return real.length ? real : all;
+    }
+    function hasHideableSpecials(d) {
+        var s = (d && d.seasons) || [];
+        return s.some(function (x) { return x.season_number === 0; })
+            && s.some(function (x) { return x.season_number !== 0; });
+    }
+    function syncSpecialsToggle(d) {
+        var b = q('[data-vd-specials-toggle]');
+        if (!b) return;
+        b.hidden = !(d && d.source !== 'youtube' && hasHideableSpecials(d));
+        b.classList.toggle('vd-missing-toggle--on', hideSpecials);
+        b.setAttribute('aria-pressed', hideSpecials ? 'true' : 'false');
+    }
+    function toggleSpecials() {
+        hideSpecials = !hideSpecials;
+        try { localStorage.setItem(SPECIALS_KEY, hideSpecials ? '1' : '0'); } catch (e) { /* private window */ }
+        syncSpecialsToggle(data);
+        if (hideSpecials && selectedSeason === 0 && data && hasHideableSpecials(data)) {
+            selectedSeason = defaultSeasonNum(navSeasons());
+            renderEpisodes();
+        }
+        renderSeasonNav();
+    }
     function specialsLast(seasons) {
         if (!seasons || !seasons.length) return seasons;
         return seasons.filter(function (s) { return s.season_number !== 0; })
@@ -2394,7 +2429,7 @@
     }
 
     function railHTML() {
-        return '<div class="vd-rail">' + data.seasons.map(function (s) {
+        return '<div class="vd-rail">' + navSeasons().map(function (s) {
             var art = seasonArt(s), p = pct(s);
             var on = s.season_number === selectedSeason ? ' vd-rcard--active' : '';
             // YouTube posters carry a lower-res fallback (maxres → original) so a
@@ -2417,8 +2452,8 @@
     }
 
     function timelineHTML() {
-        var total = data.seasons.reduce(function (a, s) { return a + Math.max(1, s.episode_total); }, 0) || 1;
-        return '<div class="vd-timeline">' + data.seasons.map(function (s) {
+        var total = navSeasons().reduce(function (a, s) { return a + Math.max(1, s.episode_total); }, 0) || 1;
+        return '<div class="vd-timeline">' + navSeasons().map(function (s) {
             var p = pct(s), grow = Math.max(1, s.episode_total);
             var on = s.season_number === selectedSeason ? ' vd-tseg--active' : '';
             return '<button class="vd-tseg' + on + '" type="button" data-vd-season="' + s.season_number + '" ' +
@@ -2430,7 +2465,7 @@
     }
 
     function pillsHTML() {
-        return '<div class="vd-pills">' + data.seasons.map(function (s) {
+        return '<div class="vd-pills">' + navSeasons().map(function (s) {
             var on = s.season_number === selectedSeason ? ' vd-pill-btn--active' : '';
             return '<button class="vd-pill-btn' + on + '" type="button" data-vd-season="' + s.season_number + '">' +
                 esc(s.title) + '<span class="vd-pill-meta">' + s.episode_owned + '/' + s.episode_total + '</span></button>';
@@ -2443,7 +2478,7 @@
             '<button class="vd-ss-btn" type="button" data-vd-ss-toggle>' +
             '<span>' + esc(cur ? cur.title : 'Season') + '</span><span class="vd-ss-caret">▾</span></button>' +
             '<div class="vd-ss-menu' + (menuOpen ? ' vd-ss-menu--open' : '') + '">' +
-            data.seasons.map(function (s) {
+            navSeasons().map(function (s) {
                 var on = s.season_number === selectedSeason ? ' vd-ss-opt--active' : '';
                 return '<button class="vd-ss-opt' + on + '" type="button" data-vd-season="' + s.season_number + '">' +
                     esc(s.title) + '<span class="vd-ss-opt-meta">' + s.episode_owned + '/' + s.episode_total + '</span></button>';
@@ -3263,8 +3298,10 @@
                 d.seasons = specialsLast(d.seasons);
                 data = d; menuOpen = false; missingOnly = false; restoreView();
                 selectedSeason = initialSeasonNum(d);
+                if (hideSpecials && selectedSeason === 0 && hasHideableSpecials(d)) selectedSeason = defaultSeasonNum(navSeasons());
                 var mt = q('[data-vd-missing-toggle]');
                 if (mt) { mt.hidden = !(d.seasons && d.seasons.length); mt.classList.remove('vd-missing-toggle--on'); }
+                syncSpecialsToggle(d);
                 renderBillboard(d);
                 renderFacts(null, [], []);
                 renderViewToggle(); renderSeasonNav(); ensureSeasonEpisodes();
@@ -3700,6 +3737,7 @@
                 selectedSeason = data.seasons.length ? data.seasons[0].season_number : null;
                 var mt = q('[data-vd-missing-toggle]');
                 if (mt) { mt.hidden = true; mt.classList.remove('vd-missing-toggle--on'); }   // n/a for channels
+                syncSpecialsToggle(null);
                 renderBillboard(data); renderViewToggle(); renderSeasonNav(); ensureSeasonEpisodes();
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
@@ -3754,6 +3792,7 @@
                 data = ytPlaylistToShow(resp); menuOpen = false; missingOnly = false;
                 selectedSeason = 1;
                 var mt = q('[data-vd-missing-toggle]'); if (mt) { mt.hidden = true; mt.classList.remove('vd-missing-toggle--on'); }
+                syncSpecialsToggle(null);
                 renderBillboard(data); renderViewToggle(); renderSeasonNav(); renderEpisodes();
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
@@ -4238,6 +4277,8 @@
         if (!e.target.closest('[data-vd-more]')) closeMoreMenu();   // click-away
         var mt = e.target.closest('[data-vd-missing-toggle]');
         if (mt && r.contains(mt)) { toggleMissing(); return; }
+        var sp = e.target.closest('[data-vd-specials-toggle]');
+        if (sp && r.contains(sp)) { toggleSpecials(); return; }
         if (menuOpen && !e.target.closest('[data-vd-season-nav]')) { menuOpen = false; renderSeasonNav(); }
     }
 

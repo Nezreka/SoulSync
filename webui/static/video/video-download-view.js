@@ -1316,7 +1316,9 @@
         eps.forEach(function (e) {
             var es = epState(e, st.today);
             st.epMeta[sn + '_' + e.episode_number] = { state: es };
-            if (es === 'missing') { missing++; st.sel.add(sn + '_' + e.episode_number); }
+            // specials start unticked: grabbing a whole show shouldn't pull in
+            // every extra and bonus clip. one click on the season ticks them (SeadogsBooty)
+            if (es === 'missing') { missing++; if (sn !== 0) st.sel.add(sn + '_' + e.episode_number); }
         });
         body.innerHTML = eps.map(function (e) { return epRowHTML(sn, e, st); }).join('');
         var meta = card.querySelector('[data-vdl-season-meta]');
