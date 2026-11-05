@@ -1040,17 +1040,20 @@
             : (r.format_score ? '<div class="vdl-r-formats"><span>Format score</span> ' +
                 (r.format_score > 0 ? '+' : '') + esc(r.format_score) + '</div>' : '');
         var isBest = i === 0 && r.accepted;
+        // the verdict is the short answer, the note says why, once. the verdict
+        // used to shout the whole reason in caps and the note repeat it
         var verdict = r.accepted
             ? '<span class="vdl-r-verdict vdl-r-verdict--ok">&#10003; MEETS PROFILE</span>'
-            : '<span class="vdl-r-verdict vdl-r-verdict--no" title="' + esc(r.rejected || '') + '">&#10007; ' + esc((r.rejected || 'FILTERED').toUpperCase()) + '</span>';
-        var note = !r.accepted && r.rejected
-            ? '<div class="vdl-r-note vdl-r-note--warn">Reason · ' + esc(r.rejected) + '</div>'
+            : '<span class="vdl-r-verdict vdl-r-verdict--no" title="' + esc(r.rejected || '') + '">&#10007; BELOW YOUR PROFILE</span>';
+        var why = r.rejected ? String(r.rejected) : '';
+        var note = !r.accepted && why
+            ? '<div class="vdl-r-note vdl-r-note--warn">' + esc(why.charAt(0).toUpperCase() + why.slice(1)) + '</div>'
             : (isBest ? '<div class="vdl-r-note vdl-r-note--best">Best ranked match for this source</div>' : '');
         // Manual pick = the user overrides the quality profile. Auto-grab still only
         // takes accepted releases; here we let them GET a below-profile one anyway.
         var grab = r.username
             ? '<button class="vdl-res-grab' + (r.accepted ? '' : ' vdl-res-grab--override') + '" type="button" data-vdl-grab="' + i +
-                '" title="' + (r.accepted ? 'Download this release' : 'Below your quality profile — download anyway') + '">[ GET ]</button>'
+                '" title="' + (r.accepted ? 'Download this release' : 'Below your quality profile — download anyway') + '">' + (r.accepted ? '[ GET ]' : '[ GET ANYWAY ]') + '</button>'
             : '';
         return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + (isBest ? ' vdl-res--best' : '') + '" data-vdl-card="' + i + '">' +
             '<div class="vdl-res-main">' +

@@ -143,3 +143,13 @@ def test_episode_grab_uses_the_shared_single_grab_path():
 def test_video_side_handles_navigate_event():
     assert "'soulsync:video-navigate'" in _SIDE
     assert 'navigate(pageId, undefined, job || undefined)' in _SIDE
+
+
+def test_a_rejected_release_says_why_once():
+    """the verdict shouted the whole reason in caps and the note under it said
+    the same thing again ("4K WEB-DL ISN'T IN YOUR ENABLED TIERS" then
+    "Reason · 4k web-dl isn't in your enabled tiers")."""
+    assert "&#10007; BELOW YOUR PROFILE" in _VIEW
+    assert "Reason · " not in _VIEW
+    assert "esc((r.rejected || 'FILTERED').toUpperCase())" not in _VIEW
+    assert "'[ GET ANYWAY ]'" in _VIEW
