@@ -145,17 +145,17 @@ export function CountTiles({
     <button
       key={key}
       type="button"
-      className={
-        attention ? `header-button dash-tile ${styles.tileAttention}` : 'header-button dash-tile'
-      }
+      className={`header-button dash-tile ${styles.tile}${attention ? ` ${styles.tileAttention}` : ''}`}
       onClick={() => goVideo(page)}
     >
-      <span className={count > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'}>{count}</span>
-      <span className="hero-btn-label">{label}</span>
+      <span className={`hero-btn-badge ${styles.tileBadge}${count > 0 ? ' has-items' : ''}`}>
+        {count}
+      </span>
+      <span className={`hero-btn-label ${styles.tileLabel}`}>{label}</span>
     </button>
   );
   return (
-    <div className={`header-quick-nav dash-tiles ${styles.tiles}`}>
+    <div className={`header-quick-nav dash-tiles ${styles.tiles}`} data-rail="tiles">
       {tile('watchlist', 'video-watchlist', watchlist ?? 0, 'On your watchlist')}
       {tile('wishlist', 'video-wishlist', wishlist ?? 0, 'On your wishlist')}
       {issues > 0

@@ -41,17 +41,17 @@ describe('the count tiles on a phone', () => {
   const phone = mediaBlock(css, 460);
 
   it('sit side by side, beating the music rule that stacks them', () => {
-    // the music rule is #dashboard-page .dash-tiles.header-quick-nav. a
-    // selector with fewer classes loses to it and the tiles stay one per row
-    expect(
-      rule(phone, ':global(#dashboard-page) .tiles:global(.dash-tiles.header-quick-nav)'),
-    ).toMatch(/grid-template-columns:\s*repeat\(auto-fit/);
+    // the music rule is #dashboard-page .dash-tiles.header-quick-nav (1,2,0).
+    // a selector that doesn't outrank it loses and the tiles stay one per row
+    expect(rule(phone, ':global(#dashboard-page) .tiles.tiles[data-rail]')).toMatch(
+      /grid-template-columns:\s*repeat\(auto-fit/,
+    );
   });
 
   it('let a label wrap instead of cutting it', () => {
-    expect(
-      rule(phone, ':global(#dashboard-page) .tiles :global(.dash-tile .hero-btn-label)'),
-    ).toMatch(/white-space:\s*normal/);
+    expect(rule(phone, ':global(#dashboard-page) .tiles[data-rail] .tileLabel.tileLabel')).toMatch(
+      /white-space:\s*normal/,
+    );
   });
 
   it('keeps the studio button on one line', () => {
