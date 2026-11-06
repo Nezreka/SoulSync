@@ -281,6 +281,11 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_type ON lib2_albums(album_type)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_legacy ON lib2_albums(legacy_album_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_origin ON lib2_albums(origin)",
+    # imports on the soulsync media server look the album up by these, once
+    # per track inside the import transaction (album_grouping, side_effects):
+    # unindexed that was a full table scan per downloaded track
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_server ON lib2_albums(server_source, server_id)",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_spotify ON lib2_albums(spotify_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_album_artists_artist ON lib2_album_artists(artist_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_album ON lib2_tracks(album_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_isrc ON lib2_tracks(isrc)",

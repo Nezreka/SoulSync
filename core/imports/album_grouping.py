@@ -102,8 +102,9 @@ def find_existing_soulsync_album_id(
     where, params = None, (album_source_id,)
     if album_source_id and provider:
         if provider in ('spotify', 'musicbrainz'):
-            column = 'spotify_id' if provider == 'spotify' else 'musicbrainz_id'
-            where = f"{column} = ?"
+            # musicbrainz through LOWER(): lib2_albums only indexes that form
+            where = ("spotify_id = ?" if provider == 'spotify'
+                     else "LOWER(musicbrainz_id) = LOWER(?)")
         else:
             # the indexed form (idx_lib2_albums_ext_*): the bare json_extract
             # parsed all 72k albums on every miss (~190ms an import)
