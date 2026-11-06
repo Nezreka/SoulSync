@@ -8800,7 +8800,7 @@ class MusicDatabase:
             from core.library2.track_files import track_id_for_path
 
             conn = self._get_connection()
-            track_id = track_id_for_path(conn, file_path)
+            track_id = track_id_for_path(conn, file_path, scoped=True)
             return str(track_id) if track_id is not None else None
         except Exception as e:
             logger.error(f"find_track_id_by_file_path error: {e}")

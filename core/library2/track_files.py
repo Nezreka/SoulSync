@@ -299,7 +299,7 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
     return True
 
 
-def track_id_for_path(conn, file_path: Any) -> Optional[int]:
+def track_id_for_path(conn, file_path: Any, *, scoped: bool = False) -> Optional[int]:
     """The catalogue track that owns a file path, or ``None``.
 
     Exact path first, then the basename — a media server and SoulSync often
@@ -310,14 +310,21 @@ def track_id_for_path(conn, file_path: Any) -> Optional[int]:
 
     Live files win over deleted ones: a deleted row is history (ADR-03) and
     must not out-vote the file that actually sits at that path today.
+
+    ``scoped`` keeps it to the asking profile's library, the way 3.6.1's
+    lookup was: a basename guess must never land in someone else's files.
     """
     file_path = str(file_path or "")
     if not file_path:
         return None
+    owner = ""
+    if scoped:
+        from core.library2.sql_util import owner_clause
+        owner = owner_clause(column="owner_profile_id")
     row = conn.execute(
         f"SELECT track_id FROM lib2_track_files"
         f" WHERE path = ? AND track_id IS NOT NULL"
-        f" AND COALESCE(file_state,'active') <> 'deleted'"
+        f" AND COALESCE(file_state,'active') <> 'deleted'{owner}"
         f" ORDER BY {primary_order()} LIMIT 1", (file_path,)).fetchone()
     if row:
         return int(row[0])
@@ -330,7 +337,7 @@ def track_id_for_path(conn, file_path: Any) -> Optional[int]:
         " WHERE track_id IS NOT NULL"
         "   AND COALESCE(file_state,'active') <> 'deleted'"
         "   AND (path LIKE ? ESCAPE '^' OR path LIKE ? ESCAPE '^')"
-        " LIMIT 2", (f"%/{escaped}", f"%\\{escaped}")).fetchall()
+        f"{owner} LIMIT 2", (f"%/{escaped}", f"%\\{escaped}")).fetchall()
     return int(rows[0][0]) if len(rows) == 1 else None
 
 

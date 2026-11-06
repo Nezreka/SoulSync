@@ -114,3 +114,26 @@ def test_unknown_and_empty_paths_return_none(imported_conn):
     assert track_id_for_path(conn, '/library/A/nope.flac') is None
     assert track_id_for_path(conn, '') is None
     assert track_id_for_path(conn, None) is None
+
+
+def test_scoped_lookup_stays_in_the_asking_profiles_library(imported_conn, monkeypatch):
+    """3.6.1 scoped this to the caller's library. a basename guess must not
+    hand profile 7 a track that only exists in profile 9's folder."""
+    from core import library_scope
+    conn = imported_conn
+    mine = _seed_track(conn, 'Mine')
+    theirs = _seed_track(conn, 'Theirs')
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, owner_profile_id) VALUES(?,?,7)",
+                 (mine, '/p7/Artist/Album/01 - Mine.flac'))
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, owner_profile_id) VALUES(?,?,9)",
+                 (theirs, '/p9/Artist/Album/02 - Theirs.flac'))
+    monkeypatch.setattr(library_scope, "any_own_library_exists", lambda: True)
+    token = library_scope.set_library_scope(7)
+    try:
+        assert track_id_for_path(conn, '/srv/Album/02 - Theirs.flac', scoped=True) is None
+        assert track_id_for_path(conn, '/p9/Artist/Album/02 - Theirs.flac', scoped=True) is None
+        assert track_id_for_path(conn, '/srv/Album/01 - Mine.flac', scoped=True) == mine
+        # unscoped callers (download recorder, publish) still see every library
+        assert track_id_for_path(conn, '/srv/Album/02 - Theirs.flac') == theirs
+    finally:
+        library_scope.reset_library_scope(token)
