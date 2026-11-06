@@ -13,7 +13,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -287,6 +287,33 @@ class ImageCache:
 
     def get_url(self, url: str) -> CachedImage:
         return self._healing(lambda: self._get_url(url))
+
+    def original_urls_for(self, keys) -> Dict[str, str]:
+        """The original url behind each key the cache still knows, unsent
+        registrations included. A key it has forgotten is left out."""
+        wanted = {str(k) for k in keys or () if k}
+        found: Dict[str, str] = {}
+        if not wanted:
+            return found
+        with self._pending_touches_lock:
+            for key in wanted:
+                pending = self._pending_registrations.get(key)
+                if pending and pending[0]:
+                    found[key] = str(pending[0])
+        rest = [k for k in wanted if k not in found]
+        try:
+            with self._db() as conn:
+                for start in range(0, len(rest), 500):
+                    chunk = rest[start:start + 500]
+                    marks = ",".join("?" for _ in chunk)
+                    for row in conn.execute(
+                            f"SELECT key, original_url FROM image_cache WHERE key IN ({marks})",
+                            chunk):
+                        if row["original_url"]:
+                            found[row["key"]] = str(row["original_url"])
+        except Exception as exc:
+            logger.debug("original url lookup failed: %s", exc)
+        return found
 
     def get_original_url(self, key: str) -> Optional[str]:
         """Look up the original registered URL for a cache key (or variant key),
@@ -1159,6 +1186,32 @@ def thumbnails_enabled() -> bool:
     down everyone who is already benefiting from it. This flag gates only the
     new work: decoding and re-encoding every image the browser asks for."""
     return config_manager.get("image_cache.thumbnails", False) is True
+
+
+def cache_key_of(url: str | None) -> Optional[str]:
+    """The cache key in a ``/api/image-cache/<key>`` link, else None."""
+    match = re.match(r"^/api/image-cache/([a-f0-9]{64})(?:[?#].*)?$", str(url or ""))
+    return match.group(1) if match else None
+
+
+def durable_image_url(url: str | None) -> str | None:
+    """The url to SAVE for an image: never a cache link.
+
+    a cache link only lives as long as its cache entry. entries expire after
+    30 days and the prune drops them, original url and all, so a saved link
+    goes dead for good (the discover hero went blank on Nov 5 when 14k
+    expired at once). save the original and let readers cache it again. a
+    link whose original the cache has forgotten is None, so the row gets a
+    fresh image instead of keeping a dead one.
+    """
+    key = cache_key_of(url)
+    if not key:
+        return url
+    try:
+        return get_image_cache().original_urls_for([key]).get(key)
+    except Exception as exc:
+        logger.debug("durable image url lookup failed: %s", exc)
+        return url
 
 
 def cached_image_url(url: str | None) -> str | None:

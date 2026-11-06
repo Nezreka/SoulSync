@@ -678,6 +678,18 @@ def _register_py_lower(conn) -> None:
     python's lower() does. register it per connection for the name lookups."""
     conn.create_function("PY_LOWER", 1, lambda v: v.lower() if isinstance(v, str) else v, deterministic=True)
 
+def _durable_image_url(url):
+    """never save an image cache link, see core.image_cache.durable_image_url."""
+    if not url or not str(url).startswith('/api/image-cache/'):
+        return url
+    try:
+        from core.image_cache import durable_image_url
+        return durable_image_url(url)
+    except Exception as exc:
+        logger.debug("durable image url failed: %s", exc)
+        return url
+
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -2139,6 +2151,7 @@ class MusicDatabase:
             except Exception as e:
                 logger.error(f"lidarr_compat schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
+            self._similar_artist_images_durable(cursor)
             self._purge_beatport_positional_matches(cursor)
             self._purge_fake_provider_ids(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
@@ -2251,6 +2264,7 @@ class MusicDatabase:
         'sample_stash_v1':            ('table', 'sample_stash'),
         'sample_stems_v1':            ('table', 'sample_stems'),
         'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
+        'similar_artist_images_durable': ('table', '_similar_artist_images_durable'),
         'beatport_positional_purged': ('table', '_beatport_positional_purged'),
         'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
     }
@@ -4421,6 +4435,47 @@ class MusicDatabase:
             logger.info("similar artists rematch: requeued %s library artists", requeued)
         except Exception as e:
             logger.error(f"Error requeueing similar artists rematch: {e}")
+
+    def _similar_artist_images_durable(self, cursor):
+        """one-time: similar artists saved image cache links, and a cache
+        link dies with its cache entry (30 days, then the prune drops it).
+        14k expired on Nov 5 and the discover hero went blank. swap each
+        link for the original url the cache still knows, and clear the dead
+        ones so the hero and the enrichment fetch a fresh image."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                           "AND name='_similar_artist_images_durable'")
+            if cursor.fetchone():
+                return
+            if not cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                                  "AND name='similar_artists'").fetchone():
+                return
+            links = [r[0] for r in cursor.execute(
+                "SELECT DISTINCT image_url FROM similar_artists "
+                "WHERE image_url LIKE '/api/image-cache/%'").fetchall()]
+            restored = cleared = 0
+            if links:
+                from core.image_cache import cache_key_of, get_image_cache
+                keys = {link: cache_key_of(link) for link in links}
+                originals = get_image_cache().original_urls_for(
+                    [k for k in keys.values() if k])
+                updates = []
+                for link, key in keys.items():
+                    original = originals.get(key) if key else None
+                    updates.append((original, link))
+                    if original:
+                        restored += 1
+                    else:
+                        cleared += 1
+                cursor.executemany(
+                    "UPDATE similar_artists SET image_url = ? WHERE image_url = ?", updates)
+            cursor.execute("CREATE TABLE _similar_artist_images_durable "
+                           "(applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'similar_artist_images_durable')
+            logger.info("similar artist images: %d cache links restored to their source, "
+                        "%d dead ones cleared", restored, cleared)
+        except Exception as e:
+            logger.error(f"Error making similar artist images durable: {e}")
 
     def _add_similar_artists_last_featured_column(self, cursor):
         """Add last_featured column to similar_artists for hero slider cycling"""
@@ -18982,6 +19037,7 @@ class MusicDatabase:
                 "Refusing similar artists for %r: a context placeholder is not an artist id",
                 source_artist_id)
             return False
+        image_url = _durable_image_url(image_url)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -19057,7 +19113,7 @@ class MusicDatabase:
                 for row in rows:
                     name = row['similar_artist_name']
                     genres = row.get('genres')
-                    image_url = row.get('image_url')
+                    image_url = _durable_image_url(row.get('image_url'))
                     cursor.execute("""
                         INSERT INTO similar_artists
                         (source_artist_id, similar_artist_spotify_id, similar_artist_itunes_id,
@@ -19211,6 +19267,7 @@ class MusicDatabase:
     def update_similar_artist_metadata(self, similar_artist_id: int, image_url: str = None,
                                         genres: list = None, popularity: int = None) -> bool:
         """Cache artist metadata (image, genres, popularity) to avoid repeated API calls"""
+        image_url = _durable_image_url(image_url)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -19230,6 +19287,7 @@ class MusicDatabase:
                                                        image_url: str = None, genres: list = None,
                                                        popularity: int = None) -> bool:
         """Cache artist metadata by external source ID (updates all rows for that artist)."""
+        image_url = _durable_image_url(image_url)
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
