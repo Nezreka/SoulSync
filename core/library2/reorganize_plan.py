@@ -360,6 +360,21 @@ def plan_album_reorganize(
         conn, album_row["primary_artist_id"], album_row["artist_name"]
     ) or "Unknown Artist"
 
+    # 3.6.1 refused an album with placeholder metadata: a scan of untagged
+    # files reads "Unknown Artist", and an old import titled the album with
+    # its provider id. reorganizing either moves a hand-sorted folder into
+    # "Unknown Artist/" or "Artist/1234567890/". say what to run instead.
+    from core.library_reorganize import _is_unknown_artist
+    _title = str(album_title or "").strip()
+    if (_is_unknown_artist(album_row["artist_name"]) or _is_unknown_artist(artist_name)
+            or (len(_title) >= 6 and _title.isdigit())):
+        return {"success": False, "status": "placeholder_metadata",
+                "source": None, "album": album_title, "artist": artist_name,
+                "transfer_dir": transfer_dir, "tracks": [],
+                "error": ("Album has placeholder metadata (Unknown Artist or numeric "
+                          "title). Run the 'Fix Unknown Artists' repair job to recover "
+                          "the real artist and album from the file tags before reorganize.")}
+
     all_rows = _track_rows(conn, album_id)
     from core.library2.retag import track_contexts
     references = {r['id']: r['db_data'] for r in track_contexts(conn, [r['id'] for r in all_rows])}

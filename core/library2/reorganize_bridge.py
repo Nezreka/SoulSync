@@ -101,6 +101,9 @@ def preview_album_reorganize(db: Any, config_manager: Any, lib2_album_id: int) -
         raise ReorganizeBridgeError("Album not found", status=404)
     if result.get("status") == "no_tracks":
         raise ReorganizeBridgeError("No tracks found for this album", status=404)
+    if result.get("status") == "placeholder_metadata":
+        raise ReorganizeBridgeError(result.get("error") or "Album has placeholder metadata",
+                                    status=409)
     return result
 
 

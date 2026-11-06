@@ -675,3 +675,28 @@ def test_reorganize_files_explicit_and_artist_identity_like_the_download(importe
     assert context["track_info"]["explicit"] is True
     assert context["spotify_album"]["explicit"] is True
     assert context["spotify_artist"]["musicbrainz_id"] == "mb-drake"
+
+
+def test_reorganize_refuses_an_unknown_artist_album(imported_conn):
+    """3.6.1 refused placeholder metadata and pointed at Fix Unknown Artists.
+    planning it moved a hand-sorted folder into 'Unknown Artist/'."""
+    conn = imported_conn
+    artist_id, album_id, _ = _seed(conn, album_title="OK Computer")
+    conn.execute("UPDATE lib2_artists SET name='Unknown Artist' WHERE id=?", (artist_id,))
+    conn.commit()
+    build, seen = _recorder()
+
+    plan = _plan(conn, album_id, build)
+
+    assert plan["status"] == "placeholder_metadata"
+    assert "Fix Unknown Artists" in plan["error"]
+    assert seen == []
+
+
+def test_reorganize_refuses_an_album_titled_with_an_id(imported_conn):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, album_title="1234567890")
+    build, seen = _recorder()
+
+    assert _plan(conn, album_id, build)["status"] == "placeholder_metadata"
+    assert seen == []
