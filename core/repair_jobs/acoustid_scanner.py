@@ -320,7 +320,8 @@ class AcoustIDScannerJob(RepairJob):
 
             try:
                 status = self._scan_file(
-                    resolved, track_id, track_info, acoustid_client, context, result,
+                    resolved, track_info.get("entity_id") or track_id, track_info,
+                    acoustid_client, context, result,
                     fp_threshold, title_threshold, artist_threshold
                 )
                 if status == 'abort_invalid_key':
@@ -889,12 +890,19 @@ class AcoustIDScannerJob(RepairJob):
     def _load_db_tracks(self, context: JobContext) -> dict:
         tracks: Dict[str, Dict[str, Any]] = {}
         try:
+            # every file of a track, as 3.6.1 fingerprinted every file row: a
+            # wrong download in a second copy (another library's, a kept
+            # format twin) is a finding too. a lossy copy soulsync made from
+            # one of these files is that file's audio, so it is skipped.
             for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
-                key = f"lib2:{subject['track_id']}"
-                current = tracks.get(key)
-                if current is not None and not subject.get("is_primary"):
+                if subject.get("derived_from_file_id"):
+                    continue
+                entity = f"lib2:{subject['track_id']}"
+                key = entity if subject.get("is_primary") else f"{entity}#{int(subject['file_id'])}"
+                if key in tracks:
                     continue
                 tracks[key] = {
+                    "entity_id": entity,
                     "title": subject.get("title") or "",
                     "artist": subject.get("artist_name") or "",
                     "file_path": str(subject["path"]),
@@ -973,9 +981,9 @@ class AcoustIDScannerJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         try:
             return len({
-                int(subject["track_id"])
+                int(subject["file_id"])
                 for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
-                if subject.get("is_primary")
+                if not subject.get("derived_from_file_id")
             })
         except Exception:
             return 0
