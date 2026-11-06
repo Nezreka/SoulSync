@@ -643,6 +643,23 @@ def _display_relative_to_root(path, root):
     return path
 
 
+def _relative_through_another_mount(resolved, transfer_dir):
+    """The file's path inside the output folder when ``resolved`` reaches it
+    through a second mount of that folder, else None.
+
+    Storm mounts one music folder twice, as /app/Transfer (the output folder)
+    and /music (what navidrome reports). a track filed from navidrome's path
+    showed as '/music/x/y/z.mp3' beside 'x/y/z.mp3' in the preview, the same
+    file under two names. Match the path's tail inside the output folder and
+    keep it only when it's the same physical file."""
+    parts = [p for p in os.path.normpath(str(resolved)).replace('\\', '/').split('/') if p]
+    for start in range(1, len(parts)):
+        candidate = os.path.join(transfer_dir, *parts[start:])
+        if os.path.exists(candidate) and _same_physical_file(resolved, candidate):
+            return os.path.join(*parts[start:])
+    return None
+
+
 def _trim_to_transfer(db_path, resolved, transfer_dir):
     """Compose the user-facing 'current path' string — relative to the
     transfer dir if the file lives there, else the raw DB value."""
@@ -650,6 +667,12 @@ def _trim_to_transfer(db_path, resolved, transfer_dir):
         trimmed = _display_relative_to_root(resolved, transfer_dir)
         if trimmed != resolved:
             return trimmed
+        try:
+            through = _relative_through_another_mount(resolved, transfer_dir)
+        except OSError:
+            through = None
+        if through:
+            return through
     return db_path or 'No file'
 
 
