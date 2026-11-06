@@ -690,6 +690,44 @@ def _durable_image_url(url):
         return url
 
 
+def _refreshed_wishlist_json(existing: Any, incoming_json: str) -> str:
+    """the refreshed row: the new payload, with every field it leaves empty
+    filled from the old one (the album's too).
+
+    the library v2 mirror refreshes a row it shares with a provider add (search,
+    playlist sync, watchlist scan). it replaced the whole payload, so what only
+    the provider knew (its album id and links, a release date, the album's
+    artists) was gone before the download read it.
+    """
+    try:
+        incoming = json.loads(incoming_json)
+    except (TypeError, ValueError):
+        return incoming_json
+    if not isinstance(incoming, dict) or not isinstance(existing, dict):
+        return incoming_json
+
+    def _blank(value):
+        return value is None or value == "" or value == [] or value == {}
+
+    merged = dict(incoming)
+    for key, value in existing.items():
+        if key == "album":
+            continue
+        if key not in merged or _blank(merged.get(key)):
+            if not _blank(value):
+                merged[key] = value
+    old_album, new_album = existing.get("album"), incoming.get("album")
+    if isinstance(old_album, dict) and isinstance(new_album, dict):
+        album = dict(new_album)
+        for key, value in old_album.items():
+            if (key not in album or _blank(album.get(key))) and not _blank(value):
+                album[key] = value
+        merged["album"] = album
+    elif _blank(new_album) and not _blank(old_album):
+        merged["album"] = old_album
+    return json.dumps(merged)
+
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -16008,7 +16046,10 @@ class MusicDatabase:
                                     updates = [
                                         "spotify_data = ?", "failure_reason = ?",
                                     ]
-                                    params: List[Any] = [spotify_json, failure_reason]
+                                    params: List[Any] = [
+                                        _refreshed_wishlist_json(existing_data, spotify_json),
+                                        failure_reason,
+                                    ]
                                     if source_info:
                                         updates.append("source_info = ?")
                                         params.append(source_json)
@@ -16054,7 +16095,7 @@ class MusicDatabase:
                     track_id, album_id, allow_duplicates=allow_duplicates) or track_id
 
                 existing = cursor.execute(
-                    "SELECT id, source_type FROM wishlist_tracks "
+                    "SELECT id, source_type, spotify_data FROM wishlist_tracks "
                     "WHERE spotify_track_id=? AND profile_id=?",
                     (insert_track_id, profile_id),
                 ).fetchone()
@@ -16100,8 +16141,12 @@ class MusicDatabase:
                         source_info = {**(source_info if isinstance(source_info, dict) else {}),
                                        'merged_wishlist_sources': previous_info['merged_wishlist_sources']}
                         source_json = json.dumps(source_info)
+                    try:
+                        _existing_payload = json.loads(existing['spotify_data'] or '{}')
+                    except (TypeError, ValueError, KeyError, IndexError):
+                        _existing_payload = {}
                     updates = ["spotify_data = ?"]
-                    params: List[Any] = [spotify_json]
+                    params: List[Any] = [_refreshed_wishlist_json(_existing_payload, spotify_json)]
                     if quality_profile_id is not None and resolved_qp_id is not None:
                         updates.append("quality_profile_id = ?")
                         params.append(resolved_qp_id)
