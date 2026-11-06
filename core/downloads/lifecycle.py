@@ -1141,7 +1141,13 @@ def _on_download_completed(batch_id: str, task_id: str, success: bool, deps: Lif
                     # a failed download keeps the task's own reason (tidal said no,
                     # the transfer stalled, ...). a bare 'Download failed' left the
                     # wishlist saying "keeps failing" with nothing to go on.
-                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else ('No matching track found' if task_status == 'not_found' else (task.get('error_message') or 'Download failed')),
+                    # a not found used to store a bare 'No matching track found',
+                    # so the wishlist couldn't say which searches ran or what they
+                    # turned up (#1981). the task's own words follow it now. the
+                    # prefix stays, the wishlist files rows by it
+                    'failure_reason': 'Download cancelled' if task_status == 'cancelled' else (
+                        ('No matching track found' + (f". {task['error_message']}" if task.get('error_message') else ''))
+                        if task_status == 'not_found' else (task.get('error_message') or 'Download failed')),
                     'candidates': task.get('cached_candidates', []),  # Include search results if available
                 }
 

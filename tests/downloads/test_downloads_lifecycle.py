@@ -289,8 +289,11 @@ def test_on_complete_failed_task_hands_the_wishlist_its_real_reason():
     assert _failed_reason('failed', why) == why
     assert _failed_reason('failed') == 'Download failed'
     assert _failed_reason('failed', '') == 'Download failed'
-    # not_found keeps the fixed text the wishlist page reads as "no match"
-    assert _failed_reason('not_found', 'No match found for "x" after 3 queries') == 'No matching track found'
+    # not_found leads with the fixed text the wishlist page files as "no
+    # match", then says which searches ran (#1981)
+    assert _failed_reason('not_found', 'No match found for "x" after 3 queries') == (
+        'No matching track found. No match found for "x" after 3 queries')
+    assert _failed_reason('not_found') == 'No matching track found'
 
 
 def test_on_complete_cancelled_task_added_to_cancelled_tracks():
