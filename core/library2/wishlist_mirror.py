@@ -112,6 +112,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         """SELECT t.id AS track_id, t.spotify_id, t.musicbrainz_id,
                   t.external_ids, t.isrc, t.title, t.track_number,
                   t.disc_number, t.duration, t.explicit AS track_explicit,
+                  t.recording_disambiguation,
                   al.explicit AS album_explicit,
                   al.id AS album_id, al.title album_title,
                   al.image_url album_image_url,
@@ -260,6 +261,13 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         "disc_number": t["disc_number"],
         "duration_ms": t["duration"] or 0,
         "explicit": _explicit(t["track_explicit"]),
+        # the recording comment ("acoustic", "live") a single's filename
+        # carries (#1536), and the recording's own ids for the match checks
+        **{key: value for key, value in (
+            ("disambiguation", str(t["recording_disambiguation"] or "").strip()),
+            ("musicbrainz_recording_id", str(t["musicbrainz_id"] or "").strip()),
+            ("isrc", str(t["isrc"] or "").strip()),
+        ) if value},
         "quality_profile_id": profile_info["id"],
         "quality_profile": profile_info,
         "_album_type": t["album_type"],

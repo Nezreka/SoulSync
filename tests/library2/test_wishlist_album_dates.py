@@ -126,3 +126,16 @@ def test_the_mirrored_album_carries_its_release_identity(imported_conn):
     assert album["musicbrainz_release_id"] == release
     assert album["disambiguation"] == "deluxe"
     assert album["total_discs"] == 2
+
+
+def test_the_mirrored_track_carries_its_recording_identity(imported_conn):
+    """#1536 puts the recording comment on a single's filename; the match
+    checks read the recording id and isrc."""
+    _album_id, track_id = _views(imported_conn)
+    imported_conn.execute(
+        "UPDATE lib2_tracks SET musicbrainz_id='rec-1', isrc='USUM71601014', "
+        "recording_disambiguation='acoustic' WHERE id=?", (track_id,))
+    payload = track_wishlist_payload(imported_conn, track_id)
+    assert payload["disambiguation"] == "acoustic"
+    assert payload["musicbrainz_recording_id"] == "rec-1"
+    assert payload["isrc"] == "USUM71601014"
