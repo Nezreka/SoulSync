@@ -10,7 +10,7 @@
   align-items: flex-end;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 .topText {
   flex: 1 1 320px;
@@ -18,34 +18,16 @@
 }
 .title {
   margin: 0;
-  font-size: 40px;
+  font-size: 48px;
   font-weight: 800;
   letter-spacing: -0.035em;
   line-height: 1.05;
   color: var(--text-1);
 }
 .sub {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--text-2);
-  font-size: 14px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-.sub b {
-  color: var(--text-1);
-  font-weight: 600;
-}
-.subDot {
-  color: var(--white-a30);
-}
-.subLive {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--accent-light);
-  font-weight: 600;
+  font-size: 15px;
 }
 .topActions {
   display: flex;
@@ -74,10 +56,10 @@
 }
 .cta {
   height: 44px;
-  padding: 0 20px 0 16px;
+  padding: 0 22px 0 18px;
   border-radius: var(--radius-pill);
   border: 0;
-  background: var(--text-1);
+  background: var(--accent-light);
   color: var(--bg-primary);
   font: inherit;
   font-weight: 700;
@@ -96,10 +78,6 @@
   opacity: 0.55;
   cursor: not-allowed;
   transform: none;
-}
-.ctaDanger {
-  background: var(--danger-soft);
-  color: var(--black-a90);
 }
 .ghost {
   height: 44px;
@@ -128,6 +106,29 @@
   height: 36px;
   padding: 0 16px;
 }
+.tools {
+  height: 44px;
+  padding: 0 14px;
+  border-radius: var(--radius-pill);
+  border: 0;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.tools:hover,
+.tools[aria-expanded='true'] {
+  color: var(--text-1);
+  background: var(--white-a08);
+}
 .toolItem {
   display: flex;
   flex-direction: column;
@@ -141,6 +142,11 @@
 .toolDesc {
   font-size: 12.5px;
   color: var(--text-3);
+}
+
+/* the old stylesheet's scope for the panel and modals, with no box of its own */
+.legacyScope.legacyScope {
+  display: contents;
 }
 
 /* ---------- section pills ---------- */
@@ -191,52 +197,94 @@
   color: var(--black-a60);
 }
 
-/* ---------- the finished-scan row ---------- */
-.scanRow {
-  margin-top: 20px;
-  padding: 14px 18px;
-  border-radius: var(--radius-card);
-  background: var(--white-a04);
+/* ---------- where the watchlist stands ---------- */
+.status {
+  margin-top: 28px;
+  padding: 20px 24px;
+  border-radius: var(--radius-sheet);
+  background: var(--white-a06);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
-.scanRowHead {
+.statusMain {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px 20px;
   flex-wrap: wrap;
 }
-.scanRowText {
-  flex: 1 1 260px;
-  min-width: 0;
+.statusIcon {
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border-radius: var(--radius-circle);
+  background: var(--white-a08);
   color: var(--text-2);
-  font-size: 14px;
+  display: grid;
+  place-items: center;
 }
-.scanRowText b {
-  color: var(--text-1);
-  font-weight: 700;
+.statusIconOn {
+  background: rgba(var(--accent-rgb), 0.16);
+  color: var(--accent-light);
 }
-.scanStats {
+.statusText {
+  flex: 1 1 320px;
+  min-width: 0;
   display: flex;
-  gap: 18px;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+  color: var(--text-2);
+}
+.statusText b {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.statusSide {
+  display: flex;
+  align-items: center;
+  gap: 12px 24px;
   flex-wrap: wrap;
-  font-size: 13px;
+}
+.statusNext {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 15px;
+  color: var(--text-1);
+}
+.statusNext span {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-3);
 }
-.scanStats b {
+.statusBtn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--radius-pill);
+  border: 0;
+  background: var(--white-a10);
   color: var(--text-1);
-  font-weight: 700;
-  margin-right: 4px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.statusBtn:hover {
+  background: var(--white-a14);
 }
 
 /* ---------- the live deck ---------- */
 .deck {
-  margin-top: 20px;
-  padding: 20px;
+  margin-top: 28px;
+  padding: 24px;
   border-radius: var(--radius-sheet);
-  background: var(--bg-surface);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.28);
+  background: var(--white-a06);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -435,7 +483,7 @@
 
 /* ---------- sections ---------- */
 .sect {
-  margin-top: 32px;
+  margin-top: 44px;
 }
 .sectHead {
   display: flex;
@@ -447,6 +495,10 @@
 .sectHeadText {
   flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
 }
 .sectTitle {
   margin: 0;
@@ -455,7 +507,12 @@
   letter-spacing: -0.025em;
   color: var(--text-1);
 }
+.sectCount {
+  font-size: 15px;
+  color: var(--text-3);
+}
 .sectSub {
+  flex-basis: 100%;
   margin: 4px 0 0;
   color: var(--text-2);
   font-size: 14px;
@@ -493,6 +550,65 @@
 .release:focus-visible {
   outline: 2px solid var(--text-1);
   outline-offset: -2px;
+}
+.releaseHit {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.releaseHit:focus-visible {
+  outline: 2px solid var(--text-1);
+  outline-offset: 4px;
+  border-radius: var(--radius-md);
+}
+.releasePlay {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-circle);
+  background: var(--accent-light);
+  color: var(--bg-primary);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 8px 20px var(--black-a50);
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+}
+.release:hover .releasePlay,
+.releaseHit:focus-visible .releasePlay {
+  opacity: 1;
+  transform: none;
+}
+.metaLink {
+  display: block;
+  max-width: 100%;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.metaLink:hover {
+  color: var(--text-1);
+  text-decoration: underline;
 }
 .releaseArt {
   position: relative;
@@ -537,6 +653,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.metaNew {
+  margin-top: 3px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-light);
+}
 .quiet {
   margin-top: 3px;
   font-size: 13px;
@@ -553,9 +675,9 @@
 .bar2 {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin: 16px 0 4px;
+  margin: 4px 0 16px;
 }
 .grow {
   flex: 1;
@@ -619,19 +741,41 @@
   margin: 0;
   accent-color: var(--accent-light);
 }
-.chipClear {
-  height: 36px;
-  padding: 0 10px 0 14px;
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chip {
+  height: 32px;
+  padding: 0 14px;
   border-radius: var(--radius-pill);
-  border: 1px solid rgba(var(--warning-strong-rgb), 0.45);
-  background: rgba(var(--warning-strong-rgb), 0.1);
-  color: var(--warning-strong);
+  border: 0;
+  background: var(--white-a08);
+  color: var(--text-1);
   font: inherit;
+  font-size: 13px;
   font-weight: 600;
   display: inline-flex;
-  gap: 6px;
   align-items: center;
+  gap: 6px;
   cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.chip:hover {
+  background: var(--white-a12);
+}
+.chipOn,
+.chipOn:hover {
+  background: var(--text-1);
+  color: var(--bg-primary);
+}
+.chipCount {
+  color: var(--text-3);
+}
+.chipOn .chipCount {
+  color: var(--black-a60);
 }
 .anchor {
   position: relative;
@@ -690,10 +834,6 @@
 .menuItemDanger {
   color: var(--danger-soft);
 }
-.menuCount {
-  color: var(--text-3);
-  font-size: 13px;
-}
 .menuSep {
   height: 1px;
   background: var(--white-a08);
@@ -726,16 +866,16 @@
 /* ---------- the artist roster ---------- */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
-  gap: 4px;
+  grid-template-columns: repeat(auto-fill, minmax(152px, 1fr));
+  gap: 8px 4px;
   margin: 0 -12px;
 }
 .artist {
   position: relative;
-  padding: 14px 12px 12px;
+  padding: 12px;
   border-radius: var(--radius-control);
   cursor: pointer;
-  text-align: center;
+  text-align: left;
   transition: background 0.2s;
 }
 .artist:hover,
@@ -826,7 +966,7 @@
 }
 .artistName {
   display: block;
-  margin-top: 12px;
+  margin-top: 14px;
   font-weight: 700;
   font-size: 15px;
   line-height: 1.3;
@@ -835,21 +975,23 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.artistName:hover {
-  text-decoration: underline;
-}
-.tags {
-  margin-top: 6px;
+.notes {
+  margin-top: 3px;
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
-  gap: 4px 6px;
-  font-size: 12px;
-  color: var(--text-3);
+  gap: 2px 8px;
+  font-size: 13px;
+  min-width: 0;
 }
-.tagCustom {
-  color: var(--info);
+.notes > span {
+  margin-top: 0;
+}
+.noteNew {
+  color: var(--accent-light);
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ---------- selection bar ---------- */
@@ -1072,15 +1214,13 @@
 }
 
 @media (hover: none) {
+  .releasePlay,
   .pick,
   .kebab {
     opacity: 1;
   }
 }
 @media (max-width: 768px) {
-  .title {
-    font-size: 32px;
-  }
   .topActions {
     width: 100%;
     flex-wrap: wrap;
@@ -1089,8 +1229,53 @@
     flex: 1 1 100%;
     width: auto;
   }
+  .title {
+    font-size: 34px;
+  }
+  .topActions > .ghost,
+  .topActions > .cta {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+  .statusSide {
+    width: 100%;
+  }
+  /* the roster is a list on a phone */
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 0 -8px;
+  }
+  .artist {
+    display: grid;
+    grid-template-columns: 56px minmax(0, 1fr) 44px;
+    column-gap: 14px;
+    align-items: center;
+    align-content: center;
+    min-height: 72px;
+    padding: 8px;
+  }
+  .portrait {
+    grid-row: 1 / span 3;
+    grid-column: 1;
+    width: 56px;
+  }
+  .artist > :not(.portrait, .pick, .kebab) {
+    grid-column: 2;
+    margin-top: 0;
+  }
+  .kebab {
+    position: static;
+    grid-column: 3;
+    grid-row: 1 / span 3;
+    background: none;
+  }
+  .pick {
+    left: 4px;
+    top: 4px;
+    width: 22px;
+    height: 22px;
   }
   .deckBody {
     grid-template-columns: minmax(0, 1fr);
