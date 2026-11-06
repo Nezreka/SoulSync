@@ -497,11 +497,12 @@ def _read_tag_from_file(audio, tag_key):
 
 def _delete_tag_from_file(audio, tag_key):
     """drop one album-level tag, under every key _read_tag_from_file looks at."""
-    from core.metadata.source import ID3_TAG_MAP, VORBIS_TAG_MAP, MP4_TAG_MAP, SOURCE_TAG_CONFIG
+    # no per-tag setting gate: this only drops a value left from the release
+    # the file came from. turning a tag's embedding off means "don't write
+    # it", not "keep a catalog number that names the wrong release"
+    from core.metadata.source import ID3_TAG_MAP, VORBIS_TAG_MAP, MP4_TAG_MAP
     from core.metadata.common import get_config_manager
-    cfg = get_config_manager()
-    setting = SOURCE_TAG_CONFIG.get(tag_key)
-    if cfg.get('musicbrainz.embed_tags', True) is False or (setting and cfg.get(setting, True) is False):
+    if get_config_manager().get('musicbrainz.embed_tags', True) is False:
         return
     try:
         if isinstance(audio.tags, ID3):
