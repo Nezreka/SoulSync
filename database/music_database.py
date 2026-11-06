@@ -690,6 +690,28 @@ def _durable_image_url(url):
         return url
 
 
+def _mirror_keeps_provenance(existing_type: Any, existing_info: Any,
+                             incoming_type: Any, incoming_info: Any):
+    """(source_type, source_info) for a row the library v2 mirror refreshes.
+
+    a playlist sync, a watchlist scan or a search add said where the row came
+    from, and the playlist batch grouping and the re-sync after it read that.
+    the mirror's refresh (a quality profile save, the hourly reconcile) turned
+    it into a plain library row. the stored provenance stays; the mirror's
+    keys only fill what it lacks. any other caller keeps the old rule.
+    """
+    incoming = incoming_info if isinstance(incoming_info, dict) else {}
+    if incoming.get("source") != "library_v2":
+        return incoming_type, incoming_info
+    stored = existing_info if isinstance(existing_info, dict) else {}
+    if not stored and str(existing_type or "") in ("album", "single", ""):
+        return incoming_type, incoming_info
+    if stored.get("source") == "library_v2" and str(existing_type or "") in ("album", "single"):
+        return incoming_type, incoming_info
+    merged = {**incoming, **stored}
+    return (existing_type or incoming_type), merged
+
+
 def _refreshed_wishlist_json(existing: Any, incoming_json: str) -> str:
     """the refreshed row: the new payload, with every field it leaves empty
     filled from the old one (the album's too).
@@ -16043,6 +16065,17 @@ class MusicDatabase:
                                 # is authoritative. Refresh the row rather than
                                 # dropping the request as a duplicate.
                                 if source_type == 'enhance' or quality_profile_id is not None:
+                                    try:
+                                        _stored_info = json.loads(cursor.execute(
+                                            "SELECT source_info FROM wishlist_tracks WHERE id=?",
+                                            (existing['id'],)).fetchone()[0] or '{}')
+                                    except (TypeError, ValueError, IndexError):
+                                        _stored_info = {}
+                                    _kept_type, _kept_info = _mirror_keeps_provenance(
+                                        existing['source_type'], _stored_info, source_type, source_info)
+                                    if _kept_info is not source_info:
+                                        source_type, source_info = _kept_type, _kept_info
+                                        source_json = json.dumps(source_info)
                                     updates = [
                                         "spotify_data = ?", "failure_reason = ?",
                                     ]
@@ -16137,6 +16170,11 @@ class MusicDatabase:
                         previous_info = json.loads(previous_context[0] or '{}')
                     except (ValueError, TypeError):
                         previous_info = {}
+                    _kept_type, _kept_info = _mirror_keeps_provenance(
+                        existing['source_type'], previous_info, source_type, source_info)
+                    if _kept_info is not source_info:
+                        source_type, source_info = _kept_type, _kept_info
+                        source_json = json.dumps(source_info)
                     if isinstance(previous_info, dict) and previous_info.get('merged_wishlist_sources'):
                         source_info = {**(source_info if isinstance(source_info, dict) else {}),
                                        'merged_wishlist_sources': previous_info['merged_wishlist_sources']}
