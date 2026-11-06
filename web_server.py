@@ -14424,11 +14424,18 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         attach_recovered_staging_context,
         record_recovered_staging_result,
     )
-    recovered_context = attach_recovered_staging_context(
-        get_database()._get_connection, file_path, context,
-    )
-    context.clear()
-    context.update(recovered_context)
+    # recovery bookkeeping only: an error here (a locked db, a bad recovery
+    # row) must not abort the import of an ordinary download
+    try:
+        recovered_context = attach_recovered_staging_context(
+            get_database()._get_connection, file_path, context,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("staging recovery lookup failed, importing as is: %s", exc)
+        recovered_context = None
+    if recovered_context is not None:
+        context.clear()
+        context.update(recovered_context)
     from core.imports.pipeline import (
         import_rejection_reason,
         post_process_matched_download_with_verification,
@@ -14578,11 +14585,18 @@ def _post_process_matched_download(context_key, context, file_path):
         attach_recovered_staging_context,
         record_recovered_staging_result,
     )
-    recovered_context = attach_recovered_staging_context(
-        get_database()._get_connection, file_path, context,
-    )
-    context.clear()
-    context.update(recovered_context)
+    # recovery bookkeeping only: an error here (a locked db, a bad recovery
+    # row) must not abort the import of an ordinary download
+    try:
+        recovered_context = attach_recovered_staging_context(
+            get_database()._get_connection, file_path, context,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("staging recovery lookup failed, importing as is: %s", exc)
+        recovered_context = None
+    if recovered_context is not None:
+        context.clear()
+        context.update(recovered_context)
     from core.imports.pipeline import import_rejection_reason, post_process_matched_download
     result = post_process_matched_download(
         context_key,
