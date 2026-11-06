@@ -4002,7 +4002,7 @@ async function fetchAndUpdateServiceStatus() {
         updateSidebarServiceStatus('soulseek', data.soulseek);
 
         // Update downloads nav badge
-        if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
+        if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads, data.quarantined);
 
         // Hide sync buttons (not the page) for standalone mode
         const isSoulsyncStandalone2 = data.media_server?.type === 'soulsync';

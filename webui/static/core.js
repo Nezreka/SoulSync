@@ -382,19 +382,28 @@ window.openDownloadBatchModal = function (batchId, playlistId, batchName) {
  * why the vanilla deliberately never called this from its own poll — the poll
  * caps at 300 rows and would under-report a bigger queue.
  */
-function _updateDlNavBadge(count) {
+function _updateDlNavBadge(count, quarantined) {
     // the downloads page's Music | Video switch shows this same number while
     // you're on the video side, so hand it over too
     window.__soulsyncMusicActiveDownloads = count;
     document.dispatchEvent(new CustomEvent('soulsync:music-active-downloads', { detail: count }));
+    // nothing downloading but files waiting in quarantine: say so, in its own
+    // colour, for whoever can act on it. a download that got quarantined used
+    // to leave no trace anywhere you'd look (#2001)
+    const review = (typeof currentProfile !== 'undefined' && currentProfile
+        && (currentProfile.is_admin || currentProfile.id === 1)) ? (quarantined || 0) : 0;
     const badge = document.getElementById('dl-nav-badge');
     if (badge) {
-        if (count > 0) {
-            badge.textContent = count;
+        const showReview = !(count > 0) && review > 0;
+        if (count > 0 || showReview) {
+            badge.textContent = count > 0 ? count : review;
             badge.classList.remove('hidden');
         } else {
             badge.classList.add('hidden');
         }
+        badge.classList.toggle('dl-nav-badge--review', showReview);
+        if (showReview) badge.title = review + ' waiting in Review';
+        else badge.removeAttribute('title');
     }
     const dlBtn = document.querySelector('.nav-button[data-page="active-downloads"]');
     if (dlBtn) {
@@ -1095,7 +1104,7 @@ function handleServiceStatusUpdate(data) {
     updateSidebarServiceStatus('soulseek', data.soulseek);
 
     // Update downloads nav badge from status push
-    if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads);
+    if (data.active_downloads !== undefined) _updateDlNavBadge(data.active_downloads, data.quarantined);
 
     // Hide sync buttons (not the page) for standalone mode — playlists still browsable/downloadable
     const isSoulsyncStandalone = data.media_server?.type === 'soulsync';

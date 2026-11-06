@@ -22553,6 +22553,17 @@ def _build_status_payload():
     except Exception as e:
         logger.debug("active download count failed: %s", e)
 
+    # files waiting in quarantine, for the downloads nav badge when nothing is
+    # downloading. a listdir, no sidecar reads (#2001: nothing said a file
+    # had been downloaded and was waiting)
+    quarantined = 0
+    try:
+        from api.quarantine import _get_quarantine_dir
+        from core.imports.quarantine import count_quarantine_entries
+        quarantined = count_quarantine_entries(_get_quarantine_dir())
+    except Exception as e:
+        logger.debug("quarantine count failed: %s", e)
+
     return {
         'metadata_source': metadata_status['metadata_source'],
         'spotify': _spotify_status_with_availability(metadata_status['spotify']),
@@ -22561,6 +22572,7 @@ def _build_status_payload():
         'active_media_server': config_manager.get_active_media_server(),
         'enrichment': _get_enrichment_status(),
         'active_downloads': active_dl_count,
+        'quarantined': quarantined,
     }
 
 def _build_watchlist_count_payload(profile_id=1):
