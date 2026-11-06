@@ -113,6 +113,17 @@ def write_provider_enrichment(
     if cleaned:
         _merge_json(conn, table, entity_id, "enrichment", key, cleaned)
 
+    if entity == "album" and payload:
+        # a release whose kind nobody knows yet (a media server sent none)
+        # takes the source's word, as 3.6.1's workers filled record_type.
+        # never reclassifies a known one: completeness and the discography
+        # single-card gate read it to tell a 2-track album from a single
+        kind = payload.get("album_type") or payload.get("record_type")
+        kind = {"compile": "compilation"}.get(str(kind or "").strip().lower(), kind)
+        if kind:
+            from core.library2.release_kind import confirm_release_kind
+            confirm_release_kind(conn, entity_id, kind)
+
     if provider_id not in (None, ""):
         value = str(provider_id).strip()
         _merge_json(conn, table, entity_id, "external_ids", key, value)

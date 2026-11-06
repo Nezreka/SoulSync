@@ -185,3 +185,20 @@ class TestOutrightColumnWrites:
             write_provider_enrichment(
                 conn, entity_type="track", entity_id=1, service="genius",
                 payload={}, columns={"nope": "x"})
+
+
+def test_a_worker_fills_an_unknown_release_kind_but_never_reclassifies(conn):
+    """3.6.1's workers filled an empty record_type from spotify/itunes/deezer,
+    and album completeness reads it to tell a 2-track album from its single.
+    v2 only kept the source's word in the payload."""
+    conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title, album_type, album_type_known)"
+                 " VALUES (10, 1, 'Unknown kind', 'album', 0)")
+    conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title, album_type, album_type_known)"
+                 " VALUES (11, 1, 'Known kind', 'album', 1)")
+    write_provider_enrichment(conn, entity_type='album', entity_id=10, service='deezer',
+                              payload={'record_type': 'single'})
+    write_provider_enrichment(conn, entity_type='album', entity_id=11, service='spotify',
+                              payload={'album_type': 'single'})
+    rows = dict(conn.execute("SELECT id, album_type || ':' || album_type_known FROM lib2_albums"))
+    assert rows[10] == 'single:1'
+    assert rows[11] == 'album:1'
