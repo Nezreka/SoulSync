@@ -655,3 +655,23 @@ def test_reorganize_dates_an_album_the_way_its_download_did():
     assert _as_provider_album(album, 6, 1)["release_date"] == "2017-08-25"
     album = {"title": "Different Route", "year": 2017, "release_date": None}
     assert _as_provider_album(album, 6, 1)["release_date"] == "2017"
+
+
+def test_reorganize_files_explicit_and_artist_identity_like_the_download(imported_conn):
+    """#1859/#1860: $explicit, $contentrating and $albumartistinfo. the catalogue
+    planner never handed the path builder the flags or the artist's mbid, so a
+    reorganize stripped [E] off a folder the next download put back."""
+    conn = imported_conn
+    artist_id, album_id, track_ids = _seed(conn)
+    conn.execute("UPDATE lib2_tracks SET explicit=1 WHERE id=?", (track_ids[0],))
+    conn.execute("UPDATE lib2_albums SET explicit=1 WHERE id=?", (album_id,))
+    conn.execute("UPDATE lib2_artists SET musicbrainz_id='mb-drake' WHERE id=?", (artist_id,))
+    conn.commit()
+    build, seen = _recorder()
+
+    _plan(conn, album_id, build)
+
+    context = seen[0]["context"]
+    assert context["track_info"]["explicit"] is True
+    assert context["spotify_album"]["explicit"] is True
+    assert context["spotify_artist"]["musicbrainz_id"] == "mb-drake"

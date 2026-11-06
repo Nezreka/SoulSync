@@ -204,8 +204,8 @@ def _album_row(conn, album_id: int):
         """SELECT al.id, al.title, al.year, al.release_date, al.album_type,
                   al.secondary_types, al.filed_release,
                   al.image_url, al.spotify_id, al.primary_artist_id,
-                  al.expected_track_count, al.track_count,
-                  ar.name AS artist_name
+                  al.expected_track_count, al.track_count, al.explicit,
+                  ar.name AS artist_name, ar.musicbrainz_id AS artist_musicbrainz_id
              FROM lib2_albums al
              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             WHERE al.id = ?""",
@@ -225,7 +225,7 @@ def _track_rows(conn, album_id: int) -> List[Any]:
     # the file of the library this runs in: a reorganize never moves another
     # library's copy into this library's folder (#1199)
     return conn.execute(
-        f"""SELECT t.id, t.title, t.track_number, t.disc_number,
+        f"""SELECT t.id, t.title, t.track_number, t.disc_number, t.explicit,
                    selected.id AS file_id, selected.path AS file_path
               FROM lib2_tracks t
               LEFT JOIN lib2_track_files selected ON selected.id =
@@ -276,6 +276,15 @@ def _credited_artists(conn, track_id: int) -> List[str]:
 
     names = effective_artist_names(conn, [r["id"] for r in rows])
     return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
+
+
+def _flag(value: Any) -> Optional[bool]:
+    if value is None or value == "":
+        return None
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _as_provider_album(album: Dict[str, Any], track_count: int,
@@ -355,7 +364,7 @@ def plan_album_reorganize(
     from core.library2.retag import track_contexts
     references = {r['id']: r['db_data'] for r in track_contexts(conn, [r['id'] for r in all_rows])}
     all_tracks = [{**references[r['id']], 'id': r['id'], 'file_path': r['file_path'],
-                   'file_id': r['file_id']} for r in all_rows]
+                   'file_id': r['file_id'], 'explicit': r['explicit']} for r in all_rows]
     tracks = [t for t in all_tracks if t["file_path"]]
     common = {
         "source": None,
@@ -475,6 +484,12 @@ def plan_album_reorganize(
             total_discs,
             local_title=title,
             local_year=(str(album["year"]) if album.get("year") else None),
+            # #1859/#1860: the same $explicit / $contentrating and the artist's
+            # mbid for $albumartistinfo a download filed it with, so a
+            # reorganize never strips [E] off a folder the next download adds
+            local_explicit=_flag(track.get("explicit")),
+            local_album_explicit=_flag(album_row["explicit"]),
+            local_artist_mbid=(album_row["artist_musicbrainz_id"] or None),
             record_type=filing["type"],
             type_source=filing["source"],
         )
