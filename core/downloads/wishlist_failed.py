@@ -62,10 +62,8 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
 
     owner_profile_id = batch.get('profile_id', 1)
 
-    # Build the batch-level pair once for the whole loop, so every
-    # track of the batch shares one source_context timestamp; the
-    # per-track resolver copies it before applying any track
-    # provenance. The pair is also the resolver's fail-safe fallback.
+    # the batch pair, built once so every track shares one timestamp. also
+    # the fallback if the per-track resolver fails
     batch_source_context = _build_wishlist_source_context(batch)
     batch_source_type = _resolve_wishlist_source_type_for_batch(batch)
 
@@ -98,21 +96,15 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
 
             logger.error(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
 
-            # Per-track provenance beats the batch label: a playlist-origin
-            # track that failed inside a wishlist album batch must go back
-            # on the wishlist AS a playlist track, or its row loses the
-            # playlist it came from and a later success never re-syncs that
-            # playlist (#1981). Tracks without their own playlist
-            # provenance keep the batch-level pair.
+            # a playlist song that failed inside an album batch goes back as
+            # its playlist's, not the batch's, or its playlist never re-syncs
+            # when it finally downloads (#1981)
             try:
                 track_source_type, track_source_context = (
                     _resolve_failed_track_requeue_provenance(
                         batch, track_data, batch_context=batch_source_context))
             except Exception as e:
-                # The resolver is provenance polish, not a gate: its
-                # failure must never skip the re-add or the attempt
-                # stamp below, so fall back to the precomputed
-                # batch-level pair (copied, like the resolver copies).
+                # never let this skip the re-add, fall back to the batch pair
                 logger.exception(f"[Wishlist Processing] Provenance resolution failed for {track_name}, falling back to batch provenance: {e}")
                 track_source_type = batch_source_type
                 track_source_context = dict(batch_source_context)

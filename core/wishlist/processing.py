@@ -355,11 +355,8 @@ def _run_wishlist_cycle(
                     source_playlist_id = None
                     for _tr in batch_tracks:
                         _si = _tr.get('source_info') or {}
-                        # Skip refs that carry nothing real (the
-                        # 'wishlist' sentinel above all): the first
-                        # truthy value wins, so a sentinel on an early
-                        # track would hide a later track's real ref and
-                        # the batch would resolve no playlist at all.
+                        # skip the 'wishlist' sentinel, or an early track's
+                        # would hide a later track's real ref
                         if isinstance(_si, dict):
                             _cleaned_ref = _clean_requeue_playlist_ref(
                                 _si.get('playlist_id'))
@@ -718,13 +715,9 @@ def build_wishlist_source_context(batch: Dict[str, Any], current_time: datetime 
         context['mirrored_playlist_id'] = batch.get('mirrored_playlist_id')
     if batch.get('organize_by_playlist'):
         context['organize_by_playlist'] = True
-    # Stamp the album batch's flags on the context: tracks that keep
-    # the batch pair ARE album downloads, and derive_download_origin
-    # reads source_info['is_album_download'] when they complete. (No
-    # routing reads these keys from a row's source_info — album
-    # grouping uses the track payloads. When a track's own playlist
-    # provenance wins in the resolver, the flags are dropped again:
-    # they describe this batch, not that track.)
+    # tracks that keep the batch pair are album downloads, and
+    # derive_download_origin reads is_album_download when they finish. a
+    # track whose own playlist wins drops these again (the resolver below)
     if batch.get('is_album_download'):
         context['is_album_download'] = True
         album_ctx = batch.get('album_context')
@@ -736,26 +729,17 @@ def build_wishlist_source_context(batch: Dict[str, Any], current_time: datetime 
     return context
 
 
-# Sentinel refs the wishlist batches stamp on themselves — never a real
-# playlist ref. Compared stripped + case-folded so ' Wishlist' can't slip by.
+# refs the wishlist stamps on its own batches. never a real playlist
 _WISHLIST_SENTINEL_REFS = frozenset({'wishlist', 'wishlist_manual'})
-# Names that are placeholders or the wishlist's own label, not a playlist:
-# the bare 'Wishlist', build_wishlist_source_context's 'Unknown Playlist'
-# default (cf. core/downloads/origin.py's placeholder names), and every
-# synthetic batch label, which all start 'Wishlist (' — 'Wishlist (Album: X)',
-# 'Wishlist (Auto - Album: X)', 'Wishlist (Residual)', ...
+# names that aren't a playlist: the bare label and the builder's default.
+# the generated batch labels all start 'Wishlist (' and are checked below
 _WISHLIST_PLACEHOLDER_NAMES = frozenset({'wishlist', 'unknown playlist'})
 
 
 def _clean_requeue_playlist_ref(value: Any) -> Optional[Any]:
-    """A stored playlist ref cleaned, or None when it carries nothing
-    real (missing, a sentinel, or a non-scalar value that must not be
-    stored verbatim). A plain positive int is preserved AS an int, not
-    stringified: register_completed_playlist_batch treats an int ref
-    as a mirrored-playlist PK while a digit string is an upstream id,
-    so stringifying here would silently change which playlist a later
-    success resolves to. Bools and non-positive ints (0 / negatives
-    are never a real id) do not survive."""
+    """a stored playlist ref, or None when it's nothing real. a positive int
+    stays an int: registration reads an int as a mirrored playlist id and a
+    digit string as an upstream one"""
     if isinstance(value, bool):
         return None
     if isinstance(value, int):
@@ -770,22 +754,10 @@ def _clean_requeue_playlist_ref(value: Any) -> Optional[Any]:
     return ref
 
 
-# batch['playlist_id'] values that name no playlist: the hand-picked
-# synthetic prefixes (an album or a song someone picked downloads under
-# a made-up id — core/downloads/origin.py's list, kept as the single
-# source for those), the album-context prefixes from
-# core/downloads/history.py's ALBUM_PREFIXES (imported, not copied, so
-# the two lists cannot drift), the library redownload id, the
-# playback prefetch queue's id, and the server/webui-made album ids
-# the hand-picked list predates: a label page's release modal
-# ('lbl_album_'), a history re-sync's fallback id ('resync_' — the
-# React caller uses `resync_${entry.id}` when the entry has no
-# playlist_id; 'resync_album_' is that flow's album_context id and is
-# covered by the same prefix), and the iTunes-link discovery-state key
-# ('ituneslink_', the no-underscore twin of the listed 'itunes_link_'
-# download id). 'legacy_modal' is the legacy /api/tracks/download_missing
-# endpoint's fixed id — today it rides only on that batch's TASKS, not
-# the batch dict, but it names no playlist either way.
+# batch playlist_ids that name no playlist: made-up ids for hand-picked
+# songs and albums (the lists come from origin.py and history.py so they
+# can't drift), plus the redownload, label, resync, itunes link and wing it
+# ids, and the fixed ones below
 _SYNTHETIC_BATCH_PLAYLIST_ID_PREFIXES = HAND_PICKED_ID_PREFIXES + ALBUM_PREFIXES + (
     'redownload_', 'lbl_album_', 'resync_', 'ituneslink_', 'wing_it_',
 )
@@ -793,15 +765,8 @@ _SYNTHETIC_BATCH_PLAYLIST_IDS = frozenset({'playback_queue', 'legacy_modal', 'li
 
 
 def _clean_direct_playlist_batch_ref(value: Any) -> Optional[Any]:
-    """batch['playlist_id'] as a fresh-resolution ref, or None.
-
-    A DIRECT playlist download (start-missing-process for a playlist
-    the user opened) stamps the real upstream id ONLY here — no
-    source_playlist_ref, no is_playlist_batch — so the freshness guard
-    needs this candidate or a track's stale provenance overrides the
-    batch's own playlist. The synthetic ids above name no playlist,
-    so they never suppress a track's real provenance.
-    """
+    """a direct playlist download's batch playlist_id, or None. that batch
+    only stamps its real id there, so it counts, the made-up ids don't"""
     ref = _clean_requeue_playlist_ref(value)
     if ref is None:
         return None
@@ -813,11 +778,9 @@ def _clean_direct_playlist_batch_ref(value: Any) -> Optional[Any]:
 
 
 def _is_generated_batch_label(name: Any) -> bool:
-    """Whether a name is a placeholder or a label the wishlist itself
-    generated ('Wishlist (Album: X)', 'Wishlist (Auto - <Cycle>)',
-    'Wishlist (Residual)'), as opposed to a playlist's real name —
-    including a real name that merely starts 'Wishlist (' ('Wishlist
-    (2024)'), which no generator produces."""
+    """a placeholder or a label the wishlist made up ('Wishlist (Album: X)',
+    'Wishlist (Auto - ...)', 'Wishlist (Residual)'). a real playlist that
+    just starts 'Wishlist (' isn't one"""
     if not isinstance(name, str):
         return True
     folded = name.strip().casefold()
@@ -829,28 +792,10 @@ def _is_generated_batch_label(name: Any) -> bool:
 
 
 def _batch_own_playlist_name(batch: Dict[str, Any]) -> Optional[str]:
-    """A residual playlist batch's OWN name, or None.
-
-    Dispatch groups residual tracks by their stored ``playlist_name``
-    verbatim and stamps that name on the batch as
-    ``source_playlist_name`` (with ``is_playlist_batch`` set) — so for
-    such a batch the name is the tracks' own playlist provenance, not
-    a generated label, even when it textually looks like one (a real
-    playlist named 'Wishlist (2024)'). Bare placeholder names still
-    clean to None: a batch grouped under the bare word 'Wishlist' is
-    indistinguishable from the sentinel label. The GENERATED labels
-    clean to None too, even on a flagged batch: 'Wishlist (Residual)'
-    and 'Wishlist (Auto - <Cycle>)' are the names dispatch itself
-    stamps on the non-playlist residual group (dispatch never flags
-    those batches ``is_playlist_batch``), and 'Wishlist (Album: X)'
-    is the album-batch label — rows stored before the batch-type
-    split carry it AS their playlist_name with source_type
-    'playlist', so residual grouping can group them under the label
-    and flag the batch. In every case the label names no playlist; a
-    real playlist that happens to share one of those exact names is
-    indistinguishable from the generated label, the same trade-off
-    as the track side.
-    """
+    """a residual playlist batch's own name, or None. dispatch grouped the
+    batch by it, so it's the tracks' real playlist even when it reads like a
+    label ('Wishlist (2024)'). bare placeholders and the generated labels
+    still don't count"""
     if not batch.get('is_playlist_batch'):
         return None
     name = batch.get('source_playlist_name')
@@ -863,19 +808,9 @@ def _batch_own_playlist_name(batch: Dict[str, Any]) -> Optional[str]:
 
 
 def _clean_requeue_playlist_name(value: Any) -> Optional[str]:
-    """A track's stored playlist name, stripped, or None when it is a
-    placeholder / wishlist batch label rather than a playlist name.
-
-    Trade-off: a playlist genuinely named 'Wishlist', 'Wishlist (2024)'
-    or 'Unknown Playlist' is indistinguishable from the labels above, so
-    its NAME is not preserved. Its ref still is (see the resolver), and
-    registration resolves by ref, so the playlist still re-syncs; only a
-    name-only row for such a playlist falls back to the batch pair.
-    That is the TRACK side, where nothing corroborates the name; a
-    residual playlist batch's own name IS corroborated (dispatch
-    grouped the batch by it) and is preserved via
-    ``_batch_own_playlist_name``.
-    """
+    """a track's stored playlist name, or None when it's a placeholder or a
+    wishlist label. a playlist really named 'Wishlist ...' loses its name
+    here but keeps its ref, and registration goes by the ref"""
     if not isinstance(value, str):
         return None
     name = value.strip()
@@ -894,104 +829,35 @@ def resolve_failed_track_requeue_provenance(
     *,
     batch_context: Optional[Dict[str, Any]] = None,
 ) -> tuple[str, Dict[str, Any]]:
-    """Pick the (source_type, source_context) for ONE failed track's
-    wishlist re-add.
+    """the (source_type, source_context) one failed track goes back on the
+    wishlist with.
 
-    The batch-level pair describes the batch, not the track. A wishlist
-    album batch is named ``Wishlist (Album: X)`` and its context says
-    ``playlist_id='wishlist'`` — re-adding a playlist-origin track under
-    that pair makes the wishlist DB refresh overwrite the row's real
-    playlist provenance with the batch label (#1981), and when the track
-    finally downloads, ``register_completed_playlist_batch`` resolves
-    ``'wishlist'`` / ``'Wishlist (Album: X)'`` to no mirrored playlist, so
-    the playlist is never re-synced to the media server.
+    the batch pair describes the batch, not the track. a playlist song that
+    failed inside a wishlist album batch went back as 'Wishlist (Album: X)'
+    with playlist_id 'wishlist', the re-add overwrote its row, and when it
+    finally downloaded nothing knew which playlist to re-sync (#1981). so a
+    track that carries its own playlist keeps it, and drops the batch's
+    album flags (derive_download_origin would read it as hand-picked).
 
-    When the track itself carries playlist provenance (a formatted
-    wishlist row keeps its ``source_type`` / ``source_info`` on the track
-    payload), that provenance wins for the playlist keys. Only the
-    playlist pair (``playlist_id`` / ``playlist_name``) is carried over
-    from the track's ``source_info``; its other keys are not. The batch's
-    album flags do NOT stay alongside: ``is_album_download`` /
-    ``album_context`` / ``artist_context`` describe the batch the track
-    failed in, and ``derive_download_origin`` reads
-    ``source_info.is_album_download`` — keeping it would reclassify the
-    restored playlist track as a hand-picked download when it finally
-    downloads, losing its playlist origin. Nothing reads those keys
-    from a wishlist row's ``source_info`` for routing. Anything else
-    keeps the batch-level pair unchanged.
+    a batch that already resolved a playlist of its own (a real ref, or a
+    name with a mirrored id) wins over the track's older one. either way a
+    key with nothing real in it is removed, never left holding the sentinel,
+    because grouping and registration read the pair together.
 
-    What the preserved provenance restores depends on which half of it
-    survives cleaning. The next cycle's residual grouping groups only
-    by ``playlist_name`` (see ``_run_wishlist_cycle``), so a track with
-    a name — name+ref or name-only — regains playlist-named grouping.
-    A ref-only track (its name was the batch label / a placeholder, so
-    it was cleaned away) still lands in the generic residual batch on
-    the next cycle; for it, the playlist re-sync is restored via
-    ``register_completed_playlist_batch``'s ref path — registration
-    resolves the task's ``source_info`` by ``playlist_id`` — not via
-    the playlist-named grouping.
-
-    Two scopings keep stale track data from winning over fresher data:
-
-    * A playlist-named residual batch already carries a fresh playlist
-      resolution — its tracks were grouped by playlist at dispatch and
-      its mirrored id resolved then (``_run_wishlist_cycle``) — so the
-      batch pair stands and the track's older provenance is not applied.
-      The batch pair is REPAIRED first (the builder misses
-      ``source_playlist_id`` and passes label names through), and the
-      repair applies to every track of the batch, playlist-typed or
-      not: it describes the batch, not the track.
-    * Partial provenance is all-or-clean per key: a key with nothing real
-      is REMOVED from the context rather than left holding the batch
-      sentinel, because grouping/registration read the pair together and
-      take the first truthy value — a leftover ``'wishlist'`` ref next to
-      a real name (or the batch label next to a real ref) poisons both.
-
-    ``batch_context`` lets a caller resolving many tracks of one batch
-    build the batch context once (one timestamp for the whole batch);
-    it is copied before any per-track key is applied.
+    batch_context: the batch pair built once for every track of a batch.
     """
     source_type = resolve_wishlist_source_type_for_batch(batch)
     if batch_context is not None:
         context = dict(batch_context)
     else:
         context = build_wishlist_source_context(batch, current_time=current_time)
-    # Batch names are stored stripped, like track-side names: the
-    # next cycle groups rows by the exact name text, so a padded
-    # batch name would group apart from its stripped twin.
+    # names are stored stripped, the next cycle groups by the exact text
     if isinstance(context.get('playlist_name'), str):
         context['playlist_name'] = context['playlist_name'].strip()
 
-    # The batch-side fresh-resolution repair runs for EVERY track of
-    # the batch, before the per-track scoping below: the repaired pair
-    # describes the batch itself, so a track whose payload lost its
-    # source_type (or never carried one) must not requeue with the
-    # builder's unrepaired pair (sentinel ref beside a real name, or a
-    # real ref beside a batch label) while its batch-mates requeue
-    # with the repaired one — the two rows would resolve differently
-    # on the next cycle for no reason but the payload's shape.
-    #
-    # A fresh batch resolution suppresses the per-track override only
-    # when it is actually usable — a truthy batch field is not enough:
-    # a sentinel ref ('wishlist') carries no resolution at all. A real
-    # ref on either source field is usable on its own (the
-    # organize_download shape sets ONLY source_playlist_ref), and so
-    # is a direct playlist download's real playlist_id (synthetic
-    # hand-picked ids excluded — see _clean_direct_playlist_batch_ref).
-    # An album batch's playlist_id never counts, whatever it holds:
-    # is_album_download is the batch's own declaration that it is not
-    # a playlist (origin.py's is_hand_picked treats it the same way),
-    # and several album flows stamp ids the deny-list cannot enumerate
-    # (per-release timestamps, history-entry ids). A
-    # playlist batch with no usable ref is still fresh when it carries
-    # a usable name: at dispatch the mirrored id was resolved by that
-    # name (resolve_mirrored_playlist_assignment falls back to an
-    # unambiguous name match when the ref is missing) and is carried
-    # on the batch, build_wishlist_source_context takes the batch's
-    # playlist_name — the same name — as the context name, and
-    # register_completed_playlist_batch uses that mirrored id
-    # directly, so a name-only fresh resolution stands. A playlist
-    # batch with neither falls through to the track's own provenance.
+    # does the batch have a playlist of its own? a real ref on either source
+    # field, or a direct download's real playlist_id. an album batch's
+    # playlist_id never counts, album flows stamp ids no list can cover
     batch_ref = (
         _clean_requeue_playlist_ref(batch.get('source_playlist_id'))
         or _clean_requeue_playlist_ref(batch.get('source_playlist_ref'))
@@ -999,33 +865,13 @@ def resolve_failed_track_requeue_provenance(
             else _clean_direct_playlist_batch_ref(batch.get('playlist_id')))
     )
     if batch_ref is not None:
-        # build_wishlist_source_context reads source_playlist_ref /
-        # playlist_id, NOT source_playlist_id — a residual playlist
-        # batch whose only ref lives in source_playlist_id would
-        # otherwise requeue with the sentinel ('wishlist') beside the
-        # real name, the exact poisoned pairing this resolver exists
-        # to prevent. When the built context's ref is unusable, the
-        # batch's cleaned ref wins; a usable built ref (e.g. one from
-        # source_playlist_ref, which the builder already prefers)
-        # stands.
+        # the builder doesn't read source_playlist_id, so its ref can be the
+        # sentinel. use the batch's real one then
         if batch.get('is_album_download') or \
                 _clean_direct_playlist_batch_ref(context.get('playlist_id')) is None:
-            # An album batch's own playlist_id never counts (see the
-            # batch_ref gate), so when a source-field ref exists it
-            # replaces whatever the builder took from that id, even a
-            # non-synthetic album id no deny-list could enumerate.
             context['playlist_id'] = batch_ref
-        # Symmetric name cleaning: a usable batch ref beside a
-        # GENERATED batch label is the other poisoned pairing (a real
-        # ref re-syncing under 'Wishlist (Album: X)'), so a generated
-        # label is popped rather than stored — all-or-clean,
-        # mirroring the name-only branch's ref pop below. A real name
-        # stands even when it merely looks wishlist-ish ('Wishlist
-        # (2024)'): on a direct batch the name arrived WITH the ref
-        # from the same download origin, and on a residual playlist
-        # batch it is the batch's own name — either way the pair is
-        # corroborated, unlike the track side, where a bare name has
-        # nothing to vouch for it.
+        # a real ref beside a generated label is the other bad pairing. a
+        # real name stands, it came with the ref
         context_name = context.get('playlist_name')
         if context_name is None or (
                 _clean_requeue_playlist_name(context_name) is None
@@ -1037,21 +883,10 @@ def resolve_failed_track_requeue_provenance(
         or _clean_requeue_playlist_name(batch.get('playlist_name')) is not None
         or _batch_own_playlist_name(batch) is not None
     ) and batch.get('mirrored_playlist_id') is not None:
-        # Name-only fresh resolution: no usable batch ref exists, so
-        # an unusable context ref is a dead key — remove it rather
-        # than store the sentinel beside the real name (all-or-clean,
-        # the same rule the track-override path below applies). The
-        # name and the batch's mirrored id carry the resolution; a
-        # usable built ref stands. The mirrored id is what makes this
-        # a fresh resolution at all — with neither a ref nor a mirror
-        # behind the name, the track's own provenance (checked below)
-        # is the better evidence and must not be suppressed.
+        # resolved by name at dispatch, with a mirrored id behind it. drop a
+        # dead ref, keep a real name
         if _clean_direct_playlist_batch_ref(context.get('playlist_id')) is None:
             context.pop('playlist_id', None)
-        # The stored name comes from batch['playlist_name'] via the
-        # builder, but this branch may have been entered on
-        # source_playlist_name — if the two differ and the stored one
-        # carries nothing real, store the checked one instead.
         if _clean_requeue_playlist_name(context.get('playlist_name')) is None:
             own_name = _batch_own_playlist_name(batch)
             if own_name is not None:
@@ -1085,19 +920,9 @@ def resolve_failed_track_requeue_provenance(
         context['playlist_id'] = playlist_id
     else:
         context.pop('playlist_id', None)
-    # The batch context's mirrored_playlist_id is DROPPED, not kept:
-    # it was resolved for the BATCH's playlist, so beside the track's
-    # own ref/name it would pair this track with a different playlist's
-    # mirror. The track's own mirrored id is not copied either (nothing
-    # reads it back from a wishlist row — registration reads the
-    # download batch's mirrored_playlist_id and resolves task
-    # source_info by playlist_id/playlist_name).
+    # the batch's mirrored id and album flags belong to the batch, not this
+    # track. registration finds the track's playlist by its ref or name
     context.pop('mirrored_playlist_id', None)
-    # The batch's album flags are dropped for the same reason: they
-    # describe the batch this track failed in, not the track, and
-    # derive_download_origin reads source_info['is_album_download'] —
-    # left in place it would reclassify the restored playlist track
-    # as hand-picked when it finally downloads.
     context.pop('is_album_download', None)
     context.pop('album_context', None)
     context.pop('artist_context', None)
