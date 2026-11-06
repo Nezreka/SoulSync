@@ -1275,3 +1275,48 @@ def test_cutoff_slack_rescans_a_file_stamped_just_before_the_cutoff(monkeypatch,
     assert scanned == ["1", "2", "3", "4"]
     scanned, _ = lib.run(monkeypatch, slack=0)
     assert scanned == []
+
+
+class _RecordingConfig(_EnabledConfig):
+    def __init__(self, values):
+        self.values = dict(values)
+
+    def get(self, key, default=None):
+        if key in self.values:
+            return self.values[key]
+        return super().get(key, default)
+
+    def set(self, key, value, *args, **kwargs):
+        self.values[key] = value
+
+
+def test_a_scoped_run_leaves_the_library_pass_alone(tmp_path, monkeypatch):
+    """an artist's run (or one own library's) used the library's checkpoint
+    and, finishing, cleared it and moved the skip_verified cutoff. a stopped
+    library pass was lost and the next pass skipped files it never checked
+    (bpm had the same bug, e6021fe10)."""
+    job = AcoustIDScannerJob()
+    low, high = str(tmp_path / "a.flac"), str(tmp_path / "b.flac")
+    context = _make_context([
+        (40, "Track A", "Artist", low, 1, "Album", 240000),
+        (42, "Track B", "Artist", high, 2, "Album", 240000),
+    ], tmp_path)
+    config = _RecordingConfig({
+        "repair.jobs.acoustid_scanner.checkpoint_id": "lib2:41",
+        "repair.jobs.acoustid_scanner.verified_cutoff": 100.0,
+        "repair.jobs.acoustid_scanner.pass_started_at": 50.0,
+    })
+    context.config_manager = config
+    context.scope = {"file_paths": [low]}
+    monkeypatch.setattr(job, "_resolve_path", lambda file_path, _context: file_path)
+    scanned = []
+    monkeypatch.setattr(job, "_scan_file",
+                        lambda fpath, track_id, *a, **k: scanned.append(track_id))
+
+    job.scan(context)
+
+    # the scoped track is scanned although it sorts below the library checkpoint
+    assert scanned == ["lib2:40"]
+    assert config.values["repair.jobs.acoustid_scanner.checkpoint_id"] == "lib2:41"
+    assert config.values["repair.jobs.acoustid_scanner.verified_cutoff"] == 100.0
+    assert config.values["repair.jobs.acoustid_scanner.pass_started_at"] == 50.0
