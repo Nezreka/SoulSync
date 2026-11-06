@@ -147,6 +147,92 @@ def test_ensure_wishlist_track_format_keeps_missing_track_number_as_none():
     assert out["disc_number"] is None
 
 
+def test_ensure_wishlist_track_format_preserves_playlist_provenance_for_string_artists():
+    """#1981: the normalized rebuild (plain-string artists) must keep
+    source_type/source_info, like the dict-artist early return does.
+    Pre-fix it dropped both, so a playlist track re-added after a failed
+    download lost the playlist it came from."""
+    track = {
+        "name": "Run Away",
+        "artists": ["Some Artist"],
+        "album": {"name": "Jam"},
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+    out = payloads.ensure_wishlist_track_format(track)
+    assert out["source_type"] == "playlist"
+    assert out["source_info"] == {"playlist_id": "908622995",
+                                  "playlist_name": "Jam Skatin"}
+
+    # A track without provenance must not gain any.
+    plain = payloads.ensure_wishlist_track_format(
+        {"name": "Plain", "artists": ["A"], "album": {"name": "Jam"}})
+    assert "source_type" not in plain
+    assert "source_info" not in plain
+
+
+def test_ensure_wishlist_track_format_copies_source_info_dict():
+    """The normalized source_info must be a shallow copy of the
+    caller's dict (like the album copy), not the same object:
+    build_failed_track_wishlist_context builds spotify_track and
+    track_data from the same track_info, and a shared reference would
+    let an in-place mutation of one alias leak into the other — and
+    back into the caller's dict."""
+    source_info = {"playlist_id": "908622995", "playlist_name": "Jam Skatin"}
+    track = {
+        "name": "Run Away",
+        "artists": ["Some Artist"],
+        "album": {"name": "Jam"},
+        "source_type": "playlist",
+        "source_info": source_info,
+    }
+
+    out = payloads.ensure_wishlist_track_format(track)
+
+    assert out["source_info"] == source_info
+    assert out["source_info"] is not source_info
+    out["source_info"]["playlist_name"] = "Mutated"
+    assert source_info["playlist_name"] == "Jam Skatin"
+
+    # The failed-track context's two aliases are independent copies too.
+    ctx = payloads.build_failed_track_wishlist_context(track)
+    assert ctx["spotify_track"]["source_info"] is not ctx["track_data"]["source_info"]
+    assert ctx["spotify_track"]["source_info"] is not source_info
+    ctx["spotify_track"]["source_info"]["playlist_id"] = "mutated"
+    assert ctx["track_data"]["source_info"]["playlist_id"] == "908622995"
+    assert source_info["playlist_id"] == "908622995"
+
+    # A non-dict source_info (e.g. a JSON string) is stored as-is.
+    string_track = {**track, "source_info": '{"playlist_id": "dz-7"}'}
+    assert payloads.ensure_wishlist_track_format(
+        string_track)["source_info"] == '{"playlist_id": "dz-7"}'
+
+
+def test_ensure_wishlist_track_format_dict_artist_path_shares_by_reference():
+    """Known aliasing, pinned deliberately: the dict-artist early
+    return hands back track_info ITSELF (identity is pinned by
+    test_ensure_spotify_track_format_preserves_existing_shape), so its
+    source_info is shared with the caller — the copy protection in
+    test_ensure_wishlist_track_format_copies_source_info_dict covers
+    only the plain-string rebuild path. Gate pass 3 flagged the
+    payloads comment for implying otherwise; the comment now scopes
+    the protection, and this test keeps the actual behaviour explicit
+    rather than implied."""
+    source_info = {"playlist_id": "908622995", "playlist_name": "Jam Skatin"}
+    track = {
+        "name": "Run Away",
+        "artists": [{"name": "Some Artist"}],
+        "album": {"name": "Jam"},
+        "source_type": "playlist",
+        "source_info": source_info,
+    }
+
+    out = payloads.ensure_wishlist_track_format(track)
+
+    assert out is track
+    assert out["source_info"] is source_info
+
+
 def test_build_cancelled_task_wishlist_payload_preserves_track_number():
     """Cancellation→re-add path was the worst offender — the payload
     builder dropped track_number from the saved data entirely (didn't

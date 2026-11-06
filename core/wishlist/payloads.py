@@ -134,6 +134,28 @@ def ensure_wishlist_track_format(track_info):
     }
     if track_info.get('quality_profile_id') is not None:
         normalized['quality_profile_id'] = track_info.get('quality_profile_id')
+    # Playlist provenance must survive normalization (#1981): the dict-artist
+    # early return above keeps these keys, and the failed-track requeue
+    # resolves a track's real playlist from them. Dropping them on this
+    # rebuild path (plain-string artists) silently degraded those tracks
+    # to the download batch's label when they were re-added to the wishlist.
+    # NOTE the early return keeps the keys by returning track_info ITSELF:
+    # on that path the result (and its source_info / album) is still shared
+    # by reference with the caller — an identity other callers rely on.
+    # The copy below protects only this rebuild path.
+    if track_info.get('source_type') is not None:
+        normalized['source_type'] = track_info.get('source_type')
+    if track_info.get('source_info') is not None:
+        # Copy a dict source_info like the album above: on this rebuild
+        # path, storing the caller's dict by reference would alias the
+        # spotify_track / track_data pair
+        # build_failed_track_wishlist_context builds from the same
+        # track_info, so an in-place mutation of one would leak into
+        # the other (and back into the caller).
+        source_info = track_info.get('source_info')
+        normalized['source_info'] = (
+            dict(source_info) if isinstance(source_info, dict) else source_info
+        )
     return normalized
 
 
