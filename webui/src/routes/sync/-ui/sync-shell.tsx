@@ -1,43 +1,32 @@
 /**
- * The sync page's chrome — header, the sixteen-tab strip, and the panel
- * switch. index.html 2226-2295 plus the tab handler at sync-services.js
- * 3694-3803.
+ * The playlists page's chrome: the header, the four collection pills, and the
+ * source panels.
  *
- * THE VANILLA'S TAB HANDLER DOES FOUR THINGS; only one survives as code here.
- * It moved the `active` class on the buttons and panels (that is this
- * component), re-hid the old sync sidebar (gone), ran a one-shot lazy load per
- * tab, and computed an `isMobile` const it never read.
+ * The page used to be a strip of sixteen tabs, then five chips plus whichever
+ * source tabs you had opened. Now the collections are pills (Mirrored, My
+ * Playlists, Request Lists, Server Playlists) and every source tab, Beatport
+ * included, opens from Add as a panel over the page. Closing a panel returns
+ * to the collection under it.
  *
- * The lazy loads dissolve. Each was `if (tabId === 'x' && !xLoaded) { xLoaded
- * = true; loadX(); }` against a script-scoped or `window` flag — a hand-rolled
- * mount hook, needed because the panels all exist in the DOM from page load
- * and only their `active` class changes. Here each panel's content is a
- * component that fetches on mount, so "first time this tab is opened" is just
- * "first time this subtree renders". The flags have no counterpart — but the
- * `opened` Set below does the other half of their job: a panel stays MOUNTED
- * once opened rather than unmounting on the way out, which is what makes
- * leaving a tab keep what it loaded, exactly as the one-shot flags did.
- *
- * Beatport is the one exception in the vanilla — it has a teardown
- * (`cleanupBeatportContent`) on leaving. That belongs to the Beatport wave's
- * own components, not the shell.
+ * Panels stay MOUNTED once opened, collections and sources alike, so leaving
+ * one keeps what it loaded (what the vanilla's one-shot load flags did).
  */
 
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+
+import type { SyncLibrarySummary } from './mirrored-tab';
 
 import {
   SYNC_DEFAULT_TAB,
-  SYNC_PRIMARY_TAB_IDS,
   SYNC_HEADER_ACTIONS,
   SYNC_TABS,
-  forgetRoutedTab,
-  readRememberedRoutedTabs,
-  rememberRoutedTab,
-  syncStripTabs,
+  isPrimarySyncTab,
   normalizeSyncTab,
+  syncStripTabs,
   type SyncTabId,
 } from '../-sync.shell';
 import { ActionMenu } from '../../artist-detail/-ui/action-menu';
+import styles from './playlists.module.css';
 
 export interface SyncShellProps {
   /** One node per tab id. A tab with no entry renders an empty panel. */
@@ -45,30 +34,19 @@ export interface SyncShellProps {
   onAutoSync: () => void;
   onActivity: () => void;
   /**
-   * Fired on every tab switch, including a click on the tab already active —
-   * the vanilla's handler runs its whole body regardless (sync-services.js
-   * 3732). Filtering out same-tab clicks here would change that.
+   * Opens the Add sheet. The PRIMARY action on this page, and the one door to
+   * every source: the source tabs open from there as panels.
    */
-  /**
-   * Opens the Add-playlist sheet. The PRIMARY action on this page: it is the
-   * one entry point that replaces choosing a source tab before you have even
-   * pasted anything.
-   */
-  onAddPlaylist?: (anchor: { top: number; left: number; el: HTMLElement }) => void;
+  onAddPlaylist?: () => void;
+  /** Tools › Update list: re-read the playlist list. */
+  onUpdateList?: () => void;
+  /** What the header's status line says; omitted until the library loads. */
+  summary?: SyncLibrarySummary | null;
+  /** Fired on every tab switch, including a click on the tab already active. */
   onTabChange?: () => void;
   /**
-   * Hand the host a function that opens a tab programmatically.
-   *
-   * The shell owns tab state, so a panel that needs to send the user elsewhere
-   * cannot do it alone — the import tab is the case: importFileSubmit's tail
-   * clicked the mirrored tab button and reloaded that list (sync-services.js
-   * 449-455). Registration upward is the idiom this port already uses for
-   * MirroredTab's reload and the Spotify tab's row order, rather than lifting
-   * tab state into the page and re-plumbing every panel.
-   *
-   * Optional: the shell stands alone in its own tests, and nothing breaks if a
-   * host does not want it. Opening a tab this way marks it opened and fires
-   * `onTabChange`, exactly as a click does.
+   * Hand the host a function that opens a tab programmatically. A collection
+   * becomes the page; a source tab opens as a panel over it.
    */
   registerOpenTab?: (open: (tab: SyncTabId) => void) => void;
 }
@@ -106,26 +84,22 @@ function runHeaderAction(key: string, onAutoSync: () => void, onActivity: () => 
 export function SyncShell({
   panels,
   onAddPlaylist,
+  onUpdateList,
   onAutoSync,
   onActivity,
   onTabChange,
   registerOpenTab,
+  summary,
 }: SyncShellProps) {
   const [tab, setTab] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
-  // Which panels have ever been opened. See the header note: the vanilla's
-  // one-shot load flags mean a tab keeps what it loaded after you leave it.
-  // Seeded with routed tabs remembered from earlier visits, so a link tab's
-  // chip survives a reload the way its cached playlists already did.
-  const [opened, setOpened] = useState<Set<SyncTabId>>(
-    () => new Set([SYNC_DEFAULT_TAB, ...readRememberedRoutedTabs()]),
-  );
-  /** routed chips the user hid with × (#1402). */
-  const [hidden, setHidden] = useState<ReadonlySet<SyncTabId>>(() => new Set());
+  /** the collection under an open source panel, which closing it returns to */
+  const [base, setBase] = useState<SyncTabId>(SYNC_DEFAULT_TAB);
+  // Which panels have ever been opened: a panel stays MOUNTED once opened, so
+  // leaving a tab keeps what it loaded (the vanilla's one-shot load flags).
+  const [opened, setOpened] = useState<Set<SyncTabId>>(() => new Set([SYNC_DEFAULT_TAB]));
 
-  // Both props live in refs so `open` can be STABLE. A host that writes
-  // `onTabChange={() => …}` inline hands a new function every render, and an
-  // `open` rebuilt each time would re-fire the registration effect forever —
-  // the trap useAutoSync's `now` fell into, applied here while writing.
+  // Both props live in refs so `open` can be STABLE (an inline host callback
+  // would otherwise re-fire the registration effect forever).
   const onTabChangeRef = useRef(onTabChange);
   onTabChangeRef.current = onTabChange;
   const registerOpenTabRef = useRef(registerOpenTab);
@@ -135,172 +109,202 @@ export function SyncShell({
     const id = normalizeSyncTab(next);
     onTabChangeRef.current?.();
     setTab(id);
+    if (isPrimarySyncTab(id)) setBase(id);
     setOpened((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
-    setHidden((prev) => {
-      if (!prev.has(id)) return prev;
-      const nextHidden = new Set(prev);
-      nextHidden.delete(id);
-      return nextHidden;
-    });
-    rememberRoutedTab(id);
   }, []);
 
   useEffect(() => {
     registerOpenTabRef.current?.(open);
   }, [open]);
 
-  /** the × on a routed chip (#1402). hides the chip only, the panel stays
-   *  mounted like it does everywhere else here, so reopening the source from
-   *  Add playlist finds what it had. the three permanent tabs have no ×. */
-  const close = useCallback(
-    (id: SyncTabId) => {
-      forgetRoutedTab(id);
-      setHidden((prev) => new Set(prev).add(id));
-      if (tab === id) {
-        onTabChangeRef.current?.();
-        setTab(SYNC_DEFAULT_TAB);
-      }
-    },
-    [tab],
-  );
+  /** close a source panel: back to the collection under it */
+  const closePanel = useCallback(() => {
+    onTabChangeRef.current?.();
+    setTab(base);
+  }, [base]);
+
+  const panelOpen = !isPrimarySyncTab(tab);
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closePanel();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [panelOpen, closePanel]);
+
+  const shownCollection = panelOpen ? base : tab;
+  const sub = summary ? summaryParts(summary) : null;
 
   return (
     // `page-shell` plus the page id, matching the convention every flipped
-    // route follows (dashboard-page.tsx 38). The vanilla nests page-shell
-    // inside `<div class="page" id="sync-page">`; the React roots collapse the
-    // two and keep the id, which is how the legacy chrome still resolves a
-    // page by `${pageId}-page`.
+    // route follows; the legacy chrome resolves a page by `${pageId}-page`.
     <div className="page-shell" id="sync-page">
-      <div className="sync-header">
-        <div className="sync-header-row">
-          <div>
-            <h2 className="sync-title">
-              <img src="/static/sync.png" className="page-header-icon" alt="" />
-              <span>Playlists</span>
-            </h2>
-            <p className="sync-subtitle">
-              Manage, mirror, and synchronize your playlists with your media server
-            </p>
-          </div>
-          {/* The vanilla styles this row inline (2236). A class is used here
-              because the port does not emit inline styles; the rule is a 1:1
-              transcription of those three declarations. */}
-          <div className="sync-header-actions">
-            {/* Primary, and first: adding a playlist is what this page is FOR.
-                The four buttons beside it are all "what happened" surfaces. */}
-            {onAddPlaylist && (
+      <div className={`pl-header ${styles.top}`}>
+        <div className={styles.topText}>
+          <h2 className={`pl-title ${styles.title}`}>
+            <span>Playlists</span>
+          </h2>
+          <p className={`pl-subtitle ${styles.sub}`}>
+            {sub ? (
+              <>
+                <span>
+                  <b>{sub.playlists}</b> mirrored
+                </span>
+                {sub.attention ? (
+                  <>
+                    <span className={styles.subDot} aria-hidden="true">
+                      ·
+                    </span>
+                    <span className={styles.subWarn}>{sub.attention}</span>
+                  </>
+                ) : null}
+                {sub.nextRun ? (
+                  <>
+                    <span className={styles.subDot} aria-hidden="true">
+                      ·
+                    </span>
+                    <span>{sub.nextRun}</span>
+                  </>
+                ) : null}
+                {sub.running ? (
+                  <>
+                    <span className={styles.subDot} aria-hidden="true">
+                      ·
+                    </span>
+                    <span className={styles.subLive}>
+                      <span className={styles.spin} aria-hidden="true" /> {sub.running}
+                    </span>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              'Manage, mirror, and synchronize your playlists with your media server'
+            )}
+          </p>
+        </div>
+        <div className={`pl-header-actions ${styles.topActions}`}>
+          {/* everything else this page can do, behind one button (#1909).
+              same names as the windows they open, with a line each. */}
+          <ActionMenu
+            align="right"
+            className="sync-more-menu"
+            trigger={(props) => (
               <button
                 type="button"
-                className="btn btn--sm sync-add-playlist-btn"
-                title="Paste a link, pick a connected account, or import a file"
-                onClick={(e) => {
-                  // Pops in AT the button, like the card's overflow menu. The
-                  // element rides along so clicking the button again closes the
-                  // sheet instead of racing the outside-click handler.
-                  const box = e.currentTarget.getBoundingClientRect();
-                  onAddPlaylist({ top: box.bottom + 8, left: box.left, el: e.currentTarget });
-                }}
+                className={`pl-tools-btn ${styles.iconBtn}`}
+                aria-label="Playlist tools"
+                title="Scheduling, match review, activity and more"
+                {...props}
               >
-                + Add playlist
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 7h10" />
+                  <path d="M18 7h2" />
+                  <circle cx="16" cy="7" r="2" />
+                  <path d="M4 17h4" />
+                  <path d="M12 17h8" />
+                  <circle cx="10" cy="17" r="2" />
+                </svg>
               </button>
             )}
-            {/* everything else this page can do, behind one button (#1909).
-                six equal buttons beside the one you came for made a new user
-                read all seven to find it. same names as the windows they open,
-                with a line each saying what they're for. */}
-            <ActionMenu
-              align="right"
-              className="sync-more-menu"
-              trigger={(props) => (
-                <button
-                  type="button"
-                  className="btn btn--sm btn--secondary sync-more-btn"
-                  aria-label="More playlist tools"
-                  title="Scheduling, match review, activity and more"
-                  {...props}
-                >
-                  More
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="14"
-                    height="14"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M6 9l6 6 6-6" />
-                  </svg>
-                </button>
-              )}
-              items={SYNC_HEADER_ACTIONS.map((action) => ({
+            items={[
+              ...SYNC_HEADER_ACTIONS.map((action) => ({
                 key: action.key,
                 // the vanilla hook classes ride on the items, so nothing that
                 // selects them loses them
                 className: `sync-history-btn${action.key === 'auto-sync' ? ' auto-sync-manager-btn' : ''}`,
                 title: action.title,
                 label: (
-                  <span className="sync-more-item">
-                    <span className="sync-more-name">{action.label}</span>
-                    <span className="sync-more-desc">{action.desc}</span>
+                  <span className={`sync-more-item ${styles.toolItem}`}>
+                    <span className={`sync-more-name ${styles.toolName}`}>{action.label}</span>
+                    <span className={`sync-more-desc ${styles.toolDesc}`}>{action.desc}</span>
                   </span>
                 ),
                 onSelect: () => runHeaderAction(action.key, onAutoSync, onActivity),
-              }))}
-            />
-          </div>
+              })),
+              ...(onUpdateList
+                ? [
+                    {
+                      key: 'update-list',
+                      className: 'sync-history-btn',
+                      title: 'Reload the playlist list',
+                      label: (
+                        <span className={`sync-more-item ${styles.toolItem}`}>
+                          <span className={`sync-more-name ${styles.toolName}`}>Update list</span>
+                          <span className={`sync-more-desc ${styles.toolDesc}`}>
+                            Reload the playlist list.
+                          </span>
+                        </span>
+                      ),
+                      onSelect: onUpdateList,
+                    },
+                  ]
+                : []),
+            ]}
+          />
+          {onAddPlaylist && (
+            <button
+              type="button"
+              className={`pl-add-btn ${styles.cta}`}
+              title="Paste a link, pick a source, import a file, or start a new playlist"
+              onClick={() => onAddPlaylist()}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="18"
+                height="18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.6"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
+              Add playlist
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="sync-content-area">
-        <div className="sync-main-panel">
-          <div className="sync-tabs" role="tablist">
-            {syncStripTabs(
-              tab,
-              [...opened].filter((id) => !hidden.has(id)),
-            ).map((t) => (
-              <Fragment key={t.id}>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === t.id}
-                  className={`sync-tab-button${t.id === 'server' ? ' sync-tab-server' : ''}${
-                    tab === t.id ? ' active' : ''
-                  }`}
-                  data-tab={t.id}
-                  {...(t.link ? { 'data-link': 'true' } : {})}
-                  title={t.label}
-                  onClick={() => {
-                    open(t.id);
-                  }}
-                >
-                  <span className={`tab-icon ${t.icon}`} />
-                  <span className="sync-tab-label">{t.label}</span>
-                </button>
-                {SYNC_PRIMARY_TAB_IDS.includes(t.id) ? null : (
-                  <button
-                    type="button"
-                    className="sync-tab-close"
-                    title={`Hide ${t.label}. Add playlist brings it back`}
-                    aria-label={`Hide ${t.label} tab`}
-                    onClick={() => {
-                      close(t.id);
-                    }}
-                  >
-                    ×
-                  </button>
-                )}
-                {/* 2253: the divider sits after Server Playlists only. */}
-              </Fragment>
+      {/* No framed panel inside the page: the artwork is the page. */}
+      <div>
+        <div>
+          <div className={`pl-collections ${styles.pills}`} role="tablist">
+            {syncStripTabs().map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={shownCollection === t.id}
+                className={`pl-collection ${styles.pill}${
+                  shownCollection === t.id ? ` active ${styles.pillOn}` : ''
+                }`}
+                data-tab={t.id}
+                title={t.label}
+                onClick={() => {
+                  open(t.id);
+                }}
+              >
+                <span className="pl-collection-label">{t.label}</span>
+              </button>
             ))}
           </div>
 
-          {SYNC_TABS.map((t) => (
+          {SYNC_TABS.filter((t) => isPrimarySyncTab(t.id)).map((t) => (
             <div
               key={t.id}
-              className={`sync-tab-content${tab === t.id ? ' active' : ''}`}
+              className={`sync-tab-content${shownCollection === t.id ? ' active' : ''}`}
               id={`${t.id}-tab-content`}
               role="tabpanel"
             >
@@ -309,6 +313,60 @@ export function SyncShell({
           ))}
         </div>
       </div>
+
+      {/* The source tabs, as panels over the page. Each stays mounted once
+          opened, so closing and reopening one finds what it had loaded. */}
+      {panelOpen ? (
+        <button
+          type="button"
+          className={styles.panelScrim}
+          aria-label="Close"
+          tabIndex={-1}
+          onClick={closePanel}
+        />
+      ) : null}
+      {SYNC_TABS.filter((t) => !isPrimarySyncTab(t.id) && opened.has(t.id)).map((t) => (
+        <div
+          key={t.id}
+          className={`sync-source-panel ${styles.panel}${tab === t.id ? '' : ` ${styles.panelHidden}`}`}
+          role="dialog"
+          aria-modal={tab === t.id ? true : undefined}
+          aria-label={t.label}
+          aria-hidden={tab === t.id ? undefined : true}
+        >
+          <div className={styles.panelHead}>
+            <span className={`tab-icon ${t.icon}`} aria-hidden="true" />
+            <h3 className={styles.panelTitle}>{t.label}</h3>
+            <button type="button" className={styles.done} onClick={closePanel}>
+              Done
+            </button>
+          </div>
+          <div
+            className={`sync-tab-content active ${styles.panelBody}`}
+            id={`${t.id}-tab-content`}
+            role="tabpanel"
+          >
+            {panels[t.id]}
+          </div>
+        </div>
+      ))}
     </div>
   );
+}
+
+/** The header status line, from the library summary. */
+function summaryParts(summary: SyncLibrarySummary): {
+  playlists: number;
+  attention: string;
+  running: string;
+  nextRun: string;
+} {
+  return {
+    playlists: summary.playlists,
+    attention: summary.attention
+      ? `${summary.attention} need${summary.attention === 1 ? 's' : ''} attention`
+      : '',
+    running: summary.running ? `${summary.running} working` : '',
+    nextRun: summary.nextRun ? `next sync ${summary.nextRun.replace(/^next /, '')}` : '',
+  };
 }

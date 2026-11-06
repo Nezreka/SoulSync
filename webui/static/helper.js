@@ -681,13 +681,13 @@ const HELPER_CONTENT = {
         tips: ['Supports CSV, TSV, M3U/M3U8, and plain text (one track per line)', 'M3U/M3U8 is read automatically (artist, title, duration from #EXTINF)', 'Column mapping for CSV/TSV files', 'Creates a mirrored playlist for persistent state'],
         docsId: 'sync-import-file'
     },
-    '.sync-tab-button[data-tab="mirrored"]': {
+    '.pl-collection[data-tab="mirrored"]': {
         title: 'Mirrored Playlists',
         description: 'All imported playlists from every source, saved persistently. Shows identification status, download progress, and allows re-syncing.',
         tips: ['Every parsed playlist is automatically mirrored here', 'Cards show live state: Discovering, Discovered, Syncing, Complete', 'Re-parsing the same URL updates the existing mirror'],
         docsId: 'sync-mirrored'
     },
-    '.sync-tab-button[data-tab="server"]': {
+    '.pl-collection[data-tab="server"]': {
         title: 'Server Playlists',
         description: 'View and manage playlists from your connected media server (Plex, Jellyfin, or Navidrome). Compare server-side playlists with source playlists to find differences.',
         tips: [
@@ -708,11 +708,11 @@ const HELPER_CONTENT = {
         description: 'View a log of all sync operations — playlist syncs, album downloads, and wishlist processing. Shows timestamps, track counts, and completion status.',
         docsId: 'sync-history'
     },
-    '.sync-more-btn': {
+    '.pl-tools-btn': {
         title: 'More tools',
         description: 'Bulk scheduling, match review, the Wing It pool, linking a track by hand, activity and download origins.',
     },
-    '.sync-header': {
+    '.pl-header': {
         title: 'Playlist Sync',
         description: 'Import and sync playlists from multiple sources. Select playlists, match tracks to your library, and download what\'s missing.',
         docsId: 'sync-overview'
@@ -2329,18 +2329,12 @@ const HELPER_TOURS = {
         icon: '🔄',
         steps: [
             // Header
-            { page: 'sync', selector: '.sync-header', title: 'Playlist Sync', description: 'Import playlists from any streaming service, match tracks to your download sources, and sync them to your media server. Everything happens from this page.' },
-            { page: 'sync', selector: '.sync-more-btn', title: 'More tools', description: 'Bulk scheduling, match review, the Wing It pool, linking a track by hand, activity and download origins. Each one says what it is for.' },
+            { page: 'sync', selector: '.pl-header', title: 'Playlist Sync', description: 'Import playlists from any streaming service, match tracks to your download sources, and sync them to your media server. Everything happens from this page.' },
+            { page: 'sync', selector: '.pl-tools-btn', title: 'More tools', description: 'Bulk scheduling, match review, the Wing It pool, linking a track by hand, activity and download origins. Each one says what it is for.' },
 
-            // Source tabs (left to right)
-            { page: 'sync', selector: '.sync-tab-button[data-tab="spotify"]', title: 'Spotify Playlists', description: 'If Spotify is connected, click "Refresh" to load all your playlists. Select ones you want, then hit Start Sync in the sidebar.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="spotify-public"]', title: 'Spotify Link', description: 'Don\'t have a Spotify account? Paste any public Spotify playlist or album URL here to import it without authentication.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="tidal"]', title: 'Tidal Playlists', description: 'Same as Spotify — connect Tidal in Settings, refresh to load your playlists, then sync.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="deezer"]', title: 'Deezer', description: 'Paste a Deezer playlist URL to import. No account needed — just the public URL.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="youtube"]', title: 'YouTube Music', description: 'Paste a YouTube Music playlist URL. The parser extracts track titles and artists, then matches them against your metadata source.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="beatport"]', title: 'Beatport', description: 'For electronic music — paste a Beatport playlist URL to import DJ sets and charts.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="import-file"]', title: 'File Import', description: 'Import a playlist from a local file — M3U, CSV, or plain text. Map columns to track/artist/album fields.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Match Review for unmatched tracks.' },
+            // Add (every source opens from it) and the library
+            { page: 'sync', selector: '.pl-add-btn', title: 'Add a playlist', description: 'Paste a link from Spotify, Apple Music, Deezer or YouTube, or open one of your sources: Spotify, Tidal, Qobuz, Deezer, YouTube Music, ListenBrainz, Last.fm, SoulSync Discovery, Beatport, or a file. What you import lands in Mirrored.' },
+            { page: 'sync', selector: '.pl-collection[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Match Review for unmatched tracks.' },
 
         ]
     },

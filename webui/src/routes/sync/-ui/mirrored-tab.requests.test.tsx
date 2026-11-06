@@ -145,14 +145,14 @@ describe('MirroredTab — Request Lists Scope and Partitioning', () => {
     expect(screen.queryByText('User Playlist')).toBeNull();
 
     // Check header
-    expect(screen.getByText('Request lists')).toBeDefined();
-    // Check request badge on card
-    const badge = document.querySelector('.pl-card-badge--request');
+    expect(screen.getByText('Request Lists')).toBeDefined();
+    // Check request mark on card
+    const badge = document.querySelector('.plc-request');
     expect(badge).not.toBeNull();
-    expect(badge?.textContent).toContain('📥');
+    expect(badge?.textContent).toContain('Request list');
   });
 
-  it('requests scope offers auto-remove fulfilled toggle in menu for Spotify request lists', async () => {
+  it('requests scope offers the auto-remove fulfilled toggle in Settings for Spotify request lists', async () => {
     stubFetch();
     responder = (url) => {
       if (url.includes('/api/mirrored-playlists')) return SAMPLE_PLAYLISTS;
@@ -165,14 +165,18 @@ describe('MirroredTab — Request Lists Scope and Partitioning', () => {
       expect(screen.getByText('Friend Request Box')).toBeDefined();
     });
 
-    const more = document.querySelector('.pl-card-more') as HTMLElement;
+    const more = document.querySelector('.plc-more') as HTMLElement;
     fireEvent.click(more);
-
     const items = [...document.querySelectorAll('.pl-menu-item')].map((el) =>
       el.textContent?.trim(),
     );
-    expect(items.some((t) => t?.includes('Auto-remove fulfilled'))).toBe(true);
     expect(items.some((t) => t?.includes('Convert'))).toBe(false);
+    fireEvent.click(
+      [...document.querySelectorAll('.pl-menu-item')].find(
+        (el) => el.textContent === 'Settings',
+      ) as HTMLElement,
+    );
+    expect(screen.getByLabelText('Auto-remove fulfilled')).toBeDefined();
   });
 
   it('normal mirror offers Copy to Request Lists in menu', async () => {
@@ -188,7 +192,7 @@ describe('MirroredTab — Request Lists Scope and Partitioning', () => {
       expect(screen.getByText('Normal Mirror')).toBeDefined();
     });
 
-    const more = document.querySelector('.pl-card-more') as HTMLElement;
+    const more = document.querySelector('.plc-more') as HTMLElement;
     fireEvent.click(more);
 
     const items = [...document.querySelectorAll('.pl-menu-item')].map((el) =>
@@ -219,11 +223,13 @@ describe('MirroredTab — Request Lists Scope and Partitioning', () => {
     await waitFor(() => {
       expect(screen.getByText('Friend Request Box')).toBeDefined();
     });
-    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
-    const item = [...document.querySelectorAll('.pl-menu-item')].find((el) =>
-      el.textContent?.includes('Auto-remove fulfilled'),
-    ) as HTMLElement;
-    fireEvent.click(item);
+    fireEvent.click(document.querySelector('.plc-more') as HTMLElement);
+    fireEvent.click(
+      [...document.querySelectorAll('.pl-menu-item')].find(
+        (el) => el.textContent === 'Settings',
+      ) as HTMLElement,
+    );
+    fireEvent.click(screen.getByLabelText('Auto-remove fulfilled'));
     return confirm;
   }
 

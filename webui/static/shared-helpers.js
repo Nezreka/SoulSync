@@ -1733,7 +1733,7 @@ async function navigateToMirroredPlaylist(playlistRef, source = 'spotify') {
     if (typeof navigateToPage === 'function') {
         navigateToPage('sync');
     }
-    const mirroredBtn = document.querySelector('.sync-tab-button[data-tab="mirrored"]');
+    const mirroredBtn = document.querySelector('.pl-collection[data-tab="mirrored"]');
     if (mirroredBtn) {
         mirroredBtn.click();
     }
