@@ -12853,6 +12853,12 @@ class MusicDatabase:
                             [server_source, server_source] if server_source else [])
                         mapping_projection = "NULL AS requested_server_id"
                         mapping_params = []
+                        # an album's missing slots (completeness, discography,
+                        # wanted rows) are catalogue rows with no file: never
+                        # "the track you already have". the other matchers
+                        # say the same (cb92d3d7a); this fallback was missed.
+                        from core.library2.sql_util import owned_in_library_sql
+                        _owned_fallback = owned_in_library_sql("track", "t")
                         if server_source:
                             mapping_projection = (
                                 "(SELECT m.server_id FROM lib2_media_server_mappings m "
@@ -12870,7 +12876,7 @@ class MusicDatabase:
                             LEFT JOIN lib2_track_files f
                                    ON f.track_id = t.id AND f.is_primary = 1
                                   AND COALESCE(f.file_state, 'active') <> 'deleted'
-                            WHERE t.album_id = ? {source_filter}
+                            WHERE t.album_id = ? {source_filter}{_owned_fallback}
                         """, [*mapping_params, *params])
                         _rows = cursor.fetchall()
                         conn.close()
