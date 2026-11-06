@@ -390,6 +390,8 @@ export async function playLibraryTrack(
           album_thumb_url?: string;
           album_title?: string;
           artist_name?: string;
+          lib2_track_id?: number | string | null;
+          lib2_artist_id?: number | string | null;
         };
       };
       if (_dbData && _dbData.success && _dbData.track) {
@@ -402,6 +404,9 @@ export async function playLibraryTrack(
           bitrate: _row.bitrate ?? track.bitrate,
           artist_id: _row.artist_id ?? track.artist_id,
           album_id: _row.album_id ?? track.album_id,
+          // the row is a v2 row: keep its ids, or Now Playing loses Report issue
+          lib2_track_id: _row.lib2_track_id ?? track.lib2_track_id,
+          lib2_artist_id: _row.lib2_artist_id ?? track.lib2_artist_id,
           _stats_image: _row.image_url || _row.album_thumb_url || track._stats_image || null,
         };
         if (_row.album_title) albumTitle = _row.album_title;

@@ -106,4 +106,30 @@ describe('playLibraryTrack', () => {
     expect(startAudioPlayback).not.toHaveBeenCalled();
     expect(window.showToast).not.toHaveBeenCalled();
   });
+
+  it('keeps the v2 ids the refresh hands back, so Now Playing can report the track', async () => {
+    // resolve-track answers with lib2 rows. the refresh copied id, path and
+    // album, and dropped lib2_track_id: the player then had no library row to
+    // point a report at and hid Report issue for every title+artist play
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes('/api/stats/resolve-track')
+        ? new Response(
+            JSON.stringify({
+              success: true,
+              track: {
+                id: 41,
+                title: 'Song',
+                file_path: '/a/first.mp3',
+                lib2_track_id: 41,
+                lib2_artist_id: 7,
+              },
+            }),
+          )
+        : respondJson(String(url)),
+    );
+    await playLibraryTrack({ id: 1, title: 'Song', file_path: '/a/stale.mp3' }, 'LP', 'Band');
+    expect(setTrackInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ is_library: true, lib2_track_id: 41, lib2_artist_id: 7 }),
+    );
+  });
 });
