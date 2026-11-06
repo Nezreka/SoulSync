@@ -750,6 +750,18 @@ def _refreshed_wishlist_json(existing: Any, incoming_json: str) -> str:
     return json.dumps(merged)
 
 
+def _album_rows_of(track_id) -> tuple:
+    """bounds of a track's ``<track>::<album>`` wishlist keys.
+
+    ``spotify_track_id >= lo AND < hi`` is exact where ``LIKE 'id::%'`` was
+    not: LIKE ignores case (spotify ids are case-sensitive), reads ``_`` as
+    any character (youtube ids have them) and skips the index. ``;`` sorts
+    right after ``:``, so the range is every key starting ``<track>::``.
+    """
+    key = str(track_id)
+    return (key + "::", key + ":;")
+
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -16248,8 +16260,9 @@ class MusicDatabase:
                 merged_key = merged_wishlist_key(conn, spotify_track_id, profile_id)
                 cursor.execute(
                     "DELETE FROM wishlist_tracks WHERE profile_id = ? AND "
-                    "(spotify_track_id IN (?, ?) OR spotify_track_id LIKE ?)",
-                    (profile_id, spotify_track_id, merged_key or spotify_track_id, f"{spotify_track_id}::%"))
+                    "(spotify_track_id IN (?, ?) OR (spotify_track_id >= ? AND spotify_track_id < ?))",
+                    (profile_id, spotify_track_id, merged_key or spotify_track_id,
+                     *_album_rows_of(spotify_track_id)))
                 conn.commit()
 
                 if cursor.rowcount > 0:
@@ -17147,8 +17160,8 @@ class MusicDatabase:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ? AND "
-                    "(spotify_track_id = ? OR spotify_track_id LIKE ?) LIMIT 1",
-                    (profile_id, track_id, f"{track_id}::%"))
+                    "(spotify_track_id = ? OR (spotify_track_id >= ? AND spotify_track_id < ?)) LIMIT 1",
+                    (profile_id, track_id, *_album_rows_of(track_id)))
                 row = cursor.fetchone()
                 if not row or not row["spotify_data"]:
                     return {}
@@ -17179,9 +17192,14 @@ class MusicDatabase:
 
     def get_wishlist_tracks(self, limit: Optional[int] = None, profile_id: int = 1,
                             offset: int = 0, category: Optional[str] = None,
-                            approved_only: bool = False) -> List[Dict[str, Any]]:
+                            approved_only: bool = False,
+                            track_key: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get tracks in the wishlist for the given profile, ordered by date added
         (oldest first for retry priority).
+
+        ``track_key`` narrows it to one track: a composite ``<track>::<album>``
+        key matches itself, a bare track id matches itself and its composite
+        rows. a range, not LIKE, so it rides the spotify_track_id index.
 
         Supports SQL-level pagination via limit/offset and optional category
         filtering (singles vs albums) pushed down to SQL using json_extract.
@@ -17199,6 +17217,16 @@ class MusicDatabase:
                 """
 
                 params: List[Any] = [profile_id]
+
+                if track_key is not None:
+                    key = str(track_key)
+                    if "::" in key:
+                        query += " AND spotify_track_id = ?"
+                        params.append(key)
+                    else:
+                        query += (" AND (spotify_track_id = ?"
+                                  " OR (spotify_track_id >= ? AND spotify_track_id < ?))")
+                        params.extend([key, *_album_rows_of(key)])
 
                 # a profile without download rights: only what an admin approved
                 if approved_only:
@@ -17341,17 +17369,17 @@ class MusicDatabase:
                     # library holds the published file when the caller can tell
                     # (#1289); every profile's row otherwise.
                     scoped = [p for p in (profile_ids or []) if p is not None]
-                    identity = (spotify_track_id, f"{spotify_track_id}::%")
+                    identity = (spotify_track_id, *_album_rows_of(spotify_track_id))
                     if scoped:
                         placeholders = ",".join("?" for _ in scoped)
                         cursor.execute(
                             "DELETE FROM wishlist_tracks WHERE (spotify_track_id = ? "
-                            f"OR spotify_track_id LIKE ?) AND profile_id IN ({placeholders})",
+                            f"OR (spotify_track_id >= ? AND spotify_track_id < ?)) AND profile_id IN ({placeholders})",
                             (*identity, *scoped))
                     else:
                         cursor.execute(
                             "DELETE FROM wishlist_tracks WHERE spotify_track_id = ? "
-                            "OR spotify_track_id LIKE ?", identity)
+                            "OR (spotify_track_id >= ? AND spotify_track_id < ?)", identity)
                     # Capture BEFORE the audit insert: rowcount reflects the
                     # last statement this cursor ran.
                     deleted = cursor.rowcount
@@ -17366,11 +17394,11 @@ class MusicDatabase:
                     identity_clause = (
                         "spotify_track_id = ?"
                         if composite
-                        else "(spotify_track_id = ? OR spotify_track_id LIKE ?)"
+                        else "(spotify_track_id = ? OR (spotify_track_id >= ? AND spotify_track_id < ?))"
                     )
                     params = [error_message, spotify_track_id]
                     if not composite:
-                        params.append(f"{spotify_track_id}::%")
+                        params.extend(_album_rows_of(spotify_track_id))
                     params.append(profile_id)
                     # a failure moves the track up the backoff ladder only when
                     # it was due. playlist syncs and batches fail a wished
@@ -17463,8 +17491,8 @@ class MusicDatabase:
                                 id_params.append(one)
                             else:
                                 terms.append(
-                                    "(spotify_track_id = ? OR spotify_track_id LIKE ?)")
-                                id_params.extend((one, f"{one}::%"))
+                                    "(spotify_track_id = ? OR (spotify_track_id >= ? AND spotify_track_id < ?))")
+                                id_params.extend((one, *_album_rows_of(one)))
                         cursor.execute(
                             f"""UPDATE wishlist_tracks
                                 SET retry_count = 0, last_attempted = NULL
