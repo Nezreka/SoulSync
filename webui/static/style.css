@@ -15468,6 +15468,33 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     animation: mirroredOverlayFadeIn 0.25s ease forwards;
 }
 
+/* The sync page shows the window as the playlist's own PAGE: the content
+   area beside the sidebar, no backdrop, no frame. Under the page's sheets
+   and menus (Settings, the schedule picker), which it opens. */
+.mirrored-modal-overlay.mm-as-page {
+    z-index: var(--z-card-overlay);
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+    background: var(--bg-primary);
+    backdrop-filter: none;
+}
+
+@media (min-width: 769px) {
+    .mirrored-modal-overlay.mm-as-page {
+        left: var(--sidebar-w, 240px);
+    }
+}
+
+.mm-as-page .mirrored-modal {
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
 @keyframes mirroredOverlayFadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -17681,45 +17708,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     filter: saturate(0.55) brightness(0.72);
 }
 
-/* The ring: a conic arc on the cover's corner, the coverage as its sweep and
-   its number in the middle. Only ever rendered when it has something to say. */
-.pl-ring {
-    position: absolute;
-    right: -6px;
-    bottom: -6px;
-    width: 30px;
-    height: 30px;
-    border-radius: var(--radius-circle);
-    display: grid;
-    place-items: center;
-    --ring-color: #e3a63c;
-    background: conic-gradient(var(--ring-color) calc(var(--pct, 0) * 1%), var(--white-a10) 0);
-    box-shadow: 0 0 0 3px #0d0d10;
-}
-
-.pl-ring::after {
-    content: attr(data-pct);
-    position: absolute;
-    inset: 3px;
-    border-radius: var(--radius-circle);
-    background: #111114;
-    display: grid;
-    place-items: center;
-    font-size: 8.5px;
-    font-weight: 700;
-    color: var(--ring-color);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
-}
-
-.pl-ring--error { --ring-color: #e0554e; }
-.pl-ring--working { --ring-color: rgb(var(--accent-rgb)); animation: pl-ring-pulse 1.6s ease-in-out infinite; }
-
-@keyframes pl-ring-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
-}
-
 .pl-card-body {
     display: flex;
     flex-direction: column;
@@ -17850,14 +17838,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 @media (prefers-reduced-motion: reduce) {
     .pl-card { transition: none; }
     .pl-card:hover { transform: none; }
-    .pl-ring--working { animation: none; }
 }
 
 /* The overflow menu — five actions that used to be five icon-only buttons on
    every card at once, each with tooltip-only meaning. */
 .pl-menu {
     position: fixed;
-    z-index: 1400;
+    z-index: var(--z-menu);
     min-width: 188px;
     padding: 6px;
     border-radius: var(--radius-lg);

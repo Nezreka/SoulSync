@@ -1,16 +1,16 @@
 {
   "legacy": {
-    "hex": 3574,
+    "hex": 3571,
     "rgbLiterals": 4197,
     "important": 2092,
     "duplicateSelectors": 311
   },
   "modules": {
-    "hex": 723,
-    "rgbLiterals": 875,
+    "hex": 708,
+    "rgbLiterals": 660,
     "important": 243
   },
-  "distinctZIndexValues": 85,
+  "distinctZIndexValues": 84,
   "distinctBreakpoints": 57,
   "duplicateKeyframes": 0,
   "undefinedCustomProperties": 0,

@@ -44,7 +44,7 @@ import { ImportFileTab } from './import-file-tab';
 import { LastfmSyncTab } from './lastfm-sync-tab';
 import { ListenBrainzSyncTab } from './lb-sync-tab';
 import { MirrorMatchEditor } from './mirror-match-editor';
-import { MirroredTab } from './mirrored-tab';
+import { MirroredTab, type SyncLibrarySummary } from './mirrored-tab';
 import { ServerCompareEditor } from './server-compare-editor';
 import { ServerPlaylistList } from './server-playlist-list';
 import { SoulsyncDiscoveryTab } from './soulsync-discovery-tab';
@@ -96,11 +96,21 @@ export function SyncPage() {
    * because the tab that must parse it may not be mounted at the moment the
    * sheet closes — opening it is what mounts it.
    */
-  const [addAnchor, setAddAnchor] = useState<{
-    top: number;
-    left: number;
-    el: HTMLElement;
-  } | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  /** what the header's status line says, from the Mirrored library */
+  const [summary, setSummary] = useState<SyncLibrarySummary | null>(null);
+  /** Add › Start fresh: bumping one opens that tab's create row */
+  const [createMine, setCreateMine] = useState(0);
+  const [createRequest, setCreateRequest] = useState(0);
+  const startNew = useCallback((kind: 'user' | 'requests') => {
+    if (kind === 'user') {
+      openTab.current?.('my-playlists');
+      setCreateMine((n) => n + 1);
+    } else {
+      openTab.current?.('request-lists');
+      setCreateRequest((n) => n + 1);
+    }
+  }, []);
   const [pending, setPending] = useState<{ tab: string; url: string } | null>(null);
   const routeAdd = useCallback((tab: string, url?: string) => {
     if (url) setPending({ tab, url });
@@ -349,6 +359,7 @@ export function SyncPage() {
         registerReload={page.registerMirroredReload}
         registerOpenDetail={registerOpenDetail}
         onOpenServerEditor={openServerEditor}
+        onSummary={setSummary}
       />
     ),
     // the same tab over the playlists made here: one vertical, one pipeline
@@ -361,6 +372,7 @@ export function SyncPage() {
         pipeline={page.pipeline}
         registerReload={page.registerMirroredReload}
         registerOpenDetail={registerOpenMineDetail}
+        createSignal={createMine}
       />
     ),
     'request-lists': (
@@ -372,24 +384,21 @@ export function SyncPage() {
         pipeline={page.pipeline}
         registerReload={page.registerMirroredReload}
         onOpenServerEditor={openServerEditor}
+        createSignal={createRequest}
       />
     ),
   };
 
   return (
     <ImportLandingProvider value={importLanding}>
-      {addAnchor && (
-        <AddPlaylistSheet
-          anchor={{ top: addAnchor.top, left: addAnchor.left }}
-          anchorEl={addAnchor.el}
-          onRoute={routeAdd}
-          onClose={() => setAddAnchor(null)}
-        />
+      {addOpen && (
+        <AddPlaylistSheet onRoute={routeAdd} onNew={startNew} onClose={() => setAddOpen(false)} />
       )}
       <SyncShell
         panels={panels}
-        // Toggles: pressing the button again closes the sheet.
-        onAddPlaylist={(next) => setAddAnchor((prev) => (prev ? null : next))}
+        summary={summary}
+        onAddPlaylist={() => setAddOpen(true)}
+        onUpdateList={() => page.reloadMirrored()}
         onAutoSync={() => setAutoSyncOpen(true)}
         onActivity={() => setActivityOpen(true)}
         registerOpenTab={registerOpenTab}

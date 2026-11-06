@@ -11,7 +11,7 @@ import { mirroredPipelineStateWriter } from '../-sync.mirrored';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { useMirroredPipeline } from '../-sync.use-pipeline';
 import { useSourceVertical } from '../-sync.use-vertical';
-import { MirroredTab } from './mirrored-tab';
+import { MirroredTab, SHELF_MIN_LIBRARY } from './mirrored-tab';
 
 // card play goes through the shared playlist player; what matters here is
 // that the card hands it the playlist's real tracks
@@ -101,12 +101,40 @@ function Harness(props: Partial<Parameters<typeof MirroredTab>[0]> = {}) {
  * behind the ⋯ menu now, so a test has to open it the way a user does.
  */
 function runCardAction(label: string, cardIndex = 0): void {
-  const more = document.querySelectorAll('.pl-card-more')[cardIndex] as HTMLElement;
+  const more = document.querySelectorAll('.plc-more')[cardIndex] as HTMLElement;
   fireEvent.click(more);
   const item = [...document.querySelectorAll('.pl-menu-item')].find(
     (b) => b.textContent === label,
   ) as HTMLElement;
   fireEvent.click(item);
+}
+
+/**
+ * Open a card's Settings sheet (⋯ › Settings). The playlist's settings moved
+ * out of the overflow menu into one sheet; a test reaches them the way a user
+ * does.
+ */
+function openSettings(cardIndex = 0): HTMLElement {
+  runCardAction('Settings', cardIndex);
+  return document.querySelector('.playlist-settings-sheet') as HTMLElement;
+}
+
+/** Click a control in a card's Settings sheet by its text. */
+function runSettingsAction(label: string, cardIndex = 0): void {
+  const sheet = openSettings(cardIndex);
+  const button = [...sheet.querySelectorAll('button')].find(
+    (b) => b.textContent === label,
+  ) as HTMLElement;
+  fireEvent.click(button);
+}
+
+/** Rename through the Settings sheet's Name field. */
+function renameVia(value: string, key = 'Enter'): HTMLInputElement {
+  const sheet = openSettings();
+  const input = sheet.querySelector('input[aria-label="Name"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { value } });
+  fireEvent.keyDown(input, { key });
+  return input;
 }
 
 describe('MirroredTab — load and card', () => {
@@ -118,17 +146,17 @@ describe('MirroredTab — load and card', () => {
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
     const card = document.querySelector('#mirrored-card-3')!;
-    expect(card.className).toBe('pl-card');
-    // The brand mark replaces the emoji, and appears twice on purpose: once on
-    // the cover (as its fallback) and once beside the name.
-    expect(card.querySelector('.pl-card-art .tidal-icon')).not.toBeNull();
-    expect(card.querySelector('.pl-card-name .tidal-icon')).not.toBeNull();
+    expect(card.className).toContain('plc');
+    // The brand mark is the cover's fallback; the source is named in words
+    // under the title.
+    expect(card.querySelector('.pl-card-art-img .tidal-icon')).not.toBeNull();
+    expect(card.textContent).toContain('Tidal');
     // ONE meta line in place of the old chip row (source badge, count,
     // mirrored-ago, ratio, phase, export status).
-    expect(card.querySelector('.pl-card-meta')!.textContent).toBe('25 tracks · Mirrored 30m ago');
+    expect(card.querySelector('.plc-status')!.textContent).toBe('25 tracks · Mirrored 30m ago');
     // Untouched playlist: no ring, and Clear discovery is not offered.
     expect(card.querySelector('.pl-ring')).toBeNull();
-    fireEvent.click(card.querySelector('.pl-card-more') as HTMLElement);
+    fireEvent.click(card.querySelector('.plc-more') as HTMLElement);
     expect([...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent)).not.toContain(
       'Clear discovery',
     );
@@ -144,15 +172,15 @@ describe('MirroredTab — load and card', () => {
     await waitFor(() => expect(screen.getByText('My Alias')).toBeInTheDocument());
     // The "↳ original name" line is gone — a whole extra line on every renamed
     // card for something you read once. It moved to the name's hover text.
-    expect(document.querySelector('.pl-card-name b')!.getAttribute('title')).toBe(
+    expect(document.querySelector('.plc-name')!.getAttribute('title')).toBe(
       'My Alias — originally "Road Trip"',
     );
-    // The ratio chip became the ring on the cover: 9 of 25 is 36%.
-    const ring = document.querySelector('.pl-ring')!;
-    expect(ring.getAttribute('data-pct')).toBe('36%');
-    expect(ring.className).toContain('pl-ring--short');
+    // 9 of 25 discovered: the card is short, and its line says by how much.
+    const card = document.querySelector('#mirrored-card-3')!;
+    expect(card.getAttribute('data-state')).toBe('short');
+    expect(card.querySelector('.plc-status')!.textContent).toBe('25 tracks · 16 not found');
     // Clear & re-identify is offered now that there IS an identification to clear.
-    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    fireEvent.click(document.querySelector('.plc-more') as HTMLElement);
     expect([...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent)).toContain(
       'Clear & re-identify',
     );
@@ -175,7 +203,10 @@ describe('MirroredTab — load and card', () => {
     await waitFor(() => {
       const el = screen.getByText('Discovering 40%');
       expect(el).toBeInTheDocument();
-      expect(el).toHaveStyle({ color: '#38bdf8' });
+      // live: the cover carries a progress bar at the run's percentage
+      expect(
+        document.querySelector('#mirrored-card-3 .pl-card-progress')!.getAttribute('aria-valuenow'),
+      ).toBe('40');
     });
   });
 
@@ -380,13 +411,8 @@ describe('MirroredTab — the three actions', () => {
     window.prompt = prompt as typeof window.prompt;
     await loaded();
 
-    runCardAction('Rename');
-    const input = document.querySelector('.mirrored-rename-input') as HTMLInputElement;
-    expect(input).not.toBeNull();
+    renameVia('  My Alias  ');
     expect(prompt).not.toHaveBeenCalled();
-
-    fireEvent.change(input, { target: { value: '  My Alias  ' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(toast).toHaveBeenCalled());
     const patch = calls.find((c) => c.method === 'PATCH')!;
     expect(patch.url).toBe('/api/mirrored-playlists/3/custom-name');
@@ -409,7 +435,7 @@ describe('MirroredTab — the three actions', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Gym')).toBeInTheDocument());
 
-    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    openSettings();
     const select = screen.getByLabelText('Sync mode') as HTMLSelectElement;
     expect(select.value).toBe('append');
 
@@ -443,10 +469,7 @@ describe('MirroredTab — the three actions', () => {
     );
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    runCardAction('Rename');
-    const input = document.querySelector('.mirrored-rename-input') as HTMLInputElement;
-    fireEvent.change(input, { target: { value: 'X' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
+    renameVia('X');
     await waitFor(() => expect(patched).toBe(true));
     await waitFor(() => expect(toast).toHaveBeenCalledWith('Error: taken', 'error'));
   });
@@ -455,8 +478,14 @@ describe('MirroredTab — the three actions', () => {
     const toast = vi.fn();
     window.showToast = toast as typeof window.showToast;
     await loaded();
-    runCardAction('Rename');
-    const input = document.querySelector('.mirrored-rename-input') as HTMLInputElement;
+    // the box starts empty on an unrenamed playlist, so blank needs a rename first
+    renameVia('Temp');
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    toast.mockClear();
+    calls.length = 0;
+    const input = document.querySelector(
+      '.playlist-settings-sheet input[aria-label="Name"]',
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { value: '   ' } });
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(toast).toHaveBeenCalled());
@@ -467,12 +496,12 @@ describe('MirroredTab — the three actions', () => {
   it('rename: Escape cancels without a request (the vanilla null return, 2386)', async () => {
     window.showToast = vi.fn() as typeof window.showToast;
     await loaded();
-    runCardAction('Rename');
-    const input = document.querySelector('.mirrored-rename-input') as HTMLInputElement;
+    const sheet = openSettings();
+    const input = sheet.querySelector('input[aria-label="Name"]') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'Nope' } });
     const before = calls.length;
     fireEvent.keyDown(input, { key: 'Escape' });
-    expect(document.querySelector('.mirrored-rename-input')).toBeNull();
+    expect(document.querySelector('.playlist-settings-sheet')).toBeNull();
     expect(calls.length).toBe(before);
   });
 
@@ -493,11 +522,17 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
     // None is conditional: the card actions own their controllers.
-    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    fireEvent.click(document.querySelector('.plc-more') as HTMLElement);
     const labels = [...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent);
     expect(labels).toContain('Export');
-    expect(screen.getByText('Sync & download')).toBeInTheDocument();
-    expect(labels).toContain('Edit source link');
+    expect(labels).toContain('Settings');
+    expect(screen.getAllByText('Sync & download').length).toBeGreaterThan(0);
+    fireEvent.click(
+      [...document.querySelectorAll('.pl-menu-item')].find(
+        (b) => b.textContent === 'Settings',
+      ) as HTMLElement,
+    );
+    expect(screen.getByText('Edit source link')).toBeInTheDocument();
   });
 
   it('a FRESH card click opens the tracks detail modal (641), not the discovery one', async () => {
@@ -598,7 +633,7 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
 
     // click the card again: detail, with its delete + edit source, not discovery.
     // (the harness's seeded span says Road Trip too now, so aim at the card)
-    fireEvent.click(document.querySelector('#mirrored-card-3 .pl-card-name') as HTMLElement);
+    fireEvent.click(document.querySelector('#mirrored-card-3 .plc-name') as HTMLElement);
     await waitFor(() => expect(document.querySelector('#mirrored-track-modal')).not.toBeNull());
     fireEvent.click(screen.getByLabelText('More actions'));
     expect(screen.getByRole('menuitem', { name: 'Delete mirror' })).toBeInTheDocument();
@@ -663,19 +698,6 @@ describe('MirroredTab — deferred controls and click dispatch', () => {
     );
     expect(document.querySelector('#mirrored-track-modal')).toBeNull();
   });
-
-  it('Update list refetches (the refresh button keeps its vanilla id)', async () => {
-    stubFetch();
-    responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
-    render(<Harness />);
-    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    const before = calls.filter((c) => c.url === '/api/mirrored-playlists').length;
-    expect(document.querySelector('#mirrored-refresh-btn')).not.toBeNull();
-    fireEvent.click(screen.getByText('Update list'));
-    await waitFor(() =>
-      expect(calls.filter((c) => c.url === '/api/mirrored-playlists').length).toBe(before + 1),
-    );
-  });
 });
 
 describe('MirroredTab — export (#903)', () => {
@@ -708,7 +730,7 @@ describe('MirroredTab — export (#903)', () => {
     );
     // _setExportStatus injects into the card's own .card-meta row (809-813).
     expect(
-      document.querySelector('#mirrored-card-3 .card-meta .export-status-span'),
+      document.querySelector('#mirrored-card-3 .plc-status .export-status-span'),
     ).not.toBeNull();
     expect(calls.some((c) => c.url === '/api/playlists/3/export/listenbrainz')).toBe(true);
   });
@@ -824,7 +846,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     };
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    runCardAction('Generate cover art');
+    runSettingsAction('Generate cover art');
     expect(await screen.findByRole('dialog', { name: 'Cover art' })).toBeInTheDocument();
     await screen.findByAltText('Generated cover preview');
     const listFetches = () => calls.filter((c) => c.url === '/api/mirrored-playlists').length;
@@ -840,7 +862,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    runCardAction('Edit source link');
+    runSettingsAction('Edit source link');
     // ROW has no source_ref and no URL description, so the id is the default.
     const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
     expect(input.value).toBe('tp1');
@@ -867,7 +889,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     };
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    runCardAction('Edit source link');
+    runSettingsAction('Edit source link');
     const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'nope' } });
     fireEvent.click(screen.getByText('Save'));
@@ -882,7 +904,7 @@ describe('MirroredTab — Auto-Sync and the 🔗 source ref', () => {
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    runCardAction('Edit source link');
+    runSettingsAction('Edit source link');
     const input = document.querySelector('.mirrored-source-ref-input') as HTMLInputElement;
     fireEvent.change(input, { target: { value: '   ' } });
     fireEvent.click(screen.getByText('Save'));
@@ -1037,7 +1059,7 @@ describe('MirroredTab — the source-ref reopen tail (2434-2438)', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
-    runCardAction('Edit source link');
+    runSettingsAction('Edit source link');
     await waitFor(() =>
       expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
     );
@@ -1106,7 +1128,7 @@ describe('MirroredTab — the reopen origin cannot leak between entry points', (
     await waitFor(() => expect(document.querySelector('#mirrored-source-ref-modal')).toBeNull());
 
     // Now edit from the CARD and commit.
-    runCardAction('Edit source link');
+    runSettingsAction('Edit source link');
     await waitFor(() =>
       expect(document.querySelector('#mirrored-source-ref-modal')).not.toBeNull(),
     );
@@ -1185,7 +1207,7 @@ describe('MirroredTab — the schedule pill', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
-    const pill = document.querySelector('.pl-card-pill') as HTMLElement;
+    const pill = document.querySelector('.plc-schedule') as HTMLElement;
     expect(pill).not.toBeNull();
     // A span here means onSchedule never reached the card, and the click would
     // fall through to the card and open the detail modal instead.
@@ -1231,7 +1253,7 @@ describe('MirroredTab — finding one playlist among many', () => {
     const input = await renderLibrary();
     fireEvent.change(input, { target: { value: 'Deep Focus' } });
     expect(screen.queryByText('Road Trip')).toBeNull();
-    expect(document.querySelectorAll('.pl-card')).toHaveLength(1);
+    expect(document.querySelectorAll('.plc')).toHaveLength(1);
   });
 
   it('says what is being shown, not what the library holds', async () => {
@@ -1258,16 +1280,21 @@ describe('MirroredTab — finding one playlist among many', () => {
 
   it('the clear button appears only when there is something to clear', async () => {
     const input = await renderLibrary();
-    expect(document.querySelector('.library-search-clear')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Clear search' })).toBeNull();
     fireEvent.change(input, { target: { value: 'x' } });
-    fireEvent.click(document.querySelector('.library-search-clear') as HTMLElement);
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
     expect(input.value).toBe('');
   });
 
   it('the source list does NOT shrink to the search result', async () => {
     // Options that vanished as you typed would move under the cursor.
     const input = await renderLibrary();
-    const options = () => document.querySelectorAll('.library-source-select option');
+    const options = () => {
+      if (!document.querySelector('.library-view-menu')) {
+        fireEvent.click(document.querySelector('.library-view-btn') as HTMLElement);
+      }
+      return document.querySelectorAll('.library-source-option');
+    };
     const before = options().length;
     expect(before).toBeGreaterThan(2);
     fireEvent.change(input, { target: { value: 'zzzz' } });
@@ -1276,13 +1303,24 @@ describe('MirroredTab — finding one playlist among many', () => {
 
   it('filters by one source from a dropdown, named the way people say it (#1909)', async () => {
     await renderLibrary();
-    const select = document.querySelector('.library-source-select select') as HTMLSelectElement;
-    expect([...select.options].map((o) => o.textContent)).toContain('Spotify Link');
-    fireEvent.change(select, { target: { value: 'spotify_public' } });
+    const pick = (source: string) => {
+      fireEvent.click(document.querySelector('.library-view-btn') as HTMLElement);
+      fireEvent.click(
+        document.querySelector(`.library-source-option[data-source="${source}"]`) as HTMLElement,
+      );
+    };
+    fireEvent.click(document.querySelector('.library-view-btn') as HTMLElement);
+    expect(
+      [...document.querySelectorAll('.library-source-option')].map(
+        (o) => o.querySelector('span')?.textContent,
+      ),
+    ).toContain('Spotify Link');
+    fireEvent.click(document.querySelector('.library-view-btn') as HTMLElement);
+    pick('spotify_public');
     expect(screen.queryByText('Road Trip')).toBeNull();
     expect(screen.queryByText('Discover Weekly')).toBeNull();
-    expect(document.querySelectorAll('.pl-grid > *')).toHaveLength(1);
-    fireEvent.change(select, { target: { value: '' } });
+    expect(document.querySelectorAll('.library-grid > *')).toHaveLength(1);
+    pick('');
     expect(screen.getByText('Road Trip')).toBeInTheDocument();
   });
 });
@@ -1323,22 +1361,23 @@ describe('MirroredTab — the Scheduled tab keeps up with the menu', () => {
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
 
     // Stand on the Scheduled tab; the card is there because it has a cadence.
-    const scheduledTab = [...document.querySelectorAll('.library-tab')].find((t) =>
+    fireEvent.click(document.querySelector('.library-view-btn') as HTMLElement);
+    const scheduledTab = [...document.querySelectorAll('.pl-show-option')].find((t) =>
       t.textContent?.startsWith('Scheduled'),
     ) as HTMLElement;
     expect(scheduledTab, 'no Scheduled tab rendered').toBeTruthy();
     fireEvent.click(scheduledTab);
-    await waitFor(() => expect(document.querySelectorAll('.pl-card')).toHaveLength(1));
+    await waitFor(() => expect(document.querySelectorAll('.plc')).toHaveLength(1));
 
     // Unschedule through the card's own menu.
-    fireEvent.click(document.querySelector('.pl-card-pill') as HTMLElement);
+    fireEvent.click(document.querySelector('.plc-schedule') as HTMLElement);
     const notScheduled = [...document.querySelectorAll('.pl-menu-item')].find((b) =>
       b.textContent?.startsWith('Not scheduled'),
     ) as HTMLElement;
     fireEvent.click(notScheduled);
 
     // It no longer has a cadence, so it no longer belongs on this tab.
-    await waitFor(() => expect(document.querySelectorAll('.pl-card')).toHaveLength(0));
+    await waitFor(() => expect(document.querySelectorAll('.plc')).toHaveLength(0));
   });
 
   it('picks up a cadence removed SOMEWHERE ELSE when the page reloads it', () => {
@@ -1367,10 +1406,14 @@ describe('MirroredTab — the Scheduled tab keeps up with the menu', () => {
 
     return waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument()).then(
       async () => {
-        const scheduledTab = () =>
-          [...document.querySelectorAll('.library-tab')].find((t) =>
+        const scheduledTab = () => {
+          if (!document.querySelector('.library-view-menu')) {
+            fireEvent.click(document.querySelector('.library-view-btn') as HTMLElement);
+          }
+          return [...document.querySelectorAll('.pl-show-option')].find((t) =>
             t.textContent?.startsWith('Scheduled'),
           );
+        };
         await waitFor(() => expect(scheduledTab()).toBeTruthy());
 
         // Something outside this tab removes the schedule.
@@ -1401,17 +1444,21 @@ describe('MirroredTab — the sort control', () => {
     await waitFor(() => expect(screen.getByText('Zebra')).toBeInTheDocument());
   }
 
-  const names = () => [...document.querySelectorAll('.pl-card-name b')].map((n) => n.textContent);
+  const names = () => [...document.querySelectorAll('.plc-name')].map((n) => n.textContent);
+  const sortBy = (label: string) => {
+    fireEvent.click(document.querySelector('.library-view-btn') as HTMLElement);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: label }));
+  };
 
   it('reorders the grid by the name a user sees', async () => {
     await renderMany();
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'name' } });
+    sortBy('Name');
     expect(names()).toEqual(['apple', 'Kiwi', 'Mango', 'Zebra']);
   });
 
   it('reorders by track count, biggest first', async () => {
     await renderMany();
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'tracks' } });
+    sortBy('Track count');
     expect(names()).toEqual(['apple', 'Mango', 'Kiwi', 'Zebra']);
   });
 
@@ -1420,7 +1467,9 @@ describe('MirroredTab — the sort control', () => {
     responder = (url) => (url === '/api/mirrored-playlists' ? [ROW] : { states: [] });
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
-    expect(screen.queryByRole('combobox')).toBeNull();
+    fireEvent.click(document.querySelector('.library-view-btn') as HTMLElement);
+    expect(screen.queryByText('Sort by')).toBeNull();
+    expect(screen.queryByRole('menuitemradio', { name: 'Track count' })).toBeNull();
   });
 });
 
@@ -1452,7 +1501,7 @@ describe('MirroredTab — select mode and batch delete (#1219)', () => {
   it('is off by default: no bar, cards are buttons, no checks', async () => {
     await loadedMany();
     expect(screen.queryByRole('toolbar')).toBeNull();
-    expect(document.querySelector('.pl-card-check')).toBeNull();
+    expect(document.querySelector('.plc-check')).toBeNull();
     expect(document.querySelector('#mirrored-card-1')!.getAttribute('role')).toBe('button');
   });
 
@@ -1464,11 +1513,11 @@ describe('MirroredTab — select mode and batch delete (#1219)', () => {
     const card = document.querySelector('#mirrored-card-1')!;
     expect(card.getAttribute('role')).toBe('checkbox');
     expect(card.getAttribute('aria-checked')).toBe('false');
-    expect(card.querySelector('.pl-card-check')).not.toBeNull();
+    expect(card.querySelector('.plc-check')).not.toBeNull();
 
     fireEvent.click(card);
     expect(card.getAttribute('aria-checked')).toBe('true');
-    expect(card.className).toContain('pl-card--selected');
+    expect(card.className).toContain('plc--selected');
     expect(screen.getByText('1 selected')).toBeInTheDocument();
     // the click did NOT open the playlist
     expect(screen.getByTestId('open-id')).toHaveTextContent('none');
@@ -1583,7 +1632,7 @@ describe('MirroredTab — select mode and batch delete (#1219)', () => {
     fireEvent.click(document.querySelector('#mirrored-card-1')!);
     fireEvent.click(screen.getByText('Done'));
     expect(screen.queryByRole('toolbar')).toBeNull();
-    expect(document.querySelector('.pl-card--selected')).toBeNull();
+    expect(document.querySelector('.plc--selected')).toBeNull();
     fireEvent.click(screen.getByText('Select'));
     expect(screen.getByText('0 selected')).toBeInTheDocument();
   });
@@ -1612,12 +1661,11 @@ describe('MirroredTab — My Playlists scope', () => {
     render(<Harness scope="user" />);
     await waitFor(() => expect(screen.getByText('Late night')).toBeInTheDocument());
     expect(screen.queryByText('Road Trip')).toBeNull();
-    expect(screen.getByText('My playlists')).toBeInTheDocument();
+    expect(screen.getByText('My Playlists')).toBeInTheDocument();
     // a user playlist has no source to point anywhere
-    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
-    const items = [...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent);
-    expect(items).toContain('Rename');
-    expect(items).not.toContain('Edit source link');
+    const sheet = openSettings();
+    expect(sheet.querySelector('input[aria-label="Name"]')).not.toBeNull();
+    expect(sheet.textContent).not.toContain('Edit source link');
   });
 
   it('registers its reload under its own key so the page refreshes both tabs', async () => {
@@ -1736,7 +1784,7 @@ describe('play from a card, and copy a mirror to My Playlists', () => {
       url === '/api/mirrored-playlists' ? [{ ...ROW, source: 'soulsync' }] : { states: [] };
     render(<Harness scope="user" />);
     await screen.findByText('Road Trip');
-    fireEvent.click(document.querySelector('.pl-card-more') as HTMLElement);
+    fireEvent.click(document.querySelector('.plc-more') as HTMLElement);
     expect([...document.querySelectorAll('.pl-menu-item')].map((b) => b.textContent)).not.toContain(
       'Copy to My Playlists',
     );
@@ -1771,5 +1819,108 @@ describe('play from a card, and copy a mirror to My Playlists', () => {
     expect(window.showToast).toHaveBeenCalledWith('“Road Trip” is in My Playlists now', 'success');
     // it is yours now: the copy offers what a mirror never had
     expect(screen.getByRole('button', { name: 'Add songs' })).toBeInTheDocument();
+  });
+});
+
+describe('MirroredTab — the Needs attention shelf', () => {
+  // 13 playlists, two of them short of discovery: a library too long to scan
+  const many = (n: number, short: number[]) =>
+    Array.from({ length: n }, (_, i) => ({
+      ...ROW,
+      id: 100 + i,
+      name: `List ${i}`,
+      source_playlist_id: `p${i}`,
+      discovered_count: short.includes(i) ? 5 : 25,
+    }));
+
+  async function renderRows(rows: unknown[]) {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? rows : { states: [] });
+    render(<Harness />);
+    await waitFor(() =>
+      expect(document.querySelectorAll('.library-grid > *').length).toBeGreaterThan(0),
+    );
+  }
+
+  it('shows the playlists that need attention, on a long library', async () => {
+    await renderRows(many(SHELF_MIN_LIBRARY + 1, [3, 7]));
+    const shelf = document.querySelector('.library-shelf') as HTMLElement;
+    expect(shelf).not.toBeNull();
+    const names = [...shelf.querySelectorAll('.plc-name')].map((n) => n.textContent);
+    expect(names.sort()).toEqual(['List 3', 'List 7']);
+    // the shelf copies don't steal the grid cards' ids
+    expect(shelf.querySelector('[id^="mirrored-card-"]')).toBeNull();
+    expect(document.querySelectorAll('#mirrored-card-103')).toHaveLength(1);
+  });
+
+  it('stays hidden on a short library, where it would only repeat the grid', async () => {
+    await renderRows(many(SHELF_MIN_LIBRARY, [3]));
+    expect(document.querySelector('.library-shelf')).toBeNull();
+  });
+
+  it('stays hidden when nothing needs attention', async () => {
+    await renderRows(many(SHELF_MIN_LIBRARY + 5, []));
+    expect(document.querySelector('.library-shelf')).toBeNull();
+  });
+
+  it('Show all switches the library to the Needs attention filter', async () => {
+    await renderRows(many(SHELF_MIN_LIBRARY + 1, [3, 7]));
+    fireEvent.click(screen.getByRole('button', { name: 'Show all' }));
+    expect(document.querySelector('.library-shelf')).toBeNull();
+    expect(document.querySelectorAll('.library-grid > *')).toHaveLength(2);
+  });
+});
+
+describe('MirroredTab — the page reports and the Add sheet starts a playlist', () => {
+  it('reports the library summary the header reads', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW, { ...ROW, id: 4, source_playlist_id: 'tp2', discovered_count: 25 }]
+        : { states: [] };
+    const onSummary = vi.fn();
+    render(<Harness onSummary={onSummary} />);
+    await waitFor(() =>
+      expect(onSummary).toHaveBeenLastCalledWith(
+        expect.objectContaining({ playlists: 2, running: 0 }),
+      ),
+    );
+  });
+
+  it('a create signal opens the new-playlist sheet, even on a tab it mounts', async () => {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? [] : { states: [] });
+    render(<Harness scope="user" createSignal={1} />);
+    expect(await screen.findByLabelText('New playlist name')).toBeInTheDocument();
+  });
+
+  it('no signal, no sheet', async () => {
+    stubFetch();
+    responder = (url) => (url === '/api/mirrored-playlists' ? [] : { states: [] });
+    render(<Harness scope="user" createSignal={0} />);
+    await waitFor(() =>
+      expect(screen.getByText(/Start one with \+ New playlist/)).toBeInTheDocument(),
+    );
+    expect(screen.queryByLabelText('New playlist name')).toBeNull();
+  });
+});
+
+describe('MirroredTab — the playlist page opens its Settings', () => {
+  it('the gear on the playlist page opens the same Settings sheet', async () => {
+    stubFetch();
+    responder = (url) =>
+      url === '/api/mirrored-playlists'
+        ? [ROW]
+        : url === '/api/mirrored-playlists/3'
+          ? { name: 'Road Trip', source: 'tidal', tracks: [] }
+          : { states: [] };
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Road Trip')).toBeInTheDocument());
+    fireEvent.click(document.querySelector('#mirrored-card-3') as HTMLElement);
+    await waitFor(() =>
+      expect(document.querySelector('#mirrored-track-modal.mm-as-page')).not.toBeNull(),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Playlist settings' }));
+    expect(screen.getByRole('dialog', { name: 'Settings for Road Trip' })).toBeInTheDocument();
   });
 });

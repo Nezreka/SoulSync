@@ -17,15 +17,26 @@ export function noMatchText(query: string): string {
 export function PlaylistSearch({
   value,
   onChange,
+  className,
+  icon,
 }: {
   value: string;
   onChange: (value: string) => void;
+  /**
+   * A page that styles the box its own way. The legacy .library-search
+   * classes are left off then, so their rules have nothing to fight.
+   */
+  className?: string;
+  /** a leading glyph inside the box */
+  icon?: React.ReactNode;
 }) {
+  const own = Boolean(className);
   return (
-    <div className="library-search">
+    <div className={own ? className : 'library-search'}>
+      {icon}
       <input
         type="search"
-        className="library-search-input"
+        className={own ? undefined : 'library-search-input'}
         placeholder="Search playlists"
         aria-label="Search playlists"
         value={value}
@@ -39,7 +50,7 @@ export function PlaylistSearch({
       {value && (
         <button
           type="button"
-          className="library-search-clear"
+          className={own ? undefined : 'library-search-clear'}
           aria-label="Clear search"
           onClick={() => onChange('')}
         >

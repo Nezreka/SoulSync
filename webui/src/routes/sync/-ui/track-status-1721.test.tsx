@@ -77,12 +77,12 @@ describe('the card', () => {
 
   it('a card with nothing to fix shows no link', () => {
     renderCard({ needs_match_count: 0 });
-    expect(document.querySelector('.pl-card-attn')).toBeNull();
+    expect(document.querySelector('.plc-guesses')).toBeNull();
   });
 
   it('live narration replaces the link while a run is going', () => {
     renderCard({ needs_match_count: 42 }, { status: <span>discovering 40%</span> });
-    expect(document.querySelector('.pl-card-attn')).toBeNull();
+    expect(document.querySelector('.plc-guesses')).toBeNull();
   });
 });
 
