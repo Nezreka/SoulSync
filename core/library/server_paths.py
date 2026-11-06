@@ -34,6 +34,11 @@ logger = get_logger("library.server_paths")
 _MIN_SHARED_SEGMENTS = 3
 # misses in one reported namespace before disabling expensive fuzzy scans
 _GIVE_UP_AFTER = 200
+# misses before the cheap probes stop too. a library that isn't mounted here
+# at all (or a NAS that's down) cost stats per track for the whole scan;
+# 3.6.1 stopped after _GIVE_UP_AFTER. a flat layout that resolves keeps going
+# because every hit resets the count
+_STOP_AFTER = 2000
 
 _lock = threading.Lock()
 _learned: Dict[str, str] = {}  # server prefix -> local prefix
@@ -122,7 +127,10 @@ def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str
             return os.path.abspath(hit)
         namespace = _namespace(normalized)
         with _lock:
-            allow_fuzzy = _misses.get(namespace, 0) < _GIVE_UP_AFTER
+            misses = _misses.get(namespace, 0)
+        if misses >= _STOP_AFTER:
+            return None
+        allow_fuzzy = misses < _GIVE_UP_AFTER
         from core.library.path_resolver import resolve_library_file_path
         resolved = resolve_library_file_path(
             server_path, config_manager=config_manager, allow_fuzzy=allow_fuzzy,
@@ -136,7 +144,7 @@ def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str
             _learn(normalized, resolved)
             return resolved
         with _lock:
-            _misses[namespace] = min(_misses.get(namespace, 0) + 1, _GIVE_UP_AFTER)
+            _misses[namespace] = min(_misses.get(namespace, 0) + 1, _STOP_AFTER)
         return None
     except Exception as e:  # noqa: BLE001 - a lookup must never cost the scan a track
         logger.debug("local path lookup failed for %r: %s", server_path, e)
