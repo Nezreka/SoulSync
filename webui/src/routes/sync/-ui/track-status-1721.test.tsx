@@ -42,8 +42,8 @@ describe('status helpers', () => {
   });
 
   it('the card link only exists when something needs a match', () => {
-    expect(needsMatchLabel({ needs_match_count: 42 })).toBe('42 need a match');
-    expect(needsMatchLabel({ needs_match_count: 1 })).toBe('1 needs a match');
+    expect(needsMatchLabel({ needs_match_count: 42 })).toBe('42 guesses to review');
+    expect(needsMatchLabel({ needs_match_count: 1 })).toBe('1 guess to review');
     expect(needsMatchLabel({ needs_match_count: 0 })).toBeNull();
     expect(needsMatchLabel({})).toBeNull();
   });
@@ -68,9 +68,9 @@ function renderCard(over: Partial<MirroredPlaylistRow>, extra = {}) {
 }
 
 describe('the card', () => {
-  it('says how many need a match and opens the pool, not the card', () => {
+  it('says how many guesses wait for review and opens the pool, not the card', () => {
     const { onOpen, onNeedsMatch } = renderCard({ needs_match_count: 42 });
-    fireEvent.click(screen.getByRole('button', { name: '42 need a match' }));
+    fireEvent.click(screen.getByRole('button', { name: '42 guesses to review' }));
     expect(onNeedsMatch).toHaveBeenCalledTimes(1);
     expect(onOpen).not.toHaveBeenCalled();
   });

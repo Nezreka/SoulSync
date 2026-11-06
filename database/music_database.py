@@ -642,7 +642,7 @@ _MIRRORED_PROVIDER_PROBES = " OR ".join(
 # Current scoped provider/file evidence can supersede an old negative verdict.
 # Unchecked rows also get an indexed, exact-name fallback. The LOWER predicate
 # selects the existing expression index; exact equality still rejects wrong case.
-_MIRRORED_ROW_IN_LIBRARY = """SUM(CASE
+_MIRRORED_ROW_IN_LIBRARY_CASE = """CASE
     WHEN mpt.extra_data LIKE '%"in_library": true%' THEN 1
     WHEN mpt.source_track_id IS NOT NULL AND mpt.source_track_id<>''
          AND (""" + _MIRRORED_PROVIDER_PROBES + """) THEN 1
@@ -659,7 +659,8 @@ _MIRRORED_ROW_IN_LIBRARY = """SUM(CASE
                  JOIN lib2_artists a ON a.id=al.primary_artist_id
                 WHERE al.id=t.album_id AND a.name=mpt.artist_name))
            AND """ + _MIRRORED_OWNED_FILE + """
-    ) THEN 1 ELSE 0 END)"""
+    ) THEN 1 ELSE 0 END"""
+_MIRRORED_ROW_IN_LIBRARY = "SUM(" + _MIRRORED_ROW_IN_LIBRARY_CASE + ")"
 
 
 def _lib2_provider_ids(row) -> Dict[str, str]:
@@ -26505,7 +26506,11 @@ class MusicDatabase:
                 cursor.execute(f"""
                     SELECT mpt.playlist_id,
                            COUNT(*) as total,
-                           SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1 ELSE 0 END) as discovered,
+                           -- a track already in the library is found, whatever
+                           -- discovery said. it used to count as not found, so a
+                           -- card read "2005 not found" beside 2696 in the library
+                           SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1
+                                    ELSE {_MIRRORED_ROW_IN_LIBRARY_CASE.format(owner=owner_clause(column="f.owner_profile_id"))} END) as discovered,
                            -- Written by the SYNC MATCHER, not derived here. A join
                            -- cannot answer this: it fails on collaborations and
                            -- casing, and normalising at query time is a full scan
@@ -26674,13 +26679,19 @@ class MusicDatabase:
                     logger.debug(f"Wishlist count failed for playlist {playlist_id}: {extra_err}")
 
                 # Use the same current ownership evidence as the batched count.
+                # an owned track is found too, same as the batched count
                 try:
+                    _case = _MIRRORED_ROW_IN_LIBRARY_CASE.format(owner=owner_clause(column="f.owner_profile_id"))
                     cursor.execute(f"""
-                        SELECT {_MIRRORED_ROW_IN_LIBRARY.format(owner=owner_clause(column="f.owner_profile_id"))} as in_library
+                        SELECT SUM({_case}) as in_library,
+                               SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1
+                                        ELSE {_case} END) as discovered
                         FROM mirrored_playlist_tracks mpt
                         WHERE mpt.playlist_id = ?
                     """, (playlist_id,))
-                    result['in_library'] = cursor.fetchone()['in_library'] or 0
+                    _row = cursor.fetchone()
+                    result['in_library'] = _row['in_library'] or 0
+                    result['discovered'] = _row['discovered'] or result['discovered']
                 except Exception as extra_err:
                     logger.debug(f"Library count failed for playlist {playlist_id}: {extra_err}")
 
