@@ -44,6 +44,30 @@ class PathDriftReconcileJob(RepairJob):
     default_interval_hours = 168  # weekly
     default_settings = {"max_rows": 500}
     auto_fix = False
+    # run from an artist's Library Health menu, it checks that artist's files
+    # only (#2004). read-only either way.
+    supports_file_scope = True
+
+    @staticmethod
+    def _scoped_file_ids(context: JobContext):
+        """The file rows in this run's allowlist; None when library-wide."""
+        from core.repair_jobs.base import file_path_in_scope, get_scope_file_paths
+
+        allowed = get_scope_file_paths(context)
+        if allowed is None:
+            return None
+        if not allowed:
+            return []
+        conn = context.db._get_connection()
+        try:
+            return [
+                int(row[0]) for row in conn.execute(
+                    "SELECT id, path FROM lib2_track_files "
+                    "WHERE path IS NOT NULL AND path <> ''")
+                if file_path_in_scope(row[1], allowed)
+            ]
+        finally:
+            conn.close()
 
     def _limit(self, context: JobContext) -> int:
         merged = dict(self.default_settings)
@@ -66,6 +90,7 @@ class PathDriftReconcileJob(RepairJob):
         try:
             report = scan_path_drift(
                 context.db,
+                file_ids=self._scoped_file_ids(context),
                 limit=self._limit(context),
                 config_manager=context.config_manager,
             )

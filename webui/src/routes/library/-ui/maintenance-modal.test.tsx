@@ -44,6 +44,29 @@ describe('Library v2 maintenance tools', () => {
     expect(screen.queryByRole('button', { name: /Find Quality Upgrades/ })).toBeNull();
   });
 
+  it('runs the cleanup checks against this artist only (#2004)', async () => {
+    const bodies: { job: string; body: unknown }[] = [];
+    server.use(
+      http.post('/api/repair/jobs/:job/run', async ({ params, request }) => {
+        bodies.push({ job: String(params.job), body: await request.json() });
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    renderModal();
+
+    for (const [name, job] of [
+      [/Find Dead File Paths/, 'dead_file_cleaner'],
+      [/Find Renamed Files/, 'path_drift_reconcile'],
+      [/Find Duplicates/, 'native_duplicate_detector'],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name }));
+      await vi.waitFor(() => expect(bodies.map((b) => b.job)).toContain(job));
+    }
+    for (const { body } of bodies) {
+      expect(body).toEqual({ artist_id: 7, artist_name: 'Massive Attack' });
+    }
+  });
+
   it('shows a terminal job error instead of a successful zero result', async () => {
     server.use(
       http.post('/api/library/v2/maintenance/reconcile-unmapped-artists', () =>
