@@ -50,6 +50,15 @@ def _explicit(value: Any):
     return explicit_flag(value)
 
 
+def _album_identity(conn: Any, album_id: int, musicbrainz_id: Any) -> dict:
+    try:
+        from core.library2.wishlist_mirror import library_album_identity
+        return library_album_identity(conn, album_id, musicbrainz_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("album identity unavailable for %s", album_id, exc_info=True)
+        return {}
+
+
 def _album_images(conn: Any, album_id: int, stored_image_url: Any) -> list:
     try:
         from core.library2.wishlist_art import album_images
@@ -83,7 +92,7 @@ def _pipeline_context(
                   t.duration, t.spotify_id AS track_spotify_id,
                   al.id AS album_id, al.title AS album_title,
                   al.album_type, al.release_date, al.year AS album_year,
-                  al.image_url AS album_image_url,
+                  al.image_url AS album_image_url, al.musicbrainz_id AS album_musicbrainz,
                   t.explicit AS track_explicit, al.explicit AS album_explicit,
                   COALESCE(al.expected_track_count, al.track_count) AS album_total_tracks,
                   al.spotify_id AS album_spotify_id,
@@ -120,6 +129,7 @@ def _pipeline_context(
             "release_date": album_release_date(data.get("release_date"), data.get("album_year")),
             "total_tracks": data.get("album_total_tracks") or 0,
             "explicit": _explicit(data.get("album_explicit")),
+            **_album_identity(conn, int(data["album_id"]), data.get("album_musicbrainz")),
             # the same cover the wishlist mirror sends: the library's artwork
             # first, so the import has a cover to embed and save
             "images": _album_images(conn, int(data["album_id"]), data.get("album_image_url")),

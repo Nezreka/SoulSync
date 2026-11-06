@@ -197,7 +197,8 @@ def _seed_expected_edition(conn: sqlite3.Connection) -> None:
                image_url TEXT,
                track_count INTEGER,
                expected_track_count INTEGER,
-               explicit INTEGER)""",
+               explicit INTEGER,
+               musicbrainz_id TEXT)""",
     )
     conn.execute(
         """CREATE TABLE IF NOT EXISTS lib2_tracks(

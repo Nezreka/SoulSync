@@ -51,6 +51,32 @@ def _explicit(value: Any) -> Optional[bool]:
         return None
 
 
+def library_album_identity(conn, album_id: int, musicbrainz_id: Any) -> Dict[str, Any]:
+    """what keeps a release apart from a same-named one at download time:
+    the musicbrainz release id the folder lookup checks, the default
+    edition's disambiguation (#1299 puts it on the folder) and disc count."""
+    identity: Dict[str, Any] = {}
+    if musicbrainz_id:
+        identity["musicbrainz_release_id"] = str(musicbrainz_id)
+    try:
+        row = conn.execute(
+            """SELECT disambiguation, disc_count FROM lib2_release_editions
+                WHERE release_group_id = ?
+                ORDER BY is_default DESC, id LIMIT 1""", (album_id,)).fetchone()
+    except Exception:  # noqa: BLE001 - an install without editions yet
+        row = None
+    if row is not None:
+        if str(row[0] or "").strip():
+            identity["disambiguation"] = str(row[0]).strip()
+        try:
+            discs = int(row[1] or 0)
+        except (TypeError, ValueError):
+            discs = 0
+        if discs > 1:
+            identity["total_discs"] = discs
+    return identity
+
+
 def library_album_artist_names(conn, album_id: int, primary_artist_id: int) -> List[str]:
     """the album's own artists: its main artist, then a joint album's other
     headliners (never a featured guest). the download names the album folder
@@ -217,6 +243,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             # $explicit / $contentrating in the naming template read these
             # (#1860); without them a wanted track lost its [E] and split off
             "explicit": _explicit(t["album_explicit"]),
+            **library_album_identity(conn, t["album_id"], t["album_musicbrainz"]),
             # The wishlist UI reads `album.images[0].url`, and the import
             # pipeline reads the same slot for cover.jpg / embedded art. This
             # payload carried no `images` at all, so every Library-v2 row

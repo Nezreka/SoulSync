@@ -109,3 +109,20 @@ def test_the_mirrored_row_carries_the_explicit_flags(imported_conn):
     payload = track_wishlist_payload(imported_conn, track_id)
     assert payload["explicit"] is True
     assert payload["album"]["explicit"] is False
+
+
+def test_the_mirrored_album_carries_its_release_identity(imported_conn):
+    """the folder lookup checks the musicbrainz release id and #1299 puts the
+    edition's disambiguation on the folder, so two same-named releases stay
+    apart. the mirror sent neither where the pipeline reads them."""
+    album_id, track_id = _views(imported_conn)
+    release = "f6b47f3a-53a9-4d09-9c87-18a2b63d8b48"
+    imported_conn.execute("UPDATE lib2_albums SET musicbrainz_id=? WHERE id=?", (release, album_id))
+    imported_conn.execute("DELETE FROM lib2_release_editions WHERE release_group_id=?", (album_id,))
+    imported_conn.execute(
+        "INSERT INTO lib2_release_editions(release_group_id, is_default, title, disambiguation, disc_count) "
+        "VALUES (?, 1, 'Views', 'deluxe', 2)", (album_id,))
+    album = track_wishlist_payload(imported_conn, track_id)["album"]
+    assert album["musicbrainz_release_id"] == release
+    assert album["disambiguation"] == "deluxe"
+    assert album["total_discs"] == 2
