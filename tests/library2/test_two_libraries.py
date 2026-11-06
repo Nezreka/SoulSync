@@ -537,6 +537,39 @@ class TestJobsWorkInOneLibrary:
                     f"SELECT title FROM repair_findings WHERE {clause}")}
                 assert titles == expected
 
+    def test_an_album_finding_with_no_file_shows_where_its_album_lives(self, lib):
+        """completeness, tag consistency, genres and discography findings name
+        an album or artist, not a file. they counted as the shared library's,
+        so kim never saw a finding about her own album."""
+        from core.repair_worker import _findings_library_clause
+        k_artist, k_album, k_track = _album_with_file(
+            lib.db, artist="Kims Band", album="Mine", title="K",
+            path=os.path.join(lib.kim_root, "Kims Band", "Mine", "01.flac"), key="k")
+        s_artist, s_album, _ = _album_with_file(
+            lib.db, artist="House Band", album="House", title="H",
+            path=os.path.join(lib.shared, "House Band", "House", "01.flac"), key="h")
+        with lib.db._get_connection() as conn:
+            empty = seed_album(conn, server_id="al-empty", title="Wanted",
+                               artist_id=s_artist, server_source="soulsync")
+            conn.executemany(
+                "INSERT INTO repair_findings (job_id, finding_type, severity, status, "
+                " entity_type, entity_id, file_path, title, description) "
+                "VALUES ('j', 't', 'info', 'pending', ?, ?, NULL, ?, '')",
+                [("album", f"lib2:{k_album}", "kim album"),
+                 ("artist", f"lib2:{k_artist}", "kim artist"),
+                 ("track", f"lib2:{k_track}", "kim track"),
+                 ("album", f"lib2:{s_album}", "house album"),
+                 ("album", f"lib2:{empty}", "nobody's yet")])
+            conn.commit()
+            for scope, expected in (
+                    (lib.kim, {"kim album", "kim artist", "kim track", "nobody's yet"}),
+                    ("shared", {"house album", "nobody's yet"})):
+                with library_scope.library_scope(scope):
+                    clause = _findings_library_clause()
+                titles = {r[0] for r in conn.execute(
+                    f"SELECT title FROM repair_findings WHERE {clause}")}
+                assert titles == expected
+
     def test_the_findings_badges_count_the_library_on_screen(self, two):
         from core.repair_worker import RepairWorker
         with two.db._get_connection() as conn:

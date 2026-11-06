@@ -271,9 +271,33 @@ def _findings_library_clause() -> str:
     owner_of = ("(SELECT r.profile_id FROM lib2_library_roots r"
                 " WHERE substr(file_path, 1, length(r.prefix)) = r.prefix"
                 " ORDER BY length(r.prefix) DESC LIMIT 1)")
-    if scope == "shared":
-        return f"COALESCE({owner_of}, 0) = 0"
-    return f"{owner_of} = {int(scope)}"
+    owner = "IS NULL" if scope == "shared" else f"= {int(scope)}"
+    by_path = (f"COALESCE({owner_of}, 0) = 0" if scope == "shared"
+               else f"{owner_of} = {int(scope)}")
+    # album / artist findings name no file (completeness, tag consistency,
+    # discography, genres...). they used to count as the shared library's,
+    # so a profile with its own library never saw its albums' findings.
+    # place them by their lib2 entity: shown where it has a file, or
+    # everywhere when it has none yet. the cast is on the finding's id, the
+    # catalogue side stays on its index
+    entity = "CAST(substr(entity_id, 6) AS INTEGER)"
+    live = "COALESCE(ef.file_state,'active') = 'active'"
+    files_of = {
+        "track": f"FROM lib2_track_files ef WHERE ef.track_id = {entity} AND {live}",
+        "album": (f"FROM lib2_tracks et JOIN lib2_track_files ef ON ef.track_id = et.id"
+                  f" WHERE et.album_id = {entity} AND {live}"),
+        "artist": (f"FROM lib2_albums ea JOIN lib2_tracks et ON et.album_id = ea.id"
+                   f" JOIN lib2_track_files ef ON ef.track_id = et.id"
+                   f" WHERE ea.primary_artist_id = {entity} AND {live}"),
+    }
+    by_entity = " ".join(
+        f"WHEN '{kind}' THEN (EXISTS (SELECT 1 {sql} AND ef.owner_profile_id {owner})"
+        f" OR NOT EXISTS (SELECT 1 {sql}))"
+        for kind, sql in files_of.items())
+    return (f"(CASE WHEN COALESCE(file_path, '') <> '' THEN {by_path}"
+            f" WHEN entity_id LIKE 'lib2:%' THEN (CASE entity_type {by_entity} ELSE "
+            f"{'1' if scope == 'shared' else '0'} END)"
+            f" ELSE {'1' if scope == 'shared' else '0'} END)")
 
 
 def job_category(job_id: str) -> str:
