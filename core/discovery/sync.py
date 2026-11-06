@@ -738,7 +738,11 @@ def _run_sync_task(
             'download_missing': False,
             'profile_id': profile_id,
             'sync_mode': sync_mode,
-            'user_initiated': not bool(automation_id) if user_initiated is None else user_initiated,
+            # only a caller that says so overrides the wishlist ignore-list
+            # (#874), as in 3.6.1. reading "no automation id" as a click let
+            # the nightly playlist pipeline and every sync-page sync re-queue
+            # tracks the user had removed.
+            'user_initiated': bool(user_initiated),
         }
         if is_request_list:
             sync_kwargs['is_request_list'] = is_request_list

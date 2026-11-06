@@ -255,7 +255,10 @@ def test_records_sync_history_for_new_sync(patched_db):
     assert history_calls[0]['source_page'] == 'sync'
 
 
-@pytest.mark.parametrize('automation, explicit, expected', [(None, None, True), ('job', None, False), ('job', True, True), (None, False, False)])
+# a sync is user-initiated only when its caller says so (#874, as in 3.6.1):
+# no automation id is not a click. the nightly playlist pipeline runs without
+# one, and taking that as a click re-queued tracks the user had removed.
+@pytest.mark.parametrize('automation, explicit, expected', [(None, None, False), ('job', None, False), ('job', True, True), (None, True, True), (None, False, False)])
 def test_sync_worker_forwards_manual_or_automatic_wishlist_intent(patched_db, automation, explicit, expected):
     deps = _build_deps()
     ds.run_sync_task('p1', 'Playlist', [_track()], automation_id=automation, user_initiated=explicit, deps=deps)
