@@ -6,6 +6,8 @@ import contextvars
 import json
 import os
 import re
+import threading
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -1340,6 +1342,77 @@ def _artist_identity(artist_context, source) -> dict:
     }
 
 
+# the folder each album's tracks went to, for a few hours. the tracks of one
+# album are post-processed at the same time, so none of them is in the library
+# yet when the next one picks its folder, and the existing-folder lookup has
+# nothing to go on. one track without a year in its album context then made
+# "Different Route" and another "[2021] Different Route" (SeadogsBooty, Nov 5).
+_RECENT_ALBUM_FOLDERS: dict = {}
+_RECENT_ALBUM_FOLDERS_LOCK = threading.Lock()
+_RECENT_ALBUM_FOLDER_TTL = 6 * 3600
+
+
+def _recent_album_key(transfer_dir, album_artist, album_name, disambiguation, release_kind):
+    artist = str(album_artist or "").strip().casefold()
+    album = str(album_name or "").strip().casefold()
+    if not transfer_dir or not artist or not album:
+        return None
+    return (os.path.normcase(os.path.normpath(str(transfer_dir))), artist, album,
+            str(disambiguation or "").strip().casefold(),
+            str(release_kind or "").strip().casefold())
+
+
+def _recent_album_folder(key):
+    """the folder this album's last track went to, if it is recent and still there."""
+    if key is None:
+        return None
+    hit = _RECENT_ALBUM_FOLDERS.get(key)
+    if not hit:
+        return None
+    folder, stamp = hit
+    if time.time() - stamp > _RECENT_ALBUM_FOLDER_TTL or not os.path.isdir(folder):
+        _RECENT_ALBUM_FOLDERS.pop(key, None)
+        return None
+    return folder
+
+
+def _remember_album_folder(key, folder):
+    if key is None or not folder:
+        return
+    if len(_RECENT_ALBUM_FOLDERS) > 2000:
+        cutoff = time.time() - _RECENT_ALBUM_FOLDER_TTL
+        for stale in [k for k, (_f, t) in _RECENT_ALBUM_FOLDERS.items() if t < cutoff]:
+            _RECENT_ALBUM_FOLDERS.pop(stale, None)
+    _RECENT_ALBUM_FOLDERS[key] = (folder, time.time())
+
+
+def _library_album_year(album_artist, album_name) -> str:
+    """the year the library already has for this album, '' when it has none
+    or the name is ambiguous (two years for one title)."""
+    if not album_artist or not album_name:
+        return ""
+    try:
+        from database.music_database import get_database
+        conn = get_database()._get_connection()
+        try:
+            rows = conn.execute(
+                """SELECT DISTINCT al.year FROM lib2_albums al
+                     JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                    WHERE ar.name = ? COLLATE NOCASE AND al.title = ? COLLATE NOCASE
+                      AND al.year IS NOT NULL AND al.year > 0
+                    LIMIT 2""",
+                (str(album_artist).strip(), str(album_name).strip()),
+            ).fetchall()
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.debug("library album year lookup failed: %s", exc)
+        return ""
+    if len(rows) != 1:
+        return ""
+    return _extract_year_from_release_date(str(rows[0][0]))
+
+
 def build_final_path_for_track(context, artist_context, album_info, file_ext, create_dirs: bool = True):
     """Shared path builder used by both post-processing and verification.
 
@@ -1627,6 +1700,12 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                 and track_info.get("artist"):
             _artist_name = track_info["artist"]
 
+        if not year and not _path_distrusted:
+            # this track's album context had no date (a deezer track's album
+            # often doesn't). the library's own year keeps it in the album's
+            # [year] folder instead of a yearless twin.
+            year = _library_album_year(_album_artist_name, album_info.get("album_name"))
+
         template_context = {
             "artist": _artist_name,
             "albumartist": _album_artist_name,
@@ -1764,6 +1843,27 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             final_path = os.path.join(reuse_folder, filename_base + file_ext)
             _ensure_dir(reuse_folder, exist_ok=True)
             return final_path, True
+
+        _recent_key = None
+        if (folder_path and filename_base and not _multi_disc_album
+                and raw_album_type not in ("compilation", "compile", "compilations")
+                and not context.get("_no_album_folder_reuse")):
+            _recent_key = _recent_album_key(
+                transfer_dir, template_context.get("albumartist"), album_info.get("album_name"),
+                template_context.get("disambiguation", ""), raw_album_type)
+        if _recent_key is not None:
+            # one decision per album at a time: the tracks race each other
+            with _RECENT_ALBUM_FOLDERS_LOCK:
+                album_dir = _recent_album_folder(_recent_key)
+                if album_dir is None:
+                    album_dir = resolve_existing_case_dir(transfer_dir, folder_path)
+                    _ensure_dir(album_dir, exist_ok=True)
+                elif os.path.normpath(album_dir) != os.path.normpath(
+                        os.path.join(transfer_dir, folder_path)):
+                    logger.info("[Album Folder] keeping %s with the rest of its album in %s",
+                                filename_base, album_dir)
+                _remember_album_folder(_recent_key, album_dir)
+            return os.path.join(album_dir, filename_base + file_ext), True
 
         if folder_path and filename_base:
             # #1091: steer into the folder that already exists when it differs
