@@ -23238,12 +23238,19 @@ class MusicDatabase:
                      "OR json_extract(external_ids, '$.bandcamp') = ?)")
             params = (external_id, external_id)
         else:
-            where = f"json_extract(external_ids, '$.{provider}') = ?"
+            # the indexed TRIM(CAST(...)) form: the bare json_extract scanned
+            # every row and never matched an id stored as a JSON number
+            from core.library2.provider_ids import external_id_sql
+            where = f"{external_id_sql('external_ids', provider)} = ?"
+        # 3.6.1's tables held owned rows only: a wanted, discography or
+        # wishlist row is not "the library's track". first by id, stable
+        owned = _owned_sql(table.rstrip('s'), "e")
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute(
-                f"SELECT * FROM {catalogue_table} WHERE {where}", params)
+                f"SELECT * FROM {catalogue_table} e WHERE {where} AND {owned} "
+                "ORDER BY e.id LIMIT 1", params)
             rows = self._api_project_lib2(conn, table.rstrip('s'), cursor.fetchall())
             return rows[0] if rows else None
         except Exception as e:
@@ -26568,8 +26575,12 @@ class MusicDatabase:
             return {}
         marks = ",".join("?" * len(ids))
         providers = ('deezer', 'itunes', 'tidal', 'qobuz')
+        # the TRIM(CAST(...)) form the idx_lib2_tracks_ext_* indexes are built
+        # on: the bare CAST matched none of them, so one unindexed arm turned
+        # the whole OR into a scan of every track, once per playlist track
+        from core.library2.provider_ids import external_id_sql
         external = " OR ".join(
-            f"CAST(json_extract(t.external_ids, '$.{p}') AS TEXT) IN ({marks})" for p in providers)
+            f"{external_id_sql('t.external_ids', p)} IN ({marks})" for p in providers)
         rows = self._api_owned_tracks(
             conn, f"(t.spotify_id IN ({marks}) OR {external})",
             ids * (1 + len(providers)), profile_id=profile_id)
