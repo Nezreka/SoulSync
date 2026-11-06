@@ -180,15 +180,23 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
       'album_tag_consistency',
       'missing_lyrics',
       'missing_cover_art',
+      // the duplicates the subtitle promises (3.6.1's duplicate_detector)
+      'native_duplicate_detector',
       'empty_folder_cleaner',
     ],
   },
   {
     id: 'audio_sweep',
     title: 'Audio Fidelity Sweep',
-    subtitle: 'Broken files, fake FLAC and preview clips',
+    subtitle: 'Broken files, fake FLAC, preview clips and tracks below your quality profile',
     icon: '🎵',
-    jobIds: ['audio_corruption_detector', 'fake_lossless_detector', 'short_preview_track'],
+    jobIds: [
+      'audio_corruption_detector',
+      'fake_lossless_detector',
+      'short_preview_track',
+      // 3.6.1's quality check (quality_upgrade_scanner) lives on as this
+      'quality_profile_audit',
+    ],
   },
   {
     id: 'metadata_polish',
