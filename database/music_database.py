@@ -23156,6 +23156,96 @@ class MusicDatabase:
             logger.error(f"Error getting watchlist scan runs: {e}")
             return []
 
+    def get_watchlist_found_releases(self, limit=24, run_limit=60, profile_id=None):
+        """What recent scans added to the wishlist, one row per release.
+
+        the ledger is per track and per run, and a track can land in several
+        runs, so tracks are counted once per release. newest release first.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = "WHERE tracks_added > 0"
+            params = []
+            if profile_id is not None:
+                where += " AND profile_id = ?"
+                params.append(profile_id)
+            cursor.execute(f"""
+                SELECT completed_at, started_at, track_events
+                FROM watchlist_scan_runs {where}
+                ORDER BY completed_at DESC, id DESC LIMIT ?
+            """, params + [run_limit])
+            found = {}
+            for row in cursor.fetchall():
+                try:
+                    events = json.loads(row['track_events'] or '[]')
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(events, list):
+                    continue
+                when = row['completed_at'] or row['started_at']
+                for event in events:
+                    if not isinstance(event, dict) or event.get('status') != 'added':
+                        continue
+                    artist = str(event.get('artist_name') or '').strip()
+                    album = str(event.get('album_name') or event.get('track_name') or '').strip()
+                    if not artist or not album:
+                        continue
+                    key = (artist.lower(), album.lower())
+                    entry = found.get(key)
+                    if entry is None:
+                        if len(found) >= limit:
+                            continue
+                        entry = found[key] = {
+                            'artist_name': artist, 'album_name': album,
+                            'album_image_url': None, 'found_at': when, 'tracks': [],
+                        }
+                    if not entry['album_image_url'] and event.get('album_image_url'):
+                        entry['album_image_url'] = event['album_image_url']
+                    track = str(event.get('track_name') or '').strip()
+                    if track and track not in entry['tracks']:
+                        entry['tracks'].append(track)
+            out = []
+            for entry in found.values():
+                entry['track_count'] = len(entry['tracks']) or 1
+                entry['library_album_id'] = self._owned_library_album_id(
+                    cursor, entry['artist_name'], entry['album_name'])
+                out.append(entry)
+            return out
+        except Exception as e:
+            logger.error(f"Error getting watchlist found releases: {e}")
+            return []
+
+    @staticmethod
+    def _owned_library_album_id(cursor, artist_name, album_name):
+        """The library album for (artist, album) with a file on disk, or None.
+
+        same name match the recent-releases owned flag uses, so the page can
+        play what it already has instead of opening the artist.
+        """
+        try:
+            cursor.execute(
+                """
+                SELECT al.id FROM lib2_albums al
+                JOIN lib2_artists ar ON al.primary_artist_id = ar.id
+                WHERE LOWER(ar.name) = LOWER(TRIM(?))
+                  AND LOWER(al.title) = LOWER(TRIM(?))
+                  AND al.origin = 'library'
+                  AND EXISTS (
+                      SELECT 1 FROM lib2_tracks t
+                      JOIN lib2_track_files f ON f.track_id=t.id
+                      WHERE t.album_id=al.id
+                        AND COALESCE(f.file_state,'active')='active'
+                        AND f.path IS NOT NULL AND TRIM(f.path)<>''
+                  )
+                LIMIT 1
+                """,
+                (artist_name or '', album_name or ''))
+            row = cursor.fetchone()
+            return row[0] if row else None
+        except Exception:
+            return None
+
     def get_watchlist_scan_run_events(self, run_id):
         """The track ledger (added/skipped events) for one scan run."""
         try:

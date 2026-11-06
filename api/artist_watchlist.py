@@ -1438,6 +1438,19 @@ def get_watchlist_scan_history():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route('/api/watchlist/found', methods=['GET'])
+def get_watchlist_found():
+    """What recent scans added to the wishlist, grouped by release (the page shelf)."""
+    try:
+        limit = min(50, max(1, int(request.args.get('limit', 24) or 24)))
+        releases = get_database().get_watchlist_found_releases(
+            limit=limit, profile_id=get_current_profile_id())
+        return jsonify({"success": True, "releases": releases})
+    except Exception as e:
+        logger.error(f"Error getting watchlist found releases: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/watchlist/scan/history/<run_id>/tracks', methods=['GET'])
 def get_watchlist_scan_history_tracks(run_id):
     """The track ledger (added/skipped) for one past scan run."""

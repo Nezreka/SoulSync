@@ -1,5 +1,8 @@
 import { useState } from 'react';
 
+import type { WatchlistScanRun } from '../-watchlist.types';
+
+import { formatTimeAgo } from '../-watchlist.helpers';
 import {
   prettyScanPhase,
   scanAlbumLine,
@@ -20,17 +23,27 @@ import home from './watchlist-home.module.css';
  */
 export function WatchlistScanDeck({
   frame,
-  scanAgo,
+  lastRun,
+  nextScan,
+  onOpenHistory,
 }: {
-  frame: WatchlistScanFrame;
-  /** "3h ago", when the backend says when it finished */
-  scanAgo?: string;
+  /** the live or polled scan frame, when there is one */
+  frame: WatchlistScanFrame | null;
+  /** the newest saved run, so the card still knows after a restart */
+  lastRun: WatchlistScanRun | null;
+  /** "in 9h 28m", or '' when no auto scan is due */
+  nextScan: string;
+  onOpenHistory: () => void;
 }) {
-  if (frame.status === 'scanning') return <ScanningDeck frame={frame} />;
-  if (frame.summary && Object.keys(frame.summary).length > 0) {
-    return <ScanCompletion frame={frame} scanAgo={scanAgo} />;
-  }
-  return null;
+  if (frame?.status === 'scanning') return <ScanningDeck frame={frame} />;
+  return (
+    <ScanStatusCard
+      frame={frame}
+      lastRun={lastRun}
+      nextScan={nextScan}
+      onOpenHistory={onOpenHistory}
+    />
+  );
 }
 
 function ScanningDeck({ frame }: { frame: WatchlistScanFrame }) {
@@ -107,54 +120,169 @@ function ScanningDeck({ frame }: { frame: WatchlistScanFrame }) {
   );
 }
 
-function ScanCompletion({ frame, scanAgo }: { frame: WatchlistScanFrame; scanAgo?: string }) {
-  const summary = frame.summary ?? {};
-  const events = frame.scan_track_events ?? [];
-  const cancelled = frame.status === 'cancelled';
+interface ScanFacts {
+  cancelled: boolean;
+  total: number;
+  scanned: number;
+  found: number;
+  added: number;
+  finishedAt: string | null;
+}
+
+/** this session's finished frame wins; the saved run covers a restart */
+function scanFacts(frame: WatchlistScanFrame | null, lastRun: WatchlistScanRun | null) {
+  const summary = frame?.summary;
+  if (frame && summary && Object.keys(summary).length > 0) {
+    const total = summary.total_artists || 0;
+    return {
+      cancelled: frame.status === 'cancelled',
+      total,
+      scanned: summary.successful_scans ?? total,
+      found: summary.new_tracks_found || 0,
+      added: summary.tracks_added_to_wishlist || 0,
+      finishedAt: frame.completed_at ?? null,
+    } satisfies ScanFacts;
+  }
+  if (lastRun) {
+    return {
+      cancelled: lastRun.status === 'cancelled',
+      total: lastRun.total_artists || 0,
+      scanned: lastRun.artists_scanned || 0,
+      found: lastRun.tracks_found || 0,
+      added: lastRun.tracks_added || 0,
+      finishedAt: lastRun.completed_at ?? lastRun.started_at,
+    } satisfies ScanFacts;
+  }
+  return null;
+}
+
+function plural(n: number, word: string) {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
+
+/**
+ * Where the watchlist stands, in a sentence: up to date, or what the last
+ * scan found, and when the next one runs. The ledger of the scan this session
+ * watched is a click away; older ones are in Scan history.
+ */
+function ScanStatusCard({
+  frame,
+  lastRun,
+  nextScan,
+  onOpenHistory,
+}: {
+  frame: WatchlistScanFrame | null;
+  lastRun: WatchlistScanRun | null;
+  nextScan: string;
+  onOpenHistory: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const total = summary.total_artists || 0;
-  const scanned = summary.successful_scans ?? total;
-  const found = summary.new_tracks_found || 0;
-  const added = summary.tracks_added_to_wishlist || 0;
+  const facts = scanFacts(frame, lastRun);
+  const events = frame?.scan_track_events ?? [];
+  const ago = facts?.finishedAt ? formatTimeAgo(facts.finishedAt) : '';
+  const when = ago ? `The last scan, ${ago},` : 'The last scan';
+
+  let tone: 'ok' | 'new' | 'idle' = 'idle';
+  let headline = 'No scans yet';
+  let line = 'Scan now checks every artist for new releases.';
+  if (facts?.cancelled) {
+    headline = 'Last scan stopped';
+    line = `It was stopped after ${plural(facts.scanned, 'artist')} and added ${facts.added} to the wishlist.`;
+  } else if (facts && facts.added > 0) {
+    tone = 'new';
+    headline = `${plural(facts.added, 'new track')} added`;
+    line = `${when} checked ${facts.scanned} of ${plural(facts.total, 'artist')}, found ${plural(facts.found, 'new track')} and added ${facts.added} to the wishlist.`;
+  } else if (facts && facts.found > 0) {
+    tone = 'ok';
+    headline = 'Up to date';
+    line = `${when} checked ${facts.scanned} of ${plural(facts.total, 'artist')} and found ${plural(facts.found, 'new track')}, all already queued or blocklisted.`;
+  } else if (facts) {
+    tone = 'ok';
+    headline = 'Up to date';
+    line =
+      facts.scanned >= facts.total
+        ? `${when} checked all ${plural(facts.total, 'artist')} and found nothing new.`
+        : `${when} checked ${facts.scanned} of ${plural(facts.total, 'artist')} and found nothing new.`;
+  }
 
   return (
-    <div className={home.scanRow} role="status" aria-label="Last watchlist scan">
-      <div className={home.scanRowHead}>
-        <div className={home.scanRowText}>
-          <b>
-            {cancelled
-              ? `Scan cancelled after ${total} artist${total !== 1 ? 's' : ''}`
-              : scanAgo
-                ? `Last scan ${scanAgo}`
-                : 'Scan finished'}
-          </b>
+    <section className={home.status} role="status" aria-label="Last watchlist scan">
+      <div className={home.statusMain}>
+        <span
+          className={`${home.statusIcon}${tone === 'idle' ? '' : ` ${home.statusIconOn}`}`}
+          aria-hidden="true"
+        >
+          {tone === 'new' ? (
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="16" r="3" />
+            </svg>
+          ) : tone === 'ok' ? (
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M5 12.5l5 5 9-10.5" />
+            </svg>
+          ) : (
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            >
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+          )}
+        </span>
+        <div className={home.statusText}>
+          <b>{headline}</b>
+          <span>{line}</span>
         </div>
-        <div className={home.scanStats}>
-          {!cancelled ? (
-            <span>
-              <b>{scanned}</b>of {total} artists checked
-            </span>
+        <div className={home.statusSide}>
+          {nextScan ? (
+            <div className={home.statusNext}>
+              <span>Next scan</span>
+              <b>{nextScan}</b>
+            </div>
           ) : null}
-          <span>
-            <b>{found}</b>new track{found !== 1 ? 's' : ''} found
-          </span>
-          <span>
-            <b>{added}</b>added to wishlist
-          </span>
-        </div>
-        {events.length > 0 ? (
-          <button
-            type="button"
-            className={home.txt}
-            aria-expanded={open}
-            onClick={() => setOpen((previous) => !previous)}
-          >
-            {open ? 'Hide tracks' : 'Show tracks'}
+          {events.length > 0 ? (
+            <button
+              type="button"
+              className={home.statusBtn}
+              aria-expanded={open}
+              onClick={() => setOpen((previous) => !previous)}
+            >
+              {open ? 'Hide tracks' : 'Show tracks'}
+            </button>
+          ) : null}
+          <button type="button" className={home.statusBtn} onClick={onOpenHistory}>
+            Scan history
           </button>
-        ) : null}
+        </div>
       </div>
       {events.length > 0 ? <ScanTrackLedger events={events} open={open} /> : null}
-    </div>
+    </section>
   );
 }
 
