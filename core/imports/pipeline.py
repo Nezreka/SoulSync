@@ -1418,6 +1418,9 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             logger.error(f"[Integrity] Rejected {_basename}: {integrity.reason}")
             context['_integrity_failure_msg'] = integrity.reason
             context['_integrity_checks'] = integrity.checks
+            # the review shows "expected 4:26, got 13:04" from these (#2001)
+            context['_expected_length_s'] = (round(_expected_duration_ms / 1000.0, 1)
+                                             if _expected_duration_ms else None)
             _journal_checks_not_run(
                 context,
                 checks=('quality', 'acoustic_id'),
