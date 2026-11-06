@@ -29,7 +29,7 @@ from __future__ import annotations
 from core.repair_jobs import register_job
 from core.library2.retag import RETAG_SOURCES
 from core.repair_jobs.base import (
-    JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects,
+    JobContext, JobResult, RepairJob, drop_hand_tagged_albums, scoped_file_subjects,
 )
 from utils.logging_config import get_logger
 
@@ -116,9 +116,11 @@ class LibraryRetagJob(RepairJob):
 
         # hand-tagged: the user typed this release, retagging from a service
         # would overwrite it with the studio album
-        return drop_hand_tagged(context, scoped_file_subjects(context, active_file_subjects(
-            context.db, context.config_manager,
-        )))
+        # one hand-tagged file locks its album, as in 3.6.1: retagging the
+        # rest from the service would split the release around it
+        everything = active_file_subjects(context.db, context.config_manager)
+        return drop_hand_tagged_albums(
+            context, scoped_file_subjects(context, everything), everything)
 
     def estimate_scope(self, context: JobContext) -> int:
         try:

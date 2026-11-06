@@ -357,6 +357,32 @@ def drop_hand_tagged(context, subjects, path_key: str = 'path') -> list:
             if not is_hand_tagged_path((s or {}).get(path_key), keys)]
 
 
+def drop_hand_tagged_albums(context, subjects, everything=None,
+                            path_key: str = 'path', album_key: str = 'album_id') -> list:
+    """``subjects`` without any file on an album that has a hand-tagged file.
+
+    3.6.1 locked the whole album when one of its files was hand-tagged, so a
+    retag, the live/commentary cleaner or a bpm backfill never compared the
+    other files against the service's studio album and split the release the
+    user typed. ``drop_hand_tagged`` drops only the file itself. ``everything``
+    is the unscoped subject list the albums are judged from, so a scoped run
+    still sees a hand-tagged file outside its scope.
+    """
+    subjects = list(subjects or [])
+    keys = hand_tagged_path_keys(getattr(context, 'db', None))
+    if not keys:
+        return subjects
+    pool = subjects if everything is None else list(everything)
+    hand_albums = {
+        (s or {}).get(album_key) for s in pool
+        if is_hand_tagged_path((s or {}).get(path_key), keys)
+        and (s or {}).get(album_key) is not None
+    }
+    return [s for s in subjects
+            if not is_hand_tagged_path((s or {}).get(path_key), keys)
+            and (s or {}).get(album_key) not in hand_albums]
+
+
 def has_metadata_locked(cursor, table: str) -> bool:
     """does this table carry metadata_locked yet. very old schemas don't, and
     a missing column just means nothing there is locked"""

@@ -10,7 +10,7 @@ from collections import defaultdict
 
 from core.repair_jobs import register_job
 from core.repair_jobs.base import (
-    JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects, stop_or_pause,
+    JobContext, JobResult, RepairJob, drop_hand_tagged_albums, scoped_file_subjects, stop_or_pause,
 )
 from utils.logging_config import get_logger
 
@@ -131,8 +131,11 @@ class LiveCommentaryCleanerJob(RepairJob):
         scan_album_titles = settings.get("scan_album_titles", True)
         # hand-tagged: the user typed this live/bootleg release on purpose,
         # flagging it would offer to delete exactly what they asked for
-        subjects = drop_hand_tagged(context, scoped_file_subjects(
-            context, active_file_subjects(context.db, context.config_manager)))
+        # one hand-tagged file locks its album (3.6.1): its other tracks are
+        # part of the release the user typed too
+        _everything = active_file_subjects(context.db, context.config_manager)
+        subjects = drop_hand_tagged_albums(
+            context, scoped_file_subjects(context, _everything), _everything)
         # scope "albums": an album whose title says live is one finding for the
         # whole album, the way 3.6.1 filed it, not one per track
         by_album = str(settings.get("scope") or "tracks").strip().lower() == "albums"
