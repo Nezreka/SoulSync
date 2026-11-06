@@ -718,6 +718,28 @@ class RepairWorker:
                             old_id, new_id)
             config_manager.set(marker, new_id)
 
+        # 3.6.1's weekly Quality Check flagged every library track below its
+        # profile, wishlisted or not. Library v2's review of exactly that is
+        # quality_profile_audit, and it ships off: someone who had the check
+        # on lost it with no notice. switch the audit on once for them, with
+        # their interval. only ever on: a scanner that was off changes nothing.
+        marker = 'repair.job_migrations.quality_check_carried_to_audit'
+        if not config_manager.get(marker, None):
+            for old_id in ('quality_upgrade_scanner', 'quality_upgrade_scan', 'quality_upgrade'):
+                old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
+                if isinstance(old_cfg, dict) and old_cfg.get('enabled'):
+                    audit = config_manager.get('repair.jobs.quality_profile_audit', None)
+                    audit = dict(audit) if isinstance(audit, dict) else {}
+                    if not audit.get('enabled'):
+                        audit['enabled'] = True
+                        if old_cfg.get('interval_hours') and not audit.get('interval_hours'):
+                            audit['interval_hours'] = old_cfg['interval_hours']
+                        config_manager.set('repair.jobs.quality_profile_audit', audit)
+                        logger.info("Quality Check (%s) was on at 3.6.1: Quality Profile "
+                                    "Audit is switched on in its place", old_id)
+                    break
+            config_manager.set(marker, 'quality_profile_audit')
+
     def set_metadata_enhancer(self, enhance_fn):
         """Inject the metadata enhancement function from web_server.py.
 

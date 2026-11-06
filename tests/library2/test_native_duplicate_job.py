@@ -215,3 +215,43 @@ def test_an_automation_running_single_album_dedup_runs_its_successor():
 
     result = auto_run_repair_job({"job_id": "single_album_dedup"}, Deps())
     assert result["status"] == "completed" and queued == ["native_duplicate_detector"]
+
+
+def test_a_weekly_quality_check_user_gets_the_quality_audit():
+    """3.6.1's Quality Check flagged every library track below its profile.
+    its successor, Quality Profile Audit, ships off, so someone who had the
+    check on lost it with no notice. it is switched on once in its place."""
+    from core.repair_worker import RepairWorker
+    saved = _Saved({'repair.jobs.quality_upgrade_scanner': {'enabled': True, 'interval_hours': 72}})
+    worker = RepairWorker.__new__(RepairWorker)
+    worker._migrate_legacy_job_configs(saved)
+    audit = saved.values['repair.jobs.quality_profile_audit']
+    assert audit['enabled'] is True and audit['interval_hours'] == 72
+
+    # switched off afterwards: it stays off
+    saved.values['repair.jobs.quality_profile_audit'] = {**audit, 'enabled': False}
+    worker._migrate_legacy_job_configs(saved)
+    assert saved.values['repair.jobs.quality_profile_audit']['enabled'] is False
+
+
+def test_a_quality_check_that_was_off_changes_nothing():
+    from core.repair_worker import RepairWorker
+    saved = _Saved({'repair.jobs.quality_upgrade_scanner': {'enabled': False}})
+    RepairWorker.__new__(RepairWorker)._migrate_legacy_job_configs(saved)
+    assert 'repair.jobs.quality_profile_audit' not in saved.values
+
+
+def test_an_automation_running_the_quality_check_runs_the_audit():
+    from core.automation.handlers.run_repair import auto_run_repair_job
+    queued = []
+
+    class Deps:
+        def update_progress(self, *a, **k):
+            pass
+
+        def run_repair_job_now(self, job_id, respect_enabled=True):
+            queued.append(job_id)
+            return True
+
+    result = auto_run_repair_job({"job_id": "quality_upgrade_scanner"}, Deps())
+    assert result["status"] == "completed" and queued == ["quality_profile_audit"]
