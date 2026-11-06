@@ -924,7 +924,9 @@ def _mark_batch_complete(batch_id: str, batch: dict, deps: LifecycleDeps, *,
         if task is None:
             continue
         tasks_snapshot[tid] = dict(task)
-        if task.get('status') == 'completed':
+        # already_owned: another batch fetched this exact recording (the
+        # cross-batch dedup); it is in the playlist all the same
+        if task.get('status') in ('completed', 'already_owned'):
             ti = task.get('track_info', {})
             artists = ti.get('artists', [])
             artist_str = artists[0] if isinstance(artists, list) and artists else ''

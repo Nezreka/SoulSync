@@ -662,8 +662,10 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                     # Inherit the owner's outcome. Without this the row shows a
                     # blank quality and an empty verification badge, which reads
                     # as "this one failed" for a track that is present and fine.
+                    # final_file_path too: the playlist folder, its M3U and
+                    # the post-download sync read it for this playlist's track
                     for _field in ('verification_status', 'quality', 'file_path',
-                                   'download_source'):
+                                   'final_file_path', 'download_source'):
                         if _owner.get(_field) is not None:
                             _row[_field] = _owner[_field]
             if batch_id:
