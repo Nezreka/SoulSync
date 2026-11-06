@@ -93,3 +93,27 @@ def test_the_one_time_repair_restores_or_clears_saved_links(cache, db):
         conn.commit()
         got = dict(conn.execute("SELECT similar_artist_name, image_url FROM similar_artists"))
     assert got == {"A": DZ, "B": None, "C": DZ}
+
+
+def test_the_repair_is_one_update_not_one_per_link(cache, db):
+    """image_url has no index. an UPDATE per link scanned every row each time,
+    and 84k links on a 327k-row table held a real startup for hours."""
+    links = [cache.cache_url_for(f"https://img.example.test/{i}.jpg") for i in range(50)]
+    cache._flush_registrations()
+    with db._get_connection() as conn:
+        conn.executemany(
+            "INSERT INTO similar_artists(source_artist_id, similar_artist_name, "
+            "similarity_rank, occurrence_count, profile_id, image_url) "
+            "VALUES ('src', ?, 1, 1, 1, ?)",
+            [(f"n{i}", links[i % 50]) for i in range(200)])
+        conn.execute("DROP TABLE IF EXISTS _similar_artist_images_durable")
+        conn.commit()
+        statements = []
+        conn.set_trace_callback(statements.append)
+        db._similar_artist_images_durable(conn.cursor())
+        conn.set_trace_callback(None)
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM similar_artists "
+                            "WHERE image_url LIKE 'https://img.example.test/%'").fetchone()[0] == 200
+    updates = [s for s in statements if s.lstrip().upper().startswith("UPDATE SIMILAR_ARTISTS")]
+    assert len(updates) == 1

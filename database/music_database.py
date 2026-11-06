@@ -4459,16 +4459,28 @@ class MusicDatabase:
                 keys = {link: cache_key_of(link) for link in links}
                 originals = get_image_cache().original_urls_for(
                     [k for k in keys.values() if k])
-                updates = []
+                # one pass over the table through a keyed map. an UPDATE per
+                # link scanned all 327k rows each time (image_url has no
+                # index): 84k of those held startup for hours.
+                cursor.execute("DROP TABLE IF EXISTS temp._sa_image_map")
+                cursor.execute("CREATE TEMP TABLE _sa_image_map "
+                               "(link TEXT PRIMARY KEY, original TEXT)")
+                rows = []
                 for link, key in keys.items():
                     original = originals.get(key) if key else None
-                    updates.append((original, link))
+                    rows.append((link, original))
                     if original:
                         restored += 1
                     else:
                         cleared += 1
                 cursor.executemany(
-                    "UPDATE similar_artists SET image_url = ? WHERE image_url = ?", updates)
+                    "INSERT OR REPLACE INTO temp._sa_image_map(link, original) VALUES (?, ?)",
+                    rows)
+                cursor.execute(
+                    "UPDATE similar_artists SET image_url = "
+                    "(SELECT m.original FROM temp._sa_image_map m WHERE m.link = similar_artists.image_url) "
+                    "WHERE image_url LIKE '/api/image-cache/%'")
+                cursor.execute("DROP TABLE IF EXISTS temp._sa_image_map")
             cursor.execute("CREATE TABLE _similar_artist_images_durable "
                            "(applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
             self._record_migration(cursor, 'similar_artist_images_durable')
