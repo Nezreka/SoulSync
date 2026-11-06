@@ -172,3 +172,36 @@ def test_a_fast_query_logs_nothing(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert lines == []
+
+
+def test_the_report_ends_with_one_line_naming_the_holder_and_where_it_is(tmp_path):
+    """#2000: the dump runs to hundreds of lines and gets pasted in pieces,
+    the piece naming the holder usually missing. one line at the end says it."""
+    path = str(tmp_path / "lib.db")
+    setup = sqlite3.connect(path)
+    setup.execute("CREATE TABLE t (x)")
+    setup.commit()
+    setup.close()
+    held, done = threading.Event(), threading.Event()
+
+    def bulk_fix_writes_then_waits():
+        conn = connection_pool.acquire(path, _opener(path))
+        conn.execute("INSERT INTO t VALUES (1)")
+        held.set()
+        done.wait(5)
+        conn.rollback()
+        conn.close()
+
+    th = threading.Thread(target=bulk_fix_writes_then_waits, name="bulk-fix")
+    th.start()
+    try:
+        assert held.wait(5)
+        lines = []
+        db_lock_watchdog.report_blocked_writer(log=lines.append)
+        last = lines[-1]
+        assert last.startswith("Write lock holder, most likely: bulk-fix")
+        assert "bulk_fix_writes_then_waits" in last
+    finally:
+        done.set()
+        th.join(5)
+    assert "not on a pooled connection" in db_lock_watchdog.summarize_holder()
