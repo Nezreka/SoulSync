@@ -48,7 +48,9 @@ def _fingerprint(service: str, base: str, get) -> bool:
             r = get(f"{base}/System/Info/Public")
             return r.status_code == 200 and "jellyfin" in _text(r)
         if service == "navidrome":
-            r = get(f"{base}/rest/ping", params={"f": "json"})
+            # carry the one Subsonic client name too (#2005); this ping
+            # stays unauthenticated, the name is for consistency
+            r = get(f"{base}/rest/ping", params={"f": "json", "c": "SoulSync"})
             return "subsonic-response" in _text(r)
         if service == "music_assistant":
             r = get(f"{base}/info")

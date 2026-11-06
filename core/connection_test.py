@@ -162,7 +162,11 @@ def run_service_test(service, test_config):
                     't': token,
                     's': salt,
                     'v': '1.16.1',
-                    'c': 'soulsync',
+                    # this ping runs with the real account, and Navidrome
+                    # keys player entries by client name — match the main
+                    # client's 'SoulSync' exactly or it mints a duplicate
+                    # player for the user (#2005)
+                    'c': 'SoulSync',
                     'f': 'json'
                 }, timeout=5)
 
