@@ -1591,22 +1591,6 @@
         });
     }
 
-    // Ask ONE source for a season pack. Resolves {ok, id} or {ok:false} — a search
-    // that finds nothing is an ordinary outcome here, not a failure.
-    function _trySeasonPack(container, st, sn, src) {
-        return new Promise(function (resolve) {
-            var panel = document.createElement('div');
-            panel.className = 'vdl-results vdl-res-noanim';
-            ensureScratch(container).appendChild(panel);
-            // scope 'season' rides through buildGrabPayload into search_ctx, which is
-            // what tells the monitor this lands as a FOLDER and must be mapped to
-            // episodes rather than narrowed to its largest file.
-            searchInto(container, panel,
-                { scope: 'season', title: st.title, season: sn, source: src },
-                [], function () { _pickAndGrab(panel).then(resolve); });
-        });
-    }
-
     // where a season or whole-show PACK search goes. packs live on usenet and
     // torrent indexers, so those first in the user's order, then whatever else
     // is set up. these searches used to send no source at all, and the server
@@ -1630,10 +1614,9 @@
         // show that Soulseek had but Prowlarr didn't was reported as unavailable.
         var sources = (st.sources || []).filter(function (s) { return SRC_META[s]; });
         if (!sources.length) { toast('No download source configured', 'error'); return; }
-        var eps = [], seasonTotal = 0;
+        var eps = [];
         for (var k in st.epMeta) {
             if (k.indexOf(sn + '_') !== 0) continue;
-            seasonTotal++;
             if (st.epMeta[k].state === 'missing') eps.push(+k.split('_')[1]);
         }
         eps.sort(function (a, b) { return a - b; });
@@ -1679,28 +1662,11 @@
             pump();
         }
 
-        // A season pack first: one grab, one torrent, one seeded swarm, instead of
-        // 22 separate searches for a 22-episode season. Falls back the moment no
-        // source has an acceptable pack — the per-episode path is still the one
-        // that works for a half-owned season.
-        // a pack only pays off when the whole season is missing. on a half-owned
-        // season it would download the episodes you already have again
-        if (eps.length < seasonTotal) { perEpisode(); return; }
-        toast('Looking for a season pack…', 'info');
-        var i = 0;
-        (function next() {
-            if (i >= sources.length) { perEpisode(); return; }
-            _trySeasonPack(container, st, sn, sources[i++]).then(function (r) {
-                if (r && r.ok) {
-                    if (btn) { btn.disabled = false; btn.textContent = 'Grab season'; }
-                    eps.forEach(function (en) { epTrack(_epEl(container, sn, en), r.id); });
-                    toast('Season pack grabbed — episodes import as it finishes', 'success');
-                    document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
-                    return;
-                }
-                next();
-            });
-        })();
+        // one episode at a time, as the button says. a whole-missing season
+        // used to try a season pack first, so The Office S1 went to sabnzbd as
+        // one pack and all six rows shared its progress (SeadogsBooty). the
+        // season's search button is the way to grab a pack on purpose
+        perEpisode();
     }
 
     // On (re)open, resume live tracking for any episodes of THIS show already in flight,

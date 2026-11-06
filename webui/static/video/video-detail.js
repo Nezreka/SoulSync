@@ -4526,10 +4526,9 @@
         var missing = _seasonMissing();
         if (!missing.length) { toast('No missing episodes in this season', 'info'); return; }
         btn.disabled = true; _btnLabel(btn, 'Searching…'); startDlTracking();
-        toast('Looking for a season pack…', 'info');
-        // No pickSource() here: VideoGrab.season asks every configured source for a
-        // pack before falling back to per-episode. Handing it one source would put
-        // the old single-source behaviour back.
+        // No pickSource() here: VideoGrab.season spreads the episodes across every
+        // configured source. Handing it one source would put the old single-source
+        // behaviour back.
         VideoGrab.season({ title: data.title, season: selectedSeason,
             episodes: missing.map(function (e) { return e.episode_number; }),
             mediaId: (data.source !== 'tmdb' ? data.id : null), mediaSource: data.source, year: data.year,
@@ -4537,10 +4536,6 @@
             function (en, state) { _setEpSynthetic(en, state); }
         ).then(function (res) {
             btn.disabled = false; _btnLabel(btn, 'Grab season'); startDlTracking();
-            if (res.pack) {
-                toast('Season pack grabbed — episodes import as it finishes', 'success');
-                return;
-            }
             toast('Grabbing ' + res.grabbed + ' of ' + res.total + ' episode' + (res.total === 1 ? '' : 's'), res.grabbed ? 'success' : 'info');
         });
     }

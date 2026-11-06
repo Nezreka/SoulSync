@@ -149,18 +149,14 @@ def test_every_configured_source_is_used():
     assert ".filter(function (s) { return SRC_META[s]; })[0]" not in fn
 
 
-def test_a_pack_is_tried_before_any_per_episode_search():
-    """Assert the GUARD, not where the text sits. perEpisode is defined near the
-    top and called at the bottom, so comparing string offsets would 'prove' the
-    opposite of the truth — the contract is that the episode path runs only once
-    every source has been asked for a pack and come back empty."""
+def test_grab_season_grabs_each_episode_and_never_a_pack():
+    """SeadogsBooty: the button says one at a time, and The Office S1 went to
+    sabnzbd as one season pack with all six rows sharing its progress. a pack is
+    the season search's job now, Grab season never looks for one."""
     fn = _grab_season()
-    assert "if (i >= sources.length) { perEpisode(); return; }" in fn
-    # defined once, called when no source had a pack, and straight away for a
-    # half-owned season (a pack would re-download what you have)
-    assert fn.count("perEpisode()") == 3
-    assert "if (eps.length < seasonTotal) { perEpisode(); return; }" in fn
-    assert "Looking for a season pack" in fn
+    assert fn.count("perEpisode()") == 2, "defined once, called once"
+    assert "scope: 'season'" not in fn and "_trySeasonPack" not in _js()
+    assert "Looking for a season pack" not in fn
 
 
 def test_the_per_episode_fallback_survives():
@@ -175,18 +171,17 @@ def test_the_fallback_spreads_episodes_across_sources():
     assert "sources[n++ % sources.length]" in fn
 
 
-def test_the_pack_search_is_scoped_to_the_season():
-    """scope 'season' is what rides into search_ctx and tells the monitor this
-    lands as a folder — without it the pack is judged as one episode."""
+def test_the_season_search_button_still_finds_packs():
+    """the way to get a pack on purpose: the season's search, scoped to the
+    season so a grab lands as a folder mapped onto episodes"""
     src = _js()
-    fn = src[src.index("function _trySeasonPack"):src.index("function grabSeason(")]
-    assert "scope: 'season'" in fn
+    assert "data-vdl-season-search" in src
+    assert "scope: 'season'" in src
 
 
-def test_the_button_is_re_enabled_on_both_outcomes():
-    """Leaving it disabled after a successful pack grab strands the control."""
+def test_the_button_is_re_enabled_when_the_season_is_done():
     fn = _grab_season()
-    assert fn.count("btn.textContent = 'Grab season'") >= 2
+    assert fn.count("btn.textContent = 'Grab season'") >= 1
 
 
 @pytest.mark.skipif(_node() is None, reason="node not available")
@@ -255,17 +250,12 @@ def _drive():
 
 
 @pytest.mark.skipif(_node() is None, reason="node not available")
-def test_the_detail_page_helper_grabs_a_pack_when_one_exists():
+def test_the_detail_page_helper_never_grabs_a_pack_even_when_one_exists():
     d = _drive()
-    assert d["pack"]["pack"] is True and d["pack"]["grabbed"] == 5
-    assert d["packGrabs"] == ["season"], "one grab, scoped to the season"
-    assert d["packSearches"] == ["season:soulseek"], "stops at the first source that has it"
-
-
-@pytest.mark.skipif(_node() is None, reason="node not available")
-def test_it_asks_every_source_for_a_pack_before_giving_up():
-    d = _drive()
-    assert d["epSearches"][:2] == ["season:soulseek", "season:torrent"]
+    assert not d["pack"].get("pack")
+    assert "season" not in d["packGrabs"]
+    assert not [s for s in d["packSearches"] if s.startswith("season:")]
+    assert all(s.startswith("episode:") for s in d["packSearches"])
 
 
 @pytest.mark.skipif(_node() is None, reason="node not available")
@@ -296,8 +286,7 @@ def test_the_detail_page_no_longer_pins_the_season_to_one_source():
     js = Path("webui/static/video/video-detail.js").read_text(encoding="utf-8")
     fn = js[js.index("function grabSeasonInline("):js.index("function wishSeasonInline(")]
     assert "VideoGrab.pickSource()" not in fn
-    assert "Looking for a season pack" in fn
-    assert "res.pack" in fn, "a pack must not report as 'grabbing N of N episodes'"
+    assert "Looking for a season pack" not in fn and "res.pack" not in fn
 
 
 # ── a search that ends badly still ends (SeadogsBooty, MobLand S1) ───────────
