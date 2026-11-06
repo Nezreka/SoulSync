@@ -30,49 +30,40 @@ import {
   isDetected,
 } from '../-sync.url-detect';
 import styles from './playlists.module.css';
+import { SourceIcon } from './source-icon';
 import { usePopoverDismiss } from './use-popover-dismiss';
 
 interface AddSource {
+  /** the tab it opens, which is also the key for its logo (SourceIcon) */
   tab: string;
   label: string;
-  /** the letter on its badge, and the badge colour */
-  mark: string;
-  color: string;
   desc: string;
 }
 
 /** The account tabs this sheet can send you to, in the order they read best. */
 export const ADD_PLAYLIST_ACCOUNTS: readonly AddSource[] = [
-  { tab: 'spotify', label: 'Spotify', mark: 'S', color: '#1ed760', desc: 'Your Spotify playlists' },
-  { tab: 'tidal', label: 'Tidal', mark: 'T', color: '#ffffff', desc: 'Your Tidal playlists' },
-  { tab: 'qobuz', label: 'Qobuz', mark: 'Q', color: '#4a95ff', desc: 'Your Qobuz playlists' },
-  { tab: 'deezer', label: 'Deezer', mark: 'D', color: '#b77bff', desc: 'Your Deezer playlists' },
+  { tab: 'spotify', label: 'Spotify', desc: 'Your Spotify playlists' },
+  { tab: 'tidal', label: 'Tidal', desc: 'Your Tidal playlists' },
+  { tab: 'qobuz', label: 'Qobuz', desc: 'Your Qobuz playlists' },
+  { tab: 'deezer', label: 'Deezer', desc: 'Your Deezer playlists' },
   {
     tab: 'ytmusic',
     label: 'YouTube Music',
-    mark: 'Y',
-    color: '#ff5a4e',
     desc: 'Your YouTube Music playlists',
   },
   {
     tab: 'listenbrainz-sync',
     label: 'ListenBrainz',
-    mark: 'L',
-    color: '#f08a52',
     desc: 'Your ListenBrainz playlists',
   },
   {
     tab: 'lastfm-sync',
     label: 'Last.fm',
-    mark: 'R',
-    color: '#ff6b7a',
     desc: 'Your Last.fm radio playlists',
   },
   {
     tab: 'soulsync-discovery-sync',
     label: 'SoulSync Discovery',
-    mark: 'S',
-    color: '#5fd68b',
     desc: 'SoulSync Discovery playlists',
   },
 ];
@@ -82,15 +73,11 @@ export const ADD_PLAYLIST_OTHER: readonly AddSource[] = [
   {
     tab: 'beatport',
     label: 'Beatport',
-    mark: 'B',
-    color: '#c3ef3c',
     desc: 'Browse by genre, top 100s',
   },
   {
     tab: 'import-file',
     label: 'Import a file',
-    mark: 'F',
-    color: '#c9c9cf',
     desc: 'CSV, TSV, TXT or M3U',
   },
 ];
@@ -146,12 +133,8 @@ export function AddPlaylistSheet({ onRoute, onNew, onClose }: AddPlaylistSheetPr
         onClose();
       }}
     >
-      <span
-        className={styles.badge}
-        style={{ '--badge-color': source.color } as React.CSSProperties}
-        aria-hidden="true"
-      >
-        {source.mark}
+      <span className={`${styles.badge} ${styles.badgeLogo}`} aria-hidden="true">
+        <SourceIcon source={source.tab} />
       </span>
       <span>
         <span className={styles.tileName}>{source.label}</span>

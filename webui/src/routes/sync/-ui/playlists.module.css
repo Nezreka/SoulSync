@@ -1036,7 +1036,15 @@ select.field {
   font-weight: 800;
   font-size: 16px;
   color: var(--bg-primary);
-  background: var(--badge-color, var(--text-1));
+  background: var(--text-1);
+}
+/* a source's real logo, in its own brand colour, on a dark disc */
+.badgeLogo {
+  background: var(--white-a08);
+}
+.badgeLogo > span {
+  width: 22px;
+  height: 22px;
 }
 .tileName {
   display: block;

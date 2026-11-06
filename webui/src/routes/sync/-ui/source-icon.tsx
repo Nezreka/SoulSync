@@ -23,6 +23,7 @@ const SOURCE_ICON_CLASSES: Readonly<Record<string, string>> = {
   'deezer-link': 'deezer-icon',
   deezer_arl: 'deezer-icon',
   youtube: 'youtube-icon',
+  ytmusic: 'ytmusic-icon',
   beatport: 'beatport-icon',
   itunes: 'itunes-icon',
   itunes_link: 'itunes-icon',

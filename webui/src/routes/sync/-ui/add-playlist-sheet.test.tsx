@@ -200,3 +200,14 @@ describe('the Add sheet reaches every source, and starts fresh', () => {
     expect(screen.queryByRole('button', { name: /New playlist/ })).toBeNull();
   });
 });
+
+describe('every source wears its own logo', () => {
+  it('draws the brand mark, not a letter', () => {
+    const { container } = render(<AddPlaylistSheet onRoute={vi.fn()} onClose={vi.fn()} />);
+    for (const s of [...ADD_PLAYLIST_ACCOUNTS, ...ADD_PLAYLIST_OTHER]) {
+      const tile = screen.getByRole('button', { name: new RegExp(s.label) });
+      expect(tile.querySelector('.tab-icon'), s.tab).not.toBeNull();
+    }
+    expect(container.querySelector('.tab-icon.ytmusic-icon')).not.toBeNull();
+  });
+});
