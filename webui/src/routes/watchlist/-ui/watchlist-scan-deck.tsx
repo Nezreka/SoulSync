@@ -301,7 +301,7 @@ function ScanTrackLedger({ events, open }: { events: LedgerEvent[]; open: boolea
   return (
     <div className={home.feed} style={{ display: open ? '' : 'none', maxHeight: 360 }}>
       <LedgerSection label="Added to wishlist" list={added} />
-      <LedgerSection label="Found but skipped — already queued or blocklisted" list={skipped} />
+      <LedgerSection label="Found but skipped, already queued or blocklisted" list={skipped} />
     </div>
   );
 }
