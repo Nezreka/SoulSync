@@ -192,6 +192,7 @@ def _seed_expected_edition(conn: sqlite3.Connection) -> None:
                title TEXT NOT NULL,
                album_type TEXT,
                release_date TEXT,
+               year INTEGER,
                spotify_id TEXT)""",
     )
     conn.execute(

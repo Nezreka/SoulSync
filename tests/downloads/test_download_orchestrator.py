@@ -576,3 +576,33 @@ def test_get_download_orchestrator_returns_set_singleton():
         assert get_download_orchestrator() is orch
     finally:
         set_download_orchestrator(None)
+
+
+def test_an_unknown_name_never_adds_soulseek_to_an_order_without_it():
+    """the shared source policy swapped an unknown name for soulseek, which
+    searched soulseek for people who left it out of their hybrid order."""
+    orch = _build_orchestrator(soulseek=_FakeClient(), youtube=_FakeClient())
+    orch.hybrid_order = ['nonsense', 'youtube']
+    orch.hybrid_primary = None
+    orch.hybrid_secondary = None
+
+    assert orch._resolve_source_chain() == ['youtube']
+
+
+def test_a_secondary_equal_to_the_primary_takes_another_source():
+    orch = _build_orchestrator(soulseek=_FakeClient(), youtube=_FakeClient())
+    orch.hybrid_order = []
+    orch.hybrid_primary = 'youtube'
+    orch.hybrid_secondary = 'youtube'
+
+    chain = orch._resolve_source_chain()
+    assert chain[0] == 'youtube' and len(chain) == 2 and chain[1] != 'youtube'
+
+
+def test_an_unknown_primary_still_falls_back_to_soulseek():
+    orch = _build_orchestrator(soulseek=_FakeClient(), youtube=_FakeClient())
+    orch.hybrid_order = []
+    orch.hybrid_primary = 'gone'
+    orch.hybrid_secondary = 'youtube'
+
+    assert orch._resolve_source_chain() == ['soulseek', 'youtube']

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from core.acquisition.candidates import redact_sensitive_text
+from core.library2.release_dates import album_release_date
 from core.runtime_state import download_tasks, tasks_lock
 from utils.logging_config import get_logger
 
@@ -58,7 +59,7 @@ def _pipeline_context(
         """SELECT t.id AS track_id, t.title, t.track_number, t.disc_number,
                   t.duration, t.spotify_id AS track_spotify_id,
                   al.id AS album_id, al.title AS album_title,
-                  al.album_type, al.release_date,
+                  al.album_type, al.release_date, al.year AS album_year,
                   al.spotify_id AS album_spotify_id,
                   ar.id AS artist_id, ar.name AS artist_name,
                   req.quality_profile_id, req.trigger
@@ -88,7 +89,9 @@ def _pipeline_context(
             "id": data.get("album_spotify_id") or f"lib2-album:{data['album_id']}",
             "name": data["album_title"],
             "album_type": data.get("album_type") or "album",
-            "release_date": data.get("release_date") or "",
+            # a missing release_date fell back to nothing, and the folder
+            # lost its [year]
+            "release_date": album_release_date(data.get("release_date"), data.get("album_year")),
         },
         "track_number": match.get("track_number") or data.get("track_number"),
         "disc_number": match.get("disc_number") or data.get("disc_number") or 1,

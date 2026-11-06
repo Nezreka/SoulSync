@@ -48,6 +48,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     the library the caller works in (#1199): another library's copy neither
     satisfies this one nor gets replaced for it.
     """
+    from core.library2.release_dates import album_release_date
     from core.library2.recording_links import owned_by_recording_sql
     from core.library2.sql_util import owner_clause
     t = conn.execute(
@@ -60,6 +61,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
                   al.musicbrainz_id album_musicbrainz,
                   al.external_ids album_external_ids,
                   al.track_count, al.expected_track_count, al.album_type,
+                  al.release_date album_release_date, al.year album_year,
                   EXISTS(SELECT 1 FROM lib2_track_files tf
                          WHERE tf.track_id = t.id
                            AND tf.path IS NOT NULL AND tf.path <> ''
@@ -172,6 +174,10 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             "provider_ids": album_provider_ids,
             "total_tracks": t["expected_track_count"] or t["track_count"] or 1,
             "album_type": t["album_type"],
+            # the download names the album folder from this ([$year]). it
+            # had none, so every wanted track landed in a yearless twin of
+            # its album's folder (SeadogsBooty, Nov 5)
+            "release_date": album_release_date(t["album_release_date"], t["album_year"]),
             # The wishlist UI reads `album.images[0].url`, and the import
             # pipeline reads the same slot for cover.jpg / embedded art. This
             # payload carried no `images` at all, so every Library-v2 row

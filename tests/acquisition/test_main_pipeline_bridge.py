@@ -36,7 +36,7 @@ def _seed_import(path: Path, source_root: Path):
         """CREATE TABLE lib2_albums(
                id INTEGER PRIMARY KEY, primary_artist_id INTEGER NOT NULL,
                title TEXT NOT NULL, album_type TEXT, release_date TEXT,
-               spotify_id TEXT)""")
+               year INTEGER, spotify_id TEXT)""")
     conn.execute(
         """CREATE TABLE lib2_tracks(
                id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL,
@@ -48,7 +48,7 @@ def _seed_import(path: Path, source_root: Path):
                path TEXT NOT NULL, file_state TEXT DEFAULT 'active')""")
     conn.execute("INSERT INTO lib2_artists VALUES(301, 'Artist')")
     conn.execute(
-        "INSERT INTO lib2_albums VALUES(201, 301, 'Album', 'album', '2024', NULL)")
+        "INSERT INTO lib2_albums VALUES(201, 301, 'Album', 'album', '2024', 2024, NULL)")
     conn.execute(
         "INSERT INTO lib2_tracks VALUES(101, 201, 'Song', 1, 1, 180000, NULL)")
     pending, request, _candidate = _pending_import(

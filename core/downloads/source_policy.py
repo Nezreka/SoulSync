@@ -108,21 +108,32 @@ def resolve_source_policy(
         fallback = accepted("soulseek") or (available_order[0] if available_order else None)
         chain = (source or fallback,) if source or fallback else ()
     else:
-        raw_chain = list(hybrid_order or ())
-        if not raw_chain:
-            raw_chain = [hybrid_primary, hybrid_secondary]
         ordered = []
         seen = set()
-        for raw in raw_chain:
-            source = accepted(raw)
-            if source is None:
-                # Compatibility with the legacy primary/secondary resolver:
-                # obsolete or unavailable configured slots fell back to
-                # Soulseek instead of silently shortening the chain.
-                source = accepted("soulseek")
-            if source and source not in seen:
-                ordered.append(source)
-                seen.add(source)
+        if hybrid_order:
+            # the old orchestrator dropped a name in the order that nothing
+            # answers to. it never put soulseek in an order that left it out.
+            for raw in hybrid_order:
+                source = accepted(raw)
+                if source and source not in seen:
+                    ordered.append(source)
+                    seen.add(source)
+        else:
+            # primary/secondary (the old two-slot setting): an obsolete or
+            # unavailable slot falls back to soulseek, and a secondary equal
+            # to the primary takes the next source there is, so hybrid still
+            # means two.
+            primary = accepted(hybrid_primary) or accepted("soulseek")
+            secondary = accepted(hybrid_secondary) or accepted("soulseek")
+            if primary:
+                ordered.append(primary)
+                seen.add(primary)
+            if secondary and secondary == primary:
+                secondary = next(
+                    (name for name in available_order if name != primary), None)
+            if secondary and secondary not in seen:
+                ordered.append(secondary)
+                seen.add(secondary)
         if not ordered:
             fallback = accepted("soulseek") or (
                 available_order[0] if available_order else None

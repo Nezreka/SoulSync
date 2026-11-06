@@ -2152,6 +2152,7 @@ class MusicDatabase:
                 logger.error(f"lidarr_compat schema init failed: {e}")
             self._requeue_similar_artists_rematch(cursor)
             self._similar_artist_images_durable(cursor)
+            self._wishlist_lib2_album_dates(cursor)
             self._purge_beatport_positional_matches(cursor)
             self._purge_fake_provider_ids(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
@@ -2265,6 +2266,7 @@ class MusicDatabase:
         'sample_stems_v1':            ('table', 'sample_stems'),
         'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
         'similar_artist_images_durable': ('table', '_similar_artist_images_durable'),
+        'wishlist_lib2_album_dates': ('table', '_wishlist_lib2_album_dates'),
         'beatport_positional_purged': ('table', '_beatport_positional_purged'),
         'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
     }
@@ -4488,6 +4490,57 @@ class MusicDatabase:
                         "%d dead ones cleared", restored, cleared)
         except Exception as e:
             logger.error(f"Error making similar artist images durable: {e}")
+
+    def _wishlist_lib2_album_dates(self, cursor):
+        """one-time: wishlist rows the Library v2 mirror wrote carried an album
+        with no release date, so they downloaded into a yearless twin of the
+        album's [year] folder (SeadogsBooty, Nov 5). give the queued ones their
+        album's date. new rows get it from the mirror itself."""
+        try:
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                           "AND name='_wishlist_lib2_album_dates'")
+            if cursor.fetchone():
+                return
+            tables = {r[0] for r in cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            fixed = 0
+            if {'wishlist_tracks', 'lib2_albums'} <= tables:
+                from core.library2.release_dates import album_release_date
+                dates = {}
+                updates = []
+                for row_id, raw in cursor.execute(
+                        "SELECT id, spotify_data FROM wishlist_tracks").fetchall():
+                    try:
+                        data = json.loads(raw or '{}')
+                    except (TypeError, ValueError):
+                        continue
+                    album = data.get('album') if isinstance(data, dict) else None
+                    info = data.get('_source_info') if isinstance(data, dict) else None
+                    if not isinstance(album, dict) or album.get('release_date'):
+                        continue
+                    album_id = info.get('lib2_album_id') if isinstance(info, dict) else None
+                    if not album_id:
+                        continue
+                    if album_id not in dates:
+                        found = cursor.execute(
+                            "SELECT release_date, year FROM lib2_albums WHERE id = ?",
+                            (album_id,)).fetchone()
+                        dates[album_id] = album_release_date(found[0], found[1]) if found else ''
+                    if not dates[album_id]:
+                        continue
+                    album['release_date'] = dates[album_id]
+                    updates.append((json.dumps(data), row_id))
+                if updates:
+                    cursor.executemany(
+                        "UPDATE wishlist_tracks SET spotify_data = ? WHERE id = ?", updates)
+                fixed = len(updates)
+            cursor.execute("CREATE TABLE _wishlist_lib2_album_dates "
+                           "(applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            self._record_migration(cursor, 'wishlist_lib2_album_dates')
+            if fixed:
+                logger.info("wishlist: gave %d library album rows their release date", fixed)
+        except Exception as e:
+            logger.error(f"Error backfilling wishlist album dates: {e}")
 
     def _add_similar_artists_last_featured_column(self, cursor):
         """Add last_featured column to similar_artists for hero slider cycling"""
