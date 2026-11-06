@@ -223,3 +223,20 @@ def test_genius_matches_3_6_1_already_reset_are_kept(db, signal):
     assert 'genius_reset' not in report
     assert _get(db, "1", "genius_id") == "good"
 
+
+
+@pytest.mark.parametrize("a,b", [("JAY-Z", "Jay Z"), ("AC/DC", "AC DC"),
+                                 ("Beyoncé", "Beyonce")])
+def test_two_spellings_of_one_artist_keep_their_shared_id(db, a, b):
+    """this runs on its own at every upgrade import now. 3.6.1 only ran it
+    when asked; lowercasing alone called JAY-Z and Jay Z two artists and
+    cleared the deezer id they share."""
+    _insert(db, artist_id=1, name=a, deezer_id='27')
+    _insert(db, artist_id=2, name=b, deezer_id='27', server_source='jellyfin')
+    assert dd.find_corrupt_clusters(db) == []
+
+
+def test_different_artists_sharing_an_id_are_still_caught(db):
+    _insert(db, artist_id=1, name='Kendrick Lamar', deezer_id='525046')
+    _insert(db, artist_id=2, name='SZA', deezer_id='525046')
+    assert len(dd.find_corrupt_clusters(db)) == 1

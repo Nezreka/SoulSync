@@ -44,8 +44,18 @@ SOURCES = ('deezer', 'spotify', 'itunes', 'musicbrainz', 'discogs',
 
 
 def _norm(name: str) -> str:
-    """Loose name key — lowercased, whitespace-collapsed."""
-    return ' '.join((name or '').lower().split())
+    """Loose name key: case, accents, punctuation and spaces folded.
+
+    JAY-Z and Jay Z, AC/DC and AC DC, Beyoncé and Beyonce are one artist
+    spelled two ways by two servers, and share an id rightly. this runs on
+    its own at every upgrade import now, so a looser key than "lowercase"
+    is what keeps it from clearing a real id.
+    """
+    import unicodedata
+    from core.worker_utils import normalize_artist_name
+    folded = unicodedata.normalize('NFKD', name or '')
+    folded = ''.join(ch for ch in folded if not unicodedata.combining(ch))
+    return normalize_artist_name(folded).replace(' ', '')
 
 
 def find_corrupt_clusters(database: Any) -> list[dict]:
