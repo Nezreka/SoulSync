@@ -45,6 +45,11 @@ def _safe_source_path(root: str, relative_path: str) -> Path:
     return source
 
 
+def _explicit(value: Any):
+    from core.library2.wishlist_mirror import _explicit as explicit_flag
+    return explicit_flag(value)
+
+
 def _album_images(conn: Any, album_id: int, stored_image_url: Any) -> list:
     try:
         from core.library2.wishlist_art import album_images
@@ -79,6 +84,7 @@ def _pipeline_context(
                   al.id AS album_id, al.title AS album_title,
                   al.album_type, al.release_date, al.year AS album_year,
                   al.image_url AS album_image_url,
+                  t.explicit AS track_explicit, al.explicit AS album_explicit,
                   COALESCE(al.expected_track_count, al.track_count) AS album_total_tracks,
                   al.spotify_id AS album_spotify_id,
                   ar.id AS artist_id, ar.name AS artist_name,
@@ -113,6 +119,7 @@ def _pipeline_context(
             # lost its [year]
             "release_date": album_release_date(data.get("release_date"), data.get("album_year")),
             "total_tracks": data.get("album_total_tracks") or 0,
+            "explicit": _explicit(data.get("album_explicit")),
             # the same cover the wishlist mirror sends: the library's artwork
             # first, so the import has a cover to embed and save
             "images": _album_images(conn, int(data["album_id"]), data.get("album_image_url")),
@@ -120,6 +127,7 @@ def _pipeline_context(
         "track_number": match.get("track_number") or data.get("track_number"),
         "disc_number": match.get("disc_number") or data.get("disc_number") or 1,
         "duration_ms": data.get("duration") or 0,
+        "explicit": _explicit(data.get("track_explicit")),
         "quality_profile_id": data["quality_profile_id"],
         "lib2_entity": lib2_entity,
         "_acquisition_import_id": record.id,

@@ -37,21 +37,21 @@ def _seed_import(path: Path, source_root: Path):
                id INTEGER PRIMARY KEY, primary_artist_id INTEGER NOT NULL,
                title TEXT NOT NULL, album_type TEXT, release_date TEXT,
                year INTEGER, spotify_id TEXT, image_url TEXT, track_count INTEGER,
-               expected_track_count INTEGER)""")
+               expected_track_count INTEGER, explicit INTEGER)""")
     conn.execute(
         """CREATE TABLE lib2_tracks(
                id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL,
                title TEXT NOT NULL, track_number INTEGER, disc_number INTEGER,
-               duration INTEGER, spotify_id TEXT)""")
+               duration INTEGER, spotify_id TEXT, explicit INTEGER)""")
     conn.execute(
         """CREATE TABLE lib2_track_files(
                id INTEGER PRIMARY KEY, track_id INTEGER NOT NULL,
                path TEXT NOT NULL, file_state TEXT DEFAULT 'active')""")
     conn.execute("INSERT INTO lib2_artists VALUES(301, 'Artist')")
     conn.execute(
-        "INSERT INTO lib2_albums VALUES(201, 301, 'Album', 'album', '2024', 2024, NULL, NULL, 1, 1)")
+        "INSERT INTO lib2_albums VALUES(201, 301, 'Album', 'album', '2024', 2024, NULL, NULL, 1, 1, 1)")
     conn.execute(
-        "INSERT INTO lib2_tracks VALUES(101, 201, 'Song', 1, 1, 180000, NULL)")
+        "INSERT INTO lib2_tracks VALUES(101, 201, 'Song', 1, 1, 180000, NULL, 1)")
     pending, request, _candidate = _pending_import(
         conn, output_path=str(source_root))
     record_inventory_result(
@@ -278,6 +278,33 @@ def test_a_move_that_never_registered_the_file_is_not_a_completion(tmp_path):
     conn = factory()
     assert get_import(conn, importing.id).status == "importing"
     conn.close()
+
+
+def test_the_dispatched_track_and_album_say_they_are_explicit(tmp_path):
+    """$explicit / $contentrating name the folder from these (#1860)."""
+    source_root = tmp_path / "client"
+    source_root.mkdir()
+    (source_root / "01.flac").write_bytes(b"audio")
+    factory, importing, _request = _seed_import(tmp_path / "db.sqlite", source_root)
+    seen = {}
+
+    def processor(_key, context, _path, _task_id, _batch_id, _runtime):
+        seen["context"] = context
+
+    dispatch_import_to_main_pipeline(
+        factory,
+        importing.id,
+        config_get=lambda key, default=None: (
+            str(tmp_path / "transfer") if key == "soulseek.transfer_path" else default),
+        processor=processor,
+        runtime=object(),
+        copier=lambda source, destination: bool(shutil.copy2(source, destination)),
+    )
+
+    context = seen["context"]
+    assert context["track_info"]["explicit"] is True
+    assert context["spotify_album"]["explicit"] is True
+    assert context["spotify_album"]["release_date"] == "2024"
 
 
 def test_the_dispatched_task_carries_the_sealed_upgrade_intent(tmp_path):

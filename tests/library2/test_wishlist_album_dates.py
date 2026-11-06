@@ -99,3 +99,13 @@ def test_the_mirrored_album_names_its_own_artists(imported_conn):
     assert payload["album"]["artists"] == [{"name": "3OH!3"}, {"name": "Innerpartysystem"}]
     # the track still credits who recorded it
     assert payload["artists"][0]["name"] == "Innerpartysystem"
+
+
+def test_the_mirrored_row_carries_the_explicit_flags(imported_conn):
+    """$explicit / $contentrating in the naming template read these (#1860)."""
+    album_id, track_id = _views(imported_conn)
+    imported_conn.execute("UPDATE lib2_tracks SET explicit=1 WHERE id=?", (track_id,))
+    imported_conn.execute("UPDATE lib2_albums SET explicit=0 WHERE id=?", (album_id,))
+    payload = track_wishlist_payload(imported_conn, track_id)
+    assert payload["explicit"] is True
+    assert payload["album"]["explicit"] is False

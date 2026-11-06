@@ -41,6 +41,16 @@ def _hand_tagged(conn, path: Any, keys: Optional[set] = None) -> bool:
         return False
 
 
+def _explicit(value: Any) -> Optional[bool]:
+    """the stored flag as a bool, None when the catalogue doesn't know."""
+    if value is None or value == "":
+        return None
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def library_album_artist_names(conn, album_id: int, primary_artist_id: int) -> List[str]:
     """the album's own artists: its main artist, then a joint album's other
     headliners (never a featured guest). the download names the album folder
@@ -75,7 +85,8 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     t = conn.execute(
         """SELECT t.id AS track_id, t.spotify_id, t.musicbrainz_id,
                   t.external_ids, t.isrc, t.title, t.track_number,
-                  t.disc_number, t.duration,
+                  t.disc_number, t.duration, t.explicit AS track_explicit,
+                  al.explicit AS album_explicit,
                   al.id AS album_id, al.title album_title,
                   al.image_url album_image_url,
                   al.spotify_id album_spotify,
@@ -203,6 +214,9 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             # its album's folder (SeadogsBooty, Nov 5)
             "release_date": album_release_date(t["album_release_date"], t["album_year"]),
             "artists": [{"name": name} for name in album_artist_names],
+            # $explicit / $contentrating in the naming template read these
+            # (#1860); without them a wanted track lost its [E] and split off
+            "explicit": _explicit(t["album_explicit"]),
             # The wishlist UI reads `album.images[0].url`, and the import
             # pipeline reads the same slot for cover.jpg / embedded art. This
             # payload carried no `images` at all, so every Library-v2 row
@@ -218,6 +232,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         "track_number": t["track_number"],
         "disc_number": t["disc_number"],
         "duration_ms": t["duration"] or 0,
+        "explicit": _explicit(t["track_explicit"]),
         "quality_profile_id": profile_info["id"],
         "quality_profile": profile_info,
         "_album_type": t["album_type"],
