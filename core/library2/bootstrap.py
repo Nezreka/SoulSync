@@ -727,6 +727,10 @@ def run_deferred_backfills(database: Any, *,
             # 3.6.1 genre-cleanup locks the import left behind
             from core.library2.legacy_locks import carry_legacy_genre_locks
             stats["genre_locks_carried"] = sum(carry_legacy_genre_locks(conn).values())
+            # 3.6.1's spotify/deezer artist credits, which the import left
+            # behind (collab releases on every credited artist's page)
+            from core.library2.legacy_credits import carry_legacy_artist_credits
+            stats["legacy_credits"] = sum(carry_legacy_artist_credits(conn).values())
             # the Songs tab's artist/album/year/recent sorts walk these
             # (a pass over every track the first time, then nothing)
             from core.library2.queries import ensure_song_sort_indexes
