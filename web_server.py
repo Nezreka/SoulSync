@@ -18925,12 +18925,12 @@ def start_missing_tracks_process(playlist_id):
                 _lib2_conn.close()
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
-    except Exception as exc:
-        logger.exception("Confirmed Search intent materialization failed")
-        return jsonify({
-            "success": False,
-            "error": f"Could not prepare Library v2 search intent: {exc}",
-        }), 500
+    except Exception:
+        # the library v2 intent is bookkeeping on top of the download (3.6.1
+        # had no such step). a locked db or odd metadata here must not refuse
+        # the download the admin asked for: it goes ahead without the intent
+        logger.exception("Confirmed Search intent materialization failed; "
+                         "starting the download without it")
 
     with tasks_lock:
         download_batches[batch_id] = {
