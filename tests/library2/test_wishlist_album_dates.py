@@ -68,3 +68,34 @@ def test_queued_rows_get_their_albums_date_once(tmp_path):
            for r in conn.execute("SELECT spotify_data FROM wishlist_tracks ORDER BY id")]
     conn.close()
     assert got == ["2017", "2020-01-01"]
+
+
+def test_the_mirrored_album_names_its_own_artists(imported_conn):
+    """the download picks the album folder (and spots a various artists
+    release) from the album's artists. the mirror sent none, so a wanted
+    track was filed under the track's own artist: a split single's B side
+    under its singer, a compilation track under its performer."""
+    from tests import lib2_seed
+
+    lead = lib2_seed.artist(imported_conn, "3OH!3")
+    other = lib2_seed.artist(imported_conn, "Innerpartysystem")
+    guest = lib2_seed.artist(imported_conn, "A Guest")
+    album_id = lib2_seed.album(imported_conn, "3OH!3", "3OH!3 versus Innerpartysystem")
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES (?, ?, 'primary')",
+        (album_id, other))
+    imported_conn.execute(
+        "INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES (?, ?, 'featured')",
+        (album_id, guest))
+    track_id = lib2_seed.track(imported_conn, "3OH!3", "3OH!3 versus Innerpartysystem",
+                               "Don't Stop (3OH!3 remix)", owned=False)
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+        "VALUES (?, ?, 'primary', 0)", (track_id, other))
+    assert lead
+
+    payload = track_wishlist_payload(imported_conn, track_id)
+
+    assert payload["album"]["artists"] == [{"name": "3OH!3"}, {"name": "Innerpartysystem"}]
+    # the track still credits who recorded it
+    assert payload["artists"][0]["name"] == "Innerpartysystem"

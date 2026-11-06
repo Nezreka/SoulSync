@@ -45,6 +45,24 @@ def _safe_source_path(root: str, relative_path: str) -> Path:
     return source
 
 
+def _album_images(conn: Any, album_id: int, stored_image_url: Any) -> list:
+    try:
+        from core.library2.wishlist_art import album_images
+        return album_images(conn, album_id, stored_image_url=stored_image_url)
+    except Exception:  # noqa: BLE001 - no cover is not a reason to fail an import
+        logger.debug("album images unavailable for %s", album_id, exc_info=True)
+        return []
+
+
+def _album_artist_names(conn: Any, album_id: int, primary_artist_id: int) -> list:
+    try:
+        from core.library2.wishlist_mirror import library_album_artist_names
+        return library_album_artist_names(conn, album_id, primary_artist_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("album artists unavailable for %s", album_id, exc_info=True)
+        return []
+
+
 def _pipeline_context(
     conn: Any,
     record: Any,
@@ -60,6 +78,8 @@ def _pipeline_context(
                   t.duration, t.spotify_id AS track_spotify_id,
                   al.id AS album_id, al.title AS album_title,
                   al.album_type, al.release_date, al.year AS album_year,
+                  al.image_url AS album_image_url,
+                  COALESCE(al.expected_track_count, al.track_count) AS album_total_tracks,
                   al.spotify_id AS album_spotify_id,
                   ar.id AS artist_id, ar.name AS artist_name,
                   req.quality_profile_id, req.trigger
@@ -92,6 +112,10 @@ def _pipeline_context(
             # a missing release_date fell back to nothing, and the folder
             # lost its [year]
             "release_date": album_release_date(data.get("release_date"), data.get("album_year")),
+            "total_tracks": data.get("album_total_tracks") or 0,
+            # the same cover the wishlist mirror sends: the library's artwork
+            # first, so the import has a cover to embed and save
+            "images": _album_images(conn, int(data["album_id"]), data.get("album_image_url")),
         },
         "track_number": match.get("track_number") or data.get("track_number"),
         "disc_number": match.get("disc_number") or data.get("disc_number") or 1,
@@ -107,9 +131,12 @@ def _pipeline_context(
         "name": data["artist_name"],
         "genres": [],
     }
+    # every headliner of a joint or split release, not only the main one:
+    # the folder and the various-artists check read these
+    album_artists = _album_artist_names(conn, int(data["album_id"]), int(data["artist_id"]))
     album_context = {
         **track_info["album"],
-        "artists": [{"name": data["artist_name"]}],
+        "artists": [{"name": name} for name in album_artists or [data["artist_name"]]],
     }
     context = {
         "track_info": track_info,

@@ -41,6 +41,27 @@ def _hand_tagged(conn, path: Any, keys: Optional[set] = None) -> bool:
         return False
 
 
+def library_album_artist_names(conn, album_id: int, primary_artist_id: int) -> List[str]:
+    """the album's own artists: its main artist, then a joint album's other
+    headliners (never a featured guest). the download names the album folder
+    and spots a various artists release from these; without them a wanted
+    track of a compilation or a split release was filed under the track's
+    own artist."""
+    names: List[str] = []
+    for row in conn.execute(
+            """SELECT ar.name FROM lib2_artists ar WHERE ar.id = ?
+               UNION ALL
+               SELECT ar.name FROM lib2_album_artists aa
+                 JOIN lib2_artists ar ON ar.id = aa.artist_id
+                WHERE aa.album_id = ? AND aa.artist_id <> ?
+                  AND COALESCE(aa.role, 'primary') IN ('primary', 'various')""",
+            (primary_artist_id, album_id, primary_artist_id)):
+        name = str(row[0] or "").strip()
+        if name and name.casefold() not in {n.casefold() for n in names}:
+            names.append(name)
+    return names
+
+
 def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Build the wishlist payload for a lib2 track (or None when unknown).
 
@@ -62,6 +83,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
                   al.external_ids album_external_ids,
                   al.track_count, al.expected_track_count, al.album_type,
                   al.release_date album_release_date, al.year album_year,
+                  al.primary_artist_id album_primary_artist_id,
                   EXISTS(SELECT 1 FROM lib2_track_files tf
                          WHERE tf.track_id = t.id
                            AND tf.path IS NOT NULL AND tf.path <> ''
@@ -80,6 +102,8 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
            FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id
            WHERE ta.track_id = ? ORDER BY ta.position""", (track_id,)
     ).fetchall()
+    album_artist_names = library_album_artist_names(
+        conn, t["album_id"], t["album_primary_artist_id"])
     from core.library2.provider_ids import (
         preferred_provider_identity,
         provider_only,
@@ -178,6 +202,7 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             # had none, so every wanted track landed in a yearless twin of
             # its album's folder (SeadogsBooty, Nov 5)
             "release_date": album_release_date(t["album_release_date"], t["album_year"]),
+            "artists": [{"name": name} for name in album_artist_names],
             # The wishlist UI reads `album.images[0].url`, and the import
             # pipeline reads the same slot for cover.jpg / embedded art. This
             # payload carried no `images` at all, so every Library-v2 row
