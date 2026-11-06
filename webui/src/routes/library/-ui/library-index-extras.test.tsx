@@ -175,7 +175,7 @@ describe('the header', () => {
     expect(window.startLibraryRadio).toHaveBeenCalled();
   });
 
-  it('Export opens the artists export, from the header\'s More (#1909)', async () => {
+  it("Export opens the artists export, from the header's More (#1909)", async () => {
     renderPage();
     await screen.findByText('Aphex Twin');
     fireEvent.click(screen.getByRole('button', { name: 'More library actions' }));

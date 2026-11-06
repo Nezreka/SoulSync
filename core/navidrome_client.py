@@ -535,6 +535,15 @@ class NavidromeClient(MediaServerBase):
             return None  # no usable credentials — don't send an anonymous call
         if params:
             auth_params.update(params)
+        # The client name is not a per-call choice: Navidrome keys a user's
+        # player entries by it, so a caller re-spelling it here would mint a
+        # duplicate player for that user (#2005). Only 'c' is forced — the
+        # other auth fields stay as _generate_auth_params built them.
+        if params and params.get('c') not in (None, 'SoulSync'):
+            logger.debug(
+                "Navidrome: ignoring caller-supplied client name %r; "
+                "the client name is fixed", params.get('c'))
+        auth_params['c'] = 'SoulSync'
 
         try:
             # Use POST for write operations to avoid URL length limits

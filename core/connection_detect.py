@@ -154,7 +154,9 @@ def run_detection(server_type):
             response = requests.get(url, timeout=2, params={
                 'u': 'test',  # Dummy username for ping test
                 'v': '1.16.1',  # API version
-                'c': 'soulsync',  # Client name
+                # the main client's name — Navidrome keys player
+                # entries by client name (#2005)
+                'c': 'SoulSync',  # Client name
                 'f': 'json'  # Response format
             })
 
