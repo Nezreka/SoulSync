@@ -1955,12 +1955,16 @@ def get_artist_db_record(artist_id):
             # Owned counts off the v2 catalogue. Tracks hang off albums, not off
             # the artist row, so the track count walks album -> track rather than
             # reading a legacy tracks.artist_id that does not exist here.
+            # owned only: a wanted album with nothing downloaded is a slot,
+            # not something you have (3.6.1's tables held owned rows only)
+            from core.library2.sql_util import owned_sql
             counts = {}
             count_sql = {
-                'albums': "SELECT COUNT(*) FROM lib2_albums WHERE primary_artist_id = ?",
+                'albums': ("SELECT COUNT(*) FROM lib2_albums al "
+                           f"WHERE al.primary_artist_id = ? AND {owned_sql('album', 'al')}"),
                 'tracks': ("SELECT COUNT(*) FROM lib2_tracks t "
                            "JOIN lib2_albums al ON al.id = t.album_id "
-                           "WHERE al.primary_artist_id = ?"),
+                           f"WHERE al.primary_artist_id = ? AND {owned_sql('track', 't')}"),
             }
             for label, sql in count_sql.items():
                 try:
