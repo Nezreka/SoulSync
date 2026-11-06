@@ -1499,3 +1499,36 @@ def test_audio_from_single_file_archive_ignores_neighbours(tmp_path: Path) -> No
     out = _audio_from_single_file(archive)
     assert [p.name for p in out] == ['track.flac']
     assert out[0].parent == tmp_path / 'Album'
+
+
+@pytest.mark.parametrize('remove', [False, True])
+def test_usenet_cancel_before_the_job_id_says_yes(monkeypatch, remove):
+    """the submit thread retires the late job itself, so a cancel sent while
+    it waits for the client's id will happen. 3.6.1 said yes; v2 said the
+    cancel failed and the ui showed an error for a cancel that worked."""
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'job_id': None}
+    grabs = []
+    monkeypatch.setattr(plugin, '_update_grab', lambda did, **kw: grabs.append(kw))
+    monkeypatch.setattr(plugin, '_persisted_job_id', lambda did: None)
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: None)
+
+    assert asyncio.run(plugin.cancel_download('dl', remove=remove)) is True
+    # the intent is on disk, so a restart still retires the job
+    assert grabs and grabs[-1].get('status') == 'cancel_pending'
+    if remove:
+        assert 'dl' not in plugin.active_downloads
+    else:
+        assert plugin.active_downloads['dl']['state'] == 'Cancelling'
+        assert plugin.active_downloads['dl']['cancel_requested'] is True
+
+
+def test_usenet_cancel_with_no_client_job_and_no_submission_still_says_no(monkeypatch):
+    """a grab with no row and no job anywhere is not a cancel that will happen."""
+    import core.download_plugins.usenet as module
+    plugin = UsenetDownloadPlugin()
+    monkeypatch.setattr(plugin, '_update_grab', lambda did, **kw: None)
+    monkeypatch.setattr(plugin, '_persisted_job_id', lambda did: None)
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: None)
+    assert asyncio.run(plugin.cancel_download('gone', remove=False)) is False

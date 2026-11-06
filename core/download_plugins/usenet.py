@@ -1002,6 +1002,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         with self._lock:
             row = self.active_downloads.get(download_id)
             job_id = row.get('job_id') if row else None
+            # the submit thread hasn't heard the client's job id yet: it reads
+            # the flag below and retires the job itself (_download_thread)
+            in_submission = row is not None and not job_id
             if row is not None:
                 # Upstream: the download thread may still be waiting for the
                 # client's job id; the flag tells it to retire the late job
@@ -1026,6 +1029,16 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         # the central monitor which checks it (client_monitor `removed = ...`).
         cancel_confirmed = False
         self._update_grab(download_id, status=STATUS_CANCEL_PENDING)
+        if in_submission and not job_id:
+            # pending is right: the submit thread confirms it once the late
+            # job is gone. 3.6.1 said yes here too
+            with self._lock:
+                row = self.active_downloads.get(download_id)
+                if remove:
+                    self.active_downloads.pop(download_id, None)
+                elif row is not None and row.get('state') != 'Cancelled':
+                    row['state'] = 'Cancelling'
+            return True
         if adapter and job_id:
             try:
                 cancel_confirmed = bool(
