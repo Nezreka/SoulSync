@@ -236,3 +236,32 @@ describe('Catalogue duplicate review', () => {
     expect(screen.getByRole('button', { name: 'Merge into release #995' })).toBeDisabled();
   });
 });
+
+describe('Library re-tag checks (Storm)', () => {
+  const retag = {
+    id: 9,
+    finding_type: 'library_retag',
+    severity: 'info',
+    entity_type: 'track',
+    entity_id: 'lib2:1',
+    title: 'Tags out of date',
+    description: '',
+    details: {
+      validation: { checks: { album: 'correct', albumartist: 'mismatch', genre: 'unknown' } },
+      diff: [
+        { file_key: 'album', file_value: 'Views', db_value: 'Views' },
+        { file_key: 'album_artist', file_value: 'Jim O’Rourke', db_value: 'Jim O Rourke' },
+      ],
+    },
+  } as unknown as RepairFinding;
+
+  it('says what the file has and what SoulSync would write for a mismatch', () => {
+    const { container } = render(
+      <FindingDetail finding={retag} onKeepDuplicate={vi.fn()} onApplyCoverArt={vi.fn()} />,
+    );
+    const text = container.textContent ?? '';
+    expect(text).toContain('mismatch: file "Jim O’Rourke", SoulSync "Jim O Rourke"');
+    // a correct field stays a single word
+    expect(text).not.toContain('correct: file');
+  });
+});

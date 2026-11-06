@@ -65,6 +65,34 @@ function pushIf(rows: FindingDetailRow[], value: unknown, key: string, cls?: str
 // ── Shared pieces ────────────────────────────────────────────────────────────
 
 /** `_gridRows` — renders nothing at all when there are no rows. */
+/** the diff row for a check key. the checks say 'albumartist' and 'cover', the
+ *  diff says 'album_artist' and 'cover_art' */
+function retagDiffFor(
+  diff: unknown,
+  key: string,
+): { file_value?: unknown; db_value?: unknown } | null {
+  if (!Array.isArray(diff)) return null;
+  const want = key === 'albumartist' ? 'album_artist' : key === 'cover' ? 'cover_art' : key;
+  const row = diff.find(
+    (r) => r && typeof r === 'object' && (r as { file_key?: unknown }).file_key === want,
+  );
+  return row && typeof row === 'object'
+    ? (row as { file_value?: unknown; db_value?: unknown })
+    : null;
+}
+
+/** "mismatch" alone left you wondering how. a mismatch or a missing tag says
+ *  what the file has and what SoulSync would write (Storm) */
+function checkWithValues(
+  status: string,
+  diff: { file_value?: unknown; db_value?: unknown } | null,
+): string {
+  if (!diff || (status !== 'mismatch' && status !== 'missing')) return status;
+  const show = (v: unknown) =>
+    v === null || v === undefined || v === '' ? 'empty' : `"${text(v)}"`;
+  return `${status}: file ${show(diff.file_value)}, SoulSync ${show(diff.db_value)}`;
+}
+
 export function DetailGrid({ rows }: { rows: FindingDetailRow[] }) {
   if (!rows.length) return null;
   return (
@@ -694,7 +722,12 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
         const checks = d.validation.checks;
         if (checks && typeof checks === 'object')
           return (
-            <DetailGrid rows={Object.entries(checks).map(([key, value]) => [key, text(value)])} />
+            <DetailGrid
+              rows={Object.entries(checks).map(([key, value]) => [
+                key,
+                checkWithValues(text(value), retagDiffFor(d.diff, key)),
+              ])}
+            />
           );
       }
       const retag = libraryRetagDetail(d);
