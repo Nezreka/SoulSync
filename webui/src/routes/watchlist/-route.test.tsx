@@ -277,7 +277,7 @@ describe('watchlist route', () => {
     });
 
     expect(screen.getByText('1 artist')).toBeInTheDocument();
-    expect(screen.getByText('Next Auto: 1h 00m')).toBeInTheDocument();
+    expect(screen.getByText(/next scan in 1h 00m/)).toBeInTheDocument();
     expect(screen.getByText('Spotify')).toBeInTheDocument();
     expect(screen.getByText('Albums')).toBeInTheDocument();
     expect(screen.getByText('Singles')).toBeInTheDocument();
@@ -311,7 +311,7 @@ describe('watchlist route', () => {
     renderWatchlistRoute();
 
     await waitFor(() => expect(screen.getByText('Boards')).toBeInTheDocument());
-    expect(document.querySelectorAll('.watchlist-pill-custom')).toHaveLength(1);
+    expect(document.querySelectorAll('.wl-custom')).toHaveLength(1);
     expect(screen.queryByText(/Global override is active/)).not.toBeInTheDocument();
   });
 
@@ -322,7 +322,7 @@ describe('watchlist route', () => {
     await waitFor(() => {
       expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
     });
-    expect(screen.queryByText(/Last scan:/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Last scan/)).not.toBeInTheDocument();
 
     unmount();
     vi.unstubAllGlobals();
@@ -331,7 +331,12 @@ describe('watchlist route', () => {
     renderWatchlistRoute();
 
     await waitFor(() => {
-      expect(screen.getByText(/3 new tracks found, 2 added to wishlist/)).toBeInTheDocument();
+      expect(screen.getByText(/^Last scan/)).toBeInTheDocument();
+    });
+    const row = screen.getByText(/^Last scan/).closest('section, div') as HTMLElement;
+    await waitFor(() => {
+      expect(row.parentElement?.textContent).toMatch(/3\s*new tracks found/);
+      expect(row.parentElement?.textContent).toMatch(/2\s*added to wishlist/);
     });
   });
 
@@ -501,7 +506,7 @@ describe('watchlist route', () => {
     expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
 
     // the panel names the artist too, so click the one in the roster
-    const roster = document.querySelector('.watchlist-roster-panel') as HTMLElement;
+    const roster = document.querySelector('.wl-roster') as HTMLElement;
     fireEvent.click(within(roster).getByText('Aphex Twin'));
     await waitFor(() => {
       expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
@@ -1332,11 +1337,13 @@ describe('watchlist route', () => {
     });
 
     await waitFor(() => {
-      expect(
-        screen.getByText(
-          'Scan completed: 38/40 artists scanned, found 19 new tracks, added 10 to wishlist',
-        ),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Scan finished')).toBeInTheDocument();
+    });
+    const done = screen.getByText('Scan finished').parentElement?.parentElement as HTMLElement;
+    await waitFor(() => {
+      expect(done.textContent).toMatch(/38\s*of 40 artists checked/);
+      expect(done.textContent).toMatch(/19\s*new tracks found/);
+      expect(done.textContent).toMatch(/10\s*added to wishlist/);
     });
 
     // The ledger is collapsed until asked for.
@@ -1359,7 +1366,7 @@ describe('watchlist route', () => {
     const more = screen.getByRole('button', { name: 'More watchlist actions' });
     for (const name of ['Download origins', 'Scan history', 'Blocklist']) {
       fireEvent.click(more);
-      fireEvent.click(screen.getByRole('menuitem', { name }));
+      fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`^${name}`) }));
     }
 
     // These modals live in other vanilla files and are shared with other

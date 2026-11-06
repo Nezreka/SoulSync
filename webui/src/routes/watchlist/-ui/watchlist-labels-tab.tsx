@@ -11,6 +11,7 @@ import {
   watchlistLabelsQueryOptions,
 } from '../-watchlist.api';
 import { formatRelativeScanTime } from '../-watchlist.helpers';
+import home from './watchlist-home.module.css';
 import styles from './watchlist-page.module.css';
 
 export function WatchlistLabelsTab({ profileId }: { profileId: number }) {
@@ -58,29 +59,33 @@ export function WatchlistLabelsTab({ profileId }: { profileId: number }) {
 
   if (labels.length === 0) {
     return (
-      <div className="watchlist-page-empty">
-        <div className="watchlist-page-empty-icon">
+      <div className={home.empty}>
+        <span className={home.emptyIcon} aria-hidden="true">
           <svg
             width="64"
             height="64"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="rgba(255,255,255,0.15)"
+            stroke="currentColor"
             strokeWidth="1.5"
           >
             <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
             <line x1="7" y1="7" x2="7.01" y2="7" />
           </svg>
+        </span>
+        <h3 className={home.emptyTitle}>No labels followed yet</h3>
+        <p className={home.emptyText}>
+          Search a record label, open it, and hit Follow to monitor its new releases here.
+        </p>
+        <div className={home.emptyActions}>
+          <button
+            className={home.cta}
+            type="button"
+            onClick={() => void navigate({ href: '/search' })}
+          >
+            Open Search
+          </button>
         </div>
-        <h3>No labels followed yet</h3>
-        <p>Search a record label, open it, and hit Follow to monitor its new releases here.</p>
-        <button
-          className="btn btn--primary"
-          type="button"
-          onClick={() => void navigate({ href: '/search' })}
-        >
-          Open Search
-        </button>
       </div>
     );
   }
@@ -95,9 +100,29 @@ export function WatchlistLabelsTab({ profileId }: { profileId: number }) {
             bridge?.navigateToLabelDetail(label.musicbrainz_label_id, label.label_name)
           }
         >
-          <div className={styles.labelActions}>
+          <div className={styles.labelArt} aria-hidden="true">
+            <svg
+              width="40"
+              height="40"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+              <circle cx="7" cy="7" r="1.5" />
+            </svg>
+          </div>
+          <div className={styles.labelName}>{label.label_name || 'Label'}</div>
+          <div className={styles.labelMeta}>{labelScanText(label)}</div>
+          <div className={styles.labelFoot}>
+            {/* what a scan watches: only what comes out next, or everything
+                the label has ever put out */}
             <button
               type="button"
+              className={`${styles.labelToggle}${label.backlog ? ` ${styles.labelToggleOn}` : ''}`}
               title={
                 label.backlog
                   ? 'Monitoring full backlog — click for new-releases-only'
@@ -111,23 +136,33 @@ export function WatchlistLabelsTab({ profileId }: { profileId: number }) {
                 });
               }}
             >
-              {label.backlog ? '📚' : '🆕'}
+              {label.backlog ? 'Full backlog' : 'New releases'}
             </button>
             <button
               type="button"
+              className={styles.labelRemove}
               title="Unfollow label"
+              aria-label={`Unfollow ${label.label_name || 'label'}`}
               onClick={(event) => {
                 event.stopPropagation();
                 void onUnfollow(label);
               }}
             >
-              ✕
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.6"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M6 6l12 12" />
+                <path d="M18 6L6 18" />
+              </svg>
             </button>
           </div>
-          <div className={styles.labelIcon}>🏷️</div>
-          <div className={styles.labelName}>{label.label_name || 'Label'}</div>
-          <div className={styles.labelMeta}>{labelScanText(label)}</div>
-          {label.backlog ? <span className={styles.labelBacklogBadge}>Full backlog</span> : null}
         </div>
       ))}
     </div>

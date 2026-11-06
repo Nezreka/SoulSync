@@ -3,23 +3,32 @@ import { useState } from 'react';
 import {
   prettyScanPhase,
   scanAlbumLine,
-  scanCompletionMessage,
   scanProgressPercent,
   scanProgressText,
   type WatchlistScanFrame,
 } from '../-watchlist.scan';
 import { hideOnError } from './hide-on-error';
+import home from './watchlist-home.module.css';
 
 /**
- * The live "scan deck" and the completion summary.
+ * The scan, live and finished.
  *
- * Both are the same status region the vanilla page swapped between: the deck
- * while status is 'scanning', the summary afterwards.
+ * While a scan runs: the deck, with the artist it is on, the album and track,
+ * the progress and what it has added so far. Afterwards: one row saying what
+ * the last scan did, with its track ledger a click away. The old page showed
+ * the finished scan twice, a box and a strip under it with the same numbers.
  */
-export function WatchlistScanDeck({ frame }: { frame: WatchlistScanFrame }) {
+export function WatchlistScanDeck({
+  frame,
+  scanAgo,
+}: {
+  frame: WatchlistScanFrame;
+  /** "3h ago", when the backend says when it finished */
+  scanAgo?: string;
+}) {
   if (frame.status === 'scanning') return <ScanningDeck frame={frame} />;
   if (frame.summary && Object.keys(frame.summary).length > 0) {
-    return <ScanCompletion frame={frame} />;
+    return <ScanCompletion frame={frame} scanAgo={scanAgo} />;
   }
   return null;
 }
@@ -27,88 +36,70 @@ export function WatchlistScanDeck({ frame }: { frame: WatchlistScanFrame }) {
 function ScanningDeck({ frame }: { frame: WatchlistScanFrame }) {
   const additions = frame.recent_wishlist_additions ?? [];
   const progressText = scanProgressText(frame);
+  const pct = scanProgressPercent(frame);
 
   return (
-    <div className="watchlist-page-scan-status">
-      <div className="wl-scan-deck" style={{ display: 'block' }}>
-        <div className="wl-scan-deck-head">
-          <span className="wl-scan-live-dot" />
-          <span className="wl-scan-live-label">Scanning</span>
-          <span className="wl-scan-progress-text">{progressText}</span>
-          <div className="wl-scan-counters">
-            <div className="wl-scan-counter">
-              <span className="wl-scan-counter-num">{frame.tracks_found_this_scan || 0}</span>
-              <span className="wl-scan-counter-label">found</span>
-            </div>
-            <div className="wl-scan-counter added">
-              <span className="wl-scan-counter-num">{frame.tracks_added_this_scan || 0}</span>
-              <span className="wl-scan-counter-label">added</span>
-            </div>
-          </div>
+    <div className={home.deck} role="status" aria-label="Watchlist scan">
+      <div className={home.deckHead}>
+        <span className={home.deckLive}>
+          <span className={home.spin} aria-hidden="true" />
+          Scanning
+        </span>
+        <span className={home.deckProgressText}>{progressText}</span>
+        <div className={home.deckCounters}>
+          <span className={home.deckCounter}>
+            <b>{frame.tracks_found_this_scan || 0}</b> found
+          </span>
+          <span className={`${home.deckCounter} ${home.deckCounterAdded}`}>
+            <b>{frame.tracks_added_this_scan || 0}</b> added
+          </span>
         </div>
+      </div>
 
-        <div className="wl-scan-progress">
-          <div
-            className="wl-scan-progress-bar"
-            style={{ width: `${scanProgressPercent(frame)}%` }}
-          />
-        </div>
+      <div className={home.bar} aria-hidden="true">
+        <span style={{ width: `${pct}%` }} />
+      </div>
 
-        <div className="wl-scan-deck-body">
-          <div className="wl-scan-hero">
-            <div className="wl-scan-portrait">
-              {/* Hidden rather than left stale when THIS artist has no photo,
-                  so the previous artist's portrait does not linger. */}
-              {frame.current_artist_image_url ? (
-                <img
-                  className="wl-scan-portrait-img"
-                  src={frame.current_artist_image_url}
-                  alt=""
-                  onError={hideOnError}
-                />
+      <div className={home.deckBody}>
+        <div className={home.deckHero}>
+          <div className={home.deckPortrait}>
+            {/* Hidden rather than left stale when THIS artist has no photo,
+                so the previous artist's portrait does not linger. */}
+            {frame.current_artist_image_url ? (
+              <img src={frame.current_artist_image_url} alt="" onError={hideOnError} />
+            ) : null}
+            <div className={home.deckAlbum}>
+              {frame.current_album_image_url ? (
+                <img src={frame.current_album_image_url} alt="" onError={hideOnError} />
               ) : null}
-              <div className="wl-scan-album-thumb">
-                {frame.current_album_image_url ? (
-                  <img src={frame.current_album_image_url} alt="" onError={hideOnError} />
-                ) : null}
-              </div>
-            </div>
-            <div className="wl-scan-hero-text">
-              <div className="wl-scan-artist-name">{frame.current_artist_name || 'Starting…'}</div>
-              <div className="wl-scan-phase">{prettyScanPhase(frame.current_phase)}</div>
-              <div className="wl-scan-now">
-                <div className="wl-scan-album-name">{scanAlbumLine(frame)}</div>
-                <div className="wl-scan-track-name">{frame.current_track_name || '—'}</div>
-              </div>
             </div>
           </div>
+          <div className={home.deckHeroText}>
+            <div className={home.deckArtist}>{frame.current_artist_name || 'Starting…'}</div>
+            <div className={home.deckPhase}>{prettyScanPhase(frame.current_phase)}</div>
+            <div className={home.deckNow}>{scanAlbumLine(frame)}</div>
+            <div className={home.deckNow}>{frame.current_track_name || '—'}</div>
+          </div>
+        </div>
 
-          <div className="wl-scan-feed">
-            <div className="wl-scan-feed-label">Added to wishlist this run</div>
-            <div className="wl-scan-feed-list">
-              {additions.length > 0 ? (
-                additions.map((item, index) => (
-                  <div
-                    key={`${item.track_name ?? ''}-${index}`}
-                    className="watchlist-live-addition-item"
-                  >
-                    {item.album_image_url ? (
-                      <img src={item.album_image_url} alt="" onError={hideOnError} />
-                    ) : null}
-                    <div className="watchlist-live-addition-item-info">
-                      <div className="watchlist-live-addition-item-track">
-                        {item.track_name || ''}
-                      </div>
-                      <div className="watchlist-live-addition-item-artist">
-                        {item.artist_name || ''}
-                      </div>
-                    </div>
+        <div>
+          <div className={home.feedLabel}>Added to wishlist this run</div>
+          <div className={home.feed}>
+            {additions.length > 0 ? (
+              additions.map((item, index) => (
+                <div key={`${item.track_name ?? ''}-${index}`} className={home.feedItem}>
+                  {item.album_image_url ? (
+                    <img src={item.album_image_url} alt="" onError={hideOnError} />
+                  ) : null}
+                  <div className={home.feedText}>
+                    <div className={home.feedTrack}>{item.track_name || ''}</div>
+                    <div className={home.feedArtist}>{item.artist_name || ''}</div>
                   </div>
-                ))
-              ) : (
-                <div className="watchlist-live-addition-empty">No tracks added yet…</div>
-              )}
-            </div>
+                </div>
+              ))
+            ) : (
+              <div className={home.feedEmpty}>No tracks added yet…</div>
+            )}
           </div>
         </div>
       </div>
@@ -116,35 +107,53 @@ function ScanningDeck({ frame }: { frame: WatchlistScanFrame }) {
   );
 }
 
-function ScanCompletion({ frame }: { frame: WatchlistScanFrame }) {
+function ScanCompletion({ frame, scanAgo }: { frame: WatchlistScanFrame; scanAgo?: string }) {
   const summary = frame.summary ?? {};
   const events = frame.scan_track_events ?? [];
   const cancelled = frame.status === 'cancelled';
+  const [open, setOpen] = useState(false);
+  const total = summary.total_artists || 0;
+  const scanned = summary.successful_scans ?? total;
+  const found = summary.new_tracks_found || 0;
+  const added = summary.tracks_added_to_wishlist || 0;
 
   return (
-    <div className="watchlist-page-scan-status">
-      <div className="watchlist-scan-completion">
-        <div className="watchlist-scan-completion-message">
-          {cancelled
-            ? `Scan cancelled after ${summary.total_artists || 0} artist${
-                (summary.total_artists || 0) !== 1 ? 's' : ''
-              }`
-            : scanCompletionMessage(summary)}
+    <div className={home.scanRow} role="status" aria-label="Last watchlist scan">
+      <div className={home.scanRowHead}>
+        <div className={home.scanRowText}>
+          <b>
+            {cancelled
+              ? `Scan cancelled after ${total} artist${total !== 1 ? 's' : ''}`
+              : scanAgo
+                ? `Last scan ${scanAgo}`
+                : 'Scan finished'}
+          </b>
         </div>
-        <div style={{ fontSize: 13, opacity: 0.8 }}>
-          {/* A cancelled run labels this "Scanned"; a completed one "Artists". */}
-          <span className="sync-stat">
-            {cancelled ? 'Scanned' : 'Artists'}: {summary.total_artists || 0}
+        <div className={home.scanStats}>
+          {!cancelled ? (
+            <span>
+              <b>{scanned}</b>of {total} artists checked
+            </span>
+          ) : null}
+          <span>
+            <b>{found}</b>new track{found !== 1 ? 's' : ''} found
           </span>
-          <span className="sync-separator"> • </span>
-          <span className="sync-stat">New tracks: {summary.new_tracks_found || 0}</span>
-          <span className="sync-separator"> • </span>
-          <span className="sync-stat">
-            Added to wishlist: {summary.tracks_added_to_wishlist || 0}
+          <span>
+            <b>{added}</b>added to wishlist
           </span>
         </div>
-        {events.length > 0 ? <ScanTrackLedger events={events} /> : null}
+        {events.length > 0 ? (
+          <button
+            type="button"
+            className={home.txt}
+            aria-expanded={open}
+            onClick={() => setOpen((previous) => !previous)}
+          >
+            {open ? 'Hide tracks' : 'Show tracks'}
+          </button>
+        ) : null}
       </div>
+      {events.length > 0 ? <ScanTrackLedger events={events} open={open} /> : null}
     </div>
   );
 }
@@ -157,26 +166,15 @@ function ScanCompletion({ frame }: { frame: WatchlistScanFrame }) {
  */
 type LedgerEvent = NonNullable<WatchlistScanFrame['scan_track_events']>[number];
 
-function ScanTrackLedger({ events }: { events: LedgerEvent[] }) {
-  const [open, setOpen] = useState(false);
+function ScanTrackLedger({ events, open }: { events: LedgerEvent[]; open: boolean }) {
   const added = events.filter((event) => event.status === 'added');
   const skipped = events.filter((event) => event.status !== 'added');
 
   return (
-    <>
-      <button
-        type="button"
-        className="watchlist-scan-tracks-toggle"
-        onClick={() => setOpen((previous) => !previous)}
-      >
-        {open ? 'Hide tracks' : 'Show tracks'}{' '}
-        <span className="watchlist-scan-tracks-caret">▾</span>
-      </button>
-      <div className="watchlist-scan-tracks" style={{ display: open ? '' : 'none' }}>
-        <LedgerSection label="Added to wishlist" list={added} />
-        <LedgerSection label="Found but skipped — already queued or blocklisted" list={skipped} />
-      </div>
-    </>
+    <div className={home.feed} style={{ display: open ? '' : 'none', maxHeight: 360 }}>
+      <LedgerSection label="Added to wishlist" list={added} />
+      <LedgerSection label="Found but skipped — already queued or blocklisted" list={skipped} />
+    </div>
   );
 }
 
@@ -184,23 +182,23 @@ function LedgerSection({ label, list }: { label: string; list: LedgerEvent[] }) 
   if (list.length === 0) return null;
   return (
     <>
-      <div className="watchlist-scan-tracks-section">
+      <div className={home.ledgerHead}>
         {label} ({list.length})
       </div>
       {list.map((event, index) => (
-        <div key={`${event.track_name ?? ''}-${index}`} className="watchlist-live-addition-item">
+        <div key={`${event.track_name ?? ''}-${index}`} className={home.feedItem}>
           {event.album_image_url ? (
             <img src={event.album_image_url} alt="" onError={hideOnError} />
           ) : null}
-          <div className="watchlist-live-addition-item-info">
-            <div className="watchlist-live-addition-item-track">{event.track_name || ''}</div>
-            <div className="watchlist-live-addition-item-artist">
+          <div className={home.feedText}>
+            <div className={home.feedTrack}>{event.track_name || ''}</div>
+            <div className={home.feedArtist}>
               {event.artist_name || ''}
               {event.album_name ? ` — ${event.album_name}` : ''}
             </div>
           </div>
           <span
-            className={`watchlist-scan-track-badge ${event.status === 'added' ? 'added' : 'skipped'}`}
+            className={`${home.feedBadge}${event.status === 'added' ? ` ${home.feedBadgeAdded}` : ''}`}
           >
             {event.status === 'added' ? 'added' : 'skipped'}
           </span>

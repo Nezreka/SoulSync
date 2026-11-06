@@ -136,6 +136,8 @@ export type WatchlistScanStatus = (typeof WATCHLIST_SCAN_STATUS_VALUES)[number];
 
 export interface WatchlistScanSummary {
   total_artists?: number;
+  /** artists the scan got through without an error */
+  successful_scans?: number;
   new_tracks_found?: number;
   tracks_added_to_wishlist?: number;
 }
