@@ -14,6 +14,14 @@ from core.library2.validation import finding_summary, finding_verified
 from tests.lib2_seed import RowDb
 
 
+@pytest.fixture(autouse=True)
+def _no_cover_art_artist_name_search(monkeypatch):
+    """the cover art job's artist name search talks to real clients"""
+    monkeypatch.setattr('core.repair_jobs.missing_cover_art._artist_art_by_name',
+                        lambda *a, **k: (None, None))
+
+
+
 @pytest.fixture
 def library(tmp_path, monkeypatch):
     path = tmp_path / '07 - Track 7.flac'
