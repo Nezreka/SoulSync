@@ -1238,6 +1238,28 @@ def test_a_guest_spot_is_an_appearance_and_a_collaboration_is_their_own(imported
 
 
 
+def test_a_split_single_appears_on_the_second_artists_page(imported_conn):
+    """#2003: one side each is exactly half. the release is the first
+    credited artist's, and appears on the other's page, not in their Singles."""
+    from tests import lib2_seed
+    lib2_seed.artist(imported_conn, 'Lead')
+    other = lib2_seed.artist(imported_conn, 'Other')
+    lib2_seed.track(imported_conn, 'Lead', 'Lead versus Other', 'Side A', track_number=1,
+                    album_cols={'album_type': 'single'})
+    side_b = lib2_seed.track(imported_conn, 'Lead', 'Lead versus Other', 'Side B', track_number=2)
+    imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                          "VALUES (?, ?, 'primary', 0)", (side_b, other))
+    from core.library2.importer import _rebuild_album_artist_credits
+    album = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Lead versus Other'").fetchone()[0]
+    _rebuild_album_artist_credits(imported_conn.cursor(), {album})
+
+    data = Q.get_artist(imported_conn, other)
+
+    assert data["singles"] == [] and data["albums"] == []
+    assert [a["title"] for a in data["appears_on"]] == ["Lead versus Other"]
+
+
 def test_a_joint_albums_second_primary_artist_is_listed(imported_conn):
     """the index lists release artists: the album's primary artist, and a
     primary album artist on a joint album too. Only featured guests drop out."""

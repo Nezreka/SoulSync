@@ -682,6 +682,19 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     album_ctx.get("name", "") or "album", _va_artist, artist_name,
                 )
                 artist_name = _va_artist
+            else:
+                # #2003: a release credited to several artists goes under
+                # its lead, the same artist its folder is named after, not
+                # under whichever of them the download was for
+                from core.imports.collab_artist import album_lead_artist
+                _lead = album_lead_artist(album_ctx, artist_name)
+                if _lead:
+                    logger.info(
+                        "[Import] '%s' is credited to %s first — filing the album "
+                        "there instead of under %s (the track keeps its own artist)",
+                        album_ctx.get("name", "") or "album", _lead, artist_name,
+                    )
+                    artist_name = _lead
 
         album_name = ""
         if _album_ctx_distrusted:

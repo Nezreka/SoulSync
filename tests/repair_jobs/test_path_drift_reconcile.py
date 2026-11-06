@@ -144,3 +144,29 @@ def test_ambiguous_directories_are_reported_but_carry_no_fix(drifted):
     assert details["_fix_action"] == "review"
     assert details["proposed_path"] is None
     assert len(details["alternatives"]) == 2
+
+
+def _scoped_ctx(db, findings, paths):
+    ctx = _ctx(db, findings)
+    ctx.scope = {"artist_name": "1nonly", "file_paths": list(paths)}
+    return ctx
+
+
+def test_an_artist_scoped_run_checks_only_that_artists_files(drifted):
+    """#2004: run from one artist's Library Health menu, a drifted row of
+    someone else's is not this run's business."""
+    db, music = drifted
+    stored = str(music / "01-01 - Bunny Girl.flac")
+
+    mine = []
+    PathDriftReconcileJob().scan(_scoped_ctx(db, mine, [stored]))
+    assert [f["entity_id"] for f in mine] == ["lib2:1"]
+
+    theirs = []
+    result = PathDriftReconcileJob().scan(_scoped_ctx(db, theirs, ["/elsewhere/song.flac"]))
+    assert theirs == [] and result.scanned == 0
+
+    # an empty allowlist is an empty run, never the whole library
+    empty = []
+    PathDriftReconcileJob().scan(_scoped_ctx(db, empty, []))
+    assert empty == []

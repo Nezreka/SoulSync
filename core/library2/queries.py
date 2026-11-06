@@ -1162,8 +1162,9 @@ def _own_release_ids(conn, album_rows, group) -> set:
     The album junction can't tell: it files every track artist who isn't the
     release's main artist as "featured", the co-headliner of a collaboration
     and a one-verse guest alike. The track credits can. A release is theirs
-    when they are its main artist, or the lead credit on at least half its
-    tracks (a collaboration). One the library holds no tracks of yet (a
+    when they are its main artist, or the lead credit on more than half its
+    tracks (a collaboration). Exactly half is a split single: one side each,
+    and it stays with the artist credited first. One the library holds no tracks of yet (a
     provider discography entry) goes by its album credit."""
     group = [int(g) for g in group]
     own = {int(r["id"]) for r in album_rows if r["primary_artist_id"] in group}
@@ -1186,7 +1187,9 @@ def _own_release_ids(conn, album_rows, group) -> set:
         led[int(row["album_id"])] = (int(row["total"] or 0), int(row["led"] or 0))
     for album_id in rest:
         total, lead = led.get(album_id, (0, 0))
-        if total and lead * 2 >= total:
+        # more than half: a split single, one side each, belongs to the
+        # artist it is credited to first, and appears on the other (#2003)
+        if total and lead * 2 > total:
             own.add(album_id)
         elif not total and conn.execute(
                 f"SELECT 1 FROM lib2_album_artists WHERE album_id=? AND artist_id IN ({marks})",

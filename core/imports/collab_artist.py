@@ -47,3 +47,27 @@ def first_listed_artist(album_artist: str, artists_list) -> str:
     if len(artists_list) > 1:
         return _name(artists_list[0])
     return listed_primary_of(album_artist, artists_list[0])
+
+
+def album_lead_artist(album_ctx, download_artist: str) -> str:
+    """the album's first credited artist, when the download was for one of
+    its other credited artists. '' otherwise (the caller keeps its artist).
+
+    a split single "3OH!3 versus Innerpartysystem" has side B by
+    Innerpartysystem. downloading it for them filed the album under them
+    while the folder went under 3OH!3, so one release became two albums
+    (#2003). the library row follows the folder: the release's lead.
+    """
+    if not isinstance(album_ctx, dict):
+        return ""
+    artists = album_ctx.get("artists")
+    if not isinstance(artists, list) or len(artists) < 2:
+        return ""
+    names = [_name(entry) for entry in artists]
+    lead = names[0]
+    wanted = (download_artist or "").strip().casefold()
+    if not lead or not wanted or lead.casefold() == wanted:
+        return ""
+    if wanted not in {name.casefold() for name in names[1:]}:
+        return ""
+    return lead

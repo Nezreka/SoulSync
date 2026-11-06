@@ -3671,6 +3671,26 @@ const MAINTENANCE_JOBS: Array<{
     desc: 'Find inconsistent album artist, year and artwork tags for this artist.',
     scope: 'artist',
   },
+  // #2004: the cleanup checks, run against this artist's files instead of a
+  // multi-terabyte library. each one only files findings to review.
+  {
+    id: 'dead_file_cleaner',
+    label: 'Find Dead File Paths',
+    desc: 'Check that every file linked to this artist still exists. A file missed on two runs in a row becomes a finding; approve it to drop the dead reference.',
+    scope: 'artist',
+  },
+  {
+    id: 'path_drift_reconcile',
+    label: 'Find Renamed Files',
+    desc: 'Find this artist’s tracks whose stored path no longer exists because the file was renamed in its folder, and propose the new path. Nothing on disk changes.',
+    scope: 'artist',
+  },
+  {
+    id: 'native_duplicate_detector',
+    label: 'Find Duplicates',
+    desc: 'Find duplicate releases and duplicate files for this artist, to review and merge.',
+    scope: 'artist',
+  },
   // No "Find Quality Upgrades" entry: queueing a track that sits below its
   // profile cutoff is not a job you run, it is what the wanted projection does
   // continuously (Monitoring List Reconcile mirrors the result into the
