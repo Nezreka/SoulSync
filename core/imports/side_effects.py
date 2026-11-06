@@ -690,7 +690,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                 _lead = album_lead_artist(album_ctx, artist_name)
                 if _lead:
                     logger.info(
-                        "[Import] '%s' is credited to %s first — filing the album "
+                        "[Import] '%s' is credited to %s first, filing the album "
                         "there instead of under %s (the track keeps its own artist)",
                         album_ctx.get("name", "") or "album", _lead, artist_name,
                     )
