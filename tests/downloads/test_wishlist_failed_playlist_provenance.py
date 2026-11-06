@@ -26,14 +26,15 @@ class _CapturingWishlistService:
         self.adds = []
 
     def add_failed_track_from_modal(self, track_info=None, source_type=None,
-                                    source_context=None, profile_id=1):
+                                    source_context=None, profile_id=1, detailed=False):
         self.adds.append({
             "track_info": track_info,
             "source_type": source_type,
             "source_context": source_context,
             "profile_id": profile_id,
         })
-        return True
+        # the re-add asks for the detailed outcome (#1998)
+        return {"status": "created", "created": True, "reason": None} if detailed else True
 
     def mark_track_download_result(self, spotify_track_id, success,
                                    error_message=None, profile_id=1, **kwargs):
