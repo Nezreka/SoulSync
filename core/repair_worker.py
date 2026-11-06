@@ -502,6 +502,20 @@ def _path_mapping_hint(config_manager) -> str:
     return 'Check Settings -> Library -> Music Paths so SoulSync can map this path.'
 
 
+# details that change without the problem changing: a rescan's size and
+# bitrate, ids enrichment adds, a provider's art url or a replaygain read.
+_VOLATILE_FINDING_KEYS = frozenset({
+    'dedup_file', 'provider_ids', 'file_size', 'current_gain',
+    'found_artwork_url', 'artist_thumb_url', 'found_artist_url',
+    '_dedup_fingerprint', '_file_identity',
+})
+
+
+def _stable_finding_payload(details) -> dict:
+    """the fields of a finding's details that say what the problem is."""
+    return {k: v for k, v in dict(details or {}).items() if k not in _VOLATILE_FINDING_KEYS}
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -1724,7 +1738,12 @@ class RepairWorker:
                 # hide the repair issue itself.
                 logger.debug("Library-v2 finding annotation skipped: %s", e)
 
-            fingerprint_payload = dict(enriched_details)
+            # what changes on its own (a rescan's size and bitrate, a provider
+            # id enrichment adds, a provider's art url, a replaygain read) is
+            # not a new problem: hashing it brought dismissed findings back
+            # after any tag write or enrichment pass. 3.6.1 never did.
+            full_payload = dict(enriched_details)
+            fingerprint_payload = _stable_finding_payload(enriched_details)
             if finding_type == 'native_duplicate_releases' and enriched_details.get('pair_key'):
                 # One release pair is one decision; its catalogue rows change
                 # in the background and must not undo a dismissal.
@@ -1735,19 +1754,17 @@ class RepairWorker:
             # ReplayGain, lyrics or BPM pass on the same file brought every
             # dismissed finding back. the size/mtime form is still accepted
             # below for rows dismissed before this
-            legacy_payload = None
+            legacy_payloads = []
+            file_identity = None
             if file_path and os.path.isfile(file_path):
                 try:
                     stat = os.stat(file_path)
-                    legacy_payload = dict(fingerprint_payload)
-                    legacy_payload["_file_stat"] = {
-                        "size": stat.st_size,
-                        "mtime_ns": stat.st_mtime_ns,
-                    }
-                    fingerprint_payload["_file_stat"] = {
-                        "ino": stat.st_ino,
-                        "dev": stat.st_dev,
-                    }
+                    file_identity = {"ino": stat.st_ino, "dev": stat.st_dev}
+                    # rows dismissed under the earlier fingerprints still match
+                    legacy_payloads.append({**full_payload, "_file_stat": {
+                        "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}})
+                    legacy_payloads.append({**full_payload, "_file_stat": dict(file_identity)})
+                    fingerprint_payload["_file_stat"] = dict(file_identity)
                 except OSError:
                     pass
 
@@ -1760,10 +1777,27 @@ class RepairWorker:
                 ).hexdigest()
             dedup_fingerprint = _fingerprint(fingerprint_payload)
             same_fingerprints = {dedup_fingerprint}
-            if legacy_payload is not None:
+            for legacy_payload in legacy_payloads:
                 same_fingerprints.add(_fingerprint(legacy_payload))
             enriched_details = dict(enriched_details)
             enriched_details["_dedup_fingerprint"] = dedup_fingerprint
+            if file_identity is not None:
+                enriched_details["_file_identity"] = file_identity
+
+            def _same_problem(old: dict) -> bool:
+                """the stored row and this one describe the same problem,
+                judged on the stable fields only. a row stored before this
+                rule is judged the same way from its details; the file
+                identity counts only when the stored row recorded one."""
+                if finding_type == 'native_duplicate_releases' and enriched_details.get('pair_key'):
+                    return old.get('pair_key') == enriched_details.get('pair_key')
+                mine = _stable_finding_payload(enriched_details)
+                theirs = _stable_finding_payload(old)
+                if old.get('_file_identity') is not None:
+                    theirs["_file_stat"] = old['_file_identity']
+                    if file_identity is not None:
+                        mine["_file_stat"] = dict(file_identity)
+                return _fingerprint(mine) == _fingerprint(theirs)
 
             # A file finding is keyed by its concrete path, not merely by its
             # parent track: multiple active files for one track are independent
@@ -1841,14 +1875,16 @@ class RepairWorker:
                     # sides are fingerprinted, only the exact dismissed
                     # snapshot is suppressed; a new file/target may surface.
                     if (not old_fingerprint
-                            or old_fingerprint in same_fingerprints):
+                            or old_fingerprint in same_fingerprints
+                            or _same_problem(old_details)):
                         return False
                     continue
                 # A replaced file or changed target is new information and may
                 # surface immediately. An unchanged (or pre-fingerprint)
                 # resolved finding observes dev's recurrence grace, then may
                 # become pending again if the problem truly returned.
-                if (not old_fingerprint or old_fingerprint in same_fingerprints) \
+                if (not old_fingerprint or old_fingerprint in same_fingerprints
+                        or _same_problem(old_details)) \
                         and self._within_recurrence_grace(resolved_at):
                     return False
 
