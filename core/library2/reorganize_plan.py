@@ -36,6 +36,7 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Optional
 
+from core.library2.release_dates import album_release_date
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.reorganize_plan")
@@ -293,8 +294,9 @@ def _as_provider_album(album: Dict[str, Any], track_count: int,
     return {
         "id": album.get("spotify_id") or "",
         "name": album.get("title") or "Unknown Album",
-        "release_date": album.get("release_date") or (
-            str(album["year"]) if album.get("year") else ""),
+        # the same date a download of this album files under, so a
+        # reorganize never moves it to another [year] folder
+        "release_date": album_release_date(album.get("release_date"), album.get("year")),
         "total_tracks": track_count,
         "total_discs": total_discs,
         "image_url": album.get("image_url") or "",

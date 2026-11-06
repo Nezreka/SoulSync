@@ -641,3 +641,17 @@ def test_another_tracks_file_is_never_carried_as_a_twin(imported_conn, monkeypat
         resolve_file_path_fn=lambda p: str(twin) if p.endswith(".opus") else str(song))
     first = next(t for t in plan["tracks"] if t["title"] == "One Dance")
     assert first["sibling_files"] == []
+
+
+def test_reorganize_dates_an_album_the_way_its_download_did():
+    """a download files under the album's year when its release_date is
+    another edition's (core.library2.release_dates). a reorganize preferring
+    the release_date moved those files to a second [year] folder."""
+    from core.library2.reorganize_plan import _as_provider_album
+
+    album = {"title": "Different Route", "year": 2017, "release_date": "2021-03-05"}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017"
+    album = {"title": "Different Route", "year": 2017, "release_date": "2017-08-25"}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017-08-25"
+    album = {"title": "Different Route", "year": 2017, "release_date": None}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017"
