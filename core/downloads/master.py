@@ -1282,6 +1282,9 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         preflight_source = None
         preflight_tracks = None
         scored_albums = []
+        # every file the album search turned up, kept on the batch so a track
+        # whose download gets quarantined tries the rest before searching again
+        _preflight_pool = []
         _soulseek_bundle_plugin = (
             _configured_bundle_plugin('soulseek')
             if _soulseek_bundle_index is not None and not batch_private_album_bundle
@@ -1314,6 +1317,7 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     for aq in album_queries:
                         _sr.info(f"[Album Pre-flight] Trying query: '{aq}'")
                         track_results, album_results = deps.run_async(slsk.search(aq, timeout=30))
+                        _preflight_pool.extend(track_results or [])
                         if album_results:
                             _sr.info(f"[Album Pre-flight] Found {len(album_results)} album results with query: '{aq}'")
                             for ar in album_results:
@@ -1324,6 +1328,8 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                             _sr.info(f"[Album Pre-flight] No album results for query: '{aq}'")
 
                     album_results = list(album_results_by_source.values())
+                    for _ar in album_results:
+                        _preflight_pool.extend(getattr(_ar, 'tracks', None) or [])
                     if album_results:
                         # Score complete folders as releases before falling back to per-track search.
                         scored_albums = []
@@ -1519,6 +1525,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
             if batch_id not in download_batches: return
 
             download_batches[batch_id]['phase'] = 'downloading'
+            if _preflight_pool:
+                _seen_pool, _pool = set(), []
+                for _c in _preflight_pool:
+                    _key = (getattr(_c, 'username', None), getattr(_c, 'filename', None))
+                    if _key[0] and _key[1] and _key not in _seen_pool:
+                        _seen_pool.add(_key)
+                        _pool.append(_c)
+                download_batches[batch_id]['preflight_pool'] = _pool[:800]
 
             # Store album pre-flight results on batch for source reuse
             # unless the Soulseek album-bundle path already staged a private

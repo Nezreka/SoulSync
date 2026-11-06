@@ -41,3 +41,33 @@ def test_the_retry_remembers_why_the_file_was_quarantined(monkeypatch):
         assert 'expected 266s' in download_tasks['t-2001']['last_quarantine_reason']
     finally:
         download_tasks.pop('t-2001', None)
+
+
+def test_a_quarantine_retry_starts_from_what_the_album_search_found():
+    """the retry searched from scratch (and found nothing, the artist was on the
+    server's banned phrase list) while the right cut sat in the folder it came
+    from"""
+    from types import SimpleNamespace
+    from core.downloads.task_worker import _seed_from_preflight_pool
+    from core.runtime_state import download_batches, download_tasks, tasks_lock
+
+    f = lambda name, ms, user='peer-a': SimpleNamespace(  # noqa: E731
+        username=user, filename=f'Lib\\Gorillaz\\DoYaThing\\{name}', duration=ms)
+    pool = [f('1-02 DoYaThing.mp3', 784_000), f('1-01 DoYaThing.mp3', 266_000),
+            f('01 Feel Good Inc.mp3', 222_000), f('DoYaThing.flac', 265_000, 'peer-b')]
+    track = SimpleNamespace(name='DoYaThing', artists=['Gorillaz'], duration_ms=266_000)
+    with tasks_lock:
+        download_batches['b-2001'] = {'preflight_pool': pool}
+        download_tasks['t-seed'] = {'status': 'searching'}
+        download_tasks['t-own'] = {'status': 'searching', 'cached_candidates': ['mine']}
+    try:
+        _seed_from_preflight_pool('t-seed', 'b-2001', track)
+        _seed_from_preflight_pool('t-own', 'b-2001', track)
+        names = [c.filename.rsplit('\\', 1)[-1] for c in download_tasks['t-seed']['cached_candidates']]
+        assert names[:2] == ['1-01 DoYaThing.mp3', 'DoYaThing.flac'], "the right length first"
+        assert names[-1] == '1-02 DoYaThing.mp3' and '01 Feel Good Inc.mp3' not in names
+        assert download_tasks['t-own']['cached_candidates'] == ['mine'], "its own search wins"
+    finally:
+        download_batches.pop('b-2001', None)
+        download_tasks.pop('t-seed', None)
+        download_tasks.pop('t-own', None)

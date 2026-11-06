@@ -152,6 +152,35 @@ def _candidate_ordering(track_info: Optional[dict] = None):
     return False, None
 
 
+def _seed_from_preflight_pool(task_id, batch_id, track):
+    """A quarantine retry with nothing cached of its own takes its candidates
+    from what the batch's album search already found: the other files in the
+    same folder, other peers' copies. An album-bundle track never searched on
+    its own, so its retry went straight to fresh queries that found nothing,
+    while the right cut sat in the folder it came from (#2001)."""
+    from core.downloads.soulseek_identity import _duration_fit, match_track
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        batch = download_batches.get(batch_id) or {}
+        if not task or task.get('cached_candidates'):
+            return
+        pool = list(batch.get('preflight_pool') or [])
+    if not pool:
+        return
+    target = {'name': getattr(track, 'name', ''), 'artists': list(getattr(track, 'artists', None) or []),
+              'duration_ms': getattr(track, 'duration_ms', None)}
+    fits = [c for c in pool if match_track(target, c).matches]
+    fits.sort(key=lambda c: _duration_fit(target, c))
+    if not fits:
+        return
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if task is not None and not task.get('cached_candidates'):
+            task['cached_candidates'] = fits[:50]
+    logger.info("[Modal Worker] Retry: %d candidate(s) from the album search for task %s",
+                min(len(fits), 50), task_id)
+
+
 def _try_cached_candidates(task_id, batch_id, track, deps):
     """Retry fast path: attempt the already-found candidates before searching.
 
@@ -665,6 +694,11 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
             cached_first = is_quarantine_retry or bool(_t.get('_slow_fallback_source_key'))
             if not cached_first:
                 _t.pop('searched_queries', None)
+        if is_quarantine_retry:
+            try:
+                _seed_from_preflight_pool(task_id, batch_id, track)
+            except Exception as _seed_err:  # noqa: BLE001 - a missed seed just means a fresh search
+                logger.debug("preflight pool seed failed for %s: %s", task_id, _seed_err)
         if cached_first and _try_cached_candidates(task_id, batch_id, track, deps):
             if getattr(deps, 'evaluate_candidates', None) is not None:
                 from core.downloads import decision_log
