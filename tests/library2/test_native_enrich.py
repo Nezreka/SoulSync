@@ -1538,3 +1538,21 @@ def test_prune_removes_the_lead_of_a_browse_only_single(imported_conn):
     stats = NE.prune_browse_only_artists(imported_conn)
 
     assert lead in stats["artist_ids"]
+
+
+def test_prune_keeps_an_artist_a_household_member_watches_or_wants(imported_conn):
+    """third #1062 review P2B-2: only the admin's columns were checked. a
+    member's watch is a rule (the column stays 0), and their wanted tracks
+    went with the deleted artist"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    watched, _ = _browse_only_artist(imported_conn, "Member Watched Guest")
+    record_rule(imported_conn, "artist", watched, True, PROVENANCE_USER, profile_id=2)
+    wanted, album_id = _browse_only_artist(imported_conn, "Member Wanted Guest")
+    track = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Wished', 1)",
+        (album_id,)).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, projection_version) "
+        "VALUES(2, ?, 1, 'track', 1)", (track,))
+
+    assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
