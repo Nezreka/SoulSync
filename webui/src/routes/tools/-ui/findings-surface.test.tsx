@@ -2487,3 +2487,23 @@ describe('a finished job refreshes the findings (#1386)', () => {
     expect(onStatusChanged).toHaveBeenCalled();
   });
 });
+
+describe('switching library in the header (third #1062 review G16-4)', () => {
+  it('reloads the counts, groups and list for the library now picked', async () => {
+    routes({ [FINDINGS]: page([]) });
+    renderSurface();
+    await flush();
+    const groupCalls = () =>
+      fetchMock.mock.calls.filter((c) => String(c[0]).includes(GROUPS)).length;
+    const countCalls = () =>
+      fetchMock.mock.calls.filter((c) => String(c[0]).includes(COUNTS)).length;
+    const groupsBefore = groupCalls();
+    const countsBefore = countCalls();
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('ss:webui-library-scope-changed'));
+    });
+    await flush();
+    expect(groupCalls()).toBeGreaterThan(groupsBefore);
+    expect(countCalls()).toBeGreaterThan(countsBefore);
+  });
+});

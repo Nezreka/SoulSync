@@ -21,6 +21,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
+
 import type { FindingAlbumGroup } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
@@ -476,6 +478,16 @@ export function OperationsStudio({
   useEffect(() => {
     void loadData();
   }, [loadData, jobs]);
+
+  // G16-4: another library picked in the header; its findings, not these
+  useEffect(() => {
+    const switched = () => {
+      setSelectedAlbum(null);
+      void loadData();
+    };
+    window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
+    return () => window.removeEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
+  }, [loadData]);
 
   // a fix-all started elsewhere (advanced, another tab) shows its progress here too
   useEffect(() => {
