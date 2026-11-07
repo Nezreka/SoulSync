@@ -1976,7 +1976,15 @@ def backfill_missing_provider_ids(
             entity_id = int(item.get("id"))
             try:
                 result = enricher(conn, entity_type, entity_id, service) or {}
-                status = "matched" if result.get("success") else "not_found"
+                answered = str(result.get("source") or service).strip().lower()
+                if result.get("success") and answered != service:
+                    # the service fell back to another provider (Spotify
+                    # Free / rate-limited -> iTunes): that one's id is stored,
+                    # but this service never answered. 'matched' settled the
+                    # pair for good; an error is asked again
+                    status = "error"
+                else:
+                    status = "matched" if result.get("success") else "not_found"
             except Exception as exc:  # noqa: BLE001 — one entity, not the run
                 logger.debug("provider backfill: %s %s via %s failed: %s",
                              entity_type, entity_id, service, exc)
