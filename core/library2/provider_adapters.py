@@ -1063,6 +1063,25 @@ def fetch_artist_discography(
     )
 
 
+def _caa_has_front(scope: str, mbid: str) -> bool:
+    """the Cover Art Archive holds a front image for this release (group).
+    one read of its index; any failure is a no (the walk carries on to the
+    other sources, it never returns a link it couldn't vouch for)"""
+    import json
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f"https://coverartarchive.org/{scope}/{mbid}",
+            headers={"User-Agent": "SoulSync/1.0 (artwork lookup)"})
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 (trusted host)
+            index = json.loads(resp.read().decode("utf-8"))
+        return any(isinstance(image, dict) and image.get("front")
+                   for image in (index or {}).get("images") or [])
+    except Exception as exc:  # noqa: BLE001 - 404 means no art
+        logger.debug("CAA index %s/%s: %s", scope, mbid, exc)
+        return False
+
+
 def fetch_artwork_url(
     kind: str,
     *,
@@ -1155,12 +1174,17 @@ def fetch_artwork_url(
         if _out_of_budget():
             return None
         if source == "musicbrainz":
-            return ArtworkProviderResult(
-                kind="album",
-                source="caa",
-                provider_entity_id=provider_id,
-                url=f"https://coverartarchive.org/release/{provider_id}/front-1200",
-            )
+            # only a release the Cover Art Archive really has a front for: an
+            # unchecked link stopped the walk on a 404 that the fix then saved
+            # as the cover (3.6.1 never used CAA blind)
+            if _caa_has_front("release", provider_id):
+                return ArtworkProviderResult(
+                    kind="album",
+                    source="caa",
+                    provider_entity_id=provider_id,
+                    url=f"https://coverartarchive.org/release/{provider_id}/front-1200",
+                )
+            continue
         try:
             client = get_client_for_source(source)
             getter = getattr(client, "get_album", None) if client else None
@@ -1214,12 +1238,13 @@ def fetch_artwork_url(
     if group_id:
         if _out_of_budget():
             return None
-        return ArtworkProviderResult(
-            kind="album",
-            source="caa",
-            provider_entity_id=group_id,
-            url=f"https://coverartarchive.org/release-group/{group_id}/front-1200",
-        )
+        if _caa_has_front("release-group", group_id):
+            return ArtworkProviderResult(
+                kind="album",
+                source="caa",
+                provider_entity_id=group_id,
+                url=f"https://coverartarchive.org/release-group/{group_id}/front-1200",
+            )
     from core.metadata.art_lookup import (
         available_art_sources,
         select_preferred_art,
