@@ -1242,6 +1242,16 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("idx_lib2_track_files_owner create skipped: %s", e)
+    # a v1 API track id (3.6.1's) and the user-reference remap look a file up
+    # by its legacy id; without this each lookup read all of the file table.
+    # partial: only imported files carry one
+    try:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_legacy "
+            "ON lib2_track_files(legacy_track_id) WHERE legacy_track_id IS NOT NULL"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("idx_lib2_track_files_legacy create skipped: %s", e)
     # Owning by path (E-15): the folder table and the triggers that derive a
     # file's owner from where it is. The folders themselves are configuration
     # and are synced at start (core.library2.library_roots.sync_library_roots).
