@@ -1632,7 +1632,8 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
             track_ids = [int(r[0]) for r in conn.execute(
                 f"SELECT id FROM lib2_tracks WHERE album_id IN ({marks})", albums)]
             for table, album_kinds, track_kinds in (
-                    ("lib2_metadata_overrides", ("album", "albums"), ("track", "tracks")),
+                    # an album's hand edits are stored as 'release_group'
+                    ("lib2_metadata_overrides", ("release_group", "album"), ("track", "tracks")),
                     ("lib2_media_server_mappings", ("album", "album"), ("track", "track"))):
                 try:
                     hit = conn.execute(

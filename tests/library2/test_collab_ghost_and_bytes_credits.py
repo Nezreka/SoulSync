@@ -101,3 +101,20 @@ def test_a_collaboration_whose_parts_are_not_in_the_library_stays(tmp_path):
         conn.commit()
         assert split_combined_credits_locally(conn)["collab_ghosts_cleared"] == 0
         assert "Nelly & Florida Georgia Line" in _artists(conn)
+
+
+def test_a_hand_edited_album_keeps_the_collaboration(tmp_path):
+    """third #1062 review P2B-9: album edits are stored as 'release_group';
+    the clear looked them up as 'album' and deleted a hand-edited album"""
+    from core.library2.metadata_overrides import ensure_metadata_overrides_schema
+    from core.library2.native_enrich import split_combined_credits_locally
+
+    _db, conn, ghost_albums = _library(tmp_path)
+    with closing(conn):
+        ensure_metadata_overrides_schema(conn.cursor())
+        conn.execute("INSERT INTO lib2_metadata_overrides(entity_type, entity_id, field_name, value_json) "
+                     "VALUES('release_group', ?, 'title', '\"Nelly album (mine)\"')", (ghost_albums[0],))
+        conn.commit()
+        assert split_combined_credits_locally(conn)["collab_ghosts_cleared"] == 0
+        assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id=?",
+                            (ghost_albums[0],)).fetchone()[0] == 1
