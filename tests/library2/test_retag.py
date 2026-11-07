@@ -906,3 +906,28 @@ def test_the_retag_modal_writes_extra_tags_only_where_their_setting_allows(monke
     assert "mood" not in kept and "lyrics" not in kept
     assert kept["style"] == "Pop" and kept["isrc"] == "US1"
     assert retag._gate_extra_tags(data, {"lyrics": "fetch"}, legacy=False)["lyrics"] == "plain"
+
+
+def test_write_tags_applies_the_strict_genre_whitelist(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """#1057 / second v2 review (T4): 3.6.1 filtered genres at the tag write,
+    so Write Tags cleaned up genres stored before the whitelist was on. v2
+    wrote the stored genres unfiltered"""
+    from types import SimpleNamespace
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, _, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")   # genres rap, pop
+    values = {"genre_whitelist.enabled": True, "genre_whitelist.genres": ["Pop"]}
+    monkeypatch.setattr("core.metadata.common.get_config_manager",
+                        lambda: SimpleNamespace(get=lambda key, default=None: values.get(key, default)))
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: {"error": None, "has_cover_art": True})
+    monkeypatch.setattr("core.tag_writer.build_tag_diff", lambda *_args: [{"changed": True}])
+    written = []
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file",
+                        lambda path, db_data, **_kw: written.append(dict(db_data)) or {"success": True})
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False)
+
+    assert [g.lower() for g in written[-1]["genres"]] == ["pop"]
