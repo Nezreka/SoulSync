@@ -67,14 +67,41 @@ def _source_ids(row: Any) -> Dict[str, str]:
     return ids
 
 
+def _ledger(conn: Any, canonical: str, entity_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    """what the workers last heard per (entity, service): third #1062 review
+    P2B-3. 3.6.1's chips read ``{service}_match_status`` and showed "not
+    found" with a date; v2 had the same answer in the ledger and said
+    "pending" forever, which hid that a manual match was needed."""
+    out: Dict[int, Dict[str, Any]] = {}
+    try:
+        for start in range(0, len(entity_ids), 500):
+            chunk = entity_ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            for r in conn.execute(
+                    f"SELECT entity_id, service, status, last_attempted_at "
+                    f"FROM lib2_provider_attempts WHERE entity_type=? AND entity_id IN ({marks})",
+                    (canonical, *chunk)):
+                out.setdefault(int(r[0]), {})[str(r[1])] = (r[2], r[3])
+    except Exception as exc:  # noqa: BLE001 - no ledger yet: chips as before
+        logger.debug("no attempt ledger for chips: %s", exc)
+    return out
+
+
+# no id, and the ledger says why
+_UNMATCHED_STATUS = {"not_found": "not_found", "error": "error", "manual": "cleared"}
+
+
 def _native_chips(
     conn: Any,
     canonical: str,
     entity_id: int,
     row: Any,
     available_services: Optional[set],
+    ledger: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     ids = _source_ids(row)
+    if ledger is None:
+        ledger = _ledger(conn, canonical, [int(entity_id)]).get(int(entity_id), {})
     origins = load_match_provenance(
         conn, f"lib2_{canonical}", [int(entity_id)]
     ).get(str(entity_id), {})
@@ -88,12 +115,16 @@ def _native_chips(
             external_id
             and str(provenance.get("external_id") or "") == str(external_id)
         )
+        attempt_status, attempted_at = ledger.get(service) or (None, None)
+        status = ("matched" if external_id
+                  else _UNMATCHED_STATUS.get(str(attempt_status or ""), "pending"))
         chips.append({
             "service": service,
             "label": label,
-            "status": "matched" if external_id else "pending",
+            "status": status,
             "external_id": external_id,
-            "last_attempted": provenance.get("matched_at") if provenance_matches else None,
+            "last_attempted": (provenance.get("matched_at") if provenance_matches else None)
+                              or attempted_at,
             # Kept only as a response-shape compatibility field. P3 clients
             # always use library_v2_entity_id for mutation.
             "legacy_entity_id": None,
@@ -185,10 +216,12 @@ def album_match_bundle(
         "FROM lib2_tracks WHERE album_id=? ORDER BY id",
         (int(album_id),),
     ).fetchall()
+    ledger = _ledger(conn, "track", [int(r["id"]) for r in rows])
     for row in rows:
         track_id = int(row["id"])
         result["tracks"][track_id] = _native_chips(
             conn, "track", track_id, row, available_services,
+            ledger.get(track_id, {}),
         )
     return result
 

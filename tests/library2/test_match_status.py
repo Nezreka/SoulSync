@@ -110,8 +110,33 @@ def test_lib2_native_entity_can_be_manually_matched_and_cleared(imported_conn):
     MS.set_library_v2_match(imported_conn, "artist", artist_id, "deezer", None)
     rows = MS.entity_match_status(imported_conn, "artist", artist_id)
     deezer = next(row for row in rows if row["service"] == "deezer")
-    assert deezer["status"] == "pending"
+    # P2B-3: the worker won't search a cleared match back, so "pending" lied
+    assert deezer["status"] == "cleared"
     assert deezer["external_id"] is None
+
+
+def test_chips_say_not_found_with_when_the_worker_tried(imported_conn):
+    """third #1062 review P2B-3: 3.6.1's chip said "not found, last tried";
+    v2 said pending forever though the ledger had the answer"""
+    from core.library2 import provider_attempts
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(1, 'Nowhere')").lastrowid
+    track_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Lost')", (album_id,)).lastrowid
+    for kind, eid in (("album", album_id), ("track", track_id)):
+        provider_attempts.record_attempt(imported_conn, entity_type=kind, entity_id=eid,
+                                         service="deezer", status="not_found")
+    provider_attempts.record_attempt(imported_conn, entity_type="album", entity_id=album_id,
+                                     service="itunes", status="error")
+    imported_conn.commit()
+    bundle = MS.album_match_bundle(imported_conn, album_id)
+    album = {c["service"]: c for c in bundle["album"]}
+    assert album["deezer"]["status"] == "not_found"
+    assert album["deezer"]["last_attempted"]
+    assert album["itunes"]["status"] == "error"
+    assert album["spotify"]["status"] == "pending"
+    track = {c["service"]: c for c in bundle["tracks"][track_id]}
+    assert track["deezer"]["status"] == "not_found"
 
 
 @pytest.mark.parametrize("foreign", ["551515699", "693f1940-7107-46a4-acf2-1d487cf46e51"])

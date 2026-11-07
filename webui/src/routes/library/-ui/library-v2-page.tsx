@@ -1174,8 +1174,17 @@ function ModalShell({
 
 function matchChipClass(status: string): string {
   if (status === 'matched') return styles.matchMatched;
-  if (status === 'not_found') return styles.matchNotFound;
+  if (status === 'not_found' || status === 'cleared') return styles.matchNotFound;
   return styles.matchPending;
+}
+
+/** P2B-3: what the workers last heard, in words (3.6.1 said "not found") */
+export function matchStatusText(status: string): string {
+  if (status === 'not_found') return 'not found';
+  if (status === 'cleared') return 'cleared, match it by hand';
+  if (status === 'error') return 'lookup failed, will retry';
+  if (status === 'pending') return 'not tried yet';
+  return status;
 }
 
 /** §52.5/§56.2: only Spotify/Deezer artist search results and the live
@@ -1349,7 +1358,7 @@ export function MatchChips({
         ]
           .filter(Boolean)
           .join(' · ');
-        const tip = `${s.label}: ${s.status} (${details})`;
+        const tip = `${s.label}: ${matchStatusText(s.status)} (${details})`;
         return (
           <button
             key={s.service}
