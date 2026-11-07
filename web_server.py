@@ -13691,9 +13691,29 @@ def parse_youtube_playlist(url):
             # path at the first ~100-item page (Liked Music came back as only 104). Skipping the
             # webpage and paging via the InnerTube API directly gets far more — verified live
             # 100 -> 200+ on a large playlist. Remove once the upstream fix (PR #16948) ships.
-            'extractor_args': {'youtubetab': {'skip': ['webpage']}},
+            # 'authcheck' must be skipped alongside 'webpage' (#2013): with no webpage
+            # download, yt-dlp never extracts ytcfg, and its authcheck then FATALLY
+            # raises for any authenticated request (cookies carry LOGIN_INFO plus
+            # a SAPISID variant) before the InnerTube endpoint is even tried — so
+            # a valid cookies.txt that works in standalone yt-dlp (which downloads
+            # the webpage) always failed here whenever logged-in cookies were
+            # configured. Skipping the check lets extraction proceed to the API
+            # endpoint with the cookies; without logged-in cookies the check
+            # never fires anyway.
+            # Trade-off, named: yt-dlp prescribes this skip for non-private
+            # content or first-account cookies, and Liked Music IS private —
+            # with multi-account cookies the webpage-less API call can answer
+            # for the default account instead of failing loudly (wrong data
+            # silently, or empty data — the empty case is warned on below).
+            # Accepted because it is the only way an authenticated playlist
+            # parses at all with the webpage skipped: for music.youtube.com
+            # the ytmusicapi path above goes first (its own auth only in
+            # paste-cookie mode), and for plain youtube.com this fallback is
+            # the only path there is.
+            'extractor_args': {'youtubetab': {'skip': ['webpage', 'authcheck']}},
         }
-        ydl_opts.update(_youtube_cookie_opts())
+        cookie_opts = _youtube_cookie_opts()
+        ydl_opts.update(cookie_opts)
 
         tracks = []
 
@@ -13761,6 +13781,23 @@ def parse_youtube_playlist(url):
             #
             # music.youtube.com does NOT have that problem: its entries carry a
             # per-track channel, so `allow_channel_artist` resolves them inline.
+
+            if not tracks and cookie_opts:
+                # The authcheck trade-off above, made diagnosable: a parse
+                # with cookies configured that comes back empty may have
+                # been answered for a different account/channel than the
+                # playlist's owner (multi-account cookies), the cookies may
+                # be expired or not logged in at all — all look like an
+                # empty playlist here, and yt-dlp's own warning is
+                # suppressed by no_warnings. (A genuinely empty playlist
+                # logs this too; it says "may" for that reason.)
+                logger.warning(
+                    "[YT Parse] %s returned 0 tracks with YouTube cookies "
+                    "configured — the cookies may be expired, not logged "
+                    "in, or belong to a different account/channel than the "
+                    "playlist owner.",
+                    url,
+                )
 
             # Create playlist object matching GUI structure
             playlist_data = {
