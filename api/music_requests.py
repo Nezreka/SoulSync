@@ -323,6 +323,12 @@ def decline_music_request():
 
 
 def _remove_rows(db, owner, group, why):
+    descriptors = []
+    for t in group["tracks"]:
+        try:
+            descriptors.extend(db.get_wishlist_tracks(profile_id=owner, track_key=str(t["id"])))
+        except Exception:  # noqa: BLE001 - a missed descriptor only skips the release
+            logger.debug("wishlist descriptor read failed for %s", t["id"], exc_info=True)
     for t in group["tracks"]:
         db.remove_from_wishlist(t["id"], profile_id=owner)
         try:
@@ -330,6 +336,22 @@ def _remove_rows(db, owner, group, why):
                                       artist_name=t.get("artist") or "", reason=why, profile_id=owner)
         except Exception:  # noqa: BLE001 - the ignore is a nicety, the removal is the action
             logger.debug("ignore-list add failed for %s", t["id"], exc_info=True)
+    # captured before, released after: same order as every wishlist removal
+    _release_wishes(db, owner, descriptors)
+
+
+def _release_wishes(db, owner, descriptors):
+    """a declined or withdrawn request stops being wanted. left behind, the
+    hourly reconcile re-added it once the ignore aged out, and for a profile
+    with its own library the mirror filed it approved: it downloaded"""
+    if not descriptors:
+        return
+    try:
+        from core.settings import config_manager
+        from core.library2.monitor_sync import sync_wishlist_removal
+        sync_wishlist_removal(db, config_manager, descriptors, profile_id=owner)
+    except Exception:  # noqa: BLE001 - the removal is the action, the release a follow-up
+        logger.debug("request wish release failed for profile %s", owner, exc_info=True)
 
 
 @bp.route("/api/requests/music/withdraw", methods=["POST"])

@@ -72,3 +72,14 @@ def test_household_watchlists_carry_over_once(tmp_path):
     assert _rule(db, artist, 1) is None
     with db._get_connection() as conn:
         assert monitor_sync.carry_member_watchlists(conn) == {"profiles": 0, "artists": 0}
+
+
+def test_a_non_admin_wishlist_removal_drops_their_wish(tmp_path, monkeypatch):
+    """the release used to be admin-only: an own-library profile's removal
+    came back once the ignore aged out (the reconcile runs for it)"""
+    db, sam, _artist = _db(tmp_path)
+    seen = []
+    monkeypatch.setattr(monitor_sync, "demonitor_lib2_tracks_for_removed_wishlist",
+                        lambda _db, descriptors, profile_id=1: seen.append(profile_id) or {"matched": 1})
+    monitor_sync.sync_wishlist_removal(db, None, [{"spotify_track_id": "x"}], profile_id=sam)
+    assert seen == [sam]

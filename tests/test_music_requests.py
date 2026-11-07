@@ -154,6 +154,23 @@ def test_decline_removes_and_ignore_lists_the_rows(asker, notes):
     assert any(p == pid and 'not on this server' in m for p, k, m in notes)
 
 
+def test_decline_drops_the_wish_so_it_never_comes_back_approved(asker, notes, monkeypatch):
+    """second v2 review (W1): decline removed the rows but left the lib2
+    wanted rule. the hourly reconcile re-added the track once the ignore aged
+    out, and for a profile with its own library the mirror filed it approved:
+    it downloaded. the release runs for the requester's profile"""
+    pid, tag = asker
+    released = []
+    monkeypatch.setattr("core.library2.monitor_sync.sync_wishlist_removal",
+                        lambda _db, _cfg, descriptors, profile_id=1: released.append(
+                            (profile_id, sorted(d['spotify_track_id'].split('::')[0] for d in descriptors))))
+    admin = _client_as(1)
+    single = next(g for g in _pending_for(admin, pid) if g['kind'] == 'track')
+    assert admin.post('/api/requests/music/decline',
+                      json={'profile_id': pid, 'key': single['key']}).get_json()['success']
+    assert released == [(pid, [f'{tag}s'])]
+
+
 def test_member_can_withdraw_a_waiting_request(asker):
     pid, tag = asker
     c = _client_as(pid)

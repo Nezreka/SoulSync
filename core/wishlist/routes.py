@@ -890,11 +890,17 @@ def remove_artist_from_wishlist(
         _db = getattr(wishlist_service, "database", None)
         removed_count = 0
         pid = runtime.profile_id
+        removed_descriptors = []
         for spotify_track_id, track_spotify_data in tracks_to_remove:
             if wishlist_service.remove_track_from_wishlist(spotify_track_id, profile_id=pid):
                 removed_count += 1
                 ignore_wishlist_track(_db, pid, spotify_track_id, REASON_REMOVED,
                                       spotify_data=track_spotify_data)
+                removed_descriptors.append({"spotify_track_id": spotify_track_id,
+                                            "spotify_data": track_spotify_data or {}})
+        # the wish goes too, like every other removal: left behind, the
+        # hourly reconcile put the artist's tracks back once the ignore aged out
+        _sync_user_wishlist_removal(runtime, wishlist_service, removed_descriptors)
 
         if removed_count > 0:
             runtime.logger.info("Removed %s wishlist track(s) for artist %r",
@@ -1063,6 +1069,7 @@ def _bulk_skip(runtime: WishlistRouteRuntime, ids):
     _db = getattr(service, "database", None)
     pid = runtime.profile_id
     outcomes = {}
+    removed_descriptors = []
     for tid in ids:
         # Capture label before the row is deleted (#874).
         _data = None
@@ -1077,9 +1084,12 @@ def _bulk_skip(runtime: WishlistRouteRuntime, ids):
             removed = False
         if removed:
             ignore_wishlist_track(_db, pid, tid, REASON_SKIPPED, spotify_data=_data)
+            removed_descriptors.append({"spotify_track_id": tid, "spotify_data": _data or {}})
             outcomes[tid] = (True, "Skipped")
         else:
             outcomes[tid] = (False, "Not in wishlist")
+    # a skip drops the wish too, or the reconcile re-adds it after the ignore
+    _sync_user_wishlist_removal(runtime, service, removed_descriptors)
     runtime.logger.info(
         "Bulk skipped %s of %s wishlist track(s)",
         sum(1 for ok, _ in outcomes.values() if ok), len(ids))

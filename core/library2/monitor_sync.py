@@ -722,7 +722,11 @@ def sync_wishlist_removal(
 ) -> Dict[str, int]:
     """Feature-gated, best-effort adapter for user-facing Wishlist removes."""
     try:
-        if not _is_admin_profile(profile_id) or not descriptors:
+        # every profile: a removal that left the wish behind came back once
+        # the ignore aged out (the reconcile re-adds wanted tracks), for an
+        # own-library profile too. release_removed_wishes only ever touches
+        # that profile's own rules
+        if not descriptors:
             return {"matched": 0, "demonitored": 0, "tracks_mirrored": 0}
         return demonitor_lib2_tracks_for_removed_wishlist(
             db, descriptors, profile_id=profile_id,
