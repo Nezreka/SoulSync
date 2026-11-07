@@ -331,6 +331,10 @@ def provider_id_owner(
         return None
     if service == "spotify":
         predicate, params = "spotify_id = ?", (value,)
+    elif service == "musicbrainz" and canonical == "album":
+        # P2C-9: lib2_albums indexes LOWER(musicbrainz_id) only, so a plain =
+        # scanned every album; a uuid compares the same either way
+        predicate, params = "LOWER(musicbrainz_id) = LOWER(?)", (value,)
     elif service == "musicbrainz":
         predicate, params = "musicbrainz_id = ?", (value,)
     else:
