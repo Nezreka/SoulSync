@@ -1630,7 +1630,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
     if reset:
         resume = None
     with closing(database._get_connection()) as conn:
-        ensure_library_v2_schema(conn)
+        # third #1062 review P2C-8: not the whole-library backfills. they ran
+        # uncommitted inside this transaction, holding the write lock for
+        # seconds on work a reset throws away; the deferred runner converges
+        # after the import (as startup does since iss32-M03)
+        ensure_library_v2_schema(conn, run_backfills=False)
         # a rebuild after the upgrade reads the renamed legacy tables
         from core.library2.source_snapshot import expose_retired_tables
         expose_retired_tables(conn)
@@ -3198,8 +3202,13 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             name = _artist_name_from_payload(artist_payload)
             if not name:
                 continue
-            spotify_id = _artist_spotify_from_payload(artist_payload)
-            aid = resolver.get_or_create_by_name(name, spotify_id=spotify_id)
+            # P2A-5: the payload's artist id is the PROVIDER's (a deezer or
+            # itunes id on those payloads), namespaced like the primary above;
+            # filed as spotify it minted twins and wrong spotify ids
+            payload_artist_id = _artist_spotify_from_payload(artist_payload)
+            aid = resolver.get_or_create_by_name(
+                name, provider_ids=({provider: payload_artist_id} if payload_artist_id else None))
+            spotify_id = payload_artist_id if provider == "spotify" else None
             if aid in linked_artists:
                 continue
             linked_artists.add(aid)
