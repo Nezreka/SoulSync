@@ -235,3 +235,22 @@ def test_wishlist_pick_ignores_a_blank_or_unchanged_query(env):
     info = download_tasks[body['task_id']]['track_info']
     assert info['id'] == 'sp-fade'
     assert info['album']['name'] == 'So Tonight That I Might See'
+
+
+def test_the_inspector_mints_its_picks_for_the_profile_that_opened_it(env, monkeypatch):
+    """second v2 review (D1): tokens are bound to a profile, and the
+    inspector searched on pool threads as profile 1 while the pick grabs as
+    the caller, so a household member's torrent/usenet pick was refused"""
+    from core.download_plugins.candidate_store import current_binding
+    seen = []
+    original = env['soulseek'].search
+
+    async def recording_search(query, timeout=20):
+        seen.append(current_binding().profile_id)
+        return await original(query, timeout=timeout)
+
+    env['soulseek'].search = recording_search
+    monkeypatch.setattr(web_server, 'get_current_profile_id', lambda: 7)
+    download_tasks['t7'] = {'status': 'not_found', 'track_info': dict(TRACK, quality_profile_id=None)}
+    _lines(env['client'].post('/api/downloads/task/t7/inspect'))
+    assert seen and set(seen) == {7}

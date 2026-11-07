@@ -11234,7 +11234,8 @@ def remove_from_blacklist(blacklist_id):
 # TRACK REDOWNLOAD — Search metadata, search download sources, start redownload
 # ==================================================================================
 
-def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector', upgrade=False):
+def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector', upgrade=False,
+                            bind_profile=False):
     """Search every configured download source for one track and stream the
     verdicts: NDJSON, one line per source as it answers, then {"done": true}.
 
@@ -11298,6 +11299,14 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
         from core.quality.upgrades import apply_upgrade_bar, upgrade_bar
         bar = upgrade_bar(quality_profile_id)
 
+    # The inspector's picks go back through /download-candidate, which grabs
+    # as the CALLER. tokens minted on these pool threads (outside the request)
+    # were profile 1's, so a household member's torrent/usenet pick was
+    # refused. captured here, while the request is still the context.
+    from contextlib import nullcontext
+    from core.download_plugins.candidate_store import candidate_binding
+    _bind_to = get_current_profile_id() if bind_profile else None
+
     def _search_one_source(source_name, client):
         evaluated = []
         for q in search_queries:
@@ -11306,7 +11315,8 @@ def _inspect_sources_stream(track_obj, quality_profile_id, *, log_tag='Inspector
                 # orchestrator, so nothing else would enter the item's profile
                 # context and quality_tier_for_source would ask each source for
                 # the tier the APP default wants.
-                with quality_profile_context(quality_profile_id):
+                with quality_profile_context(quality_profile_id), \
+                        (candidate_binding(_bind_to) if _bind_to is not None else nullcontext()):
                     tracks_result, _ = run_async(client.search(q, timeout=20))
                 if not tracks_result:
                     continue
@@ -11436,7 +11446,7 @@ def inspect_task_sources(task_id):
         return _inspect_sources_stream(
             _pinned_batch.track_object(track_info),
             track_info.get('quality_profile_id'),
-            log_tag='Inspector',
+            log_tag='Inspector', bind_profile=True,
         )
     except Exception as e:
         logger.error(f"Error in task source inspection: {e}", exc_info=True)
@@ -11492,7 +11502,7 @@ def inspect_wishlist_sources():
         track = _wishlist_search_override(track, data)
         return _inspect_sources_stream(
             _pinned_batch.track_object(track), track.get('quality_profile_id'),
-            log_tag='Inspector',
+            log_tag='Inspector', bind_profile=True,
         )
     except Exception as e:
         logger.error(f"Error in wishlist source inspection: {e}", exc_info=True)
