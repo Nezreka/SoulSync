@@ -320,6 +320,18 @@ describe('the search box', () => {
     await waitFor(() => expect(router.state.location.search).toMatchObject({ q: '' }));
   });
 
+  it('the songs view has the same box: Escape and × clear it', async () => {
+    // the songs tab had a bare input, so neither worked there (3.6.1's did)
+    const { router } = renderPage('/library?section=songs&q=xtal');
+    const input = (await screen.findByLabelText('Filter songs')) as HTMLInputElement;
+    expect(input.value).toBe('xtal');
+    fireEvent.keyDown(input, { key: 'Escape' });
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ q: '' }));
+    fireEvent.change(input, { target: { value: 'tha' } });
+    fireEvent.click(await screen.findByLabelText('Clear search'));
+    await waitFor(() => expect(input.value).toBe(''));
+  });
+
   it('a search that finds nothing offers to look online', async () => {
     artistRows = [];
     renderPage('/library?q=nonesuch');

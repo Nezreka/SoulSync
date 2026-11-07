@@ -5550,13 +5550,11 @@ function SongIndexView() {
       <div className={styles.toolbar}>
         <LibraryScopePicker />
         <LibrarySectionTabs />
-        <input
-          aria-label="Filter songs"
-          className={styles.searchInput}
-          type="text"
+        <LibrarySearchInput
+          label="Filter songs"
           placeholder="Filter songs or artists…"
           value={songFilter.value}
-          onChange={(e) => songFilter.onChange(e.target.value)}
+          onChange={songFilter.onChange}
         />
         <select
           aria-label="Sort songs"
