@@ -448,3 +448,27 @@ def test_repair_worker_fix_execution_with_text_album_id(tmp_path):
         assert conn.execute("SELECT year FROM lib2_albums WHERE id = ?", (album_id,)).fetchone()[0] == 2021
         new_fp = conn.execute("SELECT path FROM lib2_track_files WHERE track_id = 1").fetchone()[0]
         assert "Deconstructed (2021)" in new_fp
+
+
+def test_rename_leaves_another_librarys_copy_where_it_is(tmp_path):
+    """third #1062 review G11-4: the folder-name fallback also rewrote another
+    library's copy of the album (a same-named folder elsewhere) into a folder
+    that was never renamed: it read as missing and was re-downloaded"""
+    db = MusicDatabase(str(tmp_path / "test.db"))
+    shared = tmp_path / "music" / "Queen" / "Jazz (2011)"
+    own = tmp_path / "own" / "bob" / "Queen" / "Jazz (2011)"
+    for folder in (shared, own):
+        folder.mkdir(parents=True)
+        (folder / "01.flac").write_bytes(b"dummy")
+    with db._get_connection() as conn:
+        album_id = lib2_seed.album(conn, 'Queen', 'Jazz', year=2011)
+        lib2_seed.file_track(conn, 1, album_id, 'Mustapha', str(shared / "01.flac"))
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(1, ?)", (str(own / "01.flac"),))
+        conn.commit()
+
+    assert rename_album_folder(db, str(shared), "Jazz (1978)", album_id)
+
+    with db._get_connection() as conn:
+        paths = sorted(r[0] for r in conn.execute("SELECT path FROM lib2_track_files"))
+    assert str(own / "01.flac") in paths
+    assert str(shared.parent / "Jazz (1978)" / "01.flac") in paths
