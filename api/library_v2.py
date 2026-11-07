@@ -95,6 +95,10 @@ _OWN_LIBRARY_WISH_ENDPOINTS = frozenset({
     # "All Releases" of an artist in the library: browsable, unmonitored
     # catalogue rows -- what a wish is made from, no file touched
     "lib2_discography_refresh",
+    # an artist's watchlist settings: the caller's own watchlist row (3.6.1's
+    # /api/watchlist/artist/<id>/config); the shared monitor_new_items column
+    # stays the admin's (the route drops it for anyone else)
+    "lib2_artist_settings",
 })
 # Wishes that start a download right away, not just a wishlist entry.
 _DOWNLOADING_ENDPOINTS = frozenset({"lib2_scoped_search", "lib2_enhance_quality"})
@@ -4034,19 +4038,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = _conn()
         sources = _watchlist_metadata_sources()
         try:
+            # the acting profile's own watchlist row: the admin working in
+            # profile 3's library edits profile 3's, a member edits their own
+            # (both read and wrote the admin's before)
+            acting = _intent_profile()
             if request.method == "PUT":
                 body = request.get_json(silent=True)
+                if isinstance(body, dict) and not _is_admin():
+                    # one artist row serves every library
+                    body = {k: v for k, v in body.items() if k != "monitor_new_items"}
                 settings = update_artist_settings(
                     conn,
                     artist_id,
                     body,
-                    profile_id=ADMIN_PROFILE_ID,
+                    profile_id=acting,
                     allowed_metadata_sources=sources,
                 )
                 conn.commit()
             else:
                 settings = get_artist_settings(
-                    conn, artist_id, profile_id=ADMIN_PROFILE_ID
+                    conn, artist_id, profile_id=acting
                 )
             try:
                 from core.metadata.registry import get_primary_source

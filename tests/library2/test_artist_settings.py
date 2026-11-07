@@ -130,7 +130,7 @@ def test_rejects_no_core_release_types_and_unknown_provider(imported_conn):
 def test_does_not_read_another_profiles_watchlist_row(imported_conn):
     _seed_watchlist(imported_conn, profile_id=2, name="Other Profile")
 
-    with pytest.raises(ArtistSettingsError, match="admin watchlist") as exc:
+    with pytest.raises(ArtistSettingsError, match="this profile.s watchlist") as exc:
         get_artist_settings(imported_conn, _artist_id(imported_conn), profile_id=1)
     assert exc.value.status == 409
 

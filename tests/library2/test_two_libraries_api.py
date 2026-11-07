@@ -385,3 +385,27 @@ def test_only_a_profile_the_grab_route_allows_is_offered_the_library_search_grab
     assert world.client.get("/api/library/v2/enabled").get_json()["can_grab"] is True
     world.as_profile(world.sam)   # the shared library
     assert world.client.get("/api/library/v2/enabled").get_json()["can_grab"] is False
+
+
+def test_a_member_edits_their_own_artist_watchlist_settings(world):
+    """third #1062 review G03-5: Artist Settings read and wrote the admin's
+    watchlist row whoever acted. 3.6.1's watchlist config was the caller's
+    own; the shared monitor_new_items column stays the admin's"""
+    house = world.ids['h']
+    with world.db._get_connection() as conn:
+        name = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (house,)).fetchone()[0]
+        for pid in (1, world.sam):
+            conn.execute("INSERT INTO watchlist_artists(artist_name, profile_id, lookback_days) "
+                         "VALUES(?, ?, 30)", (name, pid))
+        conn.commit()
+    world.as_profile(world.sam)
+    r = world.client.put(f"/api/library/v2/artists/{house}/settings",
+                         json={"lookback_days": 90, "monitor_new_items": "none"})
+    assert r.status_code == 200, r.get_json()
+    with world.db._get_connection() as conn:
+        rows = dict(conn.execute("SELECT profile_id, lookback_days FROM watchlist_artists "
+                                 "WHERE artist_name=?", (name,)).fetchall())
+        monitor_new = conn.execute("SELECT monitor_new_items FROM lib2_artists WHERE id=?",
+                                   (house,)).fetchone()[0]
+    assert rows == {1: 30, world.sam: 90}
+    assert monitor_new != "none"
