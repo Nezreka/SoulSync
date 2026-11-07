@@ -275,17 +275,18 @@ export function ArtistHero({
    *  flapping, and it also swallowed toggles — an in-flight check that resolved
    *  after a toggle overwrote the new state with the old one. */
   const watchlistId = watchlist?.id ?? null;
+  const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
     if (!watchlistId) return;
     let cancelled = false;
-    void checkWatchlistRequest(watchlistId).then((state) => {
+    void checkWatchlistRequest(watchlistId, watchlistSource).then((state) => {
       if (!cancelled) setWatching(state);
     });
     return () => {
       cancelled = true;
     };
-  }, [watchlistId]);
+  }, [watchlistId, watchlistSource]);
 
   /**
    * Watching → one click removes (unchanged). Not watching → the settings

@@ -17905,7 +17905,7 @@ class MusicDatabase:
             return False
 
     def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1,
-                                     raise_on_error: bool = False) -> bool:
+                                     raise_on_error: bool = False, source: str = None) -> bool:
         """Remove an artist from the watchlist (checks cross-provider artist IDs)"""
         try:
             with self._get_connection() as conn:
@@ -17930,7 +17930,7 @@ class MusicDatabase:
                 if cursor.rowcount == 0:
                     # a library artist row id: remove by the provider ids it
                     # carries, the ones add stored (#1308)
-                    for provider_id in library_artist_provider_ids(cursor, artist_id):
+                    for provider_id in library_artist_provider_ids(cursor, artist_id, source):
                         cursor.execute(
                             "DELETE FROM watchlist_artists WHERE "
                             + artist_id_match_sql() + " AND profile_id = ?",
@@ -17994,7 +17994,8 @@ class MusicDatabase:
             logger.debug(f"get_watchlist_artist_descriptor failed (ID: {artist_id}): {e}")
             return None
 
-    def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1, artist_name: str = None) -> bool:
+    def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1, artist_name: str = None,
+                               source: str = None) -> bool:
         """Check if an artist is currently in the watchlist (checks cross-provider IDs and name)"""
         try:
             with self._get_connection() as conn:
@@ -18023,7 +18024,7 @@ class MusicDatabase:
                 # a library artist row id: check the provider ids it carries,
                 # the ones add actually stored (#1308)
                 from core.watchlist_sources import library_artist_provider_ids
-                for provider_id in library_artist_provider_ids(cursor, artist_id):
+                for provider_id in library_artist_provider_ids(cursor, artist_id, source):
                     cursor.execute(
                         "SELECT 1 FROM watchlist_artists WHERE "
                         + artist_id_match_sql() + " AND profile_id = ? LIMIT 1",

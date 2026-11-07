@@ -8316,17 +8316,18 @@ function ProfileWatchlistButton({
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const watchlistId = watchlist?.id ?? null;
+  const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
     if (!watchlistId) return;
     let cancelled = false;
-    void checkWatchlistRequest(watchlistId).then((state) => {
+    void checkWatchlistRequest(watchlistId, watchlistSource).then((state) => {
       if (!cancelled) setWatching(state);
     });
     return () => {
       cancelled = true;
     };
-  }, [watchlistId]);
+  }, [watchlistId, watchlistSource]);
   if (!watchlist) return null;
   const toggle = async () => {
     if (busy) return;
@@ -8383,17 +8384,18 @@ function ProviderArtistActions({
   const [adding, setAdding] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const watchlistId = watchlist?.id ?? null;
+  const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
     if (!watchlistId) return;
     let cancelled = false;
-    void checkWatchlistRequest(watchlistId).then((state) => {
+    void checkWatchlistRequest(watchlistId, watchlistSource).then((state) => {
       if (!cancelled) setWatching(state);
     });
     return () => {
       cancelled = true;
     };
-  }, [watchlistId]);
+  }, [watchlistId, watchlistSource]);
   const artist = payload.artist ?? {};
   const image = String(artist.image_url || '');
   const toggle = async () => {

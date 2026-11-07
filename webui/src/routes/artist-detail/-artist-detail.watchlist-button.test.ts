@@ -48,6 +48,19 @@ describe('checkWatchlistRequest', () => {
   });
 });
 
+describe('a provider page says whose id it is (third #1062 review G02-4)', () => {
+  it('sends the source with the check and the remove', async () => {
+    const calls = stubEndpoints(true, { success: true, message: 'removed' });
+    await checkWatchlistRequest('13', 'deezer');
+    await toggleWatchlistRequest('13', 'Someone', 'deezer');
+    expect(calls.map((c) => c.body)).toEqual([
+      { artist_id: '13', source: 'deezer' },
+      { artist_id: '13', source: 'deezer' },
+      { artist_id: '13', source: 'deezer' },
+    ]);
+  });
+});
+
 describe('toggleWatchlistRequest', () => {
   it('not watching → adds with the artist name, reports watching', async () => {
     const calls = stubEndpoints(false, { success: true, message: 'Added Aphex Twin' });

@@ -808,7 +808,10 @@ def remove_from_watchlist():
         # sync both ways). Fires only for a user-facing removal — the forward
         # mirror removes rows via the DB layer directly, never through here.
         _wl_descriptor = database.get_watchlist_artist_descriptor(artist_id, profile_id=get_current_profile_id())
-        success = database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id())
+        # the provider the id is from, when the page knows it (G02-4)
+        source = {'source': data['source']} if data.get('source') else {}
+        success = database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id(),
+                                                        **source)
 
         if success:
             try:
@@ -1079,7 +1082,9 @@ def check_watchlist_status():
             return jsonify({"success": False, "error": "Missing artist_id"}), 400
         
         database = get_database()
-        is_watching = database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id())
+        source = {'source': data['source']} if data.get('source') else {}
+        is_watching = database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id(),
+                                                      **source)
 
         return jsonify({"success": True, "is_watching": is_watching})
         
