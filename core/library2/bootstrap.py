@@ -708,6 +708,9 @@ def _carry_upgrade_state(conn: Any) -> Dict[str, Any]:
         # import itself didn't carry
         from core.library2.legacy_columns import carry_legacy_columns
         stats["legacy_columns"] = sum(carry_legacy_columns(conn).values())
+        # 3.6.1 download history keyed on legacy track ids, onto the catalogue
+        from core.library2.source_info import carry_legacy_download_ids
+        stats["download_ids_mapped"] = carry_legacy_download_ids(conn)
     except Exception as exc:  # noqa: BLE001 - each carry retries next start
         logger.warning("3.6.1 state not fully carried yet: %s", exc)
     return stats

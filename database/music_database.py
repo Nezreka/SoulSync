@@ -3774,6 +3774,12 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_track_id ON track_downloads (track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_file_path ON track_downloads (file_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_source ON track_downloads (source_username, source_filename)")
+            # which id space track_id holds: 'lib2' (a catalogue track) or
+            # 'legacy' (a 3.6.1 tracks.id the upgrade could not map). NULL on
+            # rows written before this column; the upgrade carry settles them
+            cursor.execute("PRAGMA table_info(track_downloads)")
+            if 'track_id_kind' not in {c[1] for c in cursor.fetchall()}:
+                cursor.execute("ALTER TABLE track_downloads ADD COLUMN track_id_kind TEXT")
 
             # Migration: Add audio detail columns to track_downloads
             cursor.execute("PRAGMA table_info(track_downloads)")
@@ -22418,15 +22424,17 @@ class MusicDatabase:
                  spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
                  qobuz_track_id, musicbrainz_recording_id, recording_disambiguation,
                  audiodb_id, soul_id, isrc,
-                 acquired_quality_json, retention_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 acquired_quality_json, retention_json, track_id_kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
                   source_size, audio_quality, track_title, track_artist, track_album, status,
                   bit_depth, sample_rate, bitrate,
                   spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
                   qobuz_track_id, musicbrainz_recording_id, recording_disambiguation,
                   audiodb_id, soul_id, isrc,
-                  acquired_quality_json, retention_json))
+                  acquired_quality_json, retention_json,
+                  # a catalogue track: the path lookup above, or the caller's
+                  'lib2' if track_id else None))
             conn.commit()
             return cursor.lastrowid
         except Exception as e:
@@ -22623,7 +22631,8 @@ class MusicDatabase:
             if row and link_track_id:
                 # Back-link this record so future track_id lookups work directly
                 cursor.execute(
-                    "UPDATE track_downloads SET track_id = ? WHERE id = ? AND track_id IS NULL",
+                    "UPDATE track_downloads SET track_id = ?, track_id_kind = 'lib2' "
+                    "WHERE id = ? AND track_id IS NULL",
                     (str(link_track_id), row['id'])
                 )
                 conn.commit()
