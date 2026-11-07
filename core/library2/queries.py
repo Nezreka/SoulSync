@@ -438,7 +438,9 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
         stats AS (
             SELECT t.album_id,
                    COUNT(DISTINCT CASE
-                       WHEN COALESCE(w.wanted, {track_monitored})=1 OR tf.id IS NOT NULL
+                       WHEN COALESCE(w.wanted, {track_monitored})=1
+                         -- a file the user deleted is no longer part of the total
+                         OR (tf.id IS NOT NULL AND COALESCE(tf.file_state, 'active') <> 'deleted')
                        THEN t.id END) AS track_count,
                    COUNT(DISTINCT CASE
                        WHEN tf.id IS NOT NULL

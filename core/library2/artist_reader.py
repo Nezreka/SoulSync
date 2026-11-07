@@ -606,15 +606,18 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
         -- ~78-row page CTE leads and the junction is SEEKed through
         -- idx_lib2_track_artists_artist. `page_artists` is dropped from these
         -- joins because `canonical_members` is already page-scoped.
+        -- the artist's OWN releases, as 3.6.1 counted them (album artist):
+        -- a feature or a compilation they appear on read "23 albums" in the
+        -- table beside "3 albums" on their page
         artist_albums AS (
             SELECT cm.canonical_id AS artist_id, aa.album_id
               FROM canonical_members cm
               CROSS JOIN lib2_album_artists aa ON aa.artist_id=cm.member_id
+             WHERE aa.role='primary'
             UNION
-            SELECT cm.canonical_id AS artist_id, t.album_id
+            SELECT cm.canonical_id AS artist_id, al.id
               FROM canonical_members cm
-              CROSS JOIN lib2_track_artists ta ON ta.artist_id=cm.member_id
-              JOIN lib2_tracks t ON t.id=ta.track_id
+              CROSS JOIN lib2_albums al ON al.primary_artist_id=cm.member_id
         ),
         album_stats AS (
             SELECT aa.artist_id,
@@ -636,7 +639,8 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
         track_stats AS (
             SELECT cm.canonical_id AS artist_id,
                    COUNT(DISTINCT CASE
-                       WHEN COALESCE(w.wanted, {track_monitored})=1 OR tf.id IS NOT NULL
+                       WHEN COALESCE(w.wanted, {track_monitored})=1
+                         OR (tf.id IS NOT NULL AND COALESCE(tf.file_state, 'active') <> 'deleted')
                        THEN t.id END) AS track_count,
                    COUNT(DISTINCT CASE
                        WHEN tf.id IS NOT NULL
