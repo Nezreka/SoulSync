@@ -135,9 +135,11 @@ class TestJioSaavn:
         assert _row(jiosaavn, 'lib2_artists')['image_url'] == 'http://chosen'
 
     def test_an_album_stores_its_type_in_the_payload(self, jiosaavn):
-        """``lib2_albums.album_type`` always carries a classification — the importer
-        and MB reconcile own it — so there is no empty state for JioSaavn to fill.
-        Its word goes in the payload instead of overwriting theirs."""
+        """a kind the importer or MB reconcile already knows is theirs: JioSaavn's
+        word goes in the payload instead of overwriting it."""
+        with closing(jiosaavn.db._get_connection()) as conn:
+            conn.execute("UPDATE lib2_albums SET album_type_known=1 WHERE id=1")
+            conn.commit()
         jiosaavn._update_album(1, {
             'id': '8001', 'album_type': 'soundtrack', 'label': 'T-Series',
             'image_url': 'http://js/cover', 'total_tracks': 9,
