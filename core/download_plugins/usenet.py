@@ -1003,8 +1003,11 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
             row = self.active_downloads.get(download_id)
             job_id = row.get('job_id') if row else None
             # the submit thread hasn't heard the client's job id yet: it reads
-            # the flag below and retires the job itself (_download_thread)
-            in_submission = row is not None and not job_id
+            # the flag below and retires the job itself (_download_thread).
+            # only an Initializing row is mid-submit; a later row that lost
+            # its job id has nobody left to retire the client's job
+            in_submission = (row is not None and not job_id
+                             and row.get('state') == 'Initializing')
             if row is not None:
                 # Upstream: the download thread may still be waiting for the
                 # client's job id; the flag tells it to retire the late job
