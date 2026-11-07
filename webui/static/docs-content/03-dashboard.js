@@ -156,6 +156,8 @@ Retagging is now part of the **Tools** page findings workflow. When a repair sca
 
 The retag operation writes title, artist, album artist, album, track number, disc number, year, and genre. Cover art can optionally be re-embedded.
 
+From an artist or album page, **Write Tags** previews the same diff. With Plex or Jellyfin as your server, tick **Sync to Plex** / **Sync to Jellyfin** to push the new title, artist, album and year to Plex right away (Jellyfin gets a library scan). Navidrome reads tag changes on its own.
+
 ![Retag tool interface](dash-retag.jpg)
 
 > [!TIP]

@@ -5327,7 +5327,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """Diff of file tags vs lib2 metadata for an album's or artist's tracks."""
         if entity not in ("artists", "albums"):
             return _fail("Unsupported entity")
-        from core.library2 import retag
+        from core.library2 import retag, server_tag_sync
         try:
             options = retag.retag_options(request.args)
         except ValueError as exc:
@@ -5356,13 +5356,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "refresh": refresh_result,
             "changed_count": sum(1 for p in preview if p.get("has_changes")),
             "truncated": truncated,
+            # G15-5: Write Tags offers "Sync to Plex/Jellyfin" from this
+            "server_type": server_tag_sync.active_server_type(),
         })
 
     @_route("/api/library/v2/tags/write", methods=["POST"])
     def lib2_write_tags():
         """Write lib2 metadata into the given tracks' file tags (background job).
 
-        Body: ``{"track_ids": [...], "embed_cover": true}``. Poll
+        Body: ``{"track_ids": [...], "embed_cover": true, "sync_to_server": false}``. Poll
         ``/api/library/v2/jobs/status`` for progress/result.
         """
         body = request.get_json(silent=True) or {}
@@ -5386,6 +5388,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return _fail(str(exc))
         track_ids = list(dict.fromkeys(raw_track_ids))
         embed_cover = bool(body.get("embed_cover", True))
+        sync_to_server = body.get("sync_to_server") is True
         # Fields a person set by hand win by default. `overwrite_manual` is how
         # the user hands one back to the catalogue: `true` for the bulk "apply
         # everything" choice, or [[track_id, field], ...] for the per-field
@@ -5445,6 +5448,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                          protect_hand_tagged=True,
                                          options=options,
                                          progress=_progress)
+                if sync_to_server:
+                    # G15-5: 3.6.1's "Sync to Plex/Jellyfin"; every track
+                    # that didn't fail (an already-correct file can still be
+                    # stale on the server)
+                    from core.library2.server_tag_sync import sync_tracks_to_server
+                    failed = {e.get("track_id") for e in stats.get("errors") or []}
+                    stats["server_sync"] = sync_tracks_to_server(
+                        db, [t for t in track_ids if t not in failed])
                 _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 retag failed: %s", e, exc_info=True)

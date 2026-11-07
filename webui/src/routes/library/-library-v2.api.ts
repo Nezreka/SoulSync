@@ -1363,6 +1363,8 @@ export async function fetchLibraryV2TagPreview(
   changed_count: number;
   truncated: boolean;
   refresh?: { refreshed: number; unavailable?: number; errors: unknown[] } | null;
+  /** the active media server, for Write Tags' "Sync to Plex/Jellyfin" */
+  server_type: string | null;
 }> {
   const payload = await lib2Json<
     Ok & {
@@ -1370,6 +1372,7 @@ export async function fetchLibraryV2TagPreview(
       changed_count?: number;
       truncated?: boolean;
       refresh?: { refreshed: number; unavailable?: number; errors: unknown[] } | null;
+      server_type?: string | null;
     }
   >(
     apiClient.get(
@@ -1383,6 +1386,7 @@ export async function fetchLibraryV2TagPreview(
     changed_count: payload.changed_count ?? 0,
     truncated: payload.truncated ?? false,
     refresh: payload.refresh,
+    server_type: payload.server_type ?? null,
   };
 }
 
@@ -1394,12 +1398,15 @@ export async function writeLibraryV2Tags(
    *  the rule everywhere else in Library v2. */
   overwriteManual: [number, string][] = [],
   policy?: LibraryV2RetagPolicy,
+  /** G15-5: push the written values to Plex / scan Jellyfin, as 3.6.1 did */
+  syncToServer = false,
 ): Promise<string> {
   const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post('library/v2/tags/write', {
       json: {
         track_ids: trackIds,
         embed_cover: embedCover,
+        ...(syncToServer ? { sync_to_server: true } : {}),
         ...policy,
         ...(overwriteManual.length ? { overwrite_manual: overwriteManual } : {}),
       },
