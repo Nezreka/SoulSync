@@ -189,24 +189,19 @@ def _row_release_id(db: Any, album_id: Any) -> str:
 
 
 def _row_album_type(db: Any, album_id: Any) -> str:
-    """The album row's stored album_type, "" when unknown/unreadable. A
-    ``lib2_albums`` id, like :func:`_row_release_id`'s."""
-    conn = None
-    try:
-        conn = db._get_connection()
-        row = conn.execute(
-            "SELECT album_type FROM lib2_albums WHERE id = ?", (int(album_id),),
-        ).fetchone()
-        return str((row[0] if row else "") or "").strip()
-    except Exception as e:
-        logger.debug("album_type lookup for album %s failed: %s", album_id, e)
+    """The album row's KNOWN release kind, "" when unknown/unreadable. A
+    ``lib2_albums`` id, like :func:`_row_release_id`'s.
+
+    ``album_type`` is NOT NULL with the default 'album', and the 3.6.1 import
+    turned a NULL record_type into it: a bare 'album' is no evidence, as
+    completion reads it (one rule, shared). 3.6.1 saw NULL here and reused
+    the folder; reading the default as a real album split a not-yet-enriched
+    EP's next track into a new folder.
+    """
+    if album_id is None:
         return ""
-    finally:
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:  # noqa: S110 - cleanup only
-                pass
+    from core.metadata.completion import _stored_release_kind
+    return _stored_release_kind(db, album_id)
 
 
 def _same_release(db: Any, album: Any, sample_file: Optional[str],
