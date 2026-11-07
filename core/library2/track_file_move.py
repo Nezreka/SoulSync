@@ -140,6 +140,10 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
     )
     # the profile acting: its wanted row is the one the mirror below reads
     recompute_wanted(conn, profile_id=wishlist_profile_id, track_ids=[from_track_id])
+    # the user put these files here: the start-up re-home leaves them be
+    from core.library2.recording_links import settle_file_home
+    for moved in file_rows:
+        settle_file_home(conn, int(moved["id"]))
     conn.commit()
 
     unmirrored = 0
