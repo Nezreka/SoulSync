@@ -88,7 +88,14 @@ def materialize_wanted_requests(
         scope_sql = f" AND t.id IN ({marks})"
         args.extend(normalized_ids)
     from core.library2.recording_links import owned_by_recording_sql
-    owned_elsewhere = owned_by_recording_sql(conn, "t")
+    from core.library2.sql_util import owner_clause, separated
+    from core.library_scope import library_scope
+    # third #1062 review G04-5: these are the admin's wants, for the shared
+    # library. a household member's own copy satisfies their library, not
+    # this one; unscoped, it dropped the admin's want from the requests
+    with library_scope("shared"):
+        owned_elsewhere = owned_by_recording_sql(conn, "t")
+    own_file = owner_clause(separated("shared"), column="f.owner_profile_id")
     rows = conn.execute(
         f"""SELECT wt.profile_id, wt.track_id, wt.projection_version,
                    wt.updated_at AS wanted_updated_at,
@@ -107,8 +114,8 @@ def materialize_wanted_requests(
                AND NOT EXISTS (
                    SELECT 1 FROM lib2_track_files f
                     WHERE f.track_id=t.id
-                      AND f.file_state='active'
-                      AND f.path IS NOT NULL AND f.path<>''
+                      AND COALESCE(f.file_state,'active')='active'
+                      AND f.path IS NOT NULL AND f.path<>''{own_file}
                )
                -- docs §49.7(3): a position whose audio already sits on disk
                -- under another release is not a download job. Without this the
