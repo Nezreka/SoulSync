@@ -3846,6 +3846,9 @@ function processModalStatusUpdate(playlistId, data) {
                 if (process.status !== 'complete') {
                     process.status = 'complete';
                     updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                    // a wishlist run that had nothing to start says why (an empty
+                    // list, or requests still waiting for approval)
+                    if (isWishlist && data.error) showToast(data.error, 'info');
                     _announceDownloadsFinished(playlistId, completedCount);
 
                     // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist

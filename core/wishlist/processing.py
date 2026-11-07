@@ -1263,18 +1263,29 @@ def _prepare_and_run_manual_wishlist_batch(
         # approved; the rest waits on the Requests page, which is where the
         # requester hears about it -- same rule as the scheduled run
         from core.library2.mirror_outbox import profile_asks_first
+        waiting = 0
         if profile_asks_first(db, manual_profile_id):
             raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(
                 profile_id=manual_profile_id, approved_only=True)
-            logger.info("[Manual-Wishlist] Profile %s asks first: approved requests only", manual_profile_id)
+            try:
+                waiting = max(0, int(wishlist_service.get_wishlist_count(profile_id=manual_profile_id) or 0)
+                              - len(raw_wishlist_tracks or []))
+            except Exception:  # noqa: BLE001 - the count only words the message
+                waiting = 0
+            logger.info("[Manual-Wishlist] Profile %s asks first: approved requests only (%s waiting)",
+                        manual_profile_id, waiting)
         else:
             raw_wishlist_tracks = wishlist_service.get_wishlist_tracks_for_download(profile_id=manual_profile_id)
         if not raw_wishlist_tracks:
             logger.warning("[Manual-Wishlist] No tracks in wishlist after cleanup — marking batch complete")
+            # an asks-first profile's wishlist is requests: say why nothing
+            # started instead of claiming the wishlist is empty
+            error = (f"{waiting} request{'s' if waiting != 1 else ''} waiting for approval "
+                     "on the Requests page" if waiting else 'No tracks in wishlist')
             with runtime.tasks_lock:
                 if batch_id in runtime.download_batches:
                     runtime.download_batches[batch_id]['phase'] = 'complete'
-                    runtime.download_batches[batch_id]['error'] = 'No tracks in wishlist'
+                    runtime.download_batches[batch_id]['error'] = error
             return
 
         wishlist_tracks, duplicates_found = sanitize_and_dedupe_wishlist_tracks(raw_wishlist_tracks)
