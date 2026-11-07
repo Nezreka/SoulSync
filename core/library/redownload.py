@@ -28,6 +28,17 @@ from database.music_database import get_database
 logger = logging.getLogger(__name__)
 
 
+def _browser_image_url(value) -> str:
+    """a stored album image as the browser can load it"""
+    if not value:
+        return ''
+    try:
+        from core.metadata.artwork import normalize_image_url
+        return normalize_image_url(value) or ''
+    except Exception:  # noqa: BLE001
+        return str(value)
+
+
 def _album_data_from_source(full: dict, album_id: str, fallback_name: str) -> dict:
     """Build the redownload `album_data` from a primary-source get_album result (#915).
 
@@ -371,7 +382,9 @@ def search_metadata(track_id) -> dict:
             'duration_ms': row['duration'] or 0, 'file_path': row['file_path'] or '',
             'format': ext if ext in ('FLAC', 'MP3', 'OPUS', 'OGG', 'M4A', 'WAV') else '',
             'bitrate': row['bitrate'] or 0, 'spotify_track_id': row['spotify_id'],
-            'deezer_id': deezer_id, 'thumb_url': row['thumb_url'] or '',
+            # G10-6: an album carried over from 3.6.1 keeps plex/jellyfin's
+            # relative path, a broken image in the modal; 3.6.1 resolved it
+            'deezer_id': deezer_id, 'thumb_url': _browser_image_url(row['thumb_url']),
         },
         'metadata_results': result.metadata_results,
         'best_match': result.best_match,

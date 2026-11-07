@@ -38,3 +38,22 @@ def test_search_metadata_reads_the_library_v2_track(tmp_path, monkeypatch):
     assert result["best_match"] == {"source": "deezer"}
     with pytest.raises(LookupError):
         redownload.search_metadata(tid + 999)
+
+
+def test_a_media_server_cover_reaches_the_modal_as_a_loadable_url(tmp_path, monkeypatch):
+    """third #1062 review G10-6: an album carried over from 3.6.1 keeps
+    plex's relative /library/metadata path, and the modal showed it raw"""
+    import core.library.redownload as redownload
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        tid = track(conn, "Artist", "Album", "Song", path="/m/a.flac")
+        conn.execute("UPDATE lib2_albums SET image_url='/library/metadata/123/thumb/1'")
+        conn.commit()
+    monkeypatch.setattr(redownload, "get_database", lambda: db)
+    monkeypatch.setattr("core.metadata.multi_source_search.search_all_sources",
+                        lambda *a, **k: SimpleNamespace(metadata_results={}, best_match=None))
+    monkeypatch.setattr(redownload, "spotify_client", None)
+    monkeypatch.setattr("core.metadata.artwork.normalize_image_url",
+                        lambda url: f"/api/image-proxy?u={url}" if url.startswith("/library/") else url)
+    thumb = redownload.search_metadata(tid)["current_track"]["thumb_url"]
+    assert thumb == "/api/image-proxy?u=/library/metadata/123/thumb/1"
