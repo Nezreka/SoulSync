@@ -686,7 +686,8 @@ def test_disc_and_track_number_slot_fills_when_titles_dont_normalize_equal(
         lib2_enabled, imported_conn):
     """G4 fallback: even when dedup_title_key doesn't collapse the titles to
     the same key (a genuine title-spelling drift beyond feat.-annotations),
-    the (disc, track_number) slot still wins over minting a duplicate row."""
+    the (disc, track_number) slot still wins over minting a duplicate row.
+    (a remaster tag is drift; a radio edit would be another recording)"""
     conn = lib2_enabled._get_connection()
     artist_id = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()["id"]
     conn.execute(
@@ -697,7 +698,7 @@ def test_disc_and_track_number_slot_fills_when_titles_dont_normalize_equal(
         "INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)", (album_id, artist_id))
     conn.execute(
         "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
-        "VALUES(?, 'Nonstop (Radio Edit)', 1, 1, 1)", (album_id,))
+        "VALUES(?, 'Nonstop (Remastered)', 1, 1, 1)", (album_id,))
     conn.commit()
     conn.close()
 
@@ -1483,3 +1484,35 @@ def test_full_refresh_still_groups_files_without_a_release_id_by_title(
                                musicbrainz_albumid="mb-portals", **common))
     assert _albums_named(imported_conn, "Portals") == {
         "mb-portals": ["Death", "Tunnel Vision", "Void"]}
+
+
+def _album_with_track_five(conn, title, *, owned):
+    artist = conn.execute("INSERT INTO lib2_artists(name, name_key) VALUES('Num Artist','num artist')").lastrowid
+    album = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title, album_type) "
+                         "VALUES(?, 'Album X', 'album')", (artist,)).lastrowid
+    track = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, disc_number) "
+                         "VALUES(?, ?, 5, 1)", (album, title)).lastrowid
+    if owned:
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/x/05.mp3')", (track,))
+    return artist, album, track
+
+
+def test_a_radio_edit_never_lands_on_the_owned_song_at_its_number(imported_conn):
+    """third #1062 review G07-1: the number fallback filed "Song E - Radio
+    Edit" on the owned "Song E" (it became its primary file)"""
+    artist, album, track = _album_with_track_five(imported_conn, "Song E", owned=True)
+    got = A._find_or_create_track(imported_conn, album, artist, "Song E - Radio Edit",
+                                  track_number=5, disc_number=1)
+    assert got != track
+
+
+def test_a_differently_spelled_title_still_finds_its_empty_slot(imported_conn):
+    artist, album, track = _album_with_track_five(imported_conn, "Track Five", owned=False)
+    assert A._find_or_create_track(imported_conn, album, artist, "Track 5",
+                                   track_number=5, disc_number=1) == track
+
+
+def test_a_filled_slot_is_never_taken_by_number_alone(imported_conn):
+    artist, album, track = _album_with_track_five(imported_conn, "Track Five", owned=True)
+    assert A._find_or_create_track(imported_conn, album, artist, "Track 5",
+                                   track_number=5, disc_number=1) != track

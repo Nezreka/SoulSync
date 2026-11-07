@@ -447,11 +447,25 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                 )
             return row["id"]
     if track_number is not None:
+        # a title the catalogue spells differently still finds its position,
+        # but only an empty one, and never a different version: "Song E -
+        # Radio Edit" at #5 is not the owned "Song E" at #5 (it became that
+        # track's primary file and could cost the album cut in a dedup).
+        # 3.6.1 gave every download its own row.
+        from core.library2.version_words import versions_differ
         wanted_disc = disc_number if disc_number is not None else 1
         for row in rows:
             row_disc = row["disc_number"] if row["disc_number"] is not None else 1
-            if row["track_number"] == track_number and row_disc == wanted_disc:
-                return row["id"]
+            if row["track_number"] != track_number or row_disc != wanted_disc:
+                continue
+            if versions_differ(row["title"] or "", title or ""):
+                continue
+            if conn.execute(
+                    "SELECT 1 FROM lib2_track_files WHERE track_id=? "
+                    "AND COALESCE(file_state,'active') NOT IN ('deleted','missing_confirmed') LIMIT 1",
+                    (row["id"],)).fetchone():
+                continue
+            return row["id"]
     from core.library2.profile_lookup import default_quality_profile_id
     album_profile = conn.execute(
         "SELECT quality_profile_id FROM lib2_albums WHERE id=?", (album_id,)
