@@ -286,8 +286,16 @@ def _candidate_pair(a: dict, b: dict, settings: dict, companion_exts: set) -> bo
     one, two = a["title_numbers"], b["title_numbers"]
     if one and two and one != two:
         return False
-    if not _strong_evidence(a, b) and not _similar_tags(a, b, settings):
+    strong = _strong_evidence(a, b)
+    if not strong and not _similar_tags(a, b, settings):
         return False
+    # 3.6.1's Single/Album Dedup never paired a live, acoustic, remix or edit
+    # with the studio cut ("Smells Like Teen Spirit (Live)" scores 0.90 on
+    # the title alone); only real recording evidence overrides the words
+    if not strong:
+        from core.library2.version_words import DEDUP_3_6_1, versions_differ
+        if versions_differ(a.get("title") or "", b.get("title") or "", DEDUP_3_6_1):
+            return False
     # Filesystem identity last: only plausible pairs pay for realpath/stat.
     if os.path.realpath(a["resolved_path"]) == os.path.realpath(b["resolved_path"]):
         return False

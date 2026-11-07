@@ -537,3 +537,20 @@ def test_a_named_different_artist_twin_is_still_not_paired(library):
     _named(library, a, "Intro.flac")
     _named(library, b, "Intro_638662543210987654.flac")
     assert review(library) == []
+
+
+@pytest.mark.parametrize("version", ["Smells Like Teen Spirit (Live)",
+                                     "Smells Like Teen Spirit - Radio Edit",
+                                     "Smells Like Teen Spirit (Acoustic)"])
+def test_a_live_or_edit_take_is_not_the_studio_cut(library, version):
+    """third #1062 review G12-5: 3.6.1's Single/Album Dedup never paired a
+    version with the studio recording; a title score of 0.90 is not proof"""
+    copy(library, title="Smells Like Teen Spirit", isrc=None)
+    copy(library, title=version, isrc=None, album="Other")
+    assert review(library) == []
+
+
+def test_a_shared_isrc_still_pairs_whatever_the_title_says(library):
+    copy(library, title="Song", isrc="SAME")
+    copy(library, title="Song (Remastered)", isrc="SAME", album="Other")
+    assert len(review(library)) == 1
