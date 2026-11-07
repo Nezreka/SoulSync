@@ -94,6 +94,16 @@ def _seed(db: MusicDatabase):
     cur.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, image_url) "
                 "VALUES (1,2,'Evolve','http://img/evolve.jpg')")
     cur.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (1,1,'Believer')")
+    cur.execute("INSERT INTO lib2_track_files (track_id, path) VALUES (1,'/m/believer.flac')")
+    # the other two artists own a release too (the workers only enrich the
+    # owned library, G06-2)
+    for artist_id in (1, 3):
+        cur.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (?,?,'Own')",
+                    (artist_id + 10, artist_id))
+        cur.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (?,?,'Own')",
+                    (artist_id + 10, artist_id + 10))
+        cur.execute("INSERT INTO lib2_track_files (track_id, path) VALUES (?,?)",
+                    (artist_id + 10, f"/m/own{artist_id}.flac"))
     cur.executemany(
         "INSERT INTO lib2_provider_attempts(entity_type,entity_id,service,status) VALUES(?,?,?,?)",
         [('artist', 1, 'spotify', 'matched'), ('artist', 2, 'spotify', 'not_found'),
@@ -236,7 +246,8 @@ def test_reset_failed_requeues_all(db):
     n = db.reset_enrichment('spotify', 'album', 'failed')  # one not_found album
     assert n == 1
     bd = db.get_enrichment_breakdown('spotify', 'album')
-    assert bd['not_found'] == 0 and bd['pending'] == 1
+    # the reset album plus the two owned albums never attempted
+    assert bd['not_found'] == 0 and bd['pending'] == 3
 
 
 # --------------------------------------------------------------------------
@@ -323,7 +334,7 @@ def test_bandcamp_breakdown_and_unmatched(db):
     conn.close()
 
     bd = db.get_enrichment_breakdown('bandcamp', 'album')
-    assert bd == {'matched': 1, 'not_found': 0, 'pending': 0, 'total': 1}
+    assert bd == {'matched': 1, 'not_found': 0, 'pending': 2, 'total': 3}
 
     res = db.get_enrichment_unmatched('bandcamp', 'track', status='not_found')
     assert res['total'] == 1
@@ -335,3 +346,24 @@ def test_bandcamp_breakdown_route(client):
     assert r.status_code == 200
     body = r.get_json()
     assert set(body['breakdown'].keys()) == {'album', 'track'}
+
+
+def test_unowned_catalogue_rows_are_not_listed_or_counted(db):
+    """third #1062 review G06-2: a watched artist's fileless discography (and
+    the wishlist) sit in lib2 too, but no worker enriches them. counting them
+    left the modal's pending list and match rate stuck below the worker's."""
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists (id, name) VALUES (9,'Watched Only')")
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (9,9,'Unowned LP')")
+    conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (9,9,'Unowned Song')")
+    conn.execute("INSERT INTO lib2_provider_attempts(entity_type,entity_id,service,status) "
+                 "VALUES('album',9,'spotify','not_found')")
+    conn.commit()
+    conn.close()
+    assert db.get_enrichment_breakdown('spotify', 'artist')['total'] == 3
+    assert db.get_enrichment_breakdown('spotify', 'track')['total'] == 3
+    pending = db.get_enrichment_unmatched('spotify', 'album', status='unmatched')
+    assert 'Unowned LP' not in [i['name'] for i in pending['items']]
+    failed = db.get_enrichment_unmatched('spotify', 'album', status='not_found')
+    assert failed['total'] == 1
+
