@@ -1,9 +1,24 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { expect, it, vi } from 'vitest';
+import type { ReactElement } from 'react';
+
+import { QueryClientProvider } from '@tanstack/react-query';
+import { fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+
+import { createTestQueryClient } from '@/test/query-client';
 
 import type { LibraryV2EnhanceTrack } from '../-library-v2.types';
 
 import { EnhanceQualityModal, qualityTier } from './enhance-quality-modal';
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <QueryClientProvider client={createTestQueryClient()}>{ui}</QueryClientProvider>,
+  );
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function track(id: number, album: string, monitored = false): LibraryV2EnhanceTrack {
   return {
@@ -43,7 +58,7 @@ it('groups the upgrades by album and enhances only the picked tracks', () => {
   fireEvent.click(screen.getByLabelText('Enhance Song 2'));
   fireEvent.click(screen.getByRole('button', { name: 'Enhance (2)' }));
 
-  expect(onEnhance).toHaveBeenCalledWith([1, 3]);
+  expect(onEnhance).toHaveBeenCalledWith([1, 3], null);
 });
 
 it('cannot enhance nothing', () => {
@@ -76,7 +91,7 @@ it('a whole release is picked or dropped at once', () => {
   expect(screen.getByText('1 of 3 picked')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Enhance (1)' }));
 
-  expect(onEnhance).toHaveBeenCalledWith([3]);
+  expect(onEnhance).toHaveBeenCalledWith([3], null);
 });
 
 it('colours a quality by what it is', () => {
@@ -84,4 +99,67 @@ it('colours a quality by what it is', () => {
   expect(qualityTier('FLAC 16-bit')).toBe('lossless');
   expect(qualityTier('FLAC 24-bit')).toBe('hires');
   expect(qualityTier(null)).toBe('unknown');
+});
+
+it("the admin can aim a run at another profile, like 3.6.1's tier picker", async () => {
+  // 3.6.1 let you upgrade "tracks below lossless" whatever the profile said.
+  // the picker lists the profiles that upgrade; picking one shows what IT
+  // would upgrade and the run carries it
+  const hiRes = { ...track(4, 'Absolution'), profile: 'Hi-Res', target: 'FLAC 24-bit' };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const body = url.includes('quality-profiles')
+        ? {
+            success: true,
+            profiles: [
+              { id: 7, name: 'Hi-Res', upgrade_policy: 'acceptable' },
+              { id: 8, name: 'Keep', upgrade_policy: 'none' },
+            ],
+          }
+        : url.includes('quality_profile_id=7')
+          ? { success: true, tracks: [hiRes] }
+          : { success: true, tracks: [] };
+      return new Response(JSON.stringify(body), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }),
+  );
+  const onEnhance = vi.fn();
+  render(
+    <EnhanceQualityModal
+      title="Muse"
+      tracks={[track(1, 'Origin')]}
+      scope={{ entity: 'artists', id: 3 }}
+      canChooseTarget
+      onEnhance={onEnhance}
+      onClose={vi.fn()}
+    />,
+  );
+
+  const picker = (await screen.findByLabelText('Upgrade to')) as HTMLSelectElement;
+  // a profile that never upgrades is no target
+  expect([...picker.options].map((o) => o.textContent)).toEqual([
+    "Each track's own profile",
+    'Hi-Res',
+  ]);
+  fireEvent.change(picker, { target: { value: '7' } });
+  await waitFor(() => expect(screen.getByText('Song 4')).toBeInTheDocument());
+  expect(screen.queryByText('Song 1')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Enhance (1)' }));
+  expect(onEnhance).toHaveBeenCalledWith([4], 7);
+});
+
+it('a profile without write rights gets no picker', () => {
+  render(
+    <EnhanceQualityModal
+      title="Muse"
+      tracks={[track(1, 'Origin')]}
+      scope={{ entity: 'artists', id: 3 }}
+      onEnhance={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.queryByLabelText('Upgrade to')).toBeNull();
 });

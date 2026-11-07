@@ -1564,13 +1564,20 @@ export async function startLibraryV2ScopedSearch(
 }
 
 /** Enhance Quality: the files of an artist/album its profile would still
- *  upgrade, monitored or not. */
-export function libraryV2EnhanceQueryOptions(entity: 'artists' | 'albums', id: number) {
+ *  upgrade, monitored or not. ``targetProfileId`` asks what that profile
+ *  would upgrade instead of each track's own ("upgrade to"). */
+export function libraryV2EnhanceQueryOptions(
+  entity: 'artists' | 'albums',
+  id: number,
+  targetProfileId: number | null = null,
+) {
   return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'enhance', entity, id],
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'enhance', entity, id, targetProfileId ?? 'own'],
     queryFn: () =>
       lib2Json<Ok & { tracks: LibraryV2EnhanceTrack[] }>(
-        apiClient.get(`library/v2/${entity}/${id}/enhance`),
+        apiClient.get(`library/v2/${entity}/${id}/enhance`, {
+          searchParams: targetProfileId != null ? { quality_profile_id: targetProfileId } : {},
+        }),
         'Failed to load quality upgrades',
       ),
   });
@@ -1583,10 +1590,14 @@ export async function startLibraryV2Enhance(
   entity: 'artists' | 'albums',
   id: number,
   trackIds: number[],
+  targetProfileId: number | null = null,
 ): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post(`library/v2/${entity}/${id}/enhance`, {
-      json: { track_ids: trackIds },
+      json:
+        targetProfileId != null
+          ? { track_ids: trackIds, quality_profile_id: targetProfileId }
+          : { track_ids: trackIds },
       throwHttpErrors: false,
     }),
   );

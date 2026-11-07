@@ -441,9 +441,12 @@ def mirror_projected_tracks_wishlist(
 
 
 def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
-                                track_ids: Optional[List[int]] = None) -> List[int]:
+                                track_ids: Optional[List[int]] = None,
+                                quality_profile: Optional[Dict[str, Any]] = None) -> List[int]:
     """Wanted tracks with files whose profile permits upgrades -- or, given
     ``track_ids``, exactly those whatever their monitoring (Enhance Quality).
+    ``quality_profile`` judges every track against that one profile instead
+    of its own (Enhance Quality's "upgrade to").
     The per-track upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     import json
@@ -494,7 +497,7 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
         if row["path"] in protected or _hand_tagged(conn, row["path"], hand_tagged):
             continue
         try:
-            profile = effective_track_profile(conn, int(row["id"]))
+            profile = quality_profile or effective_track_profile(conn, int(row["id"]))
         except (LookupError, ValueError):
             continue
         if not is_upgrade_policy(profile.get("upgrade_policy")):

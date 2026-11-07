@@ -991,9 +991,10 @@ function EnhanceQualityButton({
   artistId: number;
   artistName: string;
   busy: boolean;
-  onEnhance: (trackIds: number[]) => void;
+  onEnhance: (trackIds: number[], targetProfileId: number | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const canWrite = useLibraryV2CanWrite();
   const tracks = useQuery(libraryV2EnhanceQueryOptions('artists', artistId)).data?.tracks ?? [];
   if (tracks.length === 0) return null;
   return (
@@ -1010,10 +1011,12 @@ function EnhanceQualityButton({
         <EnhanceQualityModal
           title={artistName}
           tracks={tracks}
+          scope={{ entity: 'artists', id: artistId }}
+          canChooseTarget={canWrite}
           onClose={() => setOpen(false)}
-          onEnhance={(trackIds) => {
+          onEnhance={(trackIds, targetProfileId) => {
             setOpen(false);
-            onEnhance(trackIds);
+            onEnhance(trackIds, targetProfileId);
           }}
         />
       ) : null}
@@ -8824,9 +8827,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                         artistId={artistId}
                         artistName={artist.name}
                         busy={searchBusy}
-                        onEnhance={(trackIds) =>
+                        onEnhance={(trackIds, targetProfileId) =>
                           runScoped('artists', artistId, () =>
-                            startLibraryV2Enhance('artists', artistId, trackIds),
+                            startLibraryV2Enhance('artists', artistId, trackIds, targetProfileId),
                           )
                         }
                       />,

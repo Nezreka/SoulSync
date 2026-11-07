@@ -5129,14 +5129,29 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """
         if entity not in ("artists", "albums"):
             return _fail("Unknown entity")
-        from core.library2.enhance import enhance_candidates
+        from core.library2.enhance import enhance_candidates, target_quality_profile
         profile = _intent_profile()
+        body = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
+        if not isinstance(body, dict):
+            return _fail("JSON body must be an object")
+        raw_target = (request.args.get("quality_profile_id") if request.method == "GET"
+                      else body.get("quality_profile_id"))
         db = get_database()
         with closing(db._get_connection()) as conn:
-            candidates = enhance_candidates(conn, entity, eid, profile_id=profile)
+            try:
+                target = target_quality_profile(conn, raw_target)
+            except LookupError:
+                return _fail("Quality profile not found", 404)
+            except ValueError as exc:
+                return _fail(str(exc))
+            # "upgrade to" pins the picks to that profile: a catalogue column
+            # every library shares, so it is the admin's to set
+            if target is not None and request.method == "POST" and not _is_admin():
+                return _fail("Choosing another quality profile requires the admin profile", 403)
+            candidates = enhance_candidates(conn, entity, eid, profile_id=profile, target=target)
             if request.method == "GET":
                 return jsonify({"success": True, "tracks": candidates})
-            requested = (request.get_json(silent=True) or {}).get("track_ids")
+            requested = body.get("track_ids")
             if not isinstance(requested, list) or any(type(t) is not int for t in requested):
                 return _fail("track_ids must be a list of track ids")
             picked = sorted({c["track_id"] for c in candidates} & set(requested))
@@ -5145,6 +5160,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2.mirror_outbox import drain, enqueue_projected_tracks
             from core.library2.monitor_rules import PROVENANCE_USER, record_rules
             from core.library2.wanted import recompute_wanted
+            if target is not None:
+                # the Wishlist keeps aiming for the chosen quality after this
+                # search, the way 3.6.1's picked tier did for its run
+                from core.library2.profile_lookup import (
+                    assign_quality_profile, effective_quality_profile)
+                for track_id in picked:
+                    if effective_quality_profile(conn, "tracks", track_id)["id"] != target["id"]:
+                        assign_quality_profile(conn, "tracks", track_id, int(target["id"]))
             if _shared_intent():
                 conn.execute("UPDATE lib2_tracks SET monitored=1"
                              " WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(picked),))
