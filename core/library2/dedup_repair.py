@@ -538,6 +538,9 @@ def fold_shared_file_tracks(conn: Any) -> Dict[str, int]:
                 "WHERE entity_type='track' AND entity_id=?", (keep["track_id"], dup["track_id"]))
             if not conn.execute("SELECT 1 FROM lib2_track_files WHERE track_id=?",
                                 (dup["track_id"],)).fetchone():
+                # plays, rules, wishlist links, edits and matches follow the
+                # file to the kept track before the twin row goes
+                _carry_folded_track(conn, int(dup["track_id"]), int(keep["track_id"]))
                 cursor.execute("DELETE FROM lib2_media_server_mappings "
                                "WHERE entity_type='track' AND entity_id=?", (dup["track_id"],))
                 _delete_placeholder_track(cursor, int(dup["track_id"]))
@@ -573,11 +576,58 @@ def fold_shared_file_tracks(conn: Any) -> Dict[str, int]:
                 if normalize_title(title) not in have:
                     cursor.execute("UPDATE lib2_tracks SET album_id=? WHERE id=?",
                                    (keep_album, track_id))
+            # the release's own rules, snapshots and requests move too
+            from core.library2.catalogue_duplicates import _move_references
+            _move_references(conn, "album", dup_album, keep_album)
+            _move_overrides(conn, "release_group", dup_album, keep_album)
             _fold_duplicate(cursor, survivor, duplicate)
             stats["server_albums_folded"] += 1
     if any(stats.values()):
         logger.info("Shared-file tracks folded: %s", stats)
     return stats
+
+
+def _move_overrides(conn: Any, entity_type: str, source_id: int, target_id: int) -> None:
+    """a hand edit on the folded row moves to the kept one (the kept row's
+    own edit of the same field wins)"""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='lib2_metadata_overrides'").fetchone():
+        conn.execute("UPDATE OR IGNORE lib2_metadata_overrides SET entity_id=? "
+                     "WHERE entity_type=? AND entity_id=?", (target_id, entity_type, source_id))
+        conn.execute("DELETE FROM lib2_metadata_overrides WHERE entity_type=? AND entity_id=?",
+                     (entity_type, source_id))
+
+
+def _carry_folded_track(conn: Any, dup_id: int, keep_id: int) -> None:
+    """what hangs off a twin track, onto the track that kept the file: the
+    catalogue merge's own carry (rules, mappings, plays history, manual
+    matches, stash), plus play counts, wishlist links, edits and a redirect"""
+    from core.library2.catalogue_duplicates import _move_references
+    from core.library2.catalogue_identity import consolidate_merged_wishlist, record_redirect
+    rows = {int(r["id"]): dict(r) for r in conn.execute(
+        "SELECT * FROM lib2_tracks WHERE id IN (?,?)", (dup_id, keep_id))}
+    source, target = rows.get(dup_id), rows.get(keep_id)
+    if not source or not target:
+        return
+    # two servers counted their own plays; one server's two rows shared a counter
+    shared = (source.get("server_source") == target.get("server_source")
+              and source.get("server_id") and source.get("server_id") == target.get("server_id"))
+    counts = [int(source.get("play_count") or 0), int(target.get("play_count") or 0)]
+    played = max((v for v in (source.get("last_played"), target.get("last_played")) if v), default=None)
+    conn.execute("UPDATE lib2_tracks SET play_count=?, last_played=? WHERE id=?",
+                 (max(counts) if shared else sum(counts), played, keep_id))
+    _move_references(conn, "track", dup_id, keep_id)
+    _move_overrides(conn, "track", dup_id, keep_id)
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wishlist_tracks'").fetchone():
+        try:
+            consolidate_merged_wishlist(conn, [(source, target)], source["album_id"], target["album_id"])
+        except ValueError:
+            # two quality profiles asked for it: keep both rows, both naming the kept track
+            conn.execute(
+                "UPDATE wishlist_tracks SET source_info=json_set(source_info,'$.lib2_track_id',?) "
+                "WHERE json_valid(source_info) AND "
+                "CAST(json_extract(source_info,'$.lib2_track_id') AS INTEGER)=?", (keep_id, dup_id))
+    record_redirect(conn, "track", dup_id, keep_id, {}, {"folded": "shared_file"})
 
 
 def _same_album_title(a: Dict[str, Any], b: Dict[str, Any]) -> bool:

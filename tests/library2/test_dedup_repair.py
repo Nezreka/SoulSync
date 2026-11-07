@@ -470,3 +470,41 @@ def test_startup_heals_a_fallback_id_and_lets_spotify_ask_again(repair_db):
     assert json.loads(row["external_ids"]) == {"itunes": "551515699"}
     assert conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts WHERE entity_id=? "
                         "AND service='spotify'", (album,)).fetchone()[0] == 0
+
+
+def test_a_folded_server_twin_hands_over_its_plays_edits_and_wishes(repair_db, monkeypatch):
+    """the twin track the other server held is deleted by the fold: its play
+    count, a hand edit and a wishlist link move to the track that keeps the
+    file instead of dying with it"""
+    from core.library2.dedup_repair import fold_shared_file_tracks
+    from core.library2.metadata_overrides import ensure_metadata_overrides_schema
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Two Servers")
+    live, stale = _album(conn, artist, "Same Album"), _album(conn, artist, "Same Album")
+    ids = {}
+    for album, server, plays in ((live, "plex", 2), (stale, "jellyfin", 5)):
+        ids[server] = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, server_source, play_count) "
+            "VALUES(?, 'Song', 1, ?, ?)", (album, server, plays)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/song.flac')",
+                     (ids[server],))
+    ensure_metadata_overrides_schema(conn.cursor())
+    conn.execute("INSERT INTO lib2_metadata_overrides(entity_type, entity_id, field_name, value_json) "
+                 "VALUES('track', ?, 'title', '\"Song (fixed)\"')", (ids["jellyfin"],))
+    conn.execute("CREATE TABLE IF NOT EXISTS wishlist_tracks (id INTEGER PRIMARY KEY, "
+                 "spotify_track_id TEXT, spotify_data TEXT, source_info TEXT, source_type TEXT, "
+                 "profile_id INTEGER DEFAULT 1, quality_profile_id INTEGER, request_status TEXT)")
+    wished = conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_info, profile_id) "
+        "VALUES('sp-song', '{}', json_object('lib2_track_id', ?), 1)", (ids["jellyfin"],)).lastrowid
+    conn.commit()
+
+    fold_shared_file_tracks(conn)
+    conn.commit()
+
+    keep = ids["plex"]
+    assert conn.execute("SELECT play_count FROM lib2_tracks WHERE id=?", (keep,)).fetchone()[0] == 7
+    assert conn.execute("SELECT entity_id FROM lib2_metadata_overrides").fetchone()[0] == keep
+    info = conn.execute("SELECT source_info FROM wishlist_tracks WHERE id=?", (wished,)).fetchone()
+    assert json.loads(info[0])["lib2_track_id"] == keep
