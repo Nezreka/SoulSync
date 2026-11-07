@@ -173,6 +173,16 @@ def _seed_from_preflight_pool(task_id, batch_id, track):
     fits.sort(key=lambda c: _duration_fit(target, c))
     if not fits:
         return
+    # the album search never scored these: the identity check above is their
+    # evidence. without a confidence the download path crashed on its log line
+    # and every retry failed ("'TrackResult' object has no attribute
+    # 'confidence'")
+    for candidate in fits:
+        if getattr(candidate, 'confidence', None) is None:
+            try:
+                candidate.confidence = 0.9
+            except AttributeError:
+                pass
     with tasks_lock:
         task = download_tasks.get(task_id)
         if task is not None and not task.get('cached_candidates'):

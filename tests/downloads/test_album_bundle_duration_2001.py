@@ -71,3 +71,29 @@ def test_a_quarantine_retry_starts_from_what_the_album_search_found():
         download_batches.pop('b-2001', None)
         download_tasks.pop('t-seed', None)
         download_tasks.pop('t-own', None)
+
+
+def test_a_seeded_retry_candidate_carries_a_confidence():
+    """the album search's results were never scored, and the download path
+    logs candidate.confidence: every seeded retry died on "'TrackResult' object
+    has no attribute 'confidence'" (PROBLEMS IN MY HEAD, LFTBU, BAD GIRLS)"""
+    from types import SimpleNamespace
+    from core.download_plugins.types import TrackResult
+    from core.downloads.task_worker import _seed_from_preflight_pool
+    from core.runtime_state import download_batches, download_tasks, tasks_lock
+
+    raw = TrackResult(username='peer-a', filename='Lib\\Gorillaz\\DoYaThing\\1-01 DoYaThing.mp3',
+                      size=8_000_000, bitrate=320, duration=266_000, quality='mp3',
+                      free_upload_slots=1, upload_speed=500, queue_length=0)
+    assert getattr(raw, 'confidence', None) is None
+    track = SimpleNamespace(name='DoYaThing', artists=['Gorillaz'], duration_ms=266_000)
+    with tasks_lock:
+        download_batches['b-conf'] = {'preflight_pool': [raw]}
+        download_tasks['t-conf'] = {'status': 'searching'}
+    try:
+        _seed_from_preflight_pool('t-conf', 'b-conf', track)
+        seeded = download_tasks['t-conf']['cached_candidates']
+        assert seeded and all(isinstance(c.confidence, float) for c in seeded)
+    finally:
+        download_batches.pop('b-conf', None)
+        download_tasks.pop('t-conf', None)

@@ -671,7 +671,7 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         logger.info(
             "[Modal Worker] Trying candidate %d/%d: %s (Confidence: %.2f%s)",
             candidate_index + 1, len(candidates), candidate.filename,
-            candidate.confidence, identity_note,
+            float(getattr(candidate, 'confidence', None) or 0.0), identity_note,
         )
         
         try:
