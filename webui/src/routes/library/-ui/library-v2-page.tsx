@@ -206,8 +206,10 @@ import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-r
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import { cardFadeIn } from './card-fade';
 import {
+  applyMusicBrainzDeclutter,
   classifyReleaseContent,
   DEFAULT_DISCOGRAPHY_FILTERS,
+  liveToggleLabel,
   passesDiscographyFilters,
   type DiscographyFilterState,
   type DiscographyOwnership,
@@ -7112,7 +7114,7 @@ function DiscographyFilterBar({
               })
             }
           >
-            {CONTENT_LABELS[key]}
+            {key === 'live' ? liveToggleLabel(state) : CONTENT_LABELS[key]}
           </button>
         ))}
       </div>
@@ -7714,8 +7716,11 @@ function useOtherSources(input: {
 
 /** Everything the two "All Releases" render modes share: one filter bar, one
  *  set of visible releases (ldp-03/ldp-04 both apply in either mode). */
-function useDiscographyFilters() {
-  const [filters, setFilters] = useState<DiscographyFilterState>(DEFAULT_DISCOGRAPHY_FILTERS);
+function useDiscographyFilters(source?: string | null) {
+  // a MusicBrainz discography starts with the non-studio releases hidden
+  const [filters, setFilters] = useState<DiscographyFilterState>(() =>
+    applyMusicBrainzDeclutter(DEFAULT_DISCOGRAPHY_FILTERS, source),
+  );
   return { filters, setFilters };
 }
 
@@ -8046,7 +8051,7 @@ function ProviderArtistView({
   const heroHeader =
     search.header ??
     (prefs.isSuccess ? (prefs.data?.artist_page?.header_elsewhere ?? 'rich') : undefined);
-  const { filters, setFilters } = useDiscographyFilters();
+  const { filters, setFilters } = useDiscographyFilters(source);
   const providerIds = { [source]: providerId };
   const discography = useReadOnlyProviderDiscography({
     enabled: true,
@@ -8104,7 +8109,11 @@ function ProviderArtistView({
       .filter((release) =>
         filters.categories[bucket]
           ? passesDiscographyFilters(
-              { title: release.title, album_type: release.album_type },
+              {
+                title: release.title,
+                album_type: release.album_type,
+                secondary_types: release.secondary_types,
+              },
               filters,
               release.owned === true,
             )

@@ -529,6 +529,8 @@ export interface ProviderRelease {
   explicit?: boolean;
   owned?: boolean | null;
   musicbrainz_release_id?: string | null;
+  /** MusicBrainz release-group secondary types ('live', 'soundtrack', ...) */
+  secondary_types?: string[] | null;
   track_completion?: {
     owned_tracks?: number;
     total_tracks?: number;
