@@ -506,6 +506,13 @@ def _find_owning_sibling(task_id: str, track: SpotifyTrack):
         own_batch = own.get('batch_id')
         if not own_batch:
             return None, None
+        # a forced re-download or an upgrade asked for a new copy on purpose.
+        # another batch's copy is the one it's meant to replace.
+        if (download_batches.get(own_batch) or {}).get('force_download_all'):
+            return None, None
+        from core.imports.upgrade_intent import CONTEXT_KEY as _UPGRADE_INTENT_KEY
+        if own.get(_UPGRADE_INTENT_KEY):
+            return None, None
         mine = own.get('track_info')
         if not isinstance(mine, dict):
             mine = {

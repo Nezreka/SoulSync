@@ -58,6 +58,27 @@ def test_finds_completed_sibling_with_same_identity():
     assert owner['verification_status'] == 'verified'
 
 
+def test_a_forced_redownload_is_not_deduped():
+    # "download all again" asked for a fresh copy; another batch's copy is
+    # the one it means to replace.
+    download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
+                               'filename': 'Money.flac', 'batch_id': 'bA'}
+    download_batches['bB'] = {'force_download_all': True}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI, 'batch_id': 'bB'}
+    owner_id, _ = tw._find_owning_sibling('dup', _track())
+    assert owner_id is None
+
+
+def test_an_upgrade_is_not_deduped():
+    from core.imports.upgrade_intent import CONTEXT_KEY
+    download_tasks['owner'] = {'status': 'completed', 'track_info': _TI,
+                               'filename': 'Money.flac', 'batch_id': 'bA'}
+    download_tasks['dup'] = {'status': 'pending', 'track_info': _TI, 'batch_id': 'bB',
+                             CONTEXT_KEY: {'lib2_track_id': 7}}
+    owner_id, _ = tw._find_owning_sibling('dup', _track())
+    assert owner_id is None
+
+
 def test_ignores_sibling_still_in_flight():
     # A sibling that is only searching/downloading hasn't obtained the file yet —
     # skipping against it could strand this track if that sibling later fails.
