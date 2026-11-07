@@ -408,6 +408,49 @@ def test_a_file_imported_under_two_servers_keeps_one_track(repair_db, monkeypatc
                         ).fetchone()[0] == 1
 
 
+def _shared_file_pair(conn, live_artist, stale_artist, stale_title):
+    live = _album(conn, live_artist, "Same Album")
+    stale = _album(conn, stale_artist, stale_title)
+    for album, server in ((live, "plex"), (stale, "jellyfin")):
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, server_source) "
+            "VALUES(?, 'Song', 1, ?)", (album, server)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/song.flac')",
+                     (track,))
+    conn.commit()
+    return live, stale
+
+
+def test_a_server_twin_under_another_artist_row_still_folds(repair_db, monkeypatch):
+    """the other server's copy can be filed under its own artist row (an alias
+    twin). its emptied release still folds into the live one."""
+    from core.library2.dedup_repair import fold_shared_file_tracks
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    live, stale = _shared_file_pair(conn, _artist(conn, "Live Row"),
+                                    _artist(conn, "Stale Row"), "Same Album")
+
+    stats = fold_shared_file_tracks(conn)
+
+    assert (stats["shared_files_folded"], stats["server_albums_folded"]) == (1, 1)
+    assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id=?",
+                        (stale,)).fetchone()[0] == 0
+
+
+def test_a_differently_titled_release_under_another_artist_is_left_alone(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_shared_file_tracks
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    live, stale = _shared_file_pair(conn, _artist(conn, "Live Row"),
+                                    _artist(conn, "Stale Row"), "Other Album")
+
+    stats = fold_shared_file_tracks(conn)
+
+    assert stats["server_albums_folded"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id=?",
+                        (stale,)).fetchone()[0] == 1
+
+
 def test_startup_heals_a_fallback_id_and_lets_spotify_ask_again(repair_db):
     """Bad 25th Anniversary: Spotify's fallback handed over the iTunes id as
     Spotify's, and a "matched" Spotify attempt meant nothing looked again."""

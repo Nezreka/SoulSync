@@ -195,8 +195,12 @@ def album_match_bundle(
 
 def _sync_attempt_ledger(
     conn: Any, canonical: str, entity_id: int, service: str, value: Optional[str],
+    *, ask_again: bool = False,
 ) -> None:
     """Keep ``lib2_provider_attempts`` in step with a manually set/cleared id.
+
+    ``ask_again`` is for a repair that drops a bad id it stored itself: the
+    pair goes back to never attempted so the worker looks it up again.
 
     Setting an id settles that (entity, service) pair — the user has answered
     the question the worker would ask. Clearing it settles it too: the user
@@ -211,6 +215,12 @@ def _sync_attempt_ledger(
             provider_attempts.record_attempt(
                 conn, entity_type=canonical, entity_id=entity_id,
                 service=service, status="matched", detail="manual match",
+            )
+        elif ask_again:
+            conn.execute(
+                "DELETE FROM lib2_provider_attempts "
+                "WHERE entity_type=? AND entity_id=? AND service=?",
+                (canonical, entity_id, service),
             )
         else:
             # a clear is the user saying "that match was wrong". deleting the

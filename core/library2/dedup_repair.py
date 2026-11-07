@@ -148,7 +148,7 @@ def _sanitize_provider_namespaces(conn: Any, cursor: Any) -> int:
                 # its "matched" Spotify attempt was this value: ask again
                 from core.library2.match_status import _sync_attempt_ledger
                 _sync_attempt_ledger(conn, _ENTITY_TYPE_BY_TABLE[lib2_table],
-                                     int(row["id"]), "spotify", None)
+                                     int(row["id"]), "spotify", None, ask_again=True)
             fixed += 1
     if fixed:
         logger.info("Re-homed %d foreign-shaped spotify_id values", fixed)
@@ -548,7 +548,18 @@ def fold_shared_file_tracks(conn: Any) -> Dict[str, int]:
         artist = conn.execute("SELECT primary_artist_id FROM lib2_albums WHERE id=?",
                               (keep_album,)).fetchone()
         albums = {a["id"]: a for a in _album_rows_for_artist(conn, artist[0])} if artist else {}
+        cross_artist = dup_album not in albums
+        if cross_artist:
+            # the other server's copy can sit under its own artist row
+            twin_artist = conn.execute(
+                "SELECT primary_artist_id FROM lib2_albums WHERE id=?", (dup_album,)).fetchone()
+            if twin_artist and twin_artist[0] is not None:
+                for row in _album_rows_for_artist(conn, twin_artist[0]):
+                    if row["id"] == dup_album:
+                        albums[dup_album] = row
         duplicate, survivor = albums.get(dup_album), albums.get(keep_album)
+        if cross_artist and survivor and duplicate and not _same_album_title(survivor, duplicate):
+            duplicate = None
         if survivor and duplicate and not duplicate["file_rows"]:
             cursor.execute(
                 "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
@@ -567,6 +578,11 @@ def fold_shared_file_tracks(conn: Any) -> Dict[str, int]:
     if any(stats.values()):
         logger.info("Shared-file tracks folded: %s", stats)
     return stats
+
+
+def _same_album_title(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    from core.library2.recording_links import normalize_title
+    return normalize_title(a.get("title") or "") == normalize_title(b.get("title") or "")
 
 
 def _delete_placeholder_track(cursor: Any, track_id: int) -> None:
