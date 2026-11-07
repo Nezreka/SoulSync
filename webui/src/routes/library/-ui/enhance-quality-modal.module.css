@@ -297,10 +297,10 @@
 .target select {
   min-height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--white-a12, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--white-a12);
   border-radius: 8px;
-  background: var(--white-a07, rgba(255, 255, 255, 0.07));
-  color: var(--text-1, #fff);
+  background: var(--white-a07);
+  color: var(--text-1);
   font: inherit;
 }
 

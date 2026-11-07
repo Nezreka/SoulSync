@@ -103,3 +103,58 @@ def test_mix_resolution_scans_candidate_titles_once(db):
     assert [track['file_path'] for track in result['tracks']] == [
         '/m/omt.flac', '/m/justice-omt.flac', '/m/aero.flac'
     ]
+
+
+# ---- "don't chart": a playlist song the library has, skipped by the player ----
+
+@pytest.fixture
+def credited(db):
+    """Cardi B's single, credited to her and the game, served by plex"""
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists (id, name, name_key) VALUES (3, 'Cardi B', 'cardi b')")
+    conn.execute("INSERT INTO lib2_albums (id, title, primary_artist_id) VALUES (12, 'Don’t Chart', 3)")
+    conn.execute("INSERT INTO lib2_tracks (id, title, album_id, track_artist, server_source, server_id)"
+                 " VALUES (300, 'Don’t Chart', 12, 'Cardi B, Grand Theft Auto VI', 'plex', '591381')")
+    conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, file_state)"
+                 " VALUES (300, '/m/cardi/dont-chart.mp3', 1, 'active')")
+    conn.commit()
+    conn.close()
+    return db
+
+
+def test_a_song_credited_to_several_artists_resolves_by_any_of_them(credited):
+    """the playlist says "Cardi B", the track credits "Cardi B, Grand Theft Auto
+    VI": the exact match missed and the player skipped a song you own"""
+    result = resolve_playable_tracks(credited, [{'artist': 'Cardi B', 'title': 'Don’t Chart'}])
+    assert result['matched'] == 1
+    assert result['tracks'][0]['file_path'] == '/m/cardi/dont-chart.mp3'
+    assert not any(k.startswith('_') for k in result['tracks'][0])
+
+
+def test_a_playlist_rows_stored_link_plays_that_file(credited):
+    """the library check stamps the media server's id; play used to ignore it"""
+    result = resolve_playable_tracks(credited, [
+        {'artist': 'Somebody Else', 'title': 'Renamed Upstream', 'library_track_id': '591381'}])
+    assert result['matched'] == 1
+    assert result['tracks'][0]['file_path'] == '/m/cardi/dont-chart.mp3'
+
+
+def test_a_link_through_the_server_mapping_plays_that_file(credited):
+    conn = credited._get_connection()
+    conn.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source, server_id)"
+                 " VALUES ('track', 101, 'jellyfin', 'jf-aero')")
+    conn.commit()
+    conn.close()
+    result = resolve_playable_tracks(credited, [
+        {'artist': 'x', 'title': 'y', 'library_track_id': 'jf-aero'}])
+    assert result['tracks'][0]['file_path'] == '/m/aero.flac'
+
+
+def test_a_bare_catalogue_id_needs_its_title_to_agree(credited):
+    """a number might be another track's catalogue id"""
+    ok = resolve_playable_tracks(credited, [
+        {'artist': 'Daft Punk', 'title': 'Aerodynamic', 'library_track_id': '101'}])
+    assert ok['tracks'][0]['file_path'] == '/m/aero.flac'
+    wrong = resolve_playable_tracks(credited, [
+        {'artist': 'Nobody', 'title': 'Something Else', 'library_track_id': '101'}])
+    assert wrong['matched'] == 0
