@@ -370,14 +370,28 @@ def _blockers(conn, albums, refs):
     return sorted(set(reasons))
 
 
+def _explicit_conflict(one, two) -> bool:
+    """both rows know their explicit flag and they disagree"""
+    flags = [x.get("explicit") if isinstance(x, dict) else None for x in (one, two)]
+    known = [bool(int(f)) for f in flags if f is not None and str(f).strip() != ""]
+    return len(known) == 2 and known[0] != known[1]
+
+
 def _candidate(conn, a, b):
     albums = [a, b]
     refs = {"album": _related(conn, "album", [a["id"], b["id"]]),
             "track": _related(conn, "track", [t["id"] for al in albums for t in al["tracks"]])}
     reasons = _blockers(conn, albums, refs)
     ids_a, ids_b = _release_ids(a), _release_ids(b)
-    shared = ids_a.keys() & ids_b.keys()
-    identical_release = len(shared) >= 2 and all(ids_a[k] == ids_b[k] for k in shared)
+    # soul_id is a hash of artist + title, so every same-titled pair shares
+    # it: it proves nothing about the release and never counts as evidence
+    shared = (ids_a.keys() & ids_b.keys()) - {"soul_id"}
+    # a clean and an explicit copy are two releases, whatever ids a name
+    # match handed both
+    clean_vs_explicit = _explicit_conflict(a, b) or any(
+        _explicit_conflict(one, two) for one, two in zip(a["tracks"], b["tracks"]))
+    identical_release = (len(shared) >= 2 and all(ids_a[k] == ids_b[k] for k in shared)
+                         and not clean_vs_explicit)
     # a proven release needs its full tracklist on both rows, not the
     # provider's "fetched" flag: two servers' copies of an album often never
     # fetched one, though each row holds every track

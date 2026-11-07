@@ -942,3 +942,22 @@ def test_the_upgrade_leaves_an_unproven_pair_for_review(library):
     stats = merge_import_twins(db)
     assert stats['merged'] == 0 and stats['left_for_review'] >= 1
     assert _albums_left(db, albums) == 2
+
+
+def test_a_title_hash_is_not_a_second_release_id(library):
+    """soul_id is artist + title hashed: every same-titled pair shares it. one
+    spotify id plus that hash is one id, not proof"""
+    _plex, albums, _tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET musicbrainz_id=NULL, soul_id='soul-same'")
+        conn.commit()
+    assert _twin_pair(library, albums)['auto_merge_eligible'] is False
+
+
+def test_a_clean_and_an_explicit_copy_never_merge_on_their_own(library):
+    _plex, albums, _tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET explicit=1 WHERE id=?", (albums[0],))
+        conn.execute("UPDATE lib2_albums SET explicit=0 WHERE id=?", (albums[1],))
+        conn.commit()
+    assert _twin_pair(library, albums)['auto_merge_eligible'] is False
