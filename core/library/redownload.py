@@ -116,8 +116,12 @@ def redownload_start(track_id):
         conn.close()
 
         old_file_path = None
+        old_stored_path = None
         if row and row['file_path'] and delete_old:
             old_file_path = _resolve_library_file_path(row['file_path'])
+            # the row's own form (a media server's view on a mapped install):
+            # what the catalogue retires it by
+            old_stored_path = row['file_path']
 
         task_id = f"redownload_{track_id}_{int(time.time())}"
         batch_id = f"redownload_batch_{track_id}"
@@ -251,6 +255,7 @@ def redownload_start(track_id):
                 '_redownload_context': {
                     'library_track_id': track_id,
                     'old_file_path': old_file_path,
+                    'old_stored_path': old_stored_path,
                     'delete_old_file': delete_old,
                 },
             }
