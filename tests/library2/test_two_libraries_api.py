@@ -373,3 +373,15 @@ def test_kim_may_not_fill_catalogue_metadata(world):
     world.as_profile(world.kim)
     mine = _track_of(world, "k")
     assert world.client.post(f"/api/library/v2/tracks/{mine}/fill-tag-gaps").status_code == 403
+
+
+def test_only_a_profile_the_grab_route_allows_is_offered_the_library_search_grab(world):
+    """third #1062 review G16-1: a household member's wishlist Search opened
+    the library search, and its grab answered 403. /enabled says who may grab
+    (the same rule as the server), so the rest get the inspector"""
+    world.as_profile(1)
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_grab"] is True
+    world.as_profile(world.kim)   # a library of her own
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_grab"] is True
+    world.as_profile(world.sam)   # the shared library
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_grab"] is False

@@ -153,7 +153,7 @@ function TrackRow({
           type="button"
           className="wl-list-btn"
           title="Interactive Search"
-          onClick={() => openWishlistSearch(track)}
+          onClick={() => void openWishlistSearch(track)}
         >
           🔍
         </button>

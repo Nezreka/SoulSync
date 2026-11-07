@@ -724,6 +724,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "can_wish": _can_wish(),
             # a wish that downloads right away (Automatic Search) needs this
             "can_download": _may_download(),
+            # a grab for a library track straight from its Interactive Search
+            # (the server's profile_may_grab: the admin, or a profile in a
+            # library of its own); everyone else grabs through the inspector
+            "can_grab": _is_admin() or _wishes_in_own(),
         })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
