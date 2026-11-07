@@ -1509,6 +1509,44 @@ def test_album_cascade_still_projects_ruleless_tracks(api):
                             (ids["album_track"],)).fetchone()[0] == 0
 
 
+def test_bulk_unwish_never_touches_an_album_the_artist_only_guests_on(api):
+    """third #1062 review G07-2: "Remove everything from Wishlist" on artist X
+    wrote an unmonitor rule on Artist Y's album X guests on, and Add all
+    wanted whole compilations. 3.6.1's watchlist acted on X's own releases"""
+    import time
+    from core.library2.artist_aliases import artist_fronted_album_ids
+    client, db, ids = api
+    with _conn(db) as conn:
+        other = conn.execute("INSERT INTO lib2_artists(name) VALUES('Artist Y')").lastrowid
+        their_album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, album_type, monitored) "
+            "VALUES(?, 'Y Album', 'album', 1)", (other,)).lastrowid
+        conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')",
+                     (their_album, other))
+        conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'featured')",
+                     (their_album, ids["artist"]))
+        guest_track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) VALUES(?, 'Feat', 1, 1)",
+            (their_album,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) VALUES(?, ?, 'featured', 1)",
+                     (guest_track, ids["artist"]))
+        conn.commit()
+        assert their_album not in artist_fronted_album_ids(conn, ids["artist"])
+        assert ids["views"] in artist_fronted_album_ids(conn, ids["artist"])
+
+    started = client.post(f"/api/library/v2/artists/{ids['artist']}/releases/monitor",
+                          json={"scope": "all", "monitored": False}).get_json()
+    for _ in _patience():
+        if not client.get("/api/library/v2/jobs/status",
+                          query_string={"job_id": started["job_id"]}).get_json()["running"]:
+            break
+        time.sleep(0.01)
+    with _conn(db) as conn:
+        assert conn.execute("SELECT monitored FROM lib2_albums WHERE id=?", (their_album,)).fetchone()[0] == 1
+        assert not conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='album' "
+                                "AND entity_id=?", (their_album,)).fetchone()
+
+
 def test_bulk_monitor_updates_rules_projection_and_sets_hand_set_tracks(api):
     import time
 

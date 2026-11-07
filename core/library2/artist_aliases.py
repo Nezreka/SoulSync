@@ -130,6 +130,27 @@ def artist_album_scope_ids(conn: Any, artist_id: int) -> List[int]:
     )]
 
 
+def artist_fronted_album_ids(conn: Any, artist_id: int) -> List[int]:
+    """The releases an artist's alias group FRONTS: it is the release's primary
+    artist, or a primary album artist. What a whole-artist wish acts on: 3.6.1's
+    watchlist only ever wanted the artist's own releases (other artists' and
+    compilations were off by default), and a wish on everything the artist
+    guests on wanted whole compilations and other artists' albums, or, removed,
+    unwanted an album the user wanted for its own artist."""
+    group = resolve_alias_group(conn, artist_id)
+    marks = ",".join("?" for _ in group)
+    return [int(row["album_id"]) for row in conn.execute(
+        f"""SELECT album_id FROM (
+                SELECT al.id AS album_id FROM lib2_albums al
+                 WHERE al.primary_artist_id IN ({marks})
+                UNION
+                SELECT aa.album_id FROM lib2_album_artists aa
+                 WHERE aa.artist_id IN ({marks}) AND aa.role = 'primary'
+            ) ORDER BY album_id""",
+        [*group, *group],
+    )]
+
+
 def artist_track_scope_ids(conn: Any, artist_id: int) -> List[int]:
     """Return all tracks on releases shown for an alias-group artist."""
 

@@ -3873,12 +3873,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             db = get_database()
             try:
                 with closing(db._get_connection()) as conn:
-                    from core.library2.artist_aliases import artist_album_scope_ids
+                    from core.library2.artist_aliases import artist_fronted_album_ids
 
                     albums = []
                     if album_allowlist is None or album_allowlist:
                         allowlist_sql = ""
-                        scoped_album_ids = artist_album_scope_ids(conn, artist_id)
+                        # the releases the artist fronts, never the ones it
+                        # only guests on (another artist's album, a compilation)
+                        scoped_album_ids = artist_fronted_album_ids(conn, artist_id)
                         if not scoped_album_ids:
                             scoped_album_ids = [-1]
                         scope_marks = ",".join("?" for _ in scoped_album_ids)
