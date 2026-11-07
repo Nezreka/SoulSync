@@ -56,10 +56,31 @@ def compute_track_stable_id(album_stable_id: str, title: Optional[str],
                              _norm(disc_number), _norm(track_number)))
 
 
+def free_album_stable_id(conn, album_id: int, artist_name, title, album_type,
+                         release_date=None, year=None) -> str:
+    """the album's stable id, told apart from another release that would mint
+    the same one. third #1062 review G09-4: "Greatest Hits" (2004) and
+    "Greatest Hits" (2017) by one artist, neither with a provider id, shared
+    an id, so a wish for one could land on the other. the second one takes
+    its release date (content, so a reimport mints the same again)"""
+    base = compute_album_stable_id(artist_name, title, album_type)
+    taken = conn.execute("SELECT 1 FROM lib2_albums WHERE stable_id=? AND id<>? LIMIT 1",
+                         (base, int(album_id))).fetchone()
+    if not taken:
+        return base
+    dated = _digest("album", (_norm(artist_name), _norm(title), _norm(album_type),
+                              _norm(release_date or year), "edition"))
+    taken = conn.execute("SELECT 1 FROM lib2_albums WHERE stable_id=? AND id<>? LIMIT 1",
+                         (dated, int(album_id))).fetchone()
+    # two releases alike down to the date: the row itself is all that differs
+    return _digest("album", (dated, str(int(album_id)))) if taken else dated
+
+
 def ensure_album_stable_id(conn, album_id: int) -> Optional[str]:
     """The album's persisted stable_id, minting and storing it when absent."""
     row = conn.execute(
-        """SELECT al.stable_id, al.title, al.album_type, ar.name AS artist_name
+        """SELECT al.stable_id, al.title, al.album_type, al.release_date, al.year,
+                  ar.name AS artist_name
              FROM lib2_albums al
              JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             WHERE al.id = ?""", (album_id,)).fetchone()
@@ -67,8 +88,8 @@ def ensure_album_stable_id(conn, album_id: int) -> Optional[str]:
         return None
     if row["stable_id"]:
         return row["stable_id"]
-    stable_id = compute_album_stable_id(row["artist_name"], row["title"],
-                                        row["album_type"])
+    stable_id = free_album_stable_id(conn, album_id, row["artist_name"], row["title"],
+                                     row["album_type"], row["release_date"], row["year"])
     conn.execute("UPDATE lib2_albums SET stable_id=? WHERE id=? AND stable_id IS NULL",
                  (stable_id, album_id))
     return stable_id
@@ -121,17 +142,18 @@ def backfill_stable_ids(cursor, *, connection=None, batch_size: int = 500,
     after_id = 0
     while not _stopped():
         albums = cursor.execute(
-            """SELECT al.id, ar.name, al.title, al.album_type
+            """SELECT al.id, ar.name, al.title, al.album_type, al.release_date, al.year
                  FROM lib2_albums al
                  JOIN lib2_artists ar ON ar.id = al.primary_artist_id
                 WHERE al.stable_id IS NULL AND al.id > ?
                 ORDER BY al.id LIMIT ?""", (after_id, batch_size)).fetchall()
         if not albums:
             break
-        for album_id, artist_name, title, album_type in albums:
+        for album_id, artist_name, title, album_type, release_date, year in albums:
             cursor.execute(
                 "UPDATE lib2_albums SET stable_id=? WHERE id=? AND stable_id IS NULL",
-                (compute_album_stable_id(artist_name, title, album_type), album_id))
+                (free_album_stable_id(cursor, album_id, artist_name, title, album_type,
+                                      release_date, year), album_id))
             filled += cursor.rowcount
             after_id = int(album_id)
         _commit()
@@ -170,4 +192,5 @@ __all__ = [
     "compute_track_stable_id",
     "ensure_album_stable_id",
     "ensure_track_stable_id",
+    "free_album_stable_id",
 ]

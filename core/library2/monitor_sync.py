@@ -422,10 +422,12 @@ def _descriptor_lib2_track_ids(
         if raw_id.startswith("lib2-track:"):
             stable = raw_id.removeprefix("lib2-track:")
             direct = conn.execute(
-                "SELECT id FROM lib2_tracks WHERE stable_id=?", (stable,)
-            ).fetchone()
-            if direct:
-                matched.add(int(direct[0]))
+                "SELECT id FROM lib2_tracks WHERE stable_id=? LIMIT 2", (stable,)
+            ).fetchall()
+            # G09-4: an id two rows share (minted before they were told
+            # apart) names neither; the provider lookup below decides
+            if len(direct) == 1:
+                matched.add(int(direct[0][0]))
                 continue
         elif raw_id:
             source = (
