@@ -2606,8 +2606,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 " WHERE lib2_track_id IS NULL AND db_track_id IS NOT NULL"
                 "   AND EXISTS (SELECT 1 FROM lib2_tracks t"
                 "                WHERE t.legacy_track_id = listening_history.db_track_id)")
-            if legacy_owners:
-                # a play of another library's copy: the track its file joined
+            # a play of a copy whose row joined another track as a file
+            # (another library's copy, or a playlist-folder copy on any
+            # install): the track its file joined. not only with own
+            # libraries: playlist copies join without them
+            if True:
                 joined_files = {_legacy_key(r[1]): int(r[0]) for r in cursor.execute(
                     "SELECT f.track_id, f.legacy_track_id FROM lib2_track_files f"
                     " JOIN lib2_tracks t ON t.id=f.track_id"

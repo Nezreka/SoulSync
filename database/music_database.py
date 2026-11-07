@@ -6804,6 +6804,25 @@ class MusicDatabase:
                        AND EXISTS (SELECT 1 FROM lib2_tracks t
                                     WHERE t.legacy_track_id = listening_history.db_track_id)
                 """)
+                # a play of a 3.6.1 copy whose row joined another track as a
+                # file (a playlist-folder copy, another library's copy): its
+                # legacy id lives on the file only. the index first: without
+                # it each unlinked play read the whole file table
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_legacy "
+                    "ON lib2_track_files(legacy_track_id) WHERE legacy_track_id IS NOT NULL")
+                cursor.execute("""
+                    UPDATE listening_history
+                       SET lib2_track_id = (
+                           SELECT f.track_id FROM lib2_track_files f
+                            WHERE f.legacy_track_id = listening_history.db_track_id
+                              AND f.track_id IS NOT NULL LIMIT 1)
+                     WHERE lib2_track_id IS NULL
+                       AND db_track_id IS NOT NULL
+                       AND EXISTS (SELECT 1 FROM lib2_track_files f
+                                    WHERE f.legacy_track_id = listening_history.db_track_id
+                                      AND f.track_id IS NOT NULL)
+                """)
             except Exception as e:
                 logger.debug("listening_history catalogue backfill skipped: %s", e)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_listening_lib2_track ON listening_history (lib2_track_id)")
