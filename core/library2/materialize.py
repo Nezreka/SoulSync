@@ -279,8 +279,14 @@ def materialize_wishlist_intent(
             if result is not None:
                 conn.commit()
             return result
+    except ValueError as e:
+        # a payload this can't place: the expected miss
+        logger.debug("wishlist materialization skipped: %s", e)
+        return None
     except Exception as e:  # noqa: BLE001
-        logger.debug("wishlist materialization failed: %s", e)
+        # P2B-10: anything else made every album-modal add answer
+        # lib2_album_id null ("Monitor" did nothing) with no trace
+        logger.warning("wishlist materialization failed: %s", e, exc_info=True)
         return None
 
 

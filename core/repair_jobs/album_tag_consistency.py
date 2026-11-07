@@ -324,10 +324,20 @@ class AlbumTagConsistencyJob(RepairJob):
             context.update_progress(0, len(eligible))
 
         unreadable = 0
-        for album_id, subjects in eligible:
+        for idx, (album_id, subjects) in enumerate(eligible):
             if context.check_stop() or context.wait_if_paused():
                 return
             result.scanned += 1
+            # G11-8: the bar sat at 0/N for the whole run; 3.6.1 moved it and
+            # named an album every 20
+            if context.update_progress:
+                context.update_progress(idx + 1, len(eligible))
+            if context.report_progress and idx % 20 == 0:
+                context.report_progress(
+                    scanned=idx + 1, total=len(eligible),
+                    phase=f'Scanning {idx + 1} / {len(eligible)}',
+                    log_line=f"{subjects[0].get('artist_name')} — {subjects[0].get('album_title')}",
+                    log_type='info')
 
             tag_data = _read_subject_tags(subjects, context)
 
@@ -387,6 +397,9 @@ class AlbumTagConsistencyJob(RepairJob):
                 result.findings_created += 1
             else:
                 result.findings_skipped_dedup += 1
+            if context.report_progress:
+                context.report_progress(log_line=f'Found: {album_title} — {fields_affected}',
+                                        log_type='warning')
 
         if unreadable and context.report_progress:
             context.report_progress(

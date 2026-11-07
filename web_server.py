@@ -25440,7 +25440,15 @@ def start_runtime_services():
             def _start_automation_after_upgrade():
                 automation_engine.resume_after_migration()
                 logger.info("Starting automation engine...")
-                automation_engine.start()
+                try:
+                    automation_engine.start()
+                except Exception as e:
+                    # G17-2: the deferred path (first boot after an upgrade)
+                    # never reached the except below, so the hint 3.6.1 gave
+                    # for a stale docker volume went missing
+                    logger.error(f"Automation engine failed to start: {e}")
+                    logger.info("   If using Docker, check that your volume mount is /app/data (not /app/database)")
+                    raise
                 logger.info("Automation engine started")
                 try:
                     automation_engine.emit('app_started', {})
