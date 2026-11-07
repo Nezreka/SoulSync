@@ -133,6 +133,21 @@ export function SearchPage() {
     select: (s) => new URLSearchParams(s.location.searchStr).get('browse'),
   });
   const browsing = Boolean(browseId) && !query.trim() && !soulseekActive;
+
+  // /search?q=: arrive with a search already run (an artist page that has no
+  // provider page to open sends its name here). once per q, so typing after
+  // it isn't undone
+  const askedQuery = useRouterState({
+    select: (s) => new URLSearchParams(s.location.searchStr).get('q'),
+  });
+  const ranAskedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const asked = (askedQuery ?? '').trim();
+    if (!asked || ranAskedRef.current === asked) return;
+    ranAskedRef.current = asked;
+    setQuery(asked);
+    submitQuery(asked);
+  }, [askedQuery, submitQuery]);
   const browseQuery = useQuery({
     queryKey: ['search-browse', browseId],
     queryFn: ({ signal }) => fetchBrowse(browseId ?? '', signal),
