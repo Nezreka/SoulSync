@@ -296,6 +296,11 @@ def _candidate_pair(a: dict, b: dict, settings: dict, companion_exts: set) -> bo
         from core.library2.version_words import DEDUP_3_6_1, versions_differ
         if versions_differ(a.get("title") or "", b.get("title") or "", DEDUP_3_6_1):
             return False
+    # third #1062 review P2D-7: one file seen at two mount roots (plex's
+    # /media/Music/A/B/01.flac, SoulSync's /app/Transfer/A/B/01.flac) is not
+    # a duplicate; 3.6.1 never filed it, v2 filed one Keep Best can't fix
+    if _mount_aliases(a, b):
+        return False
     # Filesystem identity last: only plausible pairs pay for realpath/stat.
     if os.path.realpath(a["resolved_path"]) == os.path.realpath(b["resolved_path"]):
         return False
@@ -304,6 +309,22 @@ def _candidate_pair(a: dict, b: dict, settings: dict, companion_exts: set) -> bo
         return False
     return not (a.get("derived_from_file_id") == b["file_id"] or b.get("derived_from_file_id") == a["file_id"]
                 or is_lossy_companion_pair(a["resolved_path"], b["resolved_path"], companion_exts))
+
+
+def _mount_aliases(a: dict, b: dict) -> bool:
+    """the same artist/album/file under different roots, the same length
+    (within a second): 3.6.1's _is_same_physical_file"""
+    parts = []
+    for row in (a, b):
+        parts.append([x for x in str(row.get("path") or "").replace("\\", "/").split("/") if x])
+    one, two = parts
+    if len(one) < 3 or len(two) < 3:
+        return False
+    if [x.lower() for x in one[-3:]] != [x.lower() for x in two[-3:]] or one[:-3] == two[:-3]:
+        return False
+    if a.get("duration") and b.get("duration"):
+        return abs(int(a["duration"]) - int(b["duration"])) <= 1000
+    return True
 
 
 def _similar_tags(a: dict, b: dict, settings: dict) -> bool:

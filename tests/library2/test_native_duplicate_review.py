@@ -554,3 +554,19 @@ def test_a_shared_isrc_still_pairs_whatever_the_title_says(library):
     copy(library, title="Song", isrc="SAME")
     copy(library, title="Song (Remastered)", isrc="SAME", album="Other")
     assert len(review(library)) == 1
+
+
+def test_one_file_at_two_mount_roots_is_not_a_duplicate(library):
+    """third #1062 review P2D-7: plex's /media/Music/A/B/01.flac and
+    SoulSync's /app/Transfer/A/B/01.flac are one file. 3.6.1 never paired
+    them; v2 filed a finding Keep Best could do nothing with"""
+    _db, _config, root, _transfer = library
+    rows = [copy(library, album="Album"), copy(library, album="Single")]
+    with closing(library[0]._get_connection()) as conn:
+        for mount, (_tid, fid, path) in zip(("plex-media", "soulsync-transfer"), rows):
+            alias = root / mount / "Artist" / "Album" / "01.flac"
+            alias.parent.mkdir(parents=True)
+            os.replace(path, alias)
+            conn.execute("UPDATE lib2_track_files SET path=? WHERE id=?", (str(alias), fid))
+        conn.commit()
+    assert review(library) == []
