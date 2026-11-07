@@ -5684,7 +5684,9 @@ export function librarySectionSearch<T extends Record<string, unknown>>(
     ...previous,
     ...songOnly,
     section,
-    q: '',
+    // G15-8: "beatles" on Artists, then Songs, finds the Beatles' songs, as
+    // 3.6.1's switchView did. Wanted has no search of its own
+    q: section === 'wanted' ? '' : typeof previous.q === 'string' ? previous.q : '',
     artist: undefined,
     album: undefined,
     page: 1,
