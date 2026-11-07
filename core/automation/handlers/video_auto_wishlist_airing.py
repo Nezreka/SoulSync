@@ -142,10 +142,15 @@ def _default_unowned_follows() -> List[Dict[str, Any]]:
 
 
 def _default_tmdb_airings(tmdb_id: Any, start: str, end: str) -> Dict[str, Any]:
-    """{"poster_url", "episodes"} for an unowned followed show."""
+    """{"poster_url", "episodes"} for an unowned followed show. An owned show's
+    Specials follow their season row (the calendar pass); an unowned one has no
+    rows, so the 'Monitor Specials' setting is applied here."""
+    from api.video import get_video_db
     from core.video.enrichment.engine import get_video_enrichment_engine
     from core.video.monitor_policy import episodes_airing_between
-    return episodes_airing_between(get_video_enrichment_engine(), tmdb_id, start, end)
+    specials = (get_video_db().get_setting("monitor_specials") or "1") != "0"
+    return episodes_airing_between(get_video_enrichment_engine(), tmdb_id, start, end,
+                                   include_specials=specials)
 
 
 def _default_season_meta(tmdb_id: Any, season_number: Any):

@@ -66,7 +66,9 @@ _SEED_DEFAULTS = {"seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remov
                   # Remove Completed (usenet) is opt-in: off until someone picks it
                   "usenet_remove_completed": "off",
                   # a release the client failed is replaced by the next one: on
-                  "redownload_failed": True}
+                  "redownload_failed": True,
+                  # Specials are monitored unless someone turns this off
+                  "monitor_specials": True}
 
 
 def test_load_defaults():
@@ -173,7 +175,9 @@ def test_the_video_settings_live_with_their_subject_not_on_one_dumping_tab():
     for pid, tab in (("video-download-path", "library"),
                      ("video-seeding-goals", "sources"),
                      # #1822: import lists add to what you discover
-                     ("video-import-lists", "discovery")):
+                     ("video-import-lists", "discovery"),
+                     # what to hunt is a library choice, not a usenet one
+                     ("video-monitor-specials", "library")):
         at = index.index(f'id="{pid}"')
         stg = index.rfind('data-stg=', 0, at)
         found = re.search(r'data-stg="([a-z]+)"', index[stg:stg + 30]).group(1)
@@ -361,3 +365,26 @@ def test_redownload_failed_can_be_switched_off():
     assert save(db, {"redownload_failed": False})["redownload_failed"] is False
     assert load(db)["redownload_failed"] is False
     assert save(db, {"redownload_failed": True})["redownload_failed"] is True
+
+
+class _PolicyDB(_FakeDB):
+    def __init__(self):
+        super().__init__()
+        self.applied = 0
+
+    def apply_specials_policy(self, show_id=None):
+        self.applied += 1
+        return 0
+
+
+def test_monitor_specials_saves_and_applies_only_on_a_change():
+    db = _PolicyDB()
+    assert load(db)["monitor_specials"] is True
+    save(db, {"monitor_specials": True})          # unchanged: nothing re-applied
+    assert db.applied == 0
+    save(db, {"monitor_specials": False})
+    assert load(db)["monitor_specials"] is False and db.applied == 1
+    save(db, {"monitor_specials": False})         # every Downloads save re-posts it
+    assert db.applied == 1
+    save(db, {"monitor_specials": True})
+    assert load(db)["monitor_specials"] is True and db.applied == 2

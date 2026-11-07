@@ -8941,6 +8941,30 @@
                                                     </label>
                                                 </div>
                                             </div>
+
+                                            <!-- Specials (season 0): hunt them or not. Saves on change
+                                                 to the video downloads config (monitor_specials in the
+                                                 video db; VideoDatabase._apply_specials_policy). -->
+                                            <div class="api-service-frame stg-service" data-video-service="monitoring">
+                                                <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                    <span class="stg-service-dot" style="color: #38bdf8;"></span>
+                                                    <h4 class="service-title">Monitoring</h4>
+                                                    <span class="stg-service-chevron">›</span>
+                                                </div>
+                                                <div class="stg-service-body">
+                                                    <label class="vid-pref-row">
+                                                        <input type="checkbox" id="video-monitor-specials" checked>
+                                                        <span>Monitor Specials (season 0)</span>
+                                                    </label>
+                                                    <div class="callback-info">
+                                                        <div class="callback-help">Off: every show's Specials season is
+                                                            unmonitored, so its episodes are never searched or added to the
+                                                            wishlist. A show that is nothing but specials keeps them, and a
+                                                            Specials season you switch on by hand on a show's page stays on.
+                                                            Turning this back on monitors the ones it switched off.</div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <!-- end Paths & Organization body -->

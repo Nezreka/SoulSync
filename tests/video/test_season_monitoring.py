@@ -1,11 +1,14 @@
 """Season monitoring is a per-season flag the Your library tab can read back,
-and episodes added later follow it."""
+episodes added later follow it, and the 'Monitor Specials' setting turns
+season 0 off everywhere except a show that is all specials or a Specials
+season the user set by hand."""
 
 from __future__ import annotations
 
 import sqlite3
 
 from core.video import library_manage
+from core.video.monitor_policy import episodes_airing_between
 from database.video_database import SCHEMA_VERSION, VideoDatabase
 
 
@@ -69,6 +72,50 @@ def test_episodes_added_later_follow_their_season(tmp_path):
     assert _eps(db, sid, 1) == [0, 0, 0]
 
 
+def _set(db, on):
+    db.set_setting("monitor_specials", "1" if on else "0")
+    return db.apply_specials_policy()
+
+
+def test_monitor_specials_off_and_back_on(tmp_path):
+    db = _db(tmp_path)
+    regular = _show(db, "a")
+    only_specials = _show(db, "b", seasons=(0,))
+    assert _set(db, False) == 1
+    assert _tab(db, regular) == {0: False, 1: True, 2: True}
+    assert _eps(db, regular, 0) == [0]
+    assert _tab(db, only_specials) == {0: True}, "a specials-only show keeps them"
+    assert _set(db, True) == 1
+    assert _tab(db, regular)[0] is True and _eps(db, regular, 0) == [1]
+
+
+def test_monitor_specials_never_overrides_a_hand_set_season(tmp_path):
+    db = _db(tmp_path)
+    kept = _show(db, "a")
+    db.set_season_monitored(kept, 0, True)        # switched on by hand
+    _set(db, False)
+    assert _tab(db, kept)[0] is True
+    off = _show(db, "c")
+    db.set_season_monitored(off, 0, False)        # switched off by hand
+    _set(db, False)
+    _set(db, True)
+    assert _tab(db, off)[0] is False
+
+
+def test_new_shows_and_new_specials_follow_the_setting(tmp_path):
+    db = _db(tmp_path)
+    db.set_setting("monitor_specials", "0")
+    sid = _show(db, "a")                          # scanned in with the setting off
+    assert _tab(db, sid)[0] is False and _eps(db, sid, 0) == [0]
+    db.backfill_episodes(sid, 0, [{"episode_number": 2, "title": "SP2"}])
+    assert _eps(db, sid, 0) == [0, 0]
+    # a specials-only show gains its first real season: the policy reaches it then
+    late = _show(db, "b", seasons=(0,))
+    assert _tab(db, late) == {0: True}
+    db.backfill_episodes(late, 1, [{"episode_number": 1, "title": "E1"}])
+    assert _tab(db, late) == {0: False, 1: True}
+
+
 def test_one_time_carry_over_of_seasons_already_unmonitored(tmp_path):
     """Before this change the toggle wrote only episodes. A season whose
     episodes are all off was switched off by hand: on the first start it
@@ -90,3 +137,22 @@ def test_one_time_carry_over_of_seasons_already_unmonitored(tmp_path):
         "SELECT season_number, monitored, monitor_locked FROM seasons WHERE show_id=?", (sid,))}
     conn.close()
     assert rows == {0: (0, 1), 1: (1, 0), 2: (1, 0)}
+
+
+class _Engine:
+    def tmdb_detail(self, kind, tmdb_id):
+        return {"poster_url": None, "seasons": [{"season_number": n} for n in self.seasons]}
+
+    def tmdb_season(self, tmdb_id, sn):
+        return {"episodes": [{"episode_number": 1, "air_date": "2026-11-05"}]}
+
+
+def test_unowned_follow_airing_drops_specials_when_off():
+    eng = _Engine()
+    eng.seasons = [0, 1, 2]
+    got = lambda inc: sorted(e["season_number"] for e in episodes_airing_between(
+        eng, 1, "2026-11-01", "2026-11-07", include_specials=inc)["episodes"])
+    assert got(True) == [0, 1, 2]
+    assert got(False) == [1, 2]
+    eng.seasons = [0]                              # all specials: kept either way
+    assert got(False) == [0]

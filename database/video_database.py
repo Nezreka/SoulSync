@@ -2783,6 +2783,7 @@ class VideoDatabase:
                          e.get("air_date"), e.get("runtime_minutes"), e.get("still_url"), e.get("rating"),
                          season_id))
                     touched += 1
+            self._apply_specials_policy(conn, show_id)
             conn.commit()
             return touched
         finally:
@@ -5442,6 +5443,7 @@ class VideoDatabase:
                 if row["season_number"] not in seen_seasons:
                     conn.execute("DELETE FROM seasons WHERE show_id=? AND season_number=?",
                                  (show_id, row["season_number"]))
+            self._apply_specials_policy(conn, show_id)
             conn.commit()
             return show_id
         finally:
@@ -7324,6 +7326,55 @@ class VideoDatabase:
             return int(cur.rowcount or 0)
         except sqlite3.Error:
             logger.exception("set_season_monitored failed")
+            return 0
+        finally:
+            conn.close()
+
+    _MONITOR_SPECIALS_KEY = "monitor_specials"
+
+    @classmethod
+    def _apply_specials_policy(cls, conn, show_id=None) -> int:
+        """Bring Specials (season 0) in line with the 'Monitor Specials'
+        setting, for one show or (None) every show. Off: season 0 is
+        unmonitored, its episodes too. On: the ones this setting turned off
+        are monitored again. Left alone either way: a Specials season the user
+        set by hand (monitor_locked), and a show with nothing but specials
+        (Critical Role-style shows, where season 0 IS the show). Runs inside
+        the caller's transaction; returns how many seasons moved."""
+        row = conn.execute("SELECT value FROM video_settings WHERE key = ?",
+                           (cls._MONITOR_SPECIALS_KEY,)).fetchone()
+        want = 0 if (row is not None and str(row[0]) == "0") else 1
+        where = ("season_number = 0 AND monitor_locked = 0 AND monitored != ? "
+                 "AND EXISTS (SELECT 1 FROM seasons r WHERE r.show_id = seasons.show_id "
+                 "AND r.season_number > 0)")
+        params = [want]
+        if show_id is not None:
+            where += " AND show_id = ?"
+            params.append(int(show_id))
+        shows = [r[0] for r in conn.execute(
+            f"SELECT show_id FROM seasons WHERE {where}", params).fetchall()]
+        if not shows:
+            return 0
+        marks = ",".join("?" * len(shows))
+        conn.execute(f"UPDATE seasons SET monitored = ? WHERE season_number = 0 "
+                     f"AND show_id IN ({marks})", [want, *shows])
+        conn.execute(f"UPDATE episodes SET monitored = ? WHERE season_number = 0 "
+                     f"AND show_id IN ({marks})", [want, *shows])
+        return len(shows)
+
+    def apply_specials_policy(self, show_id=None) -> int:
+        """Public wrapper: own connection + commit (the setting's save runs it
+        for every show)."""
+        conn = self._get_connection()
+        try:
+            n = self._apply_specials_policy(conn, show_id)
+            conn.commit()
+            if n:
+                logger.info("monitor specials: %d show(s) changed", n)
+            return n
+        except sqlite3.Error:
+            conn.rollback()
+            logger.exception("apply_specials_policy failed")
             return 0
         finally:
             conn.close()
