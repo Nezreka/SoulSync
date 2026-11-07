@@ -182,7 +182,7 @@ async def collect_usenet_snapshot(
 # save_path and calls record_download_completed on a path that was already
 # imported or deleted — a phantom completion with no error anywhere. Adoption
 # is about attaching to work still in flight, so only non-terminal jobs
-# qualify. This also un-breaks the `unique_category_job` fallback (dd28-44),
+# qualify. This also keeps the one-to-one `near_title` pairing (dd28-44) working,
 # which practically never fired because history flooded `remaining_jobs`.
 _TERMINAL_CLIENT_STATES = frozenset({
     "completed", "complete", "failed", "error", "cancelled", "canceled",
@@ -224,14 +224,31 @@ def _adoption_pairs(
         else:
             ambiguous.extend(str(grab["download_id"]) for grab in grabs)
 
-    if len(remaining_grabs) == 1 and len(remaining_jobs) == 1:
-        pairs.append((remaining_grabs[0], remaining_jobs[0], "unique_category_job"))
+    # never title-blind: the category is shared (the wishlist's usenet
+    # plugin, the video side), and "one grab, one leftover job" bound a stuck
+    # grab to someone else's download and imported the wrong release. one of
+    # each still pairs when the client only reworded the title (dots for
+    # spaces, a release tag), never when it names something else
+    if (len(remaining_grabs) == 1 and len(remaining_jobs) == 1
+            and _near_title(remaining_grabs[0].get("title"), remaining_jobs[0].name)):
+        pairs.append((remaining_grabs[0], remaining_jobs[0], "near_title"))
         remaining_grabs.clear()
         remaining_jobs.clear()
     elif remaining_grabs and remaining_jobs:
         ambiguous.extend(str(grab["download_id"]) for grab in remaining_grabs)
 
     return pairs, sorted(set(ambiguous))
+
+
+def _near_title(grab_title: Any, job_name: Any) -> bool:
+    """the same release, reworded: one title's words all in the other's"""
+    import re
+    a = set(re.findall(r"\w+", _title_key(grab_title)))
+    b = set(re.findall(r"\w+", _title_key(job_name)))
+    if not a or not b:
+        return False
+    small, big = (a, b) if len(a) <= len(b) else (b, a)
+    return len(small) >= 2 and small <= big
 
 
 def _isolated(conn: Any, download_id: str, apply: Any, *args: Any, **kwargs: Any) -> bool:
@@ -270,7 +287,10 @@ def reconcile_usenet_snapshot(
         if job_id:
             attached.setdefault(str(job_id), []).append(grab)
 
-    known_ids = set(attached)
+    # every job SoulSync already follows, whichever feature submitted it
+    known_ids = set(attached) | {
+        str(grab["external_job_id"]) for grab in open_grabs(conn, "usenet")
+        if grab.get("external_job_id")}
     unknown_jobs = [
         job for job in snapshot.jobs
         if job.id not in known_ids
