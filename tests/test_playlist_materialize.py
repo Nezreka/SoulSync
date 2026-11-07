@@ -208,3 +208,27 @@ def test_a_retagged_source_of_the_same_size_is_still_recopied(tmp_path: Path):
     os.utime(real[0], (later, later))
     s2 = rebuild_playlist_folder(root, "Mix", real, mode="copy")
     assert s2.copied == 1 and s2.unchanged == 1
+
+
+@requires_symlinks
+def test_a_3_6_1_folder_is_relinked_and_pruned_on_its_first_rebuild(tmp_path: Path):
+    """third #1062 review G13-1: entries 3.6.1 wrote have no manifest record.
+    a link to a moved file failed every rebuild ("unmanaged destination") and
+    a link for a song that left the playlist stayed for good; 3.6.1 relinked
+    and pruned them"""
+    real = _library(tmp_path)
+    root = str(tmp_path / "Playlists")
+    folder = Path(root) / "Old Mix"
+    folder.mkdir(parents=True)
+    name = os.path.basename(real[0])
+    # 3.6.1's link to where the file used to be, and a link for a dropped song
+    os.symlink(str(tmp_path / "gone" / name), folder / name)
+    os.symlink(real[1], folder / "dropped.flac")
+    (folder / "notes.txt").write_text("mine")
+
+    s = rebuild_playlist_folder(root, "Old Mix", [real[0]], mode="symlink")
+
+    assert s.failed == 0, s.errors
+    assert os.path.realpath(folder / name) == os.path.realpath(real[0])
+    assert not os.path.lexists(folder / "dropped.flac")
+    assert (folder / "notes.txt").read_text() == "mine"   # never the user's own file
