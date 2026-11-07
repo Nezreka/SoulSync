@@ -202,3 +202,15 @@ def test_a_worker_fills_an_unknown_release_kind_but_never_reclassifies(conn):
     rows = dict(conn.execute("SELECT id, album_type || ':' || album_type_known FROM lib2_albums"))
     assert rows[10] == 'single:1'
     assert rows[11] == 'album:1'
+
+
+def test_a_year_of_zero_is_unknown_and_gets_filled(conn):
+    """third #1062 review G02-3: 3.6.1 stored an unknown year as 0 and its
+    workers filled `year = '0'`; v2 called 0 a real year and kept it"""
+    conn.execute("UPDATE lib2_albums SET year=0 WHERE id=1")
+    conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title, year) VALUES(12, 1, 'Dated', 1999)")
+    for album_id in (1, 12):
+        write_provider_enrichment(conn, entity_type="album", entity_id=album_id, service="spotify",
+                                  payload={}, backfill={"year": 2014})
+    assert _row(conn, "lib2_albums")["year"] == 2014
+    assert _row(conn, "lib2_albums", 12)["year"] == 1999

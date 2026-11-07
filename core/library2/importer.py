@@ -1949,6 +1949,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 actual,
             )
             year = _pick(row, "year")
+            # G02-3: 3.6.1 stored an unknown year as 0 and read 0 as unknown
+            # in three places; lib2 says unknown with NULL
+            if (_legacy_number(year) or 0) <= 0:
+                year = None
             # Expected total = the metadata track count (api_track_count) when known,
             # else the stored track_count, else the number of tracks we actually have.
             expected = _pick(row, "api_track_count") or track_count or actual

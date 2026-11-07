@@ -1132,6 +1132,18 @@ def test_text_in_any_legacy_number_column_stays_out_of_lib2(legacy_db):
     assert tuple(row) == (None, 1, None, 0)
 
 
+def test_a_legacy_year_of_zero_imports_as_unknown(legacy_db):
+    """third #1062 review G02-3: 3.6.1's 0 meant unknown; lib2 says NULL, so
+    the workers fill it and nothing shows year 0"""
+    with closing(sqlite3.connect(legacy_db.path)) as conn:
+        conn.execute("UPDATE albums SET year=0")
+        conn.commit()
+    import_legacy_library(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        years = {r[0] for r in conn.execute("SELECT year FROM lib2_albums")}
+    assert years == {None}
+
+
 def test_text_numbers_in_a_wishlist_payload_do_not_stop_the_import(legacy_db):
     """``int(total_tracks)`` stopped the migration the same way as #1989, out of
     the json this time."""
