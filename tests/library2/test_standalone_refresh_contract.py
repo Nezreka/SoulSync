@@ -181,3 +181,36 @@ def test_a_full_refresh_never_imports_a_known_file_twice(tmp_path, monkeypatch):
         rows_on_known = conn.execute(
             "SELECT COUNT(*) FROM lib2_track_files WHERE path=?", (str(known),)).fetchone()[0]
     assert states == {"active"} and rows_on_known == 1
+
+
+def test_a_symlinked_transfer_moves_new_files_into_staging(tmp_path, monkeypatch):
+    """third #1062 review G03-6: the walk yields realpaths but rel_path was
+    taken against the unresolved Transfer, so through a symlink every move
+    target was "../../real/..." and left Staging"""
+    import os
+    import web_server
+    from api import database_admin as db_admin
+
+    real = tmp_path / "disk1" / "music"
+    (real / "Artist" / "Album").mkdir(parents=True)
+    (real / "Artist" / "Album" / "new.flac").write_bytes(b"fLaC")
+    transfer = tmp_path / "Transfer"
+    os.symlink(real, transfer)
+    staging = tmp_path / "Staging"
+    staging.mkdir()
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    _db_holder["db"] = db
+    _configure_paths(monkeypatch, web_server, transfer, staging)
+    monkeypatch.setattr(web_server, "get_database", lambda: db)
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda database, *, file_ids: {})
+    errors = []
+    monkeypatch.setattr(db_admin, "_db_update_phase_callback", lambda *_: None)
+    monkeypatch.setattr(db_admin, "add_activity_item", lambda *_: None)
+    monkeypatch.setattr(db_admin, "_db_update_finished_callback", lambda *args: None)
+    monkeypatch.setattr(db_admin, "_db_update_error_callback", lambda error: errors.append(error))
+
+    db_admin._run_soulsync_deep_scan()
+
+    assert errors == []
+    assert (staging / "Artist" / "Album" / "new.flac").is_file()
+    assert not (real / "Artist" / "Album" / "new.flac").exists()

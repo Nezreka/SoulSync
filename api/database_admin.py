@@ -642,11 +642,19 @@ def _run_soulsync_deep_scan():
             add_activity_item("", "SoulSync Deep Scan — move blocked", warn, "Now")
         elif untracked and os.path.isdir(staging_path):
             _db_update_phase_callback('moving_untracked')
+            # G03-6: the walk's paths are realpaths, so the root they're made
+            # relative to must be too. against a symlinked Transfer each one
+            # came out "../../mnt/disk1/..." and the move left Staging
+            real_transfer = os.path.realpath(transfer_path)
+            real_staging = os.path.realpath(staging_path)
             for file_path in untracked:
                 try:
                     # Preserve relative folder structure from Transfer
-                    rel_path = os.path.relpath(file_path, transfer_path)
+                    rel_path = os.path.relpath(file_path, real_transfer)
                     dest_path = os.path.join(staging_path, rel_path)
+                    if os.path.commonpath((real_staging, os.path.realpath(dest_path))) != real_staging:
+                        logger.warning(f"[SoulSync Deep Scan] Not moving {file_path}: it would land outside Staging")
+                        continue
                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                     shutil.move(file_path, dest_path)
                     moved_count += 1
