@@ -53,6 +53,12 @@ def _candidate_sql(extra: str, where: str, link: str = "NULL") -> str:
                COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
                COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,
                t.album_id,
+               -- typed ids: the player sends a bare `id` as the media server's
+               -- song id (#809 stream fallback), and plays only count against
+               -- a lib2_track_id. a catalogue id passed as `id` alone streamed
+               -- nothing on navidrome without a mount and counted no plays
+               t.id AS lib2_track_id,
+               COALESCE(ar.canonical_artist_id, ar.id) AS lib2_artist_id,
                ar.name AS _album_artist,
                {link} AS _link
         FROM lib2_tracks t
@@ -71,15 +77,32 @@ def _candidate_sql(extra: str, where: str, link: str = "NULL") -> str:
         WHERE {where}"""
 
 
-def _linked_rows(cursor, extra: str, links: List[str]) -> Dict[str, Dict[str, Any]]:
+def _loose_title(text: Any) -> str:
+    """a title for "is this the same song": case, (brackets), feat. and a
+    trailing " - ..." version note folded away"""
+    t = _norm(str(text or ""))
+    t = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", t)
+    t = re.sub(r"\s+-\s+.*$", "", t)
+    t = re.sub(r"\s+(?:feat|ft|featuring)\b\.?.*$", "", t)
+    t = re.sub(r"[^\w\s]", "", t)
+    return " ".join(t.split())
+
+
+def _titles_agree(a: Any, b: Any) -> bool:
+    one, two = _loose_title(a), _loose_title(b)
+    return bool(one and two) and (one == two or one.startswith(two) or two.startswith(one))
+
+
+def _linked_rows(cursor, extra: str, links: List[str]) -> Dict[str, List[Dict[str, Any]]]:
     """the library rows a playlist's stored links name.
 
     The library check stamps ``library_track_id`` on a mirrored row: the media
     server's id (a plex ratingKey) or a catalogue id. Play read it nowhere and
-    guessed again from title + artist. A server id wins (mapping, then the
-    row's own); a bare number is a catalogue id only when no server knows it.
+    guessed again from title + artist. A link doesn't say which namespace it
+    is, and plex's numeric keys share their range with catalogue ids: every
+    reading is returned, and the caller keeps the one whose title agrees.
     """
-    found: Dict[str, Dict[str, Any]] = {}
+    found: Dict[str, List[Dict[str, Any]]] = {}
     if not links:
         return found
     servers = ",".join("?" for _ in _SERVERS)
@@ -100,8 +123,8 @@ def _linked_rows(cursor, extra: str, links: List[str]) -> Dict[str, Dict[str, An
         for row in cursor.fetchall():
             row = dict(row)
             if row.get("_link") is not None:
-                found.setdefault(str(row["_link"]), row)
-    numeric = [int(v) for v in links if v not in found and v.isdigit()]
+                found.setdefault(str(row["_link"]), []).append(row)
+    numeric = [int(v) for v in links if v.isdigit()]
     for start in range(0, len(numeric), 400):
         chunk = numeric[start:start + 400]
         cursor.execute(
@@ -109,7 +132,7 @@ def _linked_rows(cursor, extra: str, links: List[str]) -> Dict[str, Dict[str, An
                            link="CAST(t.id AS TEXT)"), chunk)
         for row in cursor.fetchall():
             row = dict(row)
-            found.setdefault(str(row["_link"]), {**row, "_by_catalogue_id": True})
+            found.setdefault(str(row["_link"]), []).append(row)
     return found
 
 
@@ -167,11 +190,9 @@ def resolve_playable_tracks(db, wanted: List[Dict[str, Any]]) -> Dict[str, Any]:
             row = None
             link = str(item.get("library_track_id") or "").strip()
             if link and link in linked:
-                row = linked[link]
-                # a bare number might be another track's catalogue id: only
-                # when its title agrees
-                if row.get("_by_catalogue_id") and _norm(row["title"]) != title:
-                    row = None
+                # the reading whose title is this song's: a link that names
+                # another song (an id read in the wrong namespace) plays nothing
+                row = next((r for r in linked[link] if _titles_agree(r["title"], title)), None)
             if row is None:
                 row = next((candidates[(title, key)] for key in _artist_keys(artist)
                             if (title, key) in candidates), None)
