@@ -155,6 +155,54 @@ def test_repair_drops_a_stale_mapping_when_the_live_id_is_already_filed(tmp_path
         assert c.execute("SELECT COUNT(*) FROM lib2_tracks").fetchone()[0] == 2
 
 
+def _match_cache(c, server_source, server_id):
+    c.execute("INSERT INTO sync_match_cache(spotify_track_id, normalized_title, normalized_artist,"
+              " server_source, server_track_id, confidence) VALUES('sp1','song','artist',?,?,1.0)",
+              (server_source, server_id))
+
+
+def test_the_live_id_branch_repoints_the_match_cache_too(tmp_path):
+    """third #1062 review G10-4: dropping the stale mapping skipped the
+    repoint, so sync_match_cache kept the dead id forever"""
+    from database.music_database import MusicDatabase
+    from tests.support.catalogue_seed import seed_library_track
+
+    db = MusicDatabase(tmp_path / 'test.db')
+    with db._get_connection() as c:
+        ids = [seed_library_track(
+            c, artist='Artist', album='Album', title='Song', artist_server_id='ar1',
+            album_server_id='al1', track_server_id=sid, file_path='/song',
+            duration=180000, server_source='navidrome') for sid in ('old', 'new')]
+        for track_id, server_id in zip(ids, ('old', 'new')):
+            c.execute("INSERT INTO lib2_media_server_mappings"
+                      "(entity_type,entity_id,server_source,server_id)"
+                      " VALUES('track',?,'navidrome',?)", (track_id, server_id))
+        _match_cache(c, 'navidrome', 'old')
+        c.commit()
+    assert repair_rekeyed_tracks(db, {'new': {'id': 'new', 'title': 'Song', 'path': '/song'}}) == 1
+    with db._get_connection() as c:
+        assert c.execute("SELECT server_track_id FROM sync_match_cache").fetchone()[0] == 'new'
+
+
+def test_a_rekey_the_scan_files_in_place_moves_the_match_cache(tmp_path):
+    """G10-4: the scan finds the same track by path and overwrites its
+    mapping's server id, so the old id was gone from every mapping and the
+    repair could never see it. the upsert carries the cache along"""
+    from database.music_database import MusicDatabase
+    from core.library2.media_mappings import upsert_mapping
+
+    db = MusicDatabase(tmp_path / 'test.db')
+    with db._get_connection() as c:
+        c.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'A')")
+        c.execute("INSERT INTO lib2_albums(id, primary_artist_id, title) VALUES(1, 1, 'B')")
+        c.execute("INSERT INTO lib2_tracks(id, album_id, title) VALUES(1, 1, 'Song')")
+        upsert_mapping(c, 'track', 1, 'plex', '4100')
+        _match_cache(c, 'plex', '4100')
+        upsert_mapping(c, 'track', 1, 'plex', '9200')
+        c.commit()
+        assert str(c.execute("SELECT server_track_id FROM sync_match_cache").fetchone()[0]) == '9200'
+
+
 def _server(monkeypatch, *, drop=False, inventory_failure=False):
     import database.music_database as database
     client = NavidromeClient.__new__(NavidromeClient)

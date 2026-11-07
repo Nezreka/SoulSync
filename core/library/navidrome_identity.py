@@ -275,7 +275,10 @@ def repair_rekeyed_tracks(db, songs):
                 # it created for the same file. UNIQUE(entity_type,
                 # server_source, server_id) would reject a second claim, and a
                 # duplicate catalogue row is core/library2/dedup_repair.py's
-                # business, not ours. Drop the obsolete mapping and stop.
+                # business, not ours. Drop the obsolete mapping and stop, after
+                # the match cache follows the id (G10-4: it kept the dead one)
+                from core.library2.media_mappings import repoint_server_track_id
+                repoint_server_track_id(conn, 'navidrome', old_id, new_id)
                 conn.execute("DELETE FROM lib2_media_server_mappings WHERE id=?",
                              (row['mapping_id'],))
                 repaired += 1
