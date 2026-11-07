@@ -1114,14 +1114,35 @@ def _rehome_and_delete_combined(
             )
     conn.execute("DELETE FROM lib2_track_artists WHERE artist_id=?", (combined_id,))
 
-    # 4) Drop the ghost's monitor rules so they don't linger.
+    # 4) Every profile's watch on the ghost goes to the artists it became
+    #    (3.6.1's watchlist rows survived an artist merge or split; dropping
+    #    them showed the artist unwatched and recomputed its wants away). A
+    #    component's own rule for that profile wins. Then the ghost's go.
     try:
+        ghost = conn.execute("SELECT COALESCE(monitored,0) FROM lib2_artists WHERE id=?",
+                             (combined_id,)).fetchone()
+        if ghost and int(ghost[0]) == 1:
+            for cid in component_ids:
+                conn.execute("UPDATE lib2_artists SET monitored=1, updated_at=CURRENT_TIMESTAMP "
+                             "WHERE id=?", (cid,))
+        rules = conn.execute(
+            "SELECT profile_id, monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='artist' AND entity_id=?", (combined_id,)).fetchall()
+        for profile_id, monitored, provenance in rules:
+            for cid in component_ids:
+                if conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='artist' "
+                                "AND entity_id=? AND profile_id=?", (cid, profile_id)).fetchone():
+                    continue
+                conn.execute(
+                    "INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, "
+                    "monitored, provenance) VALUES('artist', ?, ?, ?, ?)",
+                    (cid, profile_id, monitored, provenance))
         conn.execute(
             "DELETE FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=?",
             (combined_id,),
         )
     except Exception as exc:  # noqa: BLE001 — table optional/absent on minimal DBs
-        logger.debug("ghost monitor-rule cleanup skipped (%s): %s", combined_id, exc)
+        logger.debug("ghost monitor-rule carry skipped (%s): %s", combined_id, exc)
 
     # 5) The ghost is now unreferenced by any primary or junction.
     # If it is legacy-backed, keep it as an alias so future legacy imports

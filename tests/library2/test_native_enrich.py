@@ -1556,3 +1556,25 @@ def test_prune_keeps_an_artist_a_household_member_watches_or_wants(imported_conn
         "VALUES(2, ?, 1, 'track', 1)", (track,))
 
     assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
+
+
+def test_a_split_ghosts_watches_go_to_the_artists_it_became(imported_conn):
+    """third #1062 review P2B-8: the ghost's watch rules were deleted for every
+    profile, so the real artists showed unwatched. 3.6.1's watchlist rows
+    survived a merge or split"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    ghost = _insert_native_artist(imported_conn, "Alpha & Beta")
+    alpha = _insert_native_artist(imported_conn, "Alpha")
+    beta = _insert_native_artist(imported_conn, "Beta")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    record_rule(imported_conn, "artist", ghost, True, PROVENANCE_USER, profile_id=2)
+    record_rule(imported_conn, "artist", beta, False, PROVENANCE_USER, profile_id=2)
+
+    NE._rehome_and_delete_combined(imported_conn, ghost, alpha, [alpha, beta])
+
+    rules = {(r[0], r[1]): r[2] for r in imported_conn.execute(
+        "SELECT entity_id, profile_id, monitored FROM lib2_monitor_rules WHERE entity_type='artist'")}
+    assert rules[(alpha, 2)] == 1
+    assert rules[(beta, 2)] == 0          # beta's own choice for profile 2 stands
+    assert imported_conn.execute("SELECT monitored FROM lib2_artists WHERE id=?",
+                                 (alpha,)).fetchone()[0] == 1
