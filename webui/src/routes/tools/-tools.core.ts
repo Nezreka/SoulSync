@@ -267,7 +267,7 @@ export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   empty_folder: 'Delete Folder',
   expired_download: 'Delete',
   metadata_gap: 'Apply',
-  duplicate_tracks: 'Keep Best',
+  // duplicate_tracks (3.6.1's) has no fixer since the native detector replaced it (G16-3)
   native_duplicate_tracks: 'Keep Best',
   native_duplicate_releases: 'Review Merge',
   incomplete_album: 'Auto-Fill',

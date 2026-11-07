@@ -90,6 +90,22 @@ describe('FindingDetail duplicate rows', () => {
     );
     expect(rows[1].textContent).toContain('KEEP');
   });
+
+  it('an old 3.6.1 duplicate finding is read-only and points at the Duplicate Detector', () => {
+    // third #1062 review G16-3: its fixer is gone, so "keep this version"
+    // opened a destructive confirm the server could only refuse
+    const onKeep = vi.fn();
+    const { container } = render(
+      <FindingDetail
+        finding={duplicateFinding()}
+        onKeepDuplicate={onKeep}
+        onApplyCoverArt={vi.fn()}
+      />,
+    );
+    fireEvent.click(container.querySelectorAll('.repair-detail-subitem')[0]);
+    expect(onKeep).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Run the Duplicate Detector');
+  });
 });
 
 const nativeFinding = (requiresConfirmation = false): RepairFinding =>

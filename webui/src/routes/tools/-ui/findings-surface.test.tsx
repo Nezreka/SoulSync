@@ -2065,7 +2065,10 @@ describe('the detail renderer', () => {
     expect(items[1].className).toContain('best');
   });
 
-  it('clicking a duplicate confirms, then posts that track id as the fix action', async () => {
+  it('an old 3.6.1 duplicate is read-only: a click asks nothing and posts nothing', async () => {
+    // third #1062 review G16-3: duplicate_tracks has no fixer since the native
+    // detector replaced it; the click opened "Keep This Version" (destructive)
+    // and the server answered "No fix available"
     routes({
       [FINDINGS]: page([
         finding({
@@ -2088,10 +2091,8 @@ describe('the detail renderer', () => {
     fireEvent.click(document.querySelectorAll('.repair-detail-subitem')[0]);
     await flush();
 
-    expect(confirmSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Keep This Version', destructive: true }),
-    );
-    expect(bodyOf('/1/fix')).toEqual({ fix_action: 'trk-1' });
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/1/fix'))).toBe(false);
   });
 
   it('each duplicate copy plays ITS OWN file, verbatim', async () => {
