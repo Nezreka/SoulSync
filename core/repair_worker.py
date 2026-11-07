@@ -738,6 +738,7 @@ class RepairWorker:
             new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
             if isinstance(new_cfg, dict) and not new_cfg.get('enabled'):
                 config_manager.set(f'repair.jobs.{new_id}', {**new_cfg, 'enabled': True})
+                self._enable_successor_schedule(new_id, None)
                 logger.info("Repair job %s was on at 3.6.1: its successor %s is switched on",
                             old_id, new_id)
             config_manager.set(marker, new_id)
@@ -759,10 +760,41 @@ class RepairWorker:
                         if old_cfg.get('interval_hours') and not audit.get('interval_hours'):
                             audit['interval_hours'] = old_cfg['interval_hours']
                         config_manager.set('repair.jobs.quality_profile_audit', audit)
+                        self._enable_successor_schedule('quality_profile_audit',
+                                                        old_cfg.get('interval_hours'))
                         logger.info("Quality Check (%s) was on at 3.6.1: Quality Profile "
                                     "Audit is switched on in its place", old_id)
                     break
             config_manager.set(marker, 'quality_profile_audit')
+
+    def _enable_successor_schedule(self, job_id, interval_hours):
+        """Switch on the successor's system schedule row, not only its config.
+
+        The rows are seeded before this migration runs, from the config as it
+        was (off). Config alone never scheduled anything (the worker is
+        drain-only), and the next start's toggle reconcile read the off row as
+        the newer intent and switched the config back off: a weekly Quality
+        Check user still got no review. The engine attaches later in startup,
+        so the row is scheduled from the next start on."""
+        try:
+            import json as _json
+            from core.automation.migrate_repair_jobs import _find_system_automation
+            auto = _find_system_automation(self.db, 1, job_id)
+            if not auto:
+                return
+            changes = {"enabled": 1}
+            try:
+                hours = float(interval_hours) if interval_hours else None
+            except (TypeError, ValueError):
+                hours = None
+            if hours and hours > 0:
+                changes["trigger_config"] = _json.dumps({"interval": hours, "unit": "hours"})
+            self.db.update_automation(auto["id"], **changes)
+            engine = getattr(self, "_automation_engine", None)
+            if engine is not None:
+                engine.schedule_automation(auto["id"])
+        except Exception as exc:  # noqa: BLE001 - the config switch already happened
+            logger.debug("successor schedule for %s not switched on: %s", job_id, exc)
 
     def set_metadata_enhancer(self, enhance_fn):
         """Inject the metadata enhancement function from web_server.py.
