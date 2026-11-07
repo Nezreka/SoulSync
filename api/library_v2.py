@@ -463,7 +463,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """may the caller start a download (not just a request)?"""
         if _is_admin():
             return True
-        return bool((get_database().get_profile(_profile()) or {}).get("can_download", 1))
+        try:
+            return bool((get_database().get_profile(_profile()) or {}).get("can_download", 1))
+        except Exception:  # noqa: BLE001 - unreadable profile: a request, never a grab
+            return False
 
     def _conn():
         return get_database()._get_connection()

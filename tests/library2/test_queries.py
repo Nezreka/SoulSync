@@ -844,9 +844,11 @@ def test_get_album_preserves_unknown_present_file_quality(imported_conn):
 
     assert track["file_status"] == "present"
     assert track["meets_profile"] is None
-    # Fresh installs default to upgrades disabled, so unknown quality remains
-    # visible without becoming an automatic replacement candidate.
-    assert track["upgrade_candidate"] is False
+    # The default profile upgrades what's below it ("acceptable", 3.6.1's
+    # default), so a file of unknown quality is "unknown", not "never". It is
+    # still not queued on its own: mirror_outbox.upgrade_opted_in keeps the
+    # import's baseline from asking for any upgrade.
+    assert track["upgrade_candidate"] is None
 
 
 def test_get_album_evaluates_explicit_track_profile_not_album_profile(imported_conn):
