@@ -42,10 +42,16 @@ location.reload();return}if(s.status==='failed'){$('status').textContent=
 return}show(s)}catch(e){}setTimeout(poll,2000)}poll()</script></html>'''
 
 
+#: seconds a failed ordinary boot waits before ending the process (the log
+#: line and the failure page get out first)
+EXIT_DELAY = 5
+
+
 class StartupApplication:
-    def __init__(self, loader):
+    def __init__(self, loader, *, exit_fn=None):
         self._app = None
         self._failed = False
+        self._exit_fn = exit_fn or os._exit
         self._done = threading.Event()
         self._thread = threading.Thread(target=self._load, args=(loader,),
                                         name='SoulSyncStartup', daemon=True)
@@ -56,7 +62,20 @@ class StartupApplication:
             self._app = loader()
         except Exception:
             self._failed = True
-            logger.exception('SoulSync startup failed; application remains unavailable')
+            from core import startup_progress
+            if startup_progress.snapshot().get('step') is not None:
+                # the protected upgrade (its backup or schema step) failed: a
+                # restart would only repeat it, copying the whole database
+                # each time. stay up on the failure page until someone looks.
+                logger.exception('SoulSync upgrade failed; application remains unavailable '
+                                 'until the reported problem is resolved and it is restarted')
+            else:
+                # anything else (a share not mounted yet, a locked database):
+                # end the process, as 3.6.1's failed boot did, so the
+                # container's restart policy tries again. staying up behind a
+                # 503 left a dead app that Docker never restarts.
+                logger.exception('SoulSync startup failed; exiting so it can be restarted')
+                threading.Timer(EXIT_DELAY, self._exit_fn, args=(3,)).start()
         finally:
             self._done.set()
 
