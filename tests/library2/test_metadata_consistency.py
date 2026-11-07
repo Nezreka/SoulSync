@@ -638,3 +638,29 @@ def test_tag_preview_shows_what_the_write_changes_in_a_sibling_file(library):
     # the other file's rows say which file they are about
     assert any(row.get('file_value') == 'Wrong Title' for row in rows)
     assert any(row['field'].endswith('.flac)') and row.get('file_id') for row in rows)
+
+
+def test_a_hand_tagged_album_gets_no_retag_findings(library):
+    """third #1062 review G09-2: one hand-tagged file locked its album in
+    3.6.1. the scan filed "Metadata issues" for the other files, and Apply
+    wrote the studio tags over the release the user typed"""
+    db, path, _ = library
+    observe(library, {**read_tag_snapshot(str(path)), 'track_number': 3})
+    with closing(db._get_connection()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM repair_findings WHERE status='pending'").fetchone()[0] == 1
+        sibling = str(path.with_name('08 - Track 8.flac'))
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,format) VALUES(8,?,'flac')", (sibling,))
+        # the user hand-tagged track 8's file
+        from database.music_database import MusicDatabase
+        conn.execute("CREATE TABLE IF NOT EXISTS manual_metadata_files (path_key TEXT PRIMARY KEY, "
+                     "file_path TEXT, album_title TEXT, album_artist TEXT)")
+        conn.execute("INSERT INTO manual_metadata_files(path_key, file_path) VALUES(?,?)",
+                     (MusicDatabase.manual_path_key(sibling), sibling))
+        conn.commit()
+
+    observe(library, {**read_tag_snapshot(str(path)), 'track_number': 4})
+
+    with closing(db._get_connection()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM repair_findings WHERE status='pending'").fetchone()[0] == 0
+    from core.library2.retag import repair_field_protection
+    assert repair_field_protection(db, str(path), {'title': 'Studio'}, track_id=7) == {}

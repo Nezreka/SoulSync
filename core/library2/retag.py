@@ -115,6 +115,13 @@ def repair_field_protection(database, file_path, fields, *, track_id=None, file_
     keys = hand_tagged_path_keys(database)
     if is_hand_tagged_path(file_path, keys) or is_hand_tagged_path(resolve_lib2_path(file_path), keys):
         return {}
+    if track_id is not None:
+        # another file of the album is hand-tagged: the album is the user's
+        # (3.6.1's album lock), so a finding filed earlier writes nothing
+        from core.library2.validation import album_is_hand_tagged
+        with closing(database._get_connection()) as conn:
+            if album_is_hand_tagged(conn, int(track_id)):
+                return {}
     if track_id is None:
         return dict(fields)
     from core.library2.track_files import writable_file_rows
