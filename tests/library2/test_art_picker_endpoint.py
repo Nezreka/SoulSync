@@ -378,3 +378,25 @@ def test_release_artist_art_clears_override_and_lock(monkeypatch, api):
     assert response.get_json()["art_locked"] is False
     assert row[0] == 0
     assert override is None
+
+
+@pytest.mark.parametrize("entity, key, push", [
+    ("albums", "album", "push_album_art_outbound"),
+    ("artists", "artist", "push_artist_art_outbound"),
+])
+def test_a_picked_image_also_goes_to_the_server_and_the_folder(monkeypatch, api, entity, key, push):
+    """third #1062 review G14-1: the pick stayed inside SoulSync. 3.6.1 pushed
+    it to the media server's poster and wrote cover.jpg / artist.jpg (what
+    Navidrome reads first)"""
+    client, _db, ids = api
+    monkeypatch.setattr("core.library2.artwork._download_remote_artwork", lambda _u: _png_bytes())
+    pushed = []
+    monkeypatch.setattr(f"api.artist_detail.{push}",
+                        lambda entity_id, data: pushed.append((entity_id, bool(data)))
+                        or {"server_updated": True})
+
+    body = client.post(f"/api/library/v2/{entity}/{ids[key]}/art",
+                       json={"url": "https://example.com/x.jpg"}).get_json()
+
+    assert pushed == [(ids[key], True)]
+    assert body["server_updated"] is True

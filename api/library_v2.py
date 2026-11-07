@@ -3081,6 +3081,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "success": True,
             "album_id": album_id,
             "image_url": _artwork_url("album", album_id),
+            **_outbound_art("album", album_id),
         }
         if embed_error:
             payload["embed_warning"] = (
@@ -3200,7 +3201,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({
             "success": True, "artist_id": artist_id,
             "image_url": _artwork_url("artist", artist_id),
+            **_outbound_art("artist", artist_id),
         })
+
+    def _outbound_art(kind: str, entity_id: int) -> dict:
+        """the picked image beyond SoulSync (the media server's poster,
+        cover.jpg / artist.jpg on disk), as 3.6.1's picker did. from the bytes
+        the artwork cache just stored; best effort, never fails the pick"""
+        try:
+            from core.library2.artwork import artwork_file
+            path = artwork_file(get_database(), kind, int(entity_id))
+            data = path.read_bytes() if path.is_file() else None
+            from api import artist_detail
+            return (artist_detail.push_album_art_outbound(entity_id, data) if kind == "album"
+                    else artist_detail.push_artist_art_outbound(entity_id, data))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("outbound %s art for %s skipped: %s", kind, entity_id, exc)
+            return {}
 
     # -- monitoring (mirrors watchlist / wishlist) ----------------------------
 

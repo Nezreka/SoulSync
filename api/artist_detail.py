@@ -1526,6 +1526,79 @@ def _artist_track_paths_on_disk(db, albums, limit=None):
                     return
 
 
+def push_album_art_outbound(album_id, image_bytes) -> dict:
+    """a picked cover beyond SoulSync, as 3.6.1 did: the active server's
+    poster, and cover.jpg in every folder of the album (Navidrome reads cover.*
+    before embedded art). best effort; says what happened."""
+    out = {"server_updated": False, "cover_written": False}
+    if not image_bytes:
+        return out
+    out["server_updated"] = _push_album_poster(album_id, image_bytes)
+    try:
+        from contextlib import closing
+        from core.library2.artwork import _album_folders
+        db = get_database()
+        with closing(db._get_connection()) as conn:
+            folders = _album_folders(conn, config_manager, int(album_id))
+        for folder in folders or []:
+            try:
+                if folder and os.path.isdir(folder) and _write_cover_jpg(image_bytes, folder):
+                    out["cover_written"] = True
+            except Exception as exc:  # noqa: BLE001 - one folder, not the rest
+                logger.warning("[set-art] cover.jpg write failed in %s: %s", folder, exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[set-art] cover.jpg for album %s skipped: %s", album_id, exc)
+    return out
+
+
+def push_artist_art_outbound(artist_id, image_bytes) -> dict:
+    """a picked artist photo beyond SoulSync, as 3.6.1 did: the active
+    server's poster, artist.jpg in the artist's folder, and a Navidrome scan
+    nudge. best effort; says what happened."""
+    out = {"server_updated": False, "disk_written": False, "disk_skipped": None}
+    if not image_bytes:
+        return out
+    db = get_database()
+    artist_row = db.get_artist(str(artist_id))
+    artist_name = getattr(artist_row, 'name', '') or '' if artist_row is not None else ''
+    if media_server_engine:
+        try:
+            active = config_manager.get_active_media_server()
+            client = media_server_engine.client(active)
+            if client and hasattr(client, 'update_artist_poster'):
+                server_artist = None
+                if hasattr(client, '_search_artists_by_name'):        # Plex
+                    matches = client._search_artists_by_name(title=artist_name, limit=1)
+                    server_artist = matches[0] if matches else None
+                elif hasattr(client, 'get_artist_by_id'):             # Jellyfin
+                    server_artist = client.get_artist_by_id(str(artist_id))
+                if server_artist is not None:
+                    out["server_updated"] = bool(client.update_artist_poster(server_artist, image_bytes))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[set-artist-art] server poster update failed: %s", exc)
+    try:
+        from core.library.artist_image import find_artist_folder, write_artist_jpg
+        albums = db.get_albums_by_artist(str(artist_id)) or []
+        artist_folder = find_artist_folder(_artist_track_paths_on_disk(db, albums), artist_name)
+        if not artist_folder and next(iter(_artist_track_paths_on_disk(db, albums, limit=1)), None):
+            out["disk_skipped"] = _NO_ARTIST_FOLDER
+        if artist_folder:
+            ok, detail = write_artist_jpg(artist_folder, image_bytes, overwrite=True)
+            out["disk_written"] = bool(ok)
+            if not ok:
+                logger.warning("[set-artist-art] artist.jpg write failed: %s", detail)
+            elif media_server_engine and config_manager.get_active_media_server() == 'navidrome':
+                nav = media_server_engine.client('navidrome')
+                if nav:
+                    try:
+                        nav.trigger_library_scan()
+                    except Exception:  # noqa: BLE001
+                        logger.debug("[set-artist-art] navidrome scan nudge failed", exc_info=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[set-artist-art] disk write failed: %s", exc)
+    return out
+
+
 @bp.route('/api/artist/<artist_id>/art', methods=['POST'])
 def set_artist_art(artist_id):
     """Apply a photo chosen in the artist image picker — everywhere:
