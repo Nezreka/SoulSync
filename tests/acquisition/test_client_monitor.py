@@ -732,6 +732,7 @@ def test_runtime_runs_persistent_reconciliation_without_open_usenet_grabs(tmp_pa
             lambda: calls.append("reconcile") or {"observed": 2, "applied": 1}
         ),
     )
+    monitor._has_live_work = lambda: True   # a soulseek / torrent grab in flight
 
     result = monitor.run_once()
 
@@ -750,7 +751,29 @@ def test_runtime_reconciles_evidence_before_legacy_import_sweep(tmp_path):
         persistent_reconciler_runner=lambda: calls.append("reconcile"),
         import_pipeline_runner=lambda: calls.append("imports"),
     )
+    monitor._has_live_work = lambda: True
 
     monitor.run_once()
 
     assert calls == ["reconcile", "imports"]
+
+
+
+def test_an_idle_install_never_polls_the_clients(tmp_path):
+    """third #1062 review G04-3: with nothing in flight the reconciler still
+    polled every download client, copied every task and read every
+    quarantine sidecar, every 15 seconds"""
+    seed, factory = _runtime_database(tmp_path)
+    seed.close()
+    calls = []
+    monitor = UsenetAcquisitionMonitor(
+        factory, adapter_getter=lambda: None,
+        persistent_reconciler_runner=lambda: calls.append("reconcile"))
+    monitor.run_once()
+    assert calls == []
+    seed = factory()
+    _linked_grab(seed, "dl-live", external_job_id="job-live")
+    seed.commit()
+    seed.close()
+    monitor.run_once()
+    assert calls == ["reconcile"]

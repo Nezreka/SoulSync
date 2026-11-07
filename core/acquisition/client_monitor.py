@@ -564,6 +564,33 @@ class UsenetAcquisitionMonitor:
         except (TypeError, ValueError):
             return 15.0
 
+    def _has_live_work(self) -> bool:
+        """one cheap read: an open grab, a request still grabbing, an import
+        or a recovery under way. unreadable means yes (never skip real work)"""
+        conn = self._connection_factory()
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                "('acquisition_grabs','acquisition_requests','acquisition_imports',"
+                "'acquisition_quarantine_recoveries')")}
+            checks = []
+            if "acquisition_grabs" in tables:
+                checks.append("SELECT 1 FROM acquisition_grabs "
+                              "WHERE status NOT IN ('completed','failed','cancelled')")
+            if "acquisition_requests" in tables:
+                checks.append("SELECT 1 FROM acquisition_requests WHERE status='grabbing'")
+            if "acquisition_imports" in tables:
+                checks.append("SELECT 1 FROM acquisition_imports "
+                              "WHERE status IN ('pending','matching','importing')")
+            if "acquisition_quarantine_recoveries" in tables:
+                checks.append("SELECT 1 FROM acquisition_quarantine_recoveries "
+                              "WHERE status IN ('recovered','reimporting')")
+            return any(conn.execute(q + " LIMIT 1").fetchone() for q in checks)
+        except Exception:  # noqa: BLE001
+            return True
+        finally:
+            conn.close()
+
     def _read_open_grabs(self) -> Tuple[Tuple[dict, ...], Tuple[str, ...]]:
         conn = self._connection_factory()
         try:
@@ -678,7 +705,11 @@ class UsenetAcquisitionMonitor:
                 skipped_reason="cycle_in_progress",
             )
         try:
-            persistent_result = self._run_persistent_reconciler()
+            # the reconciler polls every download client, copies every task
+            # and reads every quarantine sidecar: only when something is
+            # actually in flight (an idle install did all that every 15 s)
+            persistent_result = (self._run_persistent_reconciler()
+                                 if self._has_live_work() else None)
             # Evidence reconciliation must precede the import coordinator's
             # legacy seven-day fallback sweep.  That preserves a real indexed
             # completion or quarantine sidecar instead of aging it out first.
