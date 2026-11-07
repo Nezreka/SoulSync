@@ -157,6 +157,25 @@ class TestFindLibraryArtistForSource:
         )
         assert result == plex
 
+    def test_name_fallback_finds_this_librarys_artist_past_another(self, db, monkeypatch):
+        """own libraries: another library's same-named artist must not take the
+        one slot and send this profile to the provider page (3.6.1 filtered
+        by library before picking)"""
+        other = _insert_artist(db, artist_id="pk-other", name="Kendrick Lamar",
+                               server_source="plex")
+        mine = _insert_artist(db, artist_id="pk-mine", name="Kendrick Lamar",
+                              server_source="plex")
+        monkeypatch.setattr("core.library2.sql_util.scope_visibility_sql",
+                            lambda _entity, alias, **_k: f"{alias}.id <> {int(other)}")
+        monkeypatch.setattr("core.library2.sql_util.entity_visible",
+                            lambda _conn, _entity, entity_id, **_k: int(entity_id) != int(other))
+
+        result = find_library_artist_for_source(
+            db, "deezer", "no-id-match", artist_name="kendrick lamar",
+            active_server="plex",
+        )
+        assert result == mine
+
     def test_name_fallback_folds_beyond_ascii(self, db):
         """SQLite's LOWER() left "BJÖRK" and "Björk" as different artists."""
         row_id = _insert_artist(db, artist_id="pk-bjork", name="Björk",
