@@ -371,6 +371,8 @@ def test_redownload_forces_wanted_even_for_unmonitored_track(legacy_db):
 def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
     legacy_db, tmp_path, monkeypatch
 ):
+    # this test is about what an inspected album does; the anomaly gate has its own tests
+    monkeypatch.setattr("core.repair_jobs.track_number_repair._album_has_number_anomaly", lambda *_a, **_k: True)
     from core.repair_jobs.track_number_repair import TrackNumberRepairJob
 
     _import(legacy_db)
@@ -1367,6 +1369,8 @@ def test_track_number_repair_reaches_v2_only_files(legacy_db, tmp_path, monkeypa
     the folder is now incidental — so the guarantee is stated against the file, which
     is what it was always about.
     """
+    # this test is about what an inspected album does; the anomaly gate has its own tests
+    monkeypatch.setattr("core.repair_jobs.track_number_repair._album_has_number_anomaly", lambda *_a, **_k: True)
     from core.repair_jobs.track_number_repair import TrackNumberRepairJob
 
     _import(legacy_db)

@@ -87,6 +87,8 @@ def test_every_guarded_job_is_wired(module):
 def test_track_number_repair_leaves_an_album_with_one_hand_tagged_file_alone(tmp_path, monkeypatch):
     """3.6.1 skipped the whole album folder: renumbering the other files of a
     release the user typed against the service's tracklist splits it"""
+    # this test is about what an inspected album does; the anomaly gate has its own tests
+    monkeypatch.setattr("core.repair_jobs.track_number_repair._album_has_number_anomaly", lambda *_a, **_k: True)
     from core.repair_jobs.base import JobContext
     db = _db(tmp_path)
     db.record_manual_metadata_file(LIVE)

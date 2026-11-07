@@ -369,6 +369,8 @@ def test_number_apply_rechecks_manual_override(library):
 
 
 def test_number_scan_retries_after_catalogue_becomes_complete(library, monkeypatch):
+    # this test is about what an inspected album does; the anomaly gate has its own tests
+    monkeypatch.setattr("core.repair_jobs.track_number_repair._album_has_number_anomaly", lambda *_a, **_k: True)
     from core.repair_jobs.base import JobContext
     from core.repair_jobs.track_number_repair import TrackNumberRepairJob
     db, path, cfg = library
