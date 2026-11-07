@@ -395,7 +395,10 @@ class TestManualMatchKeepsTheAttemptLedgerInStep:
         picked = next_pending(conn, "spotify", entity_types=("artist",))
         assert picked is None or picked["id"] != artist
 
-    def test_clearing_an_id_makes_the_entity_selectable_again(self, imported_conn):
+    def test_a_users_clear_stays_cleared(self, imported_conn):
+        """second #1062 review T2: a clear is the user saying the match was
+        wrong. 3.6.1 kept it cleared until the user matched it by hand; the
+        worker must not search the same wrong id back"""
         from core.library2.worker_queue import next_pending
 
         conn = imported_conn
@@ -403,6 +406,18 @@ class TestManualMatchKeepsTheAttemptLedgerInStep:
         MS.set_library_v2_match(conn, "artist", artist, "spotify", "sp-manual")
 
         MS.set_library_v2_match(conn, "artist", artist, "spotify", None)
+
+        picked = next_pending(conn, "spotify", entity_types=("artist",))
+        assert picked is None or picked["id"] != artist
+
+    def test_a_repair_that_drops_its_own_id_asks_again_at_once(self, imported_conn):
+        from core.library2.worker_queue import next_pending
+
+        conn = imported_conn
+        artist = self._owned_artist(conn)
+        MS.set_library_v2_match(conn, "artist", artist, "spotify", "sp-wrong")
+
+        MS.set_library_v2_match(conn, "artist", artist, "spotify", None, ask_again=True)
 
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_provider_attempts "

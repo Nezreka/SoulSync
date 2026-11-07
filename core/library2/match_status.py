@@ -195,7 +195,7 @@ def album_match_bundle(
 
 def _sync_attempt_ledger(
     conn: Any, canonical: str, entity_id: int, service: str, value: Optional[str],
-    *, ask_again: bool = False,
+    *, ask_again: bool = False, detail: str = "manual match",
 ) -> None:
     """Keep ``lib2_provider_attempts`` in step with a manually set/cleared id.
 
@@ -214,7 +214,7 @@ def _sync_attempt_ledger(
         if value:
             provider_attempts.record_attempt(
                 conn, entity_type=canonical, entity_id=entity_id,
-                service=service, status="matched", detail="manual match",
+                service=service, status="matched", detail=detail,
             )
         elif ask_again:
             conn.execute(
@@ -365,8 +365,13 @@ def set_library_v2_match(
     actor: str = "admin",
     steal: bool = False,
     ask_again: bool = False,
+    origin: str = "manual",
 ) -> None:
     """Set or clear one explicitly qualified provider identity.
+
+    ``origin='automatic'``: a background lookup made the match. It is labelled
+    as such (not as the user's own choice), and never relabels a manual match
+    of the same id.
 
     ``steal`` decides what happens when another entity already holds the id.
     Automated callers leave it False and get a :class:`ProviderIdentityConflict`
@@ -445,7 +450,8 @@ def set_library_v2_match(
     # straight back to the worker; a manual DELETE cleared the id but left a
     # stale ``matched`` row, so the queue never offered that entity again. Same
     # transaction as the id, so the two can never be half-applied.
-    _sync_attempt_ledger(conn, canonical, int(entity_id), service, value, ask_again=ask_again)
+    _sync_attempt_ledger(conn, canonical, int(entity_id), service, value, ask_again=ask_again,
+                         detail=("native enrichment" if origin == "automatic" else "manual match"))
 
     # A source's credit list belongs to the release it matched: a rematch or a
     # cleared match takes that list's featured artists away with it (3.6.1
@@ -473,8 +479,10 @@ def set_library_v2_match(
     provenance_type = f"lib2_{canonical}"
     if value:
         try:
-            from core.enrichment.match_provenance import record_manual_match
-            record_manual_match(
+            from core.enrichment.match_provenance import (
+                record_automatic_match, record_manual_match,
+            )
+            (record_automatic_match if origin == "automatic" else record_manual_match)(
                 conn,
                 entity_type=provenance_type,
                 entity_id=entity_id,

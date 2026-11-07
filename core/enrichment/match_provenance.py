@@ -27,6 +27,27 @@ def record_manual_match(
     actor: str = "admin",
 ) -> None:
     """Mark the current provider identity as explicitly chosen by a user."""
+    _record_match(conn, entity_type, entity_id, service, external_id, actor, "manual")
+
+
+def record_automatic_match(conn, *, entity_type: str, entity_id, service: str,
+                           external_id: str, actor: str = "native_enrichment") -> None:
+    """A match a background lookup made. It never relabels a user's own match
+    of the same id: that one stays 'manual'."""
+    conn.execute(
+        """INSERT INTO metadata_match_provenance(
+               entity_type, entity_id, service, origin, external_id, matched_at, actor)
+           VALUES(?, ?, ?, 'automatic', ?, CURRENT_TIMESTAMP, ?)
+           ON CONFLICT(entity_type, entity_id, service) DO UPDATE SET
+               origin='automatic', external_id=excluded.external_id,
+               matched_at=CURRENT_TIMESTAMP, actor=excluded.actor
+           WHERE NOT (metadata_match_provenance.origin='manual'
+                      AND metadata_match_provenance.external_id=excluded.external_id)""",
+        (str(entity_type), _entity_key(entity_id), str(service), str(external_id), str(actor)),
+    )
+
+
+def _record_match(conn, entity_type, entity_id, service, external_id, actor, origin) -> None:
     conn.execute(
         """INSERT INTO metadata_match_provenance(
                entity_type, entity_id, service, origin, external_id,

@@ -830,9 +830,11 @@ def enrich_native_entity_for_service(
         ProviderIdentityConflict, set_library_v2_match,
     )
     try:
+        # a search's pick, not the user's: labelled automatic, and never
+        # relabels a match the user made by hand
         set_library_v2_match(
             conn, canonical, int(entity_id), actual_source, provider_id,
-            actor="native_enrichment",
+            actor="native_enrichment", origin="automatic",
         )
     except ProviderIdentityConflict as conflict:
         # Another entity already IS this provider release. Leaving this one
