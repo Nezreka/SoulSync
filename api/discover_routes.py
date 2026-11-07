@@ -3239,14 +3239,24 @@ def get_your_artist_info(artist_id):
             database = get_database()
             conn = database._get_connection()
             cursor = conn.cursor()
-            # Check by various ID columns
-            cursor.execute("""
-                SELECT * FROM lib2_artists WHERE id = ? OR spotify_id = ?
-                   OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
-                   OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
-                   OR TRIM(CAST(json_extract(external_ids,'$.discogs') AS TEXT)) = ? LIMIT 1
-            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
-            row = cursor.fetchone()
+            # by the provider ids the card carries, never the catalogue row
+            # id: a Deezer id like 13 is not lib2 artist 13 (a stranger). the
+            # canonical row wins, and a name the card sent has to agree
+            from core.library2.importer import normalize_name
+            from core.library2.provider_ids import indexed_provider_id_sql
+            row = None
+            for source in ("spotify", "itunes", "deezer", "discogs"):
+                expression = indexed_provider_id_sql(source)
+                if not expression:
+                    continue
+                cursor.execute(
+                    f"SELECT * FROM lib2_artists WHERE {expression} = ? "
+                    "ORDER BY (canonical_artist_id IS NOT NULL), id LIMIT 1", (str(artist_id),))
+                found = cursor.fetchone()
+                if found and (not artist_name
+                              or normalize_name(found["name"] or "") == normalize_name(artist_name)):
+                    row = found
+                    break
             if row:
                 r = dict(row)
                 from core.library2.provider_ids import parse_external_ids

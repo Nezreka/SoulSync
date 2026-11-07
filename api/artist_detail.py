@@ -707,18 +707,7 @@ def get_artist_top_tracks_endpoint(artist_id):
             _conn = _db._get_connection()
             try:
                 _cur = _conn.cursor()
-                _cur.execute("""
-                    SELECT spotify_id AS spotify_artist_id,
-                           json_extract(external_ids, '$.deezer') AS deezer_id
-                    FROM lib2_artists
-                    WHERE id = ?
-                       OR spotify_id = ?
-                       OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
-                       OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
-                       OR musicbrainz_id = ?
-                    LIMIT 1
-                """, (artist_id, artist_id, artist_id, artist_id, artist_id))
-                _row = _cur.fetchone()
+                _row = _library_artist_for_id(_cur, artist_id)
                 if _row:
                     if primary_source == 'spotify' and _row['spotify_artist_id']:
                         resolved_id = str(_row['spotify_artist_id'])
@@ -770,6 +759,46 @@ def get_artist_top_tracks_endpoint(artist_id):
         return jsonify({"success": False, "error": str(e), "tracks": []}), 500
 
 
+_ARTIST_ID_COLUMNS = """SELECT a.spotify_id AS spotify_artist_id,
+           json_extract(a.external_ids, '$.itunes') AS itunes_artist_id,
+           json_extract(a.external_ids, '$.deezer') AS deezer_id,
+           a.musicbrainz_id
+      FROM lib2_artists a"""
+
+
+def _library_artist_for_id(cursor, artist_id):
+    """The library artist a URL id names: a provider id (spotify, itunes,
+    deezer, musicbrainz), never a bare catalogue row id. 3.6.1's ``artists.id``
+    was the media server's own id; ``lib2_artists.id`` is 1..N, so a Deezer id
+    like 13 used to hit catalogue row 13 (a stranger). A catalogue id is only
+    taken spelled ``lib2:<n>``. Among rows sharing a provider id, the
+    canonical row with files wins."""
+    raw = str(artist_id or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("lib2:") and raw[5:].isdigit():
+        cursor.execute(f"{_ARTIST_ID_COLUMNS} WHERE a.id = ?", (int(raw[5:]),))
+        return cursor.fetchone()
+    from core.library2.provider_ids import indexed_provider_id_sql
+    for source in ("spotify", "itunes", "deezer", "musicbrainz"):
+        expression = indexed_provider_id_sql(source, alias="a")
+        if not expression:
+            continue
+        cursor.execute(
+            f"""{_ARTIST_ID_COLUMNS} WHERE {expression} = ?
+                ORDER BY (a.canonical_artist_id IS NOT NULL),
+                         NOT EXISTS (SELECT 1 FROM lib2_album_artists aa
+                                       JOIN lib2_tracks t ON t.album_id = aa.album_id
+                                       JOIN lib2_track_files f ON f.track_id = t.id
+                                      WHERE aa.artist_id = a.id LIMIT 1),
+                         a.id
+                LIMIT 1""", (raw,))
+        row = cursor.fetchone()
+        if row:
+            return row
+    return None
+
+
 def _resolve_artist_source_ids(artist_id) -> dict:
     """Per-source artist ids from the enriched library row, keyed by source.
 
@@ -784,20 +813,7 @@ def _resolve_artist_source_ids(artist_id) -> dict:
         _conn = _db._get_connection()
         try:
             _cur = _conn.cursor()
-            _cur.execute("""
-                SELECT spotify_id AS spotify_artist_id,
-                       json_extract(external_ids, '$.itunes') AS itunes_artist_id,
-                       json_extract(external_ids, '$.deezer') AS deezer_id,
-                       musicbrainz_id
-                FROM lib2_artists
-                WHERE id = ?
-                   OR spotify_id = ?
-                   OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
-                   OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
-                   OR musicbrainz_id = ?
-                LIMIT 1
-            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
-            _row = _cur.fetchone()
+            _row = _library_artist_for_id(_cur, artist_id)
             if _row:
                 if _row['spotify_artist_id']:
                     artist_source_ids['spotify'] = str(_row['spotify_artist_id'])
