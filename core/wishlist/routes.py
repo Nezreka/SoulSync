@@ -451,13 +451,18 @@ def _lib2_artists_by_name(conn, names: list[str]) -> dict[str, tuple[int, Any]]:
     for chunk in _chunked(names):
         marks = ','.join('?' * len(chunk))
         if has_name_key:
-            rows = conn.execute(
-                f"""SELECT id, name, name_key, image_url
-                      FROM lib2_artists
-                     WHERE LOWER(name) IN ({marks})
-                        OR COALESCE(name_key, '') IN ({marks})""",
-                chunk + chunk,
-            ).fetchall()
+            # two indexed lookups, merged. third #1062 review G13-5: one OR
+            # over LOWER(name) and COALESCE(name_key,'') scanned every artist
+            # per 400 names (the COALESCE side has no index)
+            seen_ids: set = set()
+            rows = []
+            for where in (f"LOWER(name) IN ({marks})", f"name_key IN ({marks})"):
+                for row in conn.execute(
+                        f"SELECT id, name, name_key, image_url FROM lib2_artists WHERE {where}",
+                        chunk).fetchall():
+                    if row['id'] not in seen_ids:
+                        seen_ids.add(row['id'])
+                        rows.append(row)
             keys_of = lambda row: (row['name_key'], row['name'])  # noqa: E731
         else:
             rows = conn.execute(
