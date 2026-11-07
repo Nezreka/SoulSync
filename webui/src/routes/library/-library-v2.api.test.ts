@@ -848,8 +848,10 @@ describe('library v2 art picker api', () => {
         });
       }),
     );
-    await expect(applyLibraryV2AlbumArt(42, 'https://example.com/pick.jpg')).resolves.toBe(
-      '/api/library/v2/artwork/album/42',
+    await expect(applyLibraryV2AlbumArt(42, 'https://example.com/pick.jpg')).resolves.toMatchObject(
+      {
+        image_url: '/api/library/v2/artwork/album/42',
+      },
     );
   });
 
@@ -914,8 +916,10 @@ describe('library v2 artist image picker api (deep-dive A9)', () => {
         });
       }),
     );
-    await expect(applyLibraryV2ArtistArt(7, 'https://example.com/pick.jpg')).resolves.toBe(
-      '/api/library/v2/artwork/artist/7',
+    await expect(applyLibraryV2ArtistArt(7, 'https://example.com/pick.jpg')).resolves.toMatchObject(
+      {
+        image_url: '/api/library/v2/artwork/artist/7',
+      },
     );
   });
 

@@ -1814,8 +1814,23 @@ export async function fetchLibraryV2AlbumArtOptions(
 
 /** Apply a cover chosen in the picker (docs §49). Pins the choice so a later
  *  refresh won't clobber it; returns the local artwork URL to re-render. */
-export async function applyLibraryV2AlbumArt(albumId: number, url: string): Promise<string> {
-  const payload = await readJson<{ success: boolean; image_url?: string; error?: string }>(
+/** What an applied cover or photo reached beyond SoulSync (3.6.1 said so). */
+export interface ArtApplyOutcome {
+  image_url: string;
+  server_updated?: boolean;
+  cover_written?: boolean;
+  disk_written?: boolean;
+  disk_skipped?: string | null;
+  embed_warning?: string;
+}
+
+type ArtApplyPayload = Partial<ArtApplyOutcome> & { success: boolean; error?: string };
+
+export async function applyLibraryV2AlbumArt(
+  albumId: number,
+  url: string,
+): Promise<ArtApplyOutcome> {
+  const payload = await readJson<ArtApplyPayload>(
     apiClient.post(`library/v2/albums/${albumId}/art`, {
       json: { url },
       // dd28-01: the apply path is strictly slower than the art-options GET it
@@ -1830,7 +1845,7 @@ export async function applyLibraryV2AlbumArt(albumId: number, url: string): Prom
   if (!payload.success || !payload.image_url) {
     throw new Error(payload.error || 'Failed to apply cover art');
   }
-  return payload.image_url;
+  return { ...payload, image_url: payload.image_url };
 }
 
 /** Stop overriding an album cover. The current image remains until the next
@@ -1862,8 +1877,11 @@ export async function fetchLibraryV2ArtistArtOptions(
 
 /** Apply a photo chosen in the picker (deep-dive A9). Pins the choice so a
  *  later refresh won't clobber it; returns the local artwork URL to re-render. */
-export async function applyLibraryV2ArtistArt(artistId: number, url: string): Promise<string> {
-  const payload = await readJson<{ success: boolean; image_url?: string; error?: string }>(
+export async function applyLibraryV2ArtistArt(
+  artistId: number,
+  url: string,
+): Promise<ArtApplyOutcome> {
+  const payload = await readJson<ArtApplyPayload>(
     apiClient.post(`library/v2/artists/${artistId}/art`, {
       json: { url },
       // dd28-01: see the matching comment on applyLibraryV2AlbumArt.
@@ -1873,7 +1891,7 @@ export async function applyLibraryV2ArtistArt(artistId: number, url: string): Pr
   if (!payload.success || !payload.image_url) {
     throw new Error(payload.error || 'Failed to apply photo');
   }
-  return payload.image_url;
+  return { ...payload, image_url: payload.image_url };
 }
 
 /** Stop overriding an artist photo and follow automatic/server artwork again. */
