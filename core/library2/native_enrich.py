@@ -1019,11 +1019,33 @@ def _get_or_create_component_artist(
     still-unmapped* row is enriched too. A legacy-backed match is left untouched
     (it keeps the authoritative legacy path).
     """
+    from core.library2.importer import normalize_name
+
+    source = str(identity["source"]).strip().lower()
+    provider_id = str(identity["artist_id"]).strip()
+    columns = "id, legacy_artist_id, spotify_id, musicbrainz_id, external_ids"
+    # third #1062 review P2B-7: the name the way autolink keys it (name_key,
+    # through its index), then whoever already holds the resolver's id ("Ian
+    # Asher & Beyonce" splits to "Beyonce"; the library's "Beyoncé" holds the
+    # spotify id). a NOCASE name match missed the accent and minted a second
+    # row carrying the same id
     existing = conn.execute(
-        "SELECT id, legacy_artist_id, spotify_id, musicbrainz_id, external_ids "
-        "FROM lib2_artists WHERE name=? COLLATE NOCASE ORDER BY id LIMIT 1",
+        f"SELECT {columns} FROM lib2_artists WHERE name_key=? ORDER BY id LIMIT 1",
+        (normalize_name(name),),
+    ).fetchone() or conn.execute(
+        # a row written without a name_key
+        f"SELECT {columns} FROM lib2_artists WHERE name=? COLLATE NOCASE ORDER BY id LIMIT 1",
         (name,),
     ).fetchone()
+    if existing is None and source and provider_id:
+        from core.library2.match_status import provider_id_owner
+        try:
+            holder = provider_id_owner(conn, "artist", source, provider_id)
+        except Exception:  # noqa: BLE001 - a provider the owner check doesn't know
+            holder = None
+        if holder is not None:
+            existing = conn.execute(f"SELECT {columns} FROM lib2_artists WHERE id=?",
+                                    (holder,)).fetchone()
     if existing is not None:
         cid = int(existing["id"])
         unmapped = (
@@ -1032,7 +1054,7 @@ def _get_or_create_component_artist(
             and not existing["musicbrainz_id"]
             and (existing["external_ids"] or "{}") in ("", "{}")
         )
-        if unmapped:
+        if unmapped and identity_is_free(conn, cid, source, provider_id):
             _persist_identity(
                 conn, cid,
                 source=str(identity["source"]).strip().lower(),
@@ -1043,13 +1065,15 @@ def _get_or_create_component_artist(
             )
         return cid
 
-    from core.library2.importer import normalize_name
-
     cur = conn.execute(
         "INSERT INTO lib2_artists(name, name_key, sort_name, monitored) VALUES(?, ?, ?, ?)",
         (name, normalize_name(name), name, monitored),
     )
     cid = int(cur.lastrowid)
+    if not identity_is_free(conn, cid, source, provider_id):
+        # never a second holder of one provider identity (the single-artist
+        # path's rule); the component stays a plain name row
+        return cid
     _persist_identity(
         conn, cid,
         source=str(identity["source"]).strip().lower(),

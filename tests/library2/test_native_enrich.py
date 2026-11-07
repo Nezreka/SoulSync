@@ -1578,3 +1578,22 @@ def test_a_split_ghosts_watches_go_to_the_artists_it_became(imported_conn):
     assert rules[(beta, 2)] == 0          # beta's own choice for profile 2 stands
     assert imported_conn.execute("SELECT monitored FROM lib2_artists WHERE id=?",
                                  (alpha,)).fetchone()[0] == 1
+
+
+def test_smart_split_reuses_the_artist_holding_the_resolved_id(imported_conn):
+    """third #1062 review P2B-7: "Ian Asher & Beyonce" splits to "Beyonce";
+    the library's "Beyoncé" holds that spotify id. a NOCASE name match missed
+    the accent and minted a second row carrying the same id"""
+    beyonce = _insert_native_artist(imported_conn, "Beyoncé")
+    imported_conn.execute("UPDATE lib2_artists SET spotify_id='SP_Beyonce' WHERE id=?", (beyonce,))
+    combined = _insert_native_artist(imported_conn, "Ian Asher & Beyonce")
+    album_id, _track = _make_collab_release(imported_conn, combined)
+
+    NE.smart_split_combined_artist(imported_conn, combined, resolver=_component_resolver)
+
+    holders = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE spotify_id='SP_Beyonce'").fetchall()
+    assert [r["id"] for r in holders] == [beyonce]
+    credited = {r["artist_id"] for r in imported_conn.execute(
+        "SELECT artist_id FROM lib2_album_artists WHERE album_id=?", (album_id,))}
+    assert beyonce in credited
