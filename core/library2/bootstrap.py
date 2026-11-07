@@ -700,6 +700,10 @@ def _carry_upgrade_state(conn: Any) -> Dict[str, Any]:
         # state (the Library's cards and filter read it per profile)
         from core.library2.monitor_sync import carry_member_watchlists
         stats["member_watchlists"] = carry_member_watchlists(conn)["artists"]
+        # a re-identify still pending from 3.6.1 names the track it replaces
+        # by its legacy id: onto the lib2 track, or no replace at all
+        from core.imports.rematch_hints import carry_legacy_rematch_hints
+        stats["rematch_hints_mapped"] = carry_legacy_rematch_hints(conn)
     except Exception as exc:  # noqa: BLE001 - each carry retries next start
         logger.warning("3.6.1 state not fully carried yet: %s", exc)
     return stats

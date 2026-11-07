@@ -219,3 +219,40 @@ def test_finalize_consumes_and_replaces(conn, monkeypatch):
     # old file retired, catalogue identity retained, hint consumed
     assert cur.execute("SELECT file_state FROM lib2_track_files WHERE track_id=42").fetchone()[0] == 'deleted'
     assert find_hint_for_file(conn.cursor(), "/staging/Song.flac") is None   # consumed
+
+
+# ── a hint from 3.6.1 (third #1062 review, G06-1) ──────────────────────────────
+def test_a_delete_refuses_an_id_from_another_space(conn):
+    """a pending 3.6.1 hint names a Plex ratingKey; read as a lib2 id it was an
+    unrelated track whose file got deleted"""
+    cur = conn.cursor()
+    _file(cur, 7, '/lib/unrelated.flac')
+    removed = []
+    assert delete_replaced_track(cur, 7, unlink=lambda p: removed.append(p), id_space=None) is None
+    assert removed == []
+    assert cur.execute("SELECT file_state FROM lib2_track_files WHERE track_id=7").fetchone()[0] == 'active'
+
+
+def test_a_new_hint_records_that_it_names_a_lib2_track(conn):
+    cur = conn.cursor()
+    create_hint(cur, _hint(replace_track_id=7))
+    assert cur.execute("SELECT replace_id_space FROM rematch_hints").fetchone()[0] == 'lib2'
+
+
+def test_a_pending_3_6_1_hint_is_mapped_or_loses_only_its_replace(conn):
+    from core.imports.rematch_hints import carry_legacy_rematch_hints, ensure_replace_id_space_column
+    cur = conn.cursor()
+    ensure_replace_id_space_column(cur)
+    cur.execute("ALTER TABLE lib2_tracks ADD COLUMN legacy_track_id INTEGER")
+    cur.execute("ALTER TABLE lib2_track_files ADD COLUMN legacy_track_id INTEGER")
+    cur.execute("INSERT INTO lib2_tracks(id, title, legacy_track_id) VALUES(31, 'Song', 48213)")
+    for staged, legacy in (("/staging/a.flac", 48213), ("/staging/b.flac", 99999)):
+        cur.execute("INSERT INTO rematch_hints(staged_path, source, replace_track_id) VALUES(?, 'spotify', ?)",
+                    (staged, legacy))
+    conn.commit()
+
+    assert carry_legacy_rematch_hints(conn) == 1
+
+    rows = dict(cur.execute("SELECT staged_path, replace_track_id || ':' || COALESCE(replace_id_space,'-') "
+                            "FROM rematch_hints").fetchall())
+    assert rows == {"/staging/a.flac": "31:lib2", "/staging/b.flac": None}

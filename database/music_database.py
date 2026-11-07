@@ -1997,6 +1997,9 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_staged_path ON rematch_hints (staged_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_content_hash ON rematch_hints (content_hash)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_status ON rematch_hints (status)")
+            # which id space replace_track_id names; NULL on a hint from 3.6.1
+            if 'replace_id_space' not in {r[1] for r in cursor.execute("PRAGMA table_info(rematch_hints)")}:
+                cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_id_space TEXT")
 
             # Sync history table — tracks the last 100 sync operations with cached context for re-trigger
             cursor.execute("""
