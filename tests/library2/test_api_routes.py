@@ -4725,6 +4725,25 @@ def test_a_cleared_match_is_not_searched_back(api):
     assert row[0] == "matched"
 
 
+def test_an_id_moved_to_another_release_sends_its_old_holder_back_to_the_queue(api):
+    """third #1062 review P2B-1: matching release B by hand to an id release A
+    held moves the id, but A never said its match was wrong. it must be looked
+    up again (not "cleared by user"), and a pin naming that id is lifted"""
+    from core.library2.match_status import apply_manual_match
+    from core.library2.provider_attempts import due_entities
+    _client, db, ids = api
+    conn = _conn(db)
+    apply_manual_match(conn, "album", ids["ep"], "deezer", "dz-shared", actor="profile:1")
+    conn.commit()
+    apply_manual_match(conn, "album", ids["views"], "deezer", "dz-shared", actor="profile:1")
+    conn.commit()
+    assert ids["ep"] in due_entities(conn, entity_type="album", service="deezer", limit=1000)
+    pin = conn.execute("SELECT canonical_album_id, COALESCE(canonical_locked,0) FROM lib2_albums "
+                       "WHERE id=?", (ids["ep"],)).fetchone()
+    conn.close()
+    assert pin[0] != "dz-shared" and not pin[1]
+
+
 def test_a_fixed_artist_match_moves_the_profiles_watchlist_entry(api):
     """Upstream #1901 on Library v2: the watchlist row that shares one of the
     artist's ids from before the fix follows the new id; another profile's

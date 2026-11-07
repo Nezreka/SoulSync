@@ -364,6 +364,7 @@ def set_library_v2_match(
     *,
     actor: str = "admin",
     steal: bool = False,
+    ask_again: bool = False,
 ) -> None:
     """Set or clear one explicitly qualified provider identity.
 
@@ -406,9 +407,15 @@ def set_library_v2_match(
             # Clear the previous claim first, in this same transaction — an
             # id that exists on two rows for even one statement is a state no
             # reader should ever be able to observe.
+            # the old holder didn't say its match was wrong: the id is simply
+            # someone else's. it goes back to the queue (not "cleared by
+            # user"), and a release pin naming the id goes with it
             set_library_v2_match(
-                conn, canonical, owner, service, None, actor=actor,
+                conn, canonical, owner, service, None, actor=actor, ask_again=True,
             )
+            if canonical == "album":
+                from core.library2.editions import pin_album_release
+                pin_album_release(conn, owner, service, None)
             logger.info(
                 "Moved %s id %s from %s %s to %s %s",
                 service, value, canonical, owner, canonical, entity_id,
@@ -438,7 +445,7 @@ def set_library_v2_match(
     # straight back to the worker; a manual DELETE cleared the id but left a
     # stale ``matched`` row, so the queue never offered that entity again. Same
     # transaction as the id, so the two can never be half-applied.
-    _sync_attempt_ledger(conn, canonical, int(entity_id), service, value)
+    _sync_attempt_ledger(conn, canonical, int(entity_id), service, value, ask_again=ask_again)
 
     # A source's credit list belongs to the release it matched: a rematch or a
     # cleared match takes that list's featured artists away with it (3.6.1
