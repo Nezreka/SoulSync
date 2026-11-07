@@ -731,6 +731,10 @@ def run_deferred_backfills(database: Any, *,
             # behind (collab releases on every credited artist's page)
             from core.library2.legacy_credits import carry_legacy_artist_credits
             stats["legacy_credits"] = sum(carry_legacy_artist_credits(conn).values())
+            # each household member's 3.6.1 watchlist as their own watch
+            # state (the Library's cards and filter read it per profile)
+            from core.library2.monitor_sync import carry_member_watchlists
+            stats["member_watchlists"] = carry_member_watchlists(conn)["artists"]
             # the Songs tab's artist/album/year/recent sorts walk these
             # (a pass over every track the first time, then nothing)
             from core.library2.queries import ensure_song_sort_indexes

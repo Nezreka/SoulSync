@@ -231,12 +231,17 @@ def demonitor_lib2_artists_for_removed_watchlist(
 
         demonitored = 0
         for artist_id in artist_ids:
-            cur = conn.execute(
-                "UPDATE lib2_artists SET monitored=0, updated_at=CURRENT_TIMESTAMP "
-                "WHERE id=? AND monitored=1",
-                (artist_id,),
-            )
-            demonitored += int(cur.rowcount)
+            # the global column is the shared library's (the admin's); a
+            # household member's removal is their own rule only
+            if _is_admin_profile(profile_id):
+                cur = conn.execute(
+                    "UPDATE lib2_artists SET monitored=0, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=? AND monitored=1",
+                    (artist_id,),
+                )
+                demonitored += int(cur.rowcount)
+            else:
+                demonitored += 1
             record_rule(conn, "artist", artist_id, False, PROVENANCE_USER,
                         profile_id=profile_id)
 
@@ -641,8 +646,8 @@ def sync_watchlist_removal(
     raises — a reverse-sync hiccup must not fail the user's watchlist removal.
     """
     try:
-        if not _is_admin_profile(profile_id):
-            return {"matched": 0, "demonitored": 0}
+        # every profile: a household member's watchlist is theirs (their
+        # own rule), the admin's also carries the shared column
         if not descriptor:
             return {"matched": 0, "demonitored": 0}
         return demonitor_lib2_artists_for_removed_watchlist(
@@ -676,12 +681,11 @@ def sync_watchlist_addition(
     ``provider_id`` is only a lookup hint and may be None: pass it only when
     its source is known, because a wrong namespace would stick to the row.
     The forward mirror is not enqueued, since the Watchlist row this reacts to
-    exists already. Admin only, like the removal edge (ADR-01). Never raises;
+    exists already. A household member writes their own rule; only the admin the shared column and catalogue rows (ADR-01). Never raises;
     returns the lib2 artist id or None.
     """
     try:
-        if not _is_admin_profile(profile_id):
-            return None
+        admin = _is_admin_profile(profile_id)
         clean_name = str(name or "").strip()
         if not clean_name:
             return None
@@ -690,13 +694,16 @@ def sync_watchlist_addition(
         from core.library2.wanted import recompute_wanted_for_entity
 
         with closing(db._get_connection()) as conn:
+            # a household member links to the library's artists; only the
+            # admin's watchlist adds catalogue rows and the shared column
             artist_id = find_or_create_artist(
                 conn, clean_name,
                 spotify_id=(str(provider_id).strip() or None) if provider_id else None,
-                source=source or None, create=True)
+                source=source or None, create=admin)
             if artist_id is None:
                 return None
-            conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (artist_id,))
+            if admin:
+                conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (artist_id,))
             record_rule(conn, "artist", artist_id, True, PROVENANCE_USER, profile_id=profile_id)
             recompute_wanted_for_entity(conn, "artists", artist_id, profile_id=profile_id)
             conn.commit()
@@ -1211,3 +1218,72 @@ __all__ = [
     "sync_watchlist_removal",
     "sync_wishlist_removal",
 ]
+
+
+_MEMBER_WATCHLISTS_MARKER = "_lib2_member_watchlists_carried"
+
+
+def carry_member_watchlists(conn: Any) -> Dict[str, int]:
+    """once: each household member's 3.6.1 watchlist becomes their own watch
+    state in Library v2, so the Library's cards and filter show what they
+    watch (not the admin's). only the rule: their wishlist and the watchlist
+    scanner go on as before, nothing is queued. never raises, does commit."""
+    stats = {"profiles": 0, "artists": 0}
+    try:
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                        (_MEMBER_WATCHLISTS_MARKER,)).fetchone():
+            return stats
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_artists'").fetchone():
+            return stats
+        from core.library2.dedup_repair import _stored_ids
+        from core.library2.importer import normalize_name
+        from core.library2.monitor_rules import PROVENANCE_LEGACY, record_rule
+
+        by_id: Dict[tuple, int] = {}
+        by_name: Dict[str, set] = {}
+        for row in conn.execute("SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
+                                "COALESCE(canonical_artist_id, id) AS canon FROM lib2_artists"):
+            canon = int(row["canon"])
+            for source, value in _stored_ids(row).items():
+                if value:
+                    by_id.setdefault((source, str(value)), canon)
+            key = normalize_name(row["name"])
+            if key:
+                by_name.setdefault(key, set()).add(canon)
+
+        try:
+            members = [int(r[0]) for r in conn.execute(
+                "SELECT id FROM profiles WHERE id <> 1 AND COALESCE(is_admin, 0) = 0")]
+        except Exception:  # noqa: BLE001 - no profiles table: nobody to carry
+            members = []
+        for profile_id in members:
+            available, entries = _watchlist_artist_snapshot(conn, profile_id=profile_id)
+            if not available or not entries:
+                continue
+            stats["profiles"] += 1
+            have = {int(r[0]) for r in conn.execute(
+                "SELECT entity_id FROM lib2_monitor_rules WHERE entity_type='artist' AND profile_id=?",
+                (profile_id,))}
+            for entry in entries:
+                artist_id = next((by_id[(s, v)] for s, v in entry["provider_ids"].items()
+                                  if (s, v) in by_id), None)
+                if artist_id is None:
+                    named = by_name.get(normalize_name(entry["name"] or ""), set())
+                    artist_id = next(iter(named)) if len(named) == 1 else None
+                # a rule the member already has (one they made) stays theirs
+                if artist_id is None or artist_id in have:
+                    continue
+                record_rule(conn, "artist", artist_id, True, PROVENANCE_LEGACY, profile_id=profile_id)
+                have.add(artist_id)
+                stats["artists"] += 1
+        conn.execute(f"CREATE TABLE {_MEMBER_WATCHLISTS_MARKER} (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        conn.commit()
+        if stats["artists"]:
+            logger.info("household watchlists carried into Library v2: %s", stats)
+    except Exception as exc:  # noqa: BLE001 - a watch badge is never a blocker
+        logger.warning("household watchlists not carried: %s", exc)
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+    return stats

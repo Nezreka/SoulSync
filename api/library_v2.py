@@ -96,6 +96,9 @@ _OWN_LIBRARY_WISH_ENDPOINTS = frozenset({
     # catalogue rows -- what a wish is made from, no file touched
     "lib2_discography_refresh",
 })
+# Wishes that start a download right away, not just a wishlist entry.
+_DOWNLOADING_ENDPOINTS = frozenset({"lib2_scoped_search", "lib2_enhance_quality"})
+
 # Writes that touch files and nothing every library shares: a profile with a
 # library of its own may run them on files that are all its own (3.6.1 let
 # every profile tag and loudness-tag). Catalogue rows (matches, metadata
@@ -333,8 +336,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # the admin's. Everything that changes files or shared metadata
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
+                # a search downloads: a household member who asks first
+                # wishes (their wishlist becomes requests) but never grabs
+                if request.endpoint in _DOWNLOADING_ENDPOINTS and not _may_download():
+                    return _fail("Your profile asks before downloading: add it to your "
+                                 "Wishlist and an admin approves the request", 403)
                 return _named_row_hidden()
-            if (request.endpoint in _OWN_LIBRARY_FILE_ENDPOINTS and _can_wish()
+            if (request.endpoint in _OWN_LIBRARY_FILE_ENDPOINTS and _wishes_in_own()
                     and _touches_only_own_files()):
                 return _named_row_hidden()
             if request.endpoint == "lib2_update_ui_preferences" and _own_preferences_only():
@@ -434,13 +442,28 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         total, own = int(row[0] or 0), int(row[1] or 0)
         return total > 0 and own == total
 
-    def _can_wish() -> bool:
-        """May the caller monitor and search in the library it is looking at?
-        The admin anywhere; any other profile only in a library of its own."""
-        if _is_admin():
-            return True
+    def _wishes_in_own() -> bool:
+        """E-13: a non-admin wishing in a library of its own"""
         from core.library_scope import wishes_in_own_library
         return wishes_in_own_library(_profile(), get_database())
+
+    def _can_wish() -> bool:
+        """May the caller monitor (watch, wishlist) in the library it reads?
+        The admin anywhere; a profile in a library of its own; and a
+        household member in the shared library, on their own watchlist and
+        wishlist (``intent_profile_id``), as 3.6.1 had it."""
+        if _is_admin():
+            return True
+        if _wishes_in_own():
+            return True
+        from core.library2.sql_util import shared_library_member
+        return shared_library_member() is not None
+
+    def _may_download() -> bool:
+        """may the caller start a download (not just a request)?"""
+        if _is_admin():
+            return True
+        return bool((get_database().get_profile(_profile()) or {}).get("can_download", 1))
 
     def _conn():
         return get_database()._get_connection()
@@ -696,6 +719,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "can_write": _is_admin(),
             # E-13: monitor/search in a library of one's own
             "can_wish": _can_wish(),
+            # a wish that downloads right away (Automatic Search) needs this
+            "can_download": _may_download(),
         })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------

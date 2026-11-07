@@ -14493,6 +14493,9 @@ export function GlobalAutomaticSearchButton() {
  *  each, instead of four equal buttons a new user had to decode. */
 export function LibraryMoreMenu() {
   const search = useGlobalAutomaticSearch();
+  // Watch All adds to the caller's own watchlist: anyone who may wish, not
+  // only the admin (a household member watches in the shared library)
+  const canWatch = useLibraryV2CanWish();
   const [exporting, setExporting] = useState(false);
   const [watching, setWatching] = useState(false);
   const item = (key: string, name: string, desc: string) => (
@@ -14550,7 +14553,7 @@ export function LibraryMoreMenu() {
               'Watch All',
               'Add every artist in your library to your Watchlist.',
             ),
-            disabled: !search.canWrite,
+            disabled: !canWatch,
             onSelect: () => setWatching(true),
           },
           {

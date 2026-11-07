@@ -269,6 +269,19 @@ def enqueue_projected_tracks(
     return outbox_ids
 
 
+def _shared_library_member_profile(db, profile_id: int) -> bool:
+    """a non-admin profile reading the shared library (its wishes are its own)"""
+    try:
+        if int(profile_id) == 1:
+            return False
+        from core.library_scope import library_scope_for_profile
+        from core.profile_context import is_admin_profile
+        return (library_scope_for_profile(int(profile_id)) == "shared"
+                and not is_admin_profile(int(profile_id), database=db))
+    except Exception:  # noqa: BLE001 - unknown: treat as a member, never auto-approve
+        return True
+
+
 def enqueue_artist_watchlist(conn, artist_id: int, monitored: bool, *,
                              profile_id: int = 1) -> List[int]:
     """Queue a watchlist add/remove mirror for a lib2 artist (same-transaction)."""
@@ -345,7 +358,11 @@ def _execute_op(db, op: str, data: Dict[str, Any], profile_id: int,
         # the intent is the admin's -- made in its library -- and lands
         # approved instead of waiting for an approval nobody is asked for.
         payload = data.get("payload") or {}
-        approved = profile_asks_first(db, profile_id)
+        # ...except a household member in the SHARED library: they monitor
+        # on their own watchlist and wishlist now (X1), and what they ask for
+        # is a request an admin approves, as in 3.6.1. auto-approving it let
+        # an ask-first member's Library click download without approval
+        approved = profile_asks_first(db, profile_id) and not _shared_library_member_profile(db, profile_id)
         # Why the row is there, not the default "Download failed": nothing was
         # tried yet when the catalogue asks for a missing track or an upgrade.
         evaluation = (data.get("source_info") or {}).get("quality_evaluation")

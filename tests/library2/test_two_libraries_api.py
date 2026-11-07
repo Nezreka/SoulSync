@@ -201,12 +201,58 @@ def test_kim_may_not_change_files(world):
     assert world.client.delete(f"/api/library/v2/artists/{world.ids['k']}").status_code == 403
 
 
-def test_a_shared_profile_may_not_wish(world):
+def _rules(world, artist_id):
+    with world.db._get_connection() as conn:
+        return {int(r[0]): int(r[1]) for r in conn.execute(
+            "SELECT profile_id, monitored FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=?",
+            (artist_id,))}
+
+
+def _column(world, artist_id):
+    with world.db._get_connection() as conn:
+        return int(conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()[0] or 0)
+
+
+def test_a_household_member_watches_on_their_own_watchlist(world):
+    """X1: in the shared library a member watched with the admin's state
+    (every card showed what the admin watched) and could not watch at all.
+    their watch is their own now, as in 3.6.1 and plex: the admin's state
+    and the shared column are untouched"""
     world.as_profile(world.sam)
-    assert world.client.get("/api/library/v2/enabled").get_json()["can_wish"] is False
-    r = world.client.post(f"/api/library/v2/artists/{world.ids['h']}/monitor",
-                          json={"monitored": True})
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_wish"] is True
+    house = world.ids['h']
+    r = world.client.post(f"/api/library/v2/artists/{house}/monitor", json={"monitored": True})
+    assert r.status_code == 200, r.get_json()
+    assert _rules(world, house).get(world.sam) == 1
+    assert _rules(world, house).get(1) in (None, 0)
+    assert _column(world, house) == 0
+
+    def watched(pid):
+        world.as_profile(pid)
+        rows = world.client.get("/api/library/v2/artists?limit=50").get_json()["artists"]
+        return {a["name"]: a["monitored"] for a in rows}
+
+    assert watched(world.sam)["House Band"] is True
+    assert watched(1)["House Band"] is False
+
+
+def test_a_member_who_asks_first_wishes_but_never_starts_a_download(world):
+    with world.db._get_connection() as conn:
+        conn.execute("UPDATE profiles SET can_download=0 WHERE id=?", (world.sam,))
+        conn.commit()
+    world.as_profile(world.sam)
+    body = world.client.get("/api/library/v2/enabled").get_json()
+    assert body["can_wish"] is True and body["can_download"] is False
+    house = world.ids['h']
+    assert world.client.post(f"/api/library/v2/artists/{house}/monitor",
+                             json={"monitored": True}).status_code == 200
+    r = world.client.post(f"/api/library/v2/artists/{house}/search", json={})
     assert r.status_code == 403
+
+
+def test_a_member_still_may_not_change_shared_files(world):
+    world.as_profile(world.sam)
+    assert world.client.delete(f"/api/library/v2/artists/{world.ids['h']}").status_code == 403
 
 
 def test_the_admin_monitoring_in_kims_library_writes_kims_intent(world):

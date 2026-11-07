@@ -48,14 +48,35 @@ def test_the_members_own_add_past_the_quota_is_refused(asker):
                               profile_id=pid, user_initiated=True) is False
 
 
-def test_a_mirrored_add_lands_approved_and_ignores_the_quota(asker):
+def _own_library(monkeypatch, db, pid):
+    """the asker keeps a library of its own: the admin works in it (E-12)"""
+    from core import library_scope
+    monkeypatch.setattr(library_scope, "own_library_supported", lambda: True)
+    assert db.set_profile_library(pid, "own", tempfile.mkdtemp(prefix="own-lib-"))
+    library_scope.invalidate_library_scope_cache()
+
+
+def test_a_mirrored_add_lands_approved_and_ignores_the_quota(asker, monkeypatch):
     db, pid, tag = asker
+    _own_library(monkeypatch, db, pid)
     MO._execute_op(db, 'wishlist_add', {'payload': _payload(f'{tag}m', f'm{tag}'), 'source_type': 'album'},
                    pid, user_initiated=False)
     approved = {t['spotify_track_id'] for t in db.get_wishlist_tracks(profile_id=pid, approved_only=True)}
     assert approved == {f'{tag}m::m{tag}'}
     # the member's own ask is still waiting for the admin
     assert [r['spotify_track_id'] for r in db.get_pending_request_rows(pid)] == [f'{tag}own::own{tag}']
+
+
+def test_a_shared_library_members_own_wish_waits_for_approval(asker):
+    """X1 lets a household member monitor on their own wishlist in the shared
+    library. an ask-first member's Library click went in approved and the
+    next run downloaded it; it is a request an admin approves, as in 3.6.1"""
+    db, pid, tag = asker
+    db.update_profile(pid, request_limit=0, request_limit_days=7)
+    MO._execute_op(db, 'wishlist_add', {'payload': _payload(f'{tag}s', f's{tag}'), 'source_type': 'album'},
+                   pid, user_initiated=True)
+    assert db.get_wishlist_tracks(profile_id=pid, approved_only=True) == []
+    assert f'{tag}s::s{tag}' in [r['spotify_track_id'] for r in db.get_pending_request_rows(pid)]
 
 
 def test_a_profile_that_downloads_gets_an_ordinary_row():

@@ -11,7 +11,7 @@ call site.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, Set
+from typing import Optional, Any, Dict, Iterable, Set
 
 # Well under SQLite's oldest documented SQLITE_MAX_VARIABLE_NUMBER (999), so a
 # single chunk's placeholder count is safe on every SQLite build we run on.
@@ -183,7 +183,8 @@ def scope_visibility_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str
         raise ValueError(f"Unknown entity type: {entity_type!r}")
     if not _VALID_IDENTIFIER.match(alias):
         raise ValueError(f"Invalid alias: {alias!r}")
-    intent = intent_profile_id(resolved)
+    # the caller's intent: a household member's own wishes are visible to them
+    intent = intent_profile_id(scope)
     # Intent at ANY level below the row, from either table. An artist whose
     # only claim is a monitored ALBUM, or a wanted TRACK, is exactly the row a
     # user is waiting for -- checking the artist level alone hid it and made
@@ -355,8 +356,33 @@ def intent_profile_id(scope=_AMBIENT) -> int:
     """
     resolved = _resolve_scope(scope)
     if resolved is ANY_OWNER or resolved is None or resolved == "shared":
+        # a household member reading the shared library keeps their own
+        # watchlist and wishlist, as 3.6.1 did and plex/jellyfin do: their
+        # rows, not the admin's. only for the caller of a request; a job or
+        # an explicitly passed scope speaks for the shared library
+        if scope is _AMBIENT:
+            member = shared_library_member()
+            if member is not None:
+                return member
         return 1
     return int(resolved)
+
+
+def shared_library_member() -> Optional[int]:
+    """The calling profile when it is a non-admin reading the shared library
+    in a request, else None (an admin, a background job, its own library)."""
+    try:
+        from flask import has_request_context
+        if not has_request_context():
+            return None
+        from core.profile_context import get_current_profile_id, is_admin_request
+        pid = get_current_profile_id()
+        if not pid or int(pid) == 1 or is_admin_request():
+            return None
+        from core.library_scope import library_scope_for_profile
+        return int(pid) if library_scope_for_profile(int(pid)) == "shared" else None
+    except Exception:  # noqa: BLE001 - unknown caller: the shared library's intent
+        return None
 
 
 def monitored_sql(entity_type: str, alias: str, *, scope=_AMBIENT) -> str:
