@@ -780,3 +780,99 @@ def test_one_servers_two_albums_of_a_release_stay_review_only(library):
     _result, findings = scan(library)
     pair = [f for f in findings if {a['album_id'] for a in f['details'].get('albums', [])} == set(albums)]
     assert pair and pair[0]['details']['merge_eligible'] is False
+
+
+def _twin_pair(library, albums):
+    _result, findings = scan(library)
+    pair = [f for f in findings if {a['album_id'] for a in f['details'].get('albums', [])} == set(albums)]
+    assert pair, findings
+    return pair[0]['details']
+
+
+def test_proven_twins_merge_without_track_ids_or_a_fetched_tracklist(library):
+    """a media server that never had track ids, and copies that never fetched
+    the provider tracklist: the release ids already prove it is one album"""
+    _plex, albums, _tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_tracks SET spotify_id=NULL")
+        conn.execute("UPDATE lib2_albums SET tracklist_status='idle'")
+        conn.commit()
+    assert _twin_pair(library, albums)['auto_merge_eligible'] is True
+
+
+def test_unproven_twins_still_need_the_track_ids(library):
+    _plex, albums, _tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_tracks SET spotify_id=NULL")
+        conn.execute("UPDATE lib2_albums SET musicbrainz_id=NULL")  # one release id left: not proven
+        conn.commit()
+    assert _twin_pair(library, albums)['merge_eligible'] is False
+
+
+def test_a_feature_only_one_copy_knows_still_merges_and_is_kept(library):
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    _plex, albums, tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        guest = conn.execute("INSERT INTO lib2_artists(name) VALUES('Yung Gravy')").lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'featured',1)",
+                     (tracks[2], guest))   # the second server's first track
+        conn.commit()
+    details = _twin_pair(library, albums)
+    assert details['auto_merge_eligible'] is True
+    assert merge_catalogue_duplicate(library[0], details, albums[0], automatic=True)['success']
+    with closing(library[0]._get_connection()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_track_artists WHERE artist_id=?", (guest,)).fetchone()[0] == 1
+
+
+def test_a_different_primary_artist_never_merges(library):
+    _plex, albums, tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        other = conn.execute("INSERT INTO lib2_artists(name) VALUES('Somebody')").lastrowid
+        conn.execute("UPDATE lib2_track_artists SET artist_id=? WHERE track_id=?", (other, tracks[2]))
+        conn.commit()
+    assert _twin_pair(library, albums)['merge_eligible'] is False
+
+
+def test_import_written_monitoring_does_not_block_but_a_choice_does(library):
+    """the upgrade wrote 'legacy_import' rules for each server's copy, one
+    monitored and one not; that held every pair back. two choices a person
+    made still need review"""
+    _plex, albums, _tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        for album, on in zip(albums, (1, 0)):
+            conn.execute("INSERT INTO lib2_monitor_rules(entity_type,entity_id,profile_id,monitored,provenance)"
+                         " VALUES('album',?,1,?,'legacy_import')", (album, on))
+        conn.commit()
+    assert _twin_pair(library, albums)['merge_eligible'] is True
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_monitor_rules SET provenance='user_explicit'")
+        conn.commit()
+    assert _twin_pair(library, albums)['merge_eligible'] is False
+
+
+def test_a_single_linked_to_its_album_track_on_one_copy_merges_and_keeps_the_link(library):
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    plex, albums, tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        album_x = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title,album_type) VALUES(?, 'Other LP', 'album')",
+                               (plex,)).lastrowid
+        target = conn.execute("INSERT INTO lib2_tracks(album_id,title,track_number) VALUES(?, 'bag or die', 1)",
+                              (album_x,)).lastrowid
+        conn.execute("UPDATE lib2_tracks SET canonical_track_id=? WHERE id=?", (target, tracks[2]))
+        conn.commit()
+    details = _twin_pair(library, albums)
+    assert details['auto_merge_eligible'] is True, details['blocked_reasons']
+    assert merge_catalogue_duplicate(library[0], details, albums[0], automatic=True)['success']
+    with closing(library[0]._get_connection()) as conn:
+        assert conn.execute("SELECT canonical_track_id FROM lib2_tracks WHERE id=?", (tracks[0],)).fetchone()[0] == target
+
+
+def test_album_level_features_one_copy_lists_do_not_keep_twins_apart(library):
+    """plex's "bag or die" credited two featured artists on the album, the
+    other copy none: grouping by every credit never put them side by side"""
+    _plex, albums, _tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        guest = conn.execute("INSERT INTO lib2_artists(name) VALUES('Guest')").lastrowid
+        conn.execute("INSERT INTO lib2_album_artists(album_id,artist_id,role) VALUES(?,?,'featured')", (albums[0], guest))
+        conn.commit()
+    assert _twin_pair(library, albums)['auto_merge_eligible'] is True
