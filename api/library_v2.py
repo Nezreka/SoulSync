@@ -5850,6 +5850,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # continue independently so the UI can browse immediately.
                 _import_state.update(stage="done", current=0, total=0)
                 _start_artwork_cache(get_database, config_manager)
+                # P2C-8: the whole-library convergence the import no longer
+                # runs inside its own transaction, on the rebuilt rows now
+                # rather than at the next start (startup's own pass)
+                def _converge():
+                    try:
+                        lib2_bootstrap.run_deferred_backfills(get_database())
+                    except Exception as conv_err:  # noqa: BLE001 - retries next start
+                        logger.warning("Library v2 convergence after import failed: %s", conv_err)
+                threading.Thread(target=_converge, name="lib2-converge", daemon=True).start()
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)
                 _import_state.update(error=str(e), stage="failed")
