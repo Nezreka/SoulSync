@@ -2453,5 +2453,9 @@ def check_artist_discography_completion_stream(artist_id):
 def get_artist_appears_on(artist_id):
     from contextlib import closing
     from core.library2.artist_page import appears_on_payload
-    with closing(get_database()._get_connection()) as conn:
-        return jsonify(appears_on_payload(conn, artist_id))
+    try:
+        with closing(get_database()._get_connection()) as conn:
+            return jsonify(appears_on_payload(conn, artist_id))
+    except Exception as e:  # noqa: BLE001 - the section answers JSON, never an HTML 500
+        logger.error("appears-on for artist %s failed: %s", artist_id, e, exc_info=True)
+        return jsonify({"success": False, "error": str(e), "albums": [], "tracks": []}), 500

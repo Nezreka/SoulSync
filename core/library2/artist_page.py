@@ -28,11 +28,24 @@ def appears_on_payload(conn, artist_id):
     native = get_artist(conn, int(artist_id))
     if native is None:
         return {'success': True, 'albums': [], 'tracks': []}
-    for summary in (*native['albums'], *native['eps'], *native['singles'],
-                    *native.get('appears_on', [])):
+    summaries = (*native['albums'], *native['eps'], *native['singles'],
+                 *native.get('appears_on', []))
+    # the artist's OWN releases are dropped below anyway: find them in one
+    # read instead of loading every one in full first (80 get_album calls per
+    # page open on a big artist, to keep none of them)
+    ids = [int(s_['id']) for s_ in summaries]
+    own = set()
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        own |= {int(r[0]) for r in conn.execute(
+            f"SELECT id FROM lib2_albums WHERE id IN ({','.join('?' for _ in chunk)}) "
+            f"AND primary_artist_id IN ({marks})", (*chunk, *group))}
+    for summary in summaries:
         # The native summary already applied ownership/recording-link scope.
         # Do not load every provider-only album's tracks just to discard it.
         # A wanted track counts too (see wanted_albums).
+        if int(summary['id']) in own:
+            continue
         if not summary['tracks_present'] and summary['id'] not in wanted_albums:
             continue
         album = get_album(conn, summary['id'])
