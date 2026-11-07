@@ -24186,13 +24186,22 @@ class MusicDatabase:
             cursor = conn.cursor()
             from core.library2.track_files import set_file_state
             rows = cursor.execute(
-                "SELECT id, track_id FROM lib2_track_files WHERE path=? AND track_id IS NOT NULL "
+                "SELECT id, track_id, COALESCE(owner_profile_id, 1) FROM lib2_track_files "
+                "WHERE path=? AND track_id IS NOT NULL "
                 "AND COALESCE(file_state,'active')<>'deleted'", (file_path,)).fetchall()
             for row in rows:
                 set_file_state(conn, row[0], 'deleted')
             conn.commit()
             if release_wish and rows:
-                self._release_deleted_tracks(conn, [row[1] for row in rows], profile_id)
+                # the wish to release is the file's owner's (an own library's
+                # download was wanted by that profile, and released under
+                # profile 1 alone it came straight back), and the asker's
+                by_profile = {}
+                for _file_id, track_id, owner in rows:
+                    for pid in {int(owner), int(profile_id or 1)}:
+                        by_profile.setdefault(pid, []).append(track_id)
+                for pid, track_ids in sorted(by_profile.items()):
+                    self._release_deleted_tracks(conn, track_ids, pid)
             return len(rows)
         except Exception as e:
             logger.debug(f"Error deleting track by path: {e}")

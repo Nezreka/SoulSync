@@ -250,3 +250,24 @@ def test_releasing_a_deleted_download_also_drops_its_requeued_wishlist_row(db, t
     reconcile_track_wishlist(db)
     with db._get_connection() as conn:
         assert conn.execute('SELECT COUNT(*) FROM wishlist_tracks').fetchone()[0] == 0
+
+
+def test_an_own_library_download_is_released_for_the_profile_that_wanted_it(db, tmp_path, monkeypatch):
+    """third #1062 review G11-1: the Expired Download Cleaner released the
+    wish under profile 1 only; an own library's download was wanted by its
+    owner, so the sync put it straight back on their wishlist (a loop)"""
+    db.add_to_wishlist(track(), source_type='playlist')
+    track_id = state(db)[0]['id']
+    path = str(tmp_path / 'own.flac')
+    with db._get_connection() as conn:
+        conn.execute('INSERT INTO lib2_track_files(track_id,path,owner_profile_id) VALUES(?,?,3)',
+                     (track_id, path))
+        conn.commit()
+    released = []
+    monkeypatch.setattr(db, '_release_deleted_tracks',
+                        lambda _conn, track_ids, profile_id: released.append((profile_id, track_ids)))
+
+    assert db.delete_track_by_file_path(path, release_wish=True) == 1
+
+    assert sorted(p for p, _ in released) == [1, 3]
+    assert all(ids == [track_id] for _, ids in released)
