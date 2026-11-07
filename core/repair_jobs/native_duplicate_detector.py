@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from core.library2.catalogue_duplicates import dismissed_catalogue_pairs, find_catalogue_duplicates, merge_catalogue_duplicate
+from core.library2.catalogue_duplicates import auto_merge_proven, find_catalogue_duplicates
 from core.library2.duplicate_review import DEFAULT_SETTINGS, find_duplicate_candidates
 from core.library2.maintenance_subjects import active_file_subjects
 from core.repair_jobs import register_job
@@ -86,26 +86,13 @@ class NativeDuplicateDetectorJob(RepairJob):
             reviewed_catalogue = len(release_candidates)
             merged_catalogue = False
             if settings.get("auto_merge_catalogue") is True:
-                def pair(candidate):
-                    return frozenset(a["id"] for a in candidate["albums"])
-                skip = dismissed_catalogue_pairs(context.db)
-                while candidate := next((c for c in release_candidates
-                                         if c["auto_merge_eligible"] and pair(c) not in skip), None):
-                    if stop():
-                        return result
-                    applied = merge_catalogue_duplicate(
-                        context.db, candidate, candidate["recommended_album_id"], automatic=True)
-                    if not applied["success"]:
-                        skip.add(pair(candidate))
-                        continue
-                    result.auto_fixed += 1
-                    merged_catalogue = True
-                    # A merge changes snapshots and IDs of its own group only:
-                    # rebuild that group before applying or publishing again.
-                    group = {i for c in release_candidates if pair(c) & pair(candidate) for i in pair(c)}
-                    release_candidates = [c for c in release_candidates if not pair(c) & group] + find_catalogue_duplicates(
-                        context.db, scope=context.scope, check_stop=stop,
-                        album_ids=sorted(group - {applied["merged_album_id"]}))
+                applied = auto_merge_proven(context.db, scope=context.scope, check_stop=stop,
+                                            candidates=release_candidates)
+                if stop():
+                    return result
+                release_candidates = applied["candidates"]
+                result.auto_fixed += applied["merged"]
+                merged_catalogue = applied["merged"] > 0
             for candidate in release_candidates:
                 if stop():
                     return result

@@ -14,6 +14,9 @@ from core.library2.catalogue_identity import wishlist_rows
 from core.library2.dedup_repair import _release_ids
 from core.library2.duplicate_relationship import _normalized_title, conflicting_recording_id, durations_compatible
 from core.library2.provider_ids import provider_only, source_ids_from_values
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.catalogue_duplicates")
 
 
 SCHEMA = "native_duplicate_releases/v1"
@@ -623,6 +626,82 @@ def merge_catalogue_duplicate(database, candidate, keep_album_id, *, automatic=F
                 "merged_album_id": duplicate["id"], "message": "Release groups merged; editions and files preserved."}
     except (ValueError, KeyError, TypeError, sqlite3.Error) as exc:
         return {"success": False, "error": str(exc)}
+
+def auto_merge_proven(database, *, scope=None, check_stop=None, candidates=None):
+    """merge every proven twin pair (auto_merge_eligible) that wasn't dismissed.
+
+    returns {"merged": n, "candidates": what's left for review}. a merge only
+    changes its own group, so that group is re-read before going on."""
+    if candidates is None:
+        candidates = find_catalogue_duplicates(database, scope=scope, check_stop=check_stop)
+
+    def pair(candidate):
+        return frozenset(a["id"] for a in candidate["albums"])
+
+    skip = dismissed_catalogue_pairs(database)
+    merged = 0
+    while candidate := next((c for c in candidates
+                             if c["auto_merge_eligible"] and pair(c) not in skip), None):
+        if check_stop and check_stop():
+            break
+        applied = merge_catalogue_duplicate(
+            database, candidate, candidate["recommended_album_id"], automatic=True)
+        if not applied["success"]:
+            skip.add(pair(candidate))
+            continue
+        merged += 1
+        group = {i for c in candidates if pair(c) & pair(candidate) for i in pair(c)}
+        candidates = [c for c in candidates if not pair(c) & group] + find_catalogue_duplicates(
+            database, scope=scope, check_stop=check_stop,
+            album_ids=sorted(group - {applied["merged_album_id"]}))
+    return {"merged": merged, "candidates": candidates}
+
+
+_IMPORT_TWINS_MARKER = "_lib2_import_twins_merged"
+
+
+def merge_import_twins(database):
+    """once, after the 3.6.1 upgrade import: one release row per release.
+
+    3.6.1 kept a row set per media server, so an install that ever switched
+    servers imports each release once per server. the proven pairs merge here
+    (the other server's copy stays as a mapping on the kept row); anything
+    not proven is left for the Duplicate Detector. waits for the import to be
+    done, so the pass that runs before it can't use up the marker. never raises."""
+    stats = {"merged": 0, "left_for_review": 0}
+    try:
+        with closing(database._get_connection()) as conn:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                            (_IMPORT_TWINS_MARKER,)).fetchone():
+                return stats
+            if not _table(conn, "lib2_albums"):
+                return stats
+        from core.library2.bootstrap import get_state
+        if get_state(database).get("status") != "done":
+            return stats
+        result = auto_merge_proven(database)
+        stats["merged"] = result["merged"]
+        stats["left_for_review"] = len(result["candidates"])
+        with closing(database._get_connection()) as conn:
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {_IMPORT_TWINS_MARKER} "
+                         "(applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, merged INTEGER)")
+            conn.execute(f"INSERT INTO {_IMPORT_TWINS_MARKER}(merged) VALUES(?)", (stats["merged"],))
+            conn.commit()
+        if stats["merged"]:
+            logger.info("upgrade: merged %d duplicate releases from older media servers "
+                        "(%d left for review)", stats["merged"], stats["left_for_review"])
+            try:
+                from core.runtime_state import add_activity_item
+                add_activity_item(
+                    "🧹", "Duplicate releases merged",
+                    f"{stats['merged']} releases your older media servers listed twice are one "
+                    "release now. Tools → Duplicate Detector has any left to review.")
+            except Exception:  # noqa: BLE001 - the note is a courtesy
+                pass
+    except Exception as exc:  # noqa: BLE001 - a duplicate row is never a blocker
+        logger.warning("upgrade twin merge skipped (retries next start): %s", exc)
+    return stats
+
 
 def dismissed_catalogue_pairs(database):
     """Release pairs whose review was dismissed; auto merge never overrides them."""

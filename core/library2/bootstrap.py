@@ -742,6 +742,10 @@ def run_deferred_backfills(database: Any, *,
     finally:
         ticker.stop()
         conn.close()
+    # once the upgrade import is done: each release a 3.6.1 install listed
+    # once per media server becomes one release (proven pairs only)
+    from core.library2.catalogue_duplicates import merge_import_twins
+    stats["import_twins"] = merge_import_twins(database)["merged"]
     if any(stats.values()):
         logger.info("Library v2 convergence complete: %s", stats)
     # PASSIVE: this runs on every start. a TRUNCATE takes the write lock and
@@ -917,6 +921,8 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     if not mark_done(database, owner_token, watermark=current_watermark):
         return {"success": False, "error": "Bootstrap lease was lost before completion"}
     logger.info("Library v2 bootstrap import completed: %s", stats)
+    from core.library2.catalogue_duplicates import merge_import_twins
+    merge_import_twins(database)
     return {"success": True, "stats": stats}
 
 

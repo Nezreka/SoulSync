@@ -876,3 +876,69 @@ def test_album_level_features_one_copy_lists_do_not_keep_twins_apart(library):
         conn.execute("INSERT INTO lib2_album_artists(album_id,artist_id,role) VALUES(?,?,'featured')", (albums[0], guest))
         conn.commit()
     assert _twin_pair(library, albums)['auto_merge_eligible'] is True
+
+
+def _import_state(db, status):
+    from core.library2.bootstrap import ensure_bootstrap_schema
+    with closing(db._get_connection()) as conn:
+        ensure_bootstrap_schema(conn.cursor())
+        conn.execute("UPDATE lib2_bootstrap_state SET status=? WHERE id=1", (status,))
+        conn.commit()
+
+
+def _albums_left(db, albums):
+    with closing(db._get_connection()) as conn:
+        marks = ",".join("?" for _ in albums)
+        return conn.execute(f"SELECT COUNT(*) FROM lib2_albums WHERE id IN ({marks})",
+                            list(albums)).fetchone()[0]
+
+
+def test_the_upgrade_merges_proven_server_twins_once(library, monkeypatch):
+    """a 3.6.1 install that listed a release once per media server lands
+    with one release row, without anyone running the duplicate detector"""
+    from core.library2.catalogue_duplicates import merge_import_twins
+    db = library[0]
+    _plex, albums, _tracks = server_twins(library)
+    _import_state(db, 'done')
+
+    assert merge_import_twins(db)['merged'] == 1
+    assert _albums_left(db, albums) == 1
+    with closing(db._get_connection()) as conn:
+        files = conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0]
+    assert files > 0
+    # once: the marker keeps later starts from looking again at all
+    calls = []
+    monkeypatch.setattr("core.library2.catalogue_duplicates.auto_merge_proven",
+                        lambda *a, **k: calls.append(1) or {"merged": 0, "candidates": []})
+    merge_import_twins(db)
+    assert calls == [], "the one-time merge ran twice"
+
+
+def test_the_upgrade_merge_waits_for_the_import(library):
+    """the convergence pass runs before the import loop; it must not use up
+    the one-time pass on a library the import hasn't filled yet"""
+    from core.library2.catalogue_duplicates import merge_import_twins
+    db = library[0]
+    _plex, albums, _tracks = server_twins(library)
+    _import_state(db, 'running')
+
+    assert merge_import_twins(db)['merged'] == 0
+    assert _albums_left(db, albums) == 2
+
+    _import_state(db, 'done')
+    assert merge_import_twins(db)['merged'] == 1
+
+
+def test_the_upgrade_leaves_an_unproven_pair_for_review(library):
+    from core.library2.catalogue_duplicates import merge_import_twins
+    db = library[0]
+    _plex, albums, _tracks = server_twins(library)
+    with closing(db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_tracks SET spotify_id=NULL")
+        conn.execute("UPDATE lib2_albums SET musicbrainz_id=NULL")  # not proven
+        conn.commit()
+    _import_state(db, 'done')
+
+    stats = merge_import_twins(db)
+    assert stats['merged'] == 0 and stats['left_for_review'] >= 1
+    assert _albums_left(db, albums) == 2

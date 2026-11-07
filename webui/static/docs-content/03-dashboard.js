@@ -247,12 +247,14 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Preview Clip Cleanup | Detects ~30s preview clips (some sources deliver samples instead of full songs), compares against the expected length from the metadata source, and re-fetches the full track |
 | Discography Refresh | Re-fetches watchlist artists' discographies so new releases go on the Wishlist. With **Artists** set to library it also walks every artist you own a release by (the old Discography Backfill) and files a finding for each release you don't have (Add to Wishlist on each, or turn on auto add) |
 | Album Completeness | Finds albums you mostly own and wishlists the missing tracks (Fill Album). A song you already have on its single is never downloaded again |
-| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's |
+| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's. It also finds a release listed twice (once per media server): **auto merge catalogue** merges the pairs it can prove are the same release and leaves the rest for you |
 | Quality Profile Audit | Flags library tracks below their quality profile, including ones not on the Wishlist. You decide per finding: **Wishlist & Upgrade**, or leave it. Changes nothing on its own |
 | Fix Unknown Artists | Finds tracks tagged "Unknown Artist", resolves the correct artist/album/track from file tags or the metadata API, then re-tags, moves the file to the correct folder, and updates the database |
 | Album Edition Review | Suggests the release edition that best matches the tracks you own |
 
 Library v2 handles catalogue identity and wanted quality upgrades directly. Quality Check is now **Quality Profile Audit** (a weekly Quality Check keeps its schedule there), the Quality Upgrade Finder is retired, and Single/Album Dedup lives on as the Duplicate Detector's album-first keeper. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Watchlist & Wishlist Reconcile**; there is no **Apply Quality Upgrades** automation action.
+
+An upgrade from 3.6.1 merges each release your older media servers listed twice into one, once, right after the import (only pairs it can prove are the same release; your files and each server's link stay). Anything it can't prove waits in the Duplicate Detector.
 
 > [!WARNING]
 > **Mass orphan safety:** when the orphan detector's mass-orphan guard trips (over half the scanned files look like orphans — usually a DB↔filesystem path mismatch, not real orphans), the scan refuses to create any findings at all, so there's nothing to bulk-delete. The **"Witness Me"** type-the-phrase confirmation exists for bulk orphan deletes, but it can't trigger while the guard refuses findings.
