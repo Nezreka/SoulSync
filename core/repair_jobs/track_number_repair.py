@@ -1240,7 +1240,7 @@ def _update_db_file_path(db, old_path: str, new_path: str):
             conn.close()
 
 
-def _album_row_for_files(conn, file_track_data) -> Any:
+def _album_row_for_files(conn, file_track_data, *, suffix_parts: int = 3) -> Any:
     """The lib2 album a folder's files belong to, or None.
 
     Tries every file path exactly, then falls back to a suffix match on the first
@@ -1265,10 +1265,16 @@ def _album_row_for_files(conn, file_track_data) -> Any:
         if row:
             return row
     if file_track_data:
+        # third #1062 review G12-9: the suffix decides which tracklist a
+        # post-download folder is renumbered against, so it must name the
+        # artist folder too ("Greatest Hits/01 - Intro.flac" is many albums),
+        # and a _ or % in a name is a character, not a wildcard. the art
+        # lookup alone keeps 3.6.1's two parts
         parts = str(file_track_data[0][0]).replace('\\', '/').split('/')
-        if len(parts) >= 2:
-            suffix = '/'.join(parts[-2:])
-            row = conn.execute(sql % "LIKE ?", (f'%{suffix}',)).fetchone()
+        if len(parts) >= suffix_parts:
+            suffix = '/'.join(parts[-suffix_parts:])
+            escaped = suffix.replace('^', '^^').replace('%', '^%').replace('_', '^_')
+            row = conn.execute(sql % "LIKE ? ESCAPE '^'", ('%/' + escaped,)).fetchone()
             if row:
                 return row
     return None
@@ -1364,7 +1370,7 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
     conn = None
     try:
         conn = context.db._get_connection()
-        album = _album_row_for_files(conn, file_track_data)
+        album = _album_row_for_files(conn, file_track_data, suffix_parts=2)
         if album is not None:
             result['album_thumb_url'] = album["image_url"] or None
             result['artist_thumb_url'] = album["artist_image"] or None
