@@ -10080,9 +10080,9 @@ def _reconcile_after_scan(worker):
                 server_source=getattr(worker, 'server_type', None))
             logger.info(
                 "[Reconcile] Post-scan: filled %d id(s) across %d row(s) from %d newly "
-                "mapped track(s) (%d unreadable, %d conflicts)",
+                "mapped track(s) (%d unreadable, %d conflicts, %d errors)",
                 totals.ids_filled, totals.entities_updated, totals.processed,
-                totals.unreadable, totals.conflicts,
+                totals.unreadable, totals.conflicts, totals.errors,
             )
         finally:
             conn.close()
@@ -10134,6 +10134,7 @@ def reconcile_embedded_ids():
                             'ids_filled': totals.ids_filled,
                             'conflicts': totals.conflicts,
                             'unreadable': totals.unreadable,
+                            'errors': totals.errors,
                             'current': title,
                         })
 
