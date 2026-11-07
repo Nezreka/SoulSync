@@ -107,6 +107,6 @@ def carry_legacy_artist_credits(conn: Any) -> Dict[str, int]:
         logger.warning("3.6.1 artist credits not carried: %s", exc)
         try:
             conn.rollback()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as rollback_exc:  # noqa: BLE001
+            logger.debug("legacy credits rollback also failed: %s", rollback_exc)
     return stats
