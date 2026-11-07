@@ -8649,7 +8649,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       const shared = ['spotify', 'deezer', 'itunes', 'musicbrainz', 'tidal', 'qobuz'].find(
         (source) => release?.provider_ids?.[source] && artistProviderIds[source],
       );
-      if (!card.owned && shared) {
+      // the download modal unless the release is complete: a part-owned
+      // album (1 of 22) went to its album page, with no way to fetch the
+      // rest from there. the album page stays on My Library
+      const complete = card.totalTracks > 0 && card.ownedTracks >= card.totalTracks;
+      if (!complete && shared) {
         void openProviderRelease(
           { ...card, providerId: release!.provider_ids![shared] },
           { ...releaseCardArtist, id: artistProviderIds[shared] ?? null, source: shared },
