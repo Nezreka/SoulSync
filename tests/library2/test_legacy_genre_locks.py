@@ -60,4 +60,4 @@ def test_no_lock_column_is_a_quiet_no_op(imported_conn):
 def test_the_deferred_convergence_runs_it():
     import inspect
     from core.library2 import bootstrap
-    assert "carry_legacy_genre_locks(conn)" in inspect.getsource(bootstrap.run_deferred_backfills)
+    assert "carry_legacy_genre_locks(conn)" in inspect.getsource(bootstrap._carry_upgrade_state)
