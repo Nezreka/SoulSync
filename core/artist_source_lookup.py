@@ -103,6 +103,7 @@ def find_library_artist_for_source(
 
             if artist_name and active_server:
                 from core.library2.importer import normalize_name
+                from core.library2.sql_util import entity_visible
 
                 # `name_key` is the stored casefold. SQLite's LOWER() only
                 # folds A-Z, so a searched "björk" never met a stored "Björk".
