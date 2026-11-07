@@ -73,6 +73,11 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
     # source with USER provenance on the strength of a file that is not there.
     # Every other read in this module family already applies this guard.
     live_files = "COALESCE(file_state,'active') <> 'deleted'"
+    # third #1062 review G09-5: the library the caller works in. unscoped, an
+    # admin moving a file in a profile's own library re-homed the shared
+    # library's copy too, and another library's file on the target refused it
+    from core.library2.sql_util import owner_clause
+    live_files += owner_clause(column="owner_profile_id")
     file_rows = conn.execute(
         f"SELECT id, path FROM lib2_track_files WHERE track_id=? AND {live_files} "
         f"ORDER BY {primary_order()}",
