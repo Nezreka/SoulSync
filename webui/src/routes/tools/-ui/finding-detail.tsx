@@ -38,6 +38,7 @@ import {
   genericDetailRows,
   incompleteAlbumCompletion,
   libraryRetagDetail,
+  nativeRetagChanges,
   pickDuplicateToKeep,
   scoreBar,
 } from '../-tools.core';
@@ -718,18 +719,39 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       );
 
     case 'library_retag': {
-      if (d.validation && typeof d.validation === 'object' && 'checks' in d.validation) {
-        const checks = d.validation.checks;
-        if (checks && typeof checks === 'object')
-          return (
-            <DetailGrid
-              rows={Object.entries(checks).map(([key, value]) => [
-                key,
-                checkWithValues(text(value), retagDiffFor(d.diff, key)),
-              ])}
-            />
-          );
-      }
+      const checks =
+        d.validation && typeof d.validation === 'object' && 'checks' in d.validation
+          ? d.validation.checks
+          : null;
+      const checksGrid =
+        checks && typeof checks === 'object' ? (
+          <DetailGrid
+            rows={Object.entries(checks).map(([key, value]) => [
+              key,
+              checkWithValues(text(value), retagDiffFor(d.diff, key)),
+            ])}
+          />
+        ) : null;
+      // G16-2: what Apply Tags writes comes first, every field of it
+      const changes = nativeRetagChanges(d.diff);
+      if (changes.length)
+        return (
+          <>
+            <div className="repair-finding-meta" style={{ marginBottom: '8px' }}>
+              Apply Tags will write
+            </div>
+            <DetailGrid rows={changes} />
+            {checksGrid ? (
+              <>
+                <div className="repair-finding-meta" style={{ margin: '12px 0 8px' }}>
+                  Tag checks
+                </div>
+                {checksGrid}
+              </>
+            ) : null}
+          </>
+        );
+      if (checksGrid) return checksGrid;
       const retag = libraryRetagDetail(d);
       if (!retag.meta && !retag.coverOnly && !retag.tracks.length && !retag.unmatched.length) {
         return <div className="repair-finding-desc">No changes.</div>;

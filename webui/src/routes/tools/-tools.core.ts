@@ -818,6 +818,32 @@ export interface LibraryRetagDetail {
   unmatched: string[];
 }
 
+/** third #1062 review G16-2: a native Library Re-tag finding stores its
+ *  changed tag rows as `diff` (field, file_value, db_value, manual; sibling
+ *  files labelled "Title (song.mp3)"). 3.6.1 showed every change, old to new;
+ *  v2 showed only the validation grid, which has no row for source ids,
+ *  lyrics or a sibling copy, so the change Apply Tags makes wasn't visible. */
+export function nativeRetagChanges(diff: unknown): FindingDetailRow[] {
+  return arr<{
+    field?: string;
+    file_value?: unknown;
+    db_value?: unknown;
+    changed?: boolean;
+    manual?: boolean;
+  }>(diff)
+    .filter((row) => row && row.changed !== false && row.field)
+    .slice(0, LIBRARY_RETAG_TRACK_CAP)
+    .map((row) => {
+      const before = row.file_value === '' || row.file_value == null ? '∅' : str(row.file_value);
+      const after = row.db_value === '' || row.db_value == null ? '∅' : str(row.db_value);
+      return [
+        str(row.field),
+        `${before}   →   ${after}${row.manual ? '   (set by hand)' : ''}`,
+        'highlight',
+      ];
+    });
+}
+
 /** Cap from the vanilla — huge albums would otherwise render thousands of rows. */
 export const LIBRARY_RETAG_TRACK_CAP = 40;
 

@@ -264,4 +264,37 @@ describe('Library re-tag checks (Storm)', () => {
     // a correct field stays a single word
     expect(text).not.toContain('correct: file');
   });
+
+  it('lists every field Apply Tags writes, source ids, siblings and hand edits too', () => {
+    // third #1062 review G16-2: the checks grid has no row for these, so a
+    // finding whose only drift was an id said every check was correct
+    const finding = {
+      ...retag,
+      details: {
+        validation: { checks: { title: 'correct' } },
+        diff: [
+          {
+            field: 'MusicBrainz Recording ID',
+            file_key: 'musicbrainz_recording_id',
+            file_value: '',
+            db_value: 'mb-1',
+            changed: true,
+          },
+          { field: 'Title (song.mp3)', file_value: 'Old', db_value: 'New', changed: true },
+          { field: 'Genre', file_value: 'Rock', db_value: 'Pop', changed: true, manual: true },
+        ],
+      },
+    } as unknown as RepairFinding;
+    const { container } = render(
+      <FindingDetail finding={finding} onKeepDuplicate={vi.fn()} onApplyCoverArt={vi.fn()} />,
+    );
+    const text = container.textContent ?? '';
+    expect(text).toContain('Apply Tags will write');
+    expect(text).toContain('MusicBrainz Recording ID');
+    expect(text).toContain('∅   →   mb-1');
+    expect(text).toContain('Title (song.mp3)');
+    expect(text).toContain('Rock   →   Pop   (set by hand)');
+    // the checks still show, below
+    expect(text).toContain('Tag checks');
+  });
 });
