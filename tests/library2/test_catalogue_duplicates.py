@@ -991,3 +991,25 @@ def test_two_locked_releases_with_different_genres_wait_for_review(library):
         conn.execute("UPDATE lib2_albums SET genres_locked=1, genres='[\"Rap\"]' WHERE id=?", (albums[1],))
         conn.commit()
     assert _twin_pair(library, albums)['auto_merge_eligible'] is False
+
+
+def test_a_finding_on_the_merged_release_follows_the_survivor(library):
+    """third #1062 review P2A-6: a finding (or a dismissal) filed on the
+    duplicate release named a deleted row after the merge"""
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    _artist, albums, tracks = ark_pair(library)
+    _result, findings = scan(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS repair_findings (id INTEGER PRIMARY KEY, job_id TEXT,
+            finding_type TEXT, entity_type TEXT, entity_id TEXT, status TEXT, details_json TEXT,
+            user_action TEXT, resolved_at TEXT, updated_at TEXT)""")
+        conn.execute("INSERT INTO repair_findings(job_id,finding_type,entity_type,entity_id,status)"
+                     " VALUES('cover','missing_cover_art','album',?,'dismissed')", (f"lib2:{albums[1]}",))
+        conn.execute("INSERT INTO repair_findings(job_id,finding_type,entity_type,entity_id,status)"
+                     " VALUES('lyrics','missing_lyrics','track',?,'dismissed')", (f"lib2:{tracks[1]}",))
+        conn.commit()
+    assert merge_catalogue_duplicate(library[0], findings[0]["details"], albums[0])["success"] is True
+    with closing(library[0]._get_connection()) as conn:
+        named = {r[0]: r[1] for r in conn.execute(
+            "SELECT finding_type, entity_id FROM repair_findings WHERE finding_type IN ('missing_cover_art','missing_lyrics')")}
+    assert named == {"missing_cover_art": f"lib2:{albums[0]}", "missing_lyrics": f"lib2:{tracks[0]}"}

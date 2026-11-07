@@ -508,3 +508,24 @@ def test_a_folded_server_twin_hands_over_its_plays_edits_and_wishes(repair_db, m
     assert conn.execute("SELECT entity_id FROM lib2_metadata_overrides").fetchone()[0] == keep
     info = conn.execute("SELECT source_info FROM wishlist_tracks WHERE id=?", (wished,)).fetchone()
     assert json.loads(info[0])["lib2_track_id"] == keep
+
+
+def test_a_finding_on_the_merged_twin_follows_the_survivor(repair_db):
+    """third #1062 review P2A-6: a dismissal carried onto the jellyfin copy
+    of an artist named a deleted id after the merge, and the next scan
+    raised the finding again on the survivor"""
+    legacy_db, conn = repair_db
+    bare = _artist(conn, "Hiroyuki Sawano")
+    rich = _artist(conn, "Hiroyuki Sawano", spotify_id="0Riv2KnFcLZA3JSVryRg4y",
+                   legacy_artist_id=730596583)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS repair_findings (id INTEGER PRIMARY KEY, job_id TEXT,"
+        " finding_type TEXT, entity_type TEXT, entity_id TEXT, status TEXT, updated_at TEXT)")
+    conn.execute("INSERT INTO repair_findings(job_id, finding_type, entity_type, entity_id, status)"
+                 " VALUES('genre_enrichment', 'genre_enrichment', 'artist', ?, 'dismissed')",
+                 (f"lib2:{bare}",))
+    conn.commit()
+
+    repair_duplicate_artists(legacy_db)
+
+    assert conn.execute("SELECT entity_id FROM repair_findings").fetchone()[0] == f"lib2:{rich}"

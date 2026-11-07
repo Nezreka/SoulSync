@@ -465,6 +465,13 @@ def _move_references(conn, kind, source_id, target_id):
     if _table(conn, "lib2_monitor_rules"):
         from core.library2.monitor_rules import merge_rules_into
         merge_rules_into(conn, kind, source_id, target_id)
+    if _table(conn, "repair_findings") and {"entity_type", "entity_id"} <= {
+            r[1] for r in conn.execute("PRAGMA table_info(repair_findings)")}:
+        # P2A-6, for releases and tracks too: a finding (or a dismissal) on
+        # the twin follows the survivor instead of naming a deleted row
+        conn.execute("UPDATE repair_findings SET entity_id=?,updated_at=CURRENT_TIMESTAMP "
+                     "WHERE entity_type=? AND entity_id=?",
+                     (f"lib2:{target_id}", kind, f"lib2:{source_id}"))
     if _table(conn, "lib2_media_server_mappings"):
         conn.execute("UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? WHERE entity_type=? AND entity_id=?",
                      (target_id, kind, source_id))

@@ -247,6 +247,16 @@ def _merge_artist(cursor: Any, survivor: Any, duplicate: Any) -> None:
     cursor.execute(
         "DELETE FROM lib2_media_server_mappings WHERE entity_type='artist' AND entity_id=?",
         (duplicate_id,))
+    # third #1062 review P2A-6: a finding filed on the twin (a 3.6.1
+    # dismissal carried onto the jellyfin copy) follows the survivor. left
+    # naming a deleted id, the next scan raised it again on the survivor
+    try:
+        cursor.execute(
+            "UPDATE repair_findings SET entity_id=?, updated_at=CURRENT_TIMESTAMP "
+            "WHERE entity_type='artist' AND entity_id=?",
+            (f"lib2:{survivor_id}", f"lib2:{duplicate_id}"))
+    except Exception as exc:  # noqa: BLE001 - no findings table yet
+        logger.debug("artist merge: findings not re-pointed: %s", exc)
     cursor.execute("DELETE FROM lib2_artists WHERE id=?", (duplicate_id,))
 
 
