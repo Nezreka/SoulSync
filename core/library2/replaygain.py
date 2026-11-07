@@ -136,7 +136,14 @@ def analyze_album_replaygain(
     for file_id, path, track_gain_db, peak_dbfs in analyzed:
         try:
             with get_file_lock(path):
-                write(path, track_gain_db, peak_dbfs, album_gain_db, album_peak_dbfs)
+                written = write(path, track_gain_db, peak_dbfs, album_gain_db, album_peak_dbfs)
+            if written is False:
+                # G08-2: write_replaygain_tags says False, never raises (a
+                # format it can't tag, a file mutagen can't open, a save the
+                # integrity check aborted); 3.6.1 reported it as a failure
+                stats["failed"] += 1
+                stats["errors"].append({"track": path, "error": "Failed to write tags to file"})
+                continue
             stats["analyzed"] += 1
 
             # Rescan tags into database cache
@@ -217,7 +224,9 @@ def analyze_track_replaygain(
                 lufs, peak_dbfs = analyze(resolved)
                 track_gain_db = _target_lufs(config_manager) - lufs
                 with get_file_lock(resolved):
-                    write(resolved, track_gain_db, peak_dbfs, None, None)
+                    written = write(resolved, track_gain_db, peak_dbfs, None, None)
+                if written is False:  # G08-2, as above
+                    raise RuntimeError("Failed to write tags to file")
                 try:
                     from core.library2.tag_cache import read_and_persist_tag_cache
                     read_and_persist_tag_cache(conn, file_row["id"], resolved)

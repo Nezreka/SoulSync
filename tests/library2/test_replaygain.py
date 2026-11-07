@@ -255,3 +255,29 @@ def test_album_replaygain_writes_against_the_target_loudness(imported_conn):
     )
     assert result["album_gain_db"] == -14.0 - (-18.0)
     assert writes["/m/01.flac"] == (-14.0 - (-20.0), -14.0 - (-18.0))
+
+
+def test_a_tag_write_that_says_no_is_a_failure_not_a_gain(imported_conn):
+    """third #1062 review G08-2: write_replaygain_tags returns False (never
+    raises) for a format it can't tag or a save that aborted. 3.6.1 said
+    "Failed to write tags to file"; v2 showed the gain and counted it done"""
+    _seed_two_present_files(imported_conn)
+    album_id = imported_conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    result = RG.analyze_album_replaygain(
+        imported_conn, album_id,
+        analyze_fn=_fake_analyze({"/m/01.flac": -20.0, "/m/02.flac": -16.0}),
+        write_fn=lambda path, *rest: path != "/m/02.flac",
+        resolve_fn=lambda p: p,
+    )
+    assert result["analyzed"] == 1 and result["failed"] == 1
+    assert result["errors"] == [{"track": "/m/02.flac", "error": "Failed to write tags to file"}]
+
+    track_id = imported_conn.execute("SELECT id FROM lib2_tracks WHERE title='One Dance'").fetchone()[0]
+    single = RG.analyze_track_replaygain(
+        imported_conn, track_id,
+        analyze_fn=lambda p: (-20.0, -1.0),
+        write_fn=lambda *a: False,
+        resolve_fn=lambda p: p,
+    )
+    assert single["analyzed"] is False
+    assert single["error"] == "Failed to write tags to file"
