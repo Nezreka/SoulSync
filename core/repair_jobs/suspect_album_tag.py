@@ -360,6 +360,7 @@ class SuspectAlbumTagDetector(RepairJob):
                     json_extract(al.external_ids, '$.itunes') AS itunes_album_id,
                     COALESCE(aar.name, '') AS album_artist_name,
                     MIN(f.path)    AS rep_path,
+                    GROUP_CONCAT(f.path, char(31)) AS all_paths,
                     COUNT(t.id)    AS local_track_count,
                     COUNT(DISTINCT CASE WHEN {eff} != '' THEN LOWER({eff}) END) AS distinct_artists,
                     GROUP_CONCAT(DISTINCT {eff}) AS artist_names,
@@ -395,7 +396,14 @@ class SuspectAlbumTagDetector(RepairJob):
             rows = [dict(r) for r in cur.fetchall()]
         finally:
             conn.close()
-        rows = drop_hand_tagged(context, rows, path_key='rep_path')
+        # one hand-tagged file protects its whole album, as 3.6.1's album
+        # lock did; the first path alone missed a hand-tagged track 07
+        from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+        keys = hand_tagged_path_keys(getattr(context, 'db', None))
+        if keys:
+            rows = [r for r in rows
+                    if not any(is_hand_tagged_path(p, keys)
+                               for p in str(r.get('all_paths') or '').split('\x1f') if p)]
 
         total = len(rows)
         if total >= 2000:
