@@ -76,11 +76,20 @@ def _corrected_from_payload(payload, fallback_title: str, source: str,
     if not artist or is_unknown_artist_name(artist, extra):
         return None
     album = _value(payload, 'album', {}) or {}
+    image_url = ''
     if isinstance(album, dict):
         album_name = album.get('name') or album.get('title') or ''
         year = str(album.get('release_date') or '')[:4]
+        images = album.get('images') or []
+        first = images[0] if images else None
+        if isinstance(first, dict):
+            image_url = first.get('url') or ''
+        elif isinstance(first, str):
+            image_url = first
     else:
         album_name, year = str(album), ''
+    # the provider's cover, as 3.6.1 embedded it (these files rarely have art)
+    image_url = _value(payload, 'image_url', image_url) or image_url
     return {
         'artist': artist,
         'album': album_name,
@@ -90,6 +99,7 @@ def _corrected_from_payload(payload, fallback_title: str, source: str,
         'year': year,
         'source': source,
         'confidence': confidence,
+        'image_url': image_url,
     }
 
 
@@ -266,6 +276,7 @@ def apply_unknown_artist_fix(db: Any, track_id: int, details: Dict[str, Any], *,
             conn.rollback()
             return {'success': False, 'error': f'Re-filing failed: {exc}'}
 
+    failed_tags: list = []
     if fix_tags:
         from core.library2.paths import resolve_lib2_path
         from core.tag_writer import write_tags_to_file
@@ -274,20 +285,27 @@ def apply_unknown_artist_fix(db: Any, track_id: int, details: Dict[str, Any], *,
             if not resolved or not os.path.isfile(resolved):
                 continue
             try:
-                write_tags_to_file(resolved, {
+                tag_result = write_tags_to_file(resolved, {
                     'title': title,
                     'artist_name': artist_name,
                     'album_title': album_title,
                     'year': details.get('corrected_year') or '',
                     'track_number': track_number,
                     'disc_number': details.get('corrected_disc_number') or 1,
-                })
+                }, embed_cover=True, cover_url=details.get('cover_url') or None)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Unknown Artist tag write failed for %s: %s", resolved, exc)
+                tag_result = {'success': False, 'error': str(exc)}
+            written = (tag_result.get('success') if isinstance(tag_result, dict)
+                       else bool(tag_result))
+            if not written:
+                failed_tags.append(os.path.basename(resolved))
+                logger.warning("Unknown Artist tag write failed for %s: %s", resolved,
+                               tag_result.get('error') if isinstance(tag_result, dict) else None)
     return {
         'success': True,
         'action': 'identified_artist',
-        'message': f'Filed under {artist_name} — {album_title}',
+        'message': f'Filed under {artist_name} — {album_title}' + (
+            f"; tags not written to {', '.join(failed_tags)}" if failed_tags else ''),
         'library_v2_rehomed_track_id': int(new_track_id),
         'library_v2_recompute_wanted': True,
     }
@@ -399,7 +417,8 @@ class UnknownArtistRecoveryJob(RepairJob):
                 'source': corrected.get('source'),
                 'confidence': corrected.get('confidence'),
                 'file_path': path,
-                'album_thumb_url': subject.get('album_image'),
+                'album_thumb_url': corrected.get('image_url') or subject.get('album_image'),
+                'cover_url': corrected.get('image_url') or '',
             }
             if dry_run:
                 if context.create_finding:
@@ -429,10 +448,20 @@ class UnknownArtistRecoveryJob(RepairJob):
                     config_manager=context.config_manager)
                 if outcome.get('success'):
                     result.auto_fixed += 1
+                    # the fix re-homes the files onto the identified track; the
+                    # placeholder row is gone, so everything after uses the new id
+                    rehomed = outcome.get('library_v2_rehomed_track_id') or int(subject['track_id'])
+                    # the same library sync the approve path runs: tag cache,
+                    # wanted/wishlist recompute, maintenance history
+                    if context.report_change:
+                        context.report_change(
+                            finding_type='unknown_artist', action='identified_artist',
+                            entity_type='track', entity_id=f"lib2:{rehomed}",
+                            file_path=path, details=details, result=outcome)
                     # the scheduled auto-fix moves the file too, like the
                     # approve path and 3.6.1's live mode did
                     if settings.get('reorganize_files', True):
-                        move_refiled_track(context, int(subject['track_id']),
+                        move_refiled_track(context, int(rehomed),
                                            config_manager=context.config_manager)
                 else:
                     result.errors += 1
