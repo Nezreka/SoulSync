@@ -3227,6 +3227,9 @@ export function AlbumOverflowMenu({
       .catch(() => window.showToast?.('Could not copy the link', 'error'));
   };
   const canWrite = useLibraryV2CanWrite();
+  // tags and loudness touch files only: a profile may in a library of its own
+  // (the server checks every file is its own)
+  const canTag = useLibraryV2CanWish();
   const [open, setOpen] = useState(false);
   const [showSubmenu, setShowSubmenu] = useState(false);
   const [showRetag, setShowRetag] = useState(false);
@@ -3322,9 +3325,9 @@ export function AlbumOverflowMenu({
                 type="button"
                 className={styles.overflowMenuItem}
                 data-requires-write=""
-                disabled={!canWrite}
+                disabled={!canTag}
                 onClick={() => {
-                  if (!canWrite) return;
+                  if (!canTag) return;
                   setShowRetag(true);
                   setOpen(false);
                 }}
@@ -3335,9 +3338,9 @@ export function AlbumOverflowMenu({
                 type="button"
                 className={styles.overflowMenuItem}
                 data-requires-write=""
-                disabled={replaygain.isPending || !canWrite}
+                disabled={replaygain.isPending || !canTag}
                 onClick={() => {
-                  if (!canWrite) return;
+                  if (!canTag) return;
                   replaygain.mutate();
                   setOpen(false);
                 }}
@@ -3472,9 +3475,9 @@ export function AlbumOverflowMenu({
             type="button"
             className={styles.inlineRetry}
             data-requires-write=""
-            disabled={replaygain.isPending || !canWrite}
+            disabled={replaygain.isPending || !canTag}
             onClick={() => {
-              if (canWrite) replaygain.mutate();
+              if (canTag) replaygain.mutate();
             }}
           >
             Retry
@@ -10868,7 +10871,7 @@ export function TrackTableBulkBar({
         type="button"
         className={styles.bulkBarButton}
         data-requires-write=""
-        disabled={busy !== null || trackIds.length === 0 || !canWrite}
+        disabled={busy !== null || trackIds.length === 0 || !canWish}
         onClick={() => setShowTagPreview(true)}
       >
         Write Tags
@@ -10886,7 +10889,7 @@ export function TrackTableBulkBar({
         type="button"
         className={styles.bulkBarButton}
         data-requires-write=""
-        disabled={busy !== null || trackIds.length === 0 || !canWrite}
+        disabled={busy !== null || trackIds.length === 0 || !canWish}
         onClick={() =>
           void run('ReplayGain', () =>
             fanOut('ReplayGain', trackIds, (id) => analyzeLibraryV2TrackReplayGain(id)),

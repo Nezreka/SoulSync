@@ -285,3 +285,45 @@ def test_the_public_artists_api_reads_the_profiles_library(world, monkeypatch):
     assert set(kims) == {"Kims Band"}
     assert set(artists(world.sam)) == {"House Band"}
     assert kims["Kims Band"]["track_count"] == 1
+
+
+def _track_of(world, key):
+    with world.db._get_connection() as conn:
+        return conn.execute("SELECT t.id FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id"
+                            " WHERE al.primary_artist_id=?", (world.ids[key],)).fetchone()[0]
+
+
+def test_kim_may_tag_and_loudness_tag_files_that_are_all_hers(world):
+    """3.6.1 let every profile write tags and ReplayGain. v2 made both
+    admin-only; a library of her own is hers to keep tidy. a 403 is the
+    guard, anything else is the route's own answer."""
+    world.as_profile(world.kim)
+    mine = _track_of(world, "k")
+    assert world.client.post("/api/library/v2/tags/write",
+                             json={"track_ids": [mine]}).status_code != 403
+    assert world.client.post(f"/api/library/v2/tracks/{mine}/replaygain").status_code != 403
+
+
+def test_kim_may_not_tag_the_shared_librarys_files(world):
+    world.as_profile(world.kim)
+    house = _track_of(world, "h")
+    assert world.client.post("/api/library/v2/tags/write",
+                             json={"track_ids": [house]}).status_code == 403
+    # one file of hers and one of the house's: still not hers to write
+    mine = _track_of(world, "k")
+    assert world.client.post("/api/library/v2/tags/write",
+                             json={"track_ids": [mine, house]}).status_code == 403
+
+
+def test_a_shared_profile_may_not_tag(world):
+    world.as_profile(world.sam)
+    house = _track_of(world, "h")
+    assert world.client.post("/api/library/v2/tags/write",
+                             json={"track_ids": [house]}).status_code == 403
+
+
+def test_kim_may_not_fill_catalogue_metadata(world):
+    """filling tag gaps writes the catalogue row every library shares"""
+    world.as_profile(world.kim)
+    mine = _track_of(world, "k")
+    assert world.client.post(f"/api/library/v2/tracks/{mine}/fill-tag-gaps").status_code == 403

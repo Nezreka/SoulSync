@@ -96,6 +96,16 @@ _OWN_LIBRARY_WISH_ENDPOINTS = frozenset({
     # catalogue rows -- what a wish is made from, no file touched
     "lib2_discography_refresh",
 })
+# Writes that touch files and nothing every library shares: a profile with a
+# library of its own may run them on files that are all its own (3.6.1 let
+# every profile tag and loudness-tag). Catalogue rows (matches, metadata
+# fills) stay the admin's: one row serves every library.
+_OWN_LIBRARY_FILE_ENDPOINTS = frozenset({
+    "lib2_track_file_tags_edit",
+    "lib2_album_replaygain",
+    "lib2_track_replaygain",
+    "lib2_write_tags",
+})
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 
 # A track is "consolidated away" when it deliberately has no file while its
@@ -324,6 +334,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
                 return _named_row_hidden()
+            if (request.endpoint in _OWN_LIBRARY_FILE_ENDPOINTS and _can_wish()
+                    and _touches_only_own_files()):
+                return _named_row_hidden()
             if request.endpoint == "lib2_update_ui_preferences" and _own_preferences_only():
                 return None
             return _fail("Library v2 changes require the admin profile", 403)
@@ -392,6 +405,34 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as exc:  # noqa: BLE001 - an unanswerable check hides nothing
             logger.debug("scope visibility check failed for %s %s: %s", entity, entity_id, exc)
             return False
+
+    def _touches_only_own_files() -> bool:
+        """Every live file this file-write would touch belongs to the caller.
+        False when it names no file, or any file of another library."""
+        args = request.view_args or {}
+        with closing(_conn()) as conn:
+            if "track_id" in args:
+                track_ids = [int(args["track_id"])]
+            elif "album_id" in args:
+                track_ids = [r[0] for r in conn.execute(
+                    "SELECT id FROM lib2_tracks WHERE album_id=?", (int(args["album_id"]),))]
+            else:
+                body = request.get_json(silent=True) or {}
+                raw = body.get("track_ids") if isinstance(body, dict) else None
+                if not isinstance(raw, list) or not raw or any(
+                        isinstance(t, bool) or not isinstance(t, int) for t in raw):
+                    return False
+                track_ids = raw
+            if not track_ids:
+                return False
+            row = conn.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN owner_profile_id = ? THEN 1 ELSE 0 END)"
+                "  FROM lib2_track_files"
+                " WHERE track_id IN (SELECT value FROM json_each(?))"
+                "   AND COALESCE(file_state,'active') NOT IN ('deleted','missing_confirmed')",
+                (int(_profile()), json.dumps([int(t) for t in track_ids]))).fetchone()
+        total, own = int(row[0] or 0), int(row[1] or 0)
+        return total > 0 and own == total
 
     def _can_wish() -> bool:
         """May the caller monitor and search in the library it is looking at?
