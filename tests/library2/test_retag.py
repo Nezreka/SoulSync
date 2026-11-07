@@ -868,3 +868,41 @@ def test_retag_preserves_manual_concrete_edition_title(imported_conn):
     data = retag.track_contexts(imported_conn, [tid])[0]['db_data']
     assert data['album_title'] == 'My edition'
     assert data['_manual_fields']['album_title'] == 'Provider edition'
+
+
+def test_write_tags_keeps_a_files_lyrics_and_respects_tag_settings(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """Write Tags (and the retag a new album cover starts) wrote Genius's
+    plain-text lyrics over a file's synced lyrics, plus style/mood/copyright/
+    ISRC with their settings off. 3.6.1's Write Tags wrote none of them."""
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, _, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")
+    conn.execute("UPDATE lib2_tracks SET genius_lyrics='plain text', mood='Happy', style='Pop',"
+                 " isrc='USRC17607839', copyright='(c) 2016' WHERE id=?", (track_id,))
+    conn.commit()
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: {"error": None, "has_cover_art": True})
+    monkeypatch.setattr("core.tag_writer.build_tag_diff", lambda *_args: [{"changed": True}])
+    written = []
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file",
+                        lambda path, db_data, **_kw: written.append(dict(db_data)) or {"success": True})
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False)
+
+    assert written, "the write ran"
+    for key in ("lyrics", "mood", "style", "isrc", "copyright"):
+        assert key not in written[-1], key
+
+
+def test_the_retag_modal_writes_extra_tags_only_where_their_setting_allows(monkeypatch):
+    from types import SimpleNamespace
+    values = {"audiodb.tags.mood": False}
+    monkeypatch.setattr("core.metadata.common.get_config_manager",
+                        lambda: SimpleNamespace(get=lambda key, default=None: values.get(key, default)))
+    data = {"title": "x", "mood": "Happy", "style": "Pop", "isrc": "US1", "lyrics": "plain"}
+    kept = retag._gate_extra_tags(data, {"lyrics": "skip"}, legacy=False)
+    assert "mood" not in kept and "lyrics" not in kept
+    assert kept["style"] == "Pop" and kept["isrc"] == "US1"
+    assert retag._gate_extra_tags(data, {"lyrics": "fetch"}, legacy=False)["lyrics"] == "plain"
