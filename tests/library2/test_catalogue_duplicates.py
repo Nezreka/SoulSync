@@ -961,3 +961,33 @@ def test_a_clean_and_an_explicit_copy_never_merge_on_their_own(library):
         conn.execute("UPDATE lib2_albums SET explicit=0 WHERE id=?", (albums[1],))
         conn.commit()
     assert _twin_pair(library, albums)['auto_merge_eligible'] is False
+
+
+def test_a_merge_keeps_the_duplicates_locked_genres_and_fills_gaps(library):
+    """the user's cleaned genres (and their lock) survive whichever row is
+    kept, and what only the duplicate knew fills the kept row's gaps"""
+    from core.library2.catalogue_duplicates import auto_merge_proven
+    db = library[0]
+    _plex, albums, _tracks = server_twins(library)
+    with closing(db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET genres='[]', genres_locked=0, label=NULL")
+        conn.execute("UPDATE lib2_albums SET genres='[\"Hip-Hop\"]', genres_locked=1, label='Label X' WHERE id=?",
+                     (albums[1],))
+        conn.commit()
+
+    assert auto_merge_proven(db)["merged"] == 1
+
+    with closing(db._get_connection()) as conn:
+        row = conn.execute("SELECT genres, genres_locked, label FROM lib2_albums WHERE id IN (?,?)",
+                           tuple(albums)).fetchone()
+    assert json.loads(row["genres"]) == ["Hip-Hop"] and row["genres_locked"] == 1
+    assert row["label"] == "Label X"
+
+
+def test_two_locked_releases_with_different_genres_wait_for_review(library):
+    _plex, albums, _tracks = server_twins(library)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET genres_locked=1, genres='[\"Pop\"]' WHERE id=?", (albums[0],))
+        conn.execute("UPDATE lib2_albums SET genres_locked=1, genres='[\"Rap\"]' WHERE id=?", (albums[1],))
+        conn.commit()
+    assert _twin_pair(library, albums)['auto_merge_eligible'] is False

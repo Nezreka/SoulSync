@@ -260,6 +260,10 @@ def _blockers(conn, albums, refs):
             reasons.append("A file has a manually selected primary.")
         if al.get("canonical_locked") or al.get("art_locked"):
             reasons.append("A release has a manual pin or artwork selection.")
+    if (all(al.get("genres_locked") for al in albums)
+            and _genre_set(albums[0].get("genres")) != _genre_set(albums[1].get("genres"))):
+        reasons.append("Both releases have locked genres that differ.")
+    for al in albums:
         if _table(conn, "lib2_metadata_overrides"):
             if conn.execute("""SELECT 1 FROM lib2_metadata_overrides
                 WHERE (entity_type='release_group' AND entity_id=?)
@@ -370,6 +374,21 @@ def _blockers(conn, albums, refs):
     return sorted(set(reasons))
 
 
+def _keeper(albums):
+    """most files; on a tie the active server's copy (the one the user
+    sees and curates), then a genre-locked one, then the older row"""
+    from core.library2.dedup_repair import _active_server
+    try:
+        active = _active_server() or ""
+    except Exception:  # noqa: BLE001 - no config: file count and age decide
+        active = ""
+    return min(albums, key=lambda al: (
+        -al["file_count"],
+        0 if active and (al.get("server_source") or "") == active else 1,
+        0 if al.get("genres_locked") else 1,
+        al["id"]))
+
+
 def _explicit_conflict(one, two) -> bool:
     """both rows know their explicit flag and they disagree"""
     flags = [x.get("explicit") if isinstance(x, dict) else None for x in (one, two)]
@@ -419,7 +438,7 @@ def _candidate(conn, a, b):
             "count": 2, "merge_eligible": not reasons,
             "auto_merge_eligible": not reasons and identical_release,
             "blocked_reasons": sorted(set(reasons)), "snapshot": snapshot,
-            "recommended_album_id": min(albums, key=lambda al: (-al["file_count"], al["id"]))["id"],
+            "recommended_album_id": _keeper(albums)["id"],
             "library_v2_native": True,
             "library_v2": {"album_ids": [a["id"], b["id"]],
                           "track_ids": [t["id"] for al in albums for t in al["tracks"]]}}
@@ -500,12 +519,41 @@ def _adopt_gaps(conn, table, source, target):
         # isrc/mbid/spotify keep their own columns, never external_ids.
         _merge_external_ids(conn.cursor(), table, target["id"], {k: v for k, v in provider_only(_ids(source)).items()
                                                                  if k not in known and k not in {"spotify", "musicbrainz"}})
+    # what a curator or a provider filled on the duplicate fills the
+    # survivor's gaps too ("[]" and 0 are gaps)
+    fill += ["genres", "style", "mood", "label", "copyright"]
+    if table == "lib2_tracks":
+        fill += ["bpm", "genius_lyrics"]
     columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     for column in fill:
-        if column in columns and not target.get(column) and source.get(column):
+        if column in columns and _empty(target.get(column)) and not _empty(source.get(column)):
             conn.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (source[column], target["id"]))
+            target[column] = source[column]
+    # explicit 0 is "clean", a real answer: only an unknown flag is a gap
+    if "explicit" in columns and target.get("explicit") is None and source.get("explicit") is not None:
+        conn.execute(f"UPDATE {table} SET explicit=? WHERE id=?", (source["explicit"], target["id"]))
+    # a genre lock is the user's cleaned genres: an unlocked survivor takes
+    # them and the lock (two locked rows that disagree never get here)
+    if ("genres_locked" in columns and source.get("genres_locked")
+            and not target.get("genres_locked")):
+        conn.execute(f"UPDATE {table} SET genres=?, genres_locked=1 WHERE id=?",
+                     (source.get("genres"), target["id"]))
     conn.execute(f"UPDATE {table} SET quality_profile_explicit=MAX(quality_profile_explicit,?),updated_at=CURRENT_TIMESTAMP WHERE id=?",
                  (source.get("quality_profile_explicit") or 0, target["id"]))
+
+
+def _genre_set(value) -> frozenset:
+    try:
+        items = json.loads(value) if isinstance(value, str) else (value or [])
+    except (TypeError, ValueError):
+        items = [part for part in str(value).split(",")]
+    if not isinstance(items, list):
+        items = [items]
+    return frozenset(str(g).strip().casefold() for g in items if str(g).strip())
+
+
+def _empty(value) -> bool:
+    return value is None or (isinstance(value, str) and value.strip() in ("", "[]", "{}")) or value == 0
 
 
 def _merge_monitored(conn, kind, source, target):
