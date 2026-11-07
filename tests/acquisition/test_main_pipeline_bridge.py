@@ -432,3 +432,39 @@ def test_a_file_whose_track_row_is_gone_fails_alone_instead_of_the_import(tmp_pa
     assert result.dispatched == ()
     assert len(result.errors) == 1 and result.errors[0].startswith("01.flac:")
 
+
+
+def test_a_compilation_track_is_tagged_with_its_own_performers(tmp_path):
+    """third #1062 review G04-2: every track carried the album's primary
+    artist ("Various Artists"), features lost; the wishlist path sends the
+    track's own credits"""
+    import sqlite3
+    source_root = tmp_path / "client"
+    source_root.mkdir()
+    (source_root / "01.flac").write_bytes(b"audio")
+    factory, importing, _request = _seed_import(tmp_path / "db.sqlite", source_root)
+    conn = sqlite3.connect(tmp_path / "db.sqlite")
+    conn.execute("CREATE TABLE IF NOT EXISTS lib2_track_artists(track_id INTEGER, artist_id INTEGER, "
+                 "role TEXT, position INTEGER)")
+    conn.execute("INSERT INTO lib2_artists VALUES(302, 'Performer A')")
+    conn.execute("INSERT INTO lib2_artists VALUES(303, 'Guest B')")
+    conn.execute("INSERT INTO lib2_track_artists VALUES(101, 302, 'primary', 0)")
+    conn.execute("INSERT INTO lib2_track_artists VALUES(101, 303, 'featured', 1)")
+    conn.commit()
+    conn.close()
+    seen = {}
+
+    def processor(_key, context, _path, _task_id, _batch_id, _runtime):
+        seen["context"] = context
+
+    dispatch_import_to_main_pipeline(
+        factory, importing.id,
+        config_get=lambda key, default=None: (
+            str(tmp_path / "transfer") if key == "soulseek.transfer_path" else default),
+        processor=processor, runtime=object(),
+        copier=lambda source, destination: bool(shutil.copy2(source, destination)),
+    )
+
+    context = seen["context"]
+    assert [a["name"] for a in context["track_info"]["artists"]] == ["Performer A", "Guest B"]
+    assert context["original_search_result"]["artist"] == "Performer A"
