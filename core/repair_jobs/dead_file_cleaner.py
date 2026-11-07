@@ -123,6 +123,10 @@ class DeadFileCleanerJob(RepairJob):
             if deferred or (checked >= minimum and missing >= checked * share):
                 result.stopped_early = _unreachable_report(
                     context, missing=missing, checked=checked, deferred=deferred, before=before)
+                # 3.6.1: a run that tripped the guard files nothing. files a
+                # healthy run confirmed missing earlier wait for the next one,
+                # so a review never opens while the library is out of reach
+                return result
             after = scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager, include_missing=True,
             ))

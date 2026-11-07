@@ -195,3 +195,29 @@ def test_the_saved_guard_settings_still_decide(monkeypatch):
     assert run({"max_unresolved_fraction": 0.9}) == ""          # the user's 0.9
     assert run({"min_tracks_for_guard": 100}) == ""             # too small a library
     assert run({"max_unresolved_fraction": "junk"}) != ""       # garbage: default
+
+
+def test_a_run_that_trips_the_guard_files_nothing(monkeypatch):
+    """a file confirmed missing in an earlier healthy run waited, in 3.6.1,
+    for a run that could reach the library. v2 filed it while the guard said
+    the library was out of reach."""
+    total, lost = 30, 20
+    before = [_subject(i) for i in range(total)]
+    after = [_subject(i, "missing_confirmed" if i == 25 else "active") for i in range(total)]
+    calls = []
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: calls.append(1) or list(before if len(calls) == 1 else after))
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda _db, **kw: {
+        "scanned": len(kw["file_ids"]) - lost, "missing": lost})
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
+    findings = []
+    context = JobContext(
+        db=SimpleNamespace(), transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: default,
+                                       get_active_media_server=lambda: None),
+        create_finding=lambda **kw: findings.append(kw) or True)
+
+    result = DeadFileCleanerJob().scan(context)
+
+    assert result.stopped_early
+    assert findings == []
