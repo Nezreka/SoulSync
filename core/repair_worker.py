@@ -1871,6 +1871,12 @@ class RepairWorker:
                     return old.get('pair_key') == enriched_details.get('pair_key')
                 mine = _stable_finding_payload(enriched_details)
                 theirs = _stable_finding_payload(old)
+                if finding_type == 'expired_download':
+                    # G08-3: its catalogue links were wrong (a history id read
+                    # as a track id); a dismissal made under them still holds
+                    for side in (mine, theirs):
+                        side.pop('library_v2', None)
+                        side.pop('library_owner_id', None)
                 if old.get('_file_identity') is not None:
                     theirs["_file_stat"] = old['_file_identity']
                     if file_identity is not None:

@@ -154,9 +154,13 @@ def _legacy_backref_ids(conn: Any, entity_type: str, entity_id: Any) -> List[int
     if not lookup or not text or text.startswith("lib2:"):
         return []
     table, column = lookup
+    # G08-3: never CAST the column, it walked the whole table per finding.
+    # the column is INTEGER affinity, so a number is stored as one; bind the
+    # text and, for digits, the integer too, and the legacy index answers
+    values = [text, int(text)] if text.isdigit() else [text]
     try:
         rows = conn.execute(
-            f"SELECT id FROM {table} WHERE CAST({column} AS TEXT)=?", (text,)
+            f"SELECT id FROM {table} WHERE {column} IN ({','.join('?' for _ in values)})", values
         ).fetchall()
     except Exception as exc:  # noqa: BLE001 — pre-migration schema
         logger.debug("legacy backref lookup failed (%s.%s): %s", table, column, exc)

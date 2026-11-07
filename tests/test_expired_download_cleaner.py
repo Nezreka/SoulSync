@@ -131,6 +131,17 @@ def test_scan_creates_findings_for_expired():
     assert findings[0]['finding_type'] == 'expired_download'
 
 
+def test_an_expired_finding_is_filed_as_a_download_not_a_track():
+    """third #1062 review G08-3: the id is a download-history id; as a
+    'track' the finding annotation read it as a 3.6.1 track id"""
+    db = _DB([_cand(1, created=OLD, play_count=0)])
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(
+        db, {'playlist_retention': '2mo', 'keep_if_played_at_least': 2}, findings))
+    assert findings[0]['entity_type'] == 'download'
+    assert findings[0]['entity_id'] == '1'
+
+
 def test_scan_protects_actively_mirrored_playlist():
     # track still in the mirror's current track list → protected by
     # membership, not merely by the playlist name.
