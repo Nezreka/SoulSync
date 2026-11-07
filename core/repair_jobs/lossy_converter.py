@@ -147,16 +147,10 @@ class LossyConverterJob(RepairJob):
         except Exception as e:
             logger.warning("V2 subject enumeration failed: %s", e)
             result.errors += 1
-        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
-
-        for file_path in filesystem_audio_files(
-            context, extensions=LOSSLESS_CANDIDATE_EXTENSIONS,
-        ):
-            tracks.append((
-                None, os.path.splitext(os.path.basename(file_path))[0],
-                None, os.path.basename(os.path.dirname(file_path)), file_path,
-                None, None, None,
-            ))
+        # library tracks only, as in 3.6.1. v2 also walked the disk and
+        # converted files the library never imported (with delete-original
+        # on, removing them): a loose file is the orphan detector's and
+        # import's to sort out, not this job's to rewrite
 
         total = len(tracks)
         if context.update_progress:
@@ -330,14 +324,4 @@ class LossyConverterJob(RepairJob):
             )
         except Exception as exc:
             logger.debug("Could not estimate indexed conversion scope: %s", exc)
-        try:
-            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
-
-            count += sum(
-                1 for path in filesystem_audio_files(
-                    context, extensions=LOSSLESS_CANDIDATE_EXTENSIONS,
-                ) if os.path.splitext(path)[1].lower() in LOSSLESS_CANDIDATE_EXTENSIONS
-            )
-        except Exception as exc:
-            logger.debug("Could not estimate filesystem conversion scope: %s", exc)
         return count

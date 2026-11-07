@@ -135,13 +135,8 @@ class ReplayGainFillerJob(RepairJob):
                 ))
         except Exception as e:
             logger.warning("[ReplayGain Filler] V2 subject enumeration failed: %s", e)
-        from core.repair_jobs.filesystem_subjects import filesystem_audio_files
-
-        for file_path in filesystem_audio_files(context):
-            rows.append((
-                None, os.path.splitext(os.path.basename(file_path))[0],
-                None, file_path,
-            ))
+        # library tracks only, as in 3.6.1: v2 also tagged every audio file
+        # on disk the library never imported
 
         total = len(rows)
         if context.update_progress:
@@ -275,10 +270,4 @@ class ReplayGainFillerJob(RepairJob):
             count += count_active_files(context.db, context.config_manager)
         except Exception as exc:
             logger.debug("Could not estimate indexed ReplayGain scope: %s", exc)
-        try:
-            from core.repair_jobs.filesystem_subjects import filesystem_audio_files
-
-            count += len(filesystem_audio_files(context))
-        except Exception as exc:
-            logger.debug("Could not estimate filesystem ReplayGain scope: %s", exc)
         return count
