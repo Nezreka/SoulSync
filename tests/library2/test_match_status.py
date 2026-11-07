@@ -347,10 +347,16 @@ def test_artist_enrichment_coverage_counts_tracks_per_provider(imported_conn):
         "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Dummy')",
         (artist_id,),
     ).lastrowid
-    for spotify_id, external in (("sp-1", "{}"), ("sp-2", '{"deezer":"dz-2"}'), (None, "{}")):
-        conn.execute(
+    for n, (spotify_id, external) in enumerate(
+            (("sp-1", "{}"), ("sp-2", '{"deezer":"dz-2"}'), (None, "{}"))):
+        track_id = conn.execute(
             "INSERT INTO lib2_tracks(album_id, title, spotify_id, external_ids) "
-            "VALUES(?, 'T', ?, ?)", (album_id, spotify_id, external))
+            "VALUES(?, 'T', ?, ?)", (album_id, spotify_id, external)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)",
+                     (track_id, f"/m/portishead/{n}.flac"))
+    # P2B-4: a fileless discography slot isn't in the library; the worker
+    # never enriches it, so it must not hold the rings down
+    conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Wanted')", (album_id,))
 
     from core.library2.match_status import artist_enrichment_coverage
 

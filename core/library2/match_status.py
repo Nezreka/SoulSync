@@ -152,16 +152,22 @@ def artist_enrichment_coverage(conn: Any, artist_id: int) -> Dict[str, Any]:
     # two indexed halves, not one OR across two joined tables: the OR made
     # sqlite walk every track in the catalogue, 20s an artist page on a big
     # library. UNION keeps the DISTINCT.
+    # third #1062 review P2B-4: the tracks you own. 3.6.1's tracks table held
+    # nothing else; v2's also has the watched discography's fileless rows,
+    # which no worker enriches, so the rings sat low forever. guest spots
+    # stay in (the one artist page counts them)
+    from core.library2.sql_util import owned_sql
+    owned = owned_sql("track", "t")
     rows = conn.execute(
         f"""SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids
               FROM lib2_track_artists ta
               JOIN lib2_tracks t ON t.id = ta.track_id
-             WHERE ta.artist_id IN ({marks})
+             WHERE ta.artist_id IN ({marks}) AND {owned}
             UNION
             SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids
               FROM lib2_albums al
               JOIN lib2_tracks t ON t.album_id = al.id
-             WHERE al.primary_artist_id IN ({marks})""",
+             WHERE al.primary_artist_id IN ({marks}) AND {owned}""",
         tuple(group) * 2,
     ).fetchall()
     total = len(rows)
