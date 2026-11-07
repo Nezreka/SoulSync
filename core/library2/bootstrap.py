@@ -704,6 +704,10 @@ def _carry_upgrade_state(conn: Any) -> Dict[str, Any]:
         # by its legacy id: onto the lib2 track, or no replace at all
         from core.imports.rematch_hints import carry_legacy_rematch_hints
         stats["rematch_hints_mapped"] = carry_legacy_rematch_hints(conn)
+        # track artists, the server's paths and Deezer compilations the
+        # import itself didn't carry
+        from core.library2.legacy_columns import carry_legacy_columns
+        stats["legacy_columns"] = sum(carry_legacy_columns(conn).values())
     except Exception as exc:  # noqa: BLE001 - each carry retries next start
         logger.warning("3.6.1 state not fully carried yet: %s", exc)
     return stats

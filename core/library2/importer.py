@@ -553,6 +553,9 @@ def _normalize_album_type(raw: Any, track_count: Optional[int], actual_tracks: i
     the one-track heuristic for old rows that have no release-type metadata at all.
     """
     value = str(raw or "").strip().lower()
+    # Deezer's own word: 3.6.1 stored its raw record_type and read 'compile'
+    # as a compilation (the enrichment workers map it the same way)
+    value = {"compile": "compilation", "compilations": "compilation"}.get(value, value)
     if value in {"album", "single", "ep", "compilation", "live"}:
         return value
     if value in {"appears_on", "appears-on"}:
