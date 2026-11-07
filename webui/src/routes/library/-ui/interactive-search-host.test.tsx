@@ -71,6 +71,12 @@ describe('Interactive Search outside the library', () => {
   });
 
   it('a failed download always opens its own task inspector, to retry it in its batch', async () => {
+    // even a task for a library track
+    server.use(
+      http.get('*/api/downloads/task/t1/library-track', () =>
+        HttpResponse.json({ success: true, track_id: 1105 }),
+      ),
+    );
     const track = { name: 'Lost Forever', artist: 'Sergio' };
     await openDownloadTaskSearch('t1', track);
     expect(openDownloadTaskInspector).toHaveBeenCalledWith('t1', track);
