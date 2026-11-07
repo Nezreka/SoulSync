@@ -8,6 +8,7 @@ progress, speed, ETA and byte counters remain owned by SABnzbd/NZBGet.
 from __future__ import annotations
 
 import threading
+import time
 import unicodedata
 from contextlib import closing
 from dataclasses import dataclass
@@ -520,6 +521,8 @@ class UsenetAcquisitionMonitor:
         self._last_error: Optional[str] = None
         self._last_logged_error: Optional[str] = None
         self._cancel_missing_counts: Dict[str, int] = {}
+        # G04-4: the journal's retention sweep, once a day (0 = not yet)
+        self._last_retention_at = 0.0
 
     @staticmethod
     def _default_adapter() -> Optional[UsenetClientAdapter]:
@@ -529,6 +532,25 @@ class UsenetAcquisitionMonitor:
     def _default_import_pipeline(self) -> Any:
         from core.acquisition.import_pipeline import advance_open_imports
         return advance_open_imports(self._connection_factory)
+
+    RETENTION_INTERVAL_S = 24 * 3600
+
+    def _run_retention(self) -> None:
+        """settled acquisition rows past their retention, once a day; never
+        stops the cycle"""
+        now = time.monotonic()
+        if self._last_retention_at and now - self._last_retention_at < self.RETENTION_INTERVAL_S:
+            return
+        self._last_retention_at = now
+        try:
+            from core.acquisition.retention import prune_acquisition_journal, retention_days
+            conn = self._connection_factory()
+            try:
+                prune_acquisition_journal(conn, days=retention_days())
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 - monitor must stay alive
+            logger.warning("Acquisition journal retention skipped: %s", redact_sensitive_text(exc))
 
     def _run_import_pipeline(self) -> Any:
         try:
@@ -714,6 +736,7 @@ class UsenetAcquisitionMonitor:
             # legacy seven-day fallback sweep.  That preserves a real indexed
             # completion or quarantine sidecar instead of aging it out first.
             imports_result = self._run_import_pipeline()
+            self._run_retention()
             grabs, stale = self._read_open_grabs()
             if not grabs:
                 result = MonitorRunResult(
