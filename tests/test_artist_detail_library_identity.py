@@ -52,6 +52,7 @@ def client(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     _Db.keys = {"drake/hand tagged/01.flac"}
+    _Db.last_path = path
     monkeypatch.setattr(ad, "get_database", lambda: _Db(path))
     app = flask.Flask(__name__)
     app.register_blueprint(ad.bp)
@@ -66,6 +67,17 @@ def test_identity_prefers_spotify(client):
 def test_identity_falls_back_to_other_providers(client):
     body = client.get("/api/artist-detail/library/2/identity").get_json()
     assert (body["source"], body["provider_id"]) == ("deezer", "dz-9")
+
+
+def test_identity_reaches_an_amazon_only_artist(client, tmp_path):
+    """the provider page opens amazon artists; the identity skipped them."""
+    conn = row_conn(_Db.last_path)
+    conn.execute("INSERT INTO lib2_artists(id, name, sort_name, external_ids) "
+                 "VALUES(4, 'Amz', 'Amz', '{\"amazon\":\"B0AMZ\"}')")
+    conn.commit()
+    conn.close()
+    body = client.get("/api/artist-detail/library/4/identity").get_json()
+    assert (body["source"], body["provider_id"]) == ("amazon", "B0AMZ")
 
 
 def test_identity_without_provider_ids_and_unknown_rows(client):

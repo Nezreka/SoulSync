@@ -357,9 +357,10 @@ def get_library_artist_identity(artist_id):
         if row is None:
             return jsonify({"success": False, "error": "artist not found"}), 404
         row = dict(row)
+        # every source the provider artist page can open (core.artist_source_detail)
         for source, key in (("spotify", "spotify_artist_id"), ("deezer", "deezer_id"),
                             ("itunes", "itunes_artist_id"), ("musicbrainz", "musicbrainz_id"),
-                            ("discogs", "discogs_id")):
+                            ("discogs", "discogs_id"), ("amazon", "amazon_id")):
             value = str(row.get(key) or "").strip()
             if value:
                 return jsonify({"success": True, "name": row.get("name") or "",
