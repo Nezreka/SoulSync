@@ -152,3 +152,24 @@ def test_url_base_set_the_page_polls_and_reloads_through_the_prefix(monkeypatch)
         assert json.loads(_request(app, path)[1])['status'] == 'ready'
     assert _request(app, '/soulsync/library') == ('200 OK', b'normal app')
 
+
+
+def test_a_wedged_app_turns_the_healthcheck_unhealthy():
+    """third #1062 review G02-2: after the boot the wrapper answered the probe
+    itself, so a hung or failing Flask still read healthy. 3.6.1's
+    healthcheck went through Flask"""
+    from core.startup_application import StartupApplication
+    state = {'ok': True}
+
+    def flask(environ, start):
+        if not state['ok']:
+            raise RuntimeError('wedged')
+        start('200 OK', [])
+        return [b'{}']
+
+    app = StartupApplication(lambda: flask)
+    assert app.wait(5)
+    assert _request(app, '/api/startup-status')[0] == '200 OK'
+    state['ok'] = False
+    status, body = _request(app, '/api/startup-status')
+    assert status == '503 Service Unavailable' and b'unresponsive' in body

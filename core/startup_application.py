@@ -79,6 +79,26 @@ class StartupApplication:
         finally:
             self._done.set()
 
+    def _flask_answers(self, environ) -> bool:
+        """one cheap request through the real app (its before_request gates,
+        auth, the lot): /api/setup/status, which every profile may read"""
+        probe = dict(environ)
+        probe['PATH_INFO'] = '/api/setup/status'
+        probe['REQUEST_METHOD'] = 'GET'
+        probe['QUERY_STRING'] = ''
+        seen = []
+        try:
+            chunks = self._app(probe, lambda status, headers, *_a: seen.append(status))
+            for _chunk in chunks:
+                pass
+            close = getattr(chunks, 'close', None)
+            if callable(close):
+                close()
+        except Exception:  # noqa: BLE001 - an app that raises is not healthy
+            logger.exception('healthcheck: the app failed its probe request')
+            return False
+        return bool(seen) and not str(seen[0]).startswith('5')
+
     def wait(self, timeout=None):
         return self._done.wait(timeout)
 
@@ -102,9 +122,15 @@ class StartupApplication:
             path = path[len(base):] or '/'
         if path == '/api/startup-status':
             status = 'failed' if self._failed else ('ready' if self._app else 'starting')
+            if status == 'ready' and not self._flask_answers(environ):
+                # booted, but the app itself no longer answers: the probe
+                # must say so (3.6.1's healthcheck went through Flask, so a
+                # wedged app turned the container unhealthy)
+                status = 'unresponsive'
             from core import startup_progress
             body = json.dumps({'status': status, **startup_progress.snapshot()}).encode()
-            start_response('503 Service Unavailable' if self._failed else '200 OK',
+            healthy = status in ('ready', 'starting')
+            start_response('200 OK' if healthy else '503 Service Unavailable',
                            [('Content-Type', 'application/json'), ('Cache-Control', 'no-store')])
             return [body]
         if self._app is not None:
