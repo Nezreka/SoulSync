@@ -44,9 +44,19 @@ def test_a_deezer_compile_release_is_a_compilation_and_it_runs_once(imported_con
         == "compilation"
     conn.execute("UPDATE lib2_albums SET album_type='album' WHERE legacy_album_id=10")
     conn.commit()
-    assert carry_legacy_columns(conn) == {"track_artists": 0, "server_paths": 0, "compilations": 0}
+    assert not any(carry_legacy_columns(conn).values())
 
 
 def test_the_import_reads_compile_as_a_compilation():
     from core.library2.importer import _normalize_album_type
     assert _normalize_album_type("compile", 1, 1) == "compilation"
+
+
+def test_the_release_group_id_comes_over(imported_conn):
+    conn = imported_conn
+    conn.execute("ALTER TABLE albums ADD COLUMN musicbrainz_release_group_id TEXT")
+    conn.execute("UPDATE albums SET musicbrainz_release_group_id='rg-views' WHERE id=10")
+    conn.commit()
+    carry_legacy_columns(conn)
+    assert conn.execute("SELECT musicbrainz_release_group_id FROM lib2_albums WHERE legacy_album_id=10"
+                        ).fetchone()[0] == "rg-views"

@@ -9,6 +9,8 @@ Found in the third #1062 review (importer pass):
 * ``tracks.server_path`` (P2A-4, #1573): the path the media server reports.
   Without it a playlist or library M3U export wrote SoulSync's own mount,
   which the server can't open, until a full server refresh.
+* ``albums.musicbrainz_release_group_id`` (P2A-7): re-asked of MusicBrainz
+  for every album otherwise, at about one request a second.
 * ``albums.record_type = 'compile'`` (P2A-1): Deezer's word for a
   compilation. The import didn't know it and filed those as albums (or a
   1-track one as a single, then locked as known).
@@ -31,7 +33,7 @@ _BATCH = 2000
 
 
 def carry_legacy_columns(conn: Any) -> Dict[str, int]:
-    stats = {"track_artists": 0, "server_paths": 0, "compilations": 0}
+    stats = {"track_artists": 0, "server_paths": 0, "compilations": 0, "release_groups": 0}
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
                      "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
@@ -47,7 +49,20 @@ def carry_legacy_columns(conn: Any) -> Dict[str, int]:
                 stats["track_artists"] = _carry_track_artists(conn, tracks)
             if "server_path" in cols and "lib2_media_server_mappings" in tables:
                 stats["server_paths"] = _carry_server_paths(conn, tracks)
-        if albums and "record_type" in {r[1] for r in conn.execute(f'PRAGMA table_info("{albums}")')}:
+        album_cols = ({r[1] for r in conn.execute(f'PRAGMA table_info("{albums}")')}
+                      if albums else set())
+        if "musicbrainz_release_group_id" in album_cols:
+            # the MB worker re-asked every matched album for it, ~1/s
+            cur = conn.execute(
+                f"""UPDATE lib2_albums SET musicbrainz_release_group_id = (
+                        SELECT la.musicbrainz_release_group_id FROM "{albums}" la
+                         WHERE la.id = lib2_albums.legacy_album_id)
+                     WHERE COALESCE(musicbrainz_release_group_id, '') = ''
+                       AND legacy_album_id IN (
+                           SELECT id FROM "{albums}"
+                            WHERE COALESCE(musicbrainz_release_group_id, '') <> '')""")
+            stats["release_groups"] = max(int(cur.rowcount or 0), 0)
+        if "record_type" in album_cols:
             cur = conn.execute(
                 f"""UPDATE lib2_albums SET album_type='compilation', updated_at=CURRENT_TIMESTAMP
                      WHERE album_type IN ('album','single') AND legacy_album_id IN (
