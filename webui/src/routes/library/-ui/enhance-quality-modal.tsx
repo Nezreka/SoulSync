@@ -206,6 +206,8 @@ export function EnhanceQualityModal({
     return scope?.albumId != null ? rows.filter((t) => t.album_id === scope.albumId) : rows;
   }, [target, ownTracks, targeted.data, scope?.albumId]);
   const loadingTarget = target != null && targeted.isPending;
+  // G15-6: a failed fetch is not "nothing to upgrade"
+  const targetFailed = target != null && targeted.isError;
   // each target keeps its own picks, all of its tracks until you change them
   const [picks, setPicks] = useState<Record<string, Set<number>>>({});
   const pickKey = String(target ?? 'own');
@@ -274,11 +276,22 @@ export function EnhanceQualityModal({
           <p className={styles.summary}>
             {loadingTarget
               ? 'Checking what that profile would upgrade…'
-              : tracks.length
-                ? `${plural(tracks.length, 'track')} on ${plural(releases.length, 'release')} can sound better.`
-                : target != null
-                  ? 'Everything here already meets that profile.'
-                  : 'Everything here already meets its quality profile.'}
+              : targetFailed
+                ? 'Couldn’t check that profile.'
+                : tracks.length
+                  ? `${plural(tracks.length, 'track')} on ${plural(releases.length, 'release')} can sound better.`
+                  : target != null
+                    ? 'Everything here already meets that profile.'
+                    : 'Everything here already meets its quality profile.'}
+            {targetFailed ? (
+              <button
+                type="button"
+                className={styles.ghost}
+                onClick={() => void targeted.refetch()}
+              >
+                Try again
+              </button>
+            ) : null}
           </p>
           {from && goal ? <QualityJump current={from} target={goal} /> : null}
         </div>
@@ -400,7 +413,7 @@ export function EnhanceQualityModal({
           <button
             type="button"
             className={styles.primary}
-            disabled={selected.size === 0 || loadingTarget}
+            disabled={selected.size === 0 || loadingTarget || targetFailed}
             onClick={() => onEnhance([...selected], target)}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
