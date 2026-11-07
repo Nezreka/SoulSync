@@ -2247,6 +2247,9 @@ export function ArtistSettingsModal({
 }) {
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWrite();
+  // the watchlist part is the profile's own row: anyone who may wish here
+  // saves it (3.6.1's watchlist config); the rest of the sheet is the admin's
+  const canSaveWatchlist = useLibraryV2CanWish() === true;
   const settingsQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-settings', artist.id],
     queryFn: () => fetchLibraryV2ArtistSettings(artist.id),
@@ -2265,7 +2268,7 @@ export function ArtistSettingsModal({
 
   const save = useMutation({
     mutationFn: (value: LibraryV2ArtistSettings) => {
-      if (!canWrite) throw new Error('Library changes require the admin profile');
+      if (!canSaveWatchlist) throw new Error('Library changes require the admin profile');
       return updateLibraryV2ArtistSettings(artist.id, value);
     },
     onSuccess: async (response) => {
@@ -2338,10 +2341,9 @@ export function ArtistSettingsModal({
             <button
               type="button"
               className={styles.btnPrimary}
-              data-requires-write=""
-              disabled={save.isPending || !canWrite}
+              disabled={save.isPending || !canSaveWatchlist}
               onClick={() => {
-                if (canWrite) save.mutate(watchlist);
+                if (canSaveWatchlist) save.mutate(watchlist);
               }}
             >
               {save.isPending ? 'Saving…' : 'Save future-release settings'}
@@ -2483,6 +2485,7 @@ export function ArtistSettingsModal({
                     <span>Library-v2 discography rule</span>
                     <select
                       className={styles.select}
+                      disabled={!canWrite}
                       value={watchlist.monitor_new_items}
                       onChange={(event) =>
                         setDraft((current) =>
@@ -8868,6 +8871,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                         icon="settings"
                         label="Artist Settings"
                         title="Quality profile, Watchlist, new releases and audiobook filing"
+                        requiresWrite={false}
                         onClick={() => setShowArtistSettings(true)}
                       />,
                     ],

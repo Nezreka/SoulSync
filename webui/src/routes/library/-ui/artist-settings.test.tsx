@@ -7,7 +7,11 @@ import { createTestQueryClient } from '@/test/query-client';
 
 import type { LibraryV2ArtistDetail } from '../-library-v2.types';
 
-import { ArtistSettingsModal, LibraryV2CanWriteContext } from './library-v2-page';
+import {
+  ArtistSettingsModal,
+  LibraryV2CanWishContext,
+  LibraryV2CanWriteContext,
+} from './library-v2-page';
 
 const artist: LibraryV2ArtistDetail = {
   id: 7,
@@ -122,6 +126,36 @@ describe('Library v2 Artist Settings', () => {
       fireEvent.click(button);
     }
     expect(writes).toBe(0);
+  });
+
+  it("a household member saves their own watchlist settings, nothing of the admin's", async () => {
+    // third #1062 review G03-5: the sheet edits the acting profile's own
+    // watchlist row (3.6.1's watchlist config); quality, bulk wishlist and the
+    // shared discography rule stay the admin's
+    handlers();
+    let submitted = 0;
+    server.use(
+      http.put('/api/library/v2/artists/7/settings', () => {
+        submitted += 1;
+        return HttpResponse.json({ success: true, settings });
+      }),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value={false}>
+          <LibraryV2CanWishContext.Provider value={true}>
+            <ArtistSettingsModal artist={artist} onClose={vi.fn()} />
+          </LibraryV2CanWishContext.Provider>
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText('Watchlist identity');
+    expect(screen.getByRole('button', { name: 'Wishlist all' })).toBeDisabled();
+    expect(screen.getByDisplayValue('Add newly found releases to Wishlist')).toBeDisabled();
+    const save = screen.getByRole('button', { name: 'Save future-release settings' });
+    expect(save).not.toBeDisabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(submitted).toBe(1));
   });
 
   it('edits the existing Watchlist settings through one combined contract', async () => {
