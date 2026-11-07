@@ -68,6 +68,7 @@ def resolve_album_profile_id(db, album_id, tracks=None, resolve_file_path_fn=Non
     ``owner_profile_id``. Returns None for the shared library (unchanged
     behavior)."""
     from core.imports.paths import profile_id_for_path
+    shared_path = None
     # 1. file location wins — where the files actually sit right now
     try:
         track_list = tracks
@@ -82,20 +83,29 @@ def resolve_album_profile_id(db, album_id, tracks=None, resolve_file_path_fn=Non
                 pid = profile_id_for_path(resolved)
                 if pid:
                     return pid
-                break  # resolved but shared — don't keep looking
+                # resolved outside every own-library root: only THIS file's
+                # recorded owner can still say otherwise. another library's
+                # copy of the album must not decide (it planned bob's copy for
+                # the admin looking at the shared one)
+                shared_path = db_path
+                break
     except Exception as e:
         logger.debug("[Reorganize] profile resolution from path failed: %s", e)
-    # 2. DB fallback: whose library the album's files are recorded in. Ours:
-    # Library v2 keeps the owner per file, not per album row.
+    # 2. DB fallback: whose library the album's files are recorded in, within
+    # the caller's own library scope (just the file above, when one resolved)
     try:
+        from core.library2.sql_util import owner_clause
         conn = db._get_connection()
         try:
+            same_file = " AND f.path = ?" if shared_path else ""
             row = conn.execute(
                 "SELECT f.owner_profile_id FROM lib2_track_files f"
                 "  JOIN lib2_tracks t ON t.id = f.track_id"
                 " WHERE t.album_id = ? AND COALESCE(f.file_state,'active') = 'active'"
                 "   AND f.owner_profile_id IS NOT NULL"
-                " ORDER BY f.is_primary DESC, f.id LIMIT 1", (str(album_id),)
+                f"{owner_clause(column='f.owner_profile_id')}{same_file}"
+                " ORDER BY f.is_primary DESC, f.id LIMIT 1",
+                (str(album_id), *([shared_path] if shared_path else [])),
             ).fetchone()
             if row and row[0]:
                 return int(row[0])
