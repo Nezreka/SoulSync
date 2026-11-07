@@ -35,6 +35,8 @@ export interface LibrarySong {
   track_id: number;
   /** the live files of this row in the caller's library */
   file_ids: number[];
+  /** the file this row shows; a delete from the row acts on it alone */
+  file_id?: number | null;
   title: string;
   artist_name: string;
   artist_id: string | number;
@@ -281,23 +283,27 @@ export function matchParts(text: string, query: string): { text: string; hit: bo
 /**
  * Remove a song's files from the library (``db_only``: the records, files
  * stay) or from disk too, through the journaled album-scoped file delete the
- * Library page's own dialogs use. A copies row names one file, a list row
- * every live file of its track.
+ * Library page's own dialogs use. A row acts on the one file it shows (3.6.1:
+ * one row, one file); every copy of a track is in the copies view, each
+ * removable on its own.
  */
 export async function deleteLibraryTrackRequest(
   song: LibrarySong,
   choice: DeleteTrackChoice,
 ): Promise<ActionToast> {
   const albumId = Number(song.album_id);
-  if (!song.file_ids.length) throw new Error('No file to remove');
+  if (song.file_id == null && song.file_ids.length > 1)
+    throw new Error('This song has several copies: open its copies to pick the one to remove');
+  const fileIds = song.file_id != null ? [song.file_id] : song.file_ids;
+  if (!fileIds.length) throw new Error('No file to remove');
   const operation =
     choice === 'delete_file'
-      ? await fetchLibraryV2FileDeletePreview('albums', albumId, song.file_ids).then((preview) => {
+      ? await fetchLibraryV2FileDeletePreview('albums', albumId, fileIds).then((preview) => {
           if (preview.unsafe_count > 0)
             throw new Error('The file is outside your library folders or not reachable');
-          return deleteLibraryV2Files('albums', albumId, preview.preview_token, song.file_ids);
+          return deleteLibraryV2Files('albums', albumId, preview.preview_token, fileIds);
         })
-      : await removeLibraryV2FileRecords('albums', albumId, song.file_ids);
+      : await removeLibraryV2FileRecords('albums', albumId, fileIds);
   const failed = operation.items.find((item) => item.status === 'failed');
   if (failed) {
     return {

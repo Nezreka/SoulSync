@@ -229,6 +229,25 @@ describe('the Songs view', () => {
     await waitFor(() => expect(songCalls().length).toBeGreaterThan(1));
   });
 
+  it('a song with two copies deletes only the file its row shows', async () => {
+    // a FLAC + MP3 pair is one row; 3.6.1 removed that row's file, never both
+    songs = [song({ id: 1, title: 'You Proof', copies: 2, file_ids: [10, 11], file_id: 11 })];
+    renderPage('/library?section=songs');
+    await screen.findAllByText('You Proof');
+    fireEvent.click(screen.getAllByLabelText('More for You Proof')[0]);
+    fireEvent.click(await screen.findByText('Delete…'));
+    fireEvent.click(await screen.findByText('Delete File Too'));
+    await waitFor(() =>
+      expect(requested).toContainEqual({
+        url: expect.stringContaining('/api/library/v2/albums/1/file-delete'),
+        method: 'POST',
+        body: { preview_token: 'tok', file_ids: [11] },
+      }),
+    );
+    expect(requested.some((r) => r.url.includes('file_ids=10'))).toBe(false);
+    songs = PROOF;
+  });
+
   it('everyone else gets play, playlist and open, but no delete', async () => {
     canWrite = false;
     renderPage('/library?section=songs');

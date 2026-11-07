@@ -4678,6 +4678,8 @@ def test_the_songs_section_lists_owned_songs_with_catalogue_ids(api):
     assert song["album_id"] == ids["views"] and song["format"] == "FLAC"
     assert song["album_thumb_url"].startswith("/api/library/v2/artwork/album/")
     assert song["liked"] is False and song["copies"] == 1
+    # a row names the file it shows: its delete acts on that file alone
+    assert song["file_id"] in song["file_ids"]
     copies = client.get(f"/api/library/v2/songs/{ids['album_track']}/copies").get_json()
     assert [c["file_path"] for c in copies["copies"]] == ["/m/one-dance.flac"]
     assert client.get("/api/library/v2/songs?limit=501").status_code == 400
