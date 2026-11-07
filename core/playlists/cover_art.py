@@ -147,6 +147,16 @@ def _year(value: Any) -> Optional[int]:
     return year if 1900 <= year <= 2100 else None
 
 
+def _active_server_source() -> Optional[str]:
+    """the media server whose ids a playlist row may carry, or None (any)"""
+    try:
+        from core.library.playlist_membership import _active_server_and_client
+        server, _client = _active_server_and_client()
+        return str(server) if server else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _chunks(items: List[Any], size: int = 400) -> Iterable[List[Any]]:
     for i in range(0, len(items), size):
         yield items[i:i + size]
@@ -192,22 +202,35 @@ def collect_vibe(db: Any, playlist: Dict[str, Any]) -> Dict[str, Any]:
     try:
         with db._get_connection() as conn:
             cur = conn.cursor()
+            server = _active_server_source()
             for chunk in _chunks(lib_ids):
                 marks = ",".join("?" * len(chunk))
                 # a playlist row names its track by the catalogue id or by the
-                # media server's id; lib2 answers both (the mapping holds the
-                # latter). the catalogue ids go in as integers: CAST(t.id AS
-                # TEXT) IN (...) defeated the primary key and read every track
-                numeric = [int(v) for v in chunk if str(v).strip().isdigit()] or [-1]
+                # media server's id. third #1062 review G13-2: one value is
+                # one of the two, never both. a plex rating key found through
+                # the mapping also matched lib2_tracks.id, an unrelated song,
+                # and half the vibe was noise. the server's own ids answer
+                # first; what's left is a catalogue id, in as integers (a CAST
+                # read every track)
+                server_sql = " AND m.server_source = ?" if server else ""
+                mapped = cur.execute(
+                    "SELECT m.server_id, m.entity_id FROM lib2_media_server_mappings m "
+                    f"WHERE m.entity_type = 'track' AND m.server_id IN ({marks}){server_sql}",
+                    [*chunk, *([server] if server else [])],
+                ).fetchall()
+                by_server = {str(r[0]) for r in mapped}
+                track_ids = [int(r[1]) for r in mapped]
+                track_ids += [int(v) for v in chunk
+                              if str(v).strip().isdigit() and str(v) not in by_server]
+                if not track_ids:
+                    continue
                 cur.execute(
                     "SELECT COALESCE(NULLIF(NULLIF(al.genres, ''), '[]'), ar.genres), ar.style, "
                     "COALESCE(t.mood, al.mood, ar.mood), al.year "
                     "FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id "
                     "LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
-                    f"WHERE t.id IN ({','.join('?' * len(numeric))}) OR t.id IN ("
-                    "SELECT m.entity_id FROM lib2_media_server_mappings m "
-                    f"WHERE m.entity_type = 'track' AND m.server_id IN ({marks}))",
-                    [*numeric, *chunk],
+                    f"WHERE t.id IN ({','.join('?' * len(track_ids))})",
+                    track_ids,
                 )
                 for g, style, mood, year in cur.fetchall():
                     for tag in _parse_tags(g) + _parse_tags(style):
