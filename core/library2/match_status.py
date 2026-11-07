@@ -418,7 +418,8 @@ def set_library_v2_match(
             set_library_v2_match(
                 conn, canonical, owner, service, None, actor=actor, ask_again=True,
             )
-            if canonical == "album":
+            if canonical == "album" and "canonical_source" in {
+                    r[1] for r in conn.execute("PRAGMA table_info(lib2_albums)")}:
                 from core.library2.editions import pin_album_release
                 pin_album_release(conn, owner, service, None)
             logger.info(
