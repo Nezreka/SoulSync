@@ -133,6 +133,17 @@ def test_another_librarys_artist_is_not_found_for_a_profile(world):
     assert world.client.get(f"/api/library/v2/artists/{world.ids['k']}").status_code == 200
 
 
+def test_a_broken_visibility_check_hides_instead_of_showing(world, monkeypatch):
+    """third #1062 review G03-7: an exception in the scope check answered
+    "visible", so any bug there opened every own library to every profile"""
+    def _boom(*_a, **_k):
+        raise NameError("dropped import")
+
+    monkeypatch.setattr("core.library2.sql_util.entity_visible", _boom)
+    world.as_profile(world.sam)
+    assert world.client.get(f"/api/library/v2/artists/{world.ids['k']}").status_code == 404
+
+
 def test_the_rest_of_her_artists_discography_is_hers_to_browse(world):
     with world.db._get_connection() as conn:
         missing = seed_album(conn, server_id="al-k-missing", title="Unreleased",

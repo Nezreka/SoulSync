@@ -414,9 +414,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             from core.library2.sql_util import entity_visible
             return not entity_visible(conn, entity, entity_id)
-        except Exception as exc:  # noqa: BLE001 - an unanswerable check hides nothing
-            logger.debug("scope visibility check failed for %s %s: %s", entity, entity_id, exc)
-            return False
+        except Exception as exc:  # noqa: BLE001
+            # third #1062 review G03-7: fail closed. answering "visible" opened
+            # every own library's pages to every profile on any bug here
+            # (3.6.1's scope lived in the SQL, so a failure was a 500)
+            logger.warning("scope visibility check failed for %s %s: %s", entity, entity_id, exc,
+                           exc_info=True)
+            return True
 
     def _touches_only_own_files() -> bool:
         """Every live file this file-write would touch belongs to the caller.
@@ -529,8 +533,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def _profile() -> int:
         try:
             return int(profile_id_getter()) if profile_id_getter else 1
-        except Exception:
-            return 1
+        except Exception as exc:  # noqa: BLE001
+            # G03-7: an unreadable profile is nobody, never the admin
+            logger.warning("Library v2: could not read the calling profile: %s", exc)
+            return 0
 
     def _intent_profile() -> int:
         """The profile whose intent a mutation on this page writes.
