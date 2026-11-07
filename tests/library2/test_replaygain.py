@@ -234,3 +234,24 @@ def test_album_replaygain_reports_progress(imported_conn):
 
     assert seen  # progress was reported
     assert seen[-1][1] == 2  # total tracks
+
+
+def test_album_replaygain_writes_against_the_target_loudness(imported_conn):
+    """#1060: a -14 target is baked into every gain the import and the repair
+    fix write. the library analyze hard-coded -18, so the same library came
+    out 4 dB apart depending on who wrote the tag"""
+    from types import SimpleNamespace
+    _seed_two_present_files(imported_conn)
+    cfg = SimpleNamespace(get=lambda key, default=None:
+                          -14 if key == 'repair.jobs.replaygain_filler.settings.target_lufs' else default)
+    writes = {}
+    result = RG.analyze_album_replaygain(
+        imported_conn,
+        imported_conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0],
+        config_manager=cfg,
+        analyze_fn=_fake_analyze({"/m/01.flac": -20.0, "/m/02.flac": -16.0}),
+        write_fn=lambda path, tg, tp, ag, ap: writes.__setitem__(path, (tg, ag)) or True,
+        resolve_fn=lambda p: p,
+    )
+    assert result["album_gain_db"] == -14.0 - (-18.0)
+    assert writes["/m/01.flac"] == (-14.0 - (-20.0), -14.0 - (-18.0))
