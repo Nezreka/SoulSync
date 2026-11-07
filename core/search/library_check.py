@@ -192,11 +192,12 @@ def _result_scope(cursor, names: list[str]) -> tuple[list[int], list[int]]:
     keys = set({normalize_key(n) for n in names if n} - {''})
     if not keys:
         return [], []
-    # the fold runs once per distinct name for the process, not per row per
-    # search: `norm_key(name) IN (...)` called Python on every artist and
-    # every credited track of the library for each search
-    artist_ids = [row[0] for row in cursor.execute("SELECT id, name FROM lib2_artists")
-                  if row[1] and _folded(row[1]) in keys]
+    # third #1062 review G13-4: the folded maps live for the process, rebuilt
+    # when the catalogue grows (or after a few minutes for a rename). reading
+    # every artist and every credit text per search cost the library's size
+    # on each search response instead of the result count
+    by_artist, by_credit = _fold_maps(cursor)
+    artist_ids = sorted({i for k in keys for i in by_artist.get(k, ())})
     track_ids: set[int] = set()
     if artist_ids:
         ids_json = json.dumps(artist_ids)
@@ -209,9 +210,7 @@ def _result_scope(cursor, names: list[str]) -> tuple[list[int], list[int]]:
             (ids_json, ids_json)))
     # distinct credit texts through the partial index, folded once each, then
     # the matching ones fetched by value through the same index
-    credits = [row[0] for row in cursor.execute(
-        "SELECT DISTINCT track_artist FROM lib2_tracks WHERE track_artist IS NOT NULL")
-        if row[0] and _folded(row[0]) in keys]
+    credits = sorted({c for k in keys for c in by_credit.get(k, ())})
     if credits:
         track_ids.update(r[0] for r in cursor.execute(
             "SELECT id FROM lib2_tracks WHERE track_artist IS NOT NULL"
@@ -221,6 +220,37 @@ def _result_scope(cursor, names: list[str]) -> tuple[list[int], list[int]]:
 
 
 _FOLDED: dict = {}
+_FOLD_MAPS: dict = {"sig": None, "at": 0.0, "artists": {}, "credits": {}}
+_FOLD_MAPS_TTL_S = 300
+
+
+def _fold_maps(cursor) -> tuple:
+    """{folded name: artist ids}, {folded credit text: texts}, for the db the
+    cursor reads. the signature is cheap (two MAX(id) seeks and the path)"""
+    import threading
+    import time
+    path, top_artist, top_track = cursor.execute(
+        "SELECT (SELECT file FROM pragma_database_list WHERE name='main'),"
+        " (SELECT MAX(id) FROM lib2_artists), (SELECT MAX(id) FROM lib2_tracks)").fetchone()
+    # an in-memory db has no file: its connection names it
+    sig = (path or id(cursor.connection), top_artist, top_track)
+    now = time.monotonic()
+    lock = _FOLD_MAPS.setdefault("lock", threading.Lock())
+    with lock:
+        if _FOLD_MAPS["sig"] == sig and now - _FOLD_MAPS["at"] < _FOLD_MAPS_TTL_S:
+            return _FOLD_MAPS["artists"], _FOLD_MAPS["credits"]
+    artists: dict = {}
+    for artist_id, name in cursor.execute("SELECT id, name FROM lib2_artists"):
+        if name:
+            artists.setdefault(_folded(name), []).append(artist_id)
+    credits: dict = {}
+    for (text,) in cursor.execute(
+            "SELECT DISTINCT track_artist FROM lib2_tracks WHERE track_artist IS NOT NULL"):
+        if text:
+            credits.setdefault(_folded(text), []).append(text)
+    with lock:
+        _FOLD_MAPS.update(sig=sig, at=now, artists=artists, credits=credits)
+    return artists, credits
 
 
 def _folded(value: str) -> str:
