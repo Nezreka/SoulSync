@@ -94,7 +94,7 @@ def _quality_profile_dict(row: Any) -> Optional[Dict[str, Any]]:
         "id": row["id"],
         "name": row["name"],
         "description": row["description"] if "description" in keys else None,
-        "upgrade_policy": row["upgrade_policy"] or "none",
+        "upgrade_policy": row["upgrade_policy"] or "acceptable",
         "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0) if "upgrade_cutoff_index" in keys else 0,
         "ranked_targets": _ranked(row["ranked_targets"] if "ranked_targets" in keys else None),
         "repair_job_id": row["repair_job_id"] if "repair_job_id" in keys else "quality_upgrade",

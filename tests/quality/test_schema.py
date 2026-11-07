@@ -44,7 +44,8 @@ def test_fresh_install_seeds_exactly_two_builtin_profiles(db):
     # tests/quality/test_migrate_to_profiles.py for the rename itself.
     assert names == {"Default", "Upgrade until top quality"}
     profiles = {p["name"]: p for p in profiles}
-    assert profiles["Default"]["upgrade_policy"] == "none"
+    # 3.6.1's default: replace a file below the profile (v2 had made it "none")
+    assert profiles["Default"]["upgrade_policy"] == "acceptable"
     assert profiles["Upgrade until top quality"]["upgrade_policy"] == "until_cutoff"
 
 
@@ -112,7 +113,7 @@ def test_existing_profile_table_gets_upgrade_cutoff_columns(db):
     assert "upgrade_policy" in cols
     assert "upgrade_cutoff_index" in cols
     assert "folder_artist_override" not in cols
-    assert row["upgrade_policy"] == "none"
+    assert row["upgrade_policy"] == "acceptable"
     assert row["upgrade_cutoff_index"] == 0
 
 
@@ -167,3 +168,44 @@ def test_drops_leftover_quality_filter_enabled_column(db):
         conn.close()
 
     assert "quality_filter_enabled" not in _columns(db)
+
+
+def _profiles_conn(tmp_path):
+    import sqlite3
+    from core.quality.schema import ensure_quality_profiles_schema
+    conn = sqlite3.connect(str(tmp_path / "qp.db"))
+    conn.row_factory = sqlite3.Row
+    ensure_quality_profiles_schema(conn)
+    conn.commit()
+    return conn
+
+
+def test_a_default_profile_v2_seeded_with_no_upgrades_gets_them_back(tmp_path):
+    """v2 seeded and migrated profiles as "none", so a fresh install never
+    upgraded. only rows nobody edited go back; a chosen "none" stays."""
+    from core.quality import schema
+    conn = _profiles_conn(tmp_path)
+    conn.execute("DROP TABLE _quality_upgrade_default_restored")
+    conn.execute("UPDATE quality_profiles SET upgrade_policy='none', "
+                 "description='Migrated from your previous global Quality settings' WHERE id=1")
+    conn.execute("INSERT INTO quality_profiles(name, description, ranked_targets, upgrade_policy, "
+                 "created_at, updated_at) VALUES('Chosen', 'Migrated from your previous global "
+                 "Quality settings', '[]', 'none', '2026-11-01 10:00:00', '2026-11-03 18:00:00')")
+    conn.execute("INSERT INTO quality_profiles(name, description, ranked_targets, upgrade_policy) "
+                 "VALUES('Mine', 'Custom profile', '[]', 'none')")
+    schema.ensure_quality_profiles_schema(conn)
+    rows = {r["name"]: r["upgrade_policy"] for r in conn.execute(
+        "SELECT name, upgrade_policy FROM quality_profiles")}
+    assert rows["Balanced"] == "acceptable"
+    assert rows["Chosen"] == "none"
+    assert rows["Mine"] == "none"
+    # once: a later "none" on the seeded row is the user's
+    conn.execute("UPDATE quality_profiles SET upgrade_policy='none' WHERE id=1")
+    schema.ensure_quality_profiles_schema(conn)
+    assert conn.execute("SELECT upgrade_policy FROM quality_profiles WHERE id=1").fetchone()[0] == "none"
+
+
+def test_a_3_6_1_profile_with_no_policy_key_migrates_as_acceptable():
+    from core.quality.migrate_to_profiles import _profile_row_fields
+    assert _profile_row_fields({"ranked_targets": []})["upgrade_policy"] == "acceptable"
+    assert _profile_row_fields({"upgrade_policy": "none"})["upgrade_policy"] == "none"
