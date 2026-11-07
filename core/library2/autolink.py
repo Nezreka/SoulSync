@@ -596,6 +596,10 @@ def _fallback_identity(context: Dict[str, Any],
         logger.debug("fallback tag read failed (%s): %s", file_path, exc)
     title = str(tags.get("title") or "").strip()
     artist = str(tags.get("artist") or tags.get("album_artist") or "").strip()
+    # the release belongs to its album artist ("Various Artists" for a
+    # compilation), the performer is the track's credit: 3.6.1 grouped a
+    # rescanned folder by album artist, so a compilation stayed one album
+    album_artist = str(tags.get("album_artist") or "").strip()
     album = str(tags.get("album") or "").strip()
 
     if not title or not artist:
@@ -621,6 +625,7 @@ def _fallback_identity(context: Dict[str, Any],
     return {
         "title": title,
         "artist": artist,
+        "album_artist": album_artist or None,
         "album": album or None,
         "release_mbid": release_mbid or None,
         "track_number": tags.get("track_number"),
@@ -900,8 +905,15 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                 # send the pipeline hunting for it. Matching an existing row
                 # leaves that row's own monitoring untouched.
                 derived_monitored = 0 if fallback or context.get("_scan_discovered") else None
+                release_artist_id = artist_id
+                album_artist_name = fallback.get("album_artist") if fallback else None
+                if (album_artist_name and normalize_name(album_artist_name)
+                        != normalize_name(artist_name or "")):
+                    release_artist_id = _find_or_create_artist(
+                        conn, album_artist_name, spotify_id=None,
+                        source=identity_source) or artist_id
                 album_id = _find_or_create_album(
-                    conn, artist_id, album_name,
+                    conn, release_artist_id, album_name,
                     album_type=album_type, spotify_album_id=spotify_album_id,
                     source=identity_source, monitored=derived_monitored,
                     release_mbid=fallback.get("release_mbid"))
@@ -910,6 +922,12 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                     track_number=track_number, spotify_track_id=spotify_track_id,
                     disc_number=disc_number, source=track_identity_source,
                     monitored=derived_monitored)
+                if release_artist_id != artist_id and track_id:
+                    # the performer of a compilation track, as the rows the
+                    # player, stats and presence checks read show it
+                    conn.execute(
+                        "UPDATE lib2_tracks SET track_artist=COALESCE(NULLIF(track_artist,''), ?) "
+                        "WHERE id=?", (artist_name, track_id))
 
             if not fallback:
                 # how this download filed the release, for a later reorganize

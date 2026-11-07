@@ -381,6 +381,29 @@ def _resume_workers_after_scan():
     _background_pause.release("database scan")
 
 
+def _file_key(path):
+    try:
+        return os.path.normcase(os.path.realpath(path))
+    except Exception:  # noqa: BLE001
+        return os.path.normcase(str(path))
+
+
+def _known_library_files(db):
+    """every file row the library holds, by its real path: (id, state)"""
+    from core.library2.paths import resolve_lib2_path
+    known = {}
+    with db._get_connection() as conn:
+        rows = conn.execute("SELECT id, path, COALESCE(file_state,'active') FROM lib2_track_files "
+                            "WHERE path IS NOT NULL AND path<>''").fetchall()
+    for file_id, path, state in rows:
+        for candidate in {path, resolve_lib2_path(path, config_manager=config_manager) or path}:
+            key = _file_key(candidate)
+            # an active row wins over a retired one for the same file
+            if key not in known or known[key][1] != 'active':
+                known[key] = (int(file_id), state)
+    return known
+
+
 def _run_soulsync_full_refresh():
     """Re-index the standalone output folder through the native import writer.
 
@@ -412,8 +435,29 @@ def _run_soulsync_full_refresh():
         _db_update_phase_callback(f'Importing local index from {total} files...')
         successful = 0
         failed = 0
+        # a file the library already holds is re-indexed in place, never
+        # imported again: autolink on a known file made a second file row on
+        # the same path, under its track-artist tag (a compilation split into
+        # one album per performer). 3.6.1 rebuilt one row per file.
+        known = _known_library_files(db)
+        reactivated = kept = 0
         from core.library2.autolink import link_download_into_library_v2
         for index, file_path in enumerate(audio_files, 1):
+            existing = known.get(_file_key(file_path))
+            if existing is not None:
+                file_row_id, state = existing
+                if state == 'missing':
+                    with db._get_connection() as conn:
+                        conn.execute("UPDATE lib2_track_files SET file_state='active', "
+                                     "updated_at=CURRENT_TIMESTAMP WHERE id=?", (file_row_id,))
+                        conn.commit()
+                    reactivated += 1
+                else:
+                    kept += 1
+                successful += 1
+                if index % 50 == 0:
+                    _db_update_phase_callback(f'Importing local index... {index}/{total}')
+                continue
             try:
                 file_id = link_download_into_library_v2(
                     {
@@ -431,6 +475,9 @@ def _run_soulsync_full_refresh():
                 logger.error("[SoulSync Full Refresh] Could not import %s: %s", file_path, exc)
             if index % 50 == 0:
                 _db_update_phase_callback(f'Importing local index... {index}/{total}')
+
+        logger.info("[SoulSync Full Refresh] %d already indexed, %d back from missing, %d new",
+                    kept, reactivated, successful - kept - reactivated)
 
         # Existing rows that disappeared enter the normal two-scan missing
         # lifecycle.  They are never hard-deleted by this recovery scan.

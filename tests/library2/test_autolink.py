@@ -340,6 +340,36 @@ def test_simple_download_prefers_the_files_own_tags(lib2_enabled, imported_conn,
         "SELECT COUNT(*) c FROM lib2_artists WHERE name='Drake'").fetchone()["c"] == 1
 
 
+def test_a_compilation_track_files_under_its_album_artist(lib2_enabled, imported_conn,
+                                                          monkeypatch):
+    """two performers on one "Various Artists" album stay one album: the
+    release is the album artist's, the performer is the track's credit (3.6.1
+    grouped a rescan by album artist; G03-3)"""
+    tags = {"/music/now/1.flac": {"title": "One", "artist": "Performer A",
+                                  "album_artist": "Various Artists", "album": "Now 100",
+                                  "track_number": 1},
+            "/music/now/2.flac": {"title": "Two", "artist": "Performer B",
+                                  "album_artist": "Various Artists", "album": "Now 100",
+                                  "track_number": 2}}
+    monkeypatch.setattr(A, "read_tag_snapshot", lambda path: tags[path])
+    albums, performers = set(), set()
+    for path in tags:
+        file_id = A.link_download_into_library_v2(_context(
+            _final_processed_path=path, track_info={}, _embedded_id_tags={},
+            search_result={"is_simple_download": True, "filename": path.rsplit("/", 1)[1]}))
+        row = imported_conn.execute(
+            """SELECT al.id AS album, ar.name AS release_artist, t.track_artist
+                 FROM lib2_track_files tf JOIN lib2_tracks t ON t.id = tf.track_id
+                 JOIN lib2_albums al ON al.id = t.album_id
+                 JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                WHERE tf.id = ?""", (file_id,)).fetchone()
+        assert row["release_artist"] == "Various Artists"
+        albums.add(row["album"])
+        performers.add(row["track_artist"])
+    assert len(albums) == 1
+    assert performers == {"Performer A", "Performer B"}
+
+
 def test_untitled_simple_download_still_becomes_visible(lib2_enabled, imported_conn):
     """No tags, no "Artist - Title" filename: the row is still materialized —
     an invisible file is exactly what makes the orphan detector fire."""
