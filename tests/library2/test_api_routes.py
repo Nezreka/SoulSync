@@ -4701,6 +4701,28 @@ def test_the_artist_detail_match_writes_the_library_v2_row(api):
     assert stored["deezer"] == "dz-album" and "deezer" not in cleared
 
 
+def test_a_cleared_match_is_not_searched_back(api):
+    """second v2 review (T2): clearing a wrong match deleted its attempt row,
+    so the worker read the album as never attempted, searched by name and
+    stored the same wrong id again. 3.6.1 kept a cleared match cleared until
+    the user matched it by hand"""
+    from core.library2.match_status import apply_manual_match
+    from core.library2.provider_attempts import due_entities
+    _client, db, ids = api
+    conn = _conn(db)
+    apply_manual_match(conn, "album", ids["views"], "deezer", "dz-wrong", actor="profile:1")
+    apply_manual_match(conn, "album", ids["views"], "deezer", None, actor="profile:1")
+    conn.commit()
+    assert ids["views"] not in due_entities(conn, entity_type="album", service="deezer", limit=1000)
+    # a manual match later is still the user's answer
+    apply_manual_match(conn, "album", ids["views"], "deezer", "dz-right", actor="profile:1")
+    conn.commit()
+    row = conn.execute("SELECT status FROM lib2_provider_attempts WHERE entity_type='album'"
+                       " AND entity_id=? AND service='deezer'", (ids["views"],)).fetchone()
+    conn.close()
+    assert row[0] == "matched"
+
+
 def test_a_fixed_artist_match_moves_the_profiles_watchlist_entry(api):
     """Upstream #1901 on Library v2: the watchlist row that shares one of the
     artist's ids from before the fix follows the new id; another profile's

@@ -199,10 +199,8 @@ def _sync_attempt_ledger(
     """Keep ``lib2_provider_attempts`` in step with a manually set/cleared id.
 
     Setting an id settles that (entity, service) pair — the user has answered
-    the question the worker would ask. Clearing it makes the pair unanswered
-    again, which is a *deleted* row rather than a failure status: the queue's
-    "never attempted" half is what should pick it up next, ahead of the retry
-    backlog, and no retry window should have to expire first.
+    the question the worker would ask. Clearing it settles it too: the user
+    said the match was wrong, and the worker must not search it back.
     """
     try:
         from core.library2 import provider_attempts
@@ -215,10 +213,14 @@ def _sync_attempt_ledger(
                 service=service, status="matched", detail="manual match",
             )
         else:
-            conn.execute(
-                "DELETE FROM lib2_provider_attempts "
-                "WHERE entity_type=? AND entity_id=? AND service=?",
-                (canonical, entity_id, service),
+            # a clear is the user saying "that match was wrong". deleting the
+            # row made the pair "never attempted", the worker searched by name
+            # again and stored the same wrong id back. 3.6.1 left a cleared
+            # match cleared until the user matched it by hand: a settled
+            # "manual" answer does that, and a manual match overwrites it
+            provider_attempts.record_attempt(
+                conn, entity_type=canonical, entity_id=entity_id,
+                service=service, status="manual", detail="cleared by user",
             )
     except ValueError:
         # A provider the ledger does not know (it also covers derived workers
