@@ -131,15 +131,34 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
         WHERE al.title IS NOT NULL AND al.title<>''"""
     credits = defaultdict(set)
     primaries = defaultdict(set)
-    for row in conn.execute("SELECT album_id,artist_id,role FROM lib2_album_artists"):
+    # third #1062 review P2D-8: a load for named albums (every merge, inside
+    # its write lock, and each re-check after one) read the whole credit and
+    # artist tables; it reads only what those albums name
+    credit_sql = "SELECT album_id,artist_id,role FROM lib2_album_artists"
+    if album_ids is not None:
+        credit_sql += f" WHERE album_id IN ({','.join('?' for _ in album_ids)})"
+    for row in conn.execute(credit_sql, params):
         credits[int(row[0])].add(int(row[1]))
         if row[2] == "primary":
             primaries[int(row[0])].add(int(row[1]))
     # an alias row is its canonical artist: each media server's copy of an
     # artist (plex's bbno$, navidrome's bbno$) files its albums under its own
     # row, and grouping by the raw id never put those twins side by side
-    canonical = {int(r[0]): int(r[1]) for r in conn.execute(
-        "SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists")}
+    if album_ids is None:
+        canonical = {int(r[0]): int(r[1]) for r in conn.execute(
+            "SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists")}
+    else:
+        named = {a for ids in credits.values() for a in ids} | {
+            int(r[0]) for r in conn.execute(
+                f"SELECT primary_artist_id FROM lib2_albums WHERE id IN ({','.join('?' for _ in album_ids)})"
+                " AND primary_artist_id IS NOT NULL", params)}
+        canonical = {}
+        named_list = sorted(named)
+        for start in range(0, len(named_list), 500):
+            chunk = named_list[start:start + 500]
+            canonical.update({int(r[0]): int(r[1]) for r in conn.execute(
+                f"SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists"
+                f" WHERE id IN ({','.join('?' for _ in chunk)})", chunk)})
 
     def group_ids(ids):
         return tuple(sorted({canonical.get(i, i) for i in ids}))

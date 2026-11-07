@@ -1013,3 +1013,24 @@ def test_a_finding_on_the_merged_release_follows_the_survivor(library):
         named = {r[0]: r[1] for r in conn.execute(
             "SELECT finding_type, entity_id FROM repair_findings WHERE finding_type IN ('missing_cover_art','missing_lyrics')")}
     assert named == {"missing_cover_art": f"lib2:{albums[0]}", "missing_lyrics": f"lib2:{tracks[0]}"}
+
+
+def test_a_merge_reads_only_the_albums_it_merges(library):
+    """third #1062 review P2D-8: a load for two named albums (inside each
+    merge's write lock) read every credit row and every artist"""
+    from core.library2.catalogue_duplicates import _load
+    _artist, albums, _tracks = ark_pair(library)
+    with closing(library[0]._get_connection()) as conn:
+        for n in range(30):  # an unrelated library around them
+            other = conn.execute("INSERT INTO lib2_artists(name) VALUES(?)", (f"Other {n}",)).lastrowid
+            conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?, 'X')", (other,))
+        conn.commit()
+        seen = []
+        conn.set_trace_callback(seen.append)
+        loaded = _load(conn, album_ids=albums)
+        conn.set_trace_callback(None)
+    assert {a["id"] for a in loaded} == set(albums)
+    whole = [q for q in seen if q.strip() in (
+        "SELECT album_id,artist_id,role FROM lib2_album_artists",
+        "SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists")]
+    assert whole == []
