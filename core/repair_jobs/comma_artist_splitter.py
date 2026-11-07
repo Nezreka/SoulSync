@@ -522,7 +522,11 @@ class CommaArtistSplitterJob(RepairJob):
                     updated_at = CURRENT_TIMESTAMP
                 WHERE job_id = ? AND finding_type = ? AND entity_type = ? AND entity_id = ?
                   AND status = 'pending'
-            """, (self.job_id, 'comma_artist_split', entity_type, entity_id))
+                  AND CASE WHEN json_valid(details_json)
+                           THEN json_extract(details_json, '$.combined_name') END = ?
+            """, (self.job_id, 'comma_artist_split', entity_type, entity_id, combined_name))
+            # G11-6: "A, B" and "A, C" share artist A's id; keyed on the
+            # entity alone, applying one resolved (or was blocked by) the other
             if cursor.rowcount > 0:
                 conn.commit()
                 return
@@ -531,8 +535,10 @@ class CommaArtistSplitterJob(RepairJob):
                 SELECT id FROM repair_findings
                 WHERE job_id = ? AND finding_type = ? AND entity_type = ? AND entity_id = ?
                   AND status IN ('resolved', 'dismissed')
+                  AND CASE WHEN json_valid(details_json)
+                           THEN json_extract(details_json, '$.combined_name') END = ?
                 LIMIT 1
-            """, (self.job_id, 'comma_artist_split', entity_type, entity_id))
+            """, (self.job_id, 'comma_artist_split', entity_type, entity_id, combined_name))
             if cursor.fetchone():
                 conn.commit()
                 return
