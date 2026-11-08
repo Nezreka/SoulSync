@@ -128,14 +128,18 @@ def prune_acquisition_journal(conn, *, days: int = DEFAULT_RETENTION_DAYS,
         open_import = (f"EXISTS (SELECT 1 FROM acquisition_imports i WHERE i.request_id=r.id "
                        f"AND i.status NOT IN ({_marks(SETTLED_IMPORTS)}))"
                        if has("acquisition_imports") else "0")
+        # review 4 R4-C-3: a grab settled after the cutoff is kept below,
+        # so its request stays too. deleting it cascaded away the kept
+        # grab's decision run, candidate and import
         open_grab = (f"EXISTS (SELECT 1 FROM acquisition_grabs g WHERE g.acquisition_request_id=r.id "
-                     f"AND g.status NOT IN ({_marks(SETTLED_GRABS)}))"
+                     f"AND (g.status NOT IN ({_marks(SETTLED_GRABS)}) "
+                     f"OR COALESCE(g.updated_at, g.created_at) >= ?))"
                      if has("acquisition_grabs") else "0")
         params = [*SETTLED_REQUESTS, cutoff]
         if has("acquisition_imports"):
             params += SETTLED_IMPORTS
         if has("acquisition_grabs"):
-            params += SETTLED_GRABS
+            params += [*SETTLED_GRABS, cutoff]
         conn.execute("CREATE TEMP TABLE IF NOT EXISTS _acq_prune_requests (id TEXT PRIMARY KEY)")
         conn.execute("DELETE FROM _acq_prune_requests")
         conn.execute(

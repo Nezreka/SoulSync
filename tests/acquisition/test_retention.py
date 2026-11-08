@@ -164,3 +164,19 @@ def test_the_first_sweep_waits_an_hour_after_start():
     except Exception:  # noqa: BLE001
         pass
     assert calls == [1]
+
+
+def test_a_request_stays_while_its_grab_does(conn):
+    """review 4 R4-C-3: a grab settled after the cutoff (a cancel that landed
+    late) was kept while its request went, and the cascade took the grab's
+    decision run and candidate with it"""
+    _request(conn, "old-req", "cancelled")
+    _candidate(conn, "cand", "old-req", expires=9e12)
+    conn.execute("INSERT INTO candidate_decision_runs(id, request_id, candidate_id, engine_version,"
+                 " accepted, quality_rank) VALUES('run', 'old-req', 'cand', 'v1', 1, 1)")
+    _grab(conn, "dl-late", "old-req", "cancelled", when="2999-01-01 00:00:00")
+    conn.commit()
+    prune_acquisition_journal(conn, days=90)
+    assert _ids(conn, "acquisition_requests") == {"old-req"}
+    assert _ids(conn, "acquisition_grabs", "download_id") == {"dl-late"}
+    assert _ids(conn, "candidate_decision_runs") == {"run"}
