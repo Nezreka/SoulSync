@@ -366,6 +366,30 @@ def test_a_recording_learns_the_id_its_track_gained_later(imported_conn):
     assert len(recordings) == 1
 
 
+def test_a_refused_fill_is_not_reported_as_filled_every_start(imported_conn):
+    """review 5 smoke run: a track whose spotify id another recording already
+    owns is refused (the unique index), and the pass still counted it, so the
+    live log said "filled 219" on every restart for the same rows"""
+    from core.library2.editions import reconcile_recording_identity
+
+    conn = imported_conn
+    artist = _artist(conn)
+    one = _album(conn, artist, "One")
+    two = _album(conn, artist, "Two")
+    a = _track(conn, one, "Song", track_number=1)
+    b = _track(conn, two, "Song", track_number=1, isrc="ISRC-B")
+    backfill_editions(conn.cursor(), connection=conn)
+    conn.execute("UPDATE lib2_recordings SET spotify_id='SP-1' WHERE id=("
+                 "SELECT recording_id FROM lib2_release_tracks WHERE track_id=?)", (a,))
+    conn.execute("UPDATE lib2_tracks SET spotify_id='SP-1' WHERE id=?", (b,))
+    conn.commit()
+
+    reconcile_recording_identity(conn.cursor())
+    conn.commit()
+    again = reconcile_recording_identity(conn.cursor())
+    assert again["filled"] == 0
+
+
 def test_the_identity_reconcile_runs_with_the_edition_backfill(imported_conn):
     """It has to converge on its own — 94 stale recordings will not fix
     themselves on a screen nobody opens."""

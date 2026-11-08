@@ -585,11 +585,11 @@ def _find_recording_by_hard_ids(cursor: Any, isrc: Optional[str],
 
 
 def _fill_missing_hard_id(cursor: Any, recording_id: int, column: str,
-                          value: Optional[str]) -> None:
+                          value: Optional[str]) -> int:
     """Enrich a found recording with a hard ID it lacks — guarded so the
     partial unique indexes can never be violated."""
     if not value:
-        return
+        return 0
     # Same partial-index rule as _find_recording_by_hard_ids: without the two
     # extra conjuncts the collision check is a full scan of lib2_recordings.
     cursor.execute(
@@ -599,6 +599,7 @@ def _fill_missing_hard_id(cursor: Any, recording_id: int, column: str,
                                 WHERE o.{column}=? AND o.{column} IS NOT NULL
                                   AND o.{column} <> '' AND o.id<>?)""",
         (value, int(recording_id), value, int(recording_id)))
+    return int(cursor.rowcount or 0)
 
 
 def reconcile_recording_identity(cursor: Any) -> Dict[str, int]:
@@ -653,8 +654,11 @@ def reconcile_recording_identity(cursor: Any) -> Dict[str, int]:
                 f"AND ({column} IS NULL OR {column}='')", (target,))
             if cursor.fetchone() is None:
                 continue
-            _fill_missing_hard_id(cursor, target, column, row[column])
-            if stats["filled"] == before:
+            # review 5 smoke: only a real write counts. an id another
+            # recording already owns is refused, and counting it anyway
+            # reported the same rows "filled" on every start
+            if (_fill_missing_hard_id(cursor, target, column, row[column])
+                    and stats["filled"] == before):
                 stats["filled"] += 1
 
     for recording_id in touched_recordings:
