@@ -53,9 +53,15 @@ def _track_ids_from_mirror_row(track: Dict[str, Any]) -> set[str]:
         if track_id:
             identities.append((track_id, str(album_id or '').strip()))
 
+    # review 5 R5-C-1: a mirrored_playlist_tracks row's ``id`` is the row's
+    # own key, never a provider id; sync wishlists it under source_track_id.
+    # only an inline tracks_json dict (no source_track_id column) carries the
+    # provider id in ``id``
+    own_id = (track.get('source_track_id') if 'source_track_id' in track
+              else track.get('id'))
     _remember(
         track if isinstance(track.get('id'), dict) else None,
-        fallback_id=track.get('id') or track.get('source_track_id'),
+        fallback_id=own_id,
         fallback_album=track.get('source_album_id') or track.get('album_id'),
     )
     extra = track.get('extra_data') or {}

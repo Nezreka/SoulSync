@@ -152,3 +152,29 @@ def test_pipeline_wishlist_fails_closed_when_no_track_scope_can_be_resolved():
 
     assert result['wishlist_queued'] == 0
     assert wishlist_calls == []
+
+
+def test_an_undiscovered_mirror_row_is_scoped_by_its_source_id_not_its_row_key():
+    """review 5 R5-C-1: a real mirrored_playlist_tracks row carries its own
+    key as ``id``; the scope held that number, sync wishlists the track under
+    source_track_id, and the pipeline never downloaded undiscovered tracks"""
+    from core.automation.handlers._pipeline_shared import run_sync_and_wishlist
+    from core.wishlist.processing import _tracks_in_scope
+    calls = []
+
+    class _DB:
+        def get_mirrored_playlist_tracks(self, _pid):
+            return [{'id': 501, 'playlist_id': 2, 'position': 0, 'track_name': 'Song',
+                     'artist_name': 'Artist', 'album_name': 'Album', 'duration_ms': 1000,
+                     'image_url': None, 'source_track_id': 'spotify-abc', 'extra_data': None}]
+
+    deps = _minimal_deps(get_database=lambda: _DB(),
+                         process_wishlist_automatically=lambda **k: calls.append(k),
+                         is_wishlist_actually_processing=lambda: False)
+    run_sync_and_wishlist(deps, None, [{'id': 2, 'name': 'Normal'}],
+                          sync_one_fn=lambda _pl: {'status': 'skipped'},
+                          sync_id_for_fn=lambda pl: f'mirror_{pl["id"]}')
+    scope = set(calls[0]['track_ids'])
+    wish_row = {'track_id': 'spotify-abc', 'spotify_data': {'id': 'spotify-abc', 'album': {'name': 'Album'}}}
+    assert _tracks_in_scope([wish_row], scope) == [wish_row]
+    assert '501' not in scope
