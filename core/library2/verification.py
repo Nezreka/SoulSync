@@ -27,13 +27,15 @@ def mark_file_verification_status(
     if not exists:
         return 0
 
-    candidates = {
-        os.path.normcase(os.path.abspath(str(path)))
-        for path in paths
-        if path
-    }
+    given = [str(path) for path in paths if path]
+    candidates = {os.path.normcase(os.path.abspath(path)) for path in given}
     if not candidates:
         return 0
+    # the SQL lookups take the paths as given (and absolute) too: normcase
+    # lowercases on Windows, so `path IN` never matched a stored H:\Music\...
+    # path and every Approve fell through to the walks below. normcased
+    # values are compared in Python only (review 5 R5-G-3)
+    lookups = sorted(set(given) | {os.path.abspath(p) for p in given} | candidates)
 
     updated_ids: set[int] = set()
 
@@ -48,7 +50,7 @@ def mark_file_verification_status(
     # SQLite writer was held for all of them (that half is fixed at the call
     # site). `idx_lib2_track_files_path` answers the ordinary case — the stored
     # path IS the path — with one index lookup and no filesystem access at all.
-    path_list = sorted(candidates)
+    path_list = lookups
     for row in conn.execute(
         f"SELECT id, path FROM lib2_track_files WHERE path IN "
         f"({','.join('?' for _ in path_list)})",
@@ -69,7 +71,9 @@ def mark_file_verification_status(
         # the candidates' names in SQL (a string scan, no filesystem) so the
         # resolver -- a stat and a suffix walk per row -- only runs on those.
         # it walked every file row, 300k network stats on one Approve click
-        names = sorted({os.path.basename(c) for c in candidates if os.path.basename(c)})
+        # the names as given: SQLite LIKE folds ASCII only, so a lowercased
+        # "été.flac" never matched a stored "Été.flac" (review 5 R5-G-3)
+        names = sorted({os.path.basename(c) for c in lookups if os.path.basename(c)})
         if not names:
             names = [""]
         like = " OR ".join("path LIKE ? ESCAPE '\\'" for _ in names)
