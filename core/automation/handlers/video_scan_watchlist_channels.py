@@ -228,7 +228,7 @@ def _default_add_videos(channel: Dict[str, Any], videos: List[Dict[str, Any]]) -
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
     return get_video_db().add_videos_to_wishlist(
-        channel, videos, server_source=resolve_video_server(), profile_id=_profile())
+        channel, videos, server_source=resolve_video_server(), profile_id=_profile(), auto=True)
 
 
 def _default_backfill_count() -> int:
@@ -389,6 +389,16 @@ def auto_video_scan_watchlist_channels(
                                  progress=10 + int(80 * i / max(total, 1)),
                                  log_line="Checking %s for new videos" % ctitle, log_type='info')
             if not cid:
+                continue
+            # #2008: followed to keep an eye on, not to download. nothing is
+            # wished; picks from the channel page work as always
+            try:
+                hands_off = (channel_settings(cid) or {}).get("auto_download") is False
+            except Exception:   # noqa: BLE001 - unreadable settings scan as before
+                hands_off = False
+            if hands_off:
+                deps.update_progress(automation_id, log_line="%s: new uploads aren't downloaded, skipping" % ctitle,
+                                     log_type='info')
                 continue
             try:
                 uploads = fetch_uploads(cid, limit) or []

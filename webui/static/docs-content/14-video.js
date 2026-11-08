@@ -1057,6 +1057,7 @@ A channel without a banner uses a blurred version of its most-viewed video as th
 
 Each followed channel (or playlist) has its own settings, under **More → Channel settings** on the channel's page (or the cog on the watchlist):
 
+- **Download new uploads** (channels): on by default. Off keeps the channel followed but downloads nothing on its own; pick videos from the channel page. Turning it off also takes back what the follow and the scan wished that hasn't downloaded yet.
 - **Custom name** — a display-name override
 - **Quality** — a per-channel quality override (blank uses the global default)
 - **Title include / exclude** filters and a **minimum minutes** length (channels only)

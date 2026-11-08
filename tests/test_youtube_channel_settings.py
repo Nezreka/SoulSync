@@ -114,3 +114,38 @@ def test_channel_settings_api_roundtrip(tmp_path):
         assert db.get_playlist_settings("PL1")["retry_policy"] == "aggressive"
     finally:
         videoapi._video_db = None
+
+
+# ── #2008: follow without downloading ────────────────────────────────────────
+def test_follow_without_downloading_takes_back_only_the_automatic_wishes(tmp_path):
+    """off: the channel stays followed, the batch the follow and the scan
+    wished is taken back, what the user wished by hand stays"""
+    from flask import Flask
+    import api.video as videoapi
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    ch = {"youtube_id": "UC1", "title": "Chan"}
+    try:
+        db.add_videos_to_wishlist(ch, [{"youtube_id": "auto1", "title": "A"},
+                                       {"youtube_id": "both", "title": "B"}], auto=True)
+        db.add_videos_to_wishlist(ch, [{"youtube_id": "mine", "title": "M"}])
+        db.add_videos_to_wishlist(ch, [{"youtube_id": "both", "title": "B"}])   # picked by hand too
+
+        r = client.post("/api/video/youtube/channel/UC1/settings",
+                        json={"auto_download": False}).get_json()
+        assert r["settings"] == {"auto_download": False} and r["dropped"] == 1
+        left = db.youtube_video_wish_state(["auto1", "both", "mine"])
+        assert left == {"both", "mine"}
+
+        # a scan refresh of an auto row keeps the hand-picked one the user's
+        db.add_videos_to_wishlist(ch, [{"youtube_id": "both", "title": "B"}], auto=True)
+        assert db.drop_auto_wished_videos("UC1") == 0
+
+        # on again stores nothing (the default)
+        r = client.post("/api/video/youtube/channel/UC1/settings", json={}).get_json()
+        assert r["settings"] == {}
+    finally:
+        videoapi._video_db = None

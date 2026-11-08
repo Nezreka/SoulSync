@@ -11649,7 +11649,8 @@ class VideoDatabase:
             conn.close()
 
     def add_videos_to_wishlist(self, channel: dict, videos: list, *, server_source=None,
-                               allow_downloaded: bool = False, profile_id: int = 1) -> int:
+                               allow_downloaded: bool = False, profile_id: int = 1,
+                               auto: bool = False) -> int:
         """Wish for a channel's videos. ``channel`` = {youtube_id, title, avatar_url?};
         ``videos`` = [{youtube_id, title, published_at?, thumbnail_url?, description?}, …].
         Idempotent per (profile, video id). Returns the count written."""
@@ -11677,12 +11678,18 @@ class VideoDatabase:
                 vid = v.get("youtube_id")
                 if not vid or vid in downloaded:
                     continue
+                # #2008: what the follow and the scan wished (not the user) is
+                # marked, so "download new uploads" off can take back only that.
+                # a manual wish of the same video clears the mark: it's the user's
                 conn.execute(
                     """INSERT INTO video_wishlist
                            (profile_id, kind, tmdb_id, title, poster_url, episode_title, still_url,
-                            episode_overview, air_date, source, source_id, parent_source_id, server_source)
-                       VALUES (?, 'video', ?, ?, ?, ?, ?, ?, ?, 'youtube', ?, ?, ?)
+                            episode_overview, air_date, source, source_id, parent_source_id, server_source,
+                            detail_json)
+                       VALUES (?, 'video', ?, ?, ?, ?, ?, ?, ?, 'youtube', ?, ?, ?, ?)
                        ON CONFLICT(profile_id, source_id) WHERE kind='video' DO UPDATE SET
+                           detail_json=CASE WHEN excluded.detail_json IS NULL THEN NULL
+                                            ELSE video_wishlist.detail_json END,
                            title=excluded.title,
                            poster_url=COALESCE(excluded.poster_url, video_wishlist.poster_url),
                            episode_title=COALESCE(excluded.episode_title, video_wishlist.episode_title),
@@ -11690,7 +11697,8 @@ class VideoDatabase:
                            episode_overview=COALESCE(excluded.episode_overview, video_wishlist.episode_overview),
                            air_date=COALESCE(excluded.air_date, video_wishlist.air_date)""",
                     (int(profile_id), surrogate, ctitle, avatar, v.get("title"), v.get("thumbnail_url"),
-                     v.get("description"), v.get("published_at"), vid, cid, server_source))
+                     v.get("description"), v.get("published_at"), vid, cid, server_source,
+                     '{"auto_wish": true}' if auto else None))
                 n += 1
             new_rows = conn.execute(
                 "SELECT COUNT(*) FROM video_wishlist WHERE profile_id=? AND kind='video' AND parent_source_id=?",
@@ -11723,6 +11731,23 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             cur = conn.execute(sql, args)
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def drop_auto_wished_videos(self, channel_id) -> int:
+        """#2008: a channel set to not download new uploads gives back the videos
+        the follow and the scan wished for it, in every profile. what the user
+        wished by hand stays, and a download already done isn't a wish any more"""
+        if not channel_id:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "DELETE FROM video_wishlist WHERE kind='video' AND parent_source_id=? "
+                "AND json_valid(detail_json) AND json_extract(detail_json, '$.auto_wish') = 1",
+                (str(channel_id),))
             conn.commit()
             return cur.rowcount
         finally:
