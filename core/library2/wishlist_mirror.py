@@ -462,8 +462,19 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
         if track_ids is None else
         ("WHERE t.id IN (SELECT value FROM json_each(?))",
          (json.dumps([int(t) for t in track_ids]),)))
+    # the live Track > Album > Artist > Global cascade, joined in once: the
+    # per-track effective_track_profile ran a 3-table join, a default lookup
+    # and a profile read for every wanted track on the hourly reconcile
+    # (review 5 R5-G-5). live, not the projection's effective_profile_id,
+    # which can trail a default change
     rows = conn.execute(
-        f"""SELECT t.id,
+        f"""SELECT t.id, t.album_id, al.primary_artist_id AS artist_id,
+                  t.quality_profile_id AS trk_prof,
+                  COALESCE(t.quality_profile_explicit, 0) AS trk_prof_expl,
+                  al.quality_profile_id AS alb_prof,
+                  COALESCE(al.quality_profile_explicit, 0) AS alb_prof_expl,
+                  ar.quality_profile_id AS art_prof,
+                  COALESCE(ar.quality_profile_explicit, 0) AS art_prof_expl,
                   (SELECT tf.path FROM lib2_track_files tf
                     WHERE tf.track_id=t.id AND tf.path IS NOT NULL AND tf.path<>''
                       AND COALESCE(tf.file_state,'active')
@@ -471,6 +482,8 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
                       {owner_clause(library, column="tf.owner_profile_id")}
                     ORDER BY {primary_order('tf')} LIMIT 1) AS path
              FROM lib2_tracks t
+             LEFT JOIN lib2_albums al ON al.id=t.album_id
+             LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
            {scope}
             AND EXISTS (SELECT 1 FROM lib2_track_files f
                          WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>''
@@ -480,7 +493,7 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
         scope_params,
     ).fetchall()
     from core.library2.manual_skips import active_skip_paths
-    from core.library2.quality_eval import effective_track_profile, is_upgrade_policy
+    from core.library2.quality_eval import is_upgrade_policy
     protected = active_skip_paths(
         conn, ("quality", "bit_depth"), profile_id=profile_id
     )
@@ -492,12 +505,35 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
     from core.library2.track_files import primary_file_rows
     primaries = primary_file_rows(conn, [int(row["id"]) for row in rows])
     targets_by_profile: Dict[Any, tuple] = {}
+    from core.library2.profile_lookup import (
+        default_quality_profile_id,
+        resolve_profile_cascade,
+    )
+    default_profile_id = None if quality_profile else default_quality_profile_id(conn)
+    profiles_by_id: Dict[int, Optional[Dict[str, Any]]] = {}
+
+    def _profile_for(row) -> Dict[str, Any]:
+        if quality_profile:
+            return quality_profile
+        pid = int(resolve_profile_cascade(
+            (("track", row["id"], row["trk_prof"], row["trk_prof_expl"]),
+             ("album", row["album_id"], row["alb_prof"], row["alb_prof_expl"]),
+             ("artist", row["artist_id"], row["art_prof"], row["art_prof_expl"])),
+            default_profile_id)["id"])
+        if pid not in profiles_by_id:
+            prow = conn.execute("SELECT * FROM quality_profiles WHERE id=?", (pid,)).fetchone()
+            profiles_by_id[pid] = dict(prow) if prow is not None else None
+        if profiles_by_id[pid] is None:
+            # the same miss effective_track_profile reports
+            raise LookupError("Effective quality profile not found")
+        return profiles_by_id[pid]
+
     candidates = set()
     for row in rows:
         if row["path"] in protected or _hand_tagged(conn, row["path"], hand_tagged):
             continue
         try:
-            profile = quality_profile or effective_track_profile(conn, int(row["id"]))
+            profile = _profile_for(row)
         except (LookupError, ValueError):
             continue
         if not is_upgrade_policy(profile.get("upgrade_policy")):

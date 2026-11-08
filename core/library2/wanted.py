@@ -439,9 +439,17 @@ def ensure_wanted_projection(cursor: Any, *, batch_size: int = 0,
         stats = recompute_wanted(cursor, batch_size=batch_size, on_batch=on_batch)
         logger.info("Wanted projection rebuilt: %s", stats)
         return stats
-    cursor.execute(
-        "DELETE FROM lib2_wanted_tracks WHERE track_id NOT IN "
-        "(SELECT id FROM lib2_tracks)")
+    # read the orphans first, then delete just those, as recompute_wanted
+    # does: the DELETE ... NOT IN held the write lock for its whole scan
+    # (about 1 s at 300k, every start) while deleting nothing (review 5
+    # R5-G-4 / R5-X2-1)
+    orphans = [int(r[0]) for r in cursor.execute(
+        "SELECT rowid FROM lib2_wanted_tracks WHERE track_id NOT IN "
+        "(SELECT id FROM lib2_tracks)").fetchall()]
+    for i in range(0, len(orphans), 500):
+        cursor.execute(
+            "DELETE FROM lib2_wanted_tracks WHERE rowid IN "
+            "(SELECT value FROM json_each(?))", (json.dumps(orphans[i:i + 500]),))
     return None
 
 

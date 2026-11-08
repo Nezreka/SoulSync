@@ -195,8 +195,15 @@ _cutoff_cache: Dict[Any, Tuple[float, Any, List[Dict[str, Any]]]] = {}
 
 
 def _cutoff_fingerprint(conn: Any, profile_id: int) -> Tuple[Any, ...]:
-    files = conn.execute(
-        "SELECT MAX(id), COUNT(*), MAX(updated_at) FROM lib2_track_files").fetchone()
+    # three reads, each answered by an index (rowid, the smallest index,
+    # idx_lib2_track_files_updated). as one statement it was a full scan of
+    # the file table, 4.5 s at 300k on every page, hit or miss (review 5
+    # R5-G-2)
+    files = (
+        conn.execute("SELECT MAX(id) FROM lib2_track_files").fetchone()[0],
+        conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0],
+        conn.execute("SELECT MAX(updated_at) FROM lib2_track_files").fetchone()[0],
+    )
     wanted = conn.execute(
         "SELECT COUNT(*), SUM(wanted), MAX(updated_at) FROM lib2_wanted_tracks "
         "WHERE profile_id=?", (int(profile_id),)).fetchone()

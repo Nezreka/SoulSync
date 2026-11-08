@@ -1635,11 +1635,16 @@ def process_wishlist_automatically(
                                                    log_line='Ran library sweep — owned tracks removed before batch',
                                                    log_type='info')
 
-                # Get wishlist tracks for processing - combine all profiles
-                if not scoped:
-                    raw_wishlist_tracks = []
-                    for profile in all_profiles:
-                        raw_wishlist_tracks.extend(_tracks(profile))
+                # Get wishlist tracks for processing - combine all profiles.
+                # a scoped run read its rows before the sweep: read them again,
+                # or the tracks it just removed as owned are still sent, and the
+                # force_download_all batch downloads them again (review 5 R5-J-1)
+                raw_wishlist_tracks = []
+                for profile in all_profiles:
+                    tracks = _tracks(profile)
+                    if scoped:
+                        tracks = _tracks_in_scope(tracks, requested_track_ids)
+                    raw_wishlist_tracks.extend(tracks)
                 if not raw_wishlist_tracks:
                     logger.warning("No tracks returned from wishlist service.")
                     return

@@ -6767,18 +6767,27 @@ class MusicDatabase:
             # number (a startup of an older build already ran it), so it is
             # idempotent and touches nothing else. It runs FIRST: the backfill
             # below must never read this namespace as a legacy id.
+            # once: the importer writes lib2_track_id now, so after the first
+            # pass this scanned every play on every start, under the init
+            # lock, finding nothing (review 5 R5-X2-2)
             try:
-                cursor.execute("""
-                    UPDATE listening_history
-                       SET lib2_track_id = db_track_id, db_track_id = NULL
-                     WHERE server_source = 'lastfm'
-                       AND db_track_id IS NOT NULL
-                       AND EXISTS (SELECT 1 FROM lib2_tracks t
-                                    WHERE t.id = listening_history.db_track_id)
-                       AND (lib2_track_id IS NULL
-                            OR lib2_track_id = (SELECT t.id FROM lib2_tracks t
-                                                 WHERE t.legacy_track_id = listening_history.db_track_id))
-                """)
+                cursor.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+                               "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                if not cursor.execute("SELECT 1 FROM lib2_upgrade_repairs WHERE name="
+                                      "'lastfm_listening_id_repair_v1'").fetchone():
+                    cursor.execute("""
+                        UPDATE listening_history
+                           SET lib2_track_id = db_track_id, db_track_id = NULL
+                         WHERE server_source = 'lastfm'
+                           AND db_track_id IS NOT NULL
+                           AND EXISTS (SELECT 1 FROM lib2_tracks t
+                                        WHERE t.id = listening_history.db_track_id)
+                           AND (lib2_track_id IS NULL
+                                OR lib2_track_id = (SELECT t.id FROM lib2_tracks t
+                                                     WHERE t.legacy_track_id = listening_history.db_track_id))
+                    """)
+                    cursor.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) "
+                                   "VALUES('lastfm_listening_id_repair_v1')")
             except Exception as e:
                 logger.debug("last.fm listening id repair skipped: %s", e)
             try:
@@ -22407,7 +22416,8 @@ class MusicDatabase:
                                soul_id: Optional[str] = None,
                                isrc: Optional[str] = None,
                                acquired_quality_json: Optional[str] = None,
-                               retention_json: Optional[str] = None) -> Optional[int]:
+                               retention_json: Optional[str] = None,
+                               link_by_basename: bool = True) -> Optional[int]:
         """Record a download with full source provenance. Returns the record ID.
 
         External-ID kwargs (spotify_track_id et al.) capture the metadata-
@@ -22424,7 +22434,7 @@ class MusicDatabase:
             if not track_id and file_path:
                 from core.library2.track_files import track_id_for_path
 
-                linked = track_id_for_path(conn, file_path)
+                linked = track_id_for_path(conn, file_path, basename=link_by_basename)
                 if linked is not None:
                     track_id = str(linked)
 
@@ -22452,6 +22462,31 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error recording track download: {e}")
             return None
+
+    def link_track_download_to_file(self, download_id: int, lib2_file_id: int) -> bool:
+        """Point a provenance row at the catalogue track that owns ``lib2_file_id``.
+
+        the import records provenance before the autolink registers the new
+        file, so the path lookup at record time can't find it and the row was
+        left with track_id NULL for good. Source Info then showed the old
+        uploader for a re-download (review 5 R5-G-1)."""
+        if not download_id or lib2_file_id is None:
+            return False
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                "SELECT track_id FROM lib2_track_files WHERE id=?",
+                (int(lib2_file_id),)).fetchone()
+            if not row or row[0] is None:
+                return False
+            conn.execute(
+                "UPDATE track_downloads SET track_id=?, track_id_kind='lib2' WHERE id=?",
+                (str(int(row[0])), int(download_id)))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug(f"link_track_download_to_file failed: {e}")
+            return False
 
     def get_provenance_by_file_path(self, file_path: str) -> Optional[Dict[str, Any]]:
         """Return the most recent track_downloads row matching ``file_path``.
@@ -24713,6 +24748,8 @@ class MusicDatabase:
             by_base = {}   # basename -> list of (norm_title, status)
             # The verification verdict belongs to the FILE in v2 (ADR-03) —
             # it is a statement about the bytes on disk, not about the song.
+            # idx_lib2_track_files_verified holds just these rows: the scan
+            # of every file row ran on every boot (review 5 R5-X2-3)
             cursor.execute(
                 "SELECT f.path, f.verification_status, t.title "
                 "FROM lib2_track_files f "

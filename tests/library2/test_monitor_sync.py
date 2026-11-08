@@ -310,6 +310,50 @@ def test_demonitor_matches_by_name_fallback(imported_conn):
                         ).fetchone()[0] == 0
 
 
+# review 5 R5-F-2: the removal endpoints send provider ids as a dict, and that
+# branch let a bare name match run alongside the id match, past the A9 rule
+
+def _monitored(conn, artist_id):
+    return conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()[0]
+
+
+def test_removing_one_namesake_by_its_id_keeps_the_other(imported_conn):
+    conn = imported_conn
+    us = _add_artist(conn, "Nirvana", monitored=1, spotify_id="sp-us")
+    uk = _add_artist(conn, "Nirvana", monitored=1, external_ids='{"musicbrainz":"mb-uk-1967"}')
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    result = sync_watchlist_removal(
+        db, None, {"name": "Nirvana", "provider_ids": {"spotify": "sp-us"}}, profile_id=1)
+
+    assert result["matched"] == 1
+    assert (_monitored(conn, us), _monitored(conn, uk)) == (0, 1)
+    assert conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='artist' "
+                        "AND entity_id=?", (uk,)).fetchone() is None
+
+
+def test_a_dict_descriptor_name_fallback_needs_exactly_one_namesake(imported_conn):
+    conn = imported_conn
+    one = _add_artist(conn, "Nirvana", monitored=1, external_ids='{"musicbrainz":"mb-1"}')
+    two = _add_artist(conn, "Nirvana", monitored=1, external_ids='{"musicbrainz":"mb-2"}')
+    solo = _add_artist(conn, "Solo Act", monitored=1)
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    # no id matches: two namesakes is ambiguous, nobody is touched
+    ambiguous = sync_watchlist_removal(
+        db, None, {"name": "Nirvana", "provider_ids": {"spotify": "sp-x"}}, profile_id=1)
+    assert ambiguous["matched"] == 0
+    assert (_monitored(conn, one), _monitored(conn, two)) == (1, 1)
+
+    # one namesake: the fallback still resolves it
+    single = sync_watchlist_removal(
+        db, None, {"name": "Solo Act", "provider_ids": {"spotify": "sp-y"}}, profile_id=1)
+    assert single["matched"] == 1
+    assert _monitored(conn, solo) == 0
+
+
 def test_demonitor_idempotent(imported_conn):
     conn = imported_conn
     _add_artist(conn, "Once", monitored=1, spotify_id="once-sp")

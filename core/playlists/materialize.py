@@ -349,8 +349,8 @@ def _adopt_legacy_folder(pdir: str, owned: dict, wanted: dict, mode: str) -> Non
     what its manifest owns, so those entries failed every rebuild or stayed for
     good. Once, the first time v2 sees such a folder: a symlink to an audio
     file is adopted (3.6.1 only wrote links to tracks and copies here), and
-    in copy mode a regular file that is byte for byte the member it is named
-    for, which proves it is a copy. A same-named file with other bytes may be
+    in either mode a regular file that is byte for byte the member it is
+    named for, which proves it is a copy. A same-named file with other bytes may be
     the user's only copy: it is never adopted, so never overwritten.
 
     review 4 R4-D-8: every symlink used to be adopted, whatever it pointed at,
@@ -375,7 +375,11 @@ def _adopt_legacy_folder(pdir: str, owned: dict, wanted: dict, mode: str) -> Non
                         is_track and not os.path.isdir(target)):
                     owned[name] = {"source": target,
                                    "fingerprint": artifact_fingerprint(full)}
-            elif mode == "copy" and full in wanted and os.path.isfile(full):
+            elif full in wanted and os.path.isfile(full):
+                # any mode: 3.6.1's symlink mode fell back to copy2 when the
+                # link failed (Windows, SMB, FAT), so its "symlink" folders
+                # hold copies too. skipped, each failed every rebuild and a
+                # departed member was never pruned (review 5 R5-J-3)
                 import filecmp
                 source = wanted[full]
                 if (os.path.isfile(source) and os.path.getsize(source) == os.path.getsize(full)

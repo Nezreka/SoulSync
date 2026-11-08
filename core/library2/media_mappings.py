@@ -244,13 +244,20 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
     changed = 0
     sources = sorted(MEDIA_SERVER_SOURCES)
     marks = ",".join("?" for _ in sources)
+    # review 5 R5-F-4: SQL TRIM strips spaces only, upsert_mapping's strip()
+    # also tabs and newlines, so a '\t' id was selected and skipped forever.
+    # trim the same set here, and walk by id so a row the write skips for any
+    # other reason is passed, never selected again
+    trimmed = "TRIM(old.server_id, ' ' || char(9) || char(10) || char(11) || char(12) || char(13))"
     for entity_type, table in ENTITY_TABLES.items():
+        last_id = 0
         while not (should_stop and should_stop()):
             rows = cursor.execute(
                 f"""SELECT id,server_source,server_id FROM {table} old
-                     WHERE old.server_source IN ({marks})
+                     WHERE old.id > ?
+                       AND old.server_source IN ({marks})
                        AND old.server_id IS NOT NULL
-                       AND TRIM(old.server_id) <> ''
+                       AND {trimmed} <> ''
                        AND NOT EXISTS (
                            SELECT 1 FROM lib2_media_server_mappings m
                             WHERE m.entity_type=? AND m.entity_id=old.id
@@ -259,14 +266,16 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
                            SELECT 1 FROM lib2_media_server_mappings h
                             WHERE h.server_source=old.server_source
                               AND h.entity_type=?
-                              AND h.server_id=TRIM(old.server_id)
+                              AND h.server_id={trimmed}
                               AND h.server_library_id=''
                               AND h.entity_id<>old.id)
+                     ORDER BY old.id
                      LIMIT ?""",
-                (*sources, entity_type, entity_type, max(1, int(batch_size))),
+                (last_id, *sources, entity_type, entity_type, max(1, int(batch_size))),
             ).fetchall()
             if not rows:
                 break
+            last_id = int(rows[-1][0])
             for row in rows:
                 upsert_mapping(cursor, entity_type, int(row[0]), row[1], row[2])
             changed += len(rows)

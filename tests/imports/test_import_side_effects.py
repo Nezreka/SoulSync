@@ -1068,3 +1068,96 @@ def test_hydrabase_import_never_writes_the_peers_soul_ids(tmp_path, monkeypatch)
     assert album_row["soul_id"] is None
     assert track_row["soul_id"] is None
     assert track_row["album_soul_id"] is None
+
+
+_TRACK_DOWNLOADS_DDL = """CREATE TABLE track_downloads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, track_id TEXT, file_path TEXT,
+    source_service TEXT NOT NULL, source_username TEXT, source_filename TEXT,
+    source_size INTEGER, audio_quality TEXT, track_title TEXT, track_artist TEXT,
+    track_album TEXT, status TEXT DEFAULT 'completed',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, bit_depth INTEGER,
+    sample_rate INTEGER, bitrate INTEGER, spotify_track_id TEXT, itunes_track_id TEXT,
+    deezer_track_id TEXT, tidal_track_id TEXT, qobuz_track_id TEXT,
+    musicbrainz_recording_id TEXT, audiodb_id TEXT, soul_id TEXT, isrc TEXT,
+    acquired_quality_json TEXT, retention_json TEXT, recording_disambiguation TEXT,
+    track_id_kind TEXT)"""
+
+
+def test_a_redownload_links_its_provenance_and_shows_in_source_info(tmp_path, monkeypatch):
+    """review 5 R5-G-1: provenance is recorded before the autolink registers the
+    file, so the row was left with track_id NULL and Source Info showed only
+    the 3.6.1 download's uploader. the row now follows the linked file."""
+    import core.library2.autolink as autolink
+    import core.library2.unmapped_trigger as unmapped_trigger
+    import core.library2.track_reconcile_trigger as reconcile_trigger
+    from core.library2.source_info import track_source_info
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+
+    conn = lib2_seed.row_conn(str(tmp_path / "p.db"))
+    ensure_library_v2_schema(conn, run_backfills=False)
+    conn.execute(_TRACK_DOWNLOADS_DDL)
+    track = lib2_seed.track(conn, "Artist", "Album", "Song", path="/m/Artist/Album/01 - Song.mp3")
+    conn.execute("UPDATE lib2_tracks SET legacy_track_id=48213 WHERE id=?", (track,))
+    conn.execute("INSERT INTO track_downloads(track_id, track_id_kind, file_path, source_service, "
+                 "source_username) VALUES('48213','legacy','/old/01 - Song.mp3','soulseek','old_uploader')")
+    conn.commit()
+
+    class _Db:
+        _get_connection = staticmethod(lambda: conn)
+        record_track_download = MusicDatabase.record_track_download
+        link_track_download_to_file = MusicDatabase.link_track_download_to_file
+
+        def link_download_decision(self, *_a, **_kw):
+            return None
+
+    monkeypatch.setattr(side_effects, "get_database", lambda: _Db())
+    new_path = "/m/Artist/Album/01 - Song.flac"
+
+    def _autolink(context, **_kw):
+        cur = conn.execute("INSERT INTO lib2_track_files(track_id, path, format) VALUES(?, ?, 'flac')",
+                           (track, new_path))
+        conn.commit()
+        return cur.lastrowid
+
+    monkeypatch.setattr(autolink, "link_download_into_library_v2", _autolink)
+    monkeypatch.setattr(unmapped_trigger, "schedule_unmapped_artist_reconcile", lambda *_a, **_kw: None)
+    monkeypatch.setattr(reconcile_trigger, "schedule_file_track_reconcile", lambda *_a, **_kw: None)
+    monkeypatch.setattr(side_effects, "_get_config_manager", lambda: None)
+
+    side_effects.record_download_provenance({
+        "_download_username": "new_uploader",
+        "track_info": {"name": "Song", "artists": [{"name": "Artist"}], "album": "Album"},
+        "original_search_result": {"username": "new_uploader", "filename": "01 - Song.flac"},
+        "_final_processed_path": new_path,
+    })
+
+    row = conn.execute("SELECT track_id, track_id_kind FROM track_downloads "
+                       "WHERE source_username='new_uploader'").fetchone()
+    assert (row["track_id"], row["track_id_kind"]) == (str(track), "lib2")
+    users = [r["source_username"] for r in track_source_info(conn, track)]
+    assert users[:1] == ["new_uploader"], f"Source Info shows {users}"
+
+
+def test_downloads_recorded_unlinked_are_linked_once_their_file_is_catalogued(tmp_path):
+    """review 5 R5-G-1: rows already written with track_id NULL get the track
+    their exact path has now; a basename match is not a link."""
+    from core.library2.schema import run_library_v2_backfills
+    from tests import lib2_seed
+
+    conn = lib2_seed.row_conn(str(tmp_path / "b.db"))
+    ensure_library_v2_schema(conn, run_backfills=False)
+    conn.execute(_TRACK_DOWNLOADS_DDL)
+    track = lib2_seed.track(conn, "Artist", "Album", "Song", path="/m/Artist/Album/01 - Song.flac")
+    conn.executemany(
+        "INSERT INTO track_downloads(file_path, source_service, source_username) VALUES(?,?,?)",
+        [("/m/Artist/Album/01 - Song.flac", "soulseek", "exact"),
+         ("/elsewhere/01 - Song.flac", "soulseek", "basename_only")])
+    conn.commit()
+
+    stats = run_library_v2_backfills(conn, commit=True)
+
+    assert stats["download_links"] == 1
+    got = {r["source_username"]: (r["track_id"], r["track_id_kind"]) for r in conn.execute(
+        "SELECT source_username, track_id, track_id_kind FROM track_downloads")}
+    assert got == {"exact": (str(track), "lib2"), "basename_only": (None, None)}
