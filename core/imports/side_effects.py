@@ -421,6 +421,7 @@ def record_download_provenance(context: Dict[str, Any],
     ``require_library`` is used by terminal pipeline paths: registration then
     becomes part of success instead of a debug-only best effort.
     """
+    download_row_id = None
     try:
         search_result = context.get("original_search_result") or context.get("search_result") or {}
         username = search_result.get("username", context.get("_download_username", ""))
@@ -535,6 +536,10 @@ def record_download_provenance(context: Dict[str, Any],
             isrc=isrc,
             acquired_quality_json=acquired_quality_json,
             retention_json=retention_json,
+            # the autolink below registers the file and links this row to it;
+            # the basename guess would walk every file row and still miss
+            # (review 5 R5-G-1)
+            link_by_basename=False,
         )
         # the "why this file" record for the task that fetched it
         if download_row_id and context.get("task_id"):
@@ -558,6 +563,17 @@ def record_download_provenance(context: Dict[str, Any],
         logger.debug("library v2 autolink skipped: %s", e)
     if require_library and linked_lib2_file_id is None:
         require_library_v2_registration(context)
+
+    # the provenance row was written before the file had a catalogue row, so
+    # its track_id is NULL or names the file this one replaced. point it at
+    # the track the autolink just registered, or Source Info shows the old
+    # uploader for a re-download (review 5 R5-G-1)
+    if download_row_id and linked_lib2_file_id is not None:
+        try:
+            get_database().link_track_download_to_file(
+                download_row_id, linked_lib2_file_id)
+        except Exception as e:
+            logger.debug("download provenance not linked to its file: %s", e)
 
     # The canonical tracklist deliberately comes from one provider, but a
     # confirmed album can carry several provider release IDs. Reconcile those

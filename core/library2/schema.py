@@ -1678,6 +1678,18 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             logger.error("primary-file backfill failed (will retry next start): %s", e)
 
     if not _stopped():
+        # review 5 R5-G-1: downloads recorded before their file was in the
+        # catalogue. once: new imports link their row after the autolink
+        try:
+            if not _done_once(cursor, "track_downloads_lib2_link_v1"):
+                from core.library2.track_files import link_unlinked_downloads
+                stats["download_links"] = link_unlinked_downloads(cursor)
+                _mark_done(cursor, "track_downloads_lib2_link_v1")
+                _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("download provenance link failed (will retry next start): %s", e)
+
+    if not _stopped():
         # A provider's 0 ("no BPM", "no length") was stored as a value: the
         # retag wrote BPM 0 into files, and a length of 0 switched off the
         # import's duration check while COALESCE kept it over real lengths.

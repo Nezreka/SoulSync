@@ -22420,7 +22420,8 @@ class MusicDatabase:
                                soul_id: Optional[str] = None,
                                isrc: Optional[str] = None,
                                acquired_quality_json: Optional[str] = None,
-                               retention_json: Optional[str] = None) -> Optional[int]:
+                               retention_json: Optional[str] = None,
+                               link_by_basename: bool = True) -> Optional[int]:
         """Record a download with full source provenance. Returns the record ID.
 
         External-ID kwargs (spotify_track_id et al.) capture the metadata-
@@ -22437,7 +22438,7 @@ class MusicDatabase:
             if not track_id and file_path:
                 from core.library2.track_files import track_id_for_path
 
-                linked = track_id_for_path(conn, file_path)
+                linked = track_id_for_path(conn, file_path, basename=link_by_basename)
                 if linked is not None:
                     track_id = str(linked)
 
@@ -22465,6 +22466,31 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error recording track download: {e}")
             return None
+
+    def link_track_download_to_file(self, download_id: int, lib2_file_id: int) -> bool:
+        """Point a provenance row at the catalogue track that owns ``lib2_file_id``.
+
+        the import records provenance before the autolink registers the new
+        file, so the path lookup at record time can't find it and the row was
+        left with track_id NULL for good. Source Info then showed the old
+        uploader for a re-download (review 5 R5-G-1)."""
+        if not download_id or lib2_file_id is None:
+            return False
+        try:
+            conn = self._get_connection()
+            row = conn.execute(
+                "SELECT track_id FROM lib2_track_files WHERE id=?",
+                (int(lib2_file_id),)).fetchone()
+            if not row or row[0] is None:
+                return False
+            conn.execute(
+                "UPDATE track_downloads SET track_id=?, track_id_kind='lib2' WHERE id=?",
+                (str(int(row[0])), int(download_id)))
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.debug(f"link_track_download_to_file failed: {e}")
+            return False
 
     def get_provenance_by_file_path(self, file_path: str) -> Optional[Dict[str, Any]]:
         """Return the most recent track_downloads row matching ``file_path``.

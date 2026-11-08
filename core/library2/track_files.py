@@ -299,7 +299,8 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
     return True
 
 
-def track_id_for_path(conn, file_path: Any, *, scoped: bool = False) -> Optional[int]:
+def track_id_for_path(conn, file_path: Any, *, scoped: bool = False,
+                      basename: bool = True) -> Optional[int]:
     """The catalogue track that owns a file path, or ``None``.
 
     Exact path first, then the basename — a media server and SoulSync often
@@ -313,6 +314,10 @@ def track_id_for_path(conn, file_path: Any, *, scoped: bool = False) -> Optional
 
     ``scoped`` keeps it to the asking profile's library, the way 3.6.1's
     lookup was: a basename guess must never land in someone else's files.
+
+    ``basename=False`` stops after the exact path. the basename step is a
+    leading-wildcard LIKE, a walk of every file row (2-3 s at 300k), so a
+    caller that links the file itself afterwards skips it (review 5 R5-G-1).
     """
     file_path = str(file_path or "")
     if not file_path:
@@ -328,6 +333,8 @@ def track_id_for_path(conn, file_path: Any, *, scoped: bool = False) -> Optional
         f" ORDER BY {primary_order()} LIMIT 1", (file_path,)).fetchone()
     if row:
         return int(row[0])
+    if not basename:
+        return None
     name = os.path.basename(file_path.replace('\\', '/'))
     if not name:
         return None
@@ -339,6 +346,33 @@ def track_id_for_path(conn, file_path: Any, *, scoped: bool = False) -> Optional
         "   AND (path LIKE ? ESCAPE '^' OR path LIKE ? ESCAPE '^')"
         f"{owner} LIMIT 2", (f"%/{escaped}", f"%\\{escaped}")).fetchall()
     return int(rows[0][0]) if len(rows) == 1 else None
+
+
+def link_unlinked_downloads(cursor) -> int:
+    """Give provenance rows written with track_id NULL the track their file has now.
+
+    every import recorded provenance before its file had a catalogue row, so
+    those rows never linked and the upgrade carry skips them (review 5
+    R5-G-1). exact path only, through idx_track_downloads_file_path and the
+    path index. reads first, writes only the rows that match. Does not commit.
+    """
+    if not cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                          " AND name='track_downloads'").fetchone():
+        return 0
+    rows = cursor.execute(f"""
+        SELECT d.id, (SELECT f.track_id FROM lib2_track_files f
+                       WHERE f.path = d.file_path AND f.track_id IS NOT NULL
+                         AND COALESCE(f.file_state,'active') <> 'deleted'
+                       ORDER BY {primary_order('f')} LIMIT 1)
+          FROM track_downloads d
+         WHERE d.track_id IS NULL AND d.file_path IS NOT NULL AND d.file_path <> ''
+    """).fetchall()
+    pairs = [(str(int(r[1])), int(r[0])) for r in rows if r[1] is not None]
+    if pairs:
+        cursor.executemany(
+            "UPDATE track_downloads SET track_id=?, track_id_kind='lib2'"
+            " WHERE id=? AND track_id IS NULL", pairs)
+    return len(pairs)
 
 
 def repoint_file_path(conn, old_path: str, new_path: str,
