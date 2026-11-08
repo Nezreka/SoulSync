@@ -764,25 +764,37 @@ def _review_unverified_canonical_links(cursor: Any) -> int:
     return cursor.rowcount
 
 
+def _delete_found(cursor: Any, table: str, select_ids_sql: str) -> int:
+    """read the ids, then delete only those. a DELETE ... NOT IN takes the
+    write lock at statement start and holds it for its whole scan even when
+    it deletes nothing (review 5 R5-X2-1)."""
+    ids = [int(r[0]) for r in cursor.execute(select_ids_sql).fetchall()
+           if r[0] is not None]
+    deleted = 0
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        cursor.execute(f"DELETE FROM {table} WHERE id IN "
+                       f"({','.join('?' * len(chunk))})", chunk)
+        deleted += cursor.rowcount
+    return deleted
+
+
 def prune_orphaned_edition_rows(cursor: Any) -> int:
     """Drop shadow rows whose lib2 track vanished (entity deletes don't
     cascade through the compat link on every code path), then recordings and
-    review findings nothing references anymore. Idempotent."""
-    pruned = 0
-    cursor.execute(
-        """DELETE FROM lib2_release_tracks
-            WHERE track_id IS NULL
-               OR track_id NOT IN (SELECT id FROM lib2_tracks)""")
-    pruned += cursor.rowcount
-    cursor.execute(
-        """DELETE FROM lib2_recordings
-            WHERE id NOT IN (SELECT recording_id FROM lib2_release_tracks)""")
-    pruned += cursor.rowcount
-    cursor.execute(
-        """DELETE FROM lib2_recording_review
-            WHERE track_id NOT IN (SELECT id FROM lib2_tracks)
-               OR other_track_id NOT IN (SELECT id FROM lib2_tracks)""")
-    pruned += cursor.rowcount
+    review findings nothing references anymore. Idempotent. runs every
+    start, so each step reads before it writes."""
+    pruned = _delete_found(cursor, "lib2_release_tracks", """
+        SELECT id FROM lib2_release_tracks
+         WHERE track_id IS NULL
+            OR track_id NOT IN (SELECT id FROM lib2_tracks)""")
+    pruned += _delete_found(cursor, "lib2_recordings", """
+        SELECT id FROM lib2_recordings
+         WHERE id NOT IN (SELECT recording_id FROM lib2_release_tracks)""")
+    pruned += _delete_found(cursor, "lib2_recording_review", """
+        SELECT id FROM lib2_recording_review
+         WHERE track_id NOT IN (SELECT id FROM lib2_tracks)
+            OR other_track_id NOT IN (SELECT id FROM lib2_tracks)""")
     return pruned
 
 
