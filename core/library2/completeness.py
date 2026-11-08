@@ -656,16 +656,17 @@ def _project_for_rule_holders(conn, album_id: int, artist_id, created_ids: set,
     gets an album rule. the loop above recomputes the shared library and the
     own libraries, and the hourly reconcile mirrors only those, so the member's
     wanted rows and wishlist stayed empty for good. every other profile with an
-    album or artist rule here gets its projection recomputed, and the tracks
+    album rule here gets its projection recomputed, and the tracks
     this call created get queued for its wishlist. only the new ones: existing
     tracks were mirrored when the rule was written, and a cached tracklist
     persists again on every resolve.
     """
     from core.library2.mirror_outbox import enqueue_projected_tracks, intent_profile_ids
     from core.library2.wanted import recompute_wanted_for_entity
-    holders = intent_profile_ids(
-        conn, album_ids=[album_id],
-        artist_ids=[artist_id] if artist_id is not None else [])
+    # album rules only: a wish names this release. an artist watch alone
+    # would queue the artist's whole back catalogue onto the member's
+    # wishlist as each tracklist lands (their refresh is catalogue-only)
+    holders = intent_profile_ids(conn, album_ids=[album_id])
     for profile_id in sorted(holders - {int(p) for p in skip}):
         if profile_id <= 0:
             continue

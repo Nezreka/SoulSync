@@ -648,3 +648,24 @@ def test_a_members_wish_for_a_release_with_no_tracks_reaches_their_wishlist(worl
     # the admin wished for nothing
     assert _album_tracks_wanted(world, album, 1) == 0
     assert world.db.get_wishlist_count(profile_id=1) == 0
+
+
+def test_a_members_artist_watch_alone_never_queues_a_landing_tracklist(world):
+    """review 5 R5-B-1 follow-up: only a wish for this release carries the
+    landed tracks onto the member's wishlist. a watch on the artist alone
+    would queue the whole back catalogue as each tracklist lands"""
+    from core.library2 import completeness
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    with world.db._get_connection() as conn:
+        album = seed_album(conn, server_id="al-back", title="Back Catalogue", artist_id=world.ids["h"],
+                           server_source="soulsync", origin="discography")
+        conn.execute("UPDATE lib2_albums SET monitored=0 WHERE id=?", (album,))
+        record_rule(conn, "artist", world.ids["h"], True, PROVENANCE_USER, profile_id=world.sam)
+        conn.commit()
+        completeness._persist_tracklist_tracks(
+            conn, album, [{"title": "Old One", "track_number": 1, "disc_number": 1}], complete=True)
+        conn.commit()
+        queued = conn.execute(
+            "SELECT COUNT(*) FROM lib2_mirror_outbox WHERE profile_id=? AND status='pending'",
+            (world.sam,)).fetchone()[0]
+    assert queued == 0
