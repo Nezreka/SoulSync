@@ -889,3 +889,28 @@ def test_a_full_recompute_prunes_rows_of_deleted_tracks(imported_conn):
     assert 999999 not in rows and keep in rows
     # nothing left to prune: the next run writes no delete
     assert recompute_wanted(conn, profile_id=1)["pruned"] == 0
+
+
+def test_a_wishlist_removal_never_reads_the_whole_catalogue(imported_conn):
+    """review 5 R5-F-1: every removal loaded and parsed all tracks first (18 s
+    on a 316k library; Clear Wishlist held the write lock for it), even for a
+    row that names its lib2 track. each id is looked up through its index"""
+    from core.library2.monitor_sync import _descriptor_lib2_track_ids
+    conn = imported_conn
+    artist = _add_artist(conn, "Track Artist", monitored=0, spotify_id="ta-sp")
+    named = _add_track(conn, artist, "Named", spotify_id="named-sp")
+    by_deezer = _add_track(conn, artist, "Deezer", spotify_id=None)
+    conn.execute("UPDATE lib2_tracks SET external_ids='{\"deezer\": \"dz-9\"}' WHERE id=?", (by_deezer,))
+    conn.commit()
+    seen = []
+    conn.set_trace_callback(seen.append)
+    got = _descriptor_lib2_track_ids(conn, [
+        {"source_info": {"lib2_track_id": named}},
+        {"spotify_track_id": "dz-9"},                      # a bare id
+        {"track_data": {"id": "named-sp", "provider": "spotify"}},
+    ])
+    conn.set_trace_callback(None)
+    assert sorted(set(got)) == sorted({named, by_deezer})
+    flat = [" ".join(q.split()) for q in seen]
+    whole = [q for q in flat if "FROM lib2_tracks t JOIN lib2_albums" in q and "WHERE" not in q.upper()]
+    assert whole == []

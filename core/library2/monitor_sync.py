@@ -336,44 +336,65 @@ def _descriptor_lib2_track_ids(
     one release of a shared recording.
     """
     matched: set[int] = set()
-    rows = conn.execute(
-        """SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids,
-                  t.isrc, t.stable_id, al.spotify_id AS album_spotify_id,
-                  al.musicbrainz_id AS album_musicbrainz_id,
-                  al.external_ids AS album_external_ids,
-                  al.stable_id AS album_stable_id
-             FROM lib2_tracks t
-             JOIN lib2_albums al ON al.id=t.album_id"""
-    ).fetchall()
+    # review 5 R5-F-1: no whole-catalogue read. this loaded and parsed every
+    # track (18 s on 316k; Clear Wishlist held the write lock for it) even
+    # when the row named its lib2 track. each id is looked up through the
+    # column or expression index that serves it; only a provider with no
+    # index falls back to the full index, built once, on first need
+    select = ("SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids, "
+              "t.isrc, t.stable_id, al.spotify_id AS album_spotify_id, "
+              "al.musicbrainz_id AS album_musicbrainz_id, "
+              "al.external_ids AS album_external_ids, al.stable_id AS album_stable_id "
+              "FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id ")
+    from core.library2.provider_ids import external_id_sql
+    indexed_ext = ("spotify", "deezer", "tidal", "qobuz", "itunes", "audiodb", "jiosaavn")
+    full_index: Dict[str, Any] = {}
 
-    # iss29-D02: index the catalogue ONCE instead of re-walking it per
-    # descriptor.
-    #
-    # This loop used to run the full track list for every removed wishlist row
-    # and call `json.loads` on `external_ids` for each pair — "Clear Wishlist"
-    # with 1,000 legacy rows against a 50k-track library is 50 million
-    # iterations and as many JSON parses. Only descriptors carrying
-    # `source_info.lib2_track_id` short-circuit, and rows from the legacy
-    # wishlist UI, from playlist downloads or from `POST /api/wishlist` never
-    # have that marker. The hourly `reconcile_track_wishlist` paid it again
-    # every hour, on a held connection.
-    #
-    # One parse per track, then dictionary lookups. Ambiguity detection is
-    # preserved exactly: the index maps to a LIST of rows, so "more than one
-    # candidate" stays observable and the code still refuses to guess.
-    qualified_index: Dict[tuple, List[Any]] = {}
-    generic_index: Dict[str, List[Any]] = {}
-    for row in rows:
-        row_ids = _provider_ids(row["external_ids"])
-        if row["spotify_id"]:
-            row_ids.setdefault("spotify", str(row["spotify_id"]))
-        if row["musicbrainz_id"]:
-            row_ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
-        if row["isrc"]:
-            row_ids.setdefault("isrc", str(row["isrc"]))
-        for source, value in row_ids.items():
-            qualified_index.setdefault((source, value), []).append(row)
-            generic_index.setdefault(value, []).append(row)
+    def _full():
+        if not full_index:
+            qualified: Dict[tuple, List[Any]] = {}
+            generic: Dict[str, List[Any]] = {}
+            for row in conn.execute(select).fetchall():
+                row_ids = _provider_ids(row["external_ids"])
+                if row["spotify_id"]:
+                    row_ids.setdefault("spotify", str(row["spotify_id"]))
+                if row["musicbrainz_id"]:
+                    row_ids.setdefault("musicbrainz", str(row["musicbrainz_id"]))
+                if row["isrc"]:
+                    row_ids.setdefault("isrc", str(row["isrc"]))
+                for source, value in row_ids.items():
+                    qualified.setdefault((source, value), []).append(row)
+                    generic.setdefault(value, []).append(row)
+            full_index.update(qualified=qualified, generic=generic)
+        return full_index
+
+    def _where(sql_expr: str, value: str) -> List[Any]:
+        return conn.execute(select + f"WHERE {sql_expr} = ?", (value,)).fetchall()
+
+    def _lookup(source: str, value: str) -> List[Any]:
+        """the rows carrying this source's id, the way the old index keyed
+        them (external_ids first, then the dedicated columns)"""
+        rows: List[Any] = []
+        if source in indexed_ext:
+            rows += _where(external_id_sql("t.external_ids", source), value)
+        if source == "spotify":
+            rows += _where("t.spotify_id", value)
+        elif source == "musicbrainz":
+            rows += _where("t.musicbrainz_id", value)
+        elif source == "isrc":
+            rows += _where("t.isrc", value)
+        elif source not in indexed_ext:
+            return list(_full()["qualified"].get((source, value), ()))
+        return rows
+
+    def _lookup_any(value: str) -> List[Any]:
+        """a bare id from any provider. the indexed ones are asked directly;
+        an id only an unindexed provider carries is not looked for"""
+        rows: List[Any] = []
+        for source in (*indexed_ext, "musicbrainz", "isrc"):
+            rows += _lookup(source, value)
+        return rows
+
     for descriptor in descriptors:
         if not isinstance(descriptor, Mapping):
             continue
@@ -457,12 +478,12 @@ def _descriptor_lib2_track_ids(
         candidates = []
         for source, provider_values in qualified_ids.items():
             for value in provider_values:
-                for row in qualified_index.get((source, value), ()):
+                for row in _lookup(source, value):
                     if int(row["id"]) not in seen:
                         seen.add(int(row["id"]))
                         candidates.append(row)
         for value in generic_ids:
-            for row in generic_index.get(value, ()):
+            for row in _lookup_any(value):
                 if int(row["id"]) not in seen:
                     seen.add(int(row["id"]))
                     candidates.append(row)
