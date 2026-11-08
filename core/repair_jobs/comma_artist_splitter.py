@@ -30,6 +30,7 @@ import os
 import re
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.metadata_gap_filler import _gap_cursor
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.comma_artist_splitter")
@@ -56,6 +57,11 @@ KNOWN_COMMA_ARTISTS = frozenset({
 
 # Cap on comma-artists examined per scan run (each may cost API lookups).
 SCAN_ARTIST_LIMIT = 300
+# files read per query while walking the library
+_FILE_PAGE = 2000
+# where the last run that hit SCAN_ARTIST_LIMIT stopped (a lib2 file id)
+_CURSOR_KEY = 'repair.comma_artist_splitter.cursor'
+
 # Sample of affected tracks stored in the finding for display; the fix
 # re-queries the DB so it always covers ALL tracks, not just the sample.
 TRACK_SAMPLE_LIMIT = 40
@@ -225,55 +231,20 @@ class CommaArtistSplitterJob(RepairJob):
         sources: list = [s for s in _API_SOURCES
                          if not (s == 'spotify' and context.is_spotify_rate_limited())]
 
-        tracks = []
-        conn = None
-        try:
-            conn = context.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                WITH native_files AS (
-                    SELECT t.id AS track_id, f.id AS file_id, f.path,
-                           COALESCE(
-                               (SELECT ta.artist_id
-                                  FROM lib2_track_artists ta
-                                 WHERE ta.track_id = t.id
-                                 ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
-                                          ta.position, ta.artist_id
-                                 LIMIT 1),
-                               al.primary_artist_id
-                           ) AS artist_id
-                      FROM lib2_track_files f
-                      JOIN lib2_tracks t ON t.id = f.track_id
-                 LEFT JOIN lib2_albums al ON al.id = t.album_id
-                     WHERE f.path IS NOT NULL AND f.path != ''
-                       AND COALESCE(f.file_state, 'active') = 'active'
-                )
-                SELECT nf.track_id, nf.file_id, nf.path, nf.artist_id,
-                       ar.name, ar.image_url
-                  FROM native_files nf
-             LEFT JOIN lib2_artists ar ON ar.id = nf.artist_id
-                LIMIT {SCAN_ARTIST_LIMIT * 10}
-            """)
-            tracks = cursor.fetchall()
-        except Exception as e:
-            logger.error("Error fetching tracks: %s", e, exc_info=True)
-            result.errors += 1
-            return result
-        finally:
-            if conn:
-                conn.close()
-
-        if not tracks:
-            if context.report_progress:
-                context.report_progress(phase='No tracks to scan',
-                                        log_line='Nothing to check', log_type='success')
-            return result
+        # every file, in id order from where the last run stopped, wrapping
+        # round; SCAN_ARTIST_LIMIT caps findings per run, not files read.
+        # a fixed LIMIT with no order read the same 3000 files every run
+        # (review 5 R5-I-4). the cursor moves only when a run ends normally.
+        cursor_start = _gap_cursor(context, _CURSOR_KEY)
+        total = self.estimate_scope(context)
+        walk = {'last': None, 'error': None}
+        tracks = self._walk_files(context, cursor_start, walk)
 
         if context.update_progress:
-            context.update_progress(0, len(tracks))
+            context.update_progress(0, total)
         if context.report_progress:
-            context.report_progress(phase=f'Scanning {len(tracks)} track(s) for multi-artist metadata...',
-                                    total=len(tracks))
+            context.report_progress(phase=f'Scanning {total} track(s) for multi-artist metadata...',
+                                    total=total)
 
         from mutagen import File as MutagenFile
         from core.library2.paths import resolve_lib2_path
@@ -285,6 +256,7 @@ class CommaArtistSplitterJob(RepairJob):
         # Track: combined_artist → (artist_id, db_artist_name, thumb_url, files_with_this_tag)
         findings_map = {}
 
+        capped = False
         for i, (track_id, file_id, file_path, artist_id,
                 db_artist_name, thumb_url) in enumerate(tracks):
             if context.check_stop():
@@ -292,9 +264,14 @@ class CommaArtistSplitterJob(RepairJob):
                 return result
             if context.wait_if_paused():
                 return result
+            if len(findings_map) >= SCAN_ARTIST_LIMIT:
+                # enough for one run: the next one carries on from here
+                capped = True
+                break
+            walk['last'] = int(file_id)
 
             if context.update_progress:
-                context.update_progress(i + 1, len(tracks))
+                context.update_progress(i + 1, total)
 
             result.scanned += 1
             try:
@@ -388,6 +365,21 @@ class CommaArtistSplitterJob(RepairJob):
             except Exception as e:
                 logger.debug("Error scanning track %s: %s", file_path, e)
                 result.errors += 1
+
+        if walk['error'] is not None:
+            result.errors += 1
+            if not result.scanned:
+                return result
+        elif capped and walk['last'] is not None:
+            _gap_cursor(context, _CURSOR_KEY, walk['last'])
+        else:
+            _gap_cursor(context, _CURSOR_KEY, 0)
+
+        if not result.scanned and not findings_map:
+            if context.report_progress:
+                context.report_progress(phase='No tracks to scan',
+                                        log_line='Nothing to check', log_type='success')
+            return result
 
         fixer = None
         if not dry_run:
@@ -495,7 +487,7 @@ class CommaArtistSplitterJob(RepairJob):
                 return result
 
         if context.update_progress:
-            context.update_progress(len(tracks), len(tracks))
+            context.update_progress(total, total)
         if context.report_progress:
             context.report_progress(
                 phase=(f'Done — {result.findings_created} splittable artist(s) found'
@@ -505,6 +497,56 @@ class CommaArtistSplitterJob(RepairJob):
                          f'{result.skipped} skipped, {result.scanned} checked',
                 log_type='success')
         return result
+
+    def _walk_files(self, context: JobContext, after: int, walk: dict):
+        """Yield every active file row in id order: those after ``after``,
+        then from the top up to it. One page per connection, so no read
+        transaction stays open across the tag reads and api lookups."""
+        ranges = [(after, None)] + ([(0, after)] if after else [])
+        for low, high in ranges:
+            while True:
+                conn = None
+                try:
+                    conn = context.db._get_connection()
+                    upper = 'AND f.id <= ?' if high is not None else ''
+                    rows = conn.execute(f"""
+                        WITH native_files AS (
+                            SELECT t.id AS track_id, f.id AS file_id, f.path,
+                                   COALESCE(
+                                       (SELECT ta.artist_id
+                                          FROM lib2_track_artists ta
+                                         WHERE ta.track_id = t.id
+                                         ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                                                  ta.position, ta.artist_id
+                                         LIMIT 1),
+                                       al.primary_artist_id
+                                   ) AS artist_id
+                              FROM lib2_track_files f
+                              JOIN lib2_tracks t ON t.id = f.track_id
+                         LEFT JOIN lib2_albums al ON al.id = t.album_id
+                             WHERE f.id > ? {upper}
+                               AND f.path IS NOT NULL AND f.path != ''
+                               AND COALESCE(f.file_state, 'active') = 'active'
+                             ORDER BY f.id
+                             LIMIT {_FILE_PAGE}
+                        )
+                        SELECT nf.track_id, nf.file_id, nf.path, nf.artist_id,
+                               ar.name, ar.image_url
+                          FROM native_files nf
+                     LEFT JOIN lib2_artists ar ON ar.id = nf.artist_id
+                         ORDER BY nf.file_id
+                    """, (low, high) if high is not None else (low,)).fetchall()
+                except Exception as e:  # noqa: BLE001
+                    logger.error("Error fetching tracks: %s", e, exc_info=True)
+                    walk['error'] = e
+                    return
+                finally:
+                    if conn:
+                        conn.close()
+                yield from (tuple(row) for row in rows)
+                if len(rows) < _FILE_PAGE:
+                    break
+                low = int(rows[-1][1])
 
     def _record_resolved_finding(self, context: JobContext, combined_name: str, info: dict,
                                  details: dict, fixed_count: int,
