@@ -112,66 +112,126 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
     is the scan's job, not one finding's."""
     from core.library2.paths import resolve_lib2_path
 
-    subjects = scoped_file_subjects(SimpleNamespace(scope=scope), active_file_subjects(database, config_manager))
-    if only_file_ids is not None:
-        wanted = {int(i) for i in only_file_ids}
+    # review 5 R5-E-1: one group's Keep Best read every file, every credit
+    # and every mapping in the library (about 51 s of SQL on a big one),
+    # twice per click, to keep two or three files. narrowed, each read below
+    # covers just the group's own files, tracks, releases and artists
+    narrow = only_file_ids is not None
+    wanted = {int(i) for i in only_file_ids} if narrow else set()
+    subjects = scoped_file_subjects(SimpleNamespace(scope=scope), active_file_subjects(
+        database, config_manager, file_ids=sorted(wanted) if narrow else None))
+    if narrow:
         subjects = [s for s in subjects if int(s["file_id"]) in wanted]
     if not subjects:
         return []
     membership, source = _playlist_context(playlist_membership, server_source)
     hand_tags = hand_tagged_path_keys(database)
     companion_exts = lossy_companion_exts(config_manager, database)
+    ids = sorted({int(s["track_id"]) for s in subjects})
+    album_ids = sorted({int(s["album_id"]) for s in subjects})
+    artist_ids = sorted({int(s["artist_id"]) for s in subjects if s.get("artist_id") is not None})
+    file_ids = sorted({int(s["file_id"]) for s in subjects})
+    each = "SELECT value FROM json_each(?)"
+
+    def only(column: str, values) -> tuple[str, tuple]:
+        """`` AND column IN (values)`` when narrowed, else nothing."""
+        if not narrow:
+            return "", ()
+        return f" AND {column} IN ({each})", (json.dumps(list(values)),)
+
     with closing(database._get_connection()) as conn:
         # the quality order, and a tier that two files of the same quality
-        # share (every sort column but the id), so a tie can go to the album
+        # share (every sort column but the id), so a tie can go to the album.
+        # ranks only ever compare inside one group, so the group's own files
+        # rank the same among themselves as among the whole library
         order, tiers = {}, {}
         last, tier = None, -1
+        where, args = only("id", file_ids)
         for i, r in enumerate(conn.execute(
                 f"SELECT id, {quality_tier_columns()} FROM lib2_track_files"
-                f" ORDER BY {quality_order()}")):
+                f" WHERE 1=1{where} ORDER BY {quality_order()}", args)):
             if tuple(r[1:]) != last:
                 last, tier = tuple(r[1:]), tier + 1
             order[int(r[0])], tiers[int(r[0])] = i, tier
         # All owners participate in reference protection, including files
         # outside this scan's allowlist or library scope.
-        references = [dict(r) for r in conn.execute(
-            "SELECT id,track_id,path,owner_profile_id,size FROM lib2_track_files "
-            "WHERE COALESCE(file_state,'active')<>'deleted'")]
-        if only_file_ids is not None:
+        if not narrow:
+            references = [dict(r) for r in conn.execute(
+                "SELECT id,track_id,path,owner_profile_id,size FROM lib2_track_files "
+                "WHERE COALESCE(file_state,'active')<>'deleted'")]
+        else:
+            # only rows that could be the same physical file as one of the
+            # group's: same name, or same size (a hardlink always is), or a
+            # size nobody recorded. sql narrows (LIKE is a superset: it
+            # ignores ascii case); the exact test below still decides
             names = {os.path.basename(str(s["path"] or "").replace("\\", "/")) for s in subjects}
-            sizes = {r["size"] for r in references if r["id"] in wanted and r["size"]}
+            names.discard("")
+            sizes = {r[0] for r in conn.execute(
+                f"SELECT size FROM lib2_track_files WHERE id IN ({each}) AND size"
+                " AND COALESCE(file_state,'active')<>'deleted'",
+                (json.dumps(sorted(wanted)),))}
             for subject in subjects:  # the group's own files, measured: a few stats
                 try:
                     sizes.add(os.path.getsize(str(subject["path"])))
                 except OSError:
                     pass
+
+            def _like(name: str) -> str:
+                return "%/" + name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+            name_terms = " OR ".join(
+                "path = ? OR REPLACE(path, '\\', '/') LIKE ? ESCAPE '\\'" for _ in names)
+            name_args = [arg for name in sorted(names) for arg in (name, _like(name))]
+            references = [dict(r) for r in conn.execute(
+                "SELECT id,track_id,path,owner_profile_id,size FROM lib2_track_files "
+                "WHERE COALESCE(file_state,'active')<>'deleted' AND ("
+                f"id IN ({each}) OR size IS NULL OR size = 0 OR size IN ({each})"
+                + (f" OR {name_terms}" if name_terms else "") + ")",
+                (json.dumps(sorted(wanted)), json.dumps(sorted(sizes)), *name_args))]
             references = [r for r in references
                           if r["id"] in wanted or not r["size"] or r["size"] in sizes
                           or os.path.basename(str(r["path"] or "").replace("\\", "/")) in names]
-        overrides = {(r[0], int(r[1])) for r in conn.execute(
-            "SELECT entity_type,entity_id FROM lib2_metadata_overrides")}
-        pins = {int(r[0]) for r in conn.execute("SELECT id FROM lib2_albums WHERE canonical_locked=1")}
+        if narrow:
+            overrides = {(r[0], int(r[1])) for r in conn.execute(
+                "SELECT entity_type,entity_id FROM lib2_metadata_overrides "
+                f"WHERE (entity_type='track' AND entity_id IN ({each}))"
+                f" OR (entity_type='release_group' AND entity_id IN ({each}))"
+                f" OR (entity_type='artist' AND entity_id IN ({each}))",
+                (json.dumps(ids), json.dumps(album_ids), json.dumps(artist_ids)))}
+        else:
+            overrides = {(r[0], int(r[1])) for r in conn.execute(
+                "SELECT entity_type,entity_id FROM lib2_metadata_overrides")}
+        where, args = only("id", album_ids)
+        pins = {int(r[0]) for r in conn.execute(
+            f"SELECT id FROM lib2_albums WHERE canonical_locked=1{where}", args)}
+        where, args = only("canonical_track_id", ids)
         dependents = {int(r[0]) for r in conn.execute(
-            "SELECT canonical_track_id FROM lib2_tracks WHERE canonical_track_id IS NOT NULL")}
+            f"SELECT canonical_track_id FROM lib2_tracks WHERE canonical_track_id IS NOT NULL{where}",
+            args)}
+        where, args = only("derived_from_file_id", file_ids)
         derivative_parents = {int(r[0]) for r in conn.execute(
             "SELECT derived_from_file_id FROM lib2_track_files "
-            "WHERE derived_from_file_id IS NOT NULL AND COALESCE(file_state,'active')<>'deleted'")}
+            f"WHERE derived_from_file_id IS NOT NULL AND COALESCE(file_state,'active')<>'deleted'{where}",
+            args)}
         mappings = defaultdict(set)
+        where, args = only("entity_id", ids)
         for row in conn.execute("SELECT entity_id,server_source FROM lib2_media_server_mappings "
-                                "WHERE entity_type='track'"):
+                                f"WHERE entity_type='track'{where}", args):
             mappings[int(row[0])].add(str(row[1] or "").lower())
         playlists = {}
-        ids = sorted({int(s["track_id"]) for s in subjects})
         for start in range(0, len(ids), 500):
             playlists.update(track_server_playlists(conn, ids[start:start + 500], source, membership or {}))
         credits = defaultdict(list)
+        where, args = only("ta.track_id", ids)
         for row in conn.execute("SELECT ta.track_id,a.name FROM lib2_track_artists ta "
-                                "JOIN lib2_artists a ON a.id=ta.artist_id ORDER BY ta.position"):
+                                f"JOIN lib2_artists a ON a.id=ta.artist_id WHERE 1=1{where} "
+                                "ORDER BY ta.position", args):
             credits[int(row[0])].append(row[1])
         # who performs each song, as the row says (a compilation's own credit)
+        where, args = only("id", ids)
         performers = {int(r[0]): r[1] for r in conn.execute(
             "SELECT id, track_artist FROM lib2_tracks"
-            " WHERE track_artist IS NOT NULL AND track_artist <> ''")}
+            f" WHERE track_artist IS NOT NULL AND track_artist <> ''{where}", args)}
 
     reference_keys = defaultdict(set)
     inode_keys = defaultdict(set)
