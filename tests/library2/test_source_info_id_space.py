@@ -44,3 +44,20 @@ def test_a_legacy_number_never_reads_as_another_catalogue_track(tmp_path):
     conn.commit()
     carry_legacy_download_ids(conn)
     assert "stranger" not in [r["source_username"] for r in track_source_info(conn, track)]
+
+
+def test_a_same_day_download_after_the_upgrade_keeps_its_catalogue_id(tmp_path):
+    """review 4 R4-A-2: started_at is ISO and created_at isn't; as text a row
+    from later the same day sorted before the upgrade, was read as a 3.6.1
+    id and moved to whichever track carried that legacy number"""
+    _db, conn, track = _world(tmp_path)
+    other = lib2_seed.track(conn, "Other", "Album", "Unrelated", path="/m/other.flac")
+    conn.execute("UPDATE lib2_tracks SET legacy_track_id=? WHERE id=?", (track, other))
+    conn.execute("UPDATE lib2_bootstrap_state SET started_at='2026-10-29T10:00:00.123456+00:00' WHERE id=1")
+    conn.execute("INSERT INTO track_downloads(track_id, source_service, source_username, created_at) "
+                 "VALUES(?, 'soulseek', 'same_day', '2026-10-29 10:30:00')", (str(track),))
+    conn.commit()
+    carry_legacy_download_ids(conn)
+    row = conn.execute("SELECT track_id, track_id_kind FROM track_downloads "
+                       "WHERE source_username='same_day'").fetchone()
+    assert tuple(row) == (str(track), "lib2")

@@ -118,8 +118,12 @@ def carry_legacy_download_ids(conn) -> int:
         started = state[0] if state else None
         # written since the upgrade began: already a catalogue id
         if started:
+            # review 4 R4-A-2: started_at is ISO ('...T10:00:00+00:00') and
+            # created_at is CURRENT_TIMESTAMP ('... 10:30:00'); as text a
+            # same-day row sorted before the upgrade and was read as legacy
             conn.execute("UPDATE track_downloads SET track_id_kind='lib2' WHERE track_id_kind IS NULL "
-                         "AND track_id IS NOT NULL AND created_at >= ?", (started,))
+                         "AND track_id IS NOT NULL AND julianday(created_at) >= julianday(?)",
+                         (started,))
         rows = conn.execute("SELECT id, track_id FROM track_downloads "
                             "WHERE track_id_kind IS NULL AND track_id IS NOT NULL").fetchall()
         mapped = 0
