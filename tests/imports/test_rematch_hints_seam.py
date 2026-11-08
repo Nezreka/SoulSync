@@ -256,3 +256,32 @@ def test_a_pending_3_6_1_hint_is_mapped_or_loses_only_its_replace(conn):
     rows = dict(cur.execute("SELECT staged_path, replace_track_id || ':' || COALESCE(replace_id_space,'-') "
                             "FROM rematch_hints").fetchall())
     assert rows == {"/staging/a.flac": "31:lib2", "/staging/b.flac": None}
+
+
+@pytest.mark.parametrize("v2_ran", [True, False])
+def test_a_hint_written_by_earlier_v2_code_is_never_carried_as_legacy(conn, v2_ran):
+    """review 4 R4-D-1: a hint pending from library v2 code that predates the
+    id-space column holds a lib2 id. read as a 3.6.1 legacy id, it mapped onto
+    whichever unrelated track had that legacy id, and the import deleted it"""
+    from core.imports.rematch_hints import carry_legacy_rematch_hints, ensure_replace_id_space_column
+    cur = conn.cursor()
+    cur.execute("ALTER TABLE lib2_tracks ADD COLUMN legacy_track_id INTEGER")
+    cur.execute("ALTER TABLE lib2_track_files ADD COLUMN legacy_track_id INTEGER")
+    cur.execute("INSERT INTO lib2_tracks(id, title, legacy_track_id) VALUES(31, 'Song', NULL)")
+    cur.execute("INSERT INTO lib2_tracks(id, title, legacy_track_id) VALUES(77, 'Other', 31)")
+    if v2_ran:
+        cur.execute("CREATE TABLE lib2_bootstrap_state (id INTEGER PRIMARY KEY, status TEXT, started_at TEXT)")
+        cur.execute("INSERT INTO lib2_bootstrap_state VALUES(1, 'done', '2026-10-29T00:00:00')")
+    cur.execute("INSERT INTO rematch_hints(staged_path, source, replace_track_id) VALUES('/s/a.flac', 'spotify', 31)")
+    conn.commit()
+
+    ensure_replace_id_space_column(cur)
+    carry_legacy_rematch_hints(conn)
+
+    row = cur.execute("SELECT replace_track_id, replace_id_space FROM rematch_hints").fetchone()
+    if v2_ran:
+        # ambiguous: the import stays, the replace (and any delete) goes
+        assert tuple(row) == (None, "lib2")
+    else:
+        # a real 3.6.1 database: the legacy id still maps
+        assert tuple(row) == (77, "lib2")

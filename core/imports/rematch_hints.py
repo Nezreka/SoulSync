@@ -127,11 +127,32 @@ def _row_to_hint(row: Any) -> RematchHint:
     )
 
 
+def _library_v2_has_run(cursor: Any) -> bool:
+    try:
+        row = cursor.execute(
+            "SELECT 1 FROM lib2_bootstrap_state WHERE id=1 "
+            "AND (status='done' OR started_at IS NOT NULL)").fetchone()
+    except Exception:  # noqa: BLE001 - no table: a 3.6.1 database
+        return False
+    return row is not None
+
+
 def ensure_replace_id_space_column(cursor: Any) -> None:
-    """the column a 3.6.1 database lacks; added where it is missing"""
+    """the column a 3.6.1 database lacks; added where it is missing.
+
+    review 4 R4-D-1: a NULL space means "a 3.6.1 hint holding a legacy id",
+    which the upgrade maps through legacy_track_id. but an install that ran
+    library v2 before this column existed has pending hints that hold lib2
+    ids, and nothing tells the two apart. mapping one as legacy could point
+    the replace at an unrelated track and delete its file, so those keep
+    their import and lose only the replace (nothing gets deleted)"""
     cols = {r[1] for r in cursor.execute("PRAGMA table_info(rematch_hints)").fetchall()}
     if cols and "replace_id_space" not in cols:
         cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_id_space TEXT")
+        if _library_v2_has_run(cursor):
+            cursor.execute(
+                "UPDATE rematch_hints SET replace_track_id=NULL, replace_id_space='lib2' "
+                "WHERE status='pending' AND replace_track_id IS NOT NULL")
 
 
 def create_hint(cursor: Any, hint: RematchHint) -> int:

@@ -1998,8 +1998,8 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_content_hash ON rematch_hints (content_hash)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_status ON rematch_hints (status)")
             # which id space replace_track_id names; NULL on a hint from 3.6.1
-            if 'replace_id_space' not in {r[1] for r in cursor.execute("PRAGMA table_info(rematch_hints)")}:
-                cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_id_space TEXT")
+            from core.imports.rematch_hints import ensure_replace_id_space_column
+            ensure_replace_id_space_column(cursor)
 
             # Sync history table — tracks the last 100 sync operations with cached context for re-trigger
             cursor.execute("""
