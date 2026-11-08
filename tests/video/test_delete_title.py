@@ -341,6 +341,38 @@ def test_a_folder_holding_another_titles_video_is_not_taken_whole(db, tmp_path):
     assert other.exists()
 
 
+def test_a_movie_with_plex_extras_still_goes_as_its_whole_folder(db, tmp_path):
+    # The Abandon (2022), as it sits on disk: Plex's trailers/ folder holds a
+    # video that is not a library file, but it is the movie's own trailer.
+    mid = _movie(db, tmp_path, title="The Abandon", year=2022, tmdb=777)
+    folder = tmp_path / "Movies" / "The Abandon (2022)"
+    (folder / "trailers").mkdir()
+    (folder / "trailers" / "Official Trailer.mkv").write_bytes(b"t")
+    (folder / "trailers" / "Official Trailer.en.vtt").write_text("WEBVTT")
+    (folder / "The Abandon (2022)-featurette.mkv").write_bytes(b"f")   # inline extra
+    (folder / "movie.nfo").write_text("nfo")
+    p = delete_title.plan(db, "movie", mid)
+    assert [f["path"] for f in p["folders"]] == [str(folder)] and p["loose_files"] == []
+    assert _run(db, "movie", mid, "The Abandon")["success"]
+    assert not folder.exists()
+    entry = recycle.list_entries(recycle_settings(db), db)[0]
+    assert entry["is_folder"] and entry["original_path"] == str(folder)
+
+
+def test_a_different_movie_beside_the_extras_still_blocks_the_whole_folder(db, tmp_path):
+    mid = _movie(db, tmp_path)
+    folder = tmp_path / "Movies" / "Heat (1995)"
+    (folder / "Trailers").mkdir()
+    (folder / "Trailers" / "trailer.mkv").write_bytes(b"t")          # an extra: fine
+    (folder / "Bonus").mkdir()
+    stranger = folder / "Bonus" / "Ronin (1998).mkv"                 # not an extras folder
+    stranger.write_bytes(b"z")
+    p = delete_title.plan(db, "movie", mid)
+    assert p["folders"] == [] and len(p["loose_files"]) == 1
+    assert _run(db, "movie", mid, "Heat")["success"]
+    assert stranger.exists() and (folder / "Trailers" / "trailer.mkv").exists()
+
+
 def test_files_outside_every_library_folder_block_the_delete(db, tmp_path):
     mid = db.upsert_movie("plex", {"server_id": "x", "title": "Heat", "year": 1995, "tmdb_id": 949})
     _file(db, tmp_path / "elsewhere" / "Heat (1995)" / "Heat.mkv", movie_id=mid)

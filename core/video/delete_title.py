@@ -60,14 +60,29 @@ def _title_folder(kind: str, path: str) -> str:
     return d
 
 
+# Plex's local extras: the title's own trailers, featurettes and so on, kept
+# in these subfolders or named <name>-<kind>.<ext>. They belong to the title,
+# so they don't make its folder someone else's.
+# https://support.plex.tv/articles/local-files-for-trailers-and-extras/
+EXTRAS_DIRS = frozenset(("behind the scenes", "deleted scenes", "featurettes", "interviews",
+                         "scenes", "shorts", "trailers", "other", "extras"))
+EXTRAS_SUFFIXES = ("-trailer", "-featurette", "-behindthescenes", "-deleted", "-interview",
+                   "-scene", "-short", "-other")
+
+
+def _is_extra(name: str) -> bool:
+    return os.path.splitext(name)[0].lower().endswith(EXTRAS_SUFFIXES)
+
+
 def _foreign_media(folder: str, ours: set) -> bool:
     """True when ``folder`` holds a video file that isn't one of the title's,
-    i.e. it is NOT the title's own folder and must not go as a whole."""
+    i.e. it is NOT the title's own folder and must not go as a whole. The
+    title's Plex extras (a trailers/ folder, a -trailer file) are its own."""
     from core.video.importer import VIDEO_EXTS
     for base, dirs, files in os.walk(folder):
-        dirs[:] = [d for d in dirs if d != "ss_recycle"]
+        dirs[:] = [d for d in dirs if d != "ss_recycle" and d.lower() not in EXTRAS_DIRS]
         for name in files:
-            if os.path.splitext(name)[1].lower() in VIDEO_EXTS and \
+            if os.path.splitext(name)[1].lower() in VIDEO_EXTS and not _is_extra(name) and \
                     _norm(os.path.join(base, name)) not in ours:
                 return True
     return False
