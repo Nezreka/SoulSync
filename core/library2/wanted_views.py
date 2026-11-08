@@ -64,13 +64,28 @@ def _consolidated_elsewhere_sql() -> str:
     return _CONSOLIDATED_ELSEWHERE_TEMPLATE.format(
         otf_owner=owner_clause(column="otf.owner_profile_id"))
 
-_ROW_SELECT = """
+_ROW_SELECT_TEMPLATE = """
     SELECT t.id AS track_id, t.title AS track_title,
-           t.track_number, t.disc_number, t.monitored,
+           t.track_number, t.disc_number, {monitored} AS monitored,
            al.id AS album_id, al.title AS album_title, al.album_type,
            ar.id AS artist_id, ar.name AS artist_name,
            w.effective_profile_id
 """
+
+
+def _row_select(profile_id: int) -> str:
+    """The row columns, with ``monitored`` as this profile's intent.
+
+    the column on lib2_tracks is the shared library's (the admin's); any other
+    profile's wanted rows carry its own rule (review 5 R5-X1-1).
+    """
+    if int(profile_id) == ADMIN_PROFILE_ID:
+        monitored = "t.monitored"
+    else:
+        monitored = ("COALESCE((SELECT mr.monitored FROM lib2_monitor_rules mr"
+                     " WHERE mr.entity_type='track' AND mr.entity_id=t.id"
+                     " AND mr.profile_id=:profile_id), 0)")
+    return _ROW_SELECT_TEMPLATE.format(monitored=monitored)
 
 _ROW_FROM = """
       FROM lib2_wanted_tracks w
@@ -135,7 +150,7 @@ def list_missing(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
     ).fetchone()["c"]
 
     rows = conn.execute(
-        f"""{_ROW_SELECT}
+        f"""{_row_select(profile_id)}
         {_ROW_FROM}
         {where}
         ORDER BY ar.sort_name COLLATE NOCASE, ar.name COLLATE NOCASE,
@@ -230,7 +245,7 @@ def iter_cutoff_unmet(conn: Any, *, search: str = "",
     # SURVIVORS, and survivors are by definition the upgrade candidates -- a
     # small fraction of a library, and the only thing `total` needs.
     cursor = conn.execute(
-        f"""{_ROW_SELECT}
+        f"""{_row_select(profile_id)}
         {_ROW_FROM}
         {where}
         ORDER BY ar.sort_name COLLATE NOCASE, ar.name COLLATE NOCASE,

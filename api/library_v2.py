@@ -2064,13 +2064,17 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # 320k tracks where each branch on its own is an index seek
                 # (perf-audit PERF-08). Each half is now separately indexable
                 # and UNION does the de-duplication DISTINCT used to.
+                # the caller's bookmark, not the shared column: a member's
+                # and an own library's live in their rules (review 5 R5-B-3)
+                from core.library2.sql_util import monitored_sql
+                mon = monitored_sql("track", "t")
                 rows = conn.execute(
-                    f"""SELECT t.id, t.title, t.monitored
+                    f"""SELECT t.id, t.title, {mon} AS monitored
                           FROM lib2_tracks t
                           JOIN lib2_track_artists ta ON ta.track_id = t.id
                          WHERE ta.artist_id IN ({marks})
                         UNION
-                        SELECT t.id, t.title, t.monitored
+                        SELECT t.id, t.title, {mon} AS monitored
                           FROM lib2_tracks t
                           JOIN lib2_albums al ON al.id = t.album_id
                          WHERE al.primary_artist_id IN ({marks})""",
@@ -4804,10 +4808,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
             album_ids = artist_album_scope_ids(conn, artist_id)
             album_marks = ",".join("?" for _ in album_ids) or "NULL"
+            # each side's toggle is the caller's intent, not the shared
+            # column (review 5 R5-X1-1)
+            from core.library2.sql_util import monitored_sql
             rows = conn.execute(
-                f"""SELECT s.id AS single_id, s.title, s.monitored AS single_monitored,
+                f"""SELECT s.id AS single_id, s.title,
+                          {monitored_sql("track", "s")} AS single_monitored,
                           sal.title AS single_album,
-                          c.id AS canonical_id, c.monitored AS canonical_monitored,
+                          c.id AS canonical_id,
+                          {monitored_sql("track", "c")} AS canonical_monitored,
                           cal.title AS canonical_album
                      FROM lib2_tracks s
                      JOIN lib2_albums sal ON sal.id = s.album_id
