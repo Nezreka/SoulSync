@@ -5028,8 +5028,15 @@ function ArtistIndexView() {
   // render "Your library is empty — Import library" to a user with 900 artists
   // and offer them a full re-import. `AlbumDetailView` already reads `isError`;
   // this was the inconsistency, not the house style.
+  // review 5 R5-L-2: empty means the library has no artists at all. a filter
+  // (watched, letter, source, could be better) with no hits, or a page past
+  // the end, is "no artists match", not "import your library"
   const isEmpty =
-    !artistsQuery.isLoading && !artistsQuery.isError && artists.length === 0 && !search.q;
+    !artistsQuery.isLoading &&
+    !artistsQuery.isError &&
+    artists.length === 0 &&
+    !hasActiveArtistFilters &&
+    (pagination?.total_count ?? 0) === 0;
 
   // showLibraryDownloadsSection (shared-helpers.js) renders the per-artist
   // download bubbles on the library page. It is bound to `artistDownloadBubbles`
