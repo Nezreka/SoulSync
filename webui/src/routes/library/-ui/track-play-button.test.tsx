@@ -51,7 +51,28 @@ describe('library v2 track play button (H1)', () => {
         // travels alongside it so the player can route to /library?artist=.
         lib2_artist_id: 3,
         album_id: null,
+        // the cover now comes from the row's album, not a name lookup (review 5 R5-L-1)
+        _stats_image: null,
       },
+      'Some Album',
+      'Some Artist',
+    );
+  });
+
+  it('hands the album cover to the player', () => {
+    // review 5 R5-L-1: the v2 row no longer re-resolves by name, so the
+    // cover Now Playing shows has to travel with the click
+    renderWithClient(
+      <TrackPlayButton
+        track={track()}
+        albumTitle="Some Album"
+        albumImageUrl="/api/library/v2/albums/9/image"
+        artistName="Some Artist"
+      />,
+    );
+    fireEvent.click(screen.getByTitle('Play track'));
+    expect(window.SoulSyncWebShellBridge?.playLibraryTrack).toHaveBeenCalledWith(
+      expect.objectContaining({ lib2_track_id: 7, _stats_image: '/api/library/v2/albums/9/image' }),
       'Some Album',
       'Some Artist',
     );

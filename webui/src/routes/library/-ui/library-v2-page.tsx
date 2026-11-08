@@ -11796,6 +11796,7 @@ export function AlbumTrackTable({
               key={track.id ?? `missing-${i}`}
               track={track}
               albumTitle={album.title}
+              albumImageUrl={album.image_url}
               entityBase={{
                 albumId: album.id,
                 qualityProfileId: album.quality_profile?.id,
@@ -12041,6 +12042,8 @@ export function TrackMetadataGapsCell({
 type TrackRowProps = {
   track: LibraryV2Track;
   albumTitle: string;
+  /** the album's cover, for Now Playing */
+  albumImageUrl?: string | null;
   entityBase: Lib2EntityRef;
   matchServices: LibraryV2MatchService[];
   profileName: string | null;
@@ -12138,6 +12141,7 @@ function TrackRow(props: TrackRowProps) {
   const {
     track,
     albumTitle,
+    albumImageUrl,
     entityBase,
     matchServices,
     profileName,
@@ -12482,6 +12486,7 @@ function TrackRow(props: TrackRowProps) {
             <TrackPlayButton
               track={track}
               albumTitle={albumTitle}
+              albumImageUrl={albumImageUrl}
               artistName={track.artists.map((a) => a.name).join(', ')}
             />
           </td>
@@ -12679,10 +12684,12 @@ function TrackVersionLabel({ track }: { track: LibraryV2Track }) {
 export function TrackPlayButton({
   track,
   albumTitle,
+  albumImageUrl,
   artistName,
 }: {
   track: LibraryV2Track;
   albumTitle: string;
+  albumImageUrl?: string | null;
   artistName: string;
 }) {
   const trackId = track.id;
@@ -12715,6 +12722,9 @@ export function TrackPlayButton({
             // album id into a legacy slot is the H-14 confusion; the player
             // gets the display strings below instead.
             album_id: null,
+            // the player used to take its cover from the title+artist
+            // re-resolve, which this v2 row no longer runs (review 5 R5-L-1)
+            _stats_image: albumImageUrl ?? null,
           },
           albumTitle,
           artistName,
