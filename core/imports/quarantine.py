@@ -32,6 +32,14 @@ _QUARANTINE_SUFFIX = ".quarantined"
 _SAFE_SCALARS = (str, int, float, bool, type(None))
 
 
+def _seconds(value: Any):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(number, 1) if number > 0 else None
+
+
 def serialize_quarantine_context(context: Any) -> Dict[str, Any]:
     """Walk a context dict and emit a JSON-safe copy.
 
@@ -314,6 +322,11 @@ def _build_quarantine_entry(quarantine_dir: str, name: str) -> Dict[str, Any]:
         # quality/AcoustID gates) so the review UI shows what the file
         # actually is when deciding to approve/delete.
         "quality": ctx.get("_audio_quality", "") if isinstance(ctx, dict) else "",
+        # how long the release said it was and how long the file is, so a
+        # different cut reads at a glance (#2001). None when either is unknown
+        "expected_length_s": _seconds(ctx.get("_expected_length_s")),
+        "actual_length_s": _seconds((ctx.get("_integrity_checks") or {}).get("actual_length_s")
+                                    if isinstance(ctx.get("_integrity_checks"), dict) else None),
         "album_extra": (
             {key: str(ctx["_album_import_extra"].get(key) or "")
              for key in ("album", "download_source")}

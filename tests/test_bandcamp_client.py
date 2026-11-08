@@ -36,6 +36,7 @@ from core.metadata.types import Album, Artist, Track
 
 def _fresh_rate_limit_state(monkeypatch):
     monkeypatch.setattr(bc, '_rate_limit_until', 0)
+    monkeypatch.setattr(bc, '_blocked_until', 0.0)
     monkeypatch.setattr(bc, '_rate_limit_backoff', 0)
     monkeypatch.setattr(bc, '_last_call_time', 0)
 
@@ -769,3 +770,39 @@ class TestReleaseToSpotifyShape:
         release = {'tracks': [{'title': 'Untitled', 'url': 'https://x/1'}]}
         shaped = release_to_spotify_shape(release)
         assert shaped['tracks'][0]['track_number'] == 1
+
+
+# ---------------------------------------------------------------------------
+# a bot check page is not results (Nov 4 2026: 125 retries in 45 minutes)
+# ---------------------------------------------------------------------------
+
+
+def _challenge_response():
+    resp = Mock()
+    resp.raise_for_status = Mock()
+    resp.json.side_effect = ValueError("not json")
+    resp.text = "<!DOCTYPE html><html><head><title>Client Challenge</title></head></html>"
+    resp.headers = {"Content-Type": "text/html; charset=utf-8"}
+    return resp
+
+
+def test_a_challenge_page_pauses_searches_instead_of_retrying(client, monkeypatch):
+    _fresh_rate_limit_state(monkeypatch)
+    monkeypatch.setattr(bc, 'MIN_CALL_INTERVAL', 0)
+    with patch.object(client.session, 'post', return_value=_challenge_response()) as post:
+        assert client.search_albums('radiohead') == []
+        assert bc.search_blocked()
+        assert client.search_albums('portishead') == []
+        assert client.search_tracks('massive attack') == []
+    assert post.call_count == 1
+
+
+def test_searches_come_back_once_the_pause_ends(client, monkeypatch):
+    _fresh_rate_limit_state(monkeypatch)
+    monkeypatch.setattr(bc, 'MIN_CALL_INTERVAL', 0)
+    monkeypatch.setattr(bc, '_blocked_until', time.time() - 1)
+    with patch.object(client.session, 'post', return_value=_mock_search_response(
+            [_ALBUM_RESULT])) as post:
+        assert len(client.search_albums('radiohead')) == 1
+    assert post.call_count == 1
+    assert not bc.search_blocked()

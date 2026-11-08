@@ -95,6 +95,37 @@ def get_scope_file_paths(context: Any) -> Optional[frozenset[str]]:
     )
 
 
+def stop_or_pause(context: Any) -> bool:
+    """``check_stop``, and hold here while the job is paused. True = stop.
+
+    Free function like the scope helpers, so a job loop works the same with
+    the SimpleNamespace contexts the tests build (no pause there: it only
+    stops). Jobs that checked stop but never pause ran on through Pause.
+    """
+    if context.check_stop():
+        return True
+    wait = getattr(context, 'wait_if_paused', None)
+    return bool(wait()) if callable(wait) else False
+
+
+def whole_library_run(context: Any) -> bool:
+    """True when this run saw every library file: no artist/file scope and no
+    one-library scope (#1199). Only then is something a remembered-answer
+    memory didn't see this run something that left the library.
+
+    A run started by hand on an install with own libraries reads through the
+    library it was started in (E-14), so it sees that library's files only.
+    Pruning on that forgot every other library's remembered answers.
+    """
+    if get_scope_file_paths(context) is not None:
+        return False
+    try:
+        from core.library2.sql_util import owner_clause
+        return not owner_clause(column="f.owner_profile_id")
+    except Exception:  # noqa: BLE001 - unknown scope: keep the memory
+        return False
+
+
 def file_path_in_scope(path: Any, allowed_paths: Optional[frozenset[str]]) -> bool:
     """Return whether ``path`` is inside an exact per-run file allowlist."""
     if allowed_paths is None:
@@ -326,6 +357,32 @@ def drop_hand_tagged(context, subjects, path_key: str = 'path') -> list:
             if not is_hand_tagged_path((s or {}).get(path_key), keys)]
 
 
+def drop_hand_tagged_albums(context, subjects, everything=None,
+                            path_key: str = 'path', album_key: str = 'album_id') -> list:
+    """``subjects`` without any file on an album that has a hand-tagged file.
+
+    3.6.1 locked the whole album when one of its files was hand-tagged, so a
+    retag, the live/commentary cleaner or a bpm backfill never compared the
+    other files against the service's studio album and split the release the
+    user typed. ``drop_hand_tagged`` drops only the file itself. ``everything``
+    is the unscoped subject list the albums are judged from, so a scoped run
+    still sees a hand-tagged file outside its scope.
+    """
+    subjects = list(subjects or [])
+    keys = hand_tagged_path_keys(getattr(context, 'db', None))
+    if not keys:
+        return subjects
+    pool = subjects if everything is None else list(everything)
+    hand_albums = {
+        (s or {}).get(album_key) for s in pool
+        if is_hand_tagged_path((s or {}).get(path_key), keys)
+        and (s or {}).get(album_key) is not None
+    }
+    return [s for s in subjects
+            if not is_hand_tagged_path((s or {}).get(path_key), keys)
+            and (s or {}).get(album_key) not in hand_albums]
+
+
 def has_metadata_locked(cursor, table: str) -> bool:
     """does this table carry metadata_locked yet. very old schemas don't, and
     a missing column just means nothing there is locked"""
@@ -507,6 +564,14 @@ class RepairJob(ABC):
     # (Discord, Jose: good tracks swept into the deleted quarantine).
     writes_library_files: bool = False
 
+    # Settings a job carried over from 3.6.1 but no longer shows: they stay
+    # readable (a saved legacy value keeps its meaning until the user answers
+    # with the new switch) but the Tools page doesn't offer them, and the first
+    # save that leaves one out drops it. A shown-but-dead "Dry Run" next to
+    # "Auto Apply" sent the stale value back on every save, so the new switch
+    # snapped back off.
+    retired_settings: tuple = ()
+
     @abstractmethod
     def scan(self, context: JobContext) -> JobResult:
         """Execute the job scan. Must be implemented by each job.
@@ -530,6 +595,10 @@ class RepairJob(ABC):
     # config key, resumes right after it, and clears it at the end. ``scan_key``
     # names what the pass ran under (mode, naming...); a different one starts
     # over, and so does a checkpoint item that is gone.
+    #
+    # ``scan_key_fields`` names the "|"-separated parts of a job's scan key, so
+    # a pass that starts over says which one changed (3.6.1's reorganize did).
+    scan_key_fields: tuple = ()
 
     def resume_index(self, context: JobContext, ids: List[Any], scan_key: str = '') -> int:
         try:
@@ -541,7 +610,8 @@ class RepairJob(ABC):
         if not isinstance(saved, dict):
             return 0
         if saved.get('scan') != scan_key:
-            logger.info("[%s] starting at the top, the scan settings changed", self.job_id)
+            logger.info("[%s] starting at the top, %s changed since the last scan",
+                        self.job_id, self._changed_scan_parts(saved.get('scan'), scan_key))
             return 0
         keys = [str(i) for i in ids]
         if str(saved.get('id')) in keys:
@@ -559,6 +629,17 @@ class RepairJob(ABC):
                                 self.job_id, saved.get('id'), index + 1)
                     return index
         return 0
+
+    def _changed_scan_parts(self, old_key: Any, new_key: str) -> str:
+        """Which named parts of the scan key differ, in words."""
+        old = str(old_key or '').split('|')
+        new = str(new_key or '').split('|')
+        names = self.scan_key_fields
+        if not names or len(names) != len(new):
+            return 'the scan settings'
+        changed = [name for n, name in enumerate(names)
+                   if (old[n] if n < len(old) else None) != new[n]]
+        return ', '.join(changed) or 'the scan settings'
 
     def save_checkpoint(self, context: JobContext, last_id: Any, scan_key: str = '') -> None:
         """``last_id=None`` clears it: the pass reached the end."""

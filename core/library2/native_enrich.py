@@ -576,10 +576,23 @@ def default_artwork_fetcher(name: str, source_ids: Dict[str, str]) -> Optional[s
     return result.url if result is not None else None
 
 
+# the row's own name and length: a background enrich only fills them in when
+# the row has none, a Full Retag (the user asking for the provider's values)
+# replaces them
+_IDENTITY_COLUMNS = {"title": "COALESCE(title,'')=''", "duration": "COALESCE(duration,0)=0"}
+
+
 def _apply_descriptive_metadata(
     conn: Any, entity_type: str, entity_id: int, metadata: Any,
+    *, fill_identity_only: bool = False,
 ) -> Optional[str]:
-    """Persist only normalized, non-null provider fields onto one native row."""
+    """Persist only normalized, non-null provider fields onto one native row.
+
+    ``fill_identity_only``: title and duration only fill an empty row. 3.6.1's
+    enrichment workers never renamed a track or an album, and with the title
+    written on every enrich the provider's spelling replaced the file's ("Come
+    Together" became "Come Together - Remastered 2009") and could flip between
+    providers run to run."""
 
     columns = {
         "artist": {
@@ -612,6 +625,9 @@ def _apply_descriptive_metadata(
             assignments.append(
                 "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END"
             )
+        elif fill_identity_only and column in _IDENTITY_COLUMNS:
+            assignments.append(
+                f"{column}=CASE WHEN {_IDENTITY_COLUMNS[column]} THEN ? ELSE {column} END")
         else:
             assignments.append(f"{column}=?")
         values.append(value)
@@ -848,7 +864,8 @@ def enrich_native_entity_for_service(
     conn.commit()
 
     metadata = refresh_native_entity_metadata(conn, canonical, int(entity_id),
-                                              {actual_source: provider_id})
+                                              {actual_source: provider_id},
+                                              fill_identity_only=True)
     metadata_image = getattr(metadata, 'image_url', None)
     image_url = metadata_image or str(hit.get("image") or "").strip() or None
     if canonical == "artist":
@@ -1491,6 +1508,117 @@ _IDENTIFIED_SQL = ("(COALESCE(a.spotify_id,'')<>'' OR COALESCE(a.musicbrainz_id,
                    "OR COALESCE(a.external_ids,'{}') NOT IN ('','{}'))")
 
 
+def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -> int:
+    """A collaboration name that owns nothing but provider catalogue rows.
+
+    "Nelly & Florida Georgia Line" picked up Nelly's iTunes id somewhere
+    (legacy data stored it under spotify), and its discography fetch hung
+    Nelly's 22 albums on it: an artist with albums and tracks but not one
+    file, no watch and no wish. The local split only took ghosts that own no
+    album, so these stayed in the library for good.
+
+    Only when every part of the name is an artist with files here, the
+    collaboration itself is unwatched, and each of its albums is provider
+    catalogue nobody touched (no file, not monitored, no one's rule, nothing
+    wanted): those albums are dropped (the real artists keep their own
+    discography) and the name goes the way of any ghost, its credits moved
+    to the parts. Returns how many were cleared.
+    """
+    from core.library2.sql_util import ANY_OWNER, owned_sql
+
+    owners: Dict[str, int] = {}
+    for aid, name in conn.execute(
+            "SELECT a.id, a.name FROM lib2_artists a WHERE a.canonical_artist_id IS NULL "
+            f"AND {owned_sql('release_artist', 'a', scope=ANY_OWNER)}"):
+        key = normalize_name(name or "")
+        if key:
+            owners.setdefault(key, int(aid))
+    candidates = conn.execute(
+        """SELECT a.id, a.name FROM lib2_artists a
+            WHERE a.canonical_artist_id IS NULL AND COALESCE(a.monitored, 0) = 0
+              AND EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id = a.id)
+              AND NOT EXISTS (SELECT 1 FROM lib2_albums al JOIN lib2_tracks t ON t.album_id = al.id
+                               JOIN lib2_track_files f ON f.track_id = t.id
+                              WHERE al.primary_artist_id = a.id)
+              AND NOT EXISTS (SELECT 1 FROM lib2_monitor_rules r
+                               WHERE r.entity_type = 'artist' AND r.entity_id = a.id
+                                 AND (r.monitored = 1 OR r.provenance IN ('user_explicit', 'wishlist_import')))"""
+    ).fetchall()
+    cleared = 0
+    for gid, name in candidates:
+        gid = int(gid)
+        pieces = split_artist_credits(name or "")
+        keys = [normalize_name(piece) for piece in pieces]
+        if len(keys) < 2 or not all(key in owners for key in keys):
+            continue
+        from core.library2.importer import leads_a_band
+        if leads_a_band(name or "", {keys[0]}):
+            # "Bob Marley & The Wailers" is a band with its own catalogue,
+            # even with Bob Marley and The Wailers both in the library
+            continue
+        components = []
+        for key in keys:
+            if owners[key] != gid and owners[key] not in components:
+                components.append(owners[key])
+        if len(components) < 2:
+            continue
+        albums = [int(r[0]) for r in conn.execute(
+            "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (gid,))]
+        marks = ",".join("?" for _ in albums)
+        untouched = conn.execute(
+            f"""SELECT NOT EXISTS (SELECT 1 FROM lib2_albums al WHERE al.id IN ({marks})
+                         AND (COALESCE(al.monitored, 0) = 1 OR COALESCE(al.origin, '') <> 'discography'
+                              OR COALESCE(al.canonical_locked, 0) = 1))
+                   AND NOT EXISTS (SELECT 1 FROM lib2_monitor_rules r
+                         WHERE (r.entity_type = 'album' AND r.entity_id IN ({marks}))
+                            OR (r.entity_type = 'track' AND r.entity_id IN
+                                (SELECT id FROM lib2_tracks WHERE album_id IN ({marks}))))
+                   AND NOT EXISTS (SELECT 1 FROM lib2_wanted_tracks w
+                         JOIN lib2_tracks t ON t.id = w.track_id
+                        WHERE t.album_id IN ({marks}) AND w.wanted = 1)
+                   AND NOT EXISTS (SELECT 1 FROM lib2_tracks t
+                        WHERE t.album_id IN ({marks}) AND COALESCE(t.monitored, 0) = 1)""",
+            (*albums, *albums, *albums, *albums, *albums)).fetchone()[0]
+        if untouched:
+            # a hand edit, or the media server listing one of them, is a touch
+            track_ids = [int(r[0]) for r in conn.execute(
+                f"SELECT id FROM lib2_tracks WHERE album_id IN ({marks})", albums)]
+            for table, album_kinds, track_kinds in (
+                    ("lib2_metadata_overrides", ("album", "albums"), ("track", "tracks")),
+                    ("lib2_media_server_mappings", ("album", "album"), ("track", "track"))):
+                try:
+                    hit = conn.execute(
+                        f"SELECT 1 FROM {table} WHERE (entity_type IN (?, ?) AND entity_id IN "
+                        "(SELECT value FROM json_each(?))) OR (entity_type IN (?, ?) AND entity_id IN "
+                        "(SELECT value FROM json_each(?))) LIMIT 1",
+                        (*album_kinds, json.dumps(albums), *track_kinds, json.dumps(track_ids)),
+                    ).fetchone()
+                except Exception:  # noqa: BLE001 - table not there yet: nothing recorded
+                    hit = None
+                if hit:
+                    untouched = False
+        if not untouched:
+            continue
+        conn.execute(
+            f"DELETE FROM lib2_wanted_tracks WHERE track_id IN "
+            f"(SELECT id FROM lib2_tracks WHERE album_id IN ({marks}))", albums)
+        conn.execute(
+            f"DELETE FROM lib2_track_artists WHERE track_id IN "
+            f"(SELECT id FROM lib2_tracks WHERE album_id IN ({marks}))", albums)
+        conn.execute(f"DELETE FROM lib2_tracks WHERE album_id IN ({marks})", albums)
+        conn.execute(f"DELETE FROM lib2_album_artists WHERE album_id IN ({marks})", albums)
+        conn.execute(f"DELETE FROM lib2_albums WHERE id IN ({marks})", albums)
+        _rehome_and_delete_combined(conn, gid, components[0], components)
+        # one ghost, one transaction: this runs on every start (the short
+        # credit pass) and committing once at the end held the write lock
+        # across every candidate's checks
+        conn.commit()
+        logger.info("cleared collaboration ghost %r: %d untouched catalogue album(s) dropped",
+                    name, len(albums))
+        cleared += 1
+    return cleared
+
+
 def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, int], None]] = None,
                                    batch: int = 500) -> Dict[str, int]:
     """Clear guest-credit ghosts from the library's own knowledge, no network.
@@ -1510,7 +1638,7 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
     of its parts, so it is never split here. A ghost that owns an album, or
     that no rule covers, is left for the online pass. Commits per batch.
     """
-    from core.library2.importer import normalize_name, split_artist_credits
+    from core.library2.importer import leads_a_band, normalize_name, split_artist_credits
 
     identified: Dict[str, int] = {}
     anyone: Dict[str, int] = {}
@@ -1524,17 +1652,29 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
         if has_id:
             identified.setdefault(key, int(aid))
 
+    unghosted = _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name)
+
+    # every combined-looking credit that owns no album. One with an id or a
+    # legacy id only qualifies for the anchored split below: a credit carrying
+    # the album's own artist as one of its parts is a list whatever id it
+    # picked up ("Øneheart, Malek" on Øneheart's album got a provider id by
+    # name, and 258 of 289 left-over ghosts on a big library looked like that,
+    # each a fileless "artist" in the Library list)
     ghosts = conn.execute(
-        f"SELECT a.id, a.name, a.monitored FROM lib2_artists a "
-        f"WHERE a.canonical_artist_id IS NULL AND a.legacy_artist_id IS NULL AND NOT {_IDENTIFIED_SQL} "
+        f"SELECT a.id, a.name, a.monitored, "
+        f"(a.legacy_artist_id IS NOT NULL OR {_IDENTIFIED_SQL}) AS settled "
+        "FROM lib2_artists a "
+        "WHERE a.canonical_artist_id IS NULL "
         "AND NOT EXISTS (SELECT 1 FROM lib2_albums al WHERE al.primary_artist_id=a.id) "
         "ORDER BY a.id").fetchall()
-    stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0}
+    ghosts = [g for g in ghosts if not g[3] or len(split_artist_credits(g[1] or "")) >= 2]
+    stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0,
+             "collab_ghosts_cleared": unghosted}
     total = len(ghosts)
-    for index, (gid, name, monitored) in enumerate(ghosts, start=1):
+    for index, (gid, name, monitored, settled) in enumerate(ghosts, start=1):
         gid = int(gid)
         key = normalize_name(name or "")
-        target = identified.get(key)
+        target = None if settled else identified.get(key)
         if target and target != gid:
             _rehome_and_delete_combined(conn, gid, target, [target])
             stats["merged"] += 1
@@ -1547,8 +1687,14 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
                 "JOIN lib2_albums al ON al.id=t.album_id "
                 "JOIN lib2_artists pa ON pa.id=al.primary_artist_id "
                 "WHERE ta.artist_id=?", (gid,))}
+            # the album's own artist as a part is a list, except the band that
+            # artist leads ("Nick Cave & The Bad Seeds" on a Nick Cave album).
+            # with an id it is that band's id, and splitting it made a new,
+            # unidentified "The Bad Seeds" and dropped everyone's watch on it
+            anchored = (any(k in anchors for k in keys)
+                        and not leads_a_band(name or "", anchors))
             if len(pieces) < 2 or not (
-                    any(k in anchors for k in keys) or all(k in identified for k in keys)):
+                    anchored or (not settled and all(k in identified for k in keys))):
                 stats["left"] += 1
             else:
                 components: List[int] = []
@@ -1618,6 +1764,13 @@ def reconcile_unmapped_native_artists(
     artists = _pending_unmapped_artists(conn, limit, cooldown_hours=cooldown_hours,
                                         combined_only=combined_only)
     total = len(artists)
+    if progress is not None and total:
+        # the count as soon as it is known: the first artist is a network
+        # lookup, and until it answered the banner showed a stage with no numbers
+        try:
+            progress(0, total)
+        except Exception as progress_exc:  # noqa: BLE001
+            logger.debug("reconcile progress callback failed: %s", progress_exc)
     stats = {
         "scanned": 0, "matched": 0, "split": 0, "unmatched": 0, "errors": 0,
         "identities_released": released["released"],
@@ -1817,11 +1970,13 @@ __all__ = [
 ]
 
 
-def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids):
+def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids,
+                                   *, fill_identity_only: bool = False):
     """The common exact-ID provider refresh used by Enrich and Full Retag.
 
     Identity resolution stays with the existing match engine. Refreshing facts
-    never searches for or substitutes a different edition.
+    never searches for or substitutes a different edition. Enrich passes
+    ``fill_identity_only`` (see _apply_descriptive_metadata).
     """
     from dataclasses import asdict, replace
     from core.library2.provider_adapters import fetch_descriptive_metadata
@@ -1835,7 +1990,8 @@ def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids):
         old = conn.execute('SELECT release_date FROM lib2_albums WHERE id=?', (entity_id,)).fetchone()[0]
         from core.metadata.source import _more_precise_date
         metadata = replace(metadata, release_date=_more_precise_date(old, metadata.release_date))
-    _apply_descriptive_metadata(conn, entity_type, entity_id, metadata)
+    _apply_descriptive_metadata(conn, entity_type, entity_id, metadata,
+                                fill_identity_only=fill_identity_only)
     if entity_type == 'track' and metadata.isrc:
         conn.execute("UPDATE lib2_tracks SET isrc=COALESCE(NULLIF(isrc,''), ?) WHERE id=?", (metadata.isrc, entity_id))
     if entity_type == 'album':

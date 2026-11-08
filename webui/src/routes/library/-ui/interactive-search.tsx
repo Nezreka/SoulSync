@@ -178,6 +178,30 @@ function rejectedCode(r: SourceSearchResult): string {
   return r.decision?.code ?? 'unexplained';
 }
 
+/** How near a miss a filtered hit is, nearest first (#1980). The right artist
+ *  at another length or quality is far more likely the song than another
+ *  artist's song of the same name, which sorting by quality buried it under. */
+const NEAR_MISS_RANK: Record<string, number> = {
+  duration_mismatch: 0,
+  below_profile: 0,
+  below_cutoff: 0,
+  too_large: 0,
+  peer_queue: 0,
+  version_conflict: 1,
+  artist_unverified: 2,
+  match_weak: 2,
+  outranked: 2,
+  artist_mismatch: 3,
+};
+
+export function nearMissFirst(rows: SourceSearchResult[]): SourceSearchResult[] {
+  const rank = (r: SourceSearchResult) => NEAR_MISS_RANK[rejectedCode(r)] ?? 1;
+  return rows
+    .map((r, i) => [r, i] as const)
+    .sort(([a, i], [b, j]) => rank(a) - rank(b) || i - j)
+    .map(([r]) => r);
+}
+
 /** Why the download pipeline passed this hit over: "wrong artist", "version: remix". */
 function filteredReason(r: SourceSearchResult): string {
   return decisionPill({ decision: r.decision, duration: r.duration ?? undefined });
@@ -384,6 +408,21 @@ export type GrabOutcome =
  *  test exhaustively. `sinceMs` filters to events from THIS grab, not an
  *  earlier one for the same track/album (a 10s slack absorbs client/server
  *  clock skew and request latency). */
+
+/** The SoulSync yes/no modal; the browser's own prompt only when the shell
+ *  that provides it isn't loaded (a bare test page). */
+function askToConfirm(options: {
+  title: string;
+  message: string;
+  confirmText: string;
+  destructive?: boolean;
+}): Promise<boolean> {
+  if (typeof window.showConfirmDialog === 'function') {
+    return window.showConfirmDialog({ cancelText: 'Cancel', ...options });
+  }
+  return Promise.resolve(window.confirm(options.message));
+}
+
 export function classifyGrabOutcome(
   history: LibraryV2HistoryEntry[],
   sinceMs: number,
@@ -515,6 +554,9 @@ export function InteractiveSearchModal({
   const [searchTarget, setSearchTarget] = useState<SourceSearchTarget | null>(null);
   // The filtered reasons whose hits are shown anyway (chips on the right).
   const [shownCodes, setShownCodes] = useState<Set<string>>(new Set());
+  // when nothing passes, the filtered hits show by themselves (#1980) until
+  // the chips are touched; a new search starts over
+  const chipsTouchedRef = useRef(false);
   // Album/track actions use the ALBUM's own profile for the preview badge,
   // not the artist's (audit P1-17). The authoritative profile is resolved
   // server-side from the entity ids on grab either way.
@@ -580,7 +622,13 @@ export function InteractiveSearchModal({
     }
     return Object.entries(counts).sort(([, a], [, b]) => b - a);
   }, [rejected]);
-  const shownRejected = rejected.filter((r) => shownCodes.has(rejectedCode(r)));
+  useEffect(() => {
+    if (loading || chipsTouchedRef.current) return;
+    if (filtered.length === 0 && rejectionCounts.length > 0) {
+      setShownCodes(new Set(rejectionCounts.map(([code]) => code)));
+    }
+  }, [loading, filtered.length, rejectionCounts]);
+  const shownRejected = nearMissFirst(rejected.filter((r) => shownCodes.has(rejectedCode(r))));
   const visible = [...filtered, ...shownRejected];
   // A chip appends its hits below every passing result, which with a page of
   // them happened out of sight: a click that showed nothing. Turning one on
@@ -674,6 +722,7 @@ export function InteractiveSearchModal({
       return;
     }
     setShownCodes(new Set());
+    chipsTouchedRef.current = false;
     const sources = [...activeSources];
     const targets =
       sources.length > 0 ? sources : [{ name: '__current__', display_name: 'Current source' }];
@@ -778,9 +827,12 @@ export function InteractiveSearchModal({
       const checks = acoustidCheck
         ? 'AcoustID still checks the file after the download.'
         : 'AcoustID is off for this window, so nothing will catch a wrong song.';
-      const confirmed = window.confirm(
-        `"${resultTitle(r)}" was filtered out (${why}). ${checks} Download it anyway?`,
-      );
+      const confirmed = await askToConfirm({
+        title: 'Download a filtered result?',
+        message: `"${resultTitle(r)}" was filtered out (${why}). ${checks} Download it anyway?`,
+        confirmText: 'Download anyway',
+        destructive: true,
+      });
       if (!confirmed) return;
     }
     // §52.12.4: candidates outside the quality profile are shown (ProfileBadge)
@@ -791,11 +843,15 @@ export function InteractiveSearchModal({
       const rank = profileTargetRank(r, effectiveProfile.ranked_targets);
       const belowProfile = rank === effectiveProfile.ranked_targets.length;
       if (belowProfile) {
-        const confirmed = window.confirm(
-          `"${resultTitle(r)}" is below "${effectiveProfile.name}"'s quality profile. ` +
+        const confirmed = await askToConfirm({
+          title: 'Below the quality profile',
+          message:
+            `"${resultTitle(r)}" is below "${effectiveProfile.name}"'s quality profile. ` +
             'Quality check is off, so this will force-download it anyway. This override ' +
             'is recorded. Continue?',
-        );
+          confirmText: 'Force download',
+          destructive: true,
+        });
         if (!confirmed) return;
       }
     }
@@ -1012,13 +1068,14 @@ export function InteractiveSearchModal({
                 type="button"
                 className={styles.sourceChip}
                 aria-pressed={shownCodes.size === rejectionCounts.length}
-                onClick={() =>
+                onClick={() => {
+                  chipsTouchedRef.current = true;
                   setShownCodes(
                     shownCodes.size === rejectionCounts.length
                       ? new Set()
                       : new Set(rejectionCounts.map(([code]) => code)),
-                  )
-                }
+                  );
+                }}
               >
                 All filtered · {rejected.length}
               </button>
@@ -1028,13 +1085,14 @@ export function InteractiveSearchModal({
                   type="button"
                   className={styles.sourceChip}
                   aria-pressed={shownCodes.has(code)}
-                  onClick={() =>
+                  onClick={() => {
+                    chipsTouchedRef.current = true;
                     setShownCodes((current) => {
                       const next = new Set(current);
                       if (!next.delete(code)) next.add(code);
                       return next;
-                    })
-                  }
+                    });
+                  }}
                 >
                   {decisionLabel(code)} · {count}
                 </button>

@@ -243,6 +243,22 @@ def test_sync_fills_counts_discs_and_positions_from_the_album(imported_conn):
     assert not sync_edition_facts(conn.cursor(), [album])  # converged
 
 
+def test_a_converged_sweep_writes_nothing(imported_conn):
+    """an UPDATE that changes nothing still takes the write lock; the start-up
+    sweep ran one per edition and held it 15s+ on a big library"""
+    from core.library2.editions import sync_edition_facts
+    conn = imported_conn
+    _stale_edition(conn, positions=[(1, 1), (1, 2)], expected=2)
+    sync_edition_facts(conn.cursor())
+    conn.commit()
+
+    writes = []
+    conn.set_trace_callback(lambda sql: writes.append(sql) if sql.lstrip().upper().startswith("UPDATE") else None)
+    assert not sync_edition_facts(conn.cursor())
+    conn.set_trace_callback(None)
+    assert writes == []
+
+
 def test_an_incomplete_edition_gets_its_count_but_no_disc_guess(imported_conn):
     from core.library2.editions import sync_edition_facts
     album, edition = _stale_edition(imported_conn, positions=[(1, 1), (1, 2)], expected=3)

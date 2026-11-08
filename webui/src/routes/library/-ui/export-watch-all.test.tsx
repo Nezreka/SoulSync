@@ -140,15 +140,15 @@ describe('WatchAllModal', () => {
     const onClose = vi.fn();
     try {
       render(<WatchAllModal onClose={onClose} />);
-      // "Monitor" is the label on this page; the API and tables stay watchlist.
-      await screen.findByText('Ready to monitor');
+      // "Watch" is the label, dev's Watchlist; the API and tables say watchlist too.
+      await screen.findByText('Ready to watch');
       expect(
         document.querySelector('.watch-all-stat-card.eligible .watch-all-stat-value')?.textContent,
       ).toBe('2');
       expect(screen.getByText('1 artist without Spotify ID')).toBeTruthy();
 
       const confirm = document.getElementById('watch-all-confirm-btn') as HTMLButtonElement;
-      expect(confirm.textContent).toBe('Monitor All (2)');
+      expect(confirm.textContent).toBe('Watch All (2)');
 
       // First click ARMS only. This action is irreversible and library-wide,
       // and it sits next to Automatic Search in the header, so a single stray
@@ -156,13 +156,13 @@ describe('WatchAllModal', () => {
       const before = calls.length;
       fireEvent.click(confirm);
       expect(calls.length).toBe(before);
-      expect(confirm.textContent).toBe('Yes, monitor 2');
+      expect(confirm.textContent).toBe('Yes, watch 2');
       expect(screen.getByText(/Click again to confirm/)).toBeTruthy();
 
       // ...and the second fires.
       fireEvent.click(confirm);
-      await screen.findByText('Now monitoring 2 artists');
-      expect(screen.getByText('1 already monitored')).toBeTruthy();
+      await screen.findByText('Added 2 artists to your Watchlist');
+      expect(screen.getByText('1 already on it')).toBeTruthy();
       expect(calls.at(-1)).toBe('/api/library/watchlist-all-unwatched');
 
       // Closing after a successful add is what refreshes the React list.
@@ -191,14 +191,14 @@ describe('WatchAllModal', () => {
       }),
     );
     render(<WatchAllModal onClose={vi.fn()} />);
-    await screen.findByText('Ready to monitor');
+    await screen.findByText('Ready to watch');
     const confirm = document.getElementById('watch-all-confirm-btn') as HTMLButtonElement;
     const before = calls.length;
 
     fireEvent.click(confirm);
     fireEvent.click(screen.getByText('Back'));
 
-    expect(confirm.textContent).toBe('Monitor All (1)');
+    expect(confirm.textContent).toBe('Watch All (1)');
     expect(calls.length).toBe(before);
   });
 
@@ -216,7 +216,7 @@ describe('WatchAllModal', () => {
     window.addEventListener('ss:library-changed', changed);
     try {
       render(<WatchAllModal onClose={vi.fn()} />);
-      await screen.findByText('No unmonitored artists found');
+      await screen.findByText('Every artist is already on your Watchlist');
       fireEvent.click(screen.getByText('Cancel'));
       expect(changed).not.toHaveBeenCalled();
     } finally {

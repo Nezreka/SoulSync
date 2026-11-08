@@ -56,3 +56,27 @@ def test_a_mixed_folder_guesses_no_album(tmp_path):
     assert tongue["duplicate_of"] is None
     assert tongue["guess"]["album"] is None
     assert tongue["guess"]["query"] == "Tongue"
+
+
+def test_a_filing_the_import_turned_down_says_so(tmp_path):
+    # "filing under DONDA 2" for a copy stuck in the import inbox was a lie
+    conn = lib2_seed.row_conn(str(tmp_path / "m.db"))
+    from core.library2.schema import ensure_library_v2_schema
+    ensure_library_v2_schema(conn)
+    _seed(conn)
+    tongue = next(r for r in list_unmatched(conn) if r["file_name"] == "06 - Tongue.flac")
+    conn.execute("CREATE TABLE rematch_hints (id INTEGER PRIMARY KEY, status TEXT, replace_track_id INTEGER, "
+                 "album_name TEXT, artist_name TEXT, staged_path TEXT)")
+    conn.execute("CREATE TABLE auto_import_history (id INTEGER PRIMARY KEY, folder_path TEXT, "
+                 "status TEXT, error_message TEXT)")
+    conn.execute("INSERT INTO rematch_hints VALUES (1, 'pending', ?, 'No Mythologies', 'MØ', '/s/t.flac')",
+                 (tongue["track_id"],))
+    conn.commit()
+    filing = next(r for r in list_unmatched(conn) if r["file_name"] == "06 - Tongue.flac")["filing"]
+    assert filing == {"album_name": "No Mythologies", "artist_name": "MØ", "failed": None, "retry_id": None}
+    conn.execute("INSERT INTO auto_import_history VALUES (7, '/s/t.flac', 'needs_identification', "
+                 "'Could not match tracks to album tracklist')")
+    conn.commit()
+    filing = next(r for r in list_unmatched(conn) if r["file_name"] == "06 - Tongue.flac")["filing"]
+    assert filing["failed"] == "The import couldn’t line it up with that release’s tracklist."
+    assert filing["retry_id"] == 7

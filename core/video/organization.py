@@ -15,13 +15,17 @@ Settings (persisted as JSON in video.db ``video_settings['organization']``):
 
 Template tokens
   Movies:   $title $titlefirst $year $quality $resolution $source $codec $edition
-            $tmdbid $imdbid
+            $audiolangs $sublangs $tmdbid $imdbid
   Episodes: $series $season $seasonraw $episode $episodetitle $year $quality
-            $resolution $source $codec $tmdbid $imdbid $tvdbid $airdate
+            $resolution $source $codec $audiolangs $sublangs $tmdbid $imdbid
+            $tvdbid $airdate
             (an episode's ids are its SHOW's)
   ($season/$episode are zero-padded to 2; $seasonraw is the bare number; a
   multi-episode file renders its span through $episode — 'S01E01-E02'; $airdate
-  is the episode's YYYY-MM-DD air date, for daily-show naming. An id that isn't
+  is the episode's YYYY-MM-DD air date, for daily-show naming. $audiolangs /
+  $sublangs are the file's audio / embedded subtitle languages as 'JA+EN',
+  empty when it has no language tags -- write '[$audiolangs]' and the
+  brackets go with it. An id that isn't
   known renders empty, and a brace group it leaves empty -- '{imdb-}', '{}' --
   is dropped like an empty '()' or '[]'.)
 
@@ -49,6 +53,10 @@ DEFAULTS = {
     # for shows a metadata agent can match, and YouTube channels aren't on TVDB,
     # so those folders never indexed (the "Plex isn't picking it up" report).
     "youtube_template": "$channel/Season $year/$channel - $sxe - $title",
+    # what a ':' in a title becomes (SeadogsBooty): file systems refuse it, so it
+    # was always dropped ("Dexter Resurrection"). delete keeps that, so nothing
+    # already named reads as misnamed after an update.
+    "colon_replacement": "delete",
     "verify_with_ffprobe": True,
     "replace_existing": True,
     "transfer_mode": "copy",
@@ -103,6 +111,7 @@ DEFAULTS = {
 }
 
 _TRANSFER_MODES = ("copy", "move")
+COLON_MODES = ("delete", "dash", "space_dash_space", "smart")
 
 # The pre-$sxe default (see youtube_template above) — recognised and upgraded at
 # render time so existing saved settings get the Plex-indexable naming too.
@@ -181,6 +190,9 @@ def normalize(raw: Any) -> dict:
             d["youtube_follow_count"] = max(0, min(100, int(raw.get("youtube_follow_count"))))
         except (TypeError, ValueError):
             pass
+    cm = str(raw.get("colon_replacement") or "").strip().lower()
+    if cm in COLON_MODES:
+        d["colon_replacement"] = cm
     tm = str(raw.get("transfer_mode") or "").strip().lower()
     if tm in _TRANSFER_MODES:
         d["transfer_mode"] = tm
@@ -271,6 +283,25 @@ def _ext(ext: Any) -> str:
     return e if e.startswith(".") else "." + e
 
 
+def _langs(v) -> str:
+    """a file's languages for a name: ['ja', 'en'] -> 'JA+EN' (sonarr's
+    MediaInfo AudioLanguages shape). '' when it has none."""
+    from core.video.mediainfo import language_list
+    return "+".join(code.upper() for code in language_list(v))
+
+
+def languages_unknown(scope: Any, fields: dict, settings: Any) -> bool:
+    """the template names a language this file hasn't been probed for yet,
+    so its right name isn't known: mass rename and the naming check leave it
+    alone instead of stripping a '[JA]' it may well deserve."""
+    if scope not in ("movie", "episode"):
+        return False
+    s = normalize(settings)
+    tpl = str(s.get("movie_template" if scope == "movie" else "episode_template") or "")
+    return (("$audiolangs" in tpl and fields.get("audio_languages") is None)
+            or ("$sublangs" in tpl and fields.get("subtitle_languages") is None))
+
+
 def _movie_values(f: dict) -> dict:
     title = f.get("title") or "Unknown"
     return {
@@ -282,6 +313,8 @@ def _movie_values(f: dict) -> dict:
         "source": source_label(f.get("source")),
         "codec": _str(f.get("codec")).upper(),
         "edition": _str(f.get("edition")),
+        "audiolangs": _langs(f.get("audio_languages")),
+        "sublangs": _langs(f.get("subtitle_languages")),
         "tmdbid": _str(f.get("tmdbid")),
         "imdbid": _imdb(f.get("imdbid")),
     }
@@ -308,6 +341,8 @@ def _episode_values(f: dict) -> dict:
         "resolution": _str(f.get("resolution")),
         "source": source_label(f.get("source")),
         "codec": _str(f.get("codec")).upper(),
+        "audiolangs": _langs(f.get("audio_languages")),
+        "sublangs": _langs(f.get("subtitle_languages")),
         "tmdbid": _str(f.get("tmdbid")),
         "imdbid": _imdb(f.get("imdbid")),
         "tvdbid": _str(f.get("tvdbid")),
@@ -337,11 +372,33 @@ def _youtube_values(f: dict) -> dict:
     }
 
 
-def render_template(template: Any, values: dict) -> str:
+def replace_colons(text: Any, mode: Any = "delete") -> str:
+    """A title's colons the way the user picked, before the path is sanitised
+    (which drops any colon left). delete: "Dexter Resurrection"; dash:
+    "Dexter- Resurrection"; space_dash_space: "Dexter - Resurrection"; smart:
+    a colon followed by a space reads as " - ", one between characters (a
+    time, "12:30") as "-"."""
+    s = str(text if text is not None else "")
+    if ":" not in s:
+        return s
+    mode = str(mode or "delete").strip().lower()
+    if mode == "dash":
+        return s.replace(":", "-")
+    if mode == "space_dash_space":
+        return re.sub(r"\s*:\s*", " - ", s)
+    if mode == "smart":
+        s = re.sub(r"\s*:(?:\s+|$)", " - ", s)
+        return s.replace(":", "-")
+    return s
+
+
+def render_template(template: Any, values: dict, colon: Any = "delete") -> str:
     """Substitute ``$token`` / ``${token}`` from ``values`` into ``template``. Each
     value is path-sanitised first (so a title with '/' can't spawn a folder), and
-    tokens are replaced longest-name-first ($episodetitle before $episode)."""
-    clean = {k: sanitize(v) for k, v in (values or {}).items()}
+    tokens are replaced longest-name-first ($episodetitle before $episode).
+    ``colon`` is the colon_replacement setting."""
+    clean = {k: sanitize(replace_colons(v, colon) if isinstance(v, str) else v)
+             for k, v in (values or {}).items()}
     out = str(template or "")
     for tok in sorted(clean, key=len, reverse=True):
         out = out.replace("${" + tok + "}", clean[tok])
@@ -386,7 +443,7 @@ def episode_folders_below_series(settings: Any, fields: dict) -> list | None:
     values = _episode_values(fields if isinstance(fields, dict) else {})
     out = []
     for seg in folders[idx + 1:]:
-        part = _tidy_component(render_template(seg, values))
+        part = _tidy_component(render_template(seg, values, settings.get("colon_replacement")))
         if part:
             out.append(part)
     return out
@@ -420,7 +477,7 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
         base = (sanitize(fields.get("title")) or "download") + _ext(ext)
         return {"dir": root, "filename": base, "path": os.path.join(root, base)}
 
-    rendered = render_template(tmpl, values)
+    rendered = render_template(tmpl, values, settings.get("colon_replacement"))
     parts = [p for p in (_tidy_component(seg) for seg in rendered.split("/")) if p]
     if not parts:
         parts = ["download"]
@@ -432,4 +489,5 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
 __all__ = [
     "DEFAULTS", "default_settings", "normalize", "load", "save",
     "render_template", "render_path", "episode_folders_below_series",
+    "COLON_MODES", "replace_colons",
 ]

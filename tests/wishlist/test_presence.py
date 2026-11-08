@@ -54,3 +54,19 @@ def test_load_wishlist_keys_falls_back_to_legacy_schema():
         ("SELECT spotify_data FROM wishlist_tracks WHERE profile_id = ?", (3,)),
         ("SELECT spotify_data FROM wishlist_tracks", None),
     ]
+
+
+def test_load_wishlist_keys_includes_linked_artist_names():
+    cursor = _FakeCursor(
+        profile_rows=[
+            (json.dumps({"name": "Barricades", "artists": [{"name": "澤野弘之"}]}),),
+        ]
+    )
+
+    keys = presence.load_wishlist_keys(
+        cursor,
+        profile_id=1,
+        artist_aliases=lambda name: ["Sawano Hiroyuki"] if name == "澤野弘之" else [],
+    )
+
+    assert keys == {"barricades|||zeyehongzhi", "barricades|||sawanohiroyuki"}

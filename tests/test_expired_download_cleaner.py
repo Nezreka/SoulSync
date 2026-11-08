@@ -461,3 +461,13 @@ def test_unreadable_sync_history_keeps_everything_unmirrored():
     ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
     assert findings == []
 
+
+
+def test_a_playlist_synced_long_ago_ages_out_once_history_forgets_it():
+    """sync history keeps 100 rows. the old rule kept a playlist download
+    unless its name was still in history, so every playlist synced long
+    enough ago was kept forever; 3.6.1 aged it out."""
+    db = _DB([_cand(1, ctx="Summer Mix 2019", created=OLD)], synced=[])
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
+    assert len(findings) == 1

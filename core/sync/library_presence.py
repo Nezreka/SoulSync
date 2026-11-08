@@ -120,23 +120,34 @@ def refresh_history_library_presence(db: Any, entry: dict, server_source: str) -
             titles = sorted({str(t['name']).lower() for t in chunk if t.get('name')})
             server_ids = sorted({str(t['matched_track']['id']) for t in chunk
                                  if isinstance(t.get('matched_track'), dict) and t['matched_track'].get('id')})
-            clauses, params = [], [server_source, server_source, server_source]
+            # the candidates, each through its own index. one OR over these and
+            # the computed current_server_id could use none of them and scanned
+            # every track: 4.9s to open a 75-track run's details (Oct 31 2026).
+            # the id set is a superset of what the OR matched; the keying below
+            # still reads each row's own values
+            lookups, lookup_params = [], []
             if ids:
                 marks = ','.join('?' for _ in ids)
-                clauses.append(f't.spotify_id IN ({marks})')
-                params.extend(ids)
+                lookups.append(f'SELECT id FROM lib2_tracks WHERE spotify_id IN ({marks})')
+                lookup_params.extend(ids)
                 for provider in providers:
-                    clauses.append(f"CAST(json_extract(t.external_ids, '$.{provider}') AS TEXT) IN ({marks})")
-                    params.extend(ids)
+                    expression = f"TRIM(CAST(json_extract(external_ids,'$.{provider}') AS TEXT))"
+                    lookups.append(f"SELECT id FROM lib2_tracks WHERE {expression} IN ({marks})")
+                    lookup_params.extend(ids)
             if titles:
-                clauses.append(f"LOWER(t.title) IN ({','.join('?' for _ in titles)})")
-                params.extend(titles)
+                lookups.append(f"SELECT id FROM lib2_tracks WHERE LOWER(title) IN "
+                               f"({','.join('?' for _ in titles)})")
+                lookup_params.extend(titles)
             if server_ids:
                 marks = ','.join('?' for _ in server_ids)
-                clauses.append(f"current_server_id IN ({marks})")
-                params.extend(server_ids)
-            if not clauses:
+                lookups.append(f"SELECT entity_id FROM lib2_media_server_mappings WHERE "
+                               f"server_source=? AND entity_type='track' AND server_id IN ({marks})")
+                lookup_params.extend([server_source, *server_ids])
+                lookups.append(f"SELECT id FROM lib2_tracks WHERE server_source=? AND server_id IN ({marks})")
+                lookup_params.extend([server_source, *server_ids])
+            if not lookups:
                 continue
+            params = [server_source, server_source, server_source, *lookup_params]
             rows = conn.execute(f"""
                 SELECT t.*, COALESCE(NULLIF(t.track_artist,''), a.name) AS artist_name,
                        al.title AS album_title, f.path AS file_path,
@@ -155,7 +166,7 @@ def refresh_history_library_presence(db: Any, entry: dict, server_source: str) -
                        AND m.match_status='recognized'
                        AND m.server_library_id=CASE WHEN f.owner_profile_id IS NULL
                            THEN '' ELSE 'own:' || f.owner_profile_id END
-                 WHERE {' OR '.join(clauses)}
+                 WHERE t.id IN ({' UNION '.join(lookups)})
             """, params)
             for raw in rows:
                 row = dict(raw)

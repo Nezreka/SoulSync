@@ -68,7 +68,7 @@ describe('library v2 artist card semantics', () => {
     const open = screen.getByRole('button', {
       name: 'Open Independent Controls',
     });
-    const monitor = screen.getByRole('button', { name: 'Start monitoring' });
+    const monitor = screen.getByRole('button', { name: 'Add to Watchlist' });
 
     expect(container.querySelector('button button')).toBeNull();
     expect(open.contains(monitor)).toBe(false);

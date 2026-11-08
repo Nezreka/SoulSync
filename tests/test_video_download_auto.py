@@ -102,5 +102,5 @@ def test_grab_whole_season_button_and_batch():
 def test_season_grab_reuses_the_single_grab_path():
     # each episode goes through the same searchInto + _autoPick as a manual Auto,
     # so the batch can't diverge from the single path
-    assert 'autoGrabEpisode(container, st, sn, eps[idx++], src)' in _VIEW
+    assert 'autoGrabEpisode(container, st, sn, en, src, tries === 0)' in _VIEW
     assert 'searchInto(container, panel,' in _VIEW

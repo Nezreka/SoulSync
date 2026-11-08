@@ -149,16 +149,28 @@ def resolve_existing_case_dir(root: str, relative_path: str) -> str:
 
     resolved = root
     parts = [p for p in str(relative_path).replace('\\', '/').split('/') if p not in ('', '.')]
+    steered = []  # (asked, on disk) for every folder we swapped
+
+    def _like_parent(part):
+        # a folder that starts with its parent's name ('&Friends - Ode Ireti'
+        # under '&friends') spells it like the parent does. the artist folder
+        # followed the disk, the album folder kept each release's casing (#1994)
+        for asked, on_disk in steered:
+            if part.startswith(asked) and not part[len(asked):len(asked) + 1].isalnum():
+                part = on_disk + part[len(asked):]
+        return part
 
     for index, part in enumerate(parts):
+        part = _like_parent(part)
         existing = _existing_sibling(resolved, part)
         if existing is None:
             # Nothing here in any case: this component and everything under it
             # is new, so honour the caller's casing verbatim.
-            return os.path.join(resolved, *parts[index:])
+            return os.path.join(resolved, part, *(_like_parent(p) for p in parts[index + 1:]))
         if existing != part:
             logger.info("[Case Folding] Using existing folder %r instead of creating %r under %s",
                         existing, part, resolved)
+            steered.append((part, existing))
         resolved = os.path.join(resolved, existing)
 
     return resolved

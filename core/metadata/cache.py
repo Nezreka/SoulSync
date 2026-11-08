@@ -94,12 +94,85 @@ def get_metadata_cache():
     return _cache_instance
 
 
+# a cache hit used to write its access stats before returning, so every hit
+# waited on the write lock behind whatever else was writing (3.7s seen during a
+# sync, Oct 31 2026). hits are counted here and written in one batch shortly
+# after, off the read path. the stats only feed LRU eviction and the cache
+# browser, both fine a few seconds behind.
+_TOUCH_FLUSH_SECONDS = 15.0
+
+# maintenance deletes pick their rows with a plain read, then delete them a
+# chunk per transaction so other writers get the lock in between. one big
+# delete held it for 15s+ while every enrichment worker queued (Nov 1 2026).
+_MAINTENANCE_CHUNK = 500
+
+
+def _delete_ids_in_chunks(conn, table: str, ids) -> int:
+    cursor = conn.cursor()
+    removed = 0
+    for i in range(0, len(ids), _MAINTENANCE_CHUNK):
+        chunk = list(ids[i:i + _MAINTENANCE_CHUNK])
+        cursor.execute(f"DELETE FROM {table} WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+        removed += max(cursor.rowcount, 0)
+        conn.commit()
+    return removed
+
+
 class MetadataCache:
     """Caches Spotify and iTunes API responses with structured fields + raw JSON."""
 
     def __init__(self):
         # Tables are created by MusicDatabase migration — we just use get_database()
-        pass
+        self._touch_lock = threading.Lock()
+        self._touches: Dict[Tuple[str, int], int] = {}  # (table, row id) -> hits
+        self._touch_timer: Optional[threading.Timer] = None
+
+    def _touch(self, table: str, row_ids) -> None:
+        """Count hits on these rows; they are written by ``flush_touches``."""
+        with self._touch_lock:
+            for row_id in row_ids:
+                key = (table, int(row_id))
+                self._touches[key] = self._touches.get(key, 0) + 1
+            if self._touches and self._touch_timer is None:
+                if _TOUCH_FLUSH_SECONDS <= 0:
+                    flush_now = True
+                else:
+                    flush_now = False
+                    timer = threading.Timer(_TOUCH_FLUSH_SECONDS, self.flush_touches)
+                    timer.daemon = True
+                    self._touch_timer = timer
+                    timer.start()
+            else:
+                flush_now = False
+        if flush_now:
+            self.flush_touches()
+
+    def flush_touches(self) -> None:
+        """Write the counted hits in one transaction. A failed write keeps
+        them for the next flush."""
+        with self._touch_lock:
+            pending, self._touches = self._touches, {}
+            self._touch_timer = None
+        if not pending:
+            return
+        by_table: Dict[str, List[Tuple[int, int]]] = {}
+        for (table, row_id), hits in pending.items():
+            by_table.setdefault(table, []).append((hits, row_id))
+        try:
+            conn = self._get_db()._get_connection()
+            try:
+                for table, rows in by_table.items():
+                    conn.executemany(
+                        f"UPDATE {table} SET last_accessed_at = CURRENT_TIMESTAMP, "
+                        "access_count = COALESCE(access_count, 0) + ? WHERE id = ?", rows)
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug("Cache access stats write failed, keeping them: %s", e)
+            with self._touch_lock:
+                for key, hits in pending.items():
+                    self._touches[key] = self._touches.get(key, 0) + hits
 
     def _get_db(self):
         from database.music_database import get_database
@@ -160,13 +233,7 @@ class MetadataCache:
                     except (ValueError, TypeError):
                         pass
 
-                    # Touch: update access stats
-                    cursor.execute("""
-                        UPDATE metadata_cache_entities
-                        SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
-                        WHERE id = ?
-                    """, (row['id'],))
-                    conn.commit()
+                    self._touch('metadata_cache_entities', (row['id'],))
                     return json.loads(row['raw_json'])
                 return None
             finally:
@@ -186,8 +253,7 @@ class MetadataCache:
                 row = cur.fetchone()
                 if not row:
                     return None
-                cur.execute("UPDATE genre_translation_cache SET last_accessed_at=CURRENT_TIMESTAMP, access_count=access_count+1 WHERE id=?", (row['id'],))
-                conn.commit()
+                self._touch('genre_translation_cache', (row['id'],))
                 return dict(row)
             finally:
                 conn.close()
@@ -410,23 +476,15 @@ class MetadataCache:
                     chunk = entity_ids[i:i + 500]
                     placeholders = ','.join('?' * len(chunk))
                     cursor.execute(f"""
-                        SELECT entity_id, raw_json FROM metadata_cache_entities
+                        SELECT id, entity_id, raw_json FROM metadata_cache_entities
                         WHERE source = ? AND entity_type = ? AND entity_id IN ({placeholders})
                     """, [source, entity_type] + chunk)
+                    hit_rows = []
                     for row in cursor.fetchall():
                         if (str(source), str(entity_type), str(row['entity_id'])) not in _refresh_entities.get():
                             found[row['entity_id']] = json.loads(row['raw_json'])
-                    # Touch all found entries
-                    if found:
-                        found_in_chunk = [eid for eid in chunk if eid in found]
-                        if found_in_chunk:
-                            ph2 = ','.join('?' * len(found_in_chunk))
-                            cursor.execute(f"""
-                                UPDATE metadata_cache_entities
-                                SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
-                                WHERE source = ? AND entity_type = ? AND entity_id IN ({ph2})
-                            """, [source, entity_type] + found_in_chunk)
-                conn.commit()
+                            hit_rows.append(row['id'])
+                    self._touch('metadata_cache_entities', hit_rows)
             finally:
                 conn.close()
             missing = [eid for eid in entity_ids if eid not in found]
@@ -468,13 +526,7 @@ class MetadataCache:
                 except (ValueError, TypeError):
                     pass
 
-                # Touch search entry
-                cursor.execute("""
-                    UPDATE metadata_cache_searches
-                    SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
-                    WHERE id = ?
-                """, (row['id'],))
-                conn.commit()
+                self._touch('metadata_cache_searches', (row['id'],))
 
                 # Resolve entity IDs to full data via a single batched query
                 # (chunked to stay below SQLite's default variable limit).
@@ -619,13 +671,7 @@ class MetadataCache:
                 if not row:
                     return None
 
-                # Touch
-                cursor.execute("""
-                    UPDATE metadata_cache_entities
-                    SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1
-                    WHERE id = ?
-                """, (row['id'],))
-                conn.commit()
+                self._touch('metadata_cache_entities', (row['id'],))
 
                 item = dict(row)
                 # Parse JSON fields
@@ -716,24 +762,23 @@ class MetadataCache:
 
     def evict_expired(self) -> int:
         """Delete entries that have exceeded their TTL. Returns count of evicted entries."""
+        self.flush_touches()
         def _operation(conn):
             cursor = conn.cursor()
 
             # Entities
-            cursor.execute("""
-                DELETE FROM metadata_cache_entities
+            ids = [r[0] for r in cursor.execute("""
+                SELECT id FROM metadata_cache_entities
                 WHERE julianday('now') - julianday(updated_at) > ttl_days
-            """)
-            entity_count = cursor.rowcount
+            """).fetchall()]
+            entity_count = _delete_ids_in_chunks(conn, 'metadata_cache_entities', ids)
 
             # Searches
-            cursor.execute("""
-                DELETE FROM metadata_cache_searches
+            ids = [r[0] for r in cursor.execute("""
+                SELECT id FROM metadata_cache_searches
                 WHERE julianday('now') - julianday(created_at) > ttl_days
-            """)
-            search_count = cursor.rowcount
-
-            conn.commit()
+            """).fetchall()]
+            search_count = _delete_ids_in_chunks(conn, 'metadata_cache_searches', ids)
             total = entity_count + search_count
             if total > 0:
                 logger.info(f"Evicted {total} expired cache entries ({entity_count} entities, {search_count} searches)")
@@ -749,6 +794,7 @@ class MetadataCache:
         Runs AFTER evict_expired in the maintenance job, so TTL-expired and junk
         rows are already gone — this only trims a still-oversized healthy cache.
         """
+        self.flush_touches()  # LRU order includes the hits not yet written
         def _operation(conn):
             cursor = conn.cursor()
             total = cursor.execute(
@@ -759,16 +805,12 @@ class MetadataCache:
                 return 0
             # Delete the oldest-accessed rows. NULL last_accessed_at sorts first
             # (evicted earliest) — those were never touched since insert.
-            cursor.execute("""
-                DELETE FROM metadata_cache_entities
-                WHERE id IN (
-                    SELECT id FROM metadata_cache_entities
-                    ORDER BY last_accessed_at ASC
-                    LIMIT ?
-                )
-            """, (to_evict,))
-            evicted = cursor.rowcount
-            conn.commit()
+            ids = [r[0] for r in cursor.execute("""
+                SELECT id FROM metadata_cache_entities
+                ORDER BY last_accessed_at ASC
+                LIMIT ?
+            """, (to_evict,)).fetchall()]
+            evicted = _delete_ids_in_chunks(conn, 'metadata_cache_entities', ids)
             if evicted > 0:
                 logger.info(
                     "Cache over capacity (%d > %d) — evicted %d least-recently-used entities",
@@ -783,16 +825,15 @@ class MetadataCache:
         def _operation(conn):
             cursor = conn.cursor()
             junk_names = "', '".join(self._JUNK_NAMES - {''})  # exclude empty, handled separately
-            cursor.execute(f"""
-                DELETE FROM metadata_cache_entities
+            ids = [r[0] for r in cursor.execute(f"""
+                SELECT id FROM metadata_cache_entities
                 WHERE (name IS NULL
                    OR TRIM(name) = ''
                    OR LOWER(TRIM(name)) IN ('{junk_names}'))
                   AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
                   AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
-            """)
-            count = cursor.rowcount
-            conn.commit()
+            """).fetchall()]
+            count = _delete_ids_in_chunks(conn, 'metadata_cache_entities', ids)
             if count > 0:
                 logger.info(f"Cleaned {count} junk entities from cache")
             return count
@@ -1734,21 +1775,24 @@ class MetadataCache:
                         album['in_library'] = _presence_key(
                             album['name'], album['artist_name']) in lib_set
 
-                # Step 6: Resolve library artist IDs for navigation (batched).
-                # The id stays the LEGACY one — it is handed to the artist-detail
-                # route, which resolves a bare numeric id against the legacy table
-                # by contract. A native-only artist has none and is left without a
-                # link rather than with one that opens nothing.
+                # Step 6: which artists are in the library, for the "In
+                # Library" badge (the card links out by entity_id). An artist
+                # with a release of their own on disk counts, the way the
+                # media server's artist list did; a legacy id is no test, an
+                # artist SoulSync imported itself never had one.
                 if artists:
+                    # any library: the dive is cached per genre, not per profile,
+                    # same as the album check above
+                    from core.library2.sql_util import ANY_OWNER, owned_sql
                     keys = [_name_key(a['name']) for a in artists]
                     lib_name_placeholders = ','.join(['?'] * len(keys))
                     try:
                         cursor.execute(f"""
-                            SELECT legacy_artist_id, name_key FROM lib2_artists
-                            WHERE name_key IN ({lib_name_placeholders})
-                              AND legacy_artist_id IS NOT NULL
+                            SELECT ar.id, ar.name_key FROM lib2_artists ar
+                            WHERE ar.name_key IN ({lib_name_placeholders})
+                              AND {owned_sql('release_artist', 'ar', scope=ANY_OWNER)}
                         """, keys)
-                        lib_id_map = {r['name_key']: r['legacy_artist_id']
+                        lib_id_map = {r['name_key']: r['id']
                                       for r in cursor.fetchall()}
                     except Exception:
                         lib_id_map = {}

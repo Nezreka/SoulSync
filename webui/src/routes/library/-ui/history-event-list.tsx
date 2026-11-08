@@ -1,6 +1,13 @@
-import type { LibraryV2HistoryEntry } from '../-library-v2.api';
-
-import { historyOutcomeSummary, historySubject } from './history-groups';
+import {
+  groupHistoryEvents,
+  type HistoryGroup,
+  type HistoryNode,
+  type HistoryStep,
+  historyOutcomeSummary,
+  historySteps,
+  historySubject,
+  historyTone,
+} from './history-groups';
 import styles from './library-v2-page.module.css';
 
 function eventDate(value: string | null, timeOnly = false): string {
@@ -15,29 +22,103 @@ function eventDate(value: string | null, timeOnly = false): string {
   }).format(date);
 }
 
-/** a quiet colour for one outcome: done, failed or in between */
-function historyTone(status: string | null | undefined) {
-  const value = (status ?? '').toLowerCase();
-  if (!value) return undefined;
-  if (/(fail|error|reject|quarantin|block|mismatch)/.test(value)) return 'err';
-  if (/^(not|no|missing|skip)/.test(value)) return 'neutral';
-  if (/(complete|success|import|done|grabbed|verified|\bok\b)/.test(value)) return 'ok';
-  return 'neutral';
+/** The pipeline steps of a track, in order, as status pills. */
+export function HistorySteps({ steps }: { steps: HistoryStep[] }) {
+  if (!steps.length) return null;
+  return (
+    <span className={styles.historySteps}>
+      {steps.map((step, i) => (
+        <span key={step.label} className={styles.historyStep}>
+          {i > 0 ? <span aria-hidden="true">→</span> : null}
+          <span className={styles.historyOutcome} data-tone={step.tone}>
+            {step.label}
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** One row per track: its pipeline on top, every event of it folded by kind
+ *  underneath. Tracks without a pipeline step name what happened instead. */
+export function HistoryTree({ nodes }: { nodes: HistoryNode[] }) {
+  return (
+    <>
+      <div className={styles.historyColumns} aria-hidden="true">
+        <span>Last</span>
+        <span>Track / release</span>
+        <span>What happened</span>
+        <span>Events</span>
+      </div>
+      {nodes.map((node) => {
+        const groups = groupHistoryEvents(node.entries, { byKind: true });
+        const steps = historySteps(node.entries);
+        const newest = node.entries[0]!;
+        return (
+          <details key={node.key} className={styles.historyGroup}>
+            <summary className={styles.historyRow}>
+              <time
+                className={styles.historyDate}
+                dateTime={newest.date ?? undefined}
+                title={newest.date ?? undefined}
+              >
+                {eventDate(newest.date)}
+              </time>
+              <span className={styles.historyEvent}>
+                <strong>{node.title}</strong>
+                {node.subtitle ? (
+                  <span className={styles.historyDetail}>{node.subtitle}</span>
+                ) : null}
+              </span>
+              <span className={styles.historyEvent}>
+                {steps.length ? (
+                  <HistorySteps steps={steps} />
+                ) : (
+                  <span className={styles.historyDetail}>
+                    {groups
+                      .slice(0, 3)
+                      .map(({ entries }) => {
+                        const first = entries[0]!;
+                        const label = first.title ?? first.event_type;
+                        return entries.length > 1 ? `${label} ×${entries.length}` : label;
+                      })
+                      .join(' · ')}
+                  </span>
+                )}
+              </span>
+              <span className={styles.historyCount}>
+                {node.entries.length}
+                <span aria-hidden="true">⌄</span>
+              </span>
+            </summary>
+            <div className={styles.historyExpanded}>
+              <HistoryEventList groups={groups} nested />
+            </div>
+          </details>
+        );
+      })}
+    </>
+  );
 }
 
 export function HistoryEventList({
   groups,
+  nested = false,
 }: {
-  groups: Array<{ key: string; entries: LibraryV2HistoryEntry[] }>;
+  groups: HistoryGroup[];
+  /** inside a track of the tree: no header, no track name per row */
+  nested?: boolean;
 }) {
   return (
     <>
-      <div className={styles.historyColumns} aria-hidden="true">
-        <span>When</span>
-        <span>Activity / source</span>
-        <span>Result / affected files</span>
-        <span>Events</span>
-      </div>
+      {nested ? null : (
+        <div className={styles.historyColumns} aria-hidden="true">
+          <span>When</span>
+          <span>Activity / source</span>
+          <span>Result / affected files</span>
+          <span>Events</span>
+        </div>
+      )}
       {groups.map((group, i) => {
         const first = group.entries[0]!;
         const multiple = group.entries.length > 1;
@@ -68,7 +149,7 @@ export function HistoryEventList({
                 </span>
                 <span className={styles.historyDetail}>
                   {first.status_basis === 'current_file' ? 'Current file status' : ''}
-                  {!multiple
+                  {!multiple && !nested
                     ? `${first.status_basis === 'current_file' ? ' · ' : ''}${historySubject(first)}`
                     : ''}
                 </span>

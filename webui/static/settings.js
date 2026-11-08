@@ -148,12 +148,42 @@ function debouncedAutoSaveSettings(event) {
     if (document.querySelector('.stg-tab.active')?.dataset.tab === 'logs') return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     settingsAutoSaveTimer = setTimeout(() => saveSettings(true), 2000);
+    setSettingsSaveState('pending');
 }
 
 function handleManualSaveClick() {
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
     saveSettings(false);
+}
+
+// settings save themselves (#1909). the old Save Settings button and an
+// "auto-saved" toast after every keystroke told two stories, and the tour
+// still said nothing applied until you clicked. the button is now the one
+// quiet status, and still saves right away when clicked (the video side
+// hangs its own saves on that click).
+const SETTINGS_SAVE_LABELS = {
+    idle: 'All changes saved',
+    pending: 'Save now',
+    saving: 'Saving…',
+    saved: 'Saved',
+    error: 'Retry save',
+};
+let _settingsSavedTimer = null;
+
+function setSettingsSaveState(state) {
+    const btn = document.getElementById('save-settings');
+    if (!btn || !SETTINGS_SAVE_LABELS[state]) return;
+    if (_settingsSavedTimer) { clearTimeout(_settingsSavedTimer); _settingsSavedTimer = null; }
+    btn.dataset.state = state;
+    const label = btn.querySelector('span');
+    if (label) label.textContent = SETTINGS_SAVE_LABELS[state];
+    btn.title = state === 'idle' || state === 'saved'
+        ? 'Settings save as you go. Click to save again now.'
+        : '';
+    if (state === 'saved') {
+        _settingsSavedTimer = setTimeout(() => setSettingsSaveState('idle'), 2000);
+    }
 }
 
 function syncMetadataSourceSelection(source) {
@@ -751,6 +781,7 @@ const INVERT_SERVICE_MARKS = new Set(['tidal', 'qobuz', 'discogs', 'tvdb']);
 const SERVICE_GLYPHS = {
     omdb: '\u2605',             // star - ratings, as on the dashboard
     fanart: '\u{1F3A8}',        // palette - artwork
+    'artist-fanart': '\u{1F3A8}', // the same source, for artist artwork
     opensubtitles: '\u{1F4AC}', // speech bubble - subtitles
     trakt: '\u2605',            // star - audience rating
     nokey: '\u{1F4FA}',         // tv - community data (TVmaze)
@@ -765,8 +796,8 @@ const SERVICE_GROUPS = {
           ids: ['musicbrainz', 'spotify', 'itunes', 'deezer', 'discogs', 'tidal', 'qobuz', 'hydrabase'] },
         { label: 'Scrobbling', hint: 'listening history and recommendations',
           ids: ['lastfm', 'listenbrainz'] },
-        { label: 'Extras', hint: 'lyrics, concerts, fingerprint checks and cover art',
-          ids: ['genius', 'concerts', 'acoustid', 'pollinations'] },
+        { label: 'Extras', hint: 'lyrics, concerts, fingerprint checks, cover art and artist artwork',
+          ids: ['genius', 'concerts', 'acoustid', 'pollinations', 'artist-fanart'] },
     ],
     video: [
         { label: 'Metadata', hint: 'movies, shows and episodes',
@@ -1689,16 +1720,6 @@ async function _stgRefreshAfterSave() {
             .filter(Boolean);
         if (expandedServices.length > 0) {
             _stgVerifyServices(expandedServices, { force: true });
-        }
-        const btn = document.getElementById('save-settings');
-        if (btn) {
-            const origHTML = btn.innerHTML;
-            btn.classList.add('is-saved');
-            btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg><span>Saved</span>';
-            setTimeout(() => {
-                btn.classList.remove('is-saved');
-                btn.innerHTML = origHTML;
-            }, 2000);
         }
     } catch (e) {
         console.warn('[Settings Status] Post-save refresh failed:', e);
@@ -3246,6 +3267,8 @@ async function loadSettingsData() {
         const maToken = document.getElementById('music_assistant-token');
         if (maUrl) maUrl.value = settings.music_assistant?.base_url || '';
         if (maToken) maToken.value = settings.music_assistant?.token || '';
+        const maFolder = document.getElementById('music_assistant-source-folder');
+        if (maFolder) maFolder.value = settings.music_assistant?.source_folder || '';
         if (maUrl && maUrl.value && maToken && maToken.value) loadMusicAssistantSources(true);
 
         // Set active server and toggle visibility
@@ -3323,6 +3346,9 @@ async function loadSettingsData() {
         document.getElementById('genius-access-token').value = settings.genius?.access_token || '';
         const _pollinationsKey = document.getElementById('pollinations-api-key');
         if (_pollinationsKey) _pollinationsKey.value = settings.pollinations?.api_key || '';
+        // the music card's own id: the video side's fanart.tv card owns 'fanart-api-key'
+        const _fanartKey = document.getElementById('artist-fanart-api-key');
+        if (_fanartKey) _fanartKey.value = settings.fanart?.api_key || '';
 
         // Populate iTunes settings
         document.getElementById('itunes-country').value = settings.itunes?.country || 'US';
@@ -3485,6 +3511,8 @@ async function loadSettingsData() {
         if (_ucUser) _ucUser.value = settings.usenet_client?.username || '';
         if (_ucPass) _ucPass.value = settings.usenet_client?.password || '';
         if (_ucCat) _ucCat.value = settings.usenet_client?.category || 'soulsync';
+        const _ucRemove = document.getElementById('music-usenet-remove-completed');
+        if (_ucRemove) _ucRemove.value = settings.usenet_client?.remove_completed || 'off';
         const _ucDlPath = document.getElementById('usenet-download-path');
         if (_ucDlPath) _ucDlPath.value = settings.download_source?.usenet_download_path || '';
         if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
@@ -6808,7 +6836,8 @@ async function saveSettings(quiet = false) {
         music_assistant: {
             base_url: _cfgStr('music_assistant-url', { trim: true }),
             token: _cfgStr('music_assistant-token', { trim: true }),
-            source_instance: _cfgStr('music_assistant-source')
+            source_instance: _cfgStr('music_assistant-source'),
+            source_folder: _cfgStr('music_assistant-source-folder', { trim: true })
         },
         navidrome: {
             base_url: document.getElementById('navidrome-url').value,
@@ -6860,6 +6889,11 @@ async function saveSettings(quiet = false) {
             scrobble_enabled: document.getElementById('lastfm-scrobble-enabled').checked,
             embed_tags: document.getElementById('embed-lastfm').checked,
             tags: _collectServiceTags('lastfm')
+        },
+        fanart: {
+            // _cfgStr: undefined when the field is absent, so a save there
+            // doesn't wipe the stored key
+            api_key: _cfgStr('artist-fanart-api-key', { trim: true }),
         },
         pollinations: {
             // _cfgStr: undefined when the field is absent (video side), so a
@@ -6986,6 +7020,7 @@ async function saveSettings(quiet = false) {
             username: _cfgStr('usenet-client-username'),
             password: _cfgStr('usenet-client-password'),
             category: _cfgStr('usenet-client-category', { fallback: 'soulsync' }),
+            remove_completed: _cfgStr('music-usenet-remove-completed', { fallback: 'off' }),
         },
         soundcloud_download: {
             // No knobs yet — anonymous-only. Keeping the key present so
@@ -7312,6 +7347,7 @@ async function saveSettings(quiet = false) {
 
     try {
         if (!quiet) showLoadingOverlay('Saving settings...');
+        setSettingsSaveState('saving');
 
         // Save main settings
         const response = await fetch(API.settings, {
@@ -7354,22 +7390,27 @@ async function saveSettings(quiet = false) {
         }
 
         if (result.success && qualityProfileSaved && lookbackSaved) {
-            showToast(quiet ? 'Settings auto-saved' : 'Settings saved successfully', 'success');
+            // the button says Saved, a toast on every keystroke was noise
+            setSettingsSaveState('saved');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else if (result.success && qualityProfileSaved && !lookbackSaved) {
+            setSettingsSaveState('saved');
             showToast('Settings saved, but discovery lookback period failed to save', 'warning');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else if (result.success && !qualityProfileSaved) {
+            setSettingsSaveState('saved');
             showToast('Settings saved, but quality profile failed to save', 'warning');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else {
+            setSettingsSaveState('error');
             showToast(`Failed to save settings: ${result.error}`, 'error', 'set-services');
         }
     } catch (error) {
         console.error('Error saving settings:', error);
+        setSettingsSaveState('error');
         showToast('Failed to save settings', 'error', 'set-services');
     } finally {
         if (!quiet) hideLoadingOverlay();
@@ -9924,6 +9965,31 @@ async function refreshMetaSyncStatus() {
             if (p.last_exchange_error) line += ' — last error: ' + _msEscape(p.last_exchange_error);
             lines.push(line);
         });
+        // Step 3: is this install actually counted? A node starts in dry
+        // run and sends nothing; an older node doesn't report dry_run at all
+        const nodeUrl = document.getElementById('metasync-node-url')?.value.trim() || '';
+        const openNode = /^https?:\/\//i.test(nodeUrl)
+            ? ' <a href="' + _msEscape(nodeUrl) + '" target="_blank" rel="noopener noreferrer">Open MetaSync</a>'
+            : '';
+        if (s.dry_run === true && pools.length) {
+            const u = s.unsent_report;
+            lines.push(u && u.week
+                ? 'Step 3: dry run is on. Your report for ' + _msEscape(u.week) + ' is ready (' +
+                  _msEscape(u.signal_count) + ' anonymous album signals) and nothing was sent, so this install ' +
+                  'isn\'t counted yet. Check it and press Start sending in MetaSync.' + openNode
+                : 'Step 3: dry run is on, so MetaSync builds your weekly report but sends nothing yet.' + openNode);
+        } else if (s.dry_run === false && pools.length) {
+            lines.push('Step 3: sending. One anonymous report a week, nothing else.');
+        }
+        const net = s.network;
+        if (net && Number.isInteger(net.installs) && Number.isInteger(net.publish_threshold)) {
+            lines.push('The network: ' + net.installs + ' install' + (net.installs === 1 ? '' : 's') +
+                ' reported ' + _msEscape(net.week || 'last week') + '. ' +
+                (net.installs < net.publish_threshold
+                    ? 'Charts from the network start at ' + net.publish_threshold +
+                      ' installs per album; until then they fill from ListenBrainz.'
+                    : 'An album charts once ' + net.publish_threshold + ' installs report it in a week.'));
+        }
         if (s.pairing_status === 'pending') lines.push('A pairing request is waiting for approval in the MetaSync dashboard.');
         _msDetail(lines.join('<br>'));
     } catch (e) {

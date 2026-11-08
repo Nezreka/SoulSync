@@ -104,3 +104,27 @@ describe('ImportCard (#1934)', () => {
     expect(onAction).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('ImportCard: edit an imported one on the server', () => {
+  it('shows Edit only once it is in, and Edit never opens or imports', async () => {
+    let finish: (v: boolean) => void = () => {};
+    const onEdit = vi.fn(() => new Promise<boolean>((r) => (finish = r)));
+    const { onAction } = card({ status: 'imported', onEdit });
+
+    const edit = screen.getByLabelText('Edit Road Trip on your server');
+    fireEvent.click(edit);
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onAction).not.toHaveBeenCalled();
+    // busy while it looks for the server copy, a second click does nothing
+    expect(edit).toBeDisabled();
+    fireEvent.click(edit);
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    finish(true);
+    await waitFor(() => expect(edit).not.toBeDisabled());
+  });
+
+  it('a playlist not in yet has no Edit', () => {
+    card({ onEdit: vi.fn(async () => true) });
+    expect(screen.queryByLabelText('Edit Road Trip on your server')).toBeNull();
+  });
+});

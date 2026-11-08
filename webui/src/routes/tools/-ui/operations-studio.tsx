@@ -76,9 +76,24 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     glow: '244, 114, 182',
     tagline: 'Whether the audio is what it claims to be, and good enough',
     description:
-      'Finds files that fail to decode, FLAC made from a lossy source and 30-second preview clips saved as full tracks.',
-    jobIds: ['audio_corruption_detector', 'fake_lossless_detector', 'short_preview_track'],
-    findingTypes: ['corrupt_audio', 'fake_lossless', 'quality_upgrade', 'short_preview_track'],
+      'Finds files that fail to decode, FLAC made from a lossy source, 30-second preview clips saved as full tracks, AAC that shows 0:00, and files below their quality profile.',
+    jobIds: [
+      'audio_corruption_detector',
+      'fake_lossless_detector',
+      'short_preview_track',
+      'streamed_aac_repair',
+      'quality_profile_audit',
+    ],
+    findingTypes: [
+      'corrupt_audio',
+      'fake_lossless',
+      'quality_upgrade',
+      'quality_upgrade_review',
+      'quality_format_not_targeted',
+      'quality_unknown',
+      'short_preview_track',
+      'zero_length_mp4',
+    ],
   },
   {
     id: 'metadata',
@@ -128,9 +143,21 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
     glow: '56, 189, 248',
     tagline: 'Find unlinked files, missing paths, and empty folders',
     description:
-      'Finds orphan audio files, stale library paths, and empty folders. Review recording duplicates from the Library page.',
-    jobIds: ['orphan_file_detector', 'dead_file_cleaner', 'empty_folder_cleaner'],
-    findingTypes: ['duplicate_tracks', 'orphan_file', 'dead_file', 'empty_folder'],
+      'Finds duplicate copies of a song, orphan audio files, stale library paths, and empty folders.',
+    jobIds: [
+      'native_duplicate_detector',
+      'orphan_file_detector',
+      'dead_file_cleaner',
+      'empty_folder_cleaner',
+    ],
+    findingTypes: [
+      'native_duplicate_tracks',
+      'native_duplicate_releases',
+      'duplicate_tracks',
+      'orphan_file',
+      'dead_file',
+      'empty_folder',
+    ],
   },
 ] as const;
 
@@ -153,15 +180,23 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
       'album_tag_consistency',
       'missing_lyrics',
       'missing_cover_art',
+      // the duplicates the subtitle promises (3.6.1's duplicate_detector)
+      'native_duplicate_detector',
       'empty_folder_cleaner',
     ],
   },
   {
     id: 'audio_sweep',
     title: 'Audio Fidelity Sweep',
-    subtitle: 'Broken files, fake FLAC and preview clips',
+    subtitle: 'Broken files, fake FLAC, preview clips and tracks below your quality profile',
     icon: '🎵',
-    jobIds: ['audio_corruption_detector', 'fake_lossless_detector', 'short_preview_track'],
+    jobIds: [
+      'audio_corruption_detector',
+      'fake_lossless_detector',
+      'short_preview_track',
+      // 3.6.1's quality check (quality_upgrade_scanner) lives on as this
+      'quality_profile_audit',
+    ],
   },
   {
     id: 'metadata_polish',
@@ -244,7 +279,7 @@ export const VIDEO_PILLARS: readonly StrategicPillar[] = [
     tagline: 'Summaries, genres, artwork and TMDB matches',
     description:
       'Finds movies missing a summary, genres, a poster or backdrop, or a TMDB match, and fills them in from the metadata sources.',
-    jobIds: ['metadata_gaps'],
+    jobIds: ['metadata_gaps', 'media_info'],
     findingTypes: ['metadata_gap'],
   },
 ] as const;

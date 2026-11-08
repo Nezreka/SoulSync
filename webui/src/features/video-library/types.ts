@@ -31,6 +31,10 @@ export interface LibraryFile {
   audio_channels: number | null;
   dynamic_range: string | null;
   atmos: boolean;
+  /** the file's audio languages ('ja', 'en'); null until soulsync has read them */
+  audio_languages?: string[] | null;
+  /** its embedded subtitle tracks' languages, same shape */
+  subtitle_languages?: string[] | null;
   release_source: string | null;
   runtime_seconds: number | null;
   added_at: string | null;

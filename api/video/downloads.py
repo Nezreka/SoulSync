@@ -94,7 +94,7 @@ def _profile_library_for(db, kind, body) -> str:
                     pid = db.quality_profile_id_for(kind_key, library_id=int(mid))
         except (TypeError, ValueError):
             pid = None
-    return str(profile_by_id(db, pid).get("library") or "main")
+    return str(profile_by_id(db, pid, kind=kind).get("library") or "main")
 
 
 def _target_for(db, kind, body) -> str:
@@ -141,6 +141,64 @@ def _parse_text(hit) -> str:
     if base and base.lower() not in title.lower():
         return (title + "/" + base) if title else base
     return title
+
+
+def _title_keys(src) -> tuple:
+    """(library id, tmdb id) a search body names its title by. media_id is a
+    library id when media_source says library, else a tmdb id (the old
+    default)."""
+    media_source = str(src.get("media_source") or "tmdb").lower()
+    media_id = src.get("media_id")
+    library_id = media_id if media_source == "library" else None
+    tmdb = src.get("tmdb_id") or (media_id if media_source == "tmdb" else None)
+    return library_id, tmdb
+
+
+def _profile_for_request(db, src):
+    """The quality profile a get-modal search/grab should be judged under:
+    the title's own assignment (resolved from its library id or tmdb_id,
+    whichever the client sends) → else the Default profile (P2, per-title
+    profiles). A show page's episode search names its show by library id;
+    reading only tmdb ids judged every episode by the Default."""
+    from core.video.quality_profile import kind_default_id, profile_by_id
+    scope = str(src.get("scope") or src.get("kind") or "movie").lower()
+    kind = "movie" if scope == "movie" else "show"
+    pid = src.get("quality_profile_id")
+    if pid in (None, "", 0, "0"):
+        pid = None
+        library_id, tmdb = _title_keys(src)
+        if library_id or tmdb:
+            try:
+                pid = db.quality_profile_id_for(
+                    kind, tmdb_id=int(tmdb) if tmdb else None,
+                    library_id=int(library_id) if library_id else None)
+            except (TypeError, ValueError):
+                pid = None
+    # nothing assigned: the kind's default (Default for movies / for TV), so a
+    # grab records the profile it was really judged under
+    if not pid:
+        pid = kind_default_id(db, kind)
+    return profile_by_id(db, pid, kind=kind), pid
+
+
+def _with_title_identity(db, src) -> dict:
+    """The search body with its title's own tmdb/imdb/tvdb ids filled in from
+    the library, so a manual search asks the indexers the way the wishlist
+    search does (structured, by id) instead of by title text alone, which
+    missed releases the indexers had. Ids the client sent win."""
+    body = dict(src or {})
+    scope = str(body.get("scope") or body.get("kind") or "movie").lower()
+    library_id, tmdb = _title_keys(body)
+    try:
+        ident = db.search_ids_for("movie" if scope == "movie" else "show",
+                                  library_id=int(library_id) if library_id else None,
+                                  tmdb_id=int(tmdb) if tmdb else None)
+    except (TypeError, ValueError):
+        ident = {}
+    for key in ("tmdb_id", "imdb_id", "tvdb_id"):
+        if not body.get(key) and ident.get(key):
+            body[key] = ident[key]
+    return body
 
 
 def _external_ids(body) -> dict:
@@ -355,6 +413,9 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "resolution": parsed.get("resolution"), "source": parsed.get("source"),
             "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
             "audio": parsed.get("audio"), "group": parsed.get("group"),
+            # audio languages the name tags, for the Language filter. none
+            # tagged usually means the original language only
+            "languages": list(parsed.get("languages") or []), "multi": bool(parsed.get("multi")),
             "repack": parsed.get("repack") or parsed.get("proper"),
             # torrent/usenet grab carriers (present only for Prowlarr hits) — the magnet/NZB
             # URL + protocol the grab hands to the shared torrent/usenet client.
@@ -672,6 +733,16 @@ def register_routes(bp):
         rid = db.add_video_blocklist(row)
         return jsonify({"success": bool(rid), "id": rid})
 
+    @bp.route("/downloads/blocklist/retry-failed", methods=["POST"])
+    def video_downloads_block_retry_failed():
+        """Block every failed row's release and grab the next one for each,
+        searched one title at a time in the background (admin, like a block)."""
+        from . import get_video_db
+        from core.video.download_monitor import block_and_retry_failed, ensure_started
+        res = block_and_retry_failed(get_video_db())
+        ensure_started(get_video_db)
+        return jsonify({"ok": True, **res})
+
     @bp.route("/downloads/blocklist/<int:row_id>", methods=["DELETE"])
     def video_downloads_blocklist_remove(row_id):
         from . import get_video_db
@@ -795,6 +866,89 @@ def register_routes(bp):
         return jsonify(save(get_video_db(), body))
 
     # ── named quality profiles (per-title assignment; arr-parity P2) ─────────
+    @bp.route("/downloads/quality/for", methods=["GET"])
+    def video_quality_for_title():
+        """The profile a title is searched and grabbed under, for the Get /
+        Manual search modals: its own assignment (library row, the modal's
+        earlier pick, its wishlist rows), else its kind's default, else the
+        Default. Query: kind/scope, media_id, media_source, tmdb_id."""
+        from . import get_video_db
+        from core.video.quality_profile import kind_default_id, list_profiles
+        db = get_video_db()
+        src = request.args.to_dict()
+        scope = str(src.get("scope") or src.get("kind") or "movie").lower()
+        kind = "movie" if scope == "movie" else "show"
+        own = None
+        library_id, tmdb = _title_keys(src)
+        if library_id or tmdb:
+            try:
+                own = db.quality_profile_id_for(
+                    kind, tmdb_id=int(tmdb) if tmdb else None,
+                    library_id=int(library_id) if library_id else None)
+            except (TypeError, ValueError):
+                own = None
+        profile, pid = _profile_for_request(db, src)
+        return jsonify({
+            "kind": kind, "profile_id": int(pid or 0), "profile": profile,
+            "assigned": bool(own), "kind_default_id": int(kind_default_id(db, kind) or 0),
+            "profiles": [{"id": p["id"], "name": p["name"]} for p in list_profiles(db)],
+        })
+
+    @bp.route("/downloads/quality/choose", methods=["POST"])
+    def video_quality_choose_for_title():
+        """Make a profile the title's own from the Get / Manual search modal
+        (Seadog's request): judged by it now, kept on its wishlist rows, set
+        on its library row, or remembered until it lands. profile_id 0 = back
+        to the default. Body: kind/scope, media_id, media_source, tmdb_id,
+        profile_id."""
+        from . import get_video_db
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        scope = str(body.get("scope") or body.get("kind") or "movie").lower()
+        kind = "movie" if scope == "movie" else "show"
+        try:
+            pid = int(body.get("profile_id") or 0)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "profile_id must be a number"}), 400
+        if pid and not db.get_named_quality_profile(pid):
+            return jsonify({"success": False, "error": "No such quality profile"}), 404
+        library_id, tmdb = _title_keys(body)
+        if not tmdb and library_id:
+            ident = db.search_ids_for(kind, library_id=int(library_id)) or {}
+            tmdb = ident.get("tmdb_id")
+        try:
+            if tmdb:
+                ok = db.set_title_profile_choice(kind, int(tmdb), pid or None)
+            elif library_id:
+                ok = db.set_title_quality_profile(kind, int(library_id), pid or None)
+            else:
+                return jsonify({"success": False, "error": "The title has no id to keep the choice on"}), 400
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Bad title id"}), 400
+        if not ok:
+            return jsonify({"success": False, "error": "Could not save the choice"}), 500
+        profile, resolved = _profile_for_request(db, body | {"quality_profile_id": None})
+        return jsonify({"success": True, "profile_id": int(resolved or 0), "profile": profile})
+
+    @bp.route("/downloads/quality/defaults", methods=["GET"])
+    def video_quality_kind_defaults():
+        """{'movie': id, 'show': id}: the profile each kind of new title gets
+        when nothing assigns one (0 = the Default)."""
+        from . import get_video_db
+        from core.video.quality_profile import kind_defaults
+        return jsonify(kind_defaults(get_video_db()))
+
+    @bp.route("/downloads/quality/defaults", methods=["POST"])
+    def video_quality_kind_defaults_save():
+        """Body: {kind: 'movie'|'show', profile_id}."""
+        from . import get_video_db
+        from core.video.quality_profile import set_kind_default
+        body = request.get_json(silent=True) or {}
+        try:
+            return jsonify(set_kind_default(get_video_db(), body.get("kind"), body.get("profile_id")))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
     @bp.route("/downloads/quality/profiles", methods=["GET"])
     def video_quality_profiles_list():
         """Every selectable profile, Default (id 0) first."""
@@ -902,23 +1056,6 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         profile = load(get_video_db())
         return jsonify(evaluate_owned(body.get("file"), profile))
-
-    def _profile_for_request(db, src):
-        """The quality profile a get-modal search/grab should be judged under:
-        the title's own assignment (resolved from tmdb_id when the client sends
-        it) → else the Default profile (P2, per-title profiles)."""
-        from core.video.quality_profile import profile_by_id
-        pid = src.get("quality_profile_id")
-        if pid in (None, "", 0, "0"):
-            tmdb = src.get("tmdb_id") or src.get("media_id")
-            scope = str(src.get("scope") or src.get("kind") or "movie").lower()
-            kind = "movie" if scope == "movie" else "show"
-            if tmdb and str(src.get("media_source") or "tmdb") == "tmdb":
-                try:
-                    pid = db.quality_profile_id_for(kind, tmdb_id=int(tmdb))
-                except (TypeError, ValueError):
-                    pid = None
-        return profile_by_id(db, pid), pid
 
     @bp.route("/downloads/fresh-releases", methods=["GET"])
     def video_downloads_fresh_releases():
@@ -1028,7 +1165,7 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.mock_search import mock_search
 
-        body = request.get_json(silent=True) or {}
+        body = _with_title_identity(get_video_db(), request.get_json(silent=True) or {})
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
         source = str(body.get("source") or "").lower()
@@ -1082,7 +1219,7 @@ def register_routes(bp):
         like the music side) — fixes 'no results' from waiting too briefly."""
         from . import get_video_db
         from core.video.mock_search import mock_search
-        body = request.get_json(silent=True) or {}
+        body = _with_title_identity(get_video_db(), request.get_json(silent=True) or {})
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
         source = str(body.get("source") or "").lower()
@@ -1129,6 +1266,12 @@ def register_routes(bp):
             if note:
                 out["note"] = note
             return jsonify(out)
+        # no source is not a demo. the season-pack and whole-show searches sent
+        # none and the user got placeholder releases marked DEMO DATA instead of
+        # their indexers (SeadogsBooty). say what's missing instead.
+        if not source:
+            return jsonify({"queries": queries,
+                            "error": "Pick a download source to search on Settings → Downloads."})
         # remaining mock sources (e.g. youtube placeholder) resolve in one shot
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                           episode=want_episode, season_end=season_end, source=source)
@@ -1569,9 +1712,16 @@ def register_routes(bp):
         dl_id = request.args.get("id")
         if dl_id:
             try:
-                return jsonify({"download": db.get_video_download(int(dl_id))})
+                dl = db.get_video_download(int(dl_id))
             except (TypeError, ValueError):
                 return jsonify({"download": None})
+            out = {"download": dl}
+            # chain=1: what was grabbed after this one failed, so the card that
+            # grabbed it can show the replacement (SeadogsBooty)
+            if request.args.get("chain") and dl and dl.get("status") in ("failed", "cancelled"):
+                from core.video.download_monitor import retry_chain
+                out["chain"] = retry_chain(db, dl)
+            return jsonify(out)
         media_id = request.args.get("media_id")
         if media_id:
             media_source = request.args.get("media_source")
@@ -1582,6 +1732,26 @@ def register_routes(bp):
             # download (or else the most recent) for this title is simply match[0].
             return jsonify({"download": match[0] if match else None})
         return jsonify({"download": None})
+
+    @bp.route("/search-filters", methods=["GET"])
+    def video_search_filters():
+        """This profile's saved manual-search filters (SeadogsBooty)."""
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id
+        from core.video import search_filters
+        return jsonify({"filters": search_filters.load(get_video_db(), int(get_current_profile_id() or 1))})
+
+    @bp.route("/search-filters", methods=["PUT"])
+    def video_search_filters_save():
+        """Replace this profile's saved filters with the posted list (cleaned:
+        unknown fields and operators are dropped, a filter needs a name)."""
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id
+        from core.video import search_filters
+        body = request.get_json(silent=True) or {}
+        saved = search_filters.save(get_video_db(), int(get_current_profile_id() or 1),
+                                    body.get("filters"))
+        return jsonify({"ok": True, "filters": saved})
 
     @bp.route("/downloads/cancel", methods=["POST"])
     def video_downloads_cancel():
@@ -1594,7 +1764,13 @@ def register_routes(bp):
             return jsonify({"ok": False, "error": "Download not found."}), 404
         if dl["status"] in ("completed", "failed", "cancelled"):
             return jsonify({"ok": True, "already": True})
-        cancel_download(dl.get("username"), dl.get("filename"))   # best-effort; mark regardless
+        if dl.get("source") in ("torrent", "usenet"):
+            # the client kept downloading a cancelled grab to the end, and
+            # nothing would ever import it. unfinished, so its files go too
+            from core.video.client_grab import remove as remove_client_job
+            remove_client_job(dl.get("source"), dl.get("client_ref"), delete_files=True)
+        else:
+            cancel_download(dl.get("username"), dl.get("filename"))   # best-effort; mark regardless
         import time
         db.update_video_download(dl["id"], status="cancelled", error="Cancelled",
                                  completed_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
@@ -1640,10 +1816,41 @@ def register_routes(bp):
         ensure_started(get_video_db)
         return jsonify({"ok": True})
 
+    @bp.route("/downloads/remove", methods=["POST"])
+    def video_downloads_remove():
+        """Take one failed or cancelled row off the list without retrying it.
+        Live rows, finished rows and import_failed rows (Manual import's) are
+        refused and left alone. History is untouched."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        try:
+            dl_id = int(body.get("id"))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Missing download id."}), 400
+        db = get_video_db()
+        dl = db.get_video_download(dl_id)
+        if not dl:
+            return jsonify({"ok": False, "error": "Download not found."}), 404
+        if not db.remove_video_download(dl_id):
+            return jsonify({"ok": False,
+                            "error": "Only failed or cancelled downloads can be removed."}), 409
+        return jsonify({"ok": True})
+
     @bp.route("/downloads/clear", methods=["POST"])
     def video_downloads_clear():
+        """Clear finished (completed) rows. ``scope: "failed"`` clears only
+        failed and cancelled rows; ``scope: "everything"`` clears both.
+        import_failed rows are never cleared here -- they leave through
+        Manual import."""
         from . import get_video_db
-        return jsonify({"cleared": get_video_db().clear_finished_video_downloads()})
+        body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        scope = body.get("scope")
+        if scope == "failed":
+            return jsonify({"cleared": db.clear_failed_video_downloads()})
+        if scope == "everything":
+            return jsonify({"cleared": db.clear_everything_video_downloads()})
+        return jsonify({"cleared": db.clear_finished_video_downloads()})
 
     @bp.route("/downloads/youtube-quality", methods=["GET"])
     def video_youtube_quality():

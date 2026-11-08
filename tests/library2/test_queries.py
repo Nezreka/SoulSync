@@ -91,8 +91,10 @@ def test_metadata_scan_status_no_file_is_pending():
 def test_list_artists_stats(imported_conn):
     artists, total = Q.list_artists(imported_conn)
     by_name = {a["name"]: a for a in artists}
-    # Drake (legacy) + Wizkid (featured) both surface.
-    assert total == 2
+    # the Artists index lists album artists, as 3.6.1's did: Drake. Wizkid is
+    # only featured on Drake's album, so he has a page (in the library) but
+    # no index entry; on a big library guests outnumbered album artists 4:1
+    assert total == 1
     drake = by_name["Drake"]
     assert drake["album_count"] == 1
     assert drake["single_count"] == 1
@@ -103,12 +105,40 @@ def test_list_artists_stats(imported_conn):
     assert drake["track_count"] == 2
     assert drake["tracks_present"] == 2
     assert drake["tracks_missing"] == 0
-    # Wizkid shows the one track it's credited on (multi-artist via junction).
-    assert by_name["Wizkid"]["track_count"] == 1
-    assert by_name["Wizkid"]["album_count"] == 1
+    assert "Wizkid" not in by_name
+    wizkid = imported_conn.execute("SELECT id FROM lib2_artists WHERE name='Wizkid'").fetchone()[0]
+    assert Q.get_artist(imported_conn, wizkid)["in_library"] is True
     # I8: disk-space roll-up — both of Drake's present files (5000 bytes each
     # per the legacy seed), Hotline Bling has no file so contributes nothing.
     assert drake["total_size_bytes"] == 10000
+
+
+def test_list_artists_takes_a_guest_on_a_wanted_track_but_not_on_an_unwanted_one(imported_conn):
+    # Akon featured on a monitored Michael Jackson album: a featured artist is
+    # in the library, file or not. A guest on a track nobody wants, with no
+    # file here, is only a catalogue row: opened from a search, it is read
+    # from the provider instead of having its discography written in.
+    hotline = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE title='Hotline Bling'").fetchone()[0]
+    guest = imported_conn.execute(
+        "INSERT INTO lib2_artists(name) VALUES('Rihanna')").lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position)"
+        " VALUES(?, ?, 'featured', 1)", (hotline, guest))
+
+    def listed():
+        return {a["name"] for a in Q.list_artists(imported_conn)[0]}
+
+    assert "Rihanna" not in listed()
+    assert Q.get_artist(imported_conn, guest)["in_library"] is False
+
+    imported_conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (hotline,))
+    imported_conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (hotline,))
+
+    # in the library (its page, search), but the Artists index lists album
+    # artists only: a guest is not one
+    assert "Rihanna" not in listed()
+    assert Q.get_artist(imported_conn, guest)["in_library"] is True
 
 
 def test_queries_project_media_server_recognition_badges(imported_conn):
@@ -152,7 +182,7 @@ def test_list_artists_materializes_requested_page_before_catalog_rollups(
         if "page_artists AS MATERIALIZED" in statement
     )
     assert len(artists) == 1
-    assert total == 2
+    assert total == 1
     assert rollup_sql.index("page_artists AS MATERIALIZED") < rollup_sql.index(
         "artist_albums AS"
     )
@@ -435,14 +465,17 @@ def test_get_artist_groups_albums_and_singles(imported_conn):
 
 def test_featured_artist_detail_includes_its_library_appearance(imported_conn):
     """A credited artist must not be an empty/dead detail page while its
-    overview card already counts the credited track."""
+    overview card already counts the credited track. A release they only
+    guest on is reached, but as an appearance: putting it in their albums
+    filed SZA's SOS and Taylor Swift's 1989 among Kendrick Lamar's own."""
     wizkid_id = imported_conn.execute(
         "SELECT id FROM lib2_artists WHERE name='Wizkid'"
     ).fetchone()[0]
 
     data = Q.get_artist(imported_conn, wizkid_id)
 
-    assert [album["title"] for album in data["albums"]] == ["Views"]
+    assert data["albums"] == []
+    assert [album["title"] for album in data["appears_on"]] == ["Views"]
 
 
 def test_featured_artist_read_model_repairs_pre_fix_missing_album_junction(imported_conn):
@@ -456,12 +489,9 @@ def test_featured_artist_read_model_repairs_pre_fix_missing_album_junction(impor
         "DELETE FROM lib2_album_artists WHERE artist_id=?", (wizkid_id,)
     )
 
-    artists, _total = Q.list_artists(imported_conn)
-    wizkid = next(artist for artist in artists if artist["id"] == wizkid_id)
     data = Q.get_artist(imported_conn, wizkid_id)
 
-    assert wizkid["album_count"] == 1
-    assert [album["title"] for album in data["albums"]] == ["Views"]
+    assert [album["title"] for album in data["appears_on"]] == ["Views"]
 
 
 # --- §40 alias registry -------------------------------------------------------
@@ -484,7 +514,7 @@ def test_list_artists_hides_alias_member_rows(imported_conn):
     assert "Drake" in names
     assert "Drake (Alias)" not in names
     assert alias_id not in {a["id"] for a in artists}
-    assert total == 2  # Drake + Wizkid, same as before linking — alias not counted twice
+    assert total == 1  # Drake, same as before linking — alias not counted twice
 
 
 def test_list_artists_search_and_totals_include_alias_members(imported_conn):
@@ -1144,7 +1174,7 @@ def test_list_artists_can_skip_the_disk_space_rollup(imported_conn):
     assert "artist_size" not in rollup_sql
 
     by_name = {a["name"]: a for a in artists}
-    assert total == 2
+    assert total == 1
     # Everything the collapsed list actually renders is unchanged.
     assert by_name["Drake"]["album_count"] == 1
     assert by_name["Drake"]["single_count"] == 1
@@ -1172,3 +1202,87 @@ def test_list_artists_folds_only_page_aliases(imported_conn):
     )
     assert "IN (SELECT id FROM page_artists)" in rollup_sql
     assert artists[0]["album_count"] == 1
+
+
+def test_a_guest_spot_is_an_appearance_and_a_collaboration_is_their_own(imported_conn):
+    """Kendrick Lamar's page listed every album he guests on as his own. The
+    album junction files each non-main track artist as "featured", the
+    co-headliner of a collaboration and a one-verse guest alike, so the
+    track credits decide: leading at least half the tracks is their own."""
+    from tests import lib2_seed
+    host = lib2_seed.artist(imported_conn, 'Host')
+    guest = lib2_seed.artist(imported_conn, 'Guest')
+    for n in range(4):
+        tid = lib2_seed.track(imported_conn, 'Host', 'Hosted', f'Song {n}', track_number=n + 1)
+        if n == 0:
+            imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                                  "VALUES (?, ?, 'featured', 1)", (tid, guest))
+    for n in range(2):
+        tid = lib2_seed.track(imported_conn, 'Host', 'Together', f'Duet {n}', track_number=n + 1)
+        imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                              "VALUES (?, ?, 'primary', 1)", (tid, guest))
+    from core.library2.importer import _rebuild_album_artist_credits
+    albums = {r[0] for r in imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title IN ('Hosted', 'Together')")}
+    _rebuild_album_artist_credits(imported_conn.cursor(), albums)
+
+    data = Q.get_artist(imported_conn, guest)
+
+    assert [a["title"] for a in data["albums"]] == ["Together"]
+    assert [a["title"] for a in data["appears_on"]] == ["Hosted"]
+    # the guest's own tracks there, not the four on the host's album
+    assert (data["guest_track_count"], data["guest_release_count"]) == (1, 1)
+    # and the host's page is untouched
+    host_view = Q.get_artist(imported_conn, host)
+    assert {a["title"] for a in host_view["albums"]} >= {"Hosted", "Together"}
+
+
+
+def test_a_split_single_appears_on_the_second_artists_page(imported_conn):
+    """#2003: one side each is exactly half. the release is the first
+    credited artist's, and appears on the other's page, not in their Singles."""
+    from tests import lib2_seed
+    lib2_seed.artist(imported_conn, 'Lead')
+    other = lib2_seed.artist(imported_conn, 'Other')
+    lib2_seed.track(imported_conn, 'Lead', 'Lead versus Other', 'Side A', track_number=1,
+                    album_cols={'album_type': 'single'})
+    side_b = lib2_seed.track(imported_conn, 'Lead', 'Lead versus Other', 'Side B', track_number=2)
+    imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                          "VALUES (?, ?, 'primary', 0)", (side_b, other))
+    from core.library2.importer import _rebuild_album_artist_credits
+    album = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Lead versus Other'").fetchone()[0]
+    _rebuild_album_artist_credits(imported_conn.cursor(), {album})
+
+    data = Q.get_artist(imported_conn, other)
+
+    assert data["singles"] == [] and data["albums"] == []
+    assert [a["title"] for a in data["appears_on"]] == ["Lead versus Other"]
+
+
+def test_a_joint_albums_second_primary_artist_is_listed(imported_conn):
+    """the index lists release artists: the album's primary artist, and a
+    primary album artist on a joint album too. Only featured guests drop out."""
+    views = imported_conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    partner = imported_conn.execute("INSERT INTO lib2_artists(name) VALUES('Future')").lastrowid
+    imported_conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')",
+                          (views, partner))
+    names = {a["name"] for a in Q.list_artists(imported_conn)[0]}
+    assert {"Drake", "Future"} <= names and "Wizkid" not in names
+
+
+def test_library_index_membership_searches_each_ownership_branch_by_index(imported_conn):
+    # "primary_artist_id = x OR a credit names x" inside one EXISTS forced a
+    # scan of every album per artist: minutes on a big library, so the
+    # Library page timed out (Nov 4 2026). each branch must start from its index.
+    from core.library2.sql_util import library_index_artist_ids_sql
+
+    plan = " | ".join(
+        str(row[-1])
+        for row in imported_conn.execute(
+            "EXPLAIN QUERY PLAN " + library_index_artist_ids_sql()
+        )
+    )
+    assert "SCAN owned_al" not in plan, plan
+    assert "INDEX idx_lib2_albums_artist (primary_artist_id=?)" in plan, plan
+    assert "INDEX idx_lib2_album_artists_artist (artist_id=?)" in plan, plan

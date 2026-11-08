@@ -573,22 +573,6 @@ def _score_streaming_candidates(results, spotify_track, why=None):
     scored = []
     _strict_duration_sources = {'tidal', 'qobuz', 'hifi', 'deezer_dl', 'amazon'}
     for r in results:
-        if (
-            r.username in _strict_duration_sources
-            and _duration_mismatch_exceeds_integrity_tolerance(expected_duration, r.duration or 0)
-        ):
-            logger.info(
-                "[%s] Rejecting candidate due to duration mismatch before download: "
-                "expected %.1fs, candidate %.1fs",
-                source_label,
-                expected_duration / 1000.0,
-                (r.duration or 0) / 1000.0,
-            )
-            if why is not None:
-                _note(why, r, 'duration_mismatch',
-                      f"{_fmt_dur(r.duration)} vs expected {_fmt_dur(expected_duration)}")
-            continue
-
         # Score using matching engine's generic scorer (same weights as Soulseek).
         if r.username in ('torrent', 'usenet'):
             release_title = (getattr(r, '_source_metadata', None) or {}).get('release_title')
@@ -796,6 +780,26 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                           f"{_cand_artist_raw or 'no artist'} vs {', '.join(expected_artists) or '?'}",
                           confidence)
                 continue
+
+        # the length check comes after the identity checks (#1980). it used to
+        # run first, so on a strict source every other artist's song of the
+        # same name was filed as "wrong length", never "wrong artist", and the
+        # one right-artist version of a different length was lost among them
+        if (
+            r.username in _strict_duration_sources
+            and _duration_mismatch_exceeds_integrity_tolerance(expected_duration, r.duration or 0)
+        ):
+            logger.info(
+                "[%s] Rejecting candidate due to duration mismatch before download: "
+                "expected %.1fs, candidate %.1fs",
+                source_label,
+                expected_duration / 1000.0,
+                (r.duration or 0) / 1000.0,
+            )
+            if why is not None:
+                _note(why, r, 'duration_mismatch',
+                      f"{_fmt_dur(r.duration)} vs expected {_fmt_dur(expected_duration)}")
+            continue
 
         r.confidence = confidence
         r.version_type = 'wrong_version' if is_wrong_version else match_type

@@ -463,6 +463,9 @@ def _seed(db):
                 " server_id, server_path) VALUES ('track', 1, 'plex', 'k1', '/music/song-one.flac')")
     cur.execute("INSERT INTO lib2_tracks (id, album_id, title, server_source)"
                 " VALUES (99, 77, 'Numeric Song', 'plex')")
+    # the v1 library lists what you have: the numeric album has a file too
+    cur.execute("INSERT INTO lib2_track_files (track_id, path, size, is_primary, file_state)"
+                " VALUES (99, '/Media/Music/numeric-song.flac', 1000, 1, 'active')")
     cur.executemany(
         "INSERT INTO lib2_provider_attempts (entity_type, entity_id, service, status,"
         " last_attempted_at) VALUES (?, ?, ?, ?, ?)",
@@ -707,3 +710,77 @@ def test_an_old_id_two_rows_answer_to_is_refused_not_guessed(db, client):
     resp = client.get("/api/v1/library/artists/dup")
     assert resp.status_code == 409
     assert resp.get_json()["error"]["code"] == "AMBIGUOUS_ID"
+
+
+def test_the_library_lists_only_albums_you_have(client, db):
+    """lib2_albums also holds discography and wishlist releases; the v1
+    library (and its recently added) lists the owned library, as 3.6.1 did."""
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, server_source, added_at)"
+                 " VALUES (500, 42, 'Discography Only', 'plex', '2099-01-01 00:00:00')")
+    conn.commit()
+    conn.close()
+    listed = {a["title"] for a in client.get("/api/v1/library/albums").get_json()["data"]["albums"]}
+    assert "Discography Only" not in listed and "Numeric Album" in listed
+    by_artist = client.get("/api/v1/library/albums?artist_id=42").get_json()["data"]["albums"]
+    assert [a["title"] for a in by_artist] == ["Numeric Album"]
+    recent = client.get("/api/v1/library/recently-added?type=albums").get_json()["data"]
+    items = recent.get("items") or recent.get("albums") or recent
+    assert "Discography Only" not in {a.get("title") for a in items}
+
+
+def test_playlist_tracks_carry_the_ids_every_other_v1_route_shows(client, db, monkeypatch):
+    """found in the second #1062 review: the curated and mirrored playlist
+    routes returned bare catalogue ids, which /library/tracks/<id> reads as
+    the old ids first (wrong track, or a 409). they show the v1 ids now."""
+    rows = [db.api_get_track(1), db.api_get_track(99)]
+    monkeypatch.setattr(db, "api_get_curated_playlist_tracks", lambda pid, profile_id=None: rows)
+    curated = client.get("/api/v1/library/playlists/5/tracks").get_json()["data"]["tracks"]
+
+    monkeypatch.setattr(db, "get_mirrored_playlist_tracks", lambda pid, profile_id=None: [
+        {"source_track_id": "x1", "track_name": "Song One"}, {"track_name": "Numeric Song"}])
+    monkeypatch.setattr(db, "api_get_track_by_external_id", lambda sid: rows[0] if sid == "x1" else None)
+    monkeypatch.setattr(db, "api_find_track_by_title_artist", lambda title, artist: rows[1])
+    mirrored = client.get("/api/v1/library/mirrored-playlists/5/tracks").get_json()["data"]["tracks"]
+
+    for tracks in (curated, mirrored):
+        assert [t["id"] for t in tracks] == ["tr1::soulsync", "99"]
+        for t in tracks:  # and each id opens that same track
+            assert client.get(f"/api/v1/library/tracks/{t['id']}").get_json()["data"]["track"]["title"] \
+                == t["title"]
+
+
+def test_album_copyright_comes_from_the_tidal_or_qobuz_payload(client, db):
+    """found in the second #1062 review: 3.6.1 kept album copyright in a
+    column the Tidal/Qobuz workers filled; lib2 keeps it in their payload and
+    v1 served null"""
+    conn = db._get_connection()
+    enrichment = json.loads(conn.execute("SELECT enrichment FROM lib2_albums WHERE id=1").fetchone()[0])
+    enrichment["qobuz"] = {"copyright": "(P) 1999 Test Label"}
+    conn.execute("UPDATE lib2_albums SET enrichment=? WHERE id=1", (json.dumps(enrichment),))
+    conn.commit()
+    conn.close()
+    album = client.get("/api/v1/library/albums/al1::soulsync").get_json()["data"]["album"]
+    assert album["copyright"] == "(P) 1999 Test Label"
+
+
+def test_lookup_finds_an_id_stored_as_a_json_number(db, client):
+    conn = db._get_connection()
+    conn.execute("UPDATE lib2_tracks SET external_ids=json_set(COALESCE(external_ids,'{}'),"
+                 " '$.deezer', 3135556) WHERE id=1")
+    conn.commit()
+    conn.close()
+    resp = client.get("/api/v1/library/lookup?type=track&provider=deezer&id=3135556")
+    assert resp.status_code == 200
+
+
+def test_lookup_never_returns_a_wanted_row_you_do_not_have(db, client):
+    """3.6.1's tables held owned rows only; v2 also holds wanted, discography
+    and wishlist rows, which the lookup returned as the library's track."""
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_tracks (id, album_id, title, external_ids)"
+                 " VALUES (500, 1, 'Wanted Song', '{\"deezer\": \"999\"}')")
+    conn.commit()
+    conn.close()
+    resp = client.get("/api/v1/library/lookup?type=track&provider=deezer&id=999")
+    assert resp.status_code == 404

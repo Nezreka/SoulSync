@@ -69,6 +69,7 @@ class UsenetJobSnapshot:
     category: Optional[str]
     save_path: Optional[str]
     error: Optional[str]
+    removed_by_user: bool = False
 
     @classmethod
     def from_status(cls, status: UsenetStatus) -> "UsenetJobSnapshot":
@@ -82,6 +83,7 @@ class UsenetJobSnapshot:
             category=(str(status.category).strip() if status.category is not None else None),
             save_path=(str(status.save_path).strip() if status.save_path else None),
             error=(redact_sensitive_text(status.error) if status.error else None),
+            removed_by_user=bool(getattr(status, "removed_by_user", False)),
         )
 
 
@@ -232,6 +234,25 @@ def _adoption_pairs(
     return pairs, sorted(set(ambiguous))
 
 
+def _isolated(conn: Any, download_id: str, apply: Any, *args: Any, **kwargs: Any) -> bool:
+    """Apply one grab's terminal transition under its own savepoint.
+
+    The snapshot is applied in one transaction, and a grab whose request has
+    already moved on (no longer ``grabbing``) raises. Unguarded, that rolled
+    back every other grab's transition with it, on every cycle. Now it rolls
+    back alone, says so, and the rest stand."""
+    conn.execute("SAVEPOINT acquisition_grab")
+    try:
+        apply(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - one grab never blocks the others
+        conn.execute("ROLLBACK TO SAVEPOINT acquisition_grab")
+        conn.execute("RELEASE SAVEPOINT acquisition_grab")
+        logger.warning("Usenet reconcile: grab %s left as it was: %s", download_id, exc)
+        return False
+    conn.execute("RELEASE SAVEPOINT acquisition_grab")
+    return True
+
+
 def reconcile_usenet_snapshot(
     conn: Any,
     snapshot: UsenetClientSnapshot,
@@ -368,24 +389,23 @@ def reconcile_usenet_snapshot(
                     update_grab(conn, download_id, last_client_state=job.state)
                     updated.append(download_id)
                 continue
-            record_download_completed(
-                conn,
-                download_id,
-                output_path=job.save_path,
-                client_state=job.state,
-            )
-            completed.append(download_id)
+            if _isolated(conn, download_id, record_download_completed,
+                         conn, download_id, output_path=job.save_path, client_state=job.state):
+                completed.append(download_id)
             continue
 
         if job.state == "failed":
-            record_grab_outcome(
-                conn,
-                download_id,
-                completed=False,
-                error=job.error or "Usenet client reported failure",
-                failure_kind="candidate",
-            )
-            failed.append(download_id)
+            # a job someone deleted in the client ends the grab, but the
+            # release did nothing wrong: no blocklist for it
+            if _isolated(conn, download_id, record_grab_outcome,
+                         conn,
+                         download_id,
+                         completed=False,
+                         error=job.error or (
+                             "Removed in the usenet client" if job.removed_by_user
+                             else "Usenet client reported failure"),
+                         failure_kind="runtime" if job.removed_by_user else "candidate"):
+                failed.append(download_id)
             continue
 
         if grab.get("last_client_state") != job.state:

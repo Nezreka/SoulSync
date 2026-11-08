@@ -405,6 +405,8 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
             "air_date": ctx.get("air_date"),
             "quality": quality, "resolution": parsed.get("resolution"),
             "source": parsed.get("source"), "codec": parsed.get("codec"),
+            "audio_languages": (probe or {}).get("audio_languages"),
+            "subtitle_languages": (probe or {}).get("subtitle_languages"),
             "tmdbid": ids.get("tmdb_id"), "imdbid": ids.get("imdb_id"),
             "tvdbid": ids.get("tvdb_id") if scope == "episode" else None,
         }

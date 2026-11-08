@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 
 import { AudiobookRouteBadge } from '@/features/audiobook-routes/audiobook-route-badge';
 import { useRoutedArtists } from '@/features/audiobook-routes/audiobook-routes.queries';
+import { useFeatureOn } from '@/platform/features';
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 import { ActionMenu } from '@/routes/artist-detail/-ui/action-menu';
 
@@ -22,6 +23,8 @@ import {
   watchlistGlobalConfigQueryOptions,
   watchlistLabelsQueryOptions,
   watchlistPodcastsQueryOptions,
+  watchlistFoundQueryOptions,
+  watchlistLastRunQueryOptions,
   watchlistRecentReleasesQueryOptions,
   watchlistScanStatusQueryOptions,
 } from '../-watchlist.api';
@@ -34,7 +37,6 @@ import {
   formatArtistCount,
   formatCountdown,
   formatRelativeScanTime,
-  formatTimeAgo,
   primaryArtistId,
   selectedVisibleIds,
   sortArtists,
@@ -44,16 +46,19 @@ import {
 import { useCountdown, useLiveWatchlistScan } from '../-watchlist.scan';
 import {
   WATCHLIST_SORT_VALUES,
-  type ProviderSearchResult,
   type WatchlistArtist,
+  type WatchlistFoundRelease,
   type WatchlistRecentReleaseRow,
 } from '../-watchlist.types';
+import { fetchLibraryV2Album } from '../../library/-library-v2.api';
+import { albumQueueRows } from '../../library/-library-v2.play';
+import { SourceIcon } from '../../sync/-ui/source-icon';
 import { Route } from '../route';
 import { WatchlistArtistPanel } from './watchlist-artist-panel';
 import { WatchlistAudiobooksTab } from './watchlist-audiobooks-tab';
 import { WatchlistGlobalSettingsModal } from './watchlist-global-settings-modal';
+import home from './watchlist-home.module.css';
 import { WatchlistLabelsTab } from './watchlist-labels-tab';
-import styles from './watchlist-page.module.css';
 import { WatchlistPodcastsTab } from './watchlist-podcasts-tab';
 import { WatchlistScanDeck } from './watchlist-scan-deck';
 
@@ -77,27 +82,6 @@ function daysSince(iso: string | null | undefined): number | null {
   const value = timestampValue(iso);
   if (!value) return null;
   return Math.max(0, Math.floor((Date.now() - value) / 86_400_000));
-}
-
-function releaseTypeText(artist: WatchlistArtist): string {
-  const enabled = [
-    artist.include_albums ? 'Albums' : null,
-    artist.include_eps ? 'EPs' : null,
-    artist.include_singles ? 'Singles' : null,
-  ].filter(Boolean);
-  return enabled.length > 0 ? enabled.join(' / ') : 'None';
-}
-
-function ruleCount(artist: WatchlistArtist): number {
-  return artistPills(artist).length;
-}
-
-function scanFreshnessLabel(artist: WatchlistArtist): string {
-  const days = daysSince(artist.last_scan_timestamp);
-  if (days === null) return 'Needs first scan';
-  if (days === 0) return 'Fresh scan';
-  if (days < 30) return `${days}d since scan`;
-  return 'Scan stale';
 }
 
 function providerLabel(source: string | null | undefined): string {
@@ -136,6 +120,9 @@ export function WatchlistPage() {
   const artistsQuery = useQuery(watchlistArtistsQueryOptions(profileId));
   const globalConfigQuery = useQuery(watchlistGlobalConfigQueryOptions(profileId));
   const recentReleasesQuery = useQuery(watchlistRecentReleasesQueryOptions(profileId, 12));
+  const foundQuery = useQuery(watchlistFoundQueryOptions(profileId));
+  const lastRunQuery = useQuery(watchlistLastRunQueryOptions(profileId));
+  const [pickMode, setPickMode] = useState(false);
 
   const artists = useMemo(() => artistsQuery.data ?? [], [artistsQuery.data]);
   // One lookup for the whole page; the cards only read the result.
@@ -174,6 +161,8 @@ export function WatchlistPage() {
   type AttentionFilterKey = 'all' | 'fresh' | 'never' | 'stale' | 'custom';
   const [attentionFilter, setAttentionFilter] = useState<AttentionFilterKey>('all');
   const [isAddArtistOpen, setIsAddArtistOpen] = useState(false);
+  /** the Sort by / Show menu */
+  const [viewOpen, setViewOpen] = useState(false);
 
   const filteredByAttention = useMemo(() => {
     if (attentionFilter === 'fresh') {
@@ -215,6 +204,9 @@ export function WatchlistPage() {
   );
 
   const isLabelsTab = search.tab === 'labels';
+  // podcasts / audiobooks switched off (#1909) drop their tab
+  const podcastsOn = useFeatureOn('podcasts');
+  const audiobooksOn = useFeatureOn('audiobooks');
   const isPodcastsTab = search.tab === 'podcasts';
   const isAudiobooksTab = search.tab === 'audiobooks';
 
@@ -395,39 +387,144 @@ export function WatchlistPage() {
     batchRemove.mutate([artistId]);
   };
 
-  const lastScanText = useMemo(() => {
-    if (!scanStatus?.completed_at || !scanStatus.summary) return null;
-    const found = scanStatus.summary.new_tracks_found || 0;
-    const added = scanStatus.summary.tracks_added_to_wishlist || 0;
-    return `Last scan: ${formatTimeAgo(scanStatus.completed_at)} — ${found} new track${
-      found !== 1 ? 's' : ''
-    } found, ${added} added to wishlist`;
-  }, [scanStatus?.completed_at, scanStatus?.summary]);
+  const foundReleases = foundQuery.data ?? [];
+  // the newest find per artist; the list is newest first
+  const foundByArtist = new Map<string, string>();
+  for (const release of foundReleases) {
+    const key = release.artist_name.toLowerCase();
+    if (!foundByArtist.has(key)) foundByArtist.set(key, release.album_name);
+  }
+  const picking = pickMode || selection.selectedCount > 0;
+  const nextScan = nextScanText(countdown);
+  const showFilters: { id: AttentionFilterKey; label: string; count: number }[] = [
+    { id: 'all', label: 'All', count },
+    { id: 'fresh', label: 'New releases', count: recentReleases.length },
+    { id: 'never', label: 'Never scanned', count: neverScanned },
+    { id: 'stale', label: 'Not scanned in 30 days', count: staleArtists },
+    { id: 'custom', label: 'Own rules', count: customRuleArtists },
+  ];
+  const openArtistByName = (name: string | null | undefined) => {
+    const match = artists.find(
+      (artist) => artist.artist_name.toLowerCase() === (name ?? '').toLowerCase(),
+    );
+    const id = match ? primaryArtistId(match) : null;
+    if (id) {
+      void navigate({ search: (prev) => ({ ...prev, detailId: id, configId: undefined }) });
+    }
+  };
+  const setTab = (tab: 'artists' | 'labels' | 'podcasts' | 'audiobooks') =>
+    void navigate({ search: (prev) => ({ ...prev, tab }) });
+  const sectionTabs: {
+    id: 'artists' | 'labels' | 'podcasts' | 'audiobooks';
+    label: string;
+    count?: number;
+  }[] = [
+    { id: 'artists', label: 'Artists', count },
+    { id: 'labels', label: 'Labels', count: labelsQuery.data ? labelCount : undefined },
+    ...(podcastsOn || isPodcastsTab
+      ? [
+          {
+            id: 'podcasts' as const,
+            label: 'Podcasts',
+            count: podcastsQuery.data ? podcastCount : undefined,
+          },
+        ]
+      : []),
+    ...(audiobooksOn || isAudiobooksTab
+      ? [{ id: 'audiobooks' as const, label: 'Audiobooks' }]
+      : []),
+  ];
 
   return (
-    <div className="page-shell watchlist-page-container">
-      <div className="watchlist-page-header">
-        <div className="watchlist-page-header-left">
-          <h2 className="watchlist-page-title">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="rgb(var(--accent-rgb))">
-              <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" />
-            </svg>
-            Watchlist
-          </h2>
-          <div className="watchlist-page-meta">
-            <span className="wl-meta-chip">{headerCount}</span>
-            <span className="wl-meta-chip wl-meta-chip--accent">{formatCountdown(countdown)}</span>
-          </div>
+    <div className="page-shell">
+      <header className={home.top}>
+        <div className={home.topText}>
+          <h2 className={home.title}>Watchlist</h2>
+          {/* one line that says where things stand: what is watched, when the
+              next scan runs, what the last one found */}
+          <p className={home.sub}>{headerCount}</p>
         </div>
 
         {/* #1822: one loud action. scan is why you come here; adding an artist
-            is the other everyday job. everything monthly sits in the menu. */}
-        <div className="watchlist-page-actions">
+            is the other everyday job. everything monthly sits in Tools. */}
+        <div className={home.topActions}>
+          {/* Origins, History and Blocklist open modals owned by other vanilla
+              files (origin-history.js, watchlist-history.js, blocklist.js) and
+              shared with other pages, so they are invoked as globals. */}
+          <ActionMenu
+            className="wl-more-menu"
+            align="right"
+            items={[
+              {
+                key: 'similar',
+                label: toolLabel(
+                  similarRunning ? 'Updating similar artists…' : 'Update similar artists',
+                  'Refresh who sounds like the artists you watch.',
+                ),
+                disabled: similarRunning || startSimilar.isPending || isScanning,
+                onSelect: () => startSimilar.mutate(),
+              },
+              {
+                key: 'settings',
+                label: toolLabel(
+                  'Watchlist defaults',
+                  'The rules every artist follows by default.',
+                ),
+                onSelect: () => void navigate({ search: (prev) => ({ ...prev, settings: true }) }),
+              },
+              {
+                key: 'origins',
+                label: toolLabel('Download origins', 'Every track your watchlist downloaded.'),
+                title: 'See every track your watchlist downloaded',
+                onSelect: () => window.openDownloadOriginsModal?.('watchlist'),
+              },
+              {
+                key: 'history',
+                label: toolLabel('Scan history', 'Past scans and what each added to the wishlist.'),
+                title: 'Every past scan and the tracks it added to the wishlist',
+                onSelect: () => window.openWatchlistHistoryModal?.(),
+              },
+              {
+                key: 'blocklist',
+                label: toolLabel('Blocklist', 'Artists, albums or tracks never to download.'),
+                title: 'Block artists, albums or tracks from ever being downloaded',
+                onSelect: () => window.openBlocklistModal?.('artist'),
+              },
+            ]}
+            trigger={(props) => (
+              <button
+                type="button"
+                className={home.tools}
+                title="Similar artists, defaults, origins, history, blocklist"
+                {...props}
+                ref={props.ref as (el: HTMLButtonElement | null) => void}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="18"
+                  height="18"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M4 7h10" />
+                  <path d="M18 7h2" />
+                  <circle cx="16" cy="7" r="2" />
+                  <path d="M4 17h4" />
+                  <path d="M12 17h8" />
+                  <circle cx="10" cy="17" r="2" />
+                </svg>
+                Tools
+              </button>
+            )}
+          />
           <button
             type="button"
-            className={`wl-chip wl-chip--slate${isAddArtistOpen ? ' wl-chip--active' : ''}`}
+            className={home.ghost}
             aria-expanded={isAddArtistOpen}
-            onClick={() => setIsAddArtistOpen((prev) => !prev)}
+            onClick={() => setIsAddArtistOpen(true)}
           >
             <svg
               width="16"
@@ -435,29 +532,31 @@ export function WatchlistPage() {
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2.5"
+              strokeWidth="2.6"
               strokeLinecap="round"
-              strokeLinejoin="round"
+              aria-hidden="true"
             >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
             </svg>
-            {isAddArtistOpen ? 'Close search' : 'Add artist'}
+            Add artist
           </button>
-
           {isScanning ? (
             <button
               type="button"
-              className="wl-chip wl-chip--red"
+              className={home.ghost}
               disabled={cancelScan.isPending}
               onClick={() => cancelScan.mutate()}
             >
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                <rect x="1" y="1" width="10" height="10" rx="2" fill="currentColor" />
+              </svg>
               {cancelScan.isPending ? 'Stopping…' : 'Stop scan'}
             </button>
           ) : (
             <button
               type="button"
-              className="wl-chip wl-chip--cta"
+              className={home.cta}
               // Also blocked while similar-artists runs: both drive the same worker.
               disabled={startScan.isPending || similarRunning}
               title="Check every watched artist for new releases"
@@ -472,330 +571,353 @@ export function WatchlistPage() {
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                aria-hidden="true"
               >
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
+                <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" />
+                <path d="M4 4v4h4" />
+                <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" />
+                <path d="M20 20v-4h-4" />
               </svg>
               {startScan.isPending
                 ? 'Starting…'
                 : similarRunning
                   ? 'Updating similar artists…'
                   : 'Scan now'}
-              <span className="wl-chip-shimmer" />
             </button>
           )}
-
-          {/* Origins, History and Blocklist open modals owned by other vanilla
-              files (origin-history.js, watchlist-history.js, blocklist.js) and
-              shared with other pages, so they are invoked as globals. */}
-          <ActionMenu
-            className="wl-more-menu"
-            items={[
-              {
-                key: 'similar',
-                label: similarRunning ? 'Updating similar artists…' : 'Update similar artists',
-                disabled: similarRunning || startSimilar.isPending || isScanning,
-                onSelect: () => startSimilar.mutate(),
-              },
-              {
-                key: 'settings',
-                label: 'Watchlist defaults',
-                onSelect: () => void navigate({ search: (prev) => ({ ...prev, settings: true }) }),
-              },
-              {
-                key: 'origins',
-                label: 'Download origins',
-                title: 'See every track your watchlist downloaded',
-                onSelect: () => window.openDownloadOriginsModal?.('watchlist'),
-              },
-              {
-                key: 'history',
-                label: 'Scan history',
-                title: 'Every past scan and the tracks it added to the wishlist',
-                onSelect: () => window.openWatchlistHistoryModal?.(),
-              },
-              {
-                key: 'blocklist',
-                label: 'Blocklist',
-                title: 'Block artists, albums or tracks from ever being downloaded',
-                onSelect: () => window.openBlocklistModal?.('artist'),
-              },
-            ]}
-            trigger={(props) => (
-              <button
-                type="button"
-                className="wl-chip wl-chip--slate wl-chip--more"
-                aria-label="More watchlist actions"
-                title="Similar artists, defaults, origins, history, blocklist"
-                {...props}
-                ref={props.ref as (el: HTMLButtonElement | null) => void}
-              >
-                ⋯
-              </button>
-            )}
-          />
         </div>
-      </div>
+      </header>
 
       {isAddArtistOpen ? (
-        <WatchlistAddArtistSearch
+        <WatchlistAddArtistSheet
           profileId={profileId}
           onAddArtist={(artistId, artistName, source) =>
             addArtist.mutate({ artistId, artistName, source })
           }
           adding={addArtist.isPending}
+          onClose={() => setIsAddArtistOpen(false)}
         />
       ) : null}
 
-      {search.settings ? (
-        <WatchlistGlobalSettingsModal
-          profileId={profileId}
-          initialConfig={globalConfigQuery.data ?? null}
-          onClose={() => void navigate({ search: (prev) => ({ ...prev, settings: false }) })}
-        />
-      ) : null}
+      {/* the panel and the defaults modal still dress themselves from
+          watchlist-premier.css, which scopes its rules (and the drawer's
+          surface colour) under .watchlist-page-container. display: contents
+          keeps that scope without the old page box. */}
+      <div className={`watchlist-page-container ${home.legacyScope}`}>
+        {search.settings ? (
+          <WatchlistGlobalSettingsModal
+            profileId={profileId}
+            initialConfig={globalConfigQuery.data ?? null}
+            onClose={() => void navigate({ search: (prev) => ({ ...prev, settings: false }) })}
+          />
+        ) : null}
 
-      {panelArtistId ? (
-        <WatchlistArtistPanel
-          profileId={profileId}
-          artistId={panelArtistId}
-          initialTab={search.configId ? 'rules' : 'overview'}
-          onClose={() =>
-            void navigate({
-              search: (prev) => ({ ...prev, configId: undefined, detailId: undefined }),
-            })
-          }
-        />
-      ) : null}
-
-      <div className={styles.tabs} role="tablist" aria-label="Watchlist sections">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={search.tab === 'artists'}
-          className={`${styles.tab} ${search.tab === 'artists' ? styles.tabActive : ''}`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'artists' }) })}
-        >
-          Artists
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={search.tab === 'labels'}
-          className={`${styles.tab} ${search.tab === 'labels' ? styles.tabActive : ''}`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'labels' }) })}
-        >
-          Labels
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={search.tab === 'podcasts'}
-          className={`${styles.tab} ${search.tab === 'podcasts' ? styles.tabActive : ''}`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'podcasts' }) })}
-        >
-          Podcasts
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={search.tab === 'audiobooks'}
-          className={`${styles.tab} ${search.tab === 'audiobooks' ? styles.tabActive : ''}`}
-          onClick={() => void navigate({ search: (prev) => ({ ...prev, tab: 'audiobooks' }) })}
-        >
-          Audiobooks
-        </button>
+        {panelArtistId ? (
+          <WatchlistArtistPanel
+            profileId={profileId}
+            artistId={panelArtistId}
+            initialTab={search.configId ? 'rules' : 'overview'}
+            onClose={() =>
+              void navigate({
+                search: (prev) => ({ ...prev, configId: undefined, detailId: undefined }),
+              })
+            }
+          />
+        ) : null}
       </div>
 
-      {scanStatus ? <WatchlistScanDeck frame={scanStatus} /> : null}
+      <div className={home.pills} role="tablist" aria-label="Watchlist sections">
+        {sectionTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={search.tab === tab.id}
+            className={`${home.pill}${search.tab === tab.id ? ` ${home.pillOn}` : ''}`}
+            onClick={() => setTab(tab.id)}
+          >
+            {tab.label}
+            {tab.count !== undefined ? <span className={home.pillCount}>{tab.count}</span> : null}
+          </button>
+        ))}
+      </div>
+
+      {/* live while a scan runs, on every section: a scan covers artists and
+          labels alike. where things stand belongs with the artists. */}
+      {isScanning || (search.tab === 'artists' && count > 0) ? (
+        <WatchlistScanDeck
+          frame={scanStatus ?? null}
+          lastRun={lastRunQuery.data ?? null}
+          nextScan={nextScan}
+          onOpenHistory={() => window.openWatchlistHistoryModal?.()}
+        />
+      ) : null}
 
       {isLabelsTab ? (
         <WatchlistLabelsTab profileId={profileId} />
       ) : isPodcastsTab ? (
-        <WatchlistPodcastsTab profileId={profileId} searchFilter={search.q} />
+        <div className={`watchlist-page-container ${home.legacyScope}`}>
+          <WatchlistPodcastsTab profileId={profileId} searchFilter={search.q} />
+        </div>
       ) : isAudiobooksTab ? (
-        <WatchlistAudiobooksTab searchFilter={search.q} />
+        <div className={`watchlist-page-container ${home.legacyScope}`}>
+          <WatchlistAudiobooksTab searchFilter={search.q} />
+        </div>
+      ) : count === 0 ? (
+        <WatchlistEmptyState onAddArtist={() => setIsAddArtistOpen(true)} />
       ) : (
         <>
-          {lastScanText ? (
-            <div className="watchlist-last-scan-strip">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              <span>{lastScanText}</span>
+          <WatchlistFoundShelf
+            releases={foundReleases}
+            onOpenArtist={openArtistByName}
+            onShowAll={() => window.openWatchlistHistoryModal?.()}
+          />
+          <WatchlistRecentReleasesShelf
+            releases={recentReleases}
+            loading={recentReleasesQuery.isLoading}
+            onOpenArtist={openArtistByName}
+          />
+
+          <section className={home.sect}>
+            <div className={home.sectHead}>
+              <div className={home.sectHeadText}>
+                <h3 className={home.sectTitle}>Your artists</h3>
+                <span className={home.sectCount}>
+                  {search.q.trim() || attentionFilter !== 'all'
+                    ? `${visibleArtists.length} of ${count}`
+                    : count}
+                </span>
+              </div>
             </div>
-          ) : null}
 
-          {count === 0 ? (
-            <WatchlistEmptyState
-              profileId={profileId}
-              onAddArtist={(artistId, artistName, source) =>
-                addArtist.mutate({ artistId, artistName, source })
-              }
-              adding={addArtist.isPending}
-            />
-          ) : (
-            <>
-              <WatchlistAttentionStrip
-                total={count}
-                neverScanned={neverScanned}
-                staleArtists={staleArtists}
-                customRuleArtists={customRuleArtists}
-                recentCount={recentReleases.length}
-                activeFilter={attentionFilter}
-                onSelectFilter={(next) =>
-                  setAttentionFilter((prev) => (prev === next ? 'all' : next))
-                }
-              />
-
-              <WatchlistRecentReleasesPanel
-                releases={recentReleases}
-                loading={recentReleasesQuery.isLoading}
-              />
-
-              <div className="watchlist-toolbar">
-                <div className="watchlist-search-container">
-                  <svg
-                    className="watchlist-search-icon"
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="rgba(255,255,255,0.35)"
-                  >
-                    <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" />
-                  </svg>
-                  <input
-                    type="text"
-                    className="watchlist-search-input"
-                    placeholder="Filter watchlist…"
-                    value={search.q}
-                    onChange={(event) =>
-                      void navigate({
-                        search: (prev) => ({ ...prev, q: event.target.value }),
-                        replace: true,
-                      })
-                    }
-                  />
-                </div>
-                <select
-                  className="watchlist-sort-select"
-                  value={search.sort}
+            <div className={home.bar2}>
+              <label className={home.search}>
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="M20 20l-3.6-3.6" />
+                </svg>
+                <input
+                  type="search"
+                  aria-label="Filter watchlist"
+                  placeholder="Find an artist"
+                  value={search.q}
                   onChange={(event) =>
                     void navigate({
-                      search: (prev) => ({
-                        ...prev,
-                        sort: event.target.value as typeof search.sort,
-                      }),
+                      search: (prev) => ({ ...prev, q: event.target.value }),
+                      replace: true,
                     })
                   }
-                >
-                  {WATCHLIST_SORT_VALUES.map((value) => (
-                    <option key={value} value={value}>
-                      {SORT_LABELS[value]}
-                    </option>
+                />
+              </label>
+              <div className={home.chips} role="group" aria-label="Show">
+                {showFilters
+                  // an empty filter is still offered while it is the one picked
+                  .filter(
+                    (filter) =>
+                      filter.id === 'all' || filter.count > 0 || attentionFilter === filter.id,
+                  )
+                  .map((filter) => (
+                    <button
+                      key={filter.id}
+                      type="button"
+                      aria-pressed={attentionFilter === filter.id}
+                      className={`${home.chip}${attentionFilter === filter.id ? ` ${home.chipOn}` : ''}`}
+                      onClick={() => setAttentionFilter(filter.id)}
+                    >
+                      {filter.label}
+                      {filter.id !== 'all' ? (
+                        <span className={home.chipCount}>{filter.count}</span>
+                      ) : null}
+                    </button>
                   ))}
-                </select>
               </div>
-
-              <div className="watchlist-batch-bar">
-                <label
-                  className="watchlist-select-all-label"
-                  onClick={(event) => event.stopPropagation()}
+              <span className={home.grow} />
+              <div className={`${home.anchor}${viewOpen ? ` ${home.anchorRaised}` : ''}`}>
+                <button
+                  type="button"
+                  className={home.txt}
+                  aria-haspopup="menu"
+                  aria-expanded={viewOpen}
+                  onClick={() => setViewOpen((v) => !v)}
                 >
+                  {SORT_LABELS[search.sort]}
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M6 9l6 6 6-6" />
+                  </svg>
+                </button>
+                {viewOpen ? (
+                  <>
+                    <button
+                      type="button"
+                      className={home.menuScrim}
+                      aria-label="Close menu"
+                      tabIndex={-1}
+                      onClick={() => setViewOpen(false)}
+                    />
+                    <div className={home.menu} role="menu">
+                      <div className={home.menuHead}>Sort by</div>
+                      {WATCHLIST_SORT_VALUES.map((value) => (
+                        <button
+                          key={value}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={search.sort === value}
+                          className={`${home.menuItem}${search.sort === value ? ` ${home.menuItemOn}` : ''}`}
+                          onClick={() => {
+                            setViewOpen(false);
+                            void navigate({ search: (prev) => ({ ...prev, sort: value }) });
+                          }}
+                        >
+                          <span>{SORT_LABELS[value]}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+              {picking ? (
+                <label className={home.txt}>
                   <SelectAllCheckbox
                     checked={selection.allSelected}
                     indeterminate={selection.indeterminate}
                     onChange={toggleSelectAll}
                   />
-                  <span>Select All</span>
+                  Select all
                 </label>
-                <span className="watchlist-batch-count">
-                  {selection.selectedCount > 0 ? `${selection.selectedCount} selected` : ''}
-                </span>
-                {selection.selectedCount > 0 ? (
-                  <button
-                    type="button"
-                    className="btn btn--secondary watchlist-batch-remove-btn"
-                    disabled={batchRemove.isPending}
-                    onClick={() => void onBatchRemove()}
-                  >
-                    Remove Selected
-                  </button>
-                ) : null}
-              </div>
+              ) : (
+                <button
+                  type="button"
+                  className={home.txt}
+                  aria-label="Select artists"
+                  onClick={() => setPickMode(true)}
+                >
+                  Select
+                </button>
+              )}
+            </div>
 
-              <div className="watchlist-command-layout">
-                <div className="watchlist-roster-panel">
-                  <div className="watchlist-roster-head">
-                    <span>Artists</span>
-                    <span>{visibleArtists.length} shown</span>
-                  </div>
-                  <div className="watchlist-artists-grid watchlist-artists-grid--rows">
-                    {visibleArtists.map((artist) => {
-                      const artistId = primaryArtistId(artist);
-                      return (
-                        <WatchlistArtistCard
-                          key={artist.id}
-                          artist={artist}
-                          selected={artistId !== null && selectedIds.has(artistId)}
-                          active={artistId !== null && artistId === panelArtistId}
-                          audiobook={audiobookArtists.has(artist.artist_name)}
-                          onToggleSelect={() => artistId && toggleArtist(artistId)}
-                          onOpenConfig={() =>
-                            artistId &&
-                            void navigate({
-                              search: (prev) => ({
-                                ...prev,
-                                configId: artistId,
-                                detailId: undefined,
-                              }),
-                            })
-                          }
-                          onOpenDetail={() =>
-                            artistId &&
-                            void navigate({
-                              search: (prev) => ({
-                                ...prev,
-                                detailId: artistId,
-                                configId: undefined,
-                              }),
-                            })
-                          }
-                          onOpenFullDetail={() =>
-                            artistId &&
-                            void navigate({
-                              search: (prev) => ({
-                                ...prev,
-                                detailId: artistId,
-                                configId: undefined,
-                              }),
-                            })
-                          }
-                          onRemove={() => {
-                            if (artistId) void onRemoveOne(artistId, artist.artist_name);
-                          }}
-                        />
-                      );
-                    })}
-                  </div>
-                </div>
+            {visibleArtists.length === 0 ? (
+              <div className={home.empty}>
+                <p className={home.emptyText}>
+                  {search.q.trim()
+                    ? `No artist matches “${search.q.trim()}”.`
+                    : 'Nobody here right now.'}
+                </p>
               </div>
-            </>
-          )}
+            ) : (
+              <div className={`wl-roster ${home.grid}${picking ? ` ${home.picking}` : ''}`}>
+                {visibleArtists.map((artist) => {
+                  const artistId = primaryArtistId(artist);
+                  return (
+                    <WatchlistArtistCard
+                      key={artist.id}
+                      artist={artist}
+                      showAdded={search.sort === 'added-newest'}
+                      found={foundByArtist.get(artist.artist_name.toLowerCase())}
+                      selected={artistId !== null && selectedIds.has(artistId)}
+                      active={artistId !== null && artistId === panelArtistId}
+                      audiobook={audiobookArtists.has(artist.artist_name)}
+                      onToggleSelect={() => artistId && toggleArtist(artistId)}
+                      onOpenConfig={() =>
+                        artistId &&
+                        void navigate({
+                          search: (prev) => ({
+                            ...prev,
+                            configId: artistId,
+                            detailId: undefined,
+                          }),
+                        })
+                      }
+                      onOpenDetail={() =>
+                        artistId &&
+                        void navigate({
+                          search: (prev) => ({
+                            ...prev,
+                            detailId: artistId,
+                            configId: undefined,
+                          }),
+                        })
+                      }
+                      onRemove={() => {
+                        if (artistId) void onRemoveOne(artistId, artist.artist_name);
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* the batch bar only once something is picked (#1909) */}
+          {picking ? (
+            <div className={home.selbar} role="toolbar" aria-label="Selected artists">
+              <b>{`${selection.selectedCount} selected`}</b>
+              <button
+                type="button"
+                className={home.sb}
+                onClick={() => toggleSelectAll(!selection.allSelected)}
+              >
+                {selection.allSelected ? 'Clear visible' : 'Select all visible'}
+              </button>
+              <button
+                type="button"
+                className={`${home.sb} ${home.sbDanger}`}
+                disabled={batchRemove.isPending || selection.selectedCount === 0}
+                onClick={() => void onBatchRemove()}
+              >
+                Remove Selected
+              </button>
+              <button
+                type="button"
+                className={home.sb}
+                onClick={() => {
+                  setSelectedIds(new Set());
+                  setPickMode(false);
+                }}
+              >
+                Done
+              </button>
+            </div>
+          ) : null}
         </>
       )}
     </div>
   );
+}
+
+/** A Tools menu entry: its name, and a line saying what it is for. */
+function toolLabel(name: string, desc: string) {
+  return (
+    <span className={home.toolItem}>
+      <span className={home.toolName}>{name}</span>
+      <span className={home.toolDesc}>{desc}</span>
+    </span>
+  );
+}
+
+/** "next scan in 5h 19m", or '' when nothing is scheduled. */
+function nextScanText(seconds: number): string {
+  const text = formatCountdown(seconds);
+  return text.endsWith('--') ? '' : text.replace(/^Next Auto: /, 'in ');
 }
 
 interface WatchlistArtistCardProps {
@@ -804,10 +926,13 @@ interface WatchlistArtistCardProps {
   active: boolean;
   /** Downloads by this artist are filed as audiobooks. */
   audiobook: boolean;
+  /** Recently Added is the sort, so the card says when. */
+  showAdded: boolean;
+  /** the newest release a scan found for this artist, if any */
+  found?: string;
   onToggleSelect: () => void;
   onOpenConfig: () => void;
   onOpenDetail: () => void;
-  onOpenFullDetail: () => void;
   onRemove: () => void;
 }
 
@@ -816,19 +941,45 @@ function WatchlistArtistCard({
   selected,
   active,
   audiobook,
+  showAdded,
+  found,
   onToggleSelect,
   onOpenConfig,
   onOpenDetail,
-  onOpenFullDetail,
   onRemove,
 }: WatchlistArtistCardProps) {
   const pills = artistPills(artist);
   const sources = artistSourceKeys(artist);
   const artistId = primaryArtistId(artist);
+  const custom = hasCustomRules(artist);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const days = daysSince(artist.last_scan_timestamp);
+  const scanWarn = days === null || days >= 30;
+  const added = artist.date_added
+    ? `Added ${new Date(artist.date_added).toLocaleDateString()}`
+    : 'Added date unknown';
+  const scanText = formatRelativeScanTime(artist.last_scan_timestamp);
+  const notes: { key: string; text: string; className: string }[] = [];
+  if (showAdded) notes.push({ key: 'added', text: added, className: home.quiet });
+  if (found) notes.push({ key: 'found', text: `New: ${found}`, className: home.noteNew });
+  if (scanWarn) notes.push({ key: 'scan', text: scanText, className: home.warn });
+  if (pills.length === 0) {
+    notes.push({ key: 'types', text: 'No release types', className: home.warn });
+  }
+  if (custom)
+    notes.push({ key: 'custom', text: 'Own rules', className: `wl-custom ${home.quiet}` });
+  const tooltip = [
+    artist.artist_name,
+    scanText,
+    pills.length > 0 ? pills.map((pill) => pill.label).join(', ') : 'No release types',
+    sources.length > 0
+      ? `Matched on ${sources.map((key) => WATCHLIST_SOURCE_BADGES[key].label).join(', ')}`
+      : 'Not matched on any source',
+    added,
+  ].join('\n');
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -872,99 +1023,46 @@ function WatchlistArtistCard({
 
   return (
     <div
-      className={`watchlist-artist-card${active ? ' watchlist-artist-card--active' : ''}`}
+      className={`${home.artist}${active ? ` ${home.artistActive}` : ''}${
+        selected ? ` ${home.artistSelected}` : ''
+      }`}
       data-artist-id={artistId ?? ''}
+      title={tooltip}
       onClick={onOpenDetail}
     >
-      {/* The checkbox and overflow menu sit inside the row, so both stop the
-          click from also switching the sidebar selection. */}
-      <label className="watchlist-card-checkbox" onClick={(event) => event.stopPropagation()}>
+      <div className={home.portrait}>
+        <ArtistImage url={artist.image_url} name={artist.artist_name} />
+      </div>
+      {/* The tick and the menu sit on the portrait, and both stop the click
+          from also opening the artist. */}
+      <label
+        className={`${home.pick}${selected ? ` ${home.pickOn}` : ''}`}
+        onClick={(event) => event.stopPropagation()}
+      >
         <input
           type="checkbox"
-          className="watchlist-select-cb"
           checked={selected}
           onChange={onToggleSelect}
           aria-label={`Select ${artist.artist_name}`}
         />
-        <span className="watchlist-checkbox-custom" />
-      </label>
-      <div className="watchlist-card-image">
-        <ArtistImage url={artist.image_url} name={artist.artist_name} />
-      </div>
-      <div className="watchlist-card-info">
-        <span
-          className="watchlist-card-name"
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenFullDetail();
-          }}
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
         >
-          {artist.artist_name}
-        </span>
-        <span className="watchlist-card-meta">
-          {formatRelativeScanTime(artist.last_scan_timestamp)}
-        </span>
-      </div>
-      <div className="watchlist-row-stats">
-        <span>{releaseTypeText(artist)}</span>
-        <span>
-          {artist.date_added
-            ? `Added ${new Date(artist.date_added).toLocaleDateString()}`
-            : 'Added date unknown'}
-        </span>
-      </div>
-      <div className="watchlist-row-tags">
-        {sources.length > 0 ? (
-          <div
-            className="watchlist-card-sources"
-            aria-label={`Matched sources for ${artist.artist_name}`}
-          >
-            {sources.map((key) => (
-              <span
-                key={key}
-                className={`watchlist-source-badge ${WATCHLIST_SOURCE_BADGES[key].className}`}
-              >
-                {WATCHLIST_SOURCE_BADGES[key].label}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        {pills.length > 0 ? (
-          <div
-            className="watchlist-card-pills"
-            aria-label={`Watch rules for ${artist.artist_name}`}
-          >
-            {pills.map((pill) => (
-              <span key={pill.label} className={`watchlist-pill watchlist-pill-${pill.kind}`}>
-                {pill.label}
-              </span>
-            ))}
-            {hasCustomRules(artist) ? (
-              <span
-                className="watchlist-pill watchlist-pill-custom"
-                title="Own rules, not the defaults"
-              >
-                Custom
-              </span>
-            ) : null}
-            {audiobook ? <AudiobookRouteBadge /> : null}
-          </div>
-        ) : (
-          <>
-            <span className="watchlist-row-empty-rule">Default rules</span>
-            {audiobook ? <AudiobookRouteBadge /> : null}
-          </>
-        )}
-      </div>
-      <div className="watchlist-row-health">
-        <span>{sources.length} matches</span>
-        <span>{ruleCount(artist)} rules</span>
-        <span>{scanFreshnessLabel(artist)}</span>
-      </div>
+          <path d="M5 12l5 5 9-10" />
+        </svg>
+      </label>
       <button
         ref={menuButtonRef}
         type="button"
-        className="watchlist-row-menu-trigger"
+        className={home.kebab}
         aria-label={`More actions for ${artist.artist_name}`}
         title="More actions"
         aria-expanded={menuOpen}
@@ -973,35 +1071,66 @@ function WatchlistArtistCard({
           toggleMenu();
         }}
       >
-        ...
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <circle cx="5" cy="12" r="2" />
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="19" cy="12" r="2" />
+        </svg>
       </button>
+
+      <span className={home.artistName}>{artist.artist_name}</span>
+      {/* one quiet line, and only when there is something to say. the
+          rules and matched sources live in the artist panel and the tooltip. */}
+      {notes.length > 0 ? (
+        <div className={home.notes}>
+          {notes.map((note) => (
+            <span key={note.key} className={note.className}>
+              {note.text}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {audiobook ? <AudiobookRouteBadge /> : null}
+
       {menuOpen && menuPosition
         ? createPortal(
             <div
               ref={menuRef}
-              className="watchlist-row-menu"
+              className={home.floatMenu}
               style={{ top: menuPosition.top, right: menuPosition.right }}
               role="menu"
               aria-label={`Actions for ${artist.artist_name}`}
               onClick={(event) => event.stopPropagation()}
             >
-              <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenDetail)}>
-                Manage in sidebar
-              </button>
-              <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenFullDetail)}>
-                Full profile
-              </button>
-              <button type="button" role="menuitem" onClick={() => runMenuAction(onOpenConfig)}>
-                Edit rules
-              </button>
-              <button type="button" role="menuitem" onClick={() => runMenuAction(onToggleSelect)}>
-                {selected ? 'Clear selection' : 'Select for batch'}
-              </button>
-              <div className="watchlist-row-menu-sep" />
               <button
                 type="button"
                 role="menuitem"
-                className="watchlist-row-menu-danger"
+                className={home.menuItem}
+                onClick={() => runMenuAction(onOpenDetail)}
+              >
+                Open
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={home.menuItem}
+                onClick={() => runMenuAction(onOpenConfig)}
+              >
+                Edit rules
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                className={home.menuItem}
+                onClick={() => runMenuAction(onToggleSelect)}
+              >
+                {selected ? 'Clear selection' : 'Select for batch'}
+              </button>
+              <div className={home.menuSep} />
+              <button
+                type="button"
+                role="menuitem"
+                className={`${home.menuItem} ${home.menuItemDanger}`}
                 onClick={() => runMenuAction(onRemove)}
               >
                 Remove from watchlist
@@ -1014,84 +1143,24 @@ function WatchlistArtistCard({
   );
 }
 
-function WatchlistAttentionStrip({
-  total,
-  neverScanned,
-  staleArtists,
-  customRuleArtists,
-  recentCount,
-  activeFilter = 'all',
-  onSelectFilter,
-}: {
-  total: number;
-  neverScanned: number;
-  staleArtists: number;
-  customRuleArtists: number;
-  recentCount: number;
-  activeFilter?: 'all' | 'fresh' | 'never' | 'stale' | 'custom';
-  onSelectFilter?: (filter: 'all' | 'fresh' | 'never' | 'stale' | 'custom') => void;
-}) {
-  const items: {
-    id: 'all' | 'fresh' | 'never' | 'stale' | 'custom';
-    label: string;
-    value: number;
-    tone: string;
-  }[] = [
-    { id: 'all', label: 'All', value: total, tone: 'neutral' },
-    { id: 'fresh', label: 'Fresh', value: recentCount, tone: 'green' },
-    {
-      id: 'never',
-      label: 'Never scanned',
-      value: neverScanned,
-      tone: neverScanned > 0 ? 'amber' : 'neutral',
-    },
-    {
-      id: 'stale',
-      label: 'Stale',
-      value: staleArtists,
-      tone: staleArtists > 0 ? 'amber' : 'neutral',
-    },
-    {
-      id: 'custom',
-      label: 'Custom',
-      value: customRuleArtists,
-      tone: customRuleArtists > 0 ? 'blue' : 'neutral',
-    },
-  ];
+const PROVIDER_MARKS: Record<(typeof ADD_PROVIDER_OPTIONS)[number]['value'], string | null> = {
+  deezer: 'deezer',
+  spotify: 'spotify',
+  itunes: 'itunes',
+  discogs: null,
+  musicbrainz: null,
+};
 
-  return (
-    <div className="watchlist-attention-strip">
-      {items.map((item) => (
-        <div
-          key={item.label}
-          className={`watchlist-attention-card is-${item.tone}${
-            activeFilter === item.id ? ' is-active' : ''
-          }`}
-          role="button"
-          tabIndex={0}
-          onClick={() => onSelectFilter?.(item.id)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              onSelectFilter?.(item.id);
-            }
-          }}
-        >
-          <span className="watchlist-attention-label">{item.label}</span>
-          <span className="watchlist-attention-value">{item.value}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function WatchlistAddArtistSearch({
+function WatchlistAddArtistSheet({
   profileId,
   onAddArtist,
   adding,
+  onClose,
 }: {
   profileId: number;
   onAddArtist: (artistId: string, artistName: string, source: string) => void;
   adding: boolean;
+  onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [provider, setProvider] =
@@ -1107,6 +1176,14 @@ function WatchlistAddArtistSearch({
     const timer = window.setTimeout(() => setDebouncedQuery(next), 320);
     return () => window.clearTimeout(timer);
   }, [query, provider]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const resultsQuery = useQuery({
     queryKey: [
@@ -1127,162 +1204,310 @@ function WatchlistAddArtistSearch({
   const showResults = trimmedQuery.length >= 2;
 
   return (
-    <div className="watchlist-add-panel">
-      <div className="watchlist-add-copy">
-        <span className="watchlist-add-kicker">Add artist</span>
-        <span>Search a provider and follow without leaving the watchlist.</span>
-      </div>
-      <div className="watchlist-add-form" role="search">
-        <select
-          className="watchlist-sort-select"
-          value={provider}
-          aria-label="Provider"
-          onChange={(event) =>
-            setProvider(event.target.value as (typeof ADD_PROVIDER_OPTIONS)[number]['value'])
-          }
-        >
-          {ADD_PROVIDER_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <input
-          type="text"
-          className="watchlist-add-input"
-          value={query}
-          placeholder="Search artist to watch..."
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <div className="watchlist-add-status" aria-live="polite">
-          {searching
-            ? 'Searching...'
-            : debouncedQuery
-              ? `${results.length} found`
-              : 'Type 2+ letters'}
-        </div>
-        {query ? (
-          <button
-            type="button"
-            className="watchlist-add-clear"
-            aria-label="Clear artist search"
-            onClick={() => setQuery('')}
-          >
-            ×
-          </button>
-        ) : null}
-      </div>
-      {showResults ? (
-        <div className="watchlist-add-results">
-          {resultsQuery.isError ? (
-            <div className="watchlist-add-empty">Could not search {providerLabel(provider)}.</div>
-          ) : results.length > 0 ? (
-            results
-              .slice(0, 5)
-              .map((result) => (
-                <WatchlistAddResult
-                  key={`${provider}-${result.id}`}
-                  result={result}
-                  provider={provider}
-                  adding={adding}
-                  onAddArtist={onAddArtist}
-                />
-              ))
-          ) : searching ? (
-            <div className="watchlist-add-empty">Searching {providerLabel(provider)}...</div>
-          ) : (
-            <div className="watchlist-add-empty">No artists found for "{debouncedQuery}".</div>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function WatchlistAddResult({
-  result,
-  provider,
-  adding,
-  onAddArtist,
-}: {
-  result: ProviderSearchResult;
-  provider: string;
-  adding: boolean;
-  onAddArtist: (artistId: string, artistName: string, source: string) => void;
-}) {
-  return (
-    <div className="watchlist-add-result">
-      {result.image ? (
-        <img src={result.image} alt="" />
-      ) : (
-        <div className="watchlist-add-avatar">{result.name.slice(0, 1).toUpperCase()}</div>
-      )}
-      <div className="watchlist-add-result-main">
-        <span>{result.name}</span>
-        <small>
-          <b>{providerLabel(provider)}</b>
-          {result.extra ? ` · ${result.extra}` : ''}
-        </small>
-      </div>
+    <>
       <button
         type="button"
-        className="watchlist-add-result-action"
-        disabled={adding}
-        onClick={() => onAddArtist(result.id, result.name, provider)}
-      >
-        {adding ? 'Adding' : 'Add'}
-      </button>
-    </div>
+        className={home.scrim}
+        aria-label="Close add artist"
+        tabIndex={-1}
+        onClick={onClose}
+      />
+      <div className={home.sheet} role="dialog" aria-modal="true" aria-label="Add an artist">
+        <div className={home.sheetHead}>
+          <h3 className={home.sheetTitle}>Add an artist</h3>
+          <button
+            type="button"
+            className={`${home.iconBtn} ${home.iconBtnSm}`}
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12" />
+              <path d="M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+        <div className={home.providers} role="radiogroup" aria-label="Provider">
+          {ADD_PROVIDER_OPTIONS.map((option) => {
+            const on = provider === option.value;
+            const mark = PROVIDER_MARKS[option.value];
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={on}
+                className={`${home.pill} ${home.pillProvider}${on ? ` ${home.pillOn}` : ''}`}
+                onClick={() => setProvider(option.value)}
+              >
+                {mark ? <SourceIcon source={mark} /> : null}
+                {providerLabel(option.value)}
+              </button>
+            );
+          })}
+        </div>
+        <label className={home.searchBig}>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="M20 20l-3.6-3.6" />
+          </svg>
+          <input
+            type="text"
+            autoFocus
+            aria-label="Artist to watch"
+            value={query}
+            placeholder={`Search ${providerLabel(provider)} for an artist`}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          {query ? (
+            <button
+              type="button"
+              className={`${home.iconBtn} ${home.iconBtnSm}`}
+              aria-label="Clear artist search"
+              onClick={() => setQuery('')}
+            >
+              ×
+            </button>
+          ) : null}
+        </label>
+        <p className={home.hint} aria-live="polite">
+          {searching
+            ? `Searching ${providerLabel(provider)}…`
+            : debouncedQuery
+              ? `${results.length} found`
+              : 'Type 2 or more letters.'}
+        </p>
+        {showResults ? (
+          <div className={home.results}>
+            {resultsQuery.isError ? (
+              <p className={home.hint}>Could not search {providerLabel(provider)}.</p>
+            ) : results.length > 0 ? (
+              results.slice(0, 8).map((result) => (
+                <div key={`${provider}-${result.id}`} className={home.result}>
+                  {result.image ? (
+                    <img className={home.resultArt} src={result.image} alt="" />
+                  ) : (
+                    <span className={home.resultArt} aria-hidden="true">
+                      {result.name.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                  <div className={home.resultText}>
+                    <div className={home.name}>{result.name}</div>
+                    <div className={home.quiet}>
+                      {providerLabel(provider)}
+                      {result.extra ? ` · ${result.extra}` : ''}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className={home.add}
+                    disabled={adding}
+                    onClick={() => onAddArtist(result.id, result.name, provider)}
+                  >
+                    {adding ? 'Adding' : 'Add'}
+                  </button>
+                </div>
+              ))
+            ) : searching ? null : (
+              <p className={home.hint}>No artists found for “{debouncedQuery}”.</p>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </>
   );
 }
 
-function WatchlistRecentReleasesPanel({
+/**
+ * Play a Library v2 album, the way the artist panel and the library page do:
+ * every queued row has a file.
+ */
+async function playLibraryAlbum(
+  albumId: number,
+  title: string,
+  artistName: string,
+  fallbackImage: string | null,
+) {
+  try {
+    const tracks = albumQueueRows(await fetchLibraryV2Album(albumId), artistName)
+      .filter((row) => row.is_library)
+      .map((row) => ({
+        ...row,
+        playback_status: 'ready',
+        image_url: row.image_url || fallbackImage || null,
+      }));
+    if (!tracks.length) {
+      window.showToast?.(`No playable tracks in ${title}`, 'info');
+      return;
+    }
+    await window.playTrackList?.(tracks, title);
+  } catch {
+    window.showToast?.(`Could not play ${title}`, 'error');
+  }
+}
+
+/** "Nov 5", or with the year when it is not this year */
+function shortDate(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+}
+
+/**
+ * What scans actually added to the wishlist, one cover per release. Read from
+ * the saved scan runs, so it is there after a restart too.
+ */
+function WatchlistFoundShelf({
+  releases,
+  onOpenArtist,
+  onShowAll,
+}: {
+  releases: WatchlistFoundRelease[];
+  onOpenArtist: (artistName: string | null | undefined) => void;
+  onShowAll: () => void;
+}) {
+  if (releases.length === 0) return null;
+
+  return (
+    <section className={home.sect} aria-label="Found by your watchlist">
+      <div className={home.sectHead}>
+        <div className={home.sectHeadText}>
+          <h3 className={home.sectTitle}>Found by your watchlist</h3>
+          <p className={home.sectSub}>New music your scans added to the wishlist.</p>
+        </div>
+        <button type="button" className={home.txt} onClick={onShowAll}>
+          Show all
+        </button>
+      </div>
+      <div className={home.shelf}>
+        {releases.map((release) => {
+          const owned = release.library_album_id != null;
+          return (
+            <div key={`${release.artist_name}-${release.album_name}`} className={home.release}>
+              {/* owned: the cover plays it. not yet: it opens the artist. */}
+              <button
+                type="button"
+                className={home.releaseHit}
+                aria-label={
+                  owned
+                    ? `Play ${release.album_name} by ${release.artist_name}`
+                    : `Open ${release.artist_name}`
+                }
+                title={release.tracks.join('\n') || undefined}
+                onClick={() =>
+                  owned
+                    ? void playLibraryAlbum(
+                        Number(release.library_album_id),
+                        release.album_name,
+                        release.artist_name,
+                        release.album_image_url,
+                      )
+                    : onOpenArtist(release.artist_name)
+                }
+              >
+                <div className={home.releaseArt}>
+                  <ReleaseCover url={release.album_image_url} />
+                  {owned ? (
+                    <>
+                      <span className={home.releaseOwned}>In library</span>
+                      <span className={home.releasePlay} aria-hidden="true">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M8 5.5v13a1 1 0 0 0 1.5.86l11-6.5a1 1 0 0 0 0-1.72l-11-6.5A1 1 0 0 0 8 5.5z" />
+                        </svg>
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+                <div className={home.name}>{release.album_name}</div>
+              </button>
+              <button
+                type="button"
+                className={home.metaLink}
+                onClick={() => onOpenArtist(release.artist_name)}
+              >
+                {release.artist_name}
+              </button>
+              <div className={home.metaNew}>
+                {`${release.track_count} track${release.track_count === 1 ? '' : 's'}`}
+                {shortDate(release.found_at) ? ` · ${shortDate(release.found_at)}` : ''}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function WatchlistRecentReleasesShelf({
   releases,
   loading,
+  onOpenArtist,
 }: {
   releases: WatchlistRecentReleaseRow[];
   loading: boolean;
+  onOpenArtist: (artistName: string | null | undefined) => void;
 }) {
   if (!loading && releases.length === 0) return null;
 
   return (
-    <div className="watchlist-recent-panel">
-      <div className="watchlist-panel-head">
-        <div>
-          <span className="watchlist-panel-kicker">Fresh from watched artists</span>
-          <h3>Recent releases</h3>
+    <section className={home.sect} aria-label="New releases from your artists">
+      <div className={home.sectHead}>
+        <div className={home.sectHeadText}>
+          <h3 className={home.sectTitle}>New releases from your artists</h3>
+          <p className={home.sectSub}>
+            {loading ? 'Loading…' : 'The latest releases the watchlist has seen.'}
+          </p>
         </div>
-        <span>{loading ? 'Loading...' : `${releases.length} shown`}</span>
       </div>
       {releases.length > 0 ? (
-        <div className="watchlist-recent-row">
-          {releases.slice(0, 8).map((release, index) => (
-            <div
+        <div className={home.shelf}>
+          {releases.map((release, index) => (
+            <button
               key={`${release.artist_name ?? ''}-${release.album_name}-${index}`}
-              className="watchlist-release-card"
+              type="button"
+              className={home.release}
+              title={`Open ${release.artist_name || 'this artist'}`}
+              onClick={() => onOpenArtist(release.artist_name)}
             >
-              {release.album_cover_url ? (
-                <img src={release.album_cover_url} alt="" />
-              ) : (
-                <div className="watchlist-release-fallback">♪</div>
-              )}
-              <div>
-                <span>{release.album_name}</span>
-                <small>
-                  {release.artist_name || 'Unknown artist'}
-                  {release.release_date ? ` · ${release.release_date}` : ''}
-                </small>
+              <div className={home.releaseArt}>
+                <ReleaseCover url={release.album_cover_url} />
+                {release.owned ? <span className={home.releaseOwned}>In library</span> : null}
               </div>
-              {release.owned ? <em>Owned</em> : null}
-            </div>
+              <div className={home.name}>{release.album_name}</div>
+              <div className={home.meta}>
+                {release.artist_name || 'Unknown artist'}
+                {release.release_date ? ` · ${release.release_date}` : ''}
+              </div>
+            </button>
           ))}
         </div>
-      ) : (
-        <div className="watchlist-recent-empty">
-          {loading ? 'Loading recent releases...' : 'No recent releases have been cached yet.'}
-        </div>
-      )}
-    </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1318,16 +1543,52 @@ function SelectAllCheckbox({
   );
 }
 
+function MusicGlyph() {
+  return (
+    <svg
+      width="36"
+      height="36"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  );
+}
+
 /**
  * The vanilla card retried a failed image once before falling back, because
  * artist art is fetched from provider CDNs that intermittently 503. Keeping
- * that: one retry, then the emoji placeholder.
+ * that: one retry, then a quiet placeholder.
  */
 function ArtistImage({ url, name }: { url: string | null; name: string }) {
   const [attempt, setAttempt] = useState(0);
 
   if (!url || attempt > 1) {
-    return <div className="watchlist-card-image-fallback">🎤</div>;
+    return (
+      <span className={home.portraitEmpty} aria-hidden="true">
+        <svg
+          width="44"
+          height="44"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" />
+        </svg>
+      </span>
+    );
   }
 
   return (
@@ -1337,49 +1598,61 @@ function ArtistImage({ url, name }: { url: string | null; name: string }) {
       key={attempt}
       src={url}
       alt={name}
+      loading="lazy"
       onError={() => setAttempt((n) => n + 1)}
     />
   );
 }
 
-function WatchlistEmptyState({
-  profileId,
-  onAddArtist,
-  adding,
-}: {
-  profileId: number;
-  onAddArtist: (artistId: string, artistName: string, source: string) => void;
-  adding: boolean;
-}) {
+/** A dead cover falls back to the note, not the browser's broken image. */
+function ReleaseCover({ url }: { url: string | null | undefined }) {
+  const [failed, setFailed] = useState(false);
+  if (!url || failed) {
+    return (
+      <span className={home.portraitEmpty} aria-hidden="true">
+        <MusicGlyph />
+      </span>
+    );
+  }
+  return <img src={url} alt="" loading="lazy" onError={() => setFailed(true)} />;
+}
+
+function WatchlistEmptyState({ onAddArtist }: { onAddArtist: () => void }) {
   const navigate = useNavigate();
 
   return (
-    <div className="watchlist-page-empty">
-      <div className="watchlist-page-empty-icon">
+    <div className={home.empty}>
+      <span className={home.emptyIcon} aria-hidden="true">
         <svg
           width="64"
           height="64"
           viewBox="0 0 24 24"
           fill="none"
-          stroke="rgba(255,255,255,0.15)"
+          stroke="currentColor"
           strokeWidth="1.5"
         >
           <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
           <circle cx="12" cy="12" r="3" />
         </svg>
+      </span>
+      <h3 className={home.emptyTitle}>Your watchlist is empty</h3>
+      <p className={home.emptyText}>
+        Watch an artist and SoulSync checks them for new releases on every scan.
+      </p>
+      <div className={home.emptyActions}>
+        <button type="button" className={home.cta} onClick={onAddArtist}>
+          Add artist
+        </button>
+        {/* Search is still a legacy page, so this goes out as an href and lands
+            on the splat route, which hands off to the vanilla renderer. */}
+        <button
+          className={`${home.ghost} ${home.ghostSm}`}
+          type="button"
+          onClick={() => void navigate({ href: '/search' })}
+        >
+          Open Search
+        </button>
       </div>
-      <h3>Your watchlist is empty</h3>
-      <p>Use Search to find an artist, then add them to your watchlist from the artist page.</p>
-      <WatchlistAddArtistSearch profileId={profileId} onAddArtist={onAddArtist} adding={adding} />
-      {/* Search is still a legacy page, so this goes out as an href and lands
-          on the splat route, which hands off to the vanilla renderer. */}
-      <button
-        className="btn btn--primary"
-        type="button"
-        onClick={() => void navigate({ href: '/search' })}
-      >
-        Open Search
-      </button>
     </div>
   );
 }

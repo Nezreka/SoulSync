@@ -26,6 +26,9 @@ class AlbumEditionReviewJob(RepairJob):
     default_settings = {'min_score': 0.5, 'source_selection': 'active_preferred'}
     setting_options = {'source_selection': ['active_preferred', 'active_only', 'best_fit']}
     auto_fix = False
+    # 3.6.1's canonical resolve pinned live with dry_run off; this job only
+    # ever files findings, so the carried-over switch would do nothing
+    retired_settings = ('dry_run',)
     supports_artist_scope = True
 
     def _subjects(self, context):
@@ -39,7 +42,7 @@ class AlbumEditionReviewJob(RepairJob):
         return len({row['album_id'] for row in self._subjects(context)})
 
     def scan(self, context: JobContext) -> JobResult:
-        from core.library2.edition_review import propose_album_edition
+        from core.library2.edition_review import describe_edition_proposal, propose_album_edition
         result = JobResult()
         settings = dict(self.default_settings)
         if context.config_manager:
@@ -62,10 +65,7 @@ class AlbumEditionReviewJob(RepairJob):
                         entity_type='album', entity_id=f'lib2:{album_id}',
                         file_path=next((s.get('path') for s in subjects if s['album_id'] == album_id), None),
                         title=f"Review edition: {proposal['artist_name']} — {proposal['album_title']}",
-                        description=(f"{proposal['source']} release {proposal['album_id']}: "
-                                     f"{proposal['score']:.0%} fit, {proposal['file_track_count']} owned tracks "
-                                     f"against {proposal['release_track_count']} release tracks. "
-                                     'Apply to confirm this edition; no automatic pin is made.'),
+                        description=describe_edition_proposal(proposal),
                         details=proposal)
                     if created:
                         result.findings_created += 1

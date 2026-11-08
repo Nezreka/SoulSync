@@ -205,3 +205,162 @@ def test_destructive_guard_retains_a_missing_windows_roots_identity(tmp_path, mo
         r"H:\Music\Artist\Album\song.flac", str(target),
         _Config(music_paths=[r"H:\Music", str(root)]),
     ) is False
+
+
+# --- the media server's own folders and each profile's own library ----------
+
+class _Server:
+    def __init__(self, locations):
+        self.locations = locations
+        self.calls = 0
+
+    def get_music_library_locations(self):
+        self.calls += 1
+        return list(self.locations)
+
+
+class _Engine:
+    def __init__(self, client, server="plex"):
+        self._client = client
+        self.active_server = server
+
+    def active_client(self):
+        return self._client
+
+
+def _with_server(monkeypatch, locations, server="plex"):
+    from core.library2 import file_delete
+    from core.media_server import engine as engine_module
+
+    client = _Server(locations)
+    monkeypatch.setattr(file_delete, "MEDIA_SERVER_FOLDERS", True)
+    monkeypatch.setattr(engine_module, "_default_engine", _Engine(client, server))
+    return client
+
+
+def _song(root):
+    target = root / "Michael Jackson" / "Thriller" / "01 - Beat It.flac"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"audio")
+    return target
+
+
+def test_the_media_servers_music_folder_is_a_library_root(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """an upgraded plex install: music_paths was never filled, the files sit
+    in the folder plex scans, and 3.6.1 deleted them. they still delete."""
+    music = tmp_path / "PlexMusic"
+    album_id = _album_file(imported_conn, _song(music))
+    _with_server(monkeypatch, [str(music)])
+
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=album_id,
+        config_manager=_Config(transfer=str(tmp_path / "Transfer")),
+    )
+
+    assert preview["unsafe_count"] == 0, preview["files"]
+    assert preview["files"][0]["root"] == str(music.resolve())
+
+
+def test_a_server_folder_maps_through_a_learned_mount(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """jellyfin calls it /srv/media/music, soulsync mounts it elsewhere; the
+    mount the scan learned maps the folder."""
+    from core.library import server_paths
+
+    local = tmp_path / "mnt" / "music"
+    album_id = _album_file(imported_conn, _song(local))
+    server_paths.reset()
+    monkeypatch.setitem(server_paths._learned, "/srv/media", str(tmp_path / "mnt"))
+    _with_server(monkeypatch, ["/srv/media/music"], server="jellyfin")
+
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=album_id,
+        config_manager=_Config(transfer=str(tmp_path / "Transfer")),
+    )
+
+    assert preview["unsafe_count"] == 0, preview["files"]
+    assert preview["files"][0]["root"] == str(local.resolve())
+
+
+def test_a_server_folder_holding_the_downloads_is_not_a_root(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """a server that scans /data, with downloads in /data/downloads, does not
+    open the download folder to the library's delete."""
+    data = tmp_path / "data"
+    downloads = data / "downloads"
+    album_id = _album_file(imported_conn, _song(downloads))
+    _with_server(monkeypatch, [str(data)])
+
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=album_id,
+        config_manager=_Config(transfer=str(tmp_path / "Transfer"), download=str(downloads)),
+    )
+
+    assert preview["unsafe_count"] == 1
+
+
+def test_a_server_folder_soulsync_cant_see_adds_nothing(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """a remote server's folder that maps to nothing here is no root, and the
+    stray file stays refused."""
+    stray = _song(tmp_path / "somewhere-else")
+    album_id = _album_file(imported_conn, stray)
+    _with_server(monkeypatch, ["/remote/only/music", "/"])
+
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=album_id,
+        config_manager=_Config(transfer=str(tmp_path / "Transfer")),
+    )
+
+    assert preview["unsafe_count"] == 1
+    assert preview["files"][0]["reason"] == "outside_configured_library_roots"
+
+
+def test_the_server_is_asked_once_per_ten_minutes(tmp_path, monkeypatch):
+    from core.library2.file_delete import _library_roots
+
+    music = tmp_path / "PlexMusic"
+    music.mkdir()
+    client = _with_server(monkeypatch, [str(music)])
+
+    for _ in range(3):
+        assert str(music.resolve()) in _library_roots(_Config(transfer=str(tmp_path / "T")))
+    assert client.calls == 1
+
+
+def test_a_profiles_own_library_folder_is_a_root(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """a profile that keeps its own library imports into its own folder; its
+    files delete the way the shared library's do."""
+    from core.library2 import library_roots
+
+    own = tmp_path / "Kids"
+    album_id = _album_file(imported_conn, _song(own))
+    monkeypatch.setattr(library_roots, "configured_roots",
+                        lambda database=None: {str(tmp_path / "Transfer") + "/": 0,
+                                               str(own) + "/": 2})
+
+    preview = preview_entity_files(
+        legacy_db, entity="albums", entity_id=album_id,
+        config_manager=_Config(transfer=str(tmp_path / "Transfer")),
+    )
+
+    assert preview["unsafe_count"] == 0, preview["files"]
+    assert preview["files"][0]["root"] == str(own.resolve())
+
+
+def test_a_resolver_guess_in_an_own_library_folder_is_refused(tmp_path, monkeypatch):
+    """own folders are import roots too, so a guess landing there is the
+    iss29-E04 hazard and stays refused."""
+    from core.library2 import library_roots
+
+    own = tmp_path / "Kids"
+    guess = _song(own)
+    monkeypatch.setattr(library_roots, "configured_roots",
+                        lambda database=None: {str(own) + "/": 2})
+
+    assert not fuzzy_resolved_path_is_deletable(
+        str(tmp_path / "gone" / "01 - Beat It.flac"), str(guess),
+        config_manager=_Config(),
+    )

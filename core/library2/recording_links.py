@@ -78,7 +78,9 @@ def owned_by_recording_sql(conn: Any, track_alias: str = "t") -> str:
 
     Same recording (``lib2_release_tracks`` — merged on hard ids only) AND
     the same folded title, because providers hand live cuts the studio take's
-    ISRC (see the module docstring).
+    ISRC (see the module docstring). The file must be one this library has,
+    like ``reference_owners``: unscoped, another profile owning the recording
+    hid this profile's wanted track from Missing for good.
     """
     key = _title_key_sql("{col}", ensure_sql_helpers(conn))
     return f"""
@@ -93,8 +95,7 @@ def owned_by_recording_sql(conn: Any, track_alias: str = "t") -> str:
           JOIN lib2_track_files f ON f.track_id = other.id
          WHERE mine.track_id = {track_alias}.id
            AND f.path IS NOT NULL AND f.path <> ''
-           AND COALESCE(f.file_state,'active')
-               NOT IN ('missing_confirmed','deleted')
+           AND {_active_file('f')}
            AND {key.format(col='other.title')}
              = {key.format(col=track_alias + '.title')}
     )
@@ -132,10 +133,12 @@ def reference_owners(conn: Any, track_ids: Iterable[int]) -> Dict[int, Dict[str,
                 SELECT me.id, other.id FROM subjects me JOIN lib2_tracks other
                     ON other.canonical_track_id=COALESCE(me.canonical_track_id,me.id)
                 UNION
+                -- cross joins keep the planner on the subjects first. left
+                -- free it scans every release track (1.6s an album)
                 SELECT me.id, other.id FROM subjects me
-                JOIN lib2_release_tracks mine ON mine.track_id=me.id
-                JOIN lib2_release_tracks theirs ON theirs.recording_id=mine.recording_id
-                JOIN lib2_tracks other ON other.id=theirs.track_id
+                CROSS JOIN lib2_release_tracks mine ON mine.track_id=me.id
+                CROSS JOIN lib2_release_tracks theirs ON theirs.recording_id=mine.recording_id
+                CROSS JOIN lib2_tracks other ON other.id=theirs.track_id
                 WHERE {title_match}
             )
             SELECT me.id            AS track_id,
@@ -197,8 +200,15 @@ def prefer_album_home(conn: Any) -> Dict[str, int]:
     a duplicate finding, not a re-home. Idempotent; does not commit.
     """
     key = _title_key_sql("{col}", ensure_sql_helpers(conn))
+    # only recordings more than one track shares can have another home: the
+    # join enumerated every file's recording first (~8s on 311k files, every
+    # start), now ~4.5s for the same rows
     rows = conn.execute(
         f"""
+        WITH shared AS MATERIALIZED (
+            SELECT recording_id FROM lib2_release_tracks
+             WHERE track_id IS NOT NULL
+             GROUP BY recording_id HAVING COUNT(DISTINCT track_id) > 1)
         SELECT f.id            AS file_id,
                f.track_id      AS from_track_id,
                src_al.album_type AS from_type,
@@ -208,6 +218,7 @@ def prefer_album_home(conn: Any) -> Dict[str, int]:
           JOIN lib2_tracks src ON src.id = f.track_id
           JOIN lib2_albums src_al ON src_al.id = src.album_id
           JOIN lib2_release_tracks mine ON mine.track_id = src.id
+               AND mine.recording_id IN (SELECT recording_id FROM shared)
           JOIN lib2_release_tracks theirs
                 ON theirs.recording_id = mine.recording_id
                AND theirs.track_id IS NOT NULL

@@ -1449,13 +1449,26 @@
     height: auto;
   }
 
+  /* stacked, each panel sizes to its content. flex: 1 1 0 held them at the
+     150px floor, and the bottom-anchored content spilled out the top and got
+     clipped, title first */
   .bbPanel,
   .bbPanel:first-child,
   .bbPanel:last-child {
+    flex: 0 0 auto;
     min-width: 0;
     min-height: 150px;
     margin-left: 0;
     clip-path: none;
+  }
+
+  /* the 50px left pad makes room for the desktop's slanted edge, gone here */
+  .bbPanel .bbContent {
+    padding: 22px 20px 20px;
+  }
+
+  .bbPanel .bbTitle {
+    font-size: 24px;
   }
 
   .bbPanelLead,

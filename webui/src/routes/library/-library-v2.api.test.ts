@@ -17,14 +17,12 @@ import {
   fetchLibraryV2AlbumArtOptions,
   fetchLibraryV2AlbumHistory,
   fetchLibraryV2AlbumMatchStatus,
-  fetchLibraryV2AlbumReorganizeSources,
   fetchLibraryV2ArtistArtOptions,
   fetchLibraryV2ArtistSettings,
   fetchLibraryV2ArtistMatchStatus,
   fetchLibraryV2MatchArtistReleases,
   fetchLibraryV2ArtistTrackFiles,
   fetchLibraryV2FileDeletePreview,
-  fetchLibraryV2ReorganizeSourcesGlobal,
   fetchLibraryV2TrackHistory,
   fetchLibraryV2TrackSourceInfo,
   fetchLibraryV2UiPreferences,
@@ -742,28 +740,6 @@ describe('library v2 enrich api', () => {
 });
 
 describe('library v2 reorganize api', () => {
-  it('fetches global reorganize sources', async () => {
-    server.use(
-      http.get('/api/library/v2/reorganize/sources', () =>
-        HttpResponse.json({ success: true, sources: [{ source: 'deezer', label: 'Deezer' }] }),
-      ),
-    );
-    await expect(fetchLibraryV2ReorganizeSourcesGlobal()).resolves.toEqual([
-      { source: 'deezer', label: 'Deezer' },
-    ]);
-  });
-
-  it('fetches per-album reorganize sources', async () => {
-    server.use(
-      http.get('/api/library/v2/albums/42/reorganize/sources', () =>
-        HttpResponse.json({ success: true, sources: [{ source: 'spotify', label: 'Spotify' }] }),
-      ),
-    );
-    await expect(fetchLibraryV2AlbumReorganizeSources(42)).resolves.toEqual([
-      { source: 'spotify', label: 'Spotify' },
-    ]);
-  });
-
   it('previews a reorganize without naming a metadata source', async () => {
     // The destination is computed from the catalogue, so the request body has
     // nothing in it that could make two previews of one album disagree.

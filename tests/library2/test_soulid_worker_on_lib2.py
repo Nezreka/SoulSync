@@ -264,3 +264,21 @@ def test_the_worker_holds_no_legacy_sql():
 
     usage = count_legacy_usage(inspect.getsource(sw))
     assert (usage.reads, usage.writes) == (0, 0)
+
+
+def test_a_guest_with_a_file_gets_an_id_and_one_without_does_not(worker):
+    # the two routes into the id space, each its own indexed lookup: an album
+    # artist with a file, or a track credit with a file (one EXISTS with an OR
+    # inside scanned every track file per candidate: 126s a batch)
+    host = _owned_artist(worker, "Host")
+    host_track = _rows(worker, "SELECT id FROM lib2_tracks")[0][0]
+    guest = _artist(worker, "Guest")
+    _exec(worker, "INSERT INTO lib2_track_artists(track_id, artist_id, role, position)"
+                  " VALUES(?, ?, 'featured', 1)", (host_track, guest))
+    stranger = _artist(worker, "Stranger")
+    unowned = _track(worker, _album(worker, stranger, "Wanted only"), "Not here", owned=False)
+    _exec(worker, "INSERT INTO lib2_track_artists(track_id, artist_id, role, position)"
+                  " VALUES(?, ?, 'featured', 1)", (unowned, stranger))
+    assert worker._process_artists() == 2
+    minted = {r[0] for r in _rows(worker, "SELECT id FROM lib2_artists WHERE soul_id IS NOT NULL AND soul_id != ''")}
+    assert minted == {host, guest}

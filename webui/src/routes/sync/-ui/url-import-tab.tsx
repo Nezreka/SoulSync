@@ -299,6 +299,7 @@ function LinkTabShell({
                   onCopy={importer.copyAsMineFor(spec)}
                   loadPreview={importer.previewFor(spec)}
                   copying={importer.copyingOf(spec.source, spec.sourceId)}
+                  onEdit={importer.editorFor(spec.source, spec.sourceId, asString(p.name))}
                 />
               );
             })}
@@ -814,6 +815,7 @@ export function YouTubeTab({
                     onCopy={importer.copyAsMineFor(youtubeSpec(p))}
                     loadPreview={importer.previewFor(youtubeSpec(p))}
                     copying={importer.copyingOf('youtube', urlHash)}
+                    onEdit={importer.editorFor('youtube', urlHash, asString(p.name))}
                   />
                 );
               })}

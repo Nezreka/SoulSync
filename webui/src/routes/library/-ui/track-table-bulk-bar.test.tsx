@@ -64,7 +64,7 @@ describe('TrackTableBulkBar', () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Monitor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Wishlist' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
       '1 succeeded; 1 failed (track IDs: 2)',
     );

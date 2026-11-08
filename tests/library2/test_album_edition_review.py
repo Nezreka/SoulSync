@@ -214,3 +214,50 @@ def test_confirmed_source_cannot_reuse_other_providers_durable_snapshot(
 
     assert requests == [{'deezer': 'standard'}]
     assert [t['title'] for t in tracks] == ['One Dance', 'Hotline Bling']
+
+
+def test_the_finding_explains_the_pick_so_it_can_be_judged(imported_conn, legacy_db, monkeypatch):
+    """3.6.1's canonical resolve said why: confidence, the count / duration /
+    title fit, what the album is linked to now, what it beat, and the
+    release's tracklist. the v2 finding kept only "N% fit"."""
+    from core.repair_jobs import get_all_jobs
+
+    album = album_and_files(imported_conn)
+    imported_conn.execute("UPDATE lib2_albums SET year=2016 WHERE id=?", (album,))
+    imported_conn.commit()
+    monkeypatch.setattr('core.library2.edition_review.fetch_release_tracklist', catalogue)
+    monkeypatch.setattr('core.library2.match_status.configured_services', lambda: {'spotify', 'deezer'})
+    monkeypatch.setattr('core.library2.edition_review.fetch_alternative_releases', lambda *a, **kw: [])
+    findings = []
+    get_all_jobs()['album_edition_review']().scan(JobContext(
+        legacy_db, '/m', Config(source_selection='best_fit'),
+        create_finding=lambda **kw: findings.append(kw) or True))
+
+    text = next(f['description'] for f in findings if f['entity_id'] == f'lib2:{album}')
+    lines = text.split('\n')
+    assert lines[0] == 'Drake — Views (2016)'
+    assert lines[1].startswith('Suggests deezer release standard (confidence ')
+    assert lines[2].startswith('Fit to your library: 2 owned tracks vs 2 tracks on this release')
+    assert 'track count 100%' in lines[2] and 'durations ' in lines[2] and 'titles ' in lines[2]
+    assert 'Currently linked: ' in text and 'deezer=standard' in text and 'spotify=deluxe' in text
+    assert 'Beat: spotify deluxe ' in text and '(3 tk)' in text
+    assert 'Release tracks: 1. One Dance; 2. Hotline Bling' in text
+    assert lines[-1] == 'Apply to confirm this edition; no automatic pin is made.'
+
+
+def test_a_long_tracklist_is_cut_at_25_and_a_lone_candidate_says_so():
+    from core.library2.edition_review import describe_edition_proposal
+
+    text = describe_edition_proposal({
+        'artist_name': 'A', 'album_title': 'B', 'source': 'spotify', 'album_id': 'x',
+        'score': 0.9, 'file_track_count': 30, 'release_track_count': 30,
+        'count_fit': 1.0, 'duration_fit': 0.9, 'title_fit': None,
+        'candidates': [{'source': 'spotify', 'album_id': 'x', 'track_count': 30, 'score': 0.9}],
+        'release_track_titles': [f't{i}' for i in range(30)],
+        'observed_pin': ['deezer', '7'],
+    })
+    assert 'titles n/a' in text
+    assert 'Only this release was a candidate for this album.' in text
+    assert 'Currently pinned: deezer release 7.' in text
+    assert '25. t24 (+5 more)' in text and 't25' not in text
+    assert 'Currently linked' not in text

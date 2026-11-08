@@ -202,6 +202,33 @@ def _json_file_links(conn):
     return links
 
 
+def _note_own_finding(conn, finding_id, file_id):
+    """Keep the links cache current across a finding this module just wrote.
+
+    The cache is keyed on the pending count and the newest id, so every insert
+    used to throw it away and the next file re-parsed every pending finding:
+    a tag precache over a big upgrade inserts one per file with issues, which
+    made the pass quadratic, all of it under the write lock. The new row is
+    pending and names exactly this file, so it is added in place."""
+    if not finding_id or file_id is None or _JSON_LINKS['key'] is None:
+        return
+    db_file, count, newest = _JSON_LINKS['key']
+    try:
+        if conn.execute("PRAGMA database_list").fetchone()[2] != db_file:
+            return
+        # only when the cache was current right before this insert: then the
+        # live key is the cached one plus this row
+        live_count, before = conn.execute(
+            "SELECT (SELECT COUNT(*) FROM repair_findings WHERE status='pending'), "
+            "(SELECT MAX(id) FROM repair_findings WHERE id < ?)", (int(finding_id),)).fetchone()
+    except Exception:  # noqa: BLE001 - an unreadable connection keeps the old key
+        return
+    if (count, newest) != (live_count - 1, before):
+        return
+    _JSON_LINKS['links'].setdefault(str(file_id).strip(), set()).add(int(finding_id))
+    _JSON_LINKS['key'] = (db_file, live_count, int(finding_id))
+
+
 def _pending_findings_for_files(conn, file_ids):
     """``[{**finding, 'subject_file_id': id}, ...]``: each pending finding that
     names one of these files, by path, by file/track/album/artist id, or by the
@@ -339,12 +366,13 @@ def persist_validation(conn, file_id, validation):
     if issues and not current and not any(f['finding_type'] == 'library_retag' for f in findings) and conn.execute("SELECT 1 FROM sqlite_master WHERE name='repair_findings'").fetchone():
         dismissed = conn.execute("SELECT 1 FROM repair_findings WHERE finding_type='library_retag' AND file_path=? AND status='dismissed'", (file['path'],)).fetchone()
         if not dismissed:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT INTO repair_findings(job_id,finding_type,severity,entity_type,entity_id,file_path,title,description,details_json) "
                 "VALUES('library_retag','library_retag','info','track',?,?,?,?,?)",
                 (f"lib2:{file['track_id']}", file['path'], 'Metadata issues', ', '.join(f'{k}: {v}' for k, v in issues.items()),
                  json.dumps({'validation': validation})),
             )
+            _note_own_finding(conn, cur.lastrowid, validation.get('file_id'))
 
 
 def finding_summary(conn, file, findings=None):

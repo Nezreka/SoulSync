@@ -620,9 +620,6 @@ async function openDownloadMissingModalForYouTube(virtualPlaylistId, playlistNam
     void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
     modal.style.display = 'flex';
     hideLoadingOverlay();
-    // owned/missing per track straight away, not a column of 'pending' until
-    // Begin Analysis (#1910)
-    void previewModalOwnership(virtualPlaylistId);
 }
 
 async function closeDownloadMissingModal(playlistId) {
@@ -1299,7 +1296,7 @@ async function cleanupWishlistOverview() {
 async function clearEntireWishlist() {
     console.log('🗑️ clearEntireWishlist() called');
 
-    if (!await showConfirmDialog({ title: 'Clear Wishlist', message: 'Remove all wishlist entries and stop monitoring their tracks? Artists without files or monitoring will disappear from Library. Existing files are kept. A manual Sync & Download can request these tracks again.', confirmText: 'Clear All', destructive: true })) {
+    if (!await showConfirmDialog({ title: 'Clear Wishlist', message: 'Remove all wishlist entries? Artists without files or a watchlist entry will disappear from Library. Existing files are kept. A manual Sync & Download can request these tracks again.', confirmText: 'Clear All', destructive: true })) {
         console.log('User cancelled confirmation');
         return;
     }
@@ -1353,7 +1350,45 @@ function notifyWishlistChanged() {
 }
 
 
-async function openDownloadMissingWishlistModal(category = null, selectedTrackIds = null) {
+/**
+ * The rows of a wishlist batch already running, from the batch itself (#1982).
+ * Reopening one fetched the wishlist again by the batch's cycle, but a
+ * playlist run's cycle is "playlist", which no wishlist track is, and an
+ * auto run's cycle may have moved on: the modal opened with 0 tracks and an
+ * empty table while 32 downloaded. Each task keeps its row's index, so a row
+ * sits where the status poll looks for it. null when the batch has no tasks
+ * yet (still analysing).
+ */
+async function _wishlistBatchTracks(batchId) {
+    try {
+        const response = await fetch(`/api/playlists/${encodeURIComponent(batchId)}/download_status`);
+        if (!response.ok) return null;
+        const data = await response.json();
+        const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+        if (!tasks.length) return null;
+        const tracks = [];
+        tasks.forEach(task => {
+            const i = Number(task.track_index);
+            if (!Number.isInteger(i) || i < 0) return;
+            const ti = task.track_info || {};
+            const artist = ti.artist || ti.artist_name || '';
+            tracks[i] = {
+                ...ti,
+                name: ti.name || ti.track_name || ti.title || 'Unknown track',
+                artists: Array.isArray(ti.artists) && ti.artists.length ? ti.artists : (artist ? [artist] : []),
+            };
+        });
+        for (let i = 0; i < tracks.length; i++) {
+            if (!tracks[i]) tracks[i] = { name: '…', artists: [] };
+        }
+        return tracks.length ? tracks : null;
+    } catch (e) {
+        console.warn('wishlist batch tracks unavailable', e);
+        return null;
+    }
+}
+
+async function openDownloadMissingWishlistModal(category = null, selectedTrackIds = null, batchId = null) {
     showLoadingOverlay('Loading wishlist...');
     const playlistId = "wishlist"; // Use a consistent ID for wishlist
 
@@ -1379,8 +1414,11 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
     window.currentWishlistCategory = category;
 
     // Fetch actual wishlist tracks from the server
-    let tracks;
-    try {
+    let tracks = batchId ? await _wishlistBatchTracks(batchId) : null;
+    // only the wishlist's own categories filter it; a playlist run's
+    // "playlist" cycle matched no track at all (#1982)
+    if (category !== 'albums' && category !== 'singles') category = null;
+    if (!tracks) try {
         // Build API URL with optional category filter
         const apiUrl = category ? `/api/wishlist/tracks?category=${category}` : '/api/wishlist/tracks';
 
@@ -1472,6 +1510,11 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                     </div>
                     <div class="download-tracks-table-container">
                         <table class="download-tracks-table">
+                            <!-- fixed layout sizes columns from here: the name takes the room, the rest stay put -->
+                            <colgroup>
+                                <col class="dmt-col-num"><col><col class="dmt-col-artist">
+                                <col class="dmt-col-status"><col class="dmt-col-status"><col class="dmt-col-actions">
+                            </colgroup>
                             <thead>
                                 <tr>
                                     <th>#</th>
@@ -1486,7 +1529,7 @@ async function openDownloadMissingWishlistModal(category = null, selectedTrackId
                                 ${tracks.map((track, index) => `
                                     <tr data-track-index="${index}">
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}<span class="track-name-text">${escapeHtml(track.name)}</span></td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
                                         <td class="track-download-status" id="download-${playlistId}-${index}">-</td>
@@ -1985,40 +2028,49 @@ function isAlbumContextPlaylistId(playlistId) {
 }
 
 // the library half of Begin Analysis, read-only, so the modal opens knowing
-// what's owned instead of a column of 'pending'. nothing is queued.
+// what's owned instead of a column of 'pending'. nothing is queued. a long
+// playlist or wishlist is asked in blocks: no request holds a server thread
+// for the whole list, and the rows fill in as each block answers.
 async function previewModalOwnership(playlistId) {
+    const BLOCK = 200;
     const process = activeDownloadProcesses[playlistId];
     if (!process || !process.tracks?.length) return;
     const isAlbum = isAlbumContextPlaylistId(playlistId);
     const progressText = document.getElementById(`analysis-progress-text-${playlistId}`);
     if (progressText) progressText.textContent = 'Checking your library...';
-    let data = null;
-    try {
-        const response = await fetch(`/api/playlists/${playlistId}/ownership-preview`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                tracks: process.tracks,
-                is_album_download: isAlbum,
-                album_context: isAlbum ? process.album : null,
-                artist_context: isAlbum ? process.artist : null,
-            }),
-        });
-        data = await response.json();
-    } catch (error) {
-        console.debug('ownership preview failed:', error);
+    const results = [];
+    for (let start = 0; start < process.tracks.length; start += BLOCK) {
+        let data = null;
+        try {
+            const response = await fetch(`/api/playlists/${playlistId}/ownership-preview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    // each row keeps its place in the whole list
+                    tracks: process.tracks.slice(start, start + BLOCK)
+                        .map((track, offset) => ({ ...track, _original_index: start + offset })),
+                    is_album_download: isAlbum,
+                    album_context: isAlbum ? process.album : null,
+                    artist_context: isAlbum ? process.artist : null,
+                }),
+            });
+            data = await response.json();
+        } catch (error) {
+            console.debug('ownership preview failed:', error);
+        }
+        // begin analysis ran (or the modal closed) while we waited: its answer wins
+        if (activeDownloadProcesses[playlistId] !== process || process.status !== 'idle') return;
+        if (!data?.success || !Array.isArray(data.results)) {
+            if (progressText) progressText.textContent = 'Ready to start';
+            return;
+        }
+        updateTrackAnalysisResults(playlistId, data.results);
+        results.push(...data.results);
     }
-    // begin analysis ran (or the modal closed) while we waited: its answer wins
-    if (activeDownloadProcesses[playlistId] !== process || process.status !== 'idle') return;
-    if (!data?.success || !Array.isArray(data.results)) {
-        if (progressText) progressText.textContent = 'Ready to start';
-        return;
-    }
-    updateTrackAnalysisResults(playlistId, data.results);
     // Add to Wishlist reads this so it doesn't queue songs you own (#1910)
-    process.ownedIndices = new Set(data.results.filter(r => r.found).map(r => r.track_index));
-    const found = data.results.filter(r => r.found).length;
-    const missing = data.results.length - found;
+    process.ownedIndices = new Set(results.filter(r => r.found).map(r => r.track_index));
+    const found = results.filter(r => r.found).length;
+    const missing = results.length - found;
     const foundEl = document.getElementById(`stat-found-${playlistId}`);
     const missingEl = document.getElementById(`stat-missing-${playlistId}`);
     if (foundEl) foundEl.textContent = found;
@@ -2035,6 +2087,11 @@ function updateTrackAnalysisResults(playlistId, results) {
     for (const result of results) {
         const matchElement = document.getElementById(`match-${playlistId}-${result.track_index}`);
         if (matchElement) {
+            // the preview marks a missing track the user already wants
+            if (!result.found && result.in_wishlist && window.markWishlistedTrack) {
+                window.markWishlistedTrack(matchElement);
+                continue;
+            }
             matchElement.textContent = result.found ? '✅ Found' : '❌ Missing';
             matchElement.className = `track-match-status ${result.found ? 'match-found' : 'match-missing'}`;
         }
@@ -2090,6 +2147,11 @@ function renderDownloadModalBody(playlistId, tracks, labels = ['Track', 'Artist'
                     </div>
                     <div class="download-tracks-table-container">
                         <table class="download-tracks-table">
+                            <!-- fixed layout sizes columns from here: the name takes the room, the rest stay put -->
+                            <colgroup>
+                                <col class="dmt-col-select"><col class="dmt-col-num"><col><col class="dmt-col-artist">
+                                <col class="dmt-col-duration"><col class="dmt-col-status"><col class="dmt-col-status"><col class="dmt-col-actions">
+                            </colgroup>
                             <thead>
                                 <tr>
                                     <th class="track-select-header">
@@ -2115,7 +2177,7 @@ function renderDownloadModalBody(playlistId, tracks, labels = ['Track', 'Artist'
                                                    onchange="updateTrackSelectionCount('${playlistId}')">
                                         </td>
                                         <td class="track-number">${index + 1}</td>
-                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}${escapeHtml(track.name)}</td>
+                                        <td class="track-name" title="${escapeHtml(track.name)}">${renderModalTrackPlayButton(playlistId, index)}${renderModalTrackPlaylistButton(playlistId, index)}<span class="track-name-text">${escapeHtml(track.name)}</span></td>
                                         <td class="track-artist" title="${escapeHtml(formatArtists(track.artists))}">${escapeHtml(formatArtists(track.artists))}</td>
                                         <td class="track-duration">${formatDuration(track.duration_ms)}</td>
                                         <td class="track-match-status match-checking" id="match-${playlistId}-${index}">🔍 Pending</td>
@@ -3784,6 +3846,9 @@ function processModalStatusUpdate(playlistId, data) {
                 if (process.status !== 'complete') {
                     process.status = 'complete';
                     updatePlaylistCardUI(playlistId); // Update card to show ready for review
+                    // a wishlist run that had nothing to start says why (an empty
+                    // list, or requests still waiting for approval)
+                    if (isWishlist && data.error) showToast(data.error, 'info');
                     _announceDownloadsFinished(playlistId, completedCount);
 
                     // Update YouTube playlist phase to 'download_complete' if this is a YouTube playlist
@@ -4822,35 +4887,6 @@ function updateModalSyncProgress(playlistId, progress) {
 // declared again in wishlist-tools.js, which loads after this file, so those
 // copies won. The live ones are what was ported.
 
-async function loadArtistsData() {
-    try {
-        const response = await fetch(API.artists);
-        const data = await response.json();
-
-        const artistsGrid = document.getElementById('artists-grid');
-        if (data.artists && data.artists.length) {
-            artistsGrid.innerHTML = data.artists.map(artist => `
-                <div class="artist-card">
-                    <div class="artist-image">
-                        ${artist.image ?
-                    `<img src="${artist.image}" alt="${escapeHtml(artist.name)}" />` :
-                    '<div class="artist-placeholder">🎵</div>'
-                }
-                    </div>
-                    <div class="artist-info">
-                        <div class="artist-name">${escapeHtml(artist.name)}</div>
-                        <div class="artist-albums">${artist.album_count || 0} albums</div>
-                    </div>
-                </div>
-            `).join('');
-        } else {
-            artistsGrid.innerHTML = '<div class="no-artists">No artists found</div>';
-        }
-    } catch (error) {
-        console.error('Error loading artists data:', error);
-        document.getElementById('artists-grid').innerHTML = '<div class="error">Error loading artists</div>';
-    }
-}
 
 // ===============================
 // UTILITY FUNCTIONS

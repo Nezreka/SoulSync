@@ -50,10 +50,12 @@ describe('shared video Library initialization', () => {
     expect((doc.getElementById('vo-movie-template') as HTMLInputElement).value).toBe(
       '$title ($year)/$title',
     );
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    // folders, organization, libraries, and the server's folder list
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher.mock.calls.map((c) => String(c[0]))).toContain('/api/video/libraries/drives');
     (doc.getElementById('video-movies-path') as HTMLInputElement).value = '/unsaved';
     show();
-    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher).toHaveBeenCalledTimes(4);
     expect((doc.getElementById('video-movies-path') as HTMLInputElement).value).toBe('/unsaved');
   });
   it('keeps blank controls disabled after a failed load and allows retry', async () => {

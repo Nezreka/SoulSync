@@ -75,6 +75,19 @@ def _repoint_legacy_before_import(db, conn, old_path: str, new_path: str) -> Non
         logger.debug("[Atomic Recovery] legacy repoint skipped: %s", exc)
 
 
+def _row_names_in_another_spelling(conn, path: str) -> bool:
+    """Does a file row name this staged path with other case or slashes?
+    That row would be left pointing into the staging tree once it goes, which
+    is what a zero repoint guards against (L2-002). Runs only on a zero."""
+    try:
+        return conn.execute(
+            "SELECT 1 FROM lib2_track_files"
+            " WHERE LOWER(REPLACE(path, '\\', '/')) = LOWER(REPLACE(?, '\\', '/')) LIMIT 1",
+            (str(path),)).fetchone() is not None
+    except Exception:  # noqa: BLE001 - can't tell: keep the strict answer
+        return True
+
+
 def make_db_path_updater(db, *, count_is_evidence: bool = True):
     """``fn(old_path, new_path) -> rows | None`` repointing a library file row.
 
@@ -82,8 +95,10 @@ def make_db_path_updater(db, *, count_is_evidence: bool = True):
     ``require_library_v2_registration``, which the import pipeline runs on
     EVERY install whatever the media server -- so, unlike upstream's legacy
     ``tracks`` row (only written on a 'soulsync' server), a zero here is real
-    evidence that the catalogue does not know where the file went, and the
-    live publish rolls the album back on it (L2-002).
+    evidence that the catalogue does not know where the file went. The live
+    publish rolls the album back on it only when some row still names the
+    staged file in another spelling (L2-002: that row would dangle); a file no
+    row names publishes and the next scan registers it.
 
     ``count_is_evidence=False`` returns None ("unknown") instead. That is the
     startup recovery's setting: a tree abandoned by an older build may never
@@ -105,6 +120,14 @@ def make_db_path_updater(db, *, count_is_evidence: bool = True):
         conn = db._get_connection()
         try:
             repointed = repoint_file_path(conn, old_path, new_path)
+            if count_is_evidence and repointed == 0 and not _row_names_in_another_spelling(conn, old_path):
+                # nothing names the staged file at all: publishing it can't
+                # leave a row pointing into staging, and the next scan
+                # registers it. holding the whole album back for one
+                # unregistered file hid every good track with it
+                logger.warning("[Atomic Publish] no library row for %s; publishing it, "
+                               "the next scan registers it", old_path)
+                repointed = None
             _repoint_legacy_before_import(db, conn, old_path, new_path)
             for table in _PATH_RECORD_TABLES:
                 try:

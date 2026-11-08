@@ -17,7 +17,7 @@ files, never findings.
 from __future__ import annotations
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, stop_or_pause
 from utils.logging_config import get_logger
 
 logger = get_logger("repair.skip_audit_cleanup")
@@ -84,17 +84,27 @@ class Lib2SkipsCleanupJob(RepairJob):
             # Stored paths may be the media server's filesystem view — resolve
             # through the shared lib2 resolver, otherwise a path-mapped setup
             # would look 100% missing and this job would wipe the whole audit.
-            from core.library2.paths import resolve_lib2_path
+            from core.library2.paths import missing_path_root_is_healthy, resolve_lib2_path
 
-            to_delete = set(expired_ids)
+            gone = set()
             for row in rows:
-                if context.check_stop():
+                if stop_or_pause(context):
                     break
                 result.scanned += 1
                 path = row["file_path"]
+                # gone only when its storage is up: an unmounted drive is not
+                # a deleted file, and the override is the user's choice
                 if path and resolve_lib2_path(
-                        path, config_manager=context.config_manager) is None:
-                    to_delete.add(row["id"])
+                        path, config_manager=context.config_manager) is None \
+                        and missing_path_root_is_healthy(path, context.config_manager):
+                    gone.add(row["id"])
+            if len(rows) >= 10 and len(gone) * 2 > len(rows):
+                # most overrides unreachable at once is a mount or mapping
+                # problem, not a library that lost half its files overnight
+                logger.warning("lib2 skip-audit cleanup: %d of %d override paths unreachable; "
+                               "keeping them until storage is back", len(gone), len(rows))
+                gone = set()
+            to_delete = set(expired_ids) | gone
 
             for skip_id in to_delete:
                 conn.execute("DELETE FROM lib2_manual_skips WHERE id=?", (skip_id,))

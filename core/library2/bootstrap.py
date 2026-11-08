@@ -633,9 +633,9 @@ def mark_waiting_for_source(database: Any, owner_token: str, *, watermark: str) 
         return cursor.rowcount > 0
 
 
-def _checkpoint_wal(database: Any) -> None:
+def _checkpoint_wal(database: Any, mode: Optional[str] = None) -> None:
     """Fold the WAL back into the main database on a fresh connection."""
-    from core.library2.wal import checkpoint_wal
+    from core.library2.wal import CHECKPOINT_TRUNCATE, checkpoint_wal
 
     try:
         conn = database._get_connection()
@@ -643,7 +643,7 @@ def _checkpoint_wal(database: Any) -> None:
         logger.debug("wal checkpoint could not open a connection: %s", exc)
         return
     try:
-        pages = checkpoint_wal(conn)
+        pages = checkpoint_wal(conn, mode or CHECKPOINT_TRUNCATE)
         if pages:
             logger.info("Library v2 migration checkpointed %d WAL pages", pages)
     finally:
@@ -717,12 +717,37 @@ def run_deferred_backfills(database: Any, *,
             from core.library2.dedup_repair import fold_shared_file_tracks
             stats["shared_files"] = fold_shared_file_tracks(conn)
             conn.commit()
+            # 3.6.1 logged a scan import on every refresh; once, in batches
+            from core.maintenance.library_history_dedupe import dedupe_scan_import_history
+            stats["history_repeats_removed"] = dedupe_scan_import_history(
+                database, should_stop=should_stop)["removed"]
+            # issues reported before the upgrade, onto the catalogue's ids
+            from core.library2.legacy_issues import carry_legacy_issue_ids
+            stats["issues_carried"] = carry_legacy_issue_ids(conn)["issues"]
+            # 3.6.1 genre-cleanup locks the import left behind
+            from core.library2.legacy_locks import carry_legacy_genre_locks
+            stats["genre_locks_carried"] = sum(carry_legacy_genre_locks(conn).values())
+            # 3.6.1's spotify/deezer artist credits, which the import left
+            # behind (collab releases on every credited artist's page)
+            from core.library2.legacy_credits import carry_legacy_artist_credits
+            stats["legacy_credits"] = sum(carry_legacy_artist_credits(conn).values())
+            # the Songs tab's artist/album/year/recent sorts walk these
+            # (a pass over every track the first time, then nothing)
+            from core.library2.queries import ensure_song_sort_indexes
+            stats["song_sort_indexes"] = ensure_song_sort_indexes(conn)
     finally:
         ticker.stop()
         conn.close()
     if any(stats.values()):
         logger.info("Library v2 convergence complete: %s", stats)
-    _checkpoint_wal(database)
+    # PASSIVE: this runs on every start. a TRUNCATE takes the write lock and
+    # then waits for every reader to finish, and on a busy server that held up
+    # every writer, and through the connection pool every request, for half
+    # a minute after each start (a search sat on "Searching Deezer..." behind
+    # it). PASSIVE folds what it can without waiting; sqlite's own automatic
+    # checkpoints keep the WAL in hand from there
+    from core.library2.wal import CHECKPOINT_PASSIVE
+    _checkpoint_wal(database, CHECKPOINT_PASSIVE)
     return stats
 
 

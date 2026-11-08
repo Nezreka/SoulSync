@@ -10,13 +10,13 @@ from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_ta
 class QualityProfileAuditJob(RepairJob):
     job_id = "quality_profile_audit"
     display_name = "Quality Profile Audit"
-    description = "Review library audio against its current quality profile, including unmonitored tracks"
+    description = "Review library audio against its current quality profile, including tracks not on the Wishlist"
     help_text = (
         "Measures each library's primary audio file against its inherited quality profile. "
-        "The scan only creates review findings; it changes no files, monitoring or downloads. "
+        "The scan only creates review findings; it changes no files, Wishlist or downloads. "
         "Unknown quality and formats not targeted by the profile are reported separately.\n\n"
-        "Monitor & Upgrade opts that one track into monitoring and uses the existing Wishlist "
-        "pipeline after rechecking the current file and profile. Already monitored tracks "
+        "Wishlist & Upgrade puts that one track on the Wishlist and uses the existing "
+        "pipeline after rechecking the current file and profile. Tracks already on the Wishlist "
         "keep their normal automatic upgrades; this audit does not pause that automation. "
         "Hand-tagged releases and active manual quality overrides are left alone."
     )
@@ -82,7 +82,7 @@ class QualityProfileAuditJob(RepairJob):
                             "format_not_targeted": "quality_format_not_targeted",
                             "unknown": "quality_unknown"}[issue]
                     descriptions = {
-                        "below_cutoff": "Below the current upgrade target. Monitor & Upgrade queues this track using its live profile.",
+                        "below_cutoff": "Below the current upgrade target. Wishlist & Upgrade queues this track using its live profile.",
                         "format_not_targeted": "The profile does not target this format. Review the profile's formats before choosing a replacement.",
                         "unknown": "The file's audio quality could not be measured. Scan or inspect the file before replacing it.",
                     }

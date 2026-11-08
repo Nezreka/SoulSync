@@ -71,9 +71,15 @@ describe('library v2 track pipeline timeline (§52.9)', () => {
     renderWithClient(<TrackPipelineTimeline trackId={9} />);
 
     await waitFor(() => expect(screen.getByText('Pipeline — 2 events')).toBeInTheDocument());
-    const items = screen.getAllByText(/Grabbed|Quarantined/);
-    expect(items.map((el) => el.textContent)).toEqual(['Quarantined', 'Grabbed']);
-    expect(screen.getByText('AcoustID mismatch')).toBeInTheDocument();
+    // the pipeline on top in its order, then the events newest first
+    const items = screen.getAllByText(/^(Grabbed|Quarantined)$/);
+    expect(items.map((el) => el.textContent)).toEqual([
+      'Grabbed',
+      'Quarantined',
+      'Quarantined',
+      'Grabbed',
+    ]);
+    expect(screen.getAllByText('AcoustID mismatch').length).toBeGreaterThan(0);
   });
 
   it('distinguishes passed, skipped and not-run checks', async () => {
@@ -108,8 +114,12 @@ describe('library v2 track pipeline timeline (§52.9)', () => {
     renderWithClient(<TrackPipelineTimeline trackId={9} />);
 
     await waitFor(() => expect(screen.getByText('Pipeline — 2 events')).toBeInTheDocument());
-    expect(screen.getByText('passed')).toHaveAttribute('data-status', 'passed');
-    expect(screen.getByText('not run')).toHaveAttribute('data-status', 'not_run');
+    // the check that stands leads the pipeline, neither failed nor passed
+    expect(screen.getByText('AcoustID not run')).toHaveAttribute('data-tone', 'neutral');
+    const status = (text: string) =>
+      screen.getAllByText(text).map((el) => el.getAttribute('data-status') ?? el.dataset.tone);
+    expect(status('passed')).toContain('passed');
+    expect(status('not run')).toContain('not_run');
     expect(screen.getByText(/FLAC 24-bit\/96kHz/)).toBeInTheDocument();
     expect(screen.getByText(/API key unavailable/)).toBeInTheDocument();
   });

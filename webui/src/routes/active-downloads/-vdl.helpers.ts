@@ -6,7 +6,7 @@
 
 import type { VdlBlockEntry, VdlDownload, VdlFilter, VdlSearchCtx, VdlView } from './-vdl.types';
 
-import { VDL_ACTIVE_STATUSES, VDL_FAILED_STATUSES } from './-vdl.types';
+import { VDL_ACTIVE_STATUSES, VDL_FAILED_STATUSES, VDL_REMOVABLE_STATUSES } from './-vdl.types';
 
 /* ── kinds / statuses ──────────────────────────────────────────────────── */
 
@@ -63,6 +63,11 @@ export function vdlIsActive(status: string | null | undefined): boolean {
 
 export function vdlIsFail(status: string | null | undefined): boolean {
   return (VDL_FAILED_STATUSES as readonly string[]).includes(status || '');
+}
+
+/** A failed or cancelled row: 'Remove from list' and 'Clear failed' take it. */
+export function vdlIsRemovable(status: string | null | undefined): boolean {
+  return (VDL_REMOVABLE_STATUSES as readonly string[]).includes(status || '');
 }
 
 /** The old page's pill matching: 'all' | 'active' | 'completed' | 'failed'. */

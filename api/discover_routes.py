@@ -1363,6 +1363,36 @@ def _bylt_owned_lookup(database, sections):
         return None
 
 
+def _owned_album_keys_for(conn, artist_names):
+    """(title, artist) of the albums you own by these artists, lowercased.
+
+    the shelf only ever drops albums by its 25 top artists, so it asks for
+    those artists' albums and not the whole library's: 70k album keys and an
+    ownership check on each was 3.9s live (Nov 4 2026). names fold in python
+    because sqlite's LOWER only folds ascii, and a listened "Björk" has to
+    meet the library's "BJÖRK". ownership is the asker's own library."""
+    from core.library2.sql_util import owned_sql
+
+    wanted = {str(n).lower().strip() for n in artist_names if n}
+    if not wanted:
+        return set()
+    ids = [int(r[0]) for r in conn.execute("SELECT id, name FROM lib2_artists")
+           if r[1] and str(r[1]).lower().strip() in wanted]
+    keys = set()
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        rows = conn.execute(f"""
+            SELECT al.title, ar.name
+              FROM lib2_albums al
+              JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+             WHERE al.primary_artist_id IN ({','.join('?' * len(chunk))})
+               AND al.title IS NOT NULL
+               AND {owned_sql('album', 'al')}
+        """, chunk)
+        keys.update((str(t).lower().strip(), str(a).lower().strip()) for t, a in rows)
+    return keys
+
+
 @bp.route('/api/discover/undiscovered-albums', methods=['GET'])
 @_hide_blocked({'albums': WORKS})
 @_discover_shelf_cache()
@@ -1381,16 +1411,7 @@ def get_discover_undiscovered_albums():
 
         # Build library album keys for exclusion
         with database._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT LOWER(al.title), LOWER(ar.name)
-                FROM lib2_albums al
-                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                WHERE EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
-                              ON f.track_id=t.id WHERE t.album_id=al.id
-                              AND f.file_state='active' AND TRIM(f.path)<>'')
-            """)
-            library_keys = {(r[0].strip(), r[1].strip()) for r in cursor.fetchall()}
+            library_keys = _owned_album_keys_for(conn, artist_names)
 
         albums = cache.get_undiscovered_albums(artist_names, library_keys, source=active_source, limit=20)
         return jsonify({'success': True, 'albums': albums})
@@ -3221,9 +3242,9 @@ def get_your_artist_info(artist_id):
             # Check by various ID columns
             cursor.execute("""
                 SELECT * FROM lib2_artists WHERE id = ? OR spotify_id = ?
-                   OR json_extract(external_ids, '$.itunes') = ?
-                   OR json_extract(external_ids, '$.deezer') = ?
-                   OR json_extract(external_ids, '$.discogs') = ? LIMIT 1
+                   OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
+                   OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
+                   OR TRIM(CAST(json_extract(external_ids,'$.discogs') AS TEXT)) = ? LIMIT 1
             """, (artist_id, artist_id, artist_id, artist_id, artist_id))
             row = cursor.fetchone()
             if row:
@@ -3623,6 +3644,23 @@ def generate_custom_playlist():
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
 
+# served by idx_discovery_pool_profile_release, which covers it: without that
+# every call read each pool row in full to reach release_date (6.9s live)
+AVAILABLE_DECADES_SQL = """
+    SELECT DISTINCT
+        (CAST(SUBSTR(release_date, 1, 4) AS INTEGER) / 10) * 10 as decade,
+        COUNT(*) as track_count
+    FROM discovery_pool
+    WHERE release_date IS NOT NULL
+      AND profile_id = ?
+      AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) >= 1950
+      AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) <= 2029
+    GROUP BY decade
+    HAVING track_count >= 10
+    ORDER BY decade ASC
+"""
+
+
 @bp.route('/api/discover/decades/available', methods=['GET'])
 @_discover_shelf_cache()
 def get_available_decades():
@@ -3634,19 +3672,7 @@ def get_available_decades():
             cursor = conn.cursor()
 
             # Get distinct decades from discovery pool
-            cursor.execute("""
-                SELECT DISTINCT
-                    (CAST(SUBSTR(release_date, 1, 4) AS INTEGER) / 10) * 10 as decade,
-                    COUNT(*) as track_count
-                FROM discovery_pool
-                WHERE release_date IS NOT NULL
-                  AND profile_id = ?
-                  AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) >= 1950
-                  AND CAST(SUBSTR(release_date, 1, 4) AS INTEGER) <= 2029
-                GROUP BY decade
-                HAVING track_count >= 10
-                ORDER BY decade ASC
-            """, (get_current_profile_id(),))
+            cursor.execute(AVAILABLE_DECADES_SQL, (get_current_profile_id(),))
 
             rows = cursor.fetchall()
             decades = []

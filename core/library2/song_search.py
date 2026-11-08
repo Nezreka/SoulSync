@@ -180,18 +180,40 @@ def _write(conn, rows) -> None:
         [(int(r[0]), fold(r[1]), fold(r[2]), fold(r[3])) for r in rows])
 
 
+def _rows_after(conn, last_id: int):
+    return conn.execute(
+        "SELECT t.id, t.title, t.track_artist, ar.name FROM lib2_tracks t "
+        "JOIN lib2_albums al ON al.id = t.album_id "
+        "LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id "
+        f"WHERE t.id > ? ORDER BY t.id LIMIT {_BATCH}", (int(last_id),)).fetchall()
+
+
 def rebuild(database) -> bool:
-    """Fill the index from the whole catalogue. Changes made while it runs
-    stay dirty and are answered live, then caught up by ``flush``."""
+    """Fill the index from the whole catalogue, a batch per transaction.
+
+    It used to be one transaction over the whole catalogue: on a 300k-track
+    library the write lock was held for the entire build and downloads,
+    scans and wishlist writes timed out on it. The index reads as unbuilt
+    (searches answer live) until the last batch lands. Changes made while it
+    runs stay dirty and are caught up by ``flush``."""
     conn = database._get_connection()
     try:
         conn.execute("BEGIN IMMEDIATE")
+        conn.execute(f"UPDATE {_STATE} SET built = 0 WHERE id = 1")
         conn.execute(f"DELETE FROM {_DIRTY}")
         conn.execute(f"DELETE FROM {TABLE}")
-        _write(conn, _rows_for(conn, None))
-        conn.execute(f"UPDATE {_STATE} SET built = 1 WHERE id = 1")
         conn.commit()
-        return True
+        last_id = 0
+        while True:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = _rows_after(conn, last_id)
+            if not rows:
+                conn.execute(f"UPDATE {_STATE} SET built = 1 WHERE id = 1")
+                conn.commit()
+                return True
+            _write(conn, rows)
+            conn.commit()
+            last_id = int(rows[-1][0])
     except Exception as exc:  # noqa: BLE001
         if conn.in_transaction:
             conn.rollback()

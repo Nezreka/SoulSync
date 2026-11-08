@@ -358,16 +358,39 @@ function WatchedDetail({ d }: { d: Details }) {
           {d.year ? ` (${d.year})` : ''}
         </div>
         <div className="vrf-chips">
-          <span className={`vrf-chip${d.watched ? ' vrf-chip--got' : ''}`}>
-            {d.watched
-              ? `✓ watched ${d.play_count > 1 ? `${d.play_count}×` : 'once'}`
-              : 'never watched'}
-          </span>
+          {Array.isArray(d.viewers) ? null : (
+            <span className={`vrf-chip${d.watched ? ' vrf-chip--got' : ''}`}>
+              {d.watched
+                ? `✓ watched ${d.play_count > 1 ? `${d.play_count}×` : 'once'}`
+                : 'never watched'}
+            </span>
+          )}
           {d.last_viewed_at ? (
             <span className="vrf-chip">last: {String(d.last_viewed_at).slice(0, 10)}</span>
           ) : null}
           <span className="vrf-chip">{gb(d.size_bytes)}</span>
         </div>
+        {Array.isArray(d.viewers) ? (
+          <div className="vrf-chips">
+            {d.viewers.map((v: Details, i: number) => (
+              <span
+                key={i}
+                className={`vrf-chip${v.counted && v.watched ? ' vrf-chip--got' : ''}`}
+                title={
+                  v.counted
+                    ? undefined
+                    : `Not counted: nothing watched in the last ${d.active_days ?? 90} days`
+                }
+              >
+                {v.counted
+                  ? v.watched
+                    ? `✓ ${v.name}${v.last_viewed_at ? ` · ${String(v.last_viewed_at).slice(0, 10)}` : ''}`
+                    : `${v.name} · not watched`
+                  : `${v.name} · not counted${v.last_active ? ` (last active ${String(v.last_active).slice(0, 10)})` : ''}`}
+              </span>
+            ))}
+          </div>
+        ) : null}
         <p className="vrf-show-overview">
           Approving moves the file into the recycle bin (Settings → Library Organization sets where
           and for how long). Nothing is erased outright. The weekly deep scan tidies the server view

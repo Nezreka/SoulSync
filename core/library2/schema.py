@@ -281,6 +281,11 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_type ON lib2_albums(album_type)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_legacy ON lib2_albums(legacy_album_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_origin ON lib2_albums(origin)",
+    # imports on the soulsync media server look the album up by these, once
+    # per track inside the import transaction (album_grouping, side_effects):
+    # unindexed that was a full table scan per downloaded track
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_server ON lib2_albums(server_source, server_id)",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_spotify ON lib2_albums(spotify_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_album_artists_artist ON lib2_album_artists(artist_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_album ON lib2_tracks(album_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_isrc ON lib2_tracks(isrc)",
@@ -300,6 +305,8 @@ _INDEXES = (
     # index, so each one read the whole table. Same rows match.
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_title_lower ON lib2_tracks(LOWER(title))",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_title_lower ON lib2_albums(LOWER(title))",
+    # import grouping finds a release by case-folded MBID (137ms a scan without)
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_mbid_lower ON lib2_albums(LOWER(musicbrainz_id))",
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_name_lower ON lib2_artists(LOWER(name))",
     # the track search's credit pass asks for rows WITH a per-track artist;
     # most libraries have few or none, so this keeps it off a full scan
@@ -657,7 +664,83 @@ _ADDED_COLUMNS = (
     # without own-library profiles is.
     ("lib2_track_files", "owner_profile_id",
      "ALTER TABLE lib2_track_files ADD COLUMN owner_profile_id INTEGER"),
+    # Which wishlist/watchlist entry (and profile) an outbox row asserts state
+    # for, the same key ``mirror_outbox._row_key`` reads. Filled by
+    # trg_lib2_mirror_outbox_key; see _ensure_mirror_outbox_keys.
+    ("lib2_mirror_outbox", "entity_key",
+     "ALTER TABLE lib2_mirror_outbox ADD COLUMN entity_key TEXT"),
 )
+
+
+def _mirror_outbox_key_sql(op: str, payload: str, profile: str) -> str:
+    """The outbox row's entity key as SQL over the given column expressions.
+
+    ``wishlist|<release key>|<profile>`` or ``watchlist|<ext>|<profile>``, NULL
+    when the row names no entity (an unknown op, a payload without a target, or
+    a payload that isn't JSON). Mirrors ``mirror_outbox._entity_key``: the
+    release ``key`` first, then the bare track id an older build queued."""
+    return f"""CASE WHEN json_valid({payload}) THEN CASE
+        WHEN {op} IN ('wishlist_add', 'wishlist_remove') THEN
+            'wishlist|' || COALESCE(json_extract({payload}, '$.key'),
+                CASE WHEN {op} = 'wishlist_add'
+                     THEN json_extract({payload}, '$.payload.id')
+                     ELSE json_extract({payload}, '$.id') END)
+            || '|' || COALESCE({profile}, 1)
+        WHEN {op} IN ('watchlist_add', 'watchlist_remove') THEN
+            'watchlist|' || json_extract({payload}, '$.ext') || '|' || COALESCE({profile}, 1)
+        END END"""
+
+
+def _ensure_mirror_outbox_keys(cursor: Any) -> None:
+    """Key every outbox row and keep one pending row per entity.
+
+    Ops are absolute assertions ("this track is wishlisted" / "it is not"), so
+    only the newest row for an entity matters and every older PENDING row for it
+    is obsolete. The drain found those by json-parsing every row newer than the
+    oldest pending one, on every call: with a backlog that was the whole
+    backlog, and request handlers drain inline. On an install with 98k pending
+    rows (~3 KB of JSON each) every drain parsed ~290 MB while holding the drain
+    lock, and pages stopped loading (Nov 3 2026). Repeated reconcile runs also
+    queued the same intent again and again, which is how the backlog grew.
+
+    Now each row carries its key (indexed), and a newer row supersedes the older
+    pending ones for its key the moment it is inserted, so the pending queue
+    holds at most one row per entity. The one-time backfill does the same for
+    a backlog an older build left."""
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lib2_mirror_outbox_key "
+        "ON lib2_mirror_outbox(entity_key, id)")
+    new_key = _mirror_outbox_key_sql("NEW.op", "NEW.payload", "NEW.profile_id")
+    cursor.execute(f"""
+        CREATE TRIGGER IF NOT EXISTS trg_lib2_mirror_outbox_key
+        AFTER INSERT ON lib2_mirror_outbox
+        FOR EACH ROW
+        BEGIN
+            UPDATE lib2_mirror_outbox SET entity_key = {new_key} WHERE id = NEW.id;
+            UPDATE lib2_mirror_outbox
+               SET status = 'superseded', last_error = NULL,
+                   processed_at = CURRENT_TIMESTAMP
+             WHERE status = 'pending' AND id < NEW.id
+               AND entity_key = (SELECT entity_key FROM lib2_mirror_outbox WHERE id = NEW.id);
+        END
+    """)
+    if cursor.execute(
+            "SELECT 1 FROM lib2_mirror_outbox WHERE entity_key IS NULL LIMIT 1").fetchone():
+        cursor.execute(
+            "UPDATE lib2_mirror_outbox SET entity_key = "
+            + _mirror_outbox_key_sql("op", "payload", "profile_id")
+            + " WHERE entity_key IS NULL")
+        collapsed = cursor.execute("""
+            UPDATE lib2_mirror_outbox
+               SET status = 'superseded', last_error = NULL,
+                   processed_at = CURRENT_TIMESTAMP
+             WHERE status = 'pending' AND entity_key IS NOT NULL
+               AND id < (SELECT MAX(o.id) FROM lib2_mirror_outbox o
+                          WHERE o.entity_key = lib2_mirror_outbox.entity_key)
+        """).rowcount
+        if collapsed:
+            logger.info("mirror outbox: %d queued op(s) were already overridden by a "
+                        "newer one for the same entry and are skipped", collapsed)
 
 
 def _migrate_lib2_profiles_to_app_wide(cursor: Any) -> None:
@@ -1130,6 +1213,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         """)
     except Exception as e:  # noqa: BLE001
         logger.debug("release group trigger skipped: %s", e)
+    try:
+        _ensure_mirror_outbox_keys(cursor)
+    except Exception as e:  # noqa: BLE001 - the drain still works on unkeyed rows
+        logger.warning("mirror outbox keys not set up: %s", e)
     _migrate_lib2_profiles_to_app_wide(cursor)
     _migrate_quality_profile_constraints(cursor)
     _backfill_quality_profile_provenance(cursor)
@@ -1196,7 +1283,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         # every row, so after a full ANALYZE the planner judged it useless and
         # scanned the catalogue once per playlist row (the mirrored-count
         # budget test). an id lookup "expr = ?" still uses the partial index.
-        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes'):
+        # audiodb and jiosaavn too: the external-id ownership check
+        # (core/library/track_identity) ORs every id a source carries, and one
+        # unindexed arm makes the whole OR a scan
+        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'jiosaavn'):
             name = f"idx_lib2_tracks_ext_{service}"
             expression = external_id_sql('external_ids', service)
             row = cursor.execute(
@@ -1206,6 +1296,18 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
             cursor.execute(
                 f"CREATE INDEX IF NOT EXISTS {name} "
                 f"ON lib2_tracks({expression}) WHERE {expression} IS NOT NULL")
+        # the same for releases: an import groups tracks into an album by its
+        # provider id, and without these each miss parsed all 72k albums
+        for service in ('deezer', 'tidal', 'qobuz', 'itunes'):
+            expression = external_id_sql('external_ids', service)
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_lib2_albums_ext_{service} "
+                f"ON lib2_albums({expression}) WHERE {expression} IS NOT NULL")
+        # a recording's MusicBrainz id, for the same ownership check: partial,
+        # most tracks carry none
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_mbid ON lib2_tracks(musicbrainz_id) "
+            "WHERE musicbrainz_id IS NOT NULL")
     except Exception as e:  # noqa: BLE001
         logger.error("external_ids index failed (will retry next start): %s", e)
     # iss29-D13 normalized artist key. Index first, then backfill — also AFTER
@@ -1252,6 +1354,17 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                        "ON lib2_albums(musicbrainz_release_group_id)")
     except Exception as e:  # noqa: BLE001
         logger.error("release-group index failed (will retry next start): %s", e)
+    # Played tracks (Discover's label explorer ranks labels by plays). Partial:
+    # a few thousand of 300k tracks have plays, and without it the query
+    # walked every album and its tracks, 5.8s live (Nov 4 2026).
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_played "
+                       "ON lib2_tracks(album_id, play_count) WHERE play_count > 0")
+        # a stray from testing that index against a dev server that reloads
+        # on edits (Nov 4 2026); a no-op everywhere else
+        cursor.execute("DROP INDEX IF EXISTS idx_x_played")
+    except Exception as e:  # noqa: BLE001
+        logger.error("played-tracks index failed (will retry next start): %s", e)
     # Multi-file primary model (audit P1-07 / ADR-03): elect a primary where
     # missing, repair accidental extras, and keep the invariant via triggers
     # so every write path participates without changes.
@@ -1427,6 +1540,11 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     # only; the index fill runs in the background on first use.
     from core.library2.song_search import ensure_schema as ensure_song_search_schema
     ensure_song_search_schema(cursor)
+    from core.library2.member_version import ensure_schema as ensure_member_version_schema
+    ensure_member_version_schema(cursor)
+    # what each file that imported without a match most likely is
+    from core.library2.unmatched_identify import ensure_unmatched_match_schema
+    ensure_unmatched_match_schema(cursor)
     if run_backfills:
         run_library_v2_backfills(connection)
     logger.debug("Library v2 schema ensured")
@@ -1590,6 +1708,20 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("recording-home pass failed (will retry next start): %s", e)
+
+    if not _stopped():
+        # the legacy plex updater's "-updatedAt<date>" marker was imported as
+        # the biography of every artist it touched (core/library2/summary_markers.py)
+        try:
+            from core.library2.summary_markers import repair_artist_summaries
+            fixed = repair_artist_summaries(cursor)
+            stats["artist_summary_markers"] = fixed
+            if fixed["cleared"] or fixed["cleaned"]:
+                logger.info("Removed SoulSync's update markers from %d artist biographies",
+                            fixed["cleared"] + fixed["cleaned"])
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("artist summary marker pass failed (will retry next start): %s", e)
 
     return stats
 

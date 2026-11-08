@@ -124,10 +124,18 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
     credits = defaultdict(set)
     for row in conn.execute("SELECT album_id,artist_id FROM lib2_album_artists"):
         credits[int(row[0])].add(int(row[1]))
+    # an alias row is its canonical artist: each media server's copy of an
+    # artist (plex's bbno$, navidrome's bbno$) files its albums under its own
+    # row, and grouping by the raw id never put those twins side by side
+    canonical = {int(r[0]): int(r[1]) for r in conn.execute(
+        "SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists")}
+
+    def group_ids(ids):
+        return tuple(sorted({canonical.get(i, i) for i in ids}))
     # Grouping needs titles only; full rows are read for possible duplicates.
     groups = defaultdict(list)
     for al in conn.execute(f"SELECT al.id,al.title,al.album_type,al.primary_artist_id {source}{predicate}", params):
-        groups[(tuple(sorted(credits[al[0]] | {int(al[3])})), _title(al[1]), al[2])].append(al[0])
+        groups[(group_ids(credits[al[0]] | {int(al[3])}), _title(al[1]), al[2])].append(al[0])
     possible = sorted(i for ids in groups.values() if len(ids) > 1 for i in ids)
     albums = []
     for offset in range(0, len(possible), 400):
@@ -137,6 +145,7 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
     for al in albums:
         al["album_id"] = int(al["id"])
         al["artist_ids"] = sorted(credits[al["id"]] | {int(al["primary_artist_id"])})
+        al["group_artist_ids"] = list(group_ids(al["artist_ids"]))
     scope = scope or {}
     if scope.get("artist_id"):
         from core.library2.artist_aliases import resolve_alias_group
@@ -158,7 +167,9 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
             files[int(row["track_id"])].append(dict(row))
         for row in conn.execute(f"""SELECT ta.* FROM lib2_track_artists ta JOIN lib2_tracks t ON t.id=ta.track_id
             WHERE t.album_id IN ({marks}) ORDER BY ta.track_id,ta.position,ta.artist_id""", batch):
-            track_credits[int(row["track_id"])].append(dict(row))
+            credit = dict(row)
+            credit["canonical_artist_id"] = canonical.get(int(credit["artist_id"]), int(credit["artist_id"]))
+            track_credits[int(row["track_id"])].append(credit)
     # A catalogue with files in another private library is not this scan's subject.
     from core.library2.sql_util import ANY_OWNER, ambient_scope
     owner = ambient_scope()
@@ -195,8 +206,9 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
 
 
 def _track_match(a, b):
-    one = {(r["artist_id"], r["role"]) for r in a.get("artist_credits", [])}
-    two = {(r["artist_id"], r["role"]) for r in b.get("artist_credits", [])}
+    # credited by the canonical artist: two servers' rows of one artist agree
+    one = {(r.get("canonical_artist_id", r["artist_id"]), r["role"]) for r in a.get("artist_credits", [])}
+    two = {(r.get("canonical_artist_id", r["artist_id"]), r["role"]) for r in b.get("artist_credits", [])}
     if one != two or _normalized_title(a["title"]) != _normalized_title(b["title"]):
         return False
     if not durations_compatible(a.get("duration"), b.get("duration")) or conflicting_recording_id(a, b):
@@ -221,6 +233,11 @@ def _blockers(conn, albums, refs):
     track_pairs = list(zip(albums[0]["tracks"], albums[1]["tracks"], strict=False))
     for a, b in [(albums[0], albums[1]), *track_pairs]:
         for key in ("quality_profile_id", "legacy_album_id", "legacy_track_id"):
+            # 3.6.1 kept one legacy row per media server, so two servers'
+            # copies of a release always carry different legacy ids. only
+            # the same server's two ids are a conflict
+            if key.startswith("legacy_") and a.get("server_source") != b.get("server_source"):
+                continue
             if a.get(key) and b.get(key) and a[key] != b[key]:
                 reasons.append(f"Conflicting {key.replace('_', ' ')}.")
         if (a.get("server_source") == b.get("server_source") and a.get("server_id")
@@ -351,7 +368,7 @@ def find_catalogue_duplicates(database, *, scope=None, check_stop=None, album_id
     with closing(database._get_connection()) as conn:
         groups = defaultdict(list)
         for album in _load(conn, scope, check_stop, album_ids):
-            groups[(tuple(album["artist_ids"]), _title(album["title"]), album["album_type"])].append(album)
+            groups[(tuple(album["group_artist_ids"]), _title(album["title"]), album["album_type"])].append(album)
         candidates = []
         for albums in groups.values():
             for a, b in itertools.combinations(albums, 2):
@@ -365,18 +382,8 @@ def _move_references(conn, kind, source_id, target_id):
     # Conflicts were rejected in the reviewed snapshot. Keep explicit intent
     # when two equivalent monitor rules carry different provenance.
     if _table(conn, "lib2_monitor_rules"):
-        for row in conn.execute("SELECT * FROM lib2_monitor_rules WHERE entity_type=? AND entity_id=?", (kind, source_id)).fetchall():
-            row = dict(row)
-            existing = conn.execute("SELECT * FROM lib2_monitor_rules WHERE entity_type=? AND entity_id=? AND profile_id=?",
-                                    (kind, target_id, row["profile_id"])).fetchone()
-            if existing:
-                rank = {"user_explicit": 5, "wishlist_import": 4, "cascade": 3,
-                        "new_release": 3, "file_import": 2, "legacy_import": 0}
-                if rank.get(row["provenance"], 1) > rank.get(existing["provenance"], 1):
-                    conn.execute("UPDATE lib2_monitor_rules SET provenance=? WHERE id=?", (row["provenance"], existing["id"]))
-                conn.execute("DELETE FROM lib2_monitor_rules WHERE id=?", (row["id"],))
-            else:
-                conn.execute("UPDATE lib2_monitor_rules SET entity_id=? WHERE id=?", (target_id, row["id"]))
+        from core.library2.monitor_rules import merge_rules_into
+        merge_rules_into(conn, kind, source_id, target_id)
     if _table(conn, "lib2_media_server_mappings"):
         conn.execute("UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? WHERE entity_type=? AND entity_id=?",
                      (target_id, kind, source_id))

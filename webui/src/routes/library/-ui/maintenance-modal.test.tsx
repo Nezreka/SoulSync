@@ -26,7 +26,7 @@ describe('Library v2 maintenance tools', () => {
     renderModal();
 
     expect(screen.getByRole('dialog', { name: 'Library Health & Repair' })).toBeInTheDocument();
-    expect(screen.getByText('Catalog & monitoring')).toBeInTheDocument();
+    expect(screen.getByText('Catalog & Wishlist')).toBeInTheDocument();
     expect(screen.getByText('Artist files & tags')).toBeInTheDocument();
     // no library-wide scan job is left, so that section is not drawn empty
     expect(screen.queryByText('Library-wide scans')).toBeNull();
@@ -42,6 +42,29 @@ describe('Library v2 maintenance tools', () => {
     // Deliberately absent: queueing a below-cutoff track is not a job you run,
     // it is what the wanted projection does continuously.
     expect(screen.queryByRole('button', { name: /Find Quality Upgrades/ })).toBeNull();
+  });
+
+  it('runs the cleanup checks against this artist only (#2004)', async () => {
+    const bodies: { job: string; body: unknown }[] = [];
+    server.use(
+      http.post('/api/repair/jobs/:job/run', async ({ params, request }) => {
+        bodies.push({ job: String(params.job), body: await request.json() });
+        return HttpResponse.json({ success: true });
+      }),
+    );
+    renderModal();
+
+    for (const [name, job] of [
+      [/Find Dead File Paths/, 'dead_file_cleaner'],
+      [/Find Renamed Files/, 'path_drift_reconcile'],
+      [/Find Duplicates/, 'native_duplicate_detector'],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name }));
+      await vi.waitFor(() => expect(bodies.map((b) => b.job)).toContain(job));
+    }
+    for (const { body } of bodies) {
+      expect(body).toEqual({ artist_id: 7, artist_name: 'Massive Attack' });
+    }
   });
 
   it('shows a terminal job error instead of a successful zero result', async () => {

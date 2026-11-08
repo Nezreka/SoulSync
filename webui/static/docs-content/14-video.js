@@ -15,7 +15,7 @@ registerDocsSection({
             body: `
 SoulSync's **Video** side is a self-hosted movies & TV manager that lives inside the same app as the music side but runs as an **isolated application** — its own database, its own pages, its own API. Think of it as a Sonarr + Radarr + overlay/collection manager built into SoulSync.
 
-It connects to **Plex** or **Jellyfin** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze** and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
+It connects to **Plex** or **Jellyfin** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze**, **AniList** (anime) and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
 
 ::: cards
 ### 🎬 Movies & TV
@@ -102,6 +102,16 @@ The video side keeps its own library paths, migrated from the legacy single vide
 The engine routes each finished download to the library path matching its type.
 
 In Docker, Movies, TV and YouTube start on \`/media/movies\`, \`/media/tv\` and \`/media/youtube\` when the container has those mapped (the default compose file does), the way Music starts on \`/app/Transfer\`. Like the Music folders, each is locked: hit **Unlock** to change one. A folder you've cleared or set yourself is never reset.
+
+## Your library's folders
+
+Plex and Jellyfin report every file at the path *they* see it under, like \`/mnt/easystore3/PLEX/MOVIES/...\`. Settings > Folders > Video > **Your library's folders** lists every folder your libraries read (asked from the server itself), each marked Movies or TV with how many files are in it.
+
+- The folders SoulSync already reaches, like your Movies and TV output folders, are recognised from their files and ticked. You never type them twice.
+- For the rest, type where SoulSync reaches each one. It checks a sample of that folder's real files right away (**48 of 50 sample files found**).
+- A reached folder is a full library folder of its kind: every file in it is found, renamed to your templates, recycled on delete (into that drive's own recycle bin) and has its languages read. New downloads still go to your output folders.
+- **Folders your server doesn't list** (in the same section) is for a collection SoulSync should manage that your server doesn't read.
+- A folder left blank works the way it always did.
 
 ## 4K libraries
 
@@ -404,13 +414,13 @@ Movies and shows can come from either Plex or Jellyfin and render the same way.
 
 The hero keeps one main action: **Play / Resume** on your server when you own it, otherwise **Get**. Trailer and the follow toggle (watchlist for an airing show, wishlist for a movie you don't own) sit beside it, and everything else is in one **More** menu, grouped into **Get**, **Library** (edit details, change poster, sync with server, mark watched, files and match) and **Open on** (IMDb, TMDB, TVDB, Letterboxd, official site). An episode's **⋯** menu marks just that episode watched or unwatched, and the season's **⋯** marks the whole season; both sync to your server like the show-wide toggle.
 
-The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
+The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze, AniList). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. An anime also gets its other names (romaji and Japanese), the studio that animated it, the next episode's countdown while it airs, and a link to each season on AniList, on a search preview too. When TMDB lumps an anime into one long season (Jujutsu Kaisen's 59 episodes), the episode list is split into the seasons TVDB, your server and release names use, from TVDB when you have a key and from AniList's seasons when you don't. If your server numbers the show TMDB's way, SoulSync keeps its numbering. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
 
-A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons.
+A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons. **Hide specials** above the episode list takes them out of the season list, and this browser remembers it; they stay in the show and can still be grabbed. When you get a whole show, specials start unticked, so only the real seasons are picked until you tick them.
 
 If a page can't load (the title left your library, YouTube didn't return a channel or playlist, or the server didn't answer), it says which, with **Try again** and, for YouTube, **Open on YouTube**.
 
-On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures.
+On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures. **Grab season** searches and grabs each missing episode on its own with the show's quality profile, so every episode is tracked separately and one that fails or times out doesn't stop the rest. To grab the whole season as one pack instead, use the season's search and pick a pack from the results.
 `
         },
         {
@@ -452,6 +462,8 @@ SoulSync ingests per-episode and per-movie **watch state** from your server:
 - Powers a **Next Up** call-to-action on show pages
 - Lets you toggle **watched / unwatched** right on the page
 
+**Whose watch state.** The scan reads watch state through the server's own account, so it is the server owner's. Each profile linked to its own Plex account (Connect with Plex, or a linked Plex Home user) gets its own: after every Plex scan SoulSync reads that account's watched and in-progress titles with its own token, and that profile's rail, Next Up, watched checks and library filters follow it. Its watched toggle marks the title played on its own Plex account. A profile with no linked account has no watch state, and no watched toggle. The admin with no linked account sees the server owner's.
+
 The **acquisition history** on the [Your library tab](#vdet-library) shows grabs, imports, and upgrades over time — useful for answering "when did this land, and from where?"
 `
         },
@@ -477,7 +489,13 @@ Episodes are treated as facts: a scan that no longer sees an episode **demotes**
             title: 'Per-Title Quality & Series Type',
             lede: 'Give individual titles their own quality profile and tell shows how their numbering works.',
             body: `
-Assign a title its own **quality profile** — "this show is always 1080p, that movie is 4K" — overriding the global default. Set a show's **series type** so numbering and matching behave correctly:
+Assign a title its own **quality profile** ("this show is always 1080p, that movie is 4K"). Pick it from the title's Manage panel, or right in **Get** / **Manual search** with the **Profile** picker, even for a title that isn't in your library yet: the pick judges that search and grab, sticks to the title's wishlist entries, and the title keeps it when it lands, so its upgrades use it too.
+
+**Filter and sort the results.** Every manual search (movie, show, season or episode) has a bar over its results: type to narrow by name, group or indexer, sort by best match, size, age, quality, format score, seeders, indexer or grabs, and open **Filters** to build conditions (resolution is 1080, codec is HEVC, group contains MeGusta, size less than 1 GB, language contains japanese) matched on all or any of them. **Language** reads the audio language tags in a release's name, by name or code, and **dual** or **multi** finds the dual audio ones; a release with no language tag is usually the original audio only. Name a filter to save it for every later search on your profile. The head says how many results there are, how many meet your profile and how many match your filter. It only changes what you see: Auto and the wishlist still rank releases by your profile.
+
+**When a grab fails and SoulSync takes the next release**, the card you grabbed lists what it tried after (each release and whether it downloaded or failed too), and the result card of the release that replaced it is marked *Grabbed instead* or *Downloaded instead*. The episode row shows the newest attempt.
+
+A title with no profile of its own uses its kind's default: set **New movies use** and **New shows use** under Settings > Quality (both start on **Default**). Set a show's **series type** so numbering and matching behave correctly:
 
 | Series type | For |
 |-------------|-----|
@@ -577,6 +595,10 @@ Everything is grouped by what's holding it up, worst first:
 A show or channel sits in the group of its worst episode. **⚠ Failing** narrows the page to the stuck ones.
 
 Click a poster or orb and a panel opens beside it (a drawer on a tablet, a bottom sheet on a phone). It says in plain words why the title is stuck, and lists every season and episode with **Search**, a **⋯** menu for **Pick a release** and **Retry with all sources**, and remove. Click an episode to open its synopsis, guest cast and **what the last search found** — every release each source returned and the rule that turned it down.
+
+## Export
+
+**⋯ → Export…** saves the wishlist as **CSV** or **JSON**: everything, **Movies** only or **TV shows** only, previewed before you copy or download it. One row per wanted movie, episode or YouTube video, with its type, title, year, season and episode, air date, TMDB id, status and when it was added.
 `
         },
         {
@@ -632,6 +654,7 @@ The **Downloads** page is the mission-control view for video acquisition. Every 
 |--------|--------------|
 | **Grab** | Queue the selected release for download |
 | **Retry** | Re-attempt a failed or stalled grab |
+| **Block and retry failed** | (menu, admin) Blocklist every failed release and grab the next best release for each, one title at a time |
 | **Cancel** | Stop an in-flight download and remove it from the queue |
 | **Clear** | Remove completed items from the queue view |
 
@@ -718,6 +741,15 @@ When a grab turns out to be a bad file — corrupt, mislabeled, wrong title — 
 - **Retry** and automatic re-queries skip them.
 - A **manual grab** always overrides the blocklist, in case you know better.
 
+## When the download client fails a release
+
+When SABnzbd or the torrent client reports a movie or episode as failed, or a torrent stalls, SoulSync blocklists that release and searches again straight away, so the next release your quality profile ranks is grabbed: the next one from the same group at the same quality first, then lower qualities the profile still accepts. You get the **download failed** notification only when it gives up:
+
+- no other release your profile accepts was found (the item stays on the wishlist), or
+- 5 releases of the same title (or episode) failed in 2 days. A client that fails everything, like a full disk or a wrong category, would otherwise blocklist every release there is, so it stops and asks you to check the client.
+
+The replaced job is taken out of the client with its partial files, so a stalled torrent doesn't keep going next to its replacement; one it gave up on stays for you to look at. A job the client simply lost (deleted by hand, connection trouble) isn't treated as a bad release. **Cancel** on a torrent or usenet download takes it out of the client too. Turn it off with **When a video download fails, grab the next best release** in Settings, on the usenet client's card.
+
 ## Recycle bin
 
 When an upgrade replaces an existing file, the old file isn't deleted outright — it lands in a **recycle bin** first. If the "upgrade" turns out to be worse, you can recover the original.
@@ -743,7 +775,7 @@ After a download completes, a lightweight post-download scan probes your media s
             body: `
 ## Naming & folders
 
-Set your **naming scheme** (how files and folders are named — title, year, edition tags, season/episode patterns) and your **folder layout** once, and every import follows it. Consistent naming keeps Plex/Jellyfin matching clean.
+Set your **naming scheme** (how files and folders are named — title, year, edition tags, season/episode patterns) and your **folder layout** once, and every import follows it. Consistent naming keeps Plex/Jellyfin matching clean. **Colons in titles** picks what a ':' becomes, since file systems don't allow one: deleted (Dexter Resurrection, the default), smart (Dexter - Resurrection, and 12:30 becomes 12-30), space dash space, or a dash. Mass Rename brings files you already have in line.
 
 ## Mass rename
 
@@ -1128,7 +1160,7 @@ On the video side, **Fix all safe** only runs fixes that change SoulSync's own d
 | **Duplicate Copies** | Three signals: the same \`tmdb_id\` owned as two library rows, one movie carrying 2+ version files, and one episode carrying 2+ files. Every finding names the **drive** each copy sits on. | Varies by finding — review the drives and keep the copy you want. |
 | **Wishlist Audit** | Wishlist rows the pipeline will never act on: the target is already owned **and done** (owned copy meets the cutoff, or its quality is unreadable so the upgrader can't judge it). Owned-but-below-cutoff rows are deliberately left alone so upgrade-until can chase them. | Removes the row. The owned copy is untouched. |
 | **YouTube Ghost Files** | The download-ledger rows whose file is gone from disk (deleted on the server side). Without this, badges lie and retention counts overcount. Two fix modes: **prune** (stamp \`pruned_at\` — remembered, never re-downloaded) or **forget** (delete the row — becomes eligible again). Files are never touched; DB-only. Safety: unreachable YouTube root (down SMB mount) hard-errors instead of flagging everything; mass-missing (over half of 5+ checked files gone at once) asks rather than assuming. | Prune or forget the ghost row. |
-| **Watched Cleanup** | Movies watched at least once whose last watch is older than your \`watched_days\` (optionally also never-watched movies sitting \`unwatched_days\`, off by default). Watch-state changes ride the incremental scan, so candidates appear without a deep scan. Movies with no watch date are skipped, not guessed. | Moves the file to the **recycle bin** (never a hard delete) and marks the row file-less. |
+| **Watched Cleanup** | Movies watched at least once whose last watch is older than your \`watched_days\` (optionally also never-watched movies sitting \`unwatched_days\`, off by default). Watch-state changes ride the incremental scan, so candidates appear without a deep scan. Movies with no watch date are skipped, not guessed. With profiles linked to their own Plex accounts, a movie waits until every viewer who watched anything in the last \`active_days\` (default 90; the owner counts too) has seen it, the age runs from the last of those watches, anyone part-way through holds it back, and the finding names who watched and who wasn't counted. | Moves the file to the **recycle bin** (never a hard delete) and marks the row file-less. |
 | **Naming Conformance** | Renders the **current** organization template for every owned movie/episode file and flags paths that differ — the Sonarr/Radarr "preview rename" gap, since templates only ever applied to new imports. The findings list *is* the preview (current → new); bulk select = mass rename. Safety: unlocatable files are skipped, occupied destinations are per-finding errors (never overwritten), and DB paths aren't rewritten here — the next scan reconciles them after the server notices. | Renames the file (plus same-stem sidecars and subtitles) into place. |
 | **Missing Subtitles** | Every library movie and episode, checked for your subtitle languages (per-title overrides and the forced toggle included) the same way new imports are: any sidecar next to the video counts whatever it's named, and so do embedded tracks. Weekly by default. With **Dry Run** off (the default) it queues what's missing straight away and the run's *Fixed* count is how many it queued; with Dry Run on it raises one finding per movie or show instead. Needs Download subtitles on. | Queues the still-missing subtitles (re-checked at approve time); the subtitle worker fetches them within the daily quota. |
 
@@ -1324,7 +1356,8 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | GET | \`/downloads/active\`, \`/downloads/status\`, \`/downloads/history\` | Live queue & history | video |
 | POST | \`/downloads/search\`, \`/downloads/evaluate\` | Find & rank releases | video |
 | POST | \`/downloads/grab\`, \`/downloads/grab-pack\`, \`/downloads/retry\` | Queue a grab / retry | can_download |
-| POST | \`/downloads/cancel\`, \`/downloads/clear\` | Cancel / clear queue items | video |
+| POST | \`/downloads/cancel\`, \`/downloads/clear\` | Cancel / clear queue items (\`{scope: "failed"}\` clears only failed + cancelled; \`{scope: "everything"}\` clears completed + failed + cancelled; import failures always stay for Manual import) | video |
+| POST | \`/downloads/remove\` | Take one failed or cancelled row off the list, no retry | video |
 | GET/POST | \`/downloads/quality\`, \`/downloads/quality/profiles\`, \`/downloads/quality/formats\` | Quality profiles & custom formats | admin (write) |
 | GET/POST | \`/downloads/config\`, \`/downloads/config/import-lists\` | Download & import-list config | admin (write) |
 | GET/POST/DELETE | \`/downloads/blocklist\` | Release blocklist | video (GET open); admin (writes) |
@@ -1343,7 +1376,7 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
 | DELETE | \`/requests/{id}\` | Withdraw your own request (admins: any) | video |
 | POST | \`/scan/request\`, \`/scan/server\`, \`/scan/stop\` | Trigger / stop a library scan | video |
 | POST | \`/monitor\`, \`/bulk/start\` | Monitor toggle & bulk jobs | admin |
-| PUT/POST | \`/detail/{kind}/{id}/metadata\`, \`/lock\`, \`/quality-profile\`, \`/series-type\`, \`/watched\` | Edit / lock / configure a title (watched is open) | admin (watched: video) |
+| PUT/POST | \`/detail/{kind}/{id}/metadata\`, \`/lock\`, \`/quality-profile\`, \`/series-type\`, \`/watched\` | Edit / lock / configure a title (watched is open; it marks the caller's own watch state, 409 when the profile has no linked account) | admin (watched: video) |
 `
         },
         {

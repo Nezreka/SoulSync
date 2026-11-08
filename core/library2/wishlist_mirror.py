@@ -15,6 +15,7 @@ queued when its file is a genuine upgrade candidate.
 
 from __future__ import annotations
 
+import threading
 from contextlib import closing
 from typing import Any, Dict, List, Optional
 
@@ -40,6 +41,63 @@ def _hand_tagged(conn, path: Any, keys: Optional[set] = None) -> bool:
         return False
 
 
+def _explicit(value: Any) -> Optional[bool]:
+    """the stored flag as a bool, None when the catalogue doesn't know."""
+    if value is None or value == "":
+        return None
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def library_album_identity(conn, album_id: int, musicbrainz_id: Any) -> Dict[str, Any]:
+    """what keeps a release apart from a same-named one at download time:
+    the musicbrainz release id the folder lookup checks, the default
+    edition's disambiguation (#1299 puts it on the folder) and disc count."""
+    identity: Dict[str, Any] = {}
+    if musicbrainz_id:
+        identity["musicbrainz_release_id"] = str(musicbrainz_id)
+    try:
+        row = conn.execute(
+            """SELECT disambiguation, disc_count FROM lib2_release_editions
+                WHERE release_group_id = ?
+                ORDER BY is_default DESC, id LIMIT 1""", (album_id,)).fetchone()
+    except Exception:  # noqa: BLE001 - an install without editions yet
+        row = None
+    if row is not None:
+        if str(row[0] or "").strip():
+            identity["disambiguation"] = str(row[0]).strip()
+        try:
+            discs = int(row[1] or 0)
+        except (TypeError, ValueError):
+            discs = 0
+        if discs > 1:
+            identity["total_discs"] = discs
+    return identity
+
+
+def library_album_artist_names(conn, album_id: int, primary_artist_id: int) -> List[str]:
+    """the album's own artists: its main artist, then a joint album's other
+    headliners (never a featured guest). the download names the album folder
+    and spots a various artists release from these; without them a wanted
+    track of a compilation or a split release was filed under the track's
+    own artist."""
+    names: List[str] = []
+    for row in conn.execute(
+            """SELECT ar.name FROM lib2_artists ar WHERE ar.id = ?
+               UNION ALL
+               SELECT ar.name FROM lib2_album_artists aa
+                 JOIN lib2_artists ar ON ar.id = aa.artist_id
+                WHERE aa.album_id = ? AND aa.artist_id <> ?
+                  AND COALESCE(aa.role, 'primary') IN ('primary', 'various')""",
+            (primary_artist_id, album_id, primary_artist_id)):
+        name = str(row[0] or "").strip()
+        if name and name.casefold() not in {n.casefold() for n in names}:
+            names.append(name)
+    return names
+
+
 def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Build the wishlist payload for a lib2 track (or None when unknown).
 
@@ -47,24 +105,32 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     the library the caller works in (#1199): another library's copy neither
     satisfies this one nor gets replaced for it.
     """
+    from core.library2.release_dates import album_release_date
+    from core.library2.recording_links import owned_by_recording_sql
     from core.library2.sql_util import owner_clause
     t = conn.execute(
         """SELECT t.id AS track_id, t.spotify_id, t.musicbrainz_id,
                   t.external_ids, t.isrc, t.title, t.track_number,
-                  t.disc_number, t.duration,
+                  t.disc_number, t.duration, t.explicit AS track_explicit,
+                  t.recording_disambiguation,
+                  al.explicit AS album_explicit,
                   al.id AS album_id, al.title album_title,
                   al.image_url album_image_url,
                   al.spotify_id album_spotify,
                   al.musicbrainz_id album_musicbrainz,
                   al.external_ids album_external_ids,
                   al.track_count, al.expected_track_count, al.album_type,
+                  al.release_date album_release_date, al.year album_year,
+                  al.primary_artist_id album_primary_artist_id,
                   EXISTS(SELECT 1 FROM lib2_track_files tf
                          WHERE tf.track_id = t.id
                            AND tf.path IS NOT NULL AND tf.path <> ''
                            AND COALESCE(tf.file_state,'active')
-                               NOT IN ('missing_confirmed','deleted'){owner}) has_file
+                               NOT IN ('missing_confirmed','deleted'){owner}) has_file,
+                  {owned_elsewhere} AS owned_elsewhere
            FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
-           WHERE t.id = ?""".format(owner=owner_clause(column="tf.owner_profile_id")),
+           WHERE t.id = ?""".format(owner=owner_clause(column="tf.owner_profile_id"),
+                                    owned_elsewhere=owned_by_recording_sql(conn, "t")),
         (track_id,),
     ).fetchone()
     if not t:
@@ -74,6 +140,8 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
            FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id
            WHERE ta.track_id = ? ORDER BY ta.position""", (track_id,)
     ).fetchall()
+    album_artist_names = library_album_artist_names(
+        conn, t["album_id"], t["album_primary_artist_id"])
     from core.library2.provider_ids import (
         preferred_provider_identity,
         provider_only,
@@ -130,7 +198,10 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     original_quality = audio_quality_from_file(file_info)
 
     from core.library2.quality_eval import is_upgrade_policy
-    should_queue = not bool(t["has_file"])
+    # the same song already on disk under another release (the single of an
+    # album track) is owned: Missing and the wanted queue say so, and the
+    # wishlist must not download a second copy of it either
+    should_queue = not bool(t["has_file"]) and not bool(t["owned_elsewhere"])
     quality_evaluation = "not_applicable"
     if t["has_file"] and _hand_tagged(conn, (file_info or {}).get("path")):
         quality_evaluation = "hand_tagged"
@@ -165,6 +236,15 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             "provider_ids": album_provider_ids,
             "total_tracks": t["expected_track_count"] or t["track_count"] or 1,
             "album_type": t["album_type"],
+            # the download names the album folder from this ([$year]). it
+            # had none, so every wanted track landed in a yearless twin of
+            # its album's folder (SeadogsBooty, Nov 5)
+            "release_date": album_release_date(t["album_release_date"], t["album_year"]),
+            "artists": [{"name": name} for name in album_artist_names],
+            # $explicit / $contentrating in the naming template read these
+            # (#1860); without them a wanted track lost its [E] and split off
+            "explicit": _explicit(t["album_explicit"]),
+            **library_album_identity(conn, t["album_id"], t["album_musicbrainz"]),
             # The wishlist UI reads `album.images[0].url`, and the import
             # pipeline reads the same slot for cover.jpg / embedded art. This
             # payload carried no `images` at all, so every Library-v2 row
@@ -180,6 +260,14 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         "track_number": t["track_number"],
         "disc_number": t["disc_number"],
         "duration_ms": t["duration"] or 0,
+        "explicit": _explicit(t["track_explicit"]),
+        # the recording comment ("acoustic", "live") a single's filename
+        # carries (#1536), and the recording's own ids for the match checks
+        **{key: value for key, value in (
+            ("disambiguation", str(t["recording_disambiguation"] or "").strip()),
+            ("musicbrainz_recording_id", str(t["musicbrainz_id"] or "").strip()),
+            ("isrc", str(t["isrc"] or "").strip()),
+        ) if value},
         "quality_profile_id": profile_info["id"],
         "quality_profile": profile_info,
         "_album_type": t["album_type"],
@@ -325,12 +413,8 @@ def mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool,
     if not outbox_ids:
         return 0
     conn.commit()
-    drain(db)
-    marks = ",".join("?" for _ in outbox_ids)
-    row = conn.execute(
-        f"SELECT COUNT(*) FROM lib2_mirror_outbox "
-        f"WHERE id IN ({marks}) AND status='done'", outbox_ids).fetchone()
-    return int(row[0]) if row else 0
+    drain(db, ids=outbox_ids)
+    return _done_count(conn, outbox_ids)
 
 
 def mirror_projected_tracks_wishlist(
@@ -352,19 +436,17 @@ def mirror_projected_tracks_wishlist(
     if not outbox_ids:
         return 0
     conn.commit()
-    drain(db)
-    marks = ",".join("?" for _ in outbox_ids)
-    row = conn.execute(
-        f"SELECT COUNT(*) FROM lib2_mirror_outbox "
-        f"WHERE id IN ({marks}) AND status='done'", outbox_ids
-    ).fetchone()
-    return int(row[0]) if row else 0
+    drain(db, ids=outbox_ids)
+    return _done_count(conn, outbox_ids)
 
 
 def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
-                                track_ids: Optional[List[int]] = None) -> List[int]:
+                                track_ids: Optional[List[int]] = None,
+                                quality_profile: Optional[Dict[str, Any]] = None) -> List[int]:
     """Wanted tracks with files whose profile permits upgrades -- or, given
     ``track_ids``, exactly those whatever their monitoring (Enhance Quality).
+    ``quality_profile`` judges every track against that one profile instead
+    of its own (Enhance Quality's "upgrade to").
     The per-track upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     import json
@@ -415,7 +497,7 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
         if row["path"] in protected or _hand_tagged(conn, row["path"], hand_tagged):
             continue
         try:
-            profile = effective_track_profile(conn, int(row["id"]))
+            profile = quality_profile or effective_track_profile(conn, int(row["id"]))
         except (LookupError, ValueError):
             continue
         if not is_upgrade_policy(profile.get("upgrade_policy")):
@@ -436,13 +518,71 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
     return sorted(candidates)
 
 
+def _done_count(conn, outbox_ids: List[int]) -> int:
+    """How many of ``outbox_ids`` the drain finished, in chunks: a profile
+    refresh enqueues one row per wanted track, past SQLite's variable limit."""
+    done = 0
+    for start in range(0, len(outbox_ids), 900):
+        chunk = outbox_ids[start:start + 900]
+        marks = ",".join("?" for _ in chunk)
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM lib2_mirror_outbox WHERE id IN ({marks}) AND status='done'",
+            chunk).fetchone()
+        done += int(row[0]) if row else 0
+    return done
+
+
+# a full projection walk, committed per chunk so the write lock is held a
+# chunk at a time instead of for the whole library (iss32-M05)
+_REFRESH_BATCH = 2000
+# the Quality page's routes hand the refresh to a thread (RUN_INLINE: tests)
+RUN_INLINE = False
+_refresh_lock = threading.Lock()
+_refresh_running: set = set()
+_refresh_again: set = set()
+
+
+def schedule_quality_profile_refresh(db, quality_profile_id: int, *, profile_id: int = 1) -> None:
+    """Refresh the wishlist for an edited profile off the request thread.
+
+    Saving, applying, renaming or deleting a profile used to run the whole
+    projection walk and a wishlist payload per wanted track inside the HTTP
+    request: minutes on a big library, with the write lock held. Asks while
+    one is running for the same profile fold into one more pass after it."""
+    key = (int(quality_profile_id), int(profile_id))
+    if RUN_INLINE:
+        refresh_quality_profile_wishlist(db, key[0], profile_id=key[1])
+        return
+    with _refresh_lock:
+        if key in _refresh_running:
+            _refresh_again.add(key)
+            return
+        _refresh_running.add(key)
+
+    def _run():
+        while True:
+            try:
+                refresh_quality_profile_wishlist(db, key[0], profile_id=key[1])
+            except Exception:  # noqa: BLE001 - a background refresh logs, it never raises
+                logger.exception("quality profile %s wishlist refresh failed", key[0])
+            with _refresh_lock:
+                if key in _refresh_again:
+                    _refresh_again.discard(key)
+                    continue
+                _refresh_running.discard(key)
+                return
+
+    threading.Thread(target=_run, daemon=True, name="quality-profile-refresh").start()
+
+
 def refresh_quality_profile_wishlist(db, quality_profile_id: int, *,
                                      profile_id: int = 1) -> int:
     """Re-evaluate every Library-v2 track using an edited profile."""
     from core.library2.wanted import recompute_wanted
 
     with closing(db._get_connection()) as conn:
-        recompute_wanted(conn, profile_id=profile_id)
+        recompute_wanted(conn, profile_id=profile_id, batch_size=_REFRESH_BATCH,
+                         on_batch=lambda _done, _total: conn.commit())
         rows = conn.execute(
             "SELECT track_id, wanted FROM lib2_wanted_tracks "
             "WHERE profile_id=? AND effective_profile_id=?",
@@ -465,4 +605,5 @@ __all__ = [
     "track_wishlist_payload",
     "upgrade_candidate_track_ids",
     "refresh_quality_profile_wishlist",
+    "schedule_quality_profile_refresh",
 ]

@@ -73,3 +73,54 @@ def test_status_carries_the_running_phase_and_its_numbers():
     finally:
         release.set()
         app.wait(5)
+
+
+def test_the_healthcheck_probe_is_healthy_while_starting_and_once_up():
+    # docker's healthcheck probes /api/startup-status. while a big library's
+    # backup and upgrade run, every other /api path is 503 (the old probe,
+    # /api/setup/status, was one of them), which marked the container
+    # unhealthy and got it restarted mid-upgrade by autoheal and friends
+    from core.startup_application import StartupApplication
+    release = threading.Event()
+
+    def load():
+        assert release.wait(5)
+        return lambda env, start: (start('200 OK', []), [b'normal app'])[1]
+
+    app = StartupApplication(load)
+    try:
+        assert _request(app, '/api/startup-status')[0] == '200 OK'
+        assert _request(app, '/api/setup/status')[0] == '503 Service Unavailable'
+    finally:
+        release.set()
+        assert app.wait(5)
+    status, body = _request(app, '/api/startup-status')
+    assert status == '200 OK' and b'"ready"' in body
+
+
+def test_url_base_set_the_page_polls_and_reloads_through_the_prefix(monkeypatch):
+    """with SOULSYNC_URL_BASE set the app's prefix middleware isn't loaded yet,
+    and once it is Flask has no status route: the page polled a 404 forever"""
+    import json
+    from core.startup_application import StartupApplication
+    monkeypatch.setenv('SOULSYNC_URL_BASE', '/soulsync')
+    release = threading.Event()
+
+    def load():
+        assert release.wait(5)
+        return lambda env, start: (start('200 OK', []), [b'normal app'])[1]
+
+    app = StartupApplication(load)
+    try:
+        status, body = _request(app, '/soulsync/library')
+        assert b'/soulsync/api/startup-status' in body
+        assert json.loads(_request(app, '/soulsync/api/startup-status')[1])['status'] == 'starting'
+        assert _request(app, '/soulsync/api/library')[0] == '503 Service Unavailable'
+    finally:
+        release.set()
+        assert app.wait(5)
+    # after the boot, prefixed (proxy keeps it) and stripped (proxy strips it)
+    for path in ('/soulsync/api/startup-status', '/api/startup-status'):
+        assert json.loads(_request(app, path)[1])['status'] == 'ready'
+    assert _request(app, '/soulsync/library') == ('200 OK', b'normal app')
+

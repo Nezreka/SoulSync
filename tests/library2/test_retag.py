@@ -89,6 +89,32 @@ def test_preview_reports_missing_file(imported_conn):
     assert out[0]["has_changes"] is False
 
 
+@pytest.mark.parametrize('extension', ['aiff', 'aif'])
+@pytest.mark.parametrize('options', [None, {'fields': ['title', 'artist'], 'cover_art': 'skip'}])
+def test_aiff_library_preview_and_write(imported_conn, legacy_db, tmp_path, extension, options):
+    from tests.metadata.test_aiff_tags_1919 import _aiff, _sound_chunk
+    from core.tag_writer import read_file_tags
+
+    path = tmp_path / f'track.{extension}'
+    _aiff(path)
+    before = _sound_chunk(path)
+    _, _, track_id = _seed_album_with_files(imported_conn, path=str(path))
+
+    preview = retag.tag_preview(retag.track_contexts(imported_conn, [track_id]))
+    assert not preview[0].get('error')
+    assert preview[0]['has_changes'] is True
+    stats = retag.write_tags(legacy_db, [track_id], embed_cover=False, options=options)
+    assert stats['written'] == 1, stats
+    assert stats['failed'] == 0
+    tags = read_file_tags(str(path))
+    assert tags['title'] == 'One Dance'
+    assert tags['artist'] == 'Drake; Wizkid'
+    cached = imported_conn.execute(
+        'SELECT tags_json FROM lib2_track_files WHERE track_id=?', (track_id,)).fetchone()
+    assert json.loads(cached[0])['title'] == 'One Dance'
+    assert _sound_chunk(path) == before
+
+
 def test_preview_reports_unreadable_file(imported_conn):
     """A path that doesn't exist yields a per-track error, never an exception."""
     conn = imported_conn
@@ -668,6 +694,7 @@ def test_a_hand_set_artist_name_is_what_gets_written(imported_conn):
     assert data['artists_list'] == ['Corrected Artist', 'Wizkid']
 
 
+@pytest.mark.skipif(not __import__('shutil').which('ffmpeg'), reason='ffmpeg not installed')
 def test_wrong_file_number_does_not_select_another_catalogue_track(imported_conn, legacy_db, tmp_path):
     """#1610: tags naming Beta but numbered 1 must never receive Alpha's tags."""
     import subprocess

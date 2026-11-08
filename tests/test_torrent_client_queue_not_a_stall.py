@@ -9,6 +9,11 @@ the queue is the client's choice, not a dead swarm. the clock now starts when
 the torrent actually starts downloading. a dead magnet (metaDL, which maps to
 downloading) still stalls out, and usenet's queued (which also covers
 grabbing/propagating, which can hang) stays on the clock.
+
+usenet gets the same hold only when the adapter says the job is plainly
+waiting its turn (SAB ``Queued``/``Idle``): SAB runs one job at a time, so the
+third grab in line sat at 0% past the 30 minutes and was failed before SAB
+ever started it.
 """
 
 from __future__ import annotations
@@ -140,4 +145,28 @@ def test_video_still_fails_a_torrent_that_is_downloading_nothing(monkeypatch):
 
 def test_video_usenet_queued_stays_on_the_clock(monkeypatch):
     failed = _video_tick(monkeypatch, _old_row("usenet"), _status(state='queued'))
+    assert len(failed) == 1
+
+
+def test_video_does_not_fail_a_usenet_job_waiting_its_turn_in_sab(monkeypatch):
+    row = _old_row("usenet")
+    old_clock = row["progress_at"]
+    failed = _video_tick(monkeypatch, row,
+                         _status(state='queued', size=0, waiting_in_queue=True))
+    assert failed == []
+    assert row["status"] == "downloading"
+    assert row["progress_at"] > old_clock
+
+
+def test_video_usenet_grabbing_or_propagating_stays_on_the_clock(monkeypatch):
+    failed = _video_tick(monkeypatch, _old_row("usenet"),
+                         _status(state='queued', waiting_in_queue=False))
+    assert len(failed) == 1 and "no progress" in failed[0].lower()
+
+
+def test_video_waiting_flag_only_holds_usenet_rows(monkeypatch):
+    # torrents are held by their own 'queued' state; the usenet flag means
+    # nothing to them, so a stalled torrent carrying it still fails
+    failed = _video_tick(monkeypatch, _old_row("torrent"),
+                         _status(state='stalled', waiting_in_queue=True))
     assert len(failed) == 1

@@ -1514,6 +1514,29 @@ class PlexClient(MediaServerBase):
             logger.error(f"Error updating poster for {artist.title}: {e}")
             return False
     
+    def update_artist_background(self, artist: PlexArtist, image_data: bytes):
+        """Set the artist's background ("art"): the wide picture behind the
+        artist page in Plexamp and the web app (#1957)."""
+        try:
+            upload_url = f"{self.server._baseurl}/library/metadata/{artist.ratingKey}/arts"
+            headers = {
+                'X-Plex-Token': self.server._token,
+                'Content-Type': 'image/jpeg'
+            }
+            response = requests.post(upload_url, data=image_data, headers=headers, timeout=30)
+            response.raise_for_status()
+            artist.refresh()
+            logger.info(f"Updated background for {artist.title}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating background for {artist.title}: {e}")
+            return False
+
+    @staticmethod
+    def artist_has_background(artist) -> bool:
+        art = str(getattr(artist, 'art', '') or '')
+        return bool(art) and 'default' not in art.lower()
+
     def update_album_poster(self, album, image_data: bytes):
         """Update album poster image"""
         try:
@@ -1593,8 +1616,9 @@ class PlexClient(MediaServerBase):
             logger.debug(f"Error checking update age for {artist.title}: {e}")
             return True  # Default to needing update if error
     
-    def update_artist_biography(self, artist: PlexArtist) -> bool:
-        """Update artist summary with current timestamp"""
+    def update_artist_biography(self, artist: PlexArtist, biography: Optional[str] = None) -> bool:
+        """Update artist summary with current timestamp. ``biography`` fills a
+        summary that's empty, never one that already has text (#1993)"""
         try:
             # Get current summary/biography
             current_summary = getattr(artist, 'summary', '') or ''
@@ -1614,7 +1638,7 @@ class PlexClient(MediaServerBase):
             today = datetime.now().strftime('%Y-%m-%d')
             
             # Add timestamp to summary field
-            new_summary = clean_summary
+            new_summary = clean_summary or (biography or '').strip()
             if ignore_flag:
                 new_summary = f"{new_summary}\n\n{ignore_flag}".strip()
             new_summary = f"{new_summary}\n\n-updatedAt{today}".strip()
@@ -1728,6 +1752,65 @@ class PlexClient(MediaServerBase):
             return True
         except Exception as e:
             logger.error(f"Failed to trigger library scan for '{section_label}': {e}")
+            return False
+
+    def playlist_tracks_for_tagging(self, playlist_id) -> List:
+        """The tracks of one plex playlist, for tag_tracks_mood."""
+        if not self.ensure_connection():
+            return []
+        playlist = self.server.fetchItem(int(playlist_id))
+        return [t for t in playlist.items() if getattr(t, "type", "") == "track"]
+
+    @staticmethod
+    def tag_tracks_mood(tracks, tag: str) -> Dict[str, int]:
+        """Add ``tag`` as a mood on each track that doesn't have it yet (wolf39us,
+        Discord Nov 4 2026): with every song on a playlist tagged, a plex smart
+        playlist can start from "mood is <tag>" and add rating rules on top.
+        Plex metadata only, nothing is written to the files; existing moods stay."""
+        wanted = tag.strip()
+        counts = {"tagged": 0, "skipped": 0, "failed": 0}
+        for track in tracks:
+            try:
+                have = {str(getattr(m, "tag", "")).casefold() for m in (track.moods or [])}
+                if wanted.casefold() in have:
+                    counts["skipped"] += 1
+                    continue
+                track.addMood(wanted)
+                counts["tagged"] += 1
+            except Exception as e:  # noqa: BLE001 - one track never stops the rest
+                counts["failed"] += 1
+                logger.debug(f"mood tag failed on {getattr(track, 'title', '?')}: {e}")
+        return counts
+
+    def trigger_folder_scan(self, folders: List[str]) -> bool:
+        """Scan only these folders (#1978), given as Plex sees them. Each goes
+        to the music section whose folder holds it; False, with nothing
+        triggered, when any of them sits in no music section, so the caller
+        scans the whole library instead of quietly missing an album."""
+        if not folders or not self.ensure_connection():
+            return False
+        from core.library2.scan_paths import location_for
+        try:
+            sections = self._get_music_sections()
+            if not sections and self.music_library is not None:
+                sections = [self.music_library]
+            plan = []
+            for folder in folders:
+                owner = None
+                for section in sections:
+                    if location_for(folder, list(getattr(section, "locations", None) or [])):
+                        owner = section
+                        break
+                if owner is None:
+                    logger.info(f"Plex folder scan: no music section holds {folder}")
+                    return False
+                plan.append((owner, folder))
+            for section, folder in plan:
+                section.update(path=folder)
+            logger.info(f"Triggered Plex folder scan of {len(plan)} folder(s)")
+            return True
+        except Exception as e:
+            logger.error(f"Plex folder scan failed: {e}")
             return False
 
     def is_library_scanning(self, library_name: str = "Music") -> bool:

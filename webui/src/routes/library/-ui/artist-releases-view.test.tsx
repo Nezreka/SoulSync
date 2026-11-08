@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -8,6 +8,9 @@ import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
 import type { LibraryV2AlbumSummary } from '../-library-v2.types';
+
+import { lib2Track } from '../-library-v2.test-fixtures';
+import { resetGoingBackForTests } from '../../artist-detail/-artist-detail.back-label';
 
 function album(patch: Partial<LibraryV2AlbumSummary> & { id: number; title: string }) {
   return {
@@ -62,6 +65,38 @@ function portishead(patch: Record<string, unknown> = {}) {
   };
 }
 
+/** one release with files here: My Library is offered only for an artist in
+ *  the library, the way dev offered its library view (and the tests of that
+ *  view need an artist that has one) */
+const OWNED_SINGLE = {
+  id: 99,
+  title: 'Numb',
+  album_type: 'single',
+  origin: 'library',
+  tracks_present: 1,
+  tracks_missing: 1,
+  track_count: 2,
+};
+
+function inLibrary() {
+  server.use(
+    http.get('/api/library/v2/artists/1', () =>
+      HttpResponse.json({
+        success: true,
+        artist: portishead({
+          media_server_sources: ['navidrome', 'plex'],
+          monitored: false,
+          albums: [album({ id: 1, title: 'Dummy' }), album({ id: 2, title: 'Roseland NYC Live' })],
+          singles: [album(OWNED_SINGLE)],
+          album_count: 2,
+          discography_count: 2,
+          total_size_bytes: 2048,
+        }),
+      }),
+    ),
+  );
+}
+
 function renderArtist(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
@@ -104,6 +139,226 @@ describe('Library V2 artist detail — All Releases views', () => {
     },
   );
 
+  // the whole artist page and the whole View Settings: slow on a loaded run
+  it('hides the toolbar buttons this profile switched off and opens View Settings from Tools', async () => {
+    const saved: unknown[] = [];
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { track_table: {}, artist_toolbar: { history: false } },
+        }),
+      ),
+      http.put('/api/library/v2/ui-preferences', async ({ request }) => {
+        saved.push(await request.json());
+        return HttpResponse.json({
+          success: true,
+          preferences: { track_table: {}, artist_toolbar: { history: true } },
+        });
+      }),
+    );
+    renderArtist('/library?artist=1');
+    expect(await screen.findByRole('button', { name: 'Artist Settings' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'History' })).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
+    fireEvent.click(screen.getByRole('button', { name: 'View Settings…' }));
+    // the dialog is the whole View Settings: give it time under a loaded run
+    const history = await screen.findByRole('checkbox', { name: 'History' }, { timeout: 5000 });
+    expect(history).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Refresh & Scan' })).toBeChecked();
+    fireEvent.click(history);
+
+    fireEvent.click(
+      within(
+        screen.getByRole('radiogroup', { name: 'From Search, Discover and elsewhere' }),
+      ).getByRole('radio', { name: /Compact header/ }),
+    );
+    await waitFor(
+      () =>
+        expect(saved).toEqual([
+          { artist_toolbar: { history: true } },
+          { artist_page: { header_elsewhere: 'compact' } },
+        ]),
+      { timeout: 5000 },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(
+      await screen.findByRole('button', { name: 'History' }, { timeout: 5000 }),
+    ).toBeInTheDocument();
+  }, 30_000);
+
+  it.each(['cards', 'table'])(
+    'reads the discography of an artist the library does not hold, writing nothing (%s)',
+    async (view) => {
+      // a guest credit opened from a search or a track's artist column: the
+      // discography walk wrote 70 releases of someone you only looked at. the
+      // provider's list is cards only, so a table url still shows it
+      const walk = vi.fn();
+      server.use(
+        http.get('/api/library/v2/artists/1', () =>
+          HttpResponse.json({
+            success: true,
+            artist: portishead({ in_library: false, albums: [], discography_count: 0 }),
+          }),
+        ),
+        http.post('/api/library/v2/artists/1/discography/refresh', () => {
+          walk();
+          return HttpResponse.json({ success: true, job_id: 'walk-1' });
+        }),
+        http.get('/api/artist-detail/:id', () =>
+          HttpResponse.json({
+            success: true,
+            artist: { id: 'sp-1', name: 'Portishead' },
+            discography: { albums: [{ id: 'al-3', title: 'Third' }], source: 'spotify' },
+          }),
+        ),
+      );
+      renderArtist(`/library?artist=1&releases=all&releaseView=${view}`);
+
+      expect(await screen.findByText('Third')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Table View' })).not.toBeInTheDocument();
+      expect(walk).not.toHaveBeenCalled();
+    },
+  );
+
+  it('ends on similar artists in both views, the way the artist page always did', async () => {
+    window.loadSimilarArtists = vi.fn();
+    window.cancelSimilarArtistsLoad = vi.fn();
+    inLibrary();
+    renderArtist('/library?artist=1&releases=library');
+    await screen.findByRole('button', { name: 'My Library' });
+    expect(await screen.findByText('Similar Artists')).toBeInTheDocument();
+    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
+
+    fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
+    // the discography walk repaints the page, the section is there once it settles
+    await waitFor(() => expect(screen.getByText('Similar Artists')).toBeInTheDocument(), {
+      timeout: 4000,
+    });
+    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
+  });
+
+  it('leaves similar artists out of My Library when View Settings says so', async () => {
+    window.loadSimilarArtists = vi.fn();
+    window.cancelSimilarArtistsLoad = vi.fn();
+    inLibrary();
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {},
+            artist_page: { library_sections: { similar_artists: false } },
+          },
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=library');
+    await screen.findByRole('button', { name: 'My Library' });
+    expect(await screen.findByText('Numb')).toBeInTheDocument();
+    expect(screen.queryByText('Similar Artists')).not.toBeInTheDocument();
+    expect(window.loadSimilarArtists).not.toHaveBeenCalled();
+
+    // Discovery still suggests them
+    fireEvent.click(screen.getByRole('button', { name: /Discovery/ }));
+    await waitFor(() => expect(screen.getByText('Similar Artists')).toBeInTheDocument(), {
+      timeout: 4000,
+    });
+    await waitFor(() => expect(window.loadSimilarArtists).toHaveBeenCalledWith('Portishead'));
+  });
+
+  it.each(['albums', 'songs', 'wanted'])(
+    'goes back from an album picked in %s to that list, not to its artist',
+    async (section) => {
+      server.use(
+        http.get('/api/library/v2/albums/1', () =>
+          HttpResponse.json({
+            success: true,
+            album: {
+              ...album({ id: 1, title: 'Dummy' }),
+              genres: [],
+              quality_profile: null,
+              primary_artist: { id: 1, name: 'Portishead' },
+              tracks: [],
+            },
+          }),
+        ),
+        http.get('/api/library/v2/albums/1/match-status', () =>
+          HttpResponse.json({ success: true, album: [], tracks: {} }),
+        ),
+        http.get('/api/library/v2/albums/1/queue-status', () =>
+          HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+        ),
+      );
+      const { router } = renderArtist(`/library?section=${section}&album=1`);
+      fireEvent.click(await screen.findByRole('button', { name: '← Library' }));
+      await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+      expect(router.state.location.search).toMatchObject({ section });
+      expect(router.state.location.search).not.toHaveProperty('artist');
+    },
+  );
+
+  it('opens an artist linked without a header in the one this profile picked for the library', async () => {
+    inLibrary();
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {},
+            artist_page: { header: 'compact', header_elsewhere: 'rich' },
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/albums/1/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+    );
+    // from an album page the route leaves the header alone: the page picks it
+    const { router } = renderArtist('/library?album=1');
+    await screen.findByRole('button', { name: '← Library' });
+    await act(() => router.navigate({ href: '/library?artist=1' }));
+    expect(await screen.findByRole('button', { name: /^Rich header/ })).toBeInTheDocument();
+    expect(router.state.location.search).not.toHaveProperty('header');
+  });
+
+  it('says a release on the wishlist keeps upgrading to its quality profile', async () => {
+    // being on the wishlist is monitoring: it is what quality upgrades act on,
+    // and taking it off stops both
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [album({ id: 1, title: 'Dummy', monitored: true })],
+            album_count: 1,
+          }),
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=library');
+
+    const title =
+      'On your Wishlist. SoulSync keeps upgrading it to its quality profile. Click to remove it';
+    await waitFor(() => expect(screen.getAllByTitle(title).length).toBeGreaterThan(0));
+  });
+
   it('keeps media-server sync in Tools and reports its background result', async () => {
     const sync = vi.fn();
     server.use(
@@ -127,6 +382,8 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   beforeEach(() => {
+    window.artistDetailLabelStack = [];
+    resetGoingBackForTests();
     window.SoulSyncWebShellBridge = createShellBridge();
     server.use(
       http.get('/api/library/v2/enabled', () =>
@@ -204,6 +461,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('uses the existing rich header for immersive arrivals and keeps the artist tools on show', async () => {
+    inLibrary();
     const { router } = renderArtist('/library?artist=1&view=discovery&immersive=true');
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(router.state.location.search).toMatchObject({ header: 'rich', releaseView: 'cards' });
@@ -271,6 +529,7 @@ describe('Library V2 artist detail — All Releases views', () => {
   });
 
   it('offers the Table ↔ Discover switch only on All Releases (ldp-03)', async () => {
+    inLibrary();
     const { router } = renderArtist('/library?artist=1');
     await screen.findByRole('heading', { name: 'Portishead' });
     expect(screen.queryByRole('button', { name: 'Discover View' })).not.toBeInTheDocument();
@@ -301,7 +560,8 @@ describe('Library V2 artist detail — All Releases views', () => {
     // the card CSS depends on to cancel `.release-card`'s fixed 300px height,
     // without which the covers overlapped.
     await waitFor(() =>
-      expect(document.querySelectorAll('.release-card.album-card')).toHaveLength(2),
+      // two albums and the single the artist has here
+      expect(document.querySelectorAll('.release-card.album-card')).toHaveLength(3),
     );
     expect(
       document.querySelector('.discography-sections .discography-section .releases-grid'),
@@ -448,6 +708,7 @@ describe('Library V2 artist detail — All Releases views', () => {
                 track_count: 10,
               }),
             ],
+            singles: [album(OWNED_SINGLE)],
           }),
         }),
       ),
@@ -627,6 +888,198 @@ describe('Library V2 artist detail — All Releases views', () => {
     });
   });
 
+  it('opens a featured artist from the tracklist in the header this profile picked', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {
+              columns: { title: true, artists: true },
+              column_order: ['title', 'artists'],
+              column_widths: {},
+            },
+            artist_page: { header: 'compact' },
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [
+              lib2Track({
+                artists: [
+                  { id: 1, name: 'Portishead', role: 'primary' },
+                  { id: 2, name: 'Beth Gibbons', role: 'featured' },
+                ],
+              }),
+            ],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/albums/1/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+    );
+    const { router } = renderArtist('/library?artist=1&album=1');
+
+    // the tracklist loads after the page
+    fireEvent.click(await screen.findByRole('button', { name: 'Beth Gibbons' }, { timeout: 3000 }));
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 2, header: 'compact' }),
+    );
+    expect(router.state.location.search).not.toHaveProperty('album');
+  });
+
+  it('keeps the page artist as text in the tracklist', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {
+              columns: { title: true, artists: true },
+              column_order: ['title', 'artists'],
+            },
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [lib2Track({ artists: [{ id: 1, name: 'Portishead', role: 'primary' }] })],
+          },
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&album=1');
+
+    expect(
+      await screen.findByRole('cell', { name: 'Portishead' }, { timeout: 3000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Portishead' })).toBeNull();
+  });
+
+  it('goes back from a guest album to the artist it was opened from, in that header', async () => {
+    // Rockstar is Post Malone's; opened from 21 Savage's appears on, back
+    // read "Post Malone" and opened his page in the library's own header
+    server.use(
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Rockstar' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 2, name: 'Post Malone' },
+            tracks: [],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/artists/:id', ({ params }) => {
+        const id = Number(params.id);
+        return HttpResponse.json({
+          success: true,
+          artist: portishead({ id, name: id === 1 ? '21 Savage' : 'Post Malone' }),
+        });
+      }),
+    );
+    const { router } = renderArtist('/library?artist=1&header=compact');
+    await screen.findByRole('heading', { name: '21 Savage' });
+    // the page's own search with the album added, as the appears-on name does
+    await act(() => router.navigate({ href: '/library?artist=1&header=compact&album=1' }));
+
+    fireEvent.click(await screen.findByRole('button', { name: '← 21 Savage' }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+    expect(router.state.location.search).toMatchObject({ artist: 1, header: 'compact' });
+  });
+
+  it('links an album main artist when another artist page is open and returns there', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: {
+              columns: { title: true, artists: true },
+              column_order: ['title', 'artists'],
+            },
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Rockstar' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 2, name: 'Post Malone' },
+            tracks: [
+              lib2Track({
+                artists: [
+                  { id: 1, name: '21 Savage', role: 'featured' },
+                  { id: 2, name: 'Post Malone', role: 'primary' },
+                ],
+              }),
+            ],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/artists/:id', ({ params }) => {
+        const id = Number(params.id);
+        return HttpResponse.json({
+          success: true,
+          artist: portishead({ id, name: id === 1 ? '21 Savage' : 'Post Malone' }),
+        });
+      }),
+      http.get('/api/library/v2/artists/:id/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+      http.get('/api/library/v2/artists/:id/aliases', ({ params }) =>
+        HttpResponse.json({
+          success: true,
+          canonical_artist_id: Number(params.id),
+          aliases: [],
+        }),
+      ),
+      http.get('/api/library/v2/artists/:id/match-status', () =>
+        HttpResponse.json({ success: true, services: [], enrichment_coverage: {} }),
+      ),
+    );
+    const { router } = renderArtist('/wishlist?tab=music');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/wishlist'));
+    await act(() => router.navigate({ href: '/library?artist=1&album=1' }));
+
+    expect(
+      await screen.findByRole('cell', { name: '21 Savage, Post Malone' }, { timeout: 3000 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '21 Savage' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Post Malone' }));
+
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ artist: 2 }));
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to 21 Savage' }));
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ artist: 1 }));
+    const sourceBack = await screen.findByRole('button', { name: '← Back to Wishlist' });
+    fireEvent.click(sourceBack);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/wishlist'));
+    expect(router.state.location.search).toMatchObject({ tab: 'music' });
+  });
+
   it('shows the legacy enrichment rings and keeps the V2 match chips', async () => {
     renderArtist('/library?artist=1&header=rich');
 
@@ -673,11 +1126,12 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
     renderArtist('/library?artist=1&header=rich');
 
-    expect(await screen.findByTitle('Bookmarked — this track is now wanted')).toBeInTheDocument();
+    expect(await screen.findByTitle('On your Wishlist')).toBeInTheDocument();
   });
 
   it('monitors every not-yet-wanted top track with Monitor All', async () => {
     const monitored: unknown[] = [];
+    inLibrary();
     server.use(
       http.get('/api/artist/:id/top-tracks', () =>
         HttpResponse.json({
@@ -702,13 +1156,38 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
     renderArtist('/library?artist=1&header=rich');
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Monitor All' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add All to Wishlist' }));
     // the one already wanted is skipped
     await waitFor(() => expect(monitored).toEqual(['Glory Box', 'Sour Times']));
-    expect(await screen.findByRole('button', { name: 'All monitored' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'All on Wishlist' })).toBeDisabled();
   });
 
-  it('uses the same bookmark glyph as every other monitor control', async () => {
+  it.each([
+    [{ singles: [album(OWNED_SINGLE)] }, 'In your library', true],
+    // only guest verses on other artists' music: in the library, but not theirs
+    [{ guest_track_count: 6, guest_release_count: 6 }, 'Featured in your library', true],
+    // nothing on disk yet, but a wishlisted track or a watch: monitored, so its
+    // releases and their quality profile live in My Library
+    [{ in_library: true, monitored: true }, 'On your Watchlist', true],
+    // only credited on wanted tracks of other artists (Rockwell on a Michael
+    // Jackson compilation): featured, its appears on is its My Library
+    [{ in_library: true, monitored: false }, 'Featured in your library', true],
+    [{}, 'Not in your library', false],
+  ])('labels the artist by what the library holds: %#', async (patch, label, myLibrary) => {
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({ success: true, artist: portishead(patch) }),
+      ),
+    );
+    renderArtist('/library?artist=1&header=rich');
+    expect(await screen.findByText(label)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(Boolean(screen.queryByRole('button', { name: 'My Library' }))).toBe(myLibrary),
+    );
+  });
+
+  it('draws a track with the Wishlist icon and the artist with the Watchlist icon', async () => {
+    inLibrary();
     server.use(
       http.get('/api/artist/:id/top-tracks', () =>
         HttpResponse.json({
@@ -728,12 +1207,34 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
     renderArtist('/library?artist=1&header=rich');
 
-    const bookmark = await screen.findByTitle('Bookmark — mark this track as wanted');
-    // The monitor toggle by its own label, not "the first icon in the hero" —
-    // the hero actions gained a Play button in front of it, and a positional
-    // lookup silently compares against whatever happens to be leftmost.
-    const monitor = screen.getByLabelText(/^(Start|Stop) monitoring$/).querySelector('svg path');
-    expect(bookmark.querySelector('svg path')?.getAttribute('d')).toBe(monitor?.getAttribute('d'));
+    // dev's two lists: a track goes on the Wishlist (the heart), the artist
+    // on the Watchlist (the eye). Library v2 drew both as one bookmark
+    const track = await screen.findByTitle('Add to Wishlist');
+    expect(track.querySelector('svg')?.getAttribute('data-list-icon')).toBe('wishlist');
+    const artist = screen.getAllByLabelText(/^(Add to|Remove from) Watchlist$/)[0];
+    expect(artist.querySelector('svg')?.getAttribute('data-list-icon')).toBe('watchlist');
+  });
+
+  it('gives a household member their own Watchlist button on a library artist', async () => {
+    // 3.6.1's artist page let every profile watch an artist on its own
+    // watchlist; Library v2's monitored flag is the admin's, so a member saw
+    // no button at all. The member's button asks the per-profile watchlist.
+    const checks: unknown[] = [];
+    server.use(
+      http.get('/api/library/v2/enabled', () =>
+        HttpResponse.json({ success: true, enabled: true, can_write: false, can_wish: false }),
+      ),
+      http.post('/api/watchlist/check', async ({ request }) => {
+        checks.push(await request.json());
+        return HttpResponse.json({ success: true, is_watching: true });
+      }),
+    );
+    renderArtist('/library?artist=1&header=rich');
+
+    expect(
+      await screen.findByRole('button', { name: /Watching/ }, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(checks).toEqual([{ artist_id: 'sp-1' }]);
   });
 
   it('lets a read-only profile browse the full provider discography without writing', async () => {
@@ -804,7 +1305,9 @@ describe('Library V2 artist detail — All Releases views', () => {
     renderArtist('/library?artist=1');
 
     fireEvent.click(await screen.findByRole('button', { name: 'Upgrade 2' }));
-    expect(await screen.findByText('Enhance Quality — Dummy')).toBeInTheDocument();
+    expect(
+      await screen.findByRole('dialog', { name: 'Enhance Quality — Dummy' }),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /^Enhance/ }));
     await waitFor(() => expect(posts).toEqual([{ track_ids: [1, 2] }]));
   });
@@ -843,6 +1346,192 @@ describe('Library V2 artist detail — All Releases views', () => {
     await act(() => router.navigate({ href: '/library?artist=1' }));
     await act(() => router.navigate({ href: '/library?artist=1&header=rich' }));
     expect(await screen.findByRole('button', { name: '← Back to Search' })).toBeInTheDocument();
+  });
+
+  it('returns from an owned artist hop to the exact previous artist view', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { artist_page: { header: 'rich', header_elsewhere: 'compact' } },
+        }),
+      ),
+      http.get('/api/library/v2/artists/:id', ({ params }) => {
+        const id = Number(params.id);
+        return HttpResponse.json({
+          success: true,
+          artist: portishead({ id, name: id === 1 ? '21 Savage' : 'Nicki Minaj' }),
+        });
+      }),
+      http.get('/api/library/v2/artists/:id/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+      http.get('/api/library/v2/artists/:id/aliases', ({ params }) =>
+        HttpResponse.json({
+          success: true,
+          canonical_artist_id: Number(params.id),
+          aliases: [],
+        }),
+      ),
+      http.get('/api/library/v2/artists/:id/match-status', () =>
+        HttpResponse.json({ success: true, services: [], enrichment_coverage: {} }),
+      ),
+    );
+    const { router } = renderArtist('/search?q=21%20Savage');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/search'));
+    await act(() =>
+      router.navigate({
+        href: '/library?artist=1&view=discovery&releases=all&releaseView=table&header=compact',
+      }),
+    );
+    await screen.findByRole('heading', { name: '21 Savage' });
+    expect(router.state.location.search).toMatchObject({ header: 'compact' });
+
+    await act(() => router.navigate({ href: '/library?artist=2&header=rich' }));
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to 21 Savage' }));
+
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ artist: 1 }));
+    expect(router.state.location.search).toMatchObject({
+      view: 'discovery',
+      releases: 'all',
+      releaseView: 'table',
+      header: 'compact',
+    });
+  });
+
+  it('back to library leaves the artist, however often the view was switched', async () => {
+    const { router } = renderArtist('/library?section=albums');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));
+    await act(() => router.navigate({ href: '/library?artist=1' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Discovery/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Table View' }));
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ releases: 'all', releaseView: 'table' }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Library' }));
+
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('artist'));
+    expect(router.state.location.search).toMatchObject({ section: 'albums' });
+  });
+
+  it('a second artist opened from the same grid goes back to the library, not the first', async () => {
+    // the grid's url is the same both times, so "the artist last shown" was
+    // still the first one: the second read "Back to 21 Savage" and led there
+    server.use(
+      http.get('/api/library/v2/artists/:id', ({ params }) => {
+        const id = Number(params.id);
+        return HttpResponse.json({
+          success: true,
+          artist: portishead({ id, name: id === 1 ? '21 Savage' : 'Nicki Minaj' }),
+        });
+      }),
+    );
+    const { router } = renderArtist('/library?section=artists');
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe('/library'));
+    await act(() => router.navigate({ href: '/library?section=artists&artist=1' }));
+    await screen.findByRole('heading', { name: '21 Savage' });
+    fireEvent.click(screen.getByRole('button', { name: '← Back to Library' }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('artist'));
+
+    await act(() => router.navigate({ href: '/library?section=artists&artist=2' }));
+    await screen.findByRole('heading', { name: 'Nicki Minaj' });
+    expect(screen.getByRole('button', { name: '← Back to Library' })).toBeInTheDocument();
+  });
+
+  it('back never walks into the album it came up from', async () => {
+    // a cold load straight onto a release, then up to its artist: the chain
+    // is empty, and stepping back through history went into the album again,
+    // and from there to the artist, round and round
+    server.use(
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/albums/1/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+    );
+    const { router } = renderArtist('/library?artist=1&album=1');
+    fireEvent.click(await screen.findByRole('button', { name: /Portishead/ }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+
+    fireEvent.click(await screen.findByRole('button', { name: /^← Back/ }));
+
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('artist'));
+    expect(router.state.location.pathname).toBe('/library');
+  });
+
+  it.each([
+    ['/wishlist?tab=music', 'Wishlist', 'compact'],
+    ['/search?q=Portishead', 'Search', 'compact'],
+    ['/watchlist?tab=artists', 'Watchlist', 'compact'],
+    ['/playlist-explorer?playlist=Roadtrip', 'Explorer', 'compact'],
+    ['/discover?tab=for-you', 'Discover', 'compact'],
+    ['/dashboard', 'Dashboard', 'compact'],
+    ['/library?section=albums', 'Library', 'rich'],
+  ])('returns to %s after opening an artist and large album', async (origin, label, header) => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: {
+            track_table: { visible_match_providers: {} },
+            artist_page: { header: 'rich', header_elsewhere: 'compact' },
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1', () =>
+        HttpResponse.json({
+          success: true,
+          album: {
+            ...album({ id: 1, title: 'Dummy' }),
+            genres: [],
+            quality_profile: null,
+            primary_artist: { id: 1, name: 'Portishead' },
+            tracks: [],
+          },
+        }),
+      ),
+      http.get('/api/library/v2/albums/1/match-status', () =>
+        HttpResponse.json({ success: true, album: [], tracks: {} }),
+      ),
+      http.get('/api/library/v2/albums/1/queue-status', () =>
+        HttpResponse.json({ success: true, tracks: {}, albums: {} }),
+      ),
+    );
+    // A stale entry from an earlier visit must never win over this visit's
+    // actual route origin.
+    (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [
+      { type: 'page', pageId: 'discover' },
+    ];
+    const { router } = renderArtist(origin);
+    const originPath = new URL(origin, 'http://localhost').pathname;
+    await waitFor(() => expect(router.state.resolvedLocation?.pathname).toBe(originPath));
+    await act(() => router.navigate({ href: '/library?view=discovery&immersive=true&artist=1' }));
+    await waitFor(() => expect(router.state.location.search.header ?? 'rich').toBe(header));
+    await act(() => router.navigate({ href: '/library?artist=1&album=1&header=compact' }));
+    fireEvent.click(await screen.findByRole('button', { name: '← Portishead' }));
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty('album'));
+    // inside the library a switch of the header is the user's and stays
+    await act(() => router.navigate({ href: '/library?artist=1&header=rich' }));
+    expect(router.state.location.search).toMatchObject({ header: 'rich' });
+    fireEvent.click(await screen.findByRole('button', { name: `← Back to ${label}` }));
+    await waitFor(() => expect(router.state.location.pathname).toBe(originPath));
+    expect(router.state.location.search).toMatchObject(
+      Object.fromEntries(new URL(origin, 'http://localhost').searchParams),
+    );
   });
 
   it("is dev's styled back button, labelled with the page you came from", async () => {

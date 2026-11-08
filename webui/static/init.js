@@ -137,6 +137,8 @@ function applyWorkerOrbsSetting(enabled) {
             window.workerOrbs.setPage('_disabled');
         }
     }
+    // the video orbs read the same flag and decide for themselves
+    if (window.videoWorkerOrbs) window.videoWorkerOrbs.refresh();
 }
 
 function initAccentColorListeners() {
@@ -287,6 +289,7 @@ function applyMaxPerformance(enabled) {
             window.workerOrbs.setPage(activeId);
         }
     }
+    if (window.videoWorkerOrbs) window.videoWorkerOrbs.refresh();
     _syncMaxPerfDependentToggles(enabled);
 }
 
@@ -2121,6 +2124,13 @@ function updateProfileIndicator() {
         btn.style.display = (!ap || ap.includes(page)) ? '' : 'none';
     });
     document.body.classList.toggle('video-admin', !!currentProfile.is_admin);
+
+    // what this profile chose to see (#1909). goes on top of the permission
+    // filter above: the cached answer right away, the server's when it lands
+    if (window.SoulSyncFeatures) {
+        window.SoulSyncFeatures.apply();
+        window.SoulSyncFeatures.load();
+    }
 
     // Toggle download capability
     if (canDownload()) {

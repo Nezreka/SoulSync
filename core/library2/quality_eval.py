@@ -213,7 +213,7 @@ def profile_upgrade_settings(
         raw = profile_row.get("ranked_targets")
         ranked = json.loads(raw) if isinstance(raw, str) else (raw or [])
         targets, fallback = targets_from_profile({**profile_row, "ranked_targets": ranked})
-        policy = profile_row.get("upgrade_policy") or "none"
+        policy = profile_row.get("upgrade_policy") or "acceptable"
         try:
             cutoff = int(profile_row.get("upgrade_cutoff_index") or 0)
         except (TypeError, ValueError):

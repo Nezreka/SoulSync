@@ -21,7 +21,12 @@ import { appURL } from '@/platform/url-base';
 
 import type { ExportMode, ExportStatusLine } from './-sync.export';
 
-import { fetchPlaylistExportStatus, startPlaylistExport } from './-sync.api';
+import {
+  fetchMirroredPlaylist,
+  generatePlaylistM3u,
+  fetchPlaylistExportStatus,
+  startPlaylistExport,
+} from './-sync.api';
 import {
   EXPORT_POLL_MS,
   EXPORT_POLL_RETRY_MS,
@@ -30,6 +35,7 @@ import {
   exportPollOutcome,
   exportStartOutcome,
 } from './-sync.export';
+import { downloadM3u, m3uFileName } from './-sync.server';
 
 export interface ExportController {
   /** The live status line per mirrored-playlist id. */
@@ -135,6 +141,36 @@ export function useExportJobs(): ExportController {
       operations.current[playlistId] = operation;
       paint(playlistId, EXPORT_STARTING_STATUS);
       try {
+        if (mode === 'm3u') {
+          const playlist = await fetchMirroredPlaylist(playlistId);
+          if (!alive.current || operations.current[playlistId] !== operation) return;
+          if (playlist.error) throw new Error(playlist.error);
+          const tracks = (playlist.tracks || []).map((track) => ({
+            name: track.track_name || '',
+            artist: track.artist_name || '',
+            duration_ms: track.duration_ms || 0,
+          }));
+          if (!tracks.length) throw new Error('No tracks available to export');
+          const name = playlist.display_name || playlist.name || 'Playlist';
+          const response = await generatePlaylistM3u({
+            playlist_name: name,
+            tracks,
+            context_type: 'playlist',
+            save_to_disk: false,
+          });
+          const result = await response.json();
+          if (!response.ok || !result.success || typeof result.m3u_content !== 'string') {
+            throw new Error(result.error || 'M3U export failed');
+          }
+          if (!alive.current || operations.current[playlistId] !== operation) return;
+          downloadM3u(result.m3u_content, m3uFileName(name));
+          paint(playlistId, {
+            text: `Downloaded M3U (${result.stats?.found || 0}/${tracks.length} in library)`,
+            color: '#22c55e',
+            autoHideMs: 10000,
+          });
+          return;
+        }
         const data = await startPlaylistExport(playlistId, mode, backfill);
         if (!alive.current || operations.current[playlistId] !== operation) return;
         const outcome = exportStartOutcome(data);
@@ -142,9 +178,18 @@ export function useExportJobs(): ExportController {
         // Fire-and-forget, as the vanilla does (750) — the poll owns its own
         // errors, and awaiting it would keep `start` pending for the whole job.
         if (outcome.jobId) void poll(outcome.jobId, playlistId, mode, operation);
-      } catch {
+      } catch (error) {
         if (!alive.current || operations.current[playlistId] !== operation) return;
-        paint(playlistId, EXPORT_START_ERROR_STATUS);
+        paint(
+          playlistId,
+          mode === 'm3u'
+            ? {
+                text: error instanceof Error ? error.message : 'M3U export failed',
+                color: '#ef4444',
+                autoHideMs: 10000,
+              }
+            : EXPORT_START_ERROR_STATUS,
+        );
       }
     },
     [paint, poll],

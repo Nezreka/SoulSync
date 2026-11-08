@@ -469,6 +469,38 @@ body[data-side="video"] .dashboard-header-sweep {
     justify-content: center;
     margin: 4px 0;
 }
+/* one toolbar (#1909). the music library css stacks .library-controls as a
+   column, and there the search box's flex: 1 1 240px became 240px of HEIGHT:
+   a big empty block with the glass icon floating in it, then the filters
+   centred under it. here it's a wrapping row: the tabs on their own line,
+   search left and filters right on the next, the alphabet under them. */
+#video-library-page .library-controls {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+#video-library-page .library-controls::before {
+    content: "";
+    order: -1;
+    flex-basis: 100%;
+    height: 0;
+}
+#video-library-page .video-library-tabs { order: -2; }
+#video-library-page .library-controls > .library-search-container { flex: 1 1 240px; }
+#video-library-page .video-library-filters {
+    flex: 0 1 auto;
+    margin: 0 0 0 auto;
+    justify-content: flex-end;
+}
+#video-library-page .library-controls > .alphabet-selector {
+    order: 1;
+    flex-basis: 100%;
+}
+@media (max-width: 640px) {
+    #video-library-page .library-controls > .library-search-container { flex-basis: 100%; max-width: none; }
+    #video-library-page .video-library-filters { flex-basis: 100%; margin: 0; }
+}
 /* Phones: the centered no-wrap row (3 selects + Select) overflowed BOTH edges
    — wrap it into a tidy 2-up grid instead. */
 @media (max-width: 640px) {
@@ -1155,6 +1187,13 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border: 1px solid var(--white-a12); backdrop-filter: blur(6px);
 }
 .vd-rt-tag { font-size: 11px; font-weight: 900; padding: 1px 5px; border-radius: var(--radius-xs); letter-spacing: 0.02em; }
+/* a linked chip (a.vd-rt, its hover lift lives with the rating links further
+   down) gets a keyboard focus ring */
+a.vd-rt:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
+/* the provider pages with no score: quieter than a rating */
+.vd-rt--site { font-size: 12px; font-weight: 700; padding: 5px 10px; color: var(--text-2); }
+.vd-rt--site:hover { color: var(--text-1); }
+.vd-rt-out { font-size: 11px; opacity: 0.6; }
 .vd-rt-ic { font-size: 15px; line-height: 1; }
 .vd-rt--imdb .vd-rt-tag { background: #f5c518; color: #000; }
 .vd-rt--mc .vd-rt-tag { background: #fff; color: #000; }
@@ -1164,6 +1203,14 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-rt--trakt .vd-rt-tag { background: #ed1c24; color: #fff; }
 .vd-rt--tvmaze .vd-rt-tag { background: #3dd6c0; color: #00211d; }
 .vd-rt--anilist .vd-rt-tag { background: #02a9ff; color: #fff; }
+/* each season's AniList page, in the About section (the anime layer) */
+.vd-anilist-link {
+    display: inline-flex; align-items: center; gap: 6px; margin: 0 6px 6px 0; padding: 3px 10px;
+    border: 1px solid var(--white-a10); border-radius: var(--radius-pill);
+    color: var(--text-1); font-size: 12px; text-decoration: none;
+}
+.vd-anilist-link:hover { background: var(--white-a06); }
+.vd-anilist-score { color: var(--text-3); font-variant-numeric: tabular-nums; }
 /* DeArrow crowd title (YouTube video expand panel) */
 .vd-dearrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 600; color: #cfe0ff; }
 .vd-dearrow-tag { font-size: 10px; font-weight: 900; letter-spacing: 0.04em; padding: 2px 6px; border-radius: var(--radius-xs);
@@ -1889,7 +1936,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     .vsr-hero { padding: 28px 14px 20px; }
     .vsr-hero-title { font-size: 26px; }
     .vsr-searchbar { height: 50px; border-radius: 13px; }
-    .vsr-tabs { width: calc(100% - 4px); grid-template-columns: 1fr 1fr; }
+    .vsr-tabs { width: calc(100% - 4px); grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .vsr-basic { padding: 10px; border-radius: var(--radius-card); }
     .vsr-basic-row { grid-template-columns: 1fr; }
     .vsr-basic-submit { min-height: 42px; width: 100%; }
@@ -3873,6 +3920,10 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vq-chip:hover { color: #fff; border-color: var(--white-a25); }
 .vq-chip.on { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.55); color: #fecaca; }
 .vq-chip.on::before { content: '⊘ '; font-weight: 800; }
+/* audio languages are things you WANT (prefer / require), so a picked one is
+   the accent with a tick, never the reject chip's red ⊘ */
+.vq-chip.vq-chip--pick.on { background: rgba(var(--accent-rgb), 0.18); border-color: rgba(var(--accent-rgb), 0.6); color: var(--white-a90); }
+.vq-chip.vq-chip--pick.on::before { content: '✓ '; }
 /* preference rows (label + segmented control) */
 .vq-prefs { display: flex; flex-direction: column; gap: 11px; }
 .vq-pref-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
@@ -4130,8 +4181,15 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdl-season-grab:disabled { opacity: 0.7; cursor: progress; transform: none; }
 .vdl-season-chev { flex-shrink: 0; font-size: 13px; color: var(--white-a50); transition: transform var(--dur-moderate) ease; }
 .vdl-season--open .vdl-season-chev { transform: rotate(180deg); }
-.vdl-season-body { max-height: 0; overflow: hidden; transition: max-height 0.32s var(--ease-out); }
-.vdl-season--open .vdl-season-body { max-height: 5000px; }
+/* grid rows, not max-height. an open season was capped at 5000px with the
+   rest hidden, so with a few episodes' search results expanded the later
+   episodes and the next season's results were cut off and you couldn't
+   scroll to them (SeadogsBooty, Dexter: Resurrection S1). 1fr is whatever
+   the content needs, and it still animates. */
+.vdl-season-body { display: grid; grid-template-rows: 0fr; grid-template-columns: minmax(0, 1fr); overflow: hidden;
+    transition: grid-template-rows 0.32s var(--ease-out); }
+.vdl-season-inner { min-height: 0; }
+.vdl-season--open .vdl-season-body { grid-template-rows: 1fr; }
 .vdl-season-empty { padding: 12px 16px; font-size: 12.5px; color: var(--white-a40); }
 
 .vdl-ep { position: relative; border-top: 1px solid var(--white-a05); }
@@ -4174,7 +4232,14 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     border-radius: 2px; background: linear-gradient(90deg, transparent, hsl(var(--vgm-h, 220), 85%, 62%), transparent);
     box-shadow: 0 0 9px 1px hsla(var(--vgm-h, 220), 85%, 62%, 0.7); animation: vdlScan 0.9s ease-in-out infinite; }
 /* inline per-episode source search */
-.vdl-ep-search { max-height: 0; overflow: hidden; transition: max-height var(--dur-slow) var(--ease-out); }
+/* opens to the results' real height: a max-height cap (2400px) cut a long
+   result list off mid-card with the next episode right under it */
+/* minmax(0, 1fr): a bare track grows to the longest release name (titles are
+   nowrap), the panel then scrolls sideways when a card is scrolled into view,
+   and both edges get cut off (SeadogsBooty) */
+.vdl-ep-search { display: grid; grid-template-rows: 0fr; grid-template-columns: minmax(0, 1fr); overflow: hidden;
+    transition: grid-template-rows var(--dur-slow) var(--ease-out); }
+.vdl-ep-search > * { min-height: 0; }
 .vdl-ep-srcs { display: flex; flex-direction: column; gap: 7px; padding: 3px 14px 12px 42px; }
 .vdl-src--mini { padding: 8px 11px; border-radius: 0; animation: none; }
 .vdl-src--mini .vdl-src-icon { width: 30px; height: 30px; border-radius: 0; }
@@ -4189,7 +4254,7 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdl-results { margin-top: 12px; }
 .vdl-results[hidden] { display: none; }
 .vdl-results--season { margin: 2px 14px 12px 14px; }
-.vdl-ep--open .vdl-ep-search { max-height: 2400px; }   /* room for result cards */
+.vdl-ep--open .vdl-ep-search { grid-template-rows: 1fr; }
 .vdl-res-loading { display: flex; align-items: center; gap: 9px; font-size: 12.5px; font-weight: 600;
     color: var(--white-a60); padding: 9px 2px; }
 .vdl-res-spin { width: 14px; height: 14px; border-radius: var(--radius-circle); flex-shrink: 0;
@@ -4204,6 +4269,42 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdl-res-head { display: flex; align-items: center; gap: 8px; font-size: 11.5px; font-weight: 700;
     color: var(--white-a50); margin: 4px 0 10px; }
 .vdl-res-head strong { color: #fff; }
+.vdl-res-shown { color: rgb(var(--accent-light-rgb)); }
+/* filter + sort bar over the results (SeadogsBooty): square and mono like the cards */
+.vdl-rf { margin: 0 0 10px; font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace; }
+.vdl-rf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.vdl-rf-q { flex: 1 1 180px; min-width: 0; }
+.vdl-rf-q, .vdl-rf-sel, .vdl-rf-in { height: 30px; padding: 0 9px; border-radius: 0; font: inherit; font-size: 11.5px;
+    color: var(--white-a90); background: var(--white-a03); border: 1px solid var(--white-a14); }
+.vdl-rf-sel { padding-right: 6px; cursor: pointer; }
+.vdl-rf-sel option { background: var(--bg-surface); color: var(--white-a90); }
+.vdl-rf-q:focus, .vdl-rf-sel:focus, .vdl-rf-in:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.7); }
+.vdl-rf-btn { height: 30px; padding: 0 11px; border-radius: 0; font: inherit; font-size: 11px; font-weight: 800;
+    letter-spacing: 0.04em; text-transform: uppercase; cursor: pointer; color: var(--white-a80);
+    background: transparent; border: 1px solid var(--white-a25); transition: background var(--dur-xfast), border-color var(--dur-xfast); }
+.vdl-rf-btn:hover { background: var(--white-a08); border-color: var(--white-a40); }
+.vdl-rf-btn.is-on { color: var(--bg-surface); background: rgb(var(--accent-rgb)); border-color: rgb(var(--accent-rgb)); }
+.vdl-rf-btn.is-primary { color: var(--bg-surface); background: rgb(var(--accent-rgb)); border-color: rgb(var(--accent-rgb)); }
+.vdl-rf-btn.is-danger { color: var(--warning); border-color: rgba(var(--warning-strong-rgb), 0.5); }
+.vdl-rf-dir { width: 30px; padding: 0; font-size: 14px; }
+.vdl-rf-builder { margin-top: 8px; padding: 10px; border: 1px solid var(--white-a14); background: var(--black-a20);
+    display: flex; flex-direction: column; gap: 8px; }
+.vdl-rf-builder[hidden] { display: none; }
+.vdl-rf-match { font-size: 11.5px; color: var(--white-a60); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vdl-rf-conds { display: flex; flex-direction: column; gap: 6px; }
+.vdl-rf-cond { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.2fr) 30px; gap: 6px; }
+.vdl-rf-x { height: 30px; border-radius: 0; cursor: pointer; font-size: 15px; color: var(--white-a50);
+    background: transparent; border: 1px solid var(--white-a14); }
+.vdl-rf-x:hover { color: var(--warning); border-color: rgba(var(--warning-strong-rgb), 0.5); }
+.vdl-rf-link { align-self: flex-start; padding: 0; border: 0; background: none; cursor: pointer; font: inherit;
+    font-size: 11.5px; font-weight: 700; color: rgb(var(--accent-light-rgb)); }
+.vdl-rf-link:hover { text-decoration: underline; }
+.vdl-rf-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.vdl-rf-name { flex: 1 1 160px; min-width: 0; }
+@media (max-width: 560px) {
+    .vdl-rf-cond { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 30px; }
+    .vdl-rf-cond [data-rf-value] { grid-column: 1 / 3; }
+}
 .vdl-res-okn { color: #8fe7af; }
 .vdl-res-live, .vdl-res-demo { margin-left: auto; font-size: 10px; font-weight: 800; padding: 2px 8px; border-radius: var(--radius-pill);
     text-transform: uppercase; letter-spacing: 0.04em; }
@@ -4280,6 +4381,25 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     background: rgba(0, 0, 0, 0.22);
     font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace; }
 .vdl-res-track-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+/* what the retry took after this release failed (SeadogsBooty) */
+.vdl-res-track-chain { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.vdl-res-track-chain-head { font-size: 9.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--white-a40); }
+.vdl-res-track-step { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; }
+.vdl-res-track-step-ic { flex-shrink: 0; width: 12px; text-align: center; font-weight: 800; }
+.vdl-res-track-step-rel { flex: 1; min-width: 0; color: var(--white-a70); white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+.vdl-res-track-step-st { flex-shrink: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vdl-res-track-step--done .vdl-res-track-step-ic, .vdl-res-track-step--done .vdl-res-track-step-st { color: var(--success); }
+.vdl-res-track-step--fail .vdl-res-track-step-ic, .vdl-res-track-step--fail .vdl-res-track-step-st { color: var(--warning); }
+.vdl-res-track-step--active .vdl-res-track-step-ic, .vdl-res-track-step--active .vdl-res-track-step-st {
+    color: hsl(var(--vgm-h, 220), 85%, 74%); }
+.vdl-r-chain { flex-shrink: 0; font-size: 9.5px; font-weight: 900; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 0; color: var(--bg-surface); }
+.vdl-r-chain--done { background: var(--success); }
+.vdl-r-chain--active { background: hsl(var(--vgm-h, 220), 85%, 70%); }
+.vdl-r-chain--fail { background: var(--warning-strong); }
+.vdl-res--chain { border-color: var(--white-a20); }
 .vdl-res-track-state { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700;
     letter-spacing: 0.06em; text-transform: uppercase; color: #fff; }
 .vdl-res-track-pct { font-size: 11px; font-weight: 700; color: var(--white-a60); font-variant-numeric: tabular-nums; }
@@ -4758,6 +4878,19 @@ body[data-side="video"] #gsearch-aura {
 .vms-title { font-size: 22px; font-weight: 700; color: #fff; margin-top: 4px; }
 .vms-scope { font-size: 13px; font-weight: 600; color: var(--white-a60); margin-top: 2px; }
 .vms-sub { font-size: 12px; color: var(--white-a45); margin-top: 8px; }
+.vms-prof { margin-top: 10px; }
+.vms-prof[hidden] { display: none; }
+/* the title's quality profile picker (Get + Manual search) */
+.vdl-prof { display: inline-flex; align-items: center; gap: 8px; padding: 3px 4px 3px 12px;
+    border-radius: var(--radius-pill); background: var(--white-a06); border: 1px solid var(--white-a12); }
+.vdl-prof-lab { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--white-a50); }
+.vdl-prof-sel { appearance: none; -webkit-appearance: none; border: 0; border-radius: var(--radius-pill);
+    padding: 4px 26px 4px 10px; font: inherit; font-size: 12.5px; font-weight: 700; color: var(--text-1); cursor: pointer;
+    background: var(--white-a10) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23fff' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 9px center; }
+.vdl-prof-sel:hover { background-color: var(--white-a14); }
+.vdl-prof-sel:focus-visible { outline: 2px solid var(--white-a50); outline-offset: 2px; }
+.vdl-prof-sel:disabled { opacity: 0.55; cursor: progress; }
+.vdl-prof-sel option { background: var(--bg-raised); color: var(--text-1); }
 .vms-body { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 18px; }
 .vms-src-head { font-size: 13px; font-weight: 700; color: var(--white-a85); margin-bottom: 8px; }
 .vms-grabbed { color: #4ade80 !important; border-color: rgba(74,222,128,0.5) !important; }
@@ -5517,7 +5650,9 @@ body[data-side="video"] #gsearch-aura {
     .vsr-fresh-stat em { display: block; }
 }
 @media (max-width: 520px) {
-    .vsr-tabs { width: calc(100% - 4px); grid-template-columns: 1fr; }
+    /* titles / releases / fresh are short enough to stay one row (#1909);
+       stacked they were a tall column before you could search */
+    .vsr-tabs { width: calc(100% - 4px); grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .vsr-tab { min-height: 36px; }
 }
 

@@ -9,7 +9,9 @@ from core.library2.maintenance_subjects import (
 from collections import defaultdict
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, drop_hand_tagged_albums, scoped_file_subjects, stop_or_pause,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.live_commentary_cleaner")
@@ -129,11 +131,20 @@ class LiveCommentaryCleanerJob(RepairJob):
         scan_album_titles = settings.get("scan_album_titles", True)
         # hand-tagged: the user typed this live/bootleg release on purpose,
         # flagging it would offer to delete exactly what they asked for
-        subjects = drop_hand_tagged(context, scoped_file_subjects(
-            context, active_file_subjects(context.db, context.config_manager)))
-        for subject in subjects:
-            if context.check_stop():
+        # one hand-tagged file locks its album (3.6.1): its other tracks are
+        # part of the release the user typed too
+        _everything = active_file_subjects(context.db, context.config_manager)
+        subjects = drop_hand_tagged_albums(
+            context, scoped_file_subjects(context, _everything), _everything)
+        # scope "albums": an album whose title says live is one finding for the
+        # whole album, the way 3.6.1 filed it, not one per track
+        by_album = str(settings.get("scope") or "tracks").strip().lower() == "albums"
+        album_groups: dict = {}
+        for index, subject in enumerate(subjects):
+            if stop_or_pause(context):
                 return result
+            if getattr(context, "update_progress", None) and index % 25 == 0:
+                context.update_progress(index, len(subjects))
             result.scanned += 1
             content_type = _detect_content_type(subject.get("title"), "")
             album_matched = False
@@ -144,6 +155,9 @@ class LiveCommentaryCleanerJob(RepairJob):
                 continue
             album_id = int(subject["album_id"])
             type_label = _format_type(content_type)
+            if by_album and album_matched:
+                album_groups.setdefault(album_id, (content_type, type_label, []))[2].append(subject)
+                continue
             details = {
                 "track": {
                     "id": f"lib2:{subject['track_id']}",
@@ -187,5 +201,57 @@ class LiveCommentaryCleanerJob(RepairJob):
                     result.findings_created += 1
                 else:
                     result.findings_skipped_dedup += 1
+        for album_id, (content_type, type_label, members) in album_groups.items():
+            if stop_or_pause(context):
+                return result
+            self._album_finding(context, result, album_id, content_type, type_label, members)
         return result
+
+    def _album_finding(self, context, result, album_id, content_type, type_label, members):
+        """One finding for a live/spoken album: every file it holds, so the
+        fix removes the album and the catalogue retires exactly those files."""
+        first = members[0]
+        details = subject_details(first)
+        linked = dict(details.get("library_v2") or {})
+        file_ids = sorted({int(m["file_id"]) for m in members if m.get("file_id") is not None})
+        track_ids = sorted({int(m["track_id"]) for m in members})
+        linked.update(album_id=album_id, album_ids=[album_id], track_ids=track_ids,
+                      file_ids=file_ids, track_id=None, file_id=None)
+        details.update({
+            "library_v2": linked,
+            "track": {
+                "id": f"lib2:{first['track_id']}", "title": first.get("title"),
+                "artist": first.get("artist_name") or "", "album": first.get("album_title") or "",
+                "album_id": f"lib2:{album_id}", "album_type": first.get("album_type") or "",
+                "file_path": first.get("path"),
+            },
+            "album_files": [{"track_id": int(m["track_id"]), "file_id": m.get("file_id"),
+                             "title": m.get("title"), "file_path": m.get("path")}
+                            for m in members],
+            "content_type": content_type,
+            "type_label": type_label,
+            "album_matched": True,
+            "album_thumb_url": first.get("album_image"),
+            "artist_thumb_url": first.get("artist_image"),
+            "artist_id": first.get("artist_id"),
+        })
+        if not context.create_finding:
+            return
+        inserted = context.create_finding(
+            job_id=self.job_id,
+            finding_type="unwanted_content",
+            severity="info",
+            entity_type="album",
+            entity_id=f"lib2:{album_id}",
+            file_path=None,
+            title=(f'{type_label} album: {first.get("album_title")} by '
+                   f'{first.get("artist_name") or "Unknown"}'),
+            description=(f'{type_label} content detected in the album title; '
+                         f'{len(members)} file(s) on this album.'),
+            details=details,
+        )
+        if inserted:
+            result.findings_created += 1
+        else:
+            result.findings_skipped_dedup += 1
 

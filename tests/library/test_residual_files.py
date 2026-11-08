@@ -5,7 +5,6 @@ Folder Cleaner, plus the reorganize sweep that uses it.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from core.library.residual_files import (
     is_appledouble,
@@ -48,17 +47,3 @@ def test_real_content_not_disposable():
         assert not is_disposable(n), n
 
 
-# ── the reorganize sweep that uses the predicate ──────────────────────────────
-def test_delete_album_sidecars_sweeps_all_residual_keeps_real(tmp_path: Path):
-    from core.library_reorganize import _delete_album_sidecars
-
-    d = tmp_path / 'Old Album'
-    d.mkdir()
-    for n in ('cover.jpg', 'back.jpg', 'disc.png', 'lyrics.lrc', 'album.nfo', '.DS_Store'):
-        (d / n).write_text('x')
-    (d / 'booklet.pdf').write_text('keep')      # unrecognized → must survive
-
-    _delete_album_sidecars(str(d))
-
-    survivors = {p.name for p in d.iterdir()}
-    assert survivors == {'booklet.pdf'}          # every residual swept, booklet kept

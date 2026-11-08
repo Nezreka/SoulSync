@@ -170,10 +170,11 @@ def test_single_disc_all_01_bug_is_still_detected(tmp_path):
         str(tmp_path), sorted(p.name for p in tmp_path.iterdir()),
         anomaly_threshold=3, context=_ctx(findings, tmp_path),
         scan_state={'album_tracks_cache': {}, 'title_similarity': 0.8, 'dry_run': True})
-    # All totals are missing; Beta and Gamma also need their positions fixed.
-    assert len(findings) == 3
+    # Beta and Gamma need their positions fixed. Alpha's number is right, and
+    # a missing total is not a wrong one (3.6.1's rule), so it is left alone.
+    assert len(findings) == 2
     fixed = {f['details']['correct_track_num'] for f in findings}
-    assert fixed == {1, 2, 3}
+    assert fixed == {2, 3}
     # and the proposed renames are plain 2-digit track prefixes
     changes = "\n".join("\n".join(f['details']['changes']) for f in findings)
     assert "02 - Beta Song.flac" in changes and "03 - Gamma Song.flac" in changes

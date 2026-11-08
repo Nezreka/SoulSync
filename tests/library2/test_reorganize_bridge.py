@@ -3,7 +3,6 @@
 import sys
 import types
 from contextlib import closing
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -22,10 +21,8 @@ if "core.settings" not in sys.modules:
 
 from core.library2.reorganize_bridge import (  # noqa: E402
     ReorganizeBridgeError,
-    album_reorganize_sources,
     enqueue_album_reorganize,
     enqueue_artist_reorganize_all,
-    global_reorganize_sources,
     preview_album_reorganize,
     resolve_legacy_album_id,
     resolve_legacy_artist_id,
@@ -166,48 +163,12 @@ def test_resolve_artist_id_accepts_native_rows_without_backref(imported_legacy_d
     assert resolve_legacy_artist_id(conn, artist_id) == artist_id
 
 
-# -- album_reorganize_sources / global_reorganize_sources --------------------
-
-
-def test_album_reorganize_sources_delegates_after_resolving(monkeypatch, imported_legacy_db):
-    conn = imported_legacy_db._get_connection()
-    lib2_album_id = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=10").fetchone()["id"]
-    conn.close()
-
-    captured = {}
-
-    def fake_available_sources(album_data):
-        captured['album_data'] = album_data
-        return [{"source": "spotify", "label": "Spotify"}]
-
-    monkeypatch.setattr(
-        'core.library_reorganize.available_sources_for_album', fake_available_sources, raising=True,
-    )
-    result = album_reorganize_sources(imported_legacy_db, lib2_album_id)
-    assert result == [{"source": "spotify", "label": "Spotify"}]
-    assert captured['album_data']['title'] == 'Views'
-
-
-def test_album_reorganize_sources_for_discography_only_are_empty(discography_only_album, imported_legacy_db):
-    assert album_reorganize_sources(imported_legacy_db, discography_only_album) == []
-
-
-def test_global_reorganize_sources_delegates(monkeypatch):
-    monkeypatch.setattr(
-        'core.library_reorganize.authed_sources',
-        lambda: [{"source": "deezer", "label": "Deezer"}],
-        raising=True,
-    )
-    assert global_reorganize_sources() == [{"source": "deezer", "label": "Deezer"}]
-
-
 # -- preview_album_reorganize -------------------------------------------------
 
 
 def test_preview_album_reorganize_resolves_and_delegates(monkeypatch, imported_legacy_db):
-    """The native album id and the path helpers reach the catalogue planner.
-    `source`/`mode` are still accepted from an older client and then ignored —
-    a destination path has no metadata source."""
+    """The native album id and the path helpers reach the catalogue planner,
+    and nothing about a metadata source does: a destination path has none."""
     conn = imported_legacy_db._get_connection()
     lib2_album_id = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=10").fetchone()["id"]
     conn.close()
@@ -224,7 +185,6 @@ def test_preview_album_reorganize_resolves_and_delegates(monkeypatch, imported_l
 
     result = preview_album_reorganize(
         imported_legacy_db, config_manager=None, lib2_album_id=lib2_album_id,
-        source="spotify", mode="tags",
     )
     assert result["status"] == "planned"
     assert captured['album_id'] == lib2_album_id
@@ -279,7 +239,7 @@ def test_enqueue_album_reorganize_resolves_and_enqueues(imported_legacy_db):
     lib2_album_id = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=10").fetchone()["id"]
     conn.close()
 
-    result = enqueue_album_reorganize(imported_legacy_db, lib2_album_id, source="deezer", mode="api")
+    result = enqueue_album_reorganize(imported_legacy_db, lib2_album_id)
     assert result["queued"] is True
     assert result["queue_id"]
 
@@ -306,7 +266,7 @@ def test_enqueue_artist_reorganize_all_resolves_and_enqueues_every_album(importe
     ).fetchone()["id"]
     conn.close()
 
-    result = enqueue_artist_reorganize_all(imported_legacy_db, lib2_artist_id, source=None, mode="api")
+    result = enqueue_artist_reorganize_all(imported_legacy_db, lib2_artist_id)
     # The fixture's Drake artist owns 2 legacy albums (Views, One Dance).
     assert result["total_albums"] == 2
     assert result["enqueued"] == 2

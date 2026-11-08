@@ -179,10 +179,25 @@ def start(book: Dict[str, Any], narrator_mode: str = "exact", limit: int = 25,
             "updated_at": _now(),
         }
 
+    # the search runs off the request, so it carries the asker's profile with
+    # it: whose blocklist applies is that profile's question
+    from core.profile_context import get_current_profile_id
+    try:
+        asker = get_current_profile_id()
+    except Exception:  # noqa: BLE001
+        asker = None
+
+    def _as_asker():
+        from core.profile_context import reset_background_profile, set_background_profile
+        token = set_background_profile(asker)
+        try:
+            _run_search(job_id, book, narrator_mode, limit, min_relevance)
+        finally:
+            reset_background_profile(token)
+
     # Daemon so a wedged indexer can never hold the process open at shutdown.
     thread = threading.Thread(
-        target=_run_search, args=(job_id, book, narrator_mode, limit, min_relevance),
-        name=f"audiobook-search-{job_id[:8]}", daemon=True,
+        target=_as_asker, name=f"audiobook-search-{job_id[:8]}", daemon=True,
     )
     thread.start()
     return job_id

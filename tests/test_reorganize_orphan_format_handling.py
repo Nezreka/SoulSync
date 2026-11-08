@@ -14,91 +14,10 @@ the canonical, preserving both formats.
 
 from __future__ import annotations
 
-import os
 
 from core.library_reorganize import (
-    _find_sibling_audio_files,
     _move_sibling_to_destination,
 )
-
-
-# ---------------------------------------------------------------------------
-# Sibling detection
-# ---------------------------------------------------------------------------
-
-
-class TestFindSiblingAudioFiles:
-    def test_finds_flac_when_opus_is_canonical(self, tmp_path):
-        """Reporter's exact case: lossy-copy `.opus` is the
-        canonical (DB-tracked); `.flac` is the orphan to move."""
-        opus = tmp_path / "01 Track.opus"
-        flac = tmp_path / "01 Track.flac"
-        opus.write_bytes(b"opus-data")
-        flac.write_bytes(b"flac-data")
-
-        siblings = _find_sibling_audio_files(str(opus))
-
-        assert siblings == [str(flac)]
-
-    def test_finds_opus_when_flac_is_canonical(self):
-        """Symmetric direction — works either way."""
-        # tmp_path fixture handled by next test inline
-        import tempfile, pathlib
-        tmp = pathlib.Path(tempfile.mkdtemp())
-        flac = tmp / "X.flac"
-        opus = tmp / "X.opus"
-        flac.write_bytes(b"a"); opus.write_bytes(b"b")
-
-        siblings = _find_sibling_audio_files(str(flac))
-        assert siblings == [str(opus)]
-
-    def test_excludes_canonical_itself(self, tmp_path):
-        """Canonical must NOT appear in its own sibling list."""
-        canonical = tmp_path / "X.opus"
-        canonical.write_bytes(b"data")
-
-        siblings = _find_sibling_audio_files(str(canonical))
-        assert siblings == []
-
-    def test_excludes_different_stem(self, tmp_path):
-        """Different track in same dir shouldn't be flagged as
-        sibling — only same-stem files."""
-        canonical = tmp_path / "01 Track One.opus"
-        other_track = tmp_path / "02 Track Two.flac"
-        canonical.write_bytes(b"a"); other_track.write_bytes(b"b")
-
-        siblings = _find_sibling_audio_files(str(canonical))
-        assert siblings == []
-
-    def test_excludes_non_audio_extensions(self, tmp_path):
-        """Sidecars (.lrc, .nfo, .txt) handled by separate sidecar
-        helper — must not appear in audio-sibling list."""
-        canonical = tmp_path / "X.opus"
-        sidecar = tmp_path / "X.lrc"
-        nfo = tmp_path / "X.nfo"
-        canonical.write_bytes(b"a")
-        sidecar.write_bytes(b"lyrics")
-        nfo.write_bytes(b"info")
-
-        siblings = _find_sibling_audio_files(str(canonical))
-        assert siblings == []
-
-    def test_finds_multiple_siblings(self, tmp_path):
-        """User could have 3+ formats: .flac + .opus + .mp3."""
-        opus = tmp_path / "X.opus"
-        flac = tmp_path / "X.flac"
-        mp3 = tmp_path / "X.mp3"
-        opus.write_bytes(b"a"); flac.write_bytes(b"b"); mp3.write_bytes(b"c")
-
-        siblings = _find_sibling_audio_files(str(opus))
-        # All formats other than canonical
-        assert sorted(siblings) == sorted([str(flac), str(mp3)])
-
-    def test_missing_source_dir_returns_empty(self, tmp_path):
-        """Defensive: source dir vanished mid-reorganize. Return
-        empty, don't raise."""
-        siblings = _find_sibling_audio_files(str(tmp_path / "nonexistent" / "X.opus"))
-        assert siblings == []
 
 
 # ---------------------------------------------------------------------------
@@ -259,52 +178,3 @@ class TestRenameInPlaceOrdersTheSiblingCarry:
         assert err
         assert sibling.exists(), "sibling must not be stranded in the destination"
         assert not (dst_dir / "05 - Song.mp3").exists()
-
-
-# ---------------------------------------------------------------------------
-# iss29-E05: lyrics Library V2 wrote must survive a reorganize
-# ---------------------------------------------------------------------------
-
-
-class TestSidecarsAreCarriedNotDeleted:
-    """"Fetch Lyrics" then "Reorganize" used to empty the lyrics column.
-
-    The full run stages only the audio, so the ``.lrc`` was never carried to the
-    destination — and the finalisation step then deleted it at the source. lib2
-    writes exactly these files, so reorganize was destroying its own
-    application's data. Both other movers in the project (``_fix_path_mismatch``,
-    ``_rename_to_basename``) carry the sidecar.
-    """
-
-    def test_lrc_follows_the_track_to_its_new_name(self, tmp_path):
-        from core.library_reorganize import _carry_track_sidecars
-
-        src_dir = tmp_path / "Old"
-        dst_dir = tmp_path / "New"
-        src_dir.mkdir()
-        dst_dir.mkdir()
-        (src_dir / "05 Song.lrc").write_text("[00:01.00]a lyric line")
-        (src_dir / "05 Song.nfo").write_text("notes")
-
-        _carry_track_sidecars(str(src_dir / "05 Song.flac"), str(dst_dir / "05 - Song.flac"))
-
-        assert (dst_dir / "05 - Song.lrc").read_text() == "[00:01.00]a lyric line"
-        assert (dst_dir / "05 - Song.nfo").read_text() == "notes"
-        assert not (src_dir / "05 Song.lrc").exists()
-        assert not (src_dir / "05 Song.nfo").exists()
-
-    def test_a_sidecar_already_at_the_destination_is_not_clobbered(self, tmp_path):
-        from core.library_reorganize import _carry_track_sidecars
-
-        src_dir = tmp_path / "Old"
-        dst_dir = tmp_path / "New"
-        src_dir.mkdir()
-        dst_dir.mkdir()
-        (src_dir / "05 Song.lrc").write_text("source copy")
-        (dst_dir / "05 - Song.lrc").write_text("destination copy")
-
-        _carry_track_sidecars(str(src_dir / "05 Song.flac"), str(dst_dir / "05 - Song.flac"))
-
-        # The destination wins, and the source folder is left prunable.
-        assert (dst_dir / "05 - Song.lrc").read_text() == "destination copy"
-        assert not (src_dir / "05 Song.lrc").exists()

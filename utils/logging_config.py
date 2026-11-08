@@ -51,6 +51,17 @@ class ColoredFormatter(SafeFormatter):
         record.levelname = f"{log_color}{record.levelname}{reset_color}"
         return super().format(record)
 
+def app_log_path(configured: Optional[str] = None) -> str:
+    """Where app.log goes: SOULSYNC_LOG_FILE when set, else the configured path.
+
+    the test suite sets it. without it every test that imported web_server
+    logged into the real logs/app.log, and from WSL it rotated the file the
+    windows server had open, so the live log filled with test errors
+    ("no such table: metadata") nobody could tell from real ones."""
+    import os
+    return os.environ.get("SOULSYNC_LOG_FILE") or configured or "logs/app.log"
+
+
 def setup_logging(level: str = "INFO", log_file: Optional[str] = None) -> logging.Logger:
     log_level = getattr(logging, level.upper(), logging.INFO)
     

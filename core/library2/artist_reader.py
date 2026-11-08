@@ -67,6 +67,7 @@ _UPGRADE_FRESH = 30.0
 _upgrade_cache: Dict[Any, Dict[str, Any]] = {}
 _upgrade_lock = threading.Lock()
 _upgrade_refreshing: set = set()
+_upgrade_cold: Dict[Any, threading.Lock] = {}
 
 
 def _upgrade_fingerprint(conn) -> Tuple[Any, ...]:
@@ -93,6 +94,13 @@ def forget_upgradable_counts() -> None:
     _upgrade_cache.clear()
 
 
+def refresh_upgradable_counts() -> None:
+    """Recheck every cached count in the background now, not on the next
+    click (core/library2/library_watch calls it once new files settle)."""
+    for key in list(_upgrade_cache):
+        _refresh_in_background(key, key[1])
+
+
 def _upgrade_key(conn, owner: str) -> Tuple[str, str]:
     return (str(conn.execute("PRAGMA database_list").fetchone()[2]), owner)
 
@@ -114,13 +122,24 @@ def library_upgradable_counts(conn) -> Dict[int, int]:
     cached = _cached_counts(conn, owner)
     if cached is not None:
         return cached
-    fingerprint = _upgrade_fingerprint(conn)
-    profiles = _profiles_state(conn)
-    counts = _count_upgradable(conn, "", {}, owner)
-    _upgrade_cache[_upgrade_key(conn, owner)] = {
-        "at": time.monotonic(), "fingerprint": fingerprint, "profiles": profiles,
-        "counts": counts}
-    return counts
+    # one cold count per library at a time. it's ~40s of sql on a big library,
+    # and every click that arrived before the first finished used to start its
+    # own: under load one request took 21 minutes (Nov 3 2026). the rest wait
+    # for the first and read what it stored.
+    key = _upgrade_key(conn, owner)
+    with _upgrade_lock:
+        cold = _upgrade_cold.setdefault(key, threading.Lock())
+    with cold:
+        cached = _cached_counts(conn, owner)
+        if cached is not None:
+            return cached
+        fingerprint = _upgrade_fingerprint(conn)
+        profiles = _profiles_state(conn)
+        counts = _count_upgradable(conn, "", {}, owner)
+        _upgrade_cache[key] = {
+            "at": time.monotonic(), "fingerprint": fingerprint, "profiles": profiles,
+            "counts": counts}
+        return counts
 
 
 def _refresh_in_background(key, owner: str) -> None:
@@ -392,15 +411,24 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
     offset = (page - 1) * limit
     # §40: alias-member rows are folded into their canonical artist's entry
     # (get_artist merges their albums in) and never listed on their own.
-    from core.library2.sql_util import library_artist_ids_sql
+    from core.library2.sql_util import library_index_artist_ids_sql
     # library membership walks every artist (files, monitoring, wanted), and
     # the count and the page each walked it: half a second to a second apiece
     # on a big library. it's worked out once per request into a temp table
     # both of them read.
+    # The ids themselves are kept between requests (core.library2.member_version)
+    # until a table they come from changes: ~1s a page and a scroll, now a
+    # counter read and an id insert.
     conn.execute("DROP TABLE IF EXISTS temp.lib2_artist_page_members")
     conn.execute("CREATE TEMP TABLE lib2_artist_page_members (id INTEGER PRIMARY KEY)")
-    conn.execute("INSERT OR IGNORE INTO temp.lib2_artist_page_members "
-                 f"{library_artist_ids_sql()}")
+    from core.library2.member_version import cached_member_ids
+    member_sql = library_index_artist_ids_sql()
+    member_ids = cached_member_ids(conn, member_sql)
+    if member_ids is None:
+        conn.execute(f"INSERT OR IGNORE INTO temp.lib2_artist_page_members {member_sql}")
+    else:
+        conn.executemany("INSERT OR IGNORE INTO temp.lib2_artist_page_members (id) VALUES (?)",
+                         ((i,) for i in member_ids))
     clauses, params = ["a.canonical_artist_id IS NULL",
                        "a.id IN (SELECT id FROM temp.lib2_artist_page_members)"], {}
     # ...and, once directories exist, only the ones this library may see: a

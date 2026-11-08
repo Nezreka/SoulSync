@@ -620,3 +620,28 @@ def test_every_room_send_path_carries_the_channel_envelope():
     # the composer path delegates rather than duplicating the tag logic
     assert js.count("payload.chan = state.channel") == 1, \
         "channel tagging exists in more than one place — the copies WILL drift"
+
+
+def test_library_search_reads_the_song_index_once_it_is_built(files_app, monkeypatch):
+    """the folded LIKE read every track per keystroke; with the Songs index
+    built the search reads its matches and answers the same tracks"""
+    from core.library2 import song_search
+
+    http, state, client, uploads = files_app
+    assert song_search.rebuild(state["db"]) is True
+    used = []
+    real = song_search.matching_ids
+    def spy(conn, q):
+        hits = real(conn, q)
+        used.append((q, hits is not None))
+        return hits
+
+    monkeypatch.setattr(song_search, "matching_ids", spy)
+
+    body = http.get("/api/chat/files/library-search?q=muse").get_json()
+
+    assert used == [("muse", True)]  # the index answered, not the fallback
+    assert [t["title"] for t in body["tracks"]] == ["Ghost Track", "Uprising"]
+    assert [t["title"] for t in http.get(
+        "/api/chat/files/library-search?q=upri").get_json()["tracks"]] == ["Uprising"]
+

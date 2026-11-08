@@ -126,8 +126,6 @@ const libraryV2SearchWithLegacy = z.preprocess(
 
 export const libraryV2SearchSchema = libraryV2SearchWithLegacy.transform((value) => ({
   ...value,
-  // one hero everywhere; compact is an opt-in (?header=compact)
-  header: value.header ?? ('rich' as const),
   releases:
     value.releases ?? (value.view === 'discovery' ? ('all' as const) : ('library' as const)),
   // the discovery tab opens on the cards view. table is an explicit choice.
@@ -167,6 +165,12 @@ export interface LibraryV2EnhanceTrack {
   title: string;
   album_id: number;
   album_title: string;
+  album_year?: number | null;
+  album_type?: string | null;
+  /** soulsync's artwork endpoint for the release */
+  album_image_url?: string;
+  /** the provider's cover, painted while a cold local one builds */
+  album_remote_image_url?: string | null;
   disc_number: number | null;
   track_number: number | null;
   current: string | null;
@@ -266,6 +270,9 @@ export interface LibraryV2AlbumSummary {
   spotify_id: string | null;
   /** the release card's musicbrainz link. */
   musicbrainz_id?: string | null;
+  /** the release's ids by provider: a release you don't have opens the
+   *  download modal from the one matching the artist's source */
+  provider_ids?: Record<string, string>;
   /** §48 rich-metadata-edit fields — provider baseline overlaid with any admin override. */
   explicit: boolean | null;
   label: string | null;
@@ -304,6 +311,15 @@ export interface LibraryV2ArtistDetail {
   albums: LibraryV2AlbumSummary[];
   eps: LibraryV2AlbumSummary[];
   singles: LibraryV2AlbumSummary[];
+  /** releases by other artists this one is credited on (guest spots) */
+  appears_on?: LibraryV2AlbumSummary[];
+  /** the artist's own tracks on those releases that are here, and on how
+   *  many releases */
+  guest_track_count?: number;
+  guest_release_count?: number;
+  /** the artist list's rule: files, or a watch or wish of its own. One
+   *  outside it is browsed, its discography read from the provider. */
+  in_library?: boolean;
   album_count: number;
   single_count: number;
   /** Provider-only releases currently persisted for this artist. */
@@ -464,12 +480,6 @@ export interface LibraryV2ArtCandidate {
   source: string;
   type?: string;
   front?: boolean;
-}
-
-/** One reorganize metadata source option (docs §50). */
-export interface LibraryV2ReorganizeSource {
-  source: string;
-  label: string;
 }
 
 /** One per-track row of a reorganize preview plan. */
@@ -693,6 +703,8 @@ export interface LibraryV2ImportState {
 }
 
 export interface LibraryV2PreparationState {
+  /** the one-time preparation after an upgrade, not the credit pass a restart repeats */
+  full?: boolean;
   active: boolean;
   stage: string | null;
   current: number;
@@ -804,4 +816,33 @@ export interface LibraryV2UiPreferences {
     columns: LibraryV2ArtistTableColumns;
     column_order: (keyof LibraryV2ArtistTableColumns)[];
   };
+  /** Which artist toolbar buttons this profile sees (Tools always shows). */
+  artist_toolbar?: Partial<Record<ArtistToolbarButton, boolean>>;
+  /** Which header an artist opens with, from the library and from anywhere else. */
+  artist_page?: {
+    header?: LibraryV2ArtistPageHeader;
+    header_elsewhere?: LibraryV2ArtistPageHeader;
+    /** What the My Library view shows below the releases (all by default). */
+    library_sections?: Partial<Record<LibraryViewSection, boolean>>;
+    /** Add to playlist in the track table's Actions column. */
+    add_to_playlist?: boolean;
+  };
 }
+
+export type LibraryV2ArtistPageHeader = 'rich' | 'compact';
+
+export const LIBRARY_VIEW_SECTIONS = {
+  similar_artists: 'Similar Artists',
+  concerts: 'Concerts',
+} as const;
+export type LibraryViewSection = keyof typeof LIBRARY_VIEW_SECTIONS;
+
+export const ARTIST_TOOLBAR_BUTTONS = {
+  automatic_search: 'Automatic Search',
+  interactive_search: 'Interactive Search',
+  enhance_quality: 'Enhance Quality',
+  refresh_scan: 'Refresh & Scan',
+  history: 'History',
+  artist_settings: 'Artist Settings',
+} as const;
+export type ArtistToolbarButton = keyof typeof ARTIST_TOOLBAR_BUTTONS;

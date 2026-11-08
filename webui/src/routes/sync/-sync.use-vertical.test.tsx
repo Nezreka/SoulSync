@@ -185,13 +185,13 @@ describe('sync lifecycle', () => {
     expect(calls.filter((c) => c.url.includes('/sync/status/'))).toEqual([]);
   });
 
-  it('cancel POSTs the config endpoint (LB borrows youtube) and reverts to discovered', async () => {
+  it('cancel POSTs the config endpoint (LB its own) and reverts to discovered', async () => {
     const { result } = renderHook(() => useSourceVertical(SYNC_SOURCES.listenbrainz));
     act(() => result.current.seed('mbid-1'));
     await act(async () => {
       await result.current.cancelSync('mbid-1');
     });
-    expect(calls[0]).toMatchObject({ url: '/api/youtube/sync/cancel/mbid-1', method: 'POST' });
+    expect(calls[0]).toMatchObject({ url: '/api/listenbrainz/sync/cancel/mbid-1', method: 'POST' });
     expect(result.current.states['mbid-1'].phase).toBe('discovered');
   });
 

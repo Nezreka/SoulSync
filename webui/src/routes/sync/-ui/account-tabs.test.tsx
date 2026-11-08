@@ -129,6 +129,19 @@ describe('SpotifyTab', () => {
     expect(mirrorBody()).toBeUndefined();
   });
 
+  it('#1979: deleting the mirror takes the card back to Import', async () => {
+    stubFetch();
+    responder = (url) => (url === '/api/spotify/playlists' ? SPOTIFY_ROWS : {});
+    mirrors = [{ id: 4, source: 'spotify', source_playlist_id: 'sp2' }];
+    renderTab(<SpotifyTab />);
+    await waitFor(() => expect(screen.getByText('In SoulSync')).toBeInTheDocument());
+    // the Mirrored tab deletes it: the shared helper announces the change
+    mirrors = [];
+    const { deleteMirroredPlaylist } = await import('../-sync.api');
+    await deleteMirroredPlaylist(4);
+    await waitFor(() => expect(screen.queryByText('In SoulSync')).not.toBeInTheDocument());
+  });
+
   it('an empty account shows the empty copy', async () => {
     stubFetch();
     responder = (url) => (url === '/api/spotify/playlists' ? [] : {});

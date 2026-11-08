@@ -167,6 +167,7 @@ def apply_art_to_album_files(
     for fp in paths:
         if not config.get('metadata_enhancement.embed_album_art', True):
             result['skipped'] += 1
+            result['embedding_off'] = True
             continue
         if not os.path.isfile(fp):
             result["skipped"] += 1

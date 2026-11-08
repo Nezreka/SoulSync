@@ -442,7 +442,18 @@ def _sync_cover_is_users(playlist_id, profile_id) -> bool:
     return bool(row) and (row.get('source') == 'soulsync' or bool(row.get('custom_cover')))
 
 
-def run_sync_task(
+def run_sync_task(*args, **kwargs):
+    """The actual sync function that runs in the background thread.
+
+    Holds the background workers paused for the whole run, the way a library
+    scan does: they write in bursts all day, and a sync queued behind every
+    one of them (a 75-track playlist took 20+ minutes next to them)."""
+    from core import background_pause
+    with background_pause.paused_for("playlist sync"):
+        return _run_sync_task(*args, **kwargs)
+
+
+def _run_sync_task(
     playlist_id,
     playlist_name,
     tracks_json,
@@ -462,11 +473,6 @@ def run_sync_task(
     sync_states = deps.sync_states
     sync_lock = deps.sync_lock
     sync_service = deps.sync_service
-
-    if curation_snapshot:
-        from core.playlists.curation import verify_curation_snapshot
-        from database.music_database import get_database
-        verify_curation_snapshot(get_database(), curation_snapshot)
 
     task_start_time = time.time()
     logger.info(f"[TIMING] _run_sync_task STARTED for playlist '{playlist_name}' at {time.strftime('%H:%M:%S')}")
@@ -623,6 +629,11 @@ def run_sync_task(
         return
 
     try:
+        if curation_snapshot:
+            from core.playlists.curation import verify_curation_snapshot
+            from database.music_database import get_database
+            verify_curation_snapshot(get_database(), curation_snapshot)
+
         logger.info("Setting up sync service...")
         logger.info(f"   sync_service available: {sync_service is not None}")
         
@@ -734,7 +745,11 @@ def run_sync_task(
             'download_missing': False,
             'profile_id': profile_id,
             'sync_mode': sync_mode,
-            'user_initiated': not bool(automation_id) if user_initiated is None else user_initiated,
+            # only a caller that says so overrides the wishlist ignore-list
+            # (#874), as in 3.6.1. reading "no automation id" as a click let
+            # the nightly playlist pipeline and every sync-page sync re-queue
+            # tracks the user had removed.
+            'user_initiated': bool(user_initiated),
             'curation_snapshot': curation_snapshot,
             'original_tracks_map': original_tracks_map,
             'original_tracks_by_source': original_tracks_by_source,

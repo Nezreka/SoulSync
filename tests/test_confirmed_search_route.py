@@ -113,3 +113,24 @@ def test_regular_playlist_keeps_existing_non_materializing_path(route_context, m
     assert response.status_code == 200
     assert len(executor.calls) == 1
     assert "lib2_track_id" not in executor.calls[0][3][0]
+
+
+def test_a_materialization_error_never_refuses_the_download(route_context, monkeypatch):
+    """the library v2 intent is bookkeeping on top of the download; 3.6.1 had
+    no such step. a locked db there answered 500 and started nothing."""
+    client, executor = route_context
+
+    def broken(conn, tracks, **kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(
+        "core.library2.confirmed_intent.materialize_confirmed_search_tracks", broken)
+
+    response = client.post(
+        "/api/playlists/enhanced_search_track_route/start-missing-process",
+        json=_payload(),
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    assert executor.calls and executor.calls[0][3][0]["id"] == "sp-track-route"

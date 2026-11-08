@@ -231,7 +231,8 @@ def test_job_settings_show_effective_retag_policy(settings, expected):
     worker._config_manager = SimpleNamespace(get=lambda key, default=None: {'settings': settings})
     shown = worker.get_job_config('library_retag')['settings']
     assert {key: shown[key] for key in expected} == expected
-    assert ('dry_run' in shown) == ('dry_run' in settings)
+    # the 3.6.1 switch is not offered next to auto_apply (it echoed back stale)
+    assert 'dry_run' not in shown
 
 
 def test_consistency_apply_preserves_new_manual_album_override(native_audio):
@@ -345,3 +346,146 @@ def test_missing_sibling_does_not_stop_later_copies(native_audio, tmp_path, opti
     assert result['failed'] == 1
     assert result['written'] == 2
     assert File(later)['title'] == ['One Dance']
+
+
+@pytest.fixture
+def art_sources(monkeypatch):
+    """the user's cover-art sources: a configured order and one source that
+    answers. lookups are recorded; nothing leaves the process."""
+    from core.settings import config_manager
+    from core.metadata import art_lookup, artwork as metadata_artwork
+    state = SimpleNamespace(order=['deezer', 'itunes'], url='https://img.example/preferred.jpg',
+                            asked=[])
+    real_get = config_manager.get
+    monkeypatch.setattr(config_manager, 'get', lambda key, default=None: (
+        state.order if key == 'metadata_enhancement.album_art_order'
+        else 0 if key == 'metadata_enhancement.min_art_size' else real_get(key, default)))
+
+    def pick(artist, album, metadata, order, validate=None):
+        state.asked.append((artist, album, list(order)))
+        return state.url
+    monkeypatch.setattr(art_lookup, 'select_preferred_art_url', pick)
+    monkeypatch.setattr(metadata_artwork, '_fetch_art_bytes',
+                        lambda url: (b'preferred cover', 'image/jpeg'))
+    return state
+
+
+@pytest.fixture
+def flac_audio(imported_conn, legacy_db, tmp_path, monkeypatch):
+    """native_audio without ffmpeg: a real minimal flac, written by mutagen."""
+    from pathlib import Path
+    from tests.test_album_consistency_adopt import _make_flac
+    path = tmp_path / 'sample.flac'
+    _make_flac(Path(path), {'title': 'Handwritten file title', 'album': 'Original',
+                            'artist': 'File artist'})
+    _artist, _album, track = _seed_album_with_files(imported_conn, path=str(path))
+    monkeypatch.setattr(retag, '_album_cover_data', lambda *_a: (b'new cover', 'image/jpeg'))
+    return SimpleNamespace(db=legacy_db, conn=imported_conn, path=str(path), track=track)
+
+
+def _embedded(path):
+    from mutagen.flac import FLAC
+    pictures = FLAC(path).pictures
+    return pictures[0].data if pictures else None
+
+
+def test_replace_embeds_the_users_preferred_cover_source(flac_audio, art_sources):
+    """3.6.1: Library Re-tag with cover art "replace" pulled fresh art from
+    metadata_enhancement.album_art_order, not the cover the album already had."""
+    from core.tag_writer import write_tag_fields
+    n = flac_audio
+    assert write_tag_fields(n.path, {}, cover_data=(b'old cover', 'image/jpeg'))['success']
+    result = retag.write_tags(n.db, [n.track], options={'cover_art': 'replace', 'fields': ['cover_art']})
+    assert result['failed'] == 0
+    assert _embedded(n.path) == b'preferred cover'
+    assert art_sources.asked == [('Drake', 'Views', ['deezer', 'itunes'])]
+    assert File(n.path)['title'] == ['Handwritten file title']
+
+
+@pytest.mark.parametrize('case', ['no_order', 'nothing_found', 'hand_picked'])
+def test_replace_keeps_the_albums_own_cover_otherwise(flac_audio, art_sources, monkeypatch, case):
+    n = flac_audio
+    if case == 'no_order':
+        art_sources.order = []
+    elif case == 'nothing_found':
+        art_sources.url = None
+    else:
+        monkeypatch.setattr('core.library2.artwork.manual_art_override_url',
+                            lambda *_a: 'https://img.example/picked.jpg')
+    retag.write_tags(n.db, [n.track], options={'cover_art': 'replace', 'fields': ['cover_art']})
+    assert _embedded(n.path) == b'new cover'
+    if case != 'nothing_found':
+        assert art_sources.asked == []
+
+
+def test_fill_missing_and_the_plain_write_never_ask_the_sources(flac_audio, art_sources):
+    n = flac_audio
+    retag.write_tags(n.db, [n.track], options={'cover_art': 'fill_missing', 'fields': ['cover_art']})
+    assert _embedded(n.path) == b'new cover'
+    retag.write_tags(n.db, [n.track], force_cover=True)
+    assert art_sources.asked == []
+
+
+class _Store:
+    def __init__(self, values):
+        self.values = values
+
+    def get(self, key, default=None):
+        node = self.values
+        for part in key.split("."):
+            if not isinstance(node, dict) or part not in node:
+                return default
+            node = node[part]
+        return node
+
+    def set(self, key, value):
+        node = self.values
+        parts = key.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+
+
+def _worker(store):
+    worker = object.__new__(RepairWorker)
+    worker._jobs = {'library_retag': LibraryRetagJob()}
+    worker._config_manager = store
+    return worker
+
+
+def test_turning_auto_apply_on_works_for_a_3_6_1_save():
+    """found in the second #1062 review: 3.6.1 saved dry_run: true, and with
+    it stored, Auto Apply snapped back off on every save"""
+    from core.library2.retag import retag_options
+    store = _Store({'repair': {'jobs': {'library_retag': {'settings': {
+        'dry_run': True, 'cover_art': 'skip'}}}}})
+    worker = _worker(store)
+    shown = worker.get_job_config('library_retag')['settings']
+    assert 'dry_run' not in shown and shown['auto_apply'] is False
+
+    worker.set_job_settings('library_retag', settings={**shown, 'auto_apply': True})
+
+    saved = store.get('repair.jobs.library_retag.settings')
+    assert 'dry_run' not in saved
+    assert retag_options(saved)['auto_apply'] is True
+    assert worker.get_job_config('library_retag')['settings']['auto_apply'] is True
+
+
+def test_a_caller_that_sends_both_keeps_the_safe_dry_run():
+    """an API caller saying dry_run: true on purpose still gets no writes"""
+    from core.library2.retag import retag_options
+    store = _Store({'repair': {'jobs': {'library_retag': {'settings': {}}}}})
+    worker = _worker(store)
+    worker.set_job_settings('library_retag', settings={'dry_run': True, 'auto_apply': True})
+    assert retag_options(store.get('repair.jobs.library_retag.settings'))['auto_apply'] is False
+
+
+def test_album_edition_review_no_longer_offers_a_dead_dry_run():
+    from core.repair_jobs.album_edition_review import AlbumEditionReviewJob
+    store = _Store({'repair': {'jobs': {'album_edition_review': {'settings': {
+        'dry_run': False, 'min_score': 0.6}}}}})
+    worker = object.__new__(RepairWorker)
+    worker._jobs = {'album_edition_review': AlbumEditionReviewJob()}
+    worker._config_manager = store
+    shown = worker.get_job_config('album_edition_review')['settings']
+    assert 'dry_run' not in shown and shown['min_score'] == 0.6

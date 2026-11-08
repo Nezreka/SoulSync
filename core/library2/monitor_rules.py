@@ -274,6 +274,41 @@ def seed_legacy_rules(cursor) -> int:
     return seeded
 
 
+# Which of two rules for one entity and profile says what the user wants:
+# a choice made by hand beats one an import or a cascade made.
+_PROVENANCE_RANK = {PROVENANCE_USER: 5, PROVENANCE_WISHLIST: 4, PROVENANCE_CASCADE: 3,
+                    PROVENANCE_NEW_RELEASE: 3, PROVENANCE_FILE: 2, PROVENANCE_LEGACY: 0}
+
+
+def merge_rules_into(conn, entity_type: str, source_id: int, target_id: int) -> int:
+    """Move ``source_id``'s monitor rules onto ``target_id`` when two rows
+    merge. Where both already have a rule for one profile, the one with the
+    stronger provenance wins, its monitored value with it (a hand-made
+    "monitor" over an import's "unmonitored"); an equal one keeps the
+    target's. Returns how many rules the target took from the source."""
+    taken = 0
+    for row in conn.execute(
+            "SELECT id, profile_id, monitored, provenance FROM lib2_monitor_rules"
+            " WHERE entity_type=? AND entity_id=?", (entity_type, int(source_id))).fetchall():
+        rule_id, profile_id, monitored, provenance = row[0], row[1], row[2], row[3]
+        existing = conn.execute(
+            "SELECT id, provenance FROM lib2_monitor_rules"
+            " WHERE entity_type=? AND entity_id=? AND profile_id=?",
+            (entity_type, int(target_id), profile_id)).fetchone()
+        if existing is None:
+            conn.execute("UPDATE lib2_monitor_rules SET entity_id=? WHERE id=?",
+                         (int(target_id), rule_id))
+            taken += 1
+            continue
+        if _PROVENANCE_RANK.get(provenance, 1) > _PROVENANCE_RANK.get(existing[1], 1):
+            conn.execute(
+                "UPDATE lib2_monitor_rules SET monitored=?, provenance=?,"
+                " updated_at=CURRENT_TIMESTAMP WHERE id=?", (monitored, provenance, existing[0]))
+            taken += 1
+        conn.execute("DELETE FROM lib2_monitor_rules WHERE id=?", (rule_id,))
+    return taken
+
+
 def prune_orphaned_rules(cursor) -> int:
     """Drop rules whose entity no longer exists (entity deletes don't cascade
     into this table). Idempotent; called from the schema-ensure step."""
@@ -289,6 +324,7 @@ def prune_orphaned_rules(cursor) -> int:
 
 
 __all__ = [
+    "merge_rules_into",
     "PROVENANCE_CASCADE",
     "PROVENANCE_FILE",
     "PROVENANCE_LEGACY",

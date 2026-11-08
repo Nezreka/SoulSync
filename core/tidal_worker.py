@@ -622,10 +622,12 @@ class TidalWorker:
         num_tracks = data.get('numberOfTracks', data.get('numberOfItems'))
         if isinstance(num_tracks, int) and num_tracks > 0:
             backfill['track_count'] = num_tracks
-        # `duration` and `copyright` have no album-level column in lib2 (tracks
-        # carry both; albums never did). The payload keeps them without inventing a
-        # column.
-        payload = {'duration_ms': _parse_duration_to_ms(data.get('duration')),
+        # lib2_albums.duration (ms) fills while empty, as 3.6.1 filled
+        # albums.duration; copyright has no album column and stays in the payload
+        duration_ms = _parse_duration_to_ms(data.get('duration'))
+        if duration_ms:
+            backfill['duration'] = duration_ms
+        payload = {'duration_ms': duration_ms,
                    'copyright': self._text(data.get('copyright'))}
         self._write('album', album_id, search_data.get('id'),
                     backfill=backfill, payload=payload)

@@ -36,21 +36,22 @@ def _seed_import(path: Path, source_root: Path):
         """CREATE TABLE lib2_albums(
                id INTEGER PRIMARY KEY, primary_artist_id INTEGER NOT NULL,
                title TEXT NOT NULL, album_type TEXT, release_date TEXT,
-               spotify_id TEXT)""")
+               year INTEGER, spotify_id TEXT, image_url TEXT, track_count INTEGER,
+               expected_track_count INTEGER, explicit INTEGER, musicbrainz_id TEXT)""")
     conn.execute(
         """CREATE TABLE lib2_tracks(
                id INTEGER PRIMARY KEY, album_id INTEGER NOT NULL,
                title TEXT NOT NULL, track_number INTEGER, disc_number INTEGER,
-               duration INTEGER, spotify_id TEXT)""")
+               duration INTEGER, spotify_id TEXT, explicit INTEGER)""")
     conn.execute(
         """CREATE TABLE lib2_track_files(
                id INTEGER PRIMARY KEY, track_id INTEGER NOT NULL,
                path TEXT NOT NULL, file_state TEXT DEFAULT 'active')""")
     conn.execute("INSERT INTO lib2_artists VALUES(301, 'Artist')")
     conn.execute(
-        "INSERT INTO lib2_albums VALUES(201, 301, 'Album', 'album', '2024', NULL)")
+        "INSERT INTO lib2_albums VALUES(201, 301, 'Album', 'album', '2024', 2024, NULL, NULL, 1, 1, 1, NULL)")
     conn.execute(
-        "INSERT INTO lib2_tracks VALUES(101, 201, 'Song', 1, 1, 180000, NULL)")
+        "INSERT INTO lib2_tracks VALUES(101, 201, 'Song', 1, 1, 180000, NULL, 1)")
     pending, request, _candidate = _pending_import(
         conn, output_path=str(source_root))
     record_inventory_result(
@@ -279,6 +280,33 @@ def test_a_move_that_never_registered_the_file_is_not_a_completion(tmp_path):
     conn.close()
 
 
+def test_the_dispatched_track_and_album_say_they_are_explicit(tmp_path):
+    """$explicit / $contentrating name the folder from these (#1860)."""
+    source_root = tmp_path / "client"
+    source_root.mkdir()
+    (source_root / "01.flac").write_bytes(b"audio")
+    factory, importing, _request = _seed_import(tmp_path / "db.sqlite", source_root)
+    seen = {}
+
+    def processor(_key, context, _path, _task_id, _batch_id, _runtime):
+        seen["context"] = context
+
+    dispatch_import_to_main_pipeline(
+        factory,
+        importing.id,
+        config_get=lambda key, default=None: (
+            str(tmp_path / "transfer") if key == "soulseek.transfer_path" else default),
+        processor=processor,
+        runtime=object(),
+        copier=lambda source, destination: bool(shutil.copy2(source, destination)),
+    )
+
+    context = seen["context"]
+    assert context["track_info"]["explicit"] is True
+    assert context["spotify_album"]["explicit"] is True
+    assert context["spotify_album"]["release_date"] == "2024"
+
+
 def test_the_dispatched_task_carries_the_sealed_upgrade_intent(tmp_path):
     """ACQ-02: `_pipeline_context` seals the upgrade intent onto the context,
     but the candidate dispatch and staging consumers read it off the TASK. The
@@ -377,3 +405,30 @@ def test_another_imports_marker_does_not_authorise_a_replacement(tmp_path):
         _stage_working_copy(
             source, transfer_dir=str(transfer), import_id="import-5",
             track_id=505, copier=lambda *_args: True)
+
+
+def test_a_file_whose_track_row_is_gone_fails_alone_instead_of_the_import(tmp_path):
+    """one missing track row raised out of the whole dispatch, so the import
+    retried forever and the files that were fine never imported"""
+    source_root = tmp_path / "client"
+    source_root.mkdir()
+    (source_root / "01.flac").write_bytes(b"audio")
+    factory, importing, _request = _seed_import(tmp_path / "db.sqlite", source_root)
+    conn = factory()
+    conn.execute("DELETE FROM lib2_tracks WHERE id=101")
+    conn.commit()
+    conn.close()
+    called = []
+
+    result = dispatch_import_to_main_pipeline(
+        factory, importing.id,
+        config_get=lambda key, default=None: (
+            str(tmp_path / "transfer") if key == "soulseek.transfer_path" else default),
+        processor=lambda *a, **k: called.append(a), runtime=object(),
+        copier=lambda source, destination: bool(shutil.copy2(source, destination)),
+    )
+
+    assert called == []
+    assert result.dispatched == ()
+    assert len(result.errors) == 1 and result.errors[0].startswith("01.flac:")
+

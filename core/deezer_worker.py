@@ -582,8 +582,12 @@ class DeezerWorker:
             'image_url': search_data.get('cover_xl')
             or (data.get('cover_xl') if full_data else None),
             'label': data.get('label') if full_data else None,
-            'explicit': 1 if data.get('explicit_lyrics') else 0,
         }
+        # only what deezer actually said: a record without the key is not
+        # "clean", and writing 0 kept a later source's "explicit" out (the
+        # writes only fill gaps). 3.6.1 checked the key the same way.
+        if 'explicit_lyrics' in data:
+            backfill['explicit'] = 1 if data.get('explicit_lyrics') else 0
         if full_data:
             genre_names = [g.get('name') for g
                            in (full_data.get('genres', {}) or {}).get('data', [])
@@ -608,7 +612,9 @@ class DeezerWorker:
                       full_data: Optional[Dict[str, Any]]):
         """Store Deezer metadata for a track"""
         data = full_data or search_data
-        backfill = {'explicit': 1 if data.get('explicit_lyrics') else 0}
+        backfill = {}
+        if 'explicit_lyrics' in data:  # unknown is not clean (see _update_album)
+            backfill['explicit'] = 1 if data.get('explicit_lyrics') else 0
         bpm = data.get('bpm') if full_data else None
         if bpm and bpm > 0:
             backfill['bpm'] = float(bpm)

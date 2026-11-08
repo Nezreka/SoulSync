@@ -12,6 +12,30 @@ export interface PlaylistTrackLike {
   artist_name?: string;
   album_name?: string;
   image_url?: string | null;
+  /** the library check's stamp (JSON text from the mirror, or an object) */
+  extra_data?: string | Record<string, unknown> | null;
+  library_track_id?: string | number | null;
+}
+
+/** the library row the playlist already knows this song is: the check stamps
+ *  ``library_track_id`` (a media-server id or a catalogue id) on the row */
+export function libraryLinkOf(track: PlaylistTrackLike): string | null {
+  if (track.library_track_id != null && String(track.library_track_id).trim()) {
+    return String(track.library_track_id).trim();
+  }
+  let extra: unknown = track.extra_data;
+  if (typeof extra === 'string') {
+    try {
+      extra = JSON.parse(extra);
+    } catch {
+      return null;
+    }
+  }
+  if (!extra || typeof extra !== 'object') return null;
+  const stamp = extra as { in_library?: unknown; library_track_id?: unknown };
+  if (stamp.in_library === false) return null;
+  const id = stamp.library_track_id;
+  return id != null && String(id).trim() ? String(id).trim() : null;
 }
 
 /** the server resolves at most this many per call (core/discovery/playable). */
@@ -20,12 +44,17 @@ const RESOLVE_CHUNK = 250;
 /** the pairs the resolver reads, in playlist order, blanks dropped. */
 export function toResolvePairs(tracks: readonly PlaylistTrackLike[]) {
   return tracks
-    .map((t) => ({
-      title: String(t.track_name ?? '').trim(),
-      artist: String(t.artist_name ?? '').trim(),
-      album: String(t.album_name ?? ''),
-      image_url: t.image_url ?? null,
-    }))
+    .map((t) => {
+      const link = libraryLinkOf(t);
+      return {
+        title: String(t.track_name ?? '').trim(),
+        artist: String(t.artist_name ?? '').trim(),
+        album: String(t.album_name ?? ''),
+        image_url: t.image_url ?? null,
+        // play the file the playlist already matched, not a fresh guess
+        ...(link ? { library_track_id: link } : {}),
+      };
+    })
     .filter((t) => t.title && t.artist);
 }
 

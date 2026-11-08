@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { bitrateKbps, formatBitrate, isVariableBitrate } from './-bitrate';
+import { bitrateKbps, formatBitrate, formatQuality, isVariableBitrate } from './-bitrate';
 
 /**
  * A bitrate number means two different things depending on the codec, and the
@@ -111,5 +111,21 @@ describe('formatBitrate', () => {
   it('has nothing to say without a number', () => {
     expect(formatBitrate(null, 'opus')).toEqual({ label: null, title: undefined });
     expect(formatBitrate(0, 'flac')).toEqual({ label: null, title: undefined });
+  });
+});
+
+describe('formatQuality', () => {
+  const hiRes = { format: 'flac', bit_depth: 24, sample_rate: 96_000, bitrate: 2_500_000 };
+
+  it('prints format, resolution and rate the way the library does everywhere', () => {
+    expect(formatQuality(hiRes).label).toBe('FLAC · 24bit/96kHz · 2500 kbps');
+    expect(formatQuality({ format: 'mp3', sample_rate: 44_100, bitrate: 320 }).label).toBe(
+      'MP3 · 44.1kHz · 320 kbps',
+    );
+  });
+
+  it('leaves out what the track table options switch off', () => {
+    expect(formatQuality(hiRes, { bitrate: false }).label).toBe('FLAC · 24bit/96kHz');
+    expect(formatQuality(hiRes, { format: false, resolution: false }).label).toBe('2500 kbps');
   });
 });

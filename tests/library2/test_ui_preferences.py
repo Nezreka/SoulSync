@@ -201,3 +201,46 @@ def test_quality_and_match_provider_preferences():
     assert prefs["track_table"]["quality_show_format"] is True
     assert prefs["track_table"]["visible_match_providers"]["spotify"] is False
     assert prefs["track_table"]["visible_match_providers"]["tidal"] is True
+
+
+def test_each_profile_keeps_its_own_artist_toolbar():
+    conn = _conn()
+    assert all(get_ui_preferences(conn)["artist_toolbar"].values())
+    update_ui_preferences(conn, {"artist_toolbar": {"enhance_quality": False}}, profile_id=2)
+    update_ui_preferences(conn, {"track_table": {"columns": {"bpm": True}}})
+
+    guest, admin = get_ui_preferences(conn, profile_id=2), get_ui_preferences(conn)
+    assert guest["artist_toolbar"]["enhance_quality"] is False
+    assert guest["artist_toolbar"]["history"] is True
+    assert admin["artist_toolbar"]["enhance_quality"] is True
+    # the table layout stays one, shared
+    assert guest["track_table"]["columns"]["bpm"] is True
+    assert "profiles" not in admin
+
+
+def test_each_profile_picks_how_an_artist_opens_from_the_library():
+    conn = _conn()
+    page = get_ui_preferences(conn)["artist_page"]
+    assert (page["header"], page["header_elsewhere"]) == ("rich", "rich")
+    update_ui_preferences(conn, {"artist_page": {"header": "compact"}}, profile_id=2)
+    page = get_ui_preferences(conn, profile_id=2)["artist_page"]
+    assert (page["header"], page["header_elsewhere"]) == ("compact", "rich")
+    assert get_ui_preferences(conn)["artist_page"]["header"] == "rich"
+
+
+def test_each_profile_picks_what_my_library_shows_and_the_track_actions():
+    conn = _conn()
+    page = get_ui_preferences(conn)["artist_page"]
+    assert page["library_sections"] == {"similar_artists": True, "concerts": True}
+    assert page["add_to_playlist"] is True
+    update_ui_preferences(
+        conn, {"artist_page": {"library_sections": {"similar_artists": False}}}, profile_id=2)
+    update_ui_preferences(conn, {"artist_page": {"add_to_playlist": False}}, profile_id=2)
+
+    guest, admin = get_ui_preferences(conn, profile_id=2), get_ui_preferences(conn)
+    # one section off leaves the other, and the header, as they were
+    assert guest["artist_page"]["library_sections"] == {"similar_artists": False, "concerts": True}
+    assert guest["artist_page"]["add_to_playlist"] is False
+    assert guest["artist_page"]["header"] == "rich"
+    assert admin["artist_page"]["library_sections"]["similar_artists"] is True
+    assert admin["artist_page"]["add_to_playlist"] is True

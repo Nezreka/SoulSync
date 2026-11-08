@@ -225,3 +225,45 @@ def test_check_and_remove_track_from_wishlist_by_metadata_returns_false_when_no_
 
     assert removed is False
     assert wishlist_service.removed == []
+
+
+def _playlist_row(source_type="playlist"):
+    return {"wishlist_id": 21, "spotify_track_id": "sp-frosty", "id": "sp-frosty", "track_id": "sp-frosty",
+            "name": "Frosty The Snowman", "artists": [{"name": "Bing Crosby"}],
+            "source_type": source_type,
+            "source_info": {"playlist_id": "dz-123", "playlist_name": "Christmas"}}
+
+
+def _lone_download(tmp_path, monkeypatch, row, batch_id=None):
+    from core.sync import post_download_sync
+    queued = []
+    monkeypatch.setattr(post_download_sync, "register_completed_playlist_batch",
+                        lambda batch, tasks_snapshot=None, database=None: queued.append(
+                            (batch, list((tasks_snapshot or {}).values()))))
+    context = {"search_result": {"title": "Frosty The Snowman", "artist": "Bing Crosby"},
+               "track_info": {}, "original_search_result": {}}
+    if batch_id:
+        context["batch_id"] = batch_id
+    resolution.check_and_remove_from_wishlist(
+        context, wishlist_service=_FakeWishlistService([row]),
+        database=SimpleNamespace(get_all_profiles=lambda: [{"id": 1}]),
+        published_path=_published(tmp_path))
+    return queued
+
+
+def test_a_lone_download_of_a_playlist_song_queues_its_playlist(tmp_path, monkeypatch):
+    """#1981: a playlist song grabbed on its own from the wishlist finished as a
+    quick download with no batch, so its playlist never re-synced"""
+    queued = _lone_download(tmp_path, monkeypatch, _playlist_row())
+    assert len(queued) == 1
+    info = queued[0][1][0]["track_info"]
+    assert info["source_info"] == {"playlist_id": "dz-123", "playlist_name": "Christmas"}
+    assert queued[0][1][0]["status"] == "completed"
+
+
+def test_a_batch_download_leaves_it_to_the_batch(tmp_path, monkeypatch):
+    assert _lone_download(tmp_path, monkeypatch, _playlist_row(), batch_id="b1") == []
+
+
+def test_a_song_that_never_came_from_a_playlist_queues_nothing(tmp_path, monkeypatch):
+    assert _lone_download(tmp_path, monkeypatch, _playlist_row("manual")) == []

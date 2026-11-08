@@ -20,7 +20,7 @@
 .monitor {
   top: 8px;
   left: 8px;
-  z-index: 101;
+  z-index: var(--z-card-overlay);
 }
 
 /* the media-server tag next to the toggle */
@@ -28,7 +28,7 @@
   top: 10px;
   left: 46px;
   right: auto;
-  z-index: 101;
+  z-index: var(--z-card-overlay);
 }
 
 /* dev's play button was a span: a button needs its font back */

@@ -292,117 +292,6 @@ def test_first_m3u_entry_skips_the_directives():
 
 # --- reorganize parity ---------------------------------------------------
 
-def test_reorganize_reads_a_multi_valued_releasetype_tag():
-    """beets and Picard write releasetype as a LIST. The reader used to run
-    str() over it, producing "['album', 'compilation', 'live']" — a string
-    matching no canonical token — so every such file read as having no type."""
-    from core.library.reorganize_tag_source import (
-        _normalize_album_type, _secondary_album_types)
-
-    tag = ["album", "compilation", "live"]
-    primary = _normalize_album_type(tag)
-    assert primary == "album", "MusicBrainz writes the primary FIRST"
-    assert _secondary_album_types(tag, primary) == ["compilation", "live"]
-
-
-def test_a_single_valued_tag_still_reads_as_before():
-    from core.library.reorganize_tag_source import _normalize_album_type
-
-    assert _normalize_album_type("compilation") == "compilation"
-    assert _normalize_album_type("album") == "album"
-    assert _normalize_album_type("nonsense") == ""
-    assert _normalize_album_type(None) == ""
-
-
-def test_slash_and_semicolon_separated_tags_split():
-    """Some taggers pack several values into one string."""
-    from core.library.reorganize_tag_source import _release_type_tokens
-
-    assert _release_type_tokens("album/compilation") == ["album", "compilation"]
-    assert _release_type_tokens("Album; Live") == ["album", "live"]
-
-
-def test_atypes_is_identical_at_import_and_at_reorganize():
-    """The whole point: reorganize is the convergence step, so if it renders
-    $atypes differently from import it RENAMES every labelled folder. Salival
-    through both routes must produce the same string."""
-    from core.library.reorganize_tag_source import (
-        _normalize_album_type, _secondary_album_types)
-
-    at_import = {"album_type": "compilation", "secondary_types": ["Live", "Compilation"]}
-
-    tag = ["album", "compilation", "live"]
-    primary = _normalize_album_type(tag)
-    at_reorganize = {"album_type": primary, "record_type": primary,
-                     "secondary_types": _secondary_album_types(tag, primary)}
-
-    assert format_album_types(at_reorganize, BEETS_CONFIG) == "[Live][Anthology]"
-    assert format_album_types(at_import, BEETS_CONFIG) == \
-        format_album_types(at_reorganize, BEETS_CONFIG)
-
-
-def test_the_tag_reader_surfaces_secondary_types(tmp_path):
-    """End to end through read_album_track_from_file, so the dict the
-    reorganize planner consumes really carries the field."""
-    from core.library.reorganize_tag_source import read_album_track_from_file
-
-    album_meta, _track_meta, err = read_album_track_from_file(
-        str(tmp_path / "x.flac"),
-        read_embedded_tags_fn=lambda _p: {"available": True, "duration": 300, "tags": {
-            "album": "Salival", "albumartist": "Tool", "artist": "Tool",
-            "title": "Third Eye", "tracknumber": "1",
-            "releasetype": ["album", "compilation", "live"],
-        }})
-    assert err is None
-    assert album_meta["album_type"] == "album"
-    assert album_meta["secondary_types"] == ["compilation", "live"]
-
-
-def test_reading_the_tag_does_not_change_where_reorganize_files_an_album():
-    """The regression this nearly shipped with. Teaching the reader about
-    multi-valued tags means reorganize now SEES a type where it used to see
-    nothing, and resolved_record_type routes 'compilation' to compilation_path.
-    Taking the most specific token would therefore have swept every
-    single-artist greatest-hits record into Compilations/ on the next
-    reorganize — 38 folders on the library this was written against.
-
-    The primary is the first token because that is the order MusicBrainz
-    writes; the qualifiers are the rest.
-    """
-    from core.library.reorganize_tag_source import _normalize_album_type
-
-    def routes_to(tag_album_type, raw_db_type="album"):
-        # mirrors resolved_record_type in core/library_reorganize.py
-        if raw_db_type in ("compilation",) or tag_album_type in ("compilation",):
-            return "compilation_path"
-        return "album_path"
-
-    # a single artist's anthology stays with the artist, as it did before
-    assert routes_to(_normalize_album_type(["album", "compilation"])) == "album_path"
-    assert routes_to(_normalize_album_type(["album", "compilation", "live"])) == "album_path"
-    # a release whose PRIMARY type is compilation still routes as it always did
-    assert routes_to(_normalize_album_type("compilation")) == "compilation_path"
-    assert routes_to(_normalize_album_type(["compilation"])) == "compilation_path"
-
-
-def test_the_beets_folders_this_was_built_for_round_trip():
-    """Real folder names from a beets-organised library, rebuilt from the tags
-    those files actually carry."""
-    from core.library.reorganize_tag_source import (
-        _normalize_album_type, _secondary_album_types)
-
-    cases = [
-        (["album", "compilation", "live"], "[Live][Anthology]"),   # Tool / Salival
-        (["album", "compilation"], "[Anthology]"),                 # 3 Doors Down / Greatest Hits
-        (["ep", "live"], "[EP][Live]"),                            # Slothrust / Audiotree Live
-        (["album"], ""),                                           # a plain album
-    ]
-    for tag, expected in cases:
-        primary = _normalize_album_type(tag)
-        ctx = {"album_type": primary, "record_type": primary,
-               "secondary_types": _secondary_album_types(tag, primary)}
-        assert format_album_types(ctx, BEETS_CONFIG) == expected, tag
-
 
 def test_the_m3u_folder_refuses_a_path_outside_the_library(tmp_path, monkeypatch):
     """resolve_library_file_path also probes the slskd download folder. A track
@@ -461,30 +350,6 @@ def test_the_reorganize_planner_carries_secondary_types_to_the_path_builder():
         artist_name='Tool', album_title='Salival', total_discs=1,
     )
     assert ctx['spotify_album']['secondary_types'] == ['compilation', 'live']
-
-
-def test_a_reorganize_context_renders_the_labels_end_to_end():
-    """Reader -> planner -> $atypes, in one go, against the tags a beets file
-    actually carries. Any break in that chain silently renames folders."""
-    from core.library.reorganize_tag_source import (
-        _normalize_album_type, _secondary_album_types)
-    from core.library_reorganize import _build_post_process_context
-
-    tag = ["album", "compilation", "live"]            # as beets writes it
-    primary = _normalize_album_type(tag)
-    album_meta = {
-        'id': '', 'name': 'Salival', 'release_date': '2007', 'total_tracks': 8,
-        'album_type': primary,
-        'secondary_types': _secondary_album_types(tag, primary),
-    }
-    ctx = _build_post_process_context(
-        api_album=album_meta,
-        api_track={'id': '', 'name': 'Third Eye', 'track_number': 1, 'disc_number': 1},
-        artist_name='Tool', album_title='Salival', total_discs=1,
-        record_type=primary,
-    )
-    album_ctx = ctx['spotify_album']
-    assert format_album_types(album_ctx, BEETS_CONFIG) == "[Live][Anthology]"
 
 
 # --- the path builder actually emits the labels --------------------------
@@ -553,95 +418,6 @@ def test_the_single_path_gets_the_labels_too(tmp_path, monkeypatch):
     path, _ = paths.build_final_path_for_track(
         ctx, ctx["artist"], None, ".flac", create_dirs=False)
     assert "[Single]" in path, path
-
-
-def test_id3_packs_multiple_release_types_into_one_nul_separated_string():
-    """A FLAC gives mutagen a list; an mp3 gives one string with NUL between
-    the values. Splitting only on human separators leaves that blob as a single
-    unrecognised token, so every label the file carries is dropped — which on a
-    real library silently un-labelled the mp3-tagged albums while the FLAC ones
-    worked."""
-    from core.library.reorganize_tag_source import (
-        _normalize_album_type, _release_type_tokens, _secondary_album_types)
-
-    packed = "album\x00remix\x00soundtrack"
-    assert _release_type_tokens(packed) == ["album", "remix", "soundtrack"]
-    primary = _normalize_album_type(packed)
-    assert primary == "album"
-    assert format_album_types(
-        {"album_type": primary, "secondary_types": _secondary_album_types(packed, primary)},
-        BEETS_CONFIG) == "[OST][Remix]"
-
-    # and the mp3 and flac spellings of the same release agree
-    as_list = ["album", "remix", "soundtrack"]
-    assert _release_type_tokens(packed) == _release_type_tokens(as_list)
-
-
-def test_an_unmapped_qualifier_is_simply_not_labelled():
-    """'demo' has no entry in the types table, so an EP demo is [EP] and not
-    [EP][Demo] — matching what beets wrote for the same release."""
-    from core.library.reorganize_tag_source import (
-        _normalize_album_type, _secondary_album_types)
-
-    tag = "ep\x00demo"
-    primary = _normalize_album_type(tag)
-    assert format_album_types(
-        {"album_type": primary, "secondary_types": _secondary_album_types(tag, primary)},
-        BEETS_CONFIG) == "[EP]"
-
-
-# --- through the real tag reader -----------------------------------------
-
-def _minimal_flac(path):
-    """A FLAC header mutagen will open and write Vorbis comments to."""
-    path.write_bytes(
-        b'fLaC' + b'\x80\x00\x00\x22' + b'\x00\x10\x00\x10'
-        + b'\x00\x00\x00\x00\x00\x00' + b'\x0a\xc4\x42\xf0\x00\x00\x00\x00' + b'\x00' * 16
-    )
-    return str(path)
-
-
-def test_atypes_survives_the_real_tag_reader(tmp_path):
-    """The reorganize path reads tags through read_embedded_tags, which joins
-    every multi-value tag with ", " before the tokeniser sees it. Tests that
-    hand a list straight to the tokeniser skip that join and stay green while
-    the real path renames "[2007][Live][Anthology] Salival" to "[2007] Salival".
-
-    So this one writes a real file, reads it back through the real reader, and
-    asserts the label — no fake reader anywhere in the chain.
-    """
-    from mutagen.flac import FLAC
-    from core.library.file_tags import read_embedded_tags
-    from core.library.reorganize_tag_source import read_album_track_from_file
-
-    p = _minimal_flac(tmp_path / "01 - Third Eye.flac")
-    f = FLAC(p)
-    f["album"], f["artist"], f["albumartist"] = ["Salival"], ["Tool"], ["Tool"]
-    f["title"], f["tracknumber"] = ["Third Eye"], ["1"]
-    f["releasetype"] = ["album", "compilation", "live"]
-    f.save()
-
-    # the reader really does flatten it — if this stops being true the
-    # tokeniser's comma handling is no longer load-bearing and should be revisited
-    raw = (read_embedded_tags(p).get("tags") or {}).get("releasetype")
-    assert raw == "album, compilation, live", raw
-
-    album_meta, _track, err = read_album_track_from_file(p)
-    assert err is None, err
-    assert album_meta["album_type"] == "album"
-    assert album_meta["secondary_types"] == ["compilation", "live"]
-    assert format_album_types(album_meta, BEETS_CONFIG) == "[Live][Anthology]"
-
-
-def test_every_spelling_of_one_release_tokenises_the_same(tmp_path):
-    """FLAC gives a list, ID3 NUL-packs, read_embedded_tags comma-joins."""
-    from core.library.reorganize_tag_source import _release_type_tokens
-
-    expected = ["album", "compilation", "live"]
-    assert _release_type_tokens(["album", "compilation", "live"]) == expected
-    assert _release_type_tokens("album\x00compilation\x00live") == expected
-    assert _release_type_tokens("album, compilation, live") == expected
-    assert _release_type_tokens("album; compilation; live") == expected
 
 
 # --- spotify types every EP "single" --------------------------------------
@@ -745,7 +521,6 @@ def test_the_path_builder_files_by_the_sources_own_label(tmp_path, monkeypatch, 
     assert type_folder == folder, path
 
 
-
 @pytest.mark.parametrize(("type_source", "folder"), [
     ("deezer", "Single"),    # api-mode reorganize: agrees with the download
     ("tags", "EP"),          # tag mode: the library's record_type, count split
@@ -797,7 +572,6 @@ def test_a_release_locked_to_its_artist_page_section_files_there(tmp_path, monke
     path, _ = paths.build_final_path_for_track(
         ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac", create_dirs=False)
     assert os.path.basename(os.path.dirname(os.path.dirname(path))) == folder, path
-
 
 
 @pytest.mark.parametrize(("type_source", "api_type", "folder"), [

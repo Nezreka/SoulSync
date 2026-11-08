@@ -189,3 +189,56 @@ class TestCounters:
                        service="lastfm", status="not_found")
 
         assert progress_breakdown(conn, "lastfm")["artists"]["matched"] == 1
+
+
+class TestWalkCursor:
+    """The never-attempted walk carries on from where it got to instead of
+    re-walking every attempted id (about a second a fetch on 311k tracks once
+    most were done), and wraps to the start when it reaches the end."""
+
+    def _artists(self, conn, n):
+        ids = []
+        for i in range(n):
+            artist = conn.execute("INSERT INTO lib2_artists(name) VALUES(?)", (f"Artist {i}",)).lastrowid
+            album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title,album_type) "
+                                 "VALUES(?,?,'album')", (artist, f"Album {i}")).lastrowid
+            track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,?)",
+                                 (album, f"Song {i}")).lastrowid
+            conn.execute("INSERT INTO lib2_track_files(track_id,path,is_primary,file_state) "
+                         "VALUES(?,?,1,'active')", (track, f"/m/{i}.flac"))
+            ids.append(artist)
+        conn.commit()
+        return ids
+
+    def test_it_walks_forward_and_offers_an_unfinished_item_again(self, conn):
+        from core.library2 import worker_queue as wq
+        self._artists(conn, 4)
+        seen = []
+        for _ in range(3):
+            item = next_pending(conn, 'lastfm', entity_types=('artist',))
+            seen.append(item['id'])
+            record_attempt(conn, entity_type='artist', entity_id=item['id'], service='lastfm', status='matched')
+            conn.commit()
+        assert seen == sorted(seen) and len(set(seen)) == 3
+        # an item the worker never got to is offered again, not skipped
+        again = next_pending(conn, 'lastfm', entity_types=('artist',))
+        assert next_pending(conn, 'lastfm', entity_types=('artist',))['id'] == again['id']
+        assert any(k[2] == 'artist' for k in wq._NEW_CURSOR)
+
+    def test_an_older_row_that_becomes_eligible_is_found_after_the_end(self, conn):
+        ids = self._artists(conn, 3)
+        everyone = [1, *ids]
+
+        def attempt(artist):
+            record_attempt(conn, entity_type='artist', entity_id=artist, service='lastfm', status='matched')
+            conn.commit()
+        for artist in everyone[:-1]:
+            attempt(artist)
+        # the walk reaches the last artist: the cursor now sits past the others
+        assert next_pending(conn, 'lastfm', entity_types=('artist',))['id'] == everyone[-1]
+        attempt(everyone[-1])
+        # an earlier artist's attempt is reset (a retry clears its row)
+        conn.execute("DELETE FROM lib2_provider_attempts WHERE entity_type='artist' AND entity_id=?",
+                     (everyone[0],))
+        conn.commit()
+        assert next_pending(conn, 'lastfm', entity_types=('artist',))['id'] == everyone[0]

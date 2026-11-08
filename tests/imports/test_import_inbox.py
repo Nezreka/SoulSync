@@ -206,3 +206,27 @@ def test_endpoint_joins_the_worker(tmp_path):
     assert item['status'] == 'needs_review' and item['history_id'] == 3
     assert item['name'] == 'Artist - Album' and item['guessed_name'] == 'Named'
     assert payload['summary']['attention'] == 1
+
+
+def test_a_compilation_folder_is_named_by_its_album_artist_and_files_by_their_performer():
+    """pr 1973 shows each file's performing artist. the folder row still reads
+    the album credit: its artist seeds the album identify search, and a
+    compilation searched as one random track artist matched worse"""
+    c = _cand('/Staging/Spiral Roots', ['/Staging/Spiral Roots/01.aiff',
+                                         '/Staging/Spiral Roots/02.aiff',
+                                         '/Staging/Spiral Roots/03.aiff'], 'h9')
+    recs = [_rec(c.audio_files[0], artist='Shankara NZ', albumartist='Various Artists'),
+            _rec(c.audio_files[1], artist='Shankara NZ', albumartist='Various Artists'),
+            _rec(c.audio_files[2], artist='Indra', albumartist='Various Artists')]
+    r = build_inbox([c], recs, [], [], staging_root='/Staging')[0]
+
+    assert r['artist'] == 'Various Artists'
+    assert [f['artist'] for f in r['files']] == ['Shankara NZ', 'Shankara NZ', 'Indra']
+    assert all(f['albumartist'] == 'Various Artists' for f in r['files'])
+
+
+def test_a_folder_without_an_album_artist_tag_uses_the_performer():
+    c = _cand('/Staging/Solo', ['/Staging/Solo/01.flac'], 'h10')
+    r = build_inbox([c], [_rec(c.audio_files[0], artist='Solo Act', albumartist='')],
+                    [], [], staging_root='/Staging')[0]
+    assert r['artist'] == 'Solo Act'

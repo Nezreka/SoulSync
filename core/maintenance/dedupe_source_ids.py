@@ -44,8 +44,18 @@ SOURCES = ('deezer', 'spotify', 'itunes', 'musicbrainz', 'discogs',
 
 
 def _norm(name: str) -> str:
-    """Loose name key — lowercased, whitespace-collapsed."""
-    return ' '.join((name or '').lower().split())
+    """Loose name key: case, accents, punctuation and spaces folded.
+
+    JAY-Z and Jay Z, AC/DC and AC DC, Beyoncé and Beyonce are one artist
+    spelled two ways by two servers, and share an id rightly. this runs on
+    its own at every upgrade import now, so a looser key than "lowercase"
+    is what keeps it from clearing a real id.
+    """
+    import unicodedata
+    from core.worker_utils import normalize_artist_name
+    folded = unicodedata.normalize('NFKD', name or '')
+    folded = ''.join(ch for ch in folded if not unicodedata.combining(ch))
+    return normalize_artist_name(folded).replace(' ', '')
 
 
 def find_corrupt_clusters(database: Any) -> list[dict]:
@@ -131,6 +141,18 @@ def clear_corrupt_source_ids(database: Any, dry_run: bool = True) -> dict:
     return report
 
 
+def _legacy_genius_fix_applied(conn) -> bool:
+    """Whether the legacy library ran its one-time genius search reset."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table'"
+                    " AND name='_genius_search_fix_applied'").fetchone():
+        return True
+    try:
+        return conn.execute("SELECT 1 FROM schema_migrations WHERE name='genius_search_fix'"
+                            ).fetchone() is not None
+    except Exception:  # noqa: BLE001 - no ledger: nothing says it ran
+        return False
+
+
 def repair_imported_state(database: Any) -> dict:
     """Apply one-time corruption repairs after legacy rows reached Library v2."""
     with database._get_connection() as conn:
@@ -146,7 +168,11 @@ def repair_imported_state(database: Any) -> dict:
         conn.commit()
     report = clear_corrupt_source_ids(database, dry_run=False)
     with database._get_connection() as conn:
-        if 'lib2_genius_search_fix' not in markers:
+        if 'lib2_genius_search_fix' not in markers and _legacy_genius_fix_applied(conn):
+            # 3.6.1 already reset the bad genius matches once and the worker
+            # re-matched them with the fixed search: what came across is good
+            conn.execute("INSERT INTO lib2_upgrade_repairs(name) VALUES('lib2_genius_search_fix')")
+        elif 'lib2_genius_search_fix' not in markers:
             for table in ('lib2_artists', 'lib2_tracks'):
                 conn.execute(
                     f"UPDATE {table} SET external_ids=json_remove(external_ids,'$.genius'), "

@@ -108,6 +108,23 @@ def _normalized_value(alias: str, column: str) -> str:
     return f"CASE WHEN {valid} THEN CAST({alias}.{column} AS TEXT) END"
 
 
+def _field_trigger_prefix(table: str, column: str) -> str:
+    return f"trg_lib2_idhist_{table.removeprefix('lib2_')}_{column}"
+
+
+def _field_triggers_present(cursor: Any, *, table: str, column: str) -> bool:
+    """True when all three of this field's triggers are already on the table.
+    They record every write from the moment they exist, so its rows are
+    already in the history and the backfill has nothing to add. A rebuilt
+    table loses its triggers, which brings the backfill back."""
+    prefix = _field_trigger_prefix(table, column)
+    names = [f"{prefix}_{suffix}" for suffix in ("insert", "update", "delete")]
+    found = cursor.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND tbl_name=? "
+        "AND name IN (?, ?, ?)", (table, *names)).fetchone()[0]
+    return int(found) == len(names)
+
+
 def _install_field_triggers(
     cursor: Any,
     *,
@@ -116,7 +133,7 @@ def _install_field_triggers(
     column: str,
     namespace: str,
 ) -> None:
-    prefix = f"trg_lib2_idhist_{table.removeprefix('lib2_')}_{column}"
+    prefix = _field_trigger_prefix(table, column)
     new_valid = _valid_value("NEW", column)
     old_valid = _valid_value("OLD", column)
     new_value = _normalized_value("NEW", column)
@@ -230,6 +247,10 @@ def ensure_external_id_history_schema(cursor: Any) -> int:
         )
         if column not in columns:
             continue
+        # every start used to rescan each table (about 2s apiece on a 300k
+        # track library, holding the write lock); only a field whose triggers
+        # were missing can have rows the history hasn't seen
+        covered = _field_triggers_present(cursor, table=table, column=column)
         # Install triggers before backfill so all later writes are covered.
         _install_field_triggers(
             cursor,
@@ -238,6 +259,8 @@ def ensure_external_id_history_schema(cursor: Any) -> int:
             column=column,
             namespace=namespace,
         )
+        if covered:
+            continue
         backfilled += _backfill_field(
             cursor,
             table=table,

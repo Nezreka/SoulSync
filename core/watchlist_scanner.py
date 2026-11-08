@@ -574,9 +574,11 @@ def library_artist_genres(conn) -> Dict[str, set]:
 def library_owned_and_seed_ids(conn, seed_names) -> Tuple[set, List[str], Dict[str, str]]:
     """``(owned names, the seeds' provider ids, provider id → name)``.
 
-    ``owned`` is every artist the library holds — a v2 artist row exists
-    because the user has them, downloaded them, or asked to follow them, and
-    all three are reasons not to recommend them back.
+    ``owned`` is the artists you have music by, as 3.6.1's media-server
+    artists were. lib2_artists also holds featured guests, discography rows
+    and artists from one wishlisted song; calling those owned meant Bon Iver
+    (a verse on folklore) was never recommended (139ba4181 fixed the same for
+    the taste map). The seed ids still come from every row.
 
     The ids are PROVIDER ids because that is what ``similar_artists``' graph is
     keyed by (``similar_artists_worker.pick_source_artist_id``), never a
@@ -589,15 +591,19 @@ def library_owned_and_seed_ids(conn, seed_names) -> Tuple[set, List[str], Dict[s
     owned: set = set()
     seed_source_ids: List[str] = []
     seed_id_to_name: Dict[str, str] = {}
+    from core.library2.sql_util import owned_sql
+
     for row in conn.execute(
-        "SELECT name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists "
-        "WHERE name IS NOT NULL AND name <> ''"
+        "SELECT a.name, a.spotify_id, a.musicbrainz_id, a.external_ids, "
+        f"       ({owned_sql('artist', 'a')}) AS has_music FROM lib2_artists a "
+        "WHERE a.name IS NOT NULL AND a.name <> ''"
     ).fetchall():
         name = row["name"]
         lowered = str(name or '').lower()
         if not lowered:
             continue
-        owned.add(lowered)
+        if row["has_music"]:
+            owned.add(lowered)
         if lowered not in seed_names:
             continue
         known = parse_external_ids(row["external_ids"])
@@ -3045,7 +3051,12 @@ class WatchlistScanner:
                     # When allow_duplicates is on, skip album hint so we get title+artist matches only
                     search_album = None if allow_duplicates else album_name
                     from core.downloads.atomic_album_publish import contains_staging_segment
-                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album, include_downloads=True, prefer_album=album_name)
+                    # Owned means a live file in the library (the matcher
+                    # requires one), not a mapping on the active server: an
+                    # album SoulSync imported that the server hasn't scanned,
+                    # or a profile folder it doesn't index, read as missing
+                    # and was wishlisted again (the #1952 fix, for the scan).
+                    db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=None, album=search_album, include_downloads=True, prefer_album=album_name)
 
                     if db_track and confidence >= 0.7:
                         # #1289: a row whose file is still in atomic-publish

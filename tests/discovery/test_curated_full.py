@@ -86,9 +86,18 @@ def test_hidden_gems_prefers_taste_matched_genres(tmp_path):
             "VALUES (?,?,?,?,?,1,'{}',?)", (tid, name, artist, 'Al', pop, genres))
     conn.commit()
     conn.close()
+    import random
+    from collections import Counter
     service = PersonalizedPlaylistsService(db, None)
     service._get_active_source = lambda: 'spotify'
-    tracks = service.get_hidden_gems(limit=2, taste_profile={'phonk': 0.9})
-    names = [t['track_name'] for t in tracks]
-    assert 'Alien Genre Cut' not in names
-    assert len(names) == 2
+    # the draw is weighted by taste, not filtered by it: an off-taste cut can
+    # still come up now and then (a single draw asserted it never would, and
+    # failed about half the time). over many seeded draws the loved genre wins
+    service.rng = random.Random(1950)
+    seen = Counter()
+    for _ in range(40):
+        tracks = service.get_hidden_gems(limit=2, taste_profile={'phonk': 0.9})
+        assert len(tracks) == 2
+        seen.update(t['track_name'] for t in tracks)
+    assert seen['Alien Genre Cut'] < seen['Loved Genre Cut']
+    assert seen['Alien Genre Cut'] < seen['Another Loved Cut']

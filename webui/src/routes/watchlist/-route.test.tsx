@@ -63,6 +63,8 @@ interface StubOptions {
   /** what you own of the panel's artist and how much you play them. */
   library?: Record<string, unknown> | null;
   listening?: Record<string, unknown> | null;
+  /** what scans added to the wishlist, by release */
+  found?: Record<string, unknown>[];
 }
 
 function stubFetch(options: StubOptions = {}) {
@@ -82,6 +84,7 @@ function stubFetch(options: StubOptions = {}) {
     customCount = 0,
     library = null,
     listening = null,
+    found = [],
   } = options;
 
   const calls: string[] = [];
@@ -103,6 +106,9 @@ function stubFetch(options: StubOptions = {}) {
         if (raw) bodies.push({ url, body: JSON.parse(raw) as Record<string, unknown> });
       }
 
+      if (url.includes('/api/watchlist/found')) {
+        return createResponse({ success: true, releases: found });
+      }
       if (url.includes('/api/watchlist/count')) {
         return createResponse({ success: true, count, next_run_in_seconds: nextRunInSeconds });
       }
@@ -277,12 +283,13 @@ describe('watchlist route', () => {
     });
 
     expect(screen.getByText('1 artist')).toBeInTheDocument();
-    expect(screen.getByText('Next Auto: 1h 00m')).toBeInTheDocument();
-    expect(screen.getByText('Spotify')).toBeInTheDocument();
-    expect(screen.getByText('Albums')).toBeInTheDocument();
-    expect(screen.getByText('Singles')).toBeInTheDocument();
-    // Not enabled on this artist, so it must not be rendered at all.
-    expect(screen.queryByText('EPs')).not.toBeInTheDocument();
+    expect(screen.getByText('in 1h 00m')).toBeInTheDocument();
+    // the card stays quiet: rules and sources ride in its tooltip
+    const card = document.querySelector('[data-artist-id="sp-aphex"]') as HTMLElement;
+    expect(card.title).toContain('Albums, Singles');
+    expect(card.title).toContain('Matched on Spotify');
+    // Not enabled on this artist, so it must not be listed at all.
+    expect(card.title).not.toContain('EPs');
   });
 
   it('shows the empty state instead of the grid when nothing is watched', async () => {
@@ -311,7 +318,7 @@ describe('watchlist route', () => {
     renderWatchlistRoute();
 
     await waitFor(() => expect(screen.getByText('Boards')).toBeInTheDocument());
-    expect(document.querySelectorAll('.watchlist-pill-custom')).toHaveLength(1);
+    expect(document.querySelectorAll('.wl-custom')).toHaveLength(1);
     expect(screen.queryByText(/Global override is active/)).not.toBeInTheDocument();
   });
 
@@ -322,7 +329,7 @@ describe('watchlist route', () => {
     await waitFor(() => {
       expect(screen.getByText('Aphex Twin')).toBeInTheDocument();
     });
-    expect(screen.queryByText(/Last scan:/)).not.toBeInTheDocument();
+    expect(screen.getByText('No scans yet')).toBeInTheDocument();
 
     unmount();
     vi.unstubAllGlobals();
@@ -331,8 +338,11 @@ describe('watchlist route', () => {
     renderWatchlistRoute();
 
     await waitFor(() => {
-      expect(screen.getByText(/3 new tracks found, 2 added to wishlist/)).toBeInTheDocument();
+      expect(screen.getByText('2 new tracks added')).toBeInTheDocument();
     });
+    expect(
+      screen.getByText(/checked 4 of 4 artists, found 3 new tracks and added 2 to the wishlist/),
+    ).toBeInTheDocument();
   });
 
   it('applies the sort and filter carried in the URL', async () => {
@@ -373,7 +383,7 @@ describe('watchlist route', () => {
     expect(screen.queryByText('Clark')).not.toBeInTheDocument();
     // The input reflects the URL rather than starting blank, so a shared link
     // does not lie about what is being filtered.
-    expect(screen.getByPlaceholderText('Filter watchlist…')).toHaveValue('canada');
+    expect(screen.getByPlaceholderText('Find an artist')).toHaveValue('canada');
   });
 
   it('does not fetch labels until the Labels tab is opened', async () => {
@@ -465,6 +475,7 @@ describe('watchlist route', () => {
 
     await waitFor(() => expect(screen.getByText('Boards of Canada')).toBeInTheDocument());
 
+    fireEvent.click(screen.getByRole('button', { name: 'Select artists' }));
     fireEvent.click(screen.getByLabelText('Select all visible artists'));
 
     // One visible, so one selected — not all three. This is what stops a
@@ -501,7 +512,7 @@ describe('watchlist route', () => {
     expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
 
     // the panel names the artist too, so click the one in the roster
-    const roster = document.querySelector('.watchlist-roster-panel') as HTMLElement;
+    const roster = document.querySelector('.wl-roster') as HTMLElement;
     fireEvent.click(within(roster).getByText('Aphex Twin'));
     await waitFor(() => {
       expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
@@ -1065,6 +1076,71 @@ describe('watchlist route', () => {
     expect(bodies.find((call) => call.url.includes('/config'))!.body.follow_defaults).toBe(true);
   });
 
+  it('plays an owned find from its cover, and opens the artist from its name', async () => {
+    window.playTrackList = vi.fn();
+    stubFetch({
+      found: [
+        {
+          artist_name: 'Aphex Twin',
+          album_name: 'Syro',
+          album_image_url: null,
+          found_at: '2026-11-05T16:00:00',
+          track_count: 1,
+          tracks: ['Minipops 67'],
+          library_album_id: 9,
+        },
+      ],
+    });
+    const { router } = renderWatchlistRoute();
+
+    const play = await screen.findByRole('button', { name: 'Play Syro by Aphex Twin' });
+    fireEvent.click(play);
+    await waitFor(() => expect(window.playTrackList).toHaveBeenCalled());
+    // playing is not opening
+    expect(router.state.location.search).not.toMatchObject({ detailId: 'sp-aphex' });
+
+    const shelf = screen.getByRole('region', { name: 'Found by your watchlist' });
+    fireEvent.click(within(shelf).getByRole('button', { name: 'Aphex Twin' }));
+    await waitFor(() => {
+      expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
+    });
+  });
+
+  it('opens the artist from a find you do not own yet', async () => {
+    window.playTrackList = vi.fn();
+    stubFetch({
+      found: [
+        {
+          artist_name: 'Aphex Twin',
+          album_name: 'Syro',
+          album_image_url: null,
+          found_at: '2026-11-05T16:00:00',
+          track_count: 1,
+          tracks: ['Minipops 67'],
+          library_album_id: null,
+        },
+      ],
+    });
+    const { router } = renderWatchlistRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Aphex Twin' }));
+    await waitFor(() => {
+      expect(router.state.location.search).toMatchObject({ detailId: 'sp-aphex' });
+    });
+    expect(window.playTrackList).not.toHaveBeenCalled();
+  });
+
+  it('keeps the panel inside the old stylesheet scope, so its drawer has a background', async () => {
+    stubFetch();
+    renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+    await waitFor(() => {
+      expect(document.querySelector('.watchlist-inspector-drawer')).not.toBeNull();
+    });
+    // watchlist-premier.css defines the drawer surface under this class
+    const drawer = document.querySelector('.watchlist-inspector-drawer') as HTMLElement;
+    expect(drawer.closest('.watchlist-page-container')).not.toBeNull();
+  });
+
   it('opens the artist panel on its overview, with every genre and the stats', async () => {
     stubFetch();
     renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
@@ -1223,6 +1299,24 @@ describe('watchlist route', () => {
     expect(calls.some((url) => url.includes('/api/watchlist/remove'))).toBe(false);
   });
 
+  it('opens an artist the library holds there: the name, and View Discography in its discovery view', async () => {
+    stubFetch({
+      library: { artist_id: 77, album_count: 4, track_count: 52, recent_albums: [] },
+    });
+    const { router } = renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
+
+    // the library part arrives with the panel's payload
+    await screen.findByText('4 albums · 52 tracks');
+    fireEvent.click(screen.getByRole('button', { name: 'View Discography' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+    expect(router.state.location.search).toMatchObject({ artist: 77, releases: 'all' });
+
+    await act(() => router.navigate({ href: '/watchlist?detailId=sp-aphex' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Aphex Twin' }));
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+    expect(router.state.location.search).toMatchObject({ artist: 77 });
+  });
+
   it('disables View Discography for an artist with no provider ids', async () => {
     stubFetch({ configProviderIds: false });
     renderWatchlistRoute(['/watchlist?detailId=sp-aphex']);
@@ -1314,12 +1408,13 @@ describe('watchlist route', () => {
     });
 
     await waitFor(() => {
-      expect(
-        screen.getByText(
-          'Scan completed: 38/40 artists scanned, found 19 new tracks, added 10 to wishlist',
-        ),
-      ).toBeInTheDocument();
+      expect(screen.getByText('10 new tracks added')).toBeInTheDocument();
     });
+    expect(
+      screen.getByText(
+        /checked 38 of 40 artists, found 19 new tracks and added 10 to the wishlist/,
+      ),
+    ).toBeInTheDocument();
 
     // The ledger is collapsed until asked for.
     expect(screen.queryByText('Roygbiv')).not.toBeVisible();
@@ -1338,10 +1433,10 @@ describe('watchlist route', () => {
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
 
     // monthly jobs live behind ⋯ (#1822); each pick closes the menu
-    const more = screen.getByRole('button', { name: 'More watchlist actions' });
+    const more = screen.getByRole('button', { name: /Tools/ });
     for (const name of ['Download origins', 'Scan history', 'Blocklist']) {
       fireEvent.click(more);
-      fireEvent.click(screen.getByRole('menuitem', { name }));
+      fireEvent.click(screen.getByRole('menuitem', { name: new RegExp(`^${name}`) }));
     }
 
     // These modals live in other vanilla files and are shared with other
@@ -1357,7 +1452,7 @@ describe('watchlist route', () => {
 
     await waitFor(() => expect(screen.getByText('Aphex Twin')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'More watchlist actions' }));
+    fireEvent.click(screen.getByRole('button', { name: /Tools/ }));
     fireEvent.click(screen.getByRole('menuitem', { name: /Update similar artists/ }));
 
     await waitFor(() => {
@@ -1390,7 +1485,7 @@ describe('watchlist route', () => {
     renderWatchlistRoute(['/watchlist?q=311']);
 
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Filter watchlist…')).toHaveValue('311');
+      expect(screen.getByPlaceholderText('Find an artist')).toHaveValue('311');
     });
   });
 });

@@ -63,11 +63,13 @@ def find_library_artist_for_source(
 
     Returns ``None`` on miss or on any database error.
     """
-    from core.library2.provider_ids import provider_id_sql
+    from core.library2.provider_ids import indexed_provider_id_sql
 
     if source not in SOURCE_ID_FIELD:
         return None
-    id_expression = provider_id_sql(source)
+    # the indexed form: the bare json_extract scanned every artist per click
+    # and never matched an id stored as a JSON number
+    id_expression = indexed_provider_id_sql(source, alias="a")
     if not id_expression:
         return None
 
@@ -75,14 +77,19 @@ def find_library_artist_for_source(
         with database._get_connection() as conn:
             cursor = conn.cursor()
             # LIMIT 2 so we can tell a unique match from an ambiguous one.
+            # only an artist of the caller's library is theirs to open
+            # (#1199). filtered BEFORE the LIMIT 2: two libraries each holding
+            # the artist are not a corrupt mapping, as the 3.6.1 query (scoped
+            # the same way) knew
+            from core.library2.sql_util import scope_visibility_sql
+            visible = scope_visibility_sql("artist", "a")
             cursor.execute(
-                f"SELECT id FROM lib2_artists WHERE {id_expression} = ? LIMIT 2",
+                f"SELECT a.id FROM lib2_artists a WHERE {id_expression} = ?"
+                f"{(' AND ' + visible) if visible else ''} LIMIT 2",
                 (str(source_artist_id),),
             )
             rows = cursor.fetchall()
-            # only an artist of the caller's library is theirs to open (#1199)
-            from core.library2.sql_util import entity_visible
-            if len(rows) == 1 and entity_visible(conn, "artist", rows[0][0]):
+            if len(rows) == 1:
                 return rows[0][0]
             if len(rows) > 1:
                 # Same source id on multiple artists — corrupt mapping. Don't

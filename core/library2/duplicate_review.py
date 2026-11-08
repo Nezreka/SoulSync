@@ -15,6 +15,7 @@ import json
 import os
 import re
 from types import SimpleNamespace
+from typing import Optional
 
 from core.library.duplicate_rules import is_lossy_companion_file, is_lossy_companion_pair, lossy_companion_exts
 from core.library2.duplicate_relationship import (
@@ -23,10 +24,13 @@ from core.library2.duplicate_relationship import (
 )
 from core.library2.maintenance_subjects import active_file_subjects
 from core.library2.media_mappings import track_server_playlists
-from core.library2.track_files import quality_order
+from core.library2.track_files import quality_order, quality_tier_columns
 from core.repair_jobs.base import (
     hand_tagged_path_keys, is_hand_tagged_path, scoped_file_subjects,
 )
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.duplicate_review")
 
 REVIEW_SCHEMA = "native_duplicate_review/v1"
 DEFAULT_SETTINGS = {
@@ -98,25 +102,52 @@ def _playlist_context(playlist_membership, server_source):
 
 
 def _load_files(database, config_manager, *, scope=None, playlist_membership=None,
-                server_source=None) -> list[dict]:
-    """Read native subjects and protection facts, without mutating the catalogue."""
+                server_source=None, only_file_ids=None) -> list[dict]:
+    """Read native subjects and protection facts, without mutating the catalogue.
+
+    ``only_file_ids`` (Keep Best on one group): just those subjects, and of
+    the library-wide references only the rows that could be the same physical
+    file as one of them (same name, or same size: a hardlink always is). The
+    whole library walk -- a stat and a resolve per file row, twice per apply --
+    is the scan's job, not one finding's."""
     from core.library2.paths import resolve_lib2_path
-    from core.library2.importer import split_artist_credits
 
     subjects = scoped_file_subjects(SimpleNamespace(scope=scope), active_file_subjects(database, config_manager))
+    if only_file_ids is not None:
+        wanted = {int(i) for i in only_file_ids}
+        subjects = [s for s in subjects if int(s["file_id"]) in wanted]
     if not subjects:
         return []
     membership, source = _playlist_context(playlist_membership, server_source)
     hand_tags = hand_tagged_path_keys(database)
     companion_exts = lossy_companion_exts(config_manager, database)
     with closing(database._get_connection()) as conn:
-        order = {int(r[0]): i for i, r in enumerate(conn.execute(
-            f"SELECT id FROM lib2_track_files ORDER BY {quality_order()}"))}
+        # the quality order, and a tier that two files of the same quality
+        # share (every sort column but the id), so a tie can go to the album
+        order, tiers = {}, {}
+        last, tier = None, -1
+        for i, r in enumerate(conn.execute(
+                f"SELECT id, {quality_tier_columns()} FROM lib2_track_files"
+                f" ORDER BY {quality_order()}")):
+            if tuple(r[1:]) != last:
+                last, tier = tuple(r[1:]), tier + 1
+            order[int(r[0])], tiers[int(r[0])] = i, tier
         # All owners participate in reference protection, including files
         # outside this scan's allowlist or library scope.
         references = [dict(r) for r in conn.execute(
-            "SELECT id,track_id,path,owner_profile_id FROM lib2_track_files "
+            "SELECT id,track_id,path,owner_profile_id,size FROM lib2_track_files "
             "WHERE COALESCE(file_state,'active')<>'deleted'")]
+        if only_file_ids is not None:
+            names = {os.path.basename(str(s["path"] or "").replace("\\", "/")) for s in subjects}
+            sizes = {r["size"] for r in references if r["id"] in wanted and r["size"]}
+            for subject in subjects:  # the group's own files, measured: a few stats
+                try:
+                    sizes.add(os.path.getsize(str(subject["path"])))
+                except OSError:
+                    pass
+            references = [r for r in references
+                          if r["id"] in wanted or not r["size"] or r["size"] in sizes
+                          or os.path.basename(str(r["path"] or "").replace("\\", "/")) in names]
         overrides = {(r[0], int(r[1])) for r in conn.execute(
             "SELECT entity_type,entity_id FROM lib2_metadata_overrides")}
         pins = {int(r[0]) for r in conn.execute("SELECT id FROM lib2_albums WHERE canonical_locked=1")}
@@ -137,6 +168,10 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
         for row in conn.execute("SELECT ta.track_id,a.name FROM lib2_track_artists ta "
                                 "JOIN lib2_artists a ON a.id=ta.artist_id ORDER BY ta.position"):
             credits[int(row[0])].append(row[1])
+        # who performs each song, as the row says (a compilation's own credit)
+        performers = {int(r[0]): r[1] for r in conn.execute(
+            "SELECT id, track_artist FROM lib2_tracks"
+            " WHERE track_artist IS NOT NULL AND track_artist <> ''")}
 
     reference_keys = defaultdict(set)
     inode_keys = defaultdict(set)
@@ -158,9 +193,10 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
                                     resolve_lib2_path(subject["path"], config_manager=config_manager) or subject["path"])
         subject["norm_title"] = _normalized_title(subject["title"])
         subject["title_numbers"] = _title_numbers(subject["norm_title"])
-        names = credits.get(tid) or [subject["artist_name"]]
-        subject["artist_names"] = [str(n).casefold().strip() for name in names for n in split_artist_credits(name or "") if n]
+        subject["artist_names"] = _performer_names(
+            credits.get(tid) or [subject["artist_name"]], performers.get(tid), subject)
         subject["quality_order"] = order[fid]
+        subject["quality_tier"] = tiers[fid]
         subject["playlists"] = playlists.get(tid, [])
         reasons = []
         if subject.get("primary_manual"):
@@ -205,6 +241,29 @@ def _load_files(database, config_manager, *, scope=None, playlist_membership=Non
     return subjects
 
 
+def _performer_names(credited: list, track_artist, subject: dict) -> list:
+    """The names a song is credited to, folded, for the artist half of a
+    tag match. "Various Artists" is never one of them: it is the album's
+    credit on every song of a compilation, so two different performers'
+    "Intro" on one compilation matched on it (#1263). A compilation song
+    whose only credit is that falls back to its performer, as the row has
+    it (track_artist), then as the file's own artist tag has it (3.6.1's
+    #1315 healing). Nothing left means no artist evidence at all."""
+    from core.imports.compilation import is_various_artists_name
+    from core.library2.importer import split_artist_credits
+
+    names = [n for n in credited if n and not is_various_artists_name(n)]
+    if not names:
+        tag = None
+        try:
+            tag = (json.loads(subject.get("tags_json") or "{}") or {}).get("artist")
+        except (TypeError, ValueError):
+            pass
+        names = [n for n in (track_artist, tag) if n and not is_various_artists_name(n)][:1]
+    return [str(n).casefold().strip() for name in names
+            for n in split_artist_credits(name or "") if n and not is_various_artists_name(n)]
+
+
 def _strong_evidence(a: dict, b: dict) -> bool:
     if a["track_id"] == b["track_id"]:
         return True
@@ -246,15 +305,34 @@ def _similar_tags(a: dict, b: dict, settings: dict) -> bool:
             return True
     if _filename_key(a["path"]) and _filename_key(a["path"]) == _filename_key(b["path"]):
         if a.get("duration") and b.get("duration"):
-            return abs(int(a["duration"]) - int(b["duration"])) <= 3000 and artist_score >= 0.6
+            same_length = abs(int(a["duration"]) - int(b["duration"])) <= 3000
+            # slskd's "_<timestamp>" twin of a file often has no artist tag at
+            # all: the same name and the same length are the evidence then
+            # (3.6.1 paired these); a blank never pairs without both lengths
+            return same_length and (artist_score >= 0.6 or _no_artist(a) or _no_artist(b))
         return artist_score >= 0.6
     return False
 
 
+_UNKNOWN_ARTISTS = frozenset({"unknown artist", "unknown", "[unknown]", "<unknown>", "various"})
+
+
+def _no_artist(subject: dict) -> bool:
+    """No usable artist name: none at all, or only a placeholder."""
+    return all(n in _UNKNOWN_ARTISTS for n in subject.get("artist_names") or [])
+
+
 def _recommended(files: list[dict]) -> dict:
     # Retain upstream's playlist-first selection, then preserve native manual
-    # picks, then use the existing native quality/profile file picker order.
-    return min(files, key=lambda f: (not bool(f["playlists"]), not bool(f.get("primary_manual")), f["quality_order"]))
+    # picks, then the native quality/profile order. Between two copies of the
+    # same quality the album's wins over the single's (3.6.1's Single/Album
+    # Dedup kept the album version): the album keeps the track numbering and
+    # the song's place in the record. A better single is never given up for it.
+    from core.library2.recording_links import _home_rank
+    return min(files, key=lambda f: (
+        not bool(f["playlists"]), not bool(f.get("primary_manual")),
+        f.get("quality_tier", f["quality_order"]), -_home_rank(f.get("album_type")),
+        f["quality_order"]))
 
 
 def find_duplicate_candidates(database, config_manager=None, *, settings=None, scope=None,
@@ -266,6 +344,11 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
         if not 0 <= options[name] <= 1:
             raise ValueError(f"{name} must be between 0 and 1")
     files = _load_files(database, config_manager, scope=scope, playlist_membership=playlist_membership, server_source=server_source)
+    # a file the user tagged by hand is what they say it is (often the live
+    # take or the bootleg next to the studio copy): never one of a pair, or
+    # Keep Best could keep it and quarantine the studio copy (3.6.1 left
+    # these out before grouping too)
+    files = [f for f in files if "hand_tagged" not in f["protected_reasons"]]
     companion_exts = lossy_companion_exts(config_manager, database)
     buckets = defaultdict(list)
     artists = defaultdict(list)
@@ -347,6 +430,33 @@ def find_duplicate_candidates(database, config_manager=None, *, settings=None, s
     return candidates
 
 
+_PERMISSION_MARKERS = ("permission denied", "errno 13", "operation not permitted", "errno 1]",
+                       "read-only file system", "errno 30")
+
+
+def _quarantine_failure(failed: list, rollback: Optional[dict] = None) -> str:
+    """What stopped Keep Best, in words: which file and why, and for a
+    permission error what to check (3.6.1 said "usually a PUID/PGID
+    permission mismatch on the media volume"; v2 said only "Duplicate
+    quarantine failed"). Logged as well as returned."""
+    first = (failed or [{}])[0]
+    path = first.get("path") or "a copy"
+    reason = str(first.get("error") or "unknown error")
+    message = f"Couldn't move {path} to the deleted-files folder ({reason})."
+    if (rollback or {}).get("errors"):
+        message += (" Some copies already moved could not be put back; they are in the "
+                    "deleted-files folder and can be restored from there.")
+    else:
+        message += " Nothing was removed; the copies are where they were."
+    if any(marker in reason.lower() for marker in _PERMISSION_MARKERS):
+        message += (" SoulSync isn't allowed to change that folder. In Docker this is "
+                    "usually a PUID/PGID mismatch with the owner of your music volume.")
+    if len(failed or []) > 1:
+        message += f" ({len(failed)} files failed.)"
+    logger.warning("Keep Best: %s", message)
+    return message
+
+
 def _rollback_moves(database, files: list[dict], transfer_folder: str) -> dict:
     from core.library.deleted_quarantine import list_entries, restore_entries
 
@@ -384,7 +494,8 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         playlist_membership, server_source = _playlist_context(playlist_membership, server_source)
         load = lambda: {f["file_id"]: f for f in _load_files(  # noqa: E731
             database, config_manager, scope=review.get("scope"),
-            playlist_membership=playlist_membership, server_source=server_source)}
+            playlist_membership=playlist_membership, server_source=server_source,
+            only_file_ids=ids)}
         by_id = load()
         files = [by_id[fid] for fid in ids]
         if not playlist_membership:
@@ -399,6 +510,11 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         keeper = by_id[int(keep_file_id)] if keep_file_id is not None else _recommended(files)
         if keeper["file_id"] not in ids or "file_unavailable" in keeper["protected_reasons"]:
             raise ValueError("The selected keeper is not an available copy on this review")
+        if "hand_tagged" in keeper["protected_reasons"]:
+            # tagged by hand since the review: it is its own recording now, and
+            # keeping it would quarantine the copy it was paired with
+            raise ValueError("The selected keeper was tagged by hand since the review, "
+                             "so it is no longer a duplicate; refresh this review")
         options = {**DEFAULT_SETTINGS, **(review.get("settings") or {})}
         companions = lossy_companion_exts(config_manager, database)
         for i, a in enumerate(files):
@@ -454,7 +570,8 @@ def apply_keep_best(database, review: dict, *, config_manager=None, transfer_fol
         operations.append(outcome["operation_id"])
         if outcome["failed"]:
             rollback = _rollback_moves(database, moved, transfer_folder)
-            return {"success": False, "error": "Duplicate quarantine failed", "failed": outcome["failed"],
+            return {"success": False, "error": _quarantine_failure(outcome["failed"], rollback),
+                    "failed": outcome["failed"],
                     "rollback": rollback, "operation_ids": operations}
         moved.append(f)
     try:

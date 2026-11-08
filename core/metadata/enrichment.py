@@ -68,6 +68,11 @@ def build_metadata_enrichment_runtime(
 
 
 def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_info: dict, runtime=None) -> bool:
+    if context.get('_preserve_embedded_tags'):
+        # "Import from own tags" must not clear composer/remixer/custom
+        # frames, embedded art, or rewrite metadata the user already verified.
+        # The import pipeline records the manual lock in the database.
+        return True
     cfg = get_config_manager()
     if cfg.get("metadata_enhancement.enabled", True) is False:
         logger.warning("Metadata enhancement disabled in config.")

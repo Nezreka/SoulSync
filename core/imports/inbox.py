@@ -115,7 +115,11 @@ def _file_row(path: str, record: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         'full_path': path,
         'rel_path': r.get('rel_path') or os.path.basename(path),
         'title': r.get('title') or '',
-        'artist': r.get('albumartist') or r.get('artist') or '',
+        'artist': r.get('artist') or r.get('albumartist') or '',
+        # the album credit, kept apart from the performer: the folder row is
+        # named by it, so a compilation reads "Various Artists", not whichever
+        # track artist turns up most
+        'albumartist': r.get('albumartist') or '',
         'album': r.get('album') or '',
         'track_number': r.get('track_number'),
         'disc_number': r.get('disc_number'),
@@ -200,7 +204,8 @@ def build_inbox(
             'name': cand.name or '',
             'guessed_name': (hist or {}).get('album_name') or _most_common(f['album'] for f in files)
                     or (files[0]['title'] if getattr(cand, 'is_single', False) and files else None),
-            'artist': (hist or {}).get('artist_name') or _most_common(f['artist'] for f in files),
+            'artist': (hist or {}).get('artist_name')
+                      or _most_common(f.get('albumartist') or f['artist'] for f in files),
             'folder_name': cand.name,
             'folder_path': cand.path,
             'rel_path': rel,

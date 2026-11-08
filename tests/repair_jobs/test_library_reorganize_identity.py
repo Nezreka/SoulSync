@@ -205,3 +205,29 @@ def test_an_album_whose_only_file_was_deleted_is_not_an_error(
     result = LibraryReorganizeJob().scan(_ctx(reorg_db, []))
 
     assert (result.scanned, result.errors) == (0, 0)
+
+
+@pytest.mark.parametrize("message", ["Album not found", "No tracks found for this album"])
+def test_an_album_deleted_while_the_scan_runs_is_skipped_not_an_error(
+        reorg_db, monkeypatch, message):
+    """3.6.1: an album removed between the list and its preview was skipped;
+    v2 counted it as an error and the run reported "1 errors" for nothing"""
+    import core.library2.reorganize_bridge as bridge
+
+    def _gone(db, config_manager, album_id, mode='api'):
+        raise bridge.ReorganizeBridgeError(message, status=404)
+    monkeypatch.setattr(bridge, 'preview_album_reorganize', _gone)
+
+    result = LibraryReorganizeJob().scan(_ctx(reorg_db, []))
+
+    assert (result.errors, result.skipped) == (0, 1)
+
+
+def test_another_bridge_rejection_is_still_an_error(reorg_db, monkeypatch):
+    import core.library2.reorganize_bridge as bridge
+
+    def _refused(db, config_manager, album_id, mode='api'):
+        raise bridge.ReorganizeBridgeError("Library v2 is busy", status=409)
+    monkeypatch.setattr(bridge, 'preview_album_reorganize', _refused)
+
+    assert LibraryReorganizeJob().scan(_ctx(reorg_db, [])).errors == 1

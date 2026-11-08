@@ -134,6 +134,50 @@
   content: '✓';
 }
 
+/* Open, and Edit beside it once a playlist is in */
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 13px;
+  border: 1px solid var(--white-a10);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--white-a70);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out);
+}
+
+.edit:hover,
+.edit:focus-visible {
+  border-color: var(--white-a25);
+  background: var(--white-a07);
+  color: var(--text-1);
+}
+
+.edit:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.6);
+  outline-offset: 2px;
+}
+
+.edit:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .action {
   display: inline-flex;
   font: inherit;
@@ -262,7 +306,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .card,
-  .action {
+  .action,
+  .edit {
     transition: none;
   }
 

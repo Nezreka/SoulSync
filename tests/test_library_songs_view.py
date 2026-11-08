@@ -24,10 +24,14 @@ from core.library2.schema import ensure_library_v2_schema
 from tests import lib2_seed
 
 
-@pytest.fixture()
-def conn(tmp_path, monkeypatch):
+@pytest.fixture(params=["sorted", "index_walk"])
+def conn(tmp_path, monkeypatch, request):
+    """every test runs twice: before the sort indexes exist (the sorted
+    query) and after (the index walk); both must give the same pages"""
     c = lib2_seed.row_conn(str(tmp_path / "music.db"))
     ensure_library_v2_schema(c)
+    if request.param == "index_walk":
+        assert Q.ensure_song_sort_indexes(c) == len(Q.SONG_SORT_INDEXES)
     albums = {'Dangerous': ('Morgan Wallen', 2021), 'Dangerous: The Double Album': ('Morgan Wallen', 2021),
               'Famous Friends': ('Chris Young', 2021), 'Arcade': ('Love Arcade', 2010),
               'Elsewhere': ('Nobody', 2000)}
@@ -82,6 +86,12 @@ def test_a_row_says_which_album_and_counts_its_copies(conn):
     assert one['artist_name'] == 'Morgan Wallen' and one['year'] == 2021
     assert one['duration'] == 200000 and one['file_path'].startswith('/m/')
     assert one['file_ids'] and one['track_id'] == one['id']
+
+
+def test_a_row_carries_the_resolution_the_library_prints(conn):
+    conn.execute("UPDATE lib2_track_files SET sample_rate = 96000, bit_depth = 24 WHERE path = '/m/3.flac'")
+    boots = next(s for s in songs(conn)['songs'] if s['title'] == 'Sand in My Boots')
+    assert (boots['format'], boots['bit_depth'], boots['sample_rate']) == ('FLAC', 24, 96000)
 
 
 def test_search_finds_titles_first_then_artists(conn):

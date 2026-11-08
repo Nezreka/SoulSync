@@ -3,9 +3,7 @@
  * tab handler at sync-services.js 3694-3811.
  */
 
-import { act, fireEvent, render } from '@testing-library/react';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,75 +24,112 @@ afterEach(() => {
   delete window.openManualLibraryMatchTool;
   delete window.openSyncHistoryModal;
   delete window.openDownloadOriginsModal;
-  // routed tabs are remembered in localStorage now - without this, one
-  // test's opened tab leaks into the next one's initial strip
-  window.localStorage.clear();
 });
 
-describe('the header (2229-2243)', () => {
-  it('renders the title, icon and subtitle', () => {
+describe('the header', () => {
+  it('renders the title, and a plain subtitle until the library reports', () => {
     const { container } = renderShell();
-    expect(container.querySelector('.sync-title span')?.textContent).toBe('Playlists');
-    expect(container.querySelector('.page-header-icon')?.getAttribute('src')).toBe(
-      '/static/sync.png',
-    );
-    // Decorative — the text beside it carries the meaning.
-    expect(container.querySelector('.page-header-icon')?.getAttribute('alt')).toBe('');
-    expect(container.querySelector('.sync-subtitle')?.textContent).toBe(
+    expect(container.querySelector('.pl-title span')?.textContent).toBe('Playlists');
+    expect(container.querySelector('.pl-subtitle')?.textContent).toBe(
       'Manage, mirror, and synchronize your playlists with your media server',
     );
   });
 
-  it('renders the action buttons in order, with their tooltips', () => {
-    const { container } = renderShell();
-    const btns = Array.from(container.querySelectorAll('.sync-header-actions button')).filter(
-      (b) => b.textContent !== '+ Add playlist',
+  it('says what the library holds once it has loaded', () => {
+    const { container } = renderShell({
+      summary: { playlists: 55, attention: 27, running: 2, nextRun: 'next in 14h' },
+    });
+    const text = container.querySelector('.pl-subtitle')?.textContent ?? '';
+    expect(text).toContain('55 mirrored');
+    expect(text).toContain('27 need attention');
+    expect(text).toContain('next sync in 14h');
+    expect(text).toContain('2 working');
+  });
+
+  it('leaves out what it has nothing to say about', () => {
+    const { container } = renderShell({
+      summary: { playlists: 3, attention: 0, running: 0, nextRun: '' },
+    });
+    const text = container.querySelector('.pl-subtitle')?.textContent ?? '';
+    expect(text).toBe('3 mirrored');
+  });
+
+  it('has one main action and the rest behind Tools (#1909)', () => {
+    const { container } = renderShell({ onAddPlaylist: vi.fn() });
+    expect(container.querySelector('.pl-add-btn')?.textContent).toBe('Add playlist');
+    expect(container.querySelector('.pl-tools-btn')?.getAttribute('aria-label')).toBe(
+      'Playlist tools',
     );
-    expect(btns.map((b) => b.textContent)).toEqual([
+    // the tools are not on the page until the menu is opened
+    expect(document.querySelector('.sync-more-menu')).toBeNull();
+  });
+
+  it('Add opens the Add sheet', () => {
+    const onAddPlaylist = vi.fn();
+    const { container } = renderShell({ onAddPlaylist });
+    fireEvent.click(container.querySelector('.pl-add-btn') as HTMLElement);
+    expect(onAddPlaylist).toHaveBeenCalledTimes(1);
+  });
+
+  function openTools(container: HTMLElement) {
+    fireEvent.click(container.querySelector('.pl-tools-btn') as HTMLElement);
+    return [...document.querySelectorAll('.sync-more-menu [role="menuitem"]')] as HTMLElement[];
+  }
+
+  it('lists the tools in order, each with a line saying what it is for', () => {
+    const { container } = renderShell({ onUpdateList: vi.fn() });
+    const items = openTools(container);
+    expect(items.map((i) => i.querySelector('.sync-more-name')?.textContent)).toEqual([
       'Bulk schedule',
       'Match Review',
       'Wing It Pool',
       'Library Match',
       'Activity',
       'Download Origins',
+      'Update list',
     ]);
-    expect(btns[0].getAttribute('title')).toBe(
+    for (const item of items)
+      expect(item.querySelector('.sync-more-desc')?.textContent).toBeTruthy();
+    expect(items[0].getAttribute('title')).toBe(
       'Schedule many mirrored playlists at once, and review the pipeline',
     );
-    expect(btns[5].getAttribute('title')).toBe('See every track your playlist syncs downloaded');
-    // Only the bulk-schedule button carries the extra hook class the vanilla
-    // gives it; the CLASS keeps its auto-sync name because vanilla CSS and the
-    // dashboard tile both still select on it. Only the LABEL changed.
-    const byLabel = (label: string) =>
-      [...container.querySelectorAll('.sync-header-actions button')].find(
-        (b) => b.textContent === label,
-      ) as HTMLElement;
-    expect(byLabel('Bulk schedule').className).toContain('auto-sync-manager-btn');
-    expect(byLabel('Library Match').className).not.toContain('auto-sync-manager-btn');
+    // the old hook classes ride on the items
+    expect(items[0].className).toContain('auto-sync-manager-btn');
+    expect(items[3].className).not.toContain('auto-sync-manager-btn');
   });
 
-  it('routes each button to its own seam, Bulk schedule and Activity to React', () => {
-    // Selected by LABEL, not index: the row gained two buttons when the pool
-    // modals moved up from the Mirrored tab, and index-based assertions all
-    // silently pointed at the wrong control.
+  it('Update list is only offered when the page can do it', () => {
+    const { container } = renderShell();
+    const names = openTools(container).map((i) => i.querySelector('.sync-more-name')?.textContent);
+    expect(names).not.toContain('Update list');
+  });
+
+  it('Update list reloads', () => {
+    const onUpdateList = vi.fn();
+    const { container } = renderShell({ onUpdateList });
+    const item = openTools(container).find(
+      (i) => i.querySelector('.sync-more-name')?.textContent === 'Update list',
+    ) as HTMLElement;
+    fireEvent.click(item);
+    expect(onUpdateList).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes each item to its own seam, Bulk schedule and Activity to React', () => {
     window.openManualLibraryMatchTool = vi.fn();
     window.openDownloadOriginsModal = vi.fn();
     window.openDiscoveryPoolModal = vi.fn();
     window.openWingItPoolModal = vi.fn();
     const { container, props } = renderShell();
-    const click = (label: string) => {
-      const btn = [...container.querySelectorAll('.sync-header-actions button')].find(
-        (b) => b.textContent === label,
+    const click = (name: string) => {
+      const item = openTools(container).find(
+        (i) => i.querySelector('.sync-more-name')?.textContent === name,
       ) as HTMLElement;
-      fireEvent.click(btn);
+      fireEvent.click(item);
     };
-
     click('Bulk schedule');
     expect(props.onAutoSync).toHaveBeenCalledTimes(1);
     click('Library Match');
     expect(window.openManualLibraryMatchTool).toHaveBeenCalledTimes(1);
-    // Activity is React, not a window seam: it holds the sync history AND the
-    // scheduled-run history, and the vanilla modal knows only the first.
     click('Activity');
     expect(props.onActivity).toHaveBeenCalledTimes(1);
     click('Match Review');
@@ -102,15 +137,21 @@ describe('the header (2229-2243)', () => {
     click('Wing It Pool');
     expect(window.openWingItPoolModal).toHaveBeenCalledTimes(1);
     click('Download Origins');
-    // 2241: the shared modal is scoped by this literal.
+    // the shared modal is scoped by this literal
     expect(window.openDownloadOriginsModal).toHaveBeenCalledWith('playlist');
   });
 
   it('does not throw when a vanilla seam is missing', () => {
     const { container } = renderShell();
-    const btns = [...container.querySelectorAll('.sync-header-actions button')];
+    const names = openTools(container).map((i) => i.querySelector('.sync-more-name')?.textContent);
+    fireEvent.click(container.querySelector('.pl-tools-btn') as HTMLElement);
     expect(() => {
-      for (const btn of btns) fireEvent.click(btn as HTMLElement);
+      for (const name of names) {
+        const item = openTools(container).find(
+          (i) => i.querySelector('.sync-more-name')?.textContent === name,
+        ) as HTMLElement;
+        fireEvent.click(item);
+      }
     }).not.toThrow();
   });
 });
@@ -120,270 +161,139 @@ describe('the page root', () => {
     const { container } = renderShell();
     const root = container.firstElementChild as HTMLElement;
     expect(root.className).toBe('page-shell');
-    // The vanilla nests page-shell inside `<div class="page" id="sync-page">`;
-    // the React roots collapse the two and keep the id.
     expect(root.id).toBe('sync-page');
   });
 });
 
-describe('the tab strip', () => {
-  it('renders FIVE permanent chips, not sixteen', () => {
-    // Six of the fifteen were duplicates of one another and the four
-    // paste-a-URL tabs differed at the input step not at all. They are reached
-    // through Add playlist now, which detects the service from the link.
+describe('the collections', () => {
+  it('renders the four collections as pills, named', () => {
     const { container } = renderShell();
-    const btns = Array.from(container.querySelectorAll('.sync-tab-button'));
-    expect(btns.map((b) => b.getAttribute('data-tab'))).toEqual([
-      'mirrored',
-      'my-playlists',
-      'request-lists',
-      'server',
-      'beatport',
+    const pills = [...container.querySelectorAll('.pl-collection')];
+    expect(pills.map((p) => p.getAttribute('data-tab'))).toEqual([...SYNC_PRIMARY_TAB_IDS]);
+    expect(pills.map((p) => p.querySelector('.pl-collection-label')?.textContent)).toEqual([
+      'Mirrored',
+      'My Playlists',
+      'Request Lists',
+      'Server Playlists',
     ]);
   });
 
-  it('opens YouTube Music as a routed tab, same as the other sources', () => {
-    // ytmusic has no permanent chip (like spotify-public, tidal, etc.) — it
-    // is reached through Add playlist / the account-listing flow, which
-    // opens it by id exactly like the other routed sources.
-    let open!: (tab: string) => void;
-    const { container } = renderShell({
-      registerOpenTab: (fn) => {
-        open = fn as (tab: string) => void;
-      },
-    });
-    act(() => {
-      open('ytmusic');
-    });
-    const withRouted = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
-      b.getAttribute('data-tab'),
+  it('opens on Mirrored', () => {
+    const { container } = renderShell();
+    expect(container.querySelector('[data-tab="mirrored"]')?.getAttribute('aria-selected')).toBe(
+      'true',
     );
-    expect(withRouted).toEqual([
-      'mirrored',
-      'my-playlists',
-      'request-lists',
-      'server',
-      'beatport',
-      'ytmusic',
-    ]);
-    expect(container.querySelector('[data-tab="ytmusic"]')?.className).toContain('active');
-  });
-
-  it('opens on Mirrored — the library, not a source directory', () => {
-    const { container } = renderShell();
-    expect(container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
     expect(container.querySelector('#mirrored-tab-content')?.className).toContain('active');
   });
 
-  it('shows a routed tab once opened, and KEEPS it after leaving', () => {
-    // A panel with no chip is a room with no door - and the first cut
-    // re-bricked the door the moment you stepped out: the loaded playlists
-    // survived in localStorage while the only way back vanished ("the
-    // Spotify Link button only shows if I paste a link again", aug 25).
-    let open!: (tab: string) => void;
+  it('moves the active state on both the pill and the panel', () => {
+    const { container } = renderShell();
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
+    expect(container.querySelector('[data-tab="server"]')?.className).toContain('active');
+    expect(container.querySelector('[data-tab="mirrored"]')?.className).not.toContain('active');
+    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
+    expect(container.querySelector('#mirrored-tab-content')?.className).not.toContain('active');
+    expect(container.querySelectorAll('.pl-collection.active')).toHaveLength(1);
+  });
+
+  it('renders a panel for EVERY tab once it is opened — routing depends on it', () => {
+    let open: ((tab: (typeof SYNC_TABS)[number]['id']) => void) | undefined;
     const { container } = renderShell({
       registerOpenTab: (fn) => {
-        open = fn as (tab: string) => void;
+        open = fn;
       },
     });
-    act(() => {
-      open('spotify-public');
-    });
-    const withRouted = Array.from(container.querySelectorAll('.sync-tab-button')).map((b) =>
-      b.getAttribute('data-tab'),
-    );
-    expect(withRouted).toEqual([
-      'mirrored',
-      'my-playlists',
-      'request-lists',
-      'server',
-      'beatport',
-      'spotify-public',
-    ]);
-    expect(container.querySelector('[data-tab="spotify-public"]')?.className).toContain('active');
-
-    act(() => {
-      open('server');
-    });
-    // the chip stays; only the highlight moves
-    expect(container.querySelectorAll('.sync-tab-button')).toHaveLength(6);
-    expect(container.querySelector('[data-tab="spotify-public"]')?.className).not.toContain(
-      'active',
-    );
-  });
-
-  it('hides a routed chip with its ×, for good, and Add playlist brings it back (#1402)', () => {
-    // cremonies #1402: sources you never use pile up in the strip with no
-    // way to clear them. the five permanent chips have no ×.
-    let open!: (tab: string) => void;
-    const view = renderShell({
-      panels: { deezer: <div id="probe" /> },
-      registerOpenTab: (fn) => {
-        open = fn as (tab: string) => void;
-      },
-    });
-    act(() => {
-      open('spotify');
-    });
-    act(() => {
-      open('deezer');
-    });
-    const chips = () =>
-      Array.from(view.container.querySelectorAll('.sync-tab-button')).map((b) =>
-        b.getAttribute('data-tab'),
-      );
-    expect(chips()).toEqual([
-      'mirrored',
-      'my-playlists',
-      'request-lists',
-      'server',
-      'beatport',
-      'spotify',
-      'deezer',
-    ]);
-    expect(view.container.querySelectorAll('.sync-tab-close')).toHaveLength(2);
-
-    fireEvent.click(view.getByLabelText('Hide Deezer tab'));
-    expect(chips()).toEqual([
-      'mirrored',
-      'my-playlists',
-      'request-lists',
-      'server',
-      'beatport',
-      'spotify',
-    ]);
-    // it was the active one, so we land back on the library
-    expect(view.container.querySelector('[data-tab="mirrored"]')?.className).toContain('active');
-    // chip gone, panel kept
-    expect(view.container.querySelector('#probe')).not.toBeNull();
-
-    // stays gone after a reload
-    view.unmount();
-    const again = renderShell({
-      registerOpenTab: (fn) => {
-        open = fn as (tab: string) => void;
-      },
-    });
-    const chipsAgain = () =>
-      Array.from(again.container.querySelectorAll('.sync-tab-button')).map((b) =>
-        b.getAttribute('data-tab'),
-      );
-    expect(chipsAgain()).toEqual([
-      'mirrored',
-      'my-playlists',
-      'request-lists',
-      'server',
-      'beatport',
-      'spotify',
-    ]);
-
-    // opening the source again brings it back
-    act(() => {
-      open('deezer');
-    });
-    expect(chipsAgain()).toContain('deezer');
-  });
-
-  it('keeps a routed panel MOUNTED after its chip disappears', () => {
-    // The chip is navigation; the panel is state. Losing the panel when the
-    // chip goes would throw away a playlist the user just loaded.
-    let open!: (tab: string) => void;
-    const { container } = renderShell({
-      panels: { 'spotify-public': <div id="probe" /> },
-      registerOpenTab: (fn) => {
-        open = fn as (tab: string) => void;
-      },
-    });
-    act(() => {
-      open('spotify-public');
-    });
-    expect(container.querySelector('#probe')).not.toBeNull();
-    act(() => {
-      open('server');
-    });
-    expect(container.querySelector('#probe')).not.toBeNull();
-  });
-
-  it('gives each rendered chip its sprite class and its own title', () => {
-    const { container } = renderShell();
-    const icon = (tab: string) =>
-      container.querySelector(`[data-tab="${tab}"] .tab-icon`)?.className;
-    expect(icon('mirrored')).toBe('tab-icon mirrored-icon');
-    expect(icon('server')).toBe('tab-icon server-icon');
-    expect(icon('beatport')).toBe('tab-icon beatport-icon');
-    for (const t of SYNC_TABS.filter((x) => SYNC_PRIMARY_TAB_IDS.includes(x.id))) {
-      expect(container.querySelector(`[data-tab="${t.id}"]`)?.getAttribute('title')).toBe(t.label);
-    }
-  });
-
-  it('gives the server tab its own extra class', () => {
-    const { container } = renderShell();
-    expect(container.querySelector('[data-tab="server"]')?.className).toContain('sync-tab-server');
-    expect(container.querySelector('[data-tab="mirrored"]')?.className).not.toContain(
-      'sync-tab-server',
-    );
-  });
-
-  it('renders a panel for EVERY tab, strip or not — routing depends on it', () => {
-    const { container } = renderShell();
+    for (const t of SYNC_TABS) act(() => open?.(t.id));
     for (const t of SYNC_TABS) {
-      expect(container.querySelector(`#${t.id}-tab-content`)).not.toBeNull();
+      expect(container.querySelector(`#${t.id}-tab-content`), t.id).not.toBeNull();
     }
-  });
-
-  it('no longer renders the fifteen-tab divider', () => {
-    // It marked the boundary after Server Playlists in a crowded strip; with
-    // three chips it separates nothing.
-    const { container } = renderShell();
-    expect(container.querySelectorAll('.sync-tab-divider')).toHaveLength(0);
   });
 });
 
-describe('switching tabs (3702-3715)', () => {
-  it('moves the active class on both the button and the panel', () => {
-    const { container } = renderShell();
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+describe('source panels (the routed tabs, opened from Add)', () => {
+  function withOpener(over: Partial<React.ComponentProps<typeof SyncShell>> = {}) {
+    let open: ((tab: 'beatport' | 'spotify-public' | 'server') => void) | undefined;
+    const r = renderShell({
+      panels: {
+        beatport: <div data-testid="p-beatport">beatport</div>,
+        'spotify-public': <div data-testid="routed-panel" />,
+      },
+      registerOpenTab: (fn) => {
+        open = fn as typeof open;
+      },
+      ...over,
+    });
+    return { ...r, open: (t: 'beatport' | 'spotify-public' | 'server') => act(() => open?.(t)) };
+  }
 
-    expect(container.querySelector('[data-tab="beatport"]')?.className).toContain('active');
-    expect(container.querySelector('[data-tab="server"]')?.className).not.toContain('active');
-    expect(container.querySelector('#beatport-tab-content')?.className).toContain('active');
-    expect(container.querySelector('#server-tab-content')?.className).not.toContain('active');
+  it('opens over the page as a named dialog, and leaves the collection under it', () => {
+    const { container, open } = withOpener();
+    open('beatport');
+    const dialog = document.querySelector('.sync-source-panel[role="dialog"]') as HTMLElement;
+    expect(dialog.getAttribute('aria-label')).toBe('Beatport');
+    expect(dialog.querySelector('[data-testid="p-beatport"]')).not.toBeNull();
+    // the collection pill under it stays the selected one
+    expect(container.querySelector('[data-tab="mirrored"]')?.getAttribute('aria-selected')).toBe(
+      'true',
+    );
   });
 
-  it('marks exactly ONE tab active at a time', () => {
-    const { container } = renderShell();
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
-    expect(container.querySelectorAll('.sync-tab-button.active')).toHaveLength(1);
-    expect(container.querySelectorAll('.sync-tab-content.active')).toHaveLength(1);
+  it('Done closes it, back to the collection it was opened over', () => {
+    const { container, open } = withOpener();
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
+    open('beatport');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(document.querySelector('.sync-source-panel[aria-modal="true"]')).toBeNull();
+    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
   });
 
-  it('exposes the selection to assistive tech', () => {
-    const { container } = renderShell();
-    const aria = (tab: string) =>
-      container.querySelector(`[data-tab="${tab}"]`)?.getAttribute('aria-selected');
-    expect(aria('mirrored')).toBe('true');
-    expect(aria('beatport')).toBe('false');
+  it('Escape closes it too', () => {
+    const { open } = withOpener();
+    open('beatport');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(document.querySelector('.sync-source-panel[aria-modal="true"]')).toBeNull();
+  });
 
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
-    expect(aria('mirrored')).toBe('false');
-    expect(aria('beatport')).toBe('true');
+  it('KEEPS the panel mounted after closing, so reopening finds what it loaded', () => {
+    let mounts = 0;
+    function Counted() {
+      useEffect(() => {
+        mounts += 1;
+      }, []);
+      return <div data-testid="counted" />;
+    }
+    const { open } = withOpener({ panels: { beatport: <Counted /> } });
+    expect(mounts).toBe(0);
+    open('beatport');
+    expect(mounts).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    open('beatport');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    open('beatport');
+    expect(mounts).toBe(1);
+    expect(document.querySelector('[data-testid="counted"]')).not.toBeNull();
+  });
+
+  it('a closed panel is hidden from assistive tech', () => {
+    const { open } = withOpener();
+    open('beatport');
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    const panel = document.querySelector('.sync-source-panel') as HTMLElement;
+    expect(panel.getAttribute('aria-hidden')).toBe('true');
   });
 });
 
 describe('the tab-change signal', () => {
-  it('fires on every switch, with the tab already updated', () => {
+  it('fires on every switch', () => {
     const onTabChange = vi.fn();
     const { container } = renderShell({ onTabChange });
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
-    expect(onTabChange).toHaveBeenCalledTimes(1);
     fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
+    expect(onTabChange).toHaveBeenCalledTimes(1);
+    fireEvent.click(container.querySelector('[data-tab="my-playlists"]') as HTMLElement);
     expect(onTabChange).toHaveBeenCalledTimes(2);
   });
 
   it('fires for a click on the tab that is ALREADY active', () => {
-    // The vanilla handler runs its whole body on any tab click, including the
-    // active one, and its unconditional sidebar re-hide is what the page keys
-    // off. Filtering same-tab clicks would change that behaviour.
     const onTabChange = vi.fn();
     const { container } = renderShell({ onTabChange });
     const active = container.querySelector('[data-tab="mirrored"]') as HTMLElement;
@@ -395,88 +305,45 @@ describe('the tab-change signal', () => {
   it('is optional — the shell works without it', () => {
     const { container } = renderShell();
     expect(() => {
-      fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
+      fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
     }).not.toThrow();
-    expect(container.querySelector('#beatport-tab-content')?.className).toContain('active');
+    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
   });
 });
 
-describe('panel mounting — the one-shot load flags (3724-3803)', () => {
+describe('panel mounting — the one-shot load flags', () => {
   const panels = {
     mirrored: <div data-testid="p-mirrored">mirrored</div>,
     server: <div data-testid="p-server">server</div>,
-    beatport: <div data-testid="p-beatport">beatport</div>,
+    'my-playlists': <div data-testid="p-mine">mine</div>,
   };
 
   it('mounts only the default panel to begin with', () => {
     const { container } = renderShell({ panels });
     expect(container.querySelector('[data-testid="p-mirrored"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="p-beatport"]')).toBeNull();
+    expect(container.querySelector('[data-testid="p-server"]')).toBeNull();
   });
 
-  it('mounts a panel the first time its tab is opened', () => {
+  it('mounts a panel the first time its tab is opened, and KEEPS it after leaving', () => {
     const { container } = renderShell({ panels });
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
-    expect(container.querySelector('[data-testid="p-beatport"]')).not.toBeNull();
-  });
-
-  it('KEEPS a panel mounted after leaving it — the one-shot flags never reset', () => {
-    // The vanilla sets e.g. `mirroredPlaylistsLoaded = true` once and never
-    // clears it, so returning to a tab shows what it already loaded rather
-    // than re-fetching. Unmounting on leave would re-fetch every visit.
-    const { container } = renderShell({ panels });
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
     fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
-    expect(container.querySelector('[data-testid="p-beatport"]')).not.toBeNull();
+    fireEvent.click(container.querySelector('[data-tab="my-playlists"]') as HTMLElement);
     expect(container.querySelector('[data-testid="p-server"]')).not.toBeNull();
-    // ...and only the current one is visible.
-    expect(container.querySelector('#beatport-tab-content')?.className).not.toContain('active');
-    expect(container.querySelector('#server-tab-content')?.className).toContain('active');
-  });
-
-  it('mounts each panel only ONCE across repeated visits', () => {
-    // Counted in an EFFECT, not the render body: a panel that stays mounted
-    // still re-renders when the shell's state changes, so a render counter
-    // would tick without a remount and prove nothing. What matters is that the
-    // fetch-on-mount never runs a second time.
-    let mounts = 0;
-    function Counted() {
-      useEffect(() => {
-        mounts += 1;
-      }, []);
-      return <div data-testid="counted" />;
-    }
-    const { container } = renderShell({ panels: { beatport: <Counted /> } });
-    const tidal = container.querySelector('[data-tab="beatport"]') as HTMLElement;
-    const server = container.querySelector('[data-tab="server"]') as HTMLElement;
-
-    expect(mounts).toBe(0);
-    fireEvent.click(tidal);
-    expect(mounts).toBe(1);
-    fireEvent.click(server);
-    fireEvent.click(tidal);
-    fireEvent.click(server);
-    fireEvent.click(tidal);
-    expect(mounts).toBe(1);
+    expect(container.querySelector('[data-testid="p-mine"]')).not.toBeNull();
+    expect(container.querySelector('#server-tab-content')?.className).not.toContain('active');
+    expect(container.querySelector('#my-playlists-tab-content')?.className).toContain('active');
   });
 
   it('renders an empty panel for a tab with no content supplied', () => {
     const { container } = renderShell({ panels: { mirrored: panels.mirrored } });
-    fireEvent.click(container.querySelector('[data-tab="beatport"]') as HTMLElement);
-    expect(container.querySelector('#beatport-tab-content')?.textContent).toBe('');
+    fireEvent.click(container.querySelector('[data-tab="server"]') as HTMLElement);
+    expect(container.querySelector('#server-tab-content')?.textContent).toBe('');
   });
 });
 
 describe('the tab opener', () => {
   it('hands the host an opener that switches tabs like a click does', () => {
-    // The import tab has to send the user to Mirrored after a write
-    // (sync-services.js 449-455) and the shell owns tab state, so it registers
-    // the opener upward. Opening this way must be indistinguishable from a
-    // click: the panel mounts AND the sidebar re-hide fires, because the
-    // vanilla got there BY clicking the button.
-    // Targets a tab that is NOT the default and NOT in the strip — which is
-    // now this opener's main user: Add playlist routes a detected link to the
-    // tab that loads it.
+    // Add routes a detected link to the tab that loads it, through this.
     let open: ((tab: 'spotify-public') => void) | undefined;
     const onTabChange = vi.fn();
     renderShell({
@@ -492,28 +359,5 @@ describe('the tab opener', () => {
     act(() => open?.('spotify-public'));
     expect(document.querySelector('[data-testid="routed-panel"]')).not.toBeNull();
     expect(onTabChange).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('the three tabs are named, not just drawn', () => {
-  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
-
-  it('the label is rendered in the markup at all', () => {
-    const { container } = renderShell();
-    const labels = [...container.querySelectorAll('.sync-tab-label')].map((n) => n.textContent);
-    expect(labels.length).toBeGreaterThan(0);
-    expect(labels).toContain('Mirrored');
-  });
-
-  it('and the stylesheet lets it OPEN above the icon-only breakpoint', () => {
-    // The strip collapsed every label back when it held fifteen chips. It holds
-    // three, and three unlabelled icons whose meaning lives in a tooltip is the
-    // thing the card redesign removed. The chip also has to stop being a fixed
-    // 40x40 with overflow:hidden, or the label has nowhere to appear however
-    // wide you let the label itself be — measured, it stayed 10px.
-    const block = /@media\s*\(min-width:\s*721px\)\s*\{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
-    expect(block, 'no min-width:721px block opens the tab labels').toContain('.sync-tab-label');
-    expect(block).toMatch(/width:\s*auto/);
-    expect(block).not.toMatch(/max-width:\s*0/);
   });
 });

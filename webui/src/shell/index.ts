@@ -21,12 +21,14 @@ import {
 } from './blocklist';
 import { patchChatMessages } from './chat-morph';
 import { refreshDiscoverInboxBadge, startDiscoverInboxBadge } from './discover-inbox-badge';
+import { installFeatures } from './features';
 import {
   _handoffLibrarySearchToEnhancedSearch,
   _updateSidebarLibraryBreadcrumb,
   clearArtistDetailPageState,
   navigateToArtistDetail,
   playLibraryTrack,
+  setLibraryArtistBreadcrumb,
 } from './library-globals';
 import {
   _mlmClose,
@@ -125,6 +127,7 @@ export const SHELL_WINDOW_EXPORTS = {
   playLibraryTrack,
   clearArtistDetailPageState,
   _updateSidebarLibraryBreadcrumb,
+  setLibraryArtistBreadcrumb,
   _handoffLibrarySearchToEnhancedSearch,
   // track-detail.js (ported aug 26)
   openTrackDetail,
@@ -154,6 +157,8 @@ export const SHELL_WINDOW_EXPORTS = {
 } as const;
 
 Object.assign(window, SHELL_WINDOW_EXPORTS);
+// window.SoulSyncFeatures (#1909): what this profile chose to see
+installFeatures();
 startDiscoverInboxBadge();
 initSidebarWeather();
 const onReady = () => {

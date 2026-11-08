@@ -101,14 +101,17 @@ def playlist_output_identity(playlist: dict, *, profile_id: int = 1, batch: bool
         kind, ref = "name", str(playlist.get("playlist_name") or playlist.get("name") or "Unnamed Playlist")
     identity = [owner, source, kind, ref]
     digest = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode("utf-8")).hexdigest()[:24]
-    # Keep the path independent of a renamed display label, including labels
-    # which sanitize to the same filename. Readable labels live in the manifest.
-    from core.imports.paths import sanitize_filename
-    folder = f"profile-{owner}-{sanitize_filename(source)[:24]}-{digest}"
+    # the folder is the playlist's name, as in 3.6.1: a media server's folder
+    # view shows it, and 3.6.1's folders are found and kept instead of a hashed
+    # twin appearing beside them (every song twice on the server). the stable
+    # identity lives in the manifest: a rebuild finds its folder by it, so a
+    # renamed playlist keeps its folder and two playlists that share a name
+    # get one suffixed (core.playlists.materialize._resolve_playlist_dir)
+    folder = str(playlist.get("playlist_name") or playlist.get("name") or "Unnamed Playlist")
     metadata = {"profile_id": owner, "source": source, "source_playlist_id": source_id,
                 "mirrored_playlist_id": playlist.get("mirrored_playlist_id") if batch else playlist.get("id"),
                 "playlist_name": playlist.get("playlist_name") or playlist.get("name") or "Unnamed Playlist",
-                "identity_kind": kind, "identity_ref": ref}
+                "identity_kind": kind, "identity_ref": ref, "identity_digest": digest}
     return folder, metadata
 
 
@@ -136,7 +139,7 @@ def collect_batch_real_paths(batch: dict, download_tasks: dict, *, config_manage
 
     for tid in (batch.get("queue") or []):
         task = (download_tasks or {}).get(tid) or {}
-        if task.get("status") == "completed":
+        if task.get("status") in ("completed", "already_owned"):
             _add(task.get("final_file_path"))
 
     return out
@@ -208,7 +211,7 @@ def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_mana
 
     for tid in (batch.get("queue") or []):
         task = (download_tasks or {}).get(tid) or {}
-        if task.get("status") != "completed":
+        if task.get("status") not in ("completed", "already_owned"):
             continue
         si = (task.get("track_info") or {}).get("source_info") or {}
         if isinstance(si, str):

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -94,6 +95,16 @@ _OWN_LIBRARY_WISH_ENDPOINTS = frozenset({
     # "All Releases" of an artist in the library: browsable, unmonitored
     # catalogue rows -- what a wish is made from, no file touched
     "lib2_discography_refresh",
+})
+# Writes that touch files and nothing every library shares: a profile with a
+# library of its own may run them on files that are all its own (3.6.1 let
+# every profile tag and loudness-tag). Catalogue rows (matches, metadata
+# fills) stay the admin's: one row serves every library.
+_OWN_LIBRARY_FILE_ENDPOINTS = frozenset({
+    "lib2_track_file_tags_edit",
+    "lib2_album_replaygain",
+    "lib2_track_replaygain",
+    "lib2_write_tags",
 })
 _PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
 
@@ -323,10 +334,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
                 return _named_row_hidden()
+            if (request.endpoint in _OWN_LIBRARY_FILE_ENDPOINTS and _can_wish()
+                    and _touches_only_own_files()):
+                return _named_row_hidden()
+            if request.endpoint == "lib2_update_ui_preferences" and _own_preferences_only():
+                return None
             return _fail("Library v2 changes require the admin profile", 403)
         # E-06: for a profile, another library's row does not exist -- its
         # page, its tags, its history alike
         return _named_row_hidden()
+
+    def _own_preferences_only() -> bool:
+        """A profile's own layout (its artist toolbar) is its to change; the
+        shared table layout stays the admin's."""
+        from core.library2.ui_preferences import PROFILE_SECTIONS
+        body = request.get_json(silent=True)
+        return isinstance(body, dict) and bool(body) and set(body) <= PROFILE_SECTIONS
 
     def _resolve_merged_ids(kwargs):
         """A merged release group or track answers under its survivor on
@@ -382,6 +405,34 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as exc:  # noqa: BLE001 - an unanswerable check hides nothing
             logger.debug("scope visibility check failed for %s %s: %s", entity, entity_id, exc)
             return False
+
+    def _touches_only_own_files() -> bool:
+        """Every live file this file-write would touch belongs to the caller.
+        False when it names no file, or any file of another library."""
+        args = request.view_args or {}
+        with closing(_conn()) as conn:
+            if "track_id" in args:
+                track_ids = [int(args["track_id"])]
+            elif "album_id" in args:
+                track_ids = [r[0] for r in conn.execute(
+                    "SELECT id FROM lib2_tracks WHERE album_id=?", (int(args["album_id"]),))]
+            else:
+                body = request.get_json(silent=True) or {}
+                raw = body.get("track_ids") if isinstance(body, dict) else None
+                if not isinstance(raw, list) or not raw or any(
+                        isinstance(t, bool) or not isinstance(t, int) for t in raw):
+                    return False
+                track_ids = raw
+            if not track_ids:
+                return False
+            row = conn.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN owner_profile_id = ? THEN 1 ELSE 0 END)"
+                "  FROM lib2_track_files"
+                " WHERE track_id IN (SELECT value FROM json_each(?))"
+                "   AND COALESCE(file_state,'active') NOT IN ('deleted','missing_confirmed')",
+                (int(_profile()), json.dumps([int(t) for t in track_ids]))).fetchone()
+        total, own = int(row[0] or 0), int(row[1] or 0)
+        return total > 0 and own == total
 
     def _can_wish() -> bool:
         """May the caller monitor and search in the library it is looking at?
@@ -1744,7 +1795,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     (provider_id,)).fetchone()
                 artist_id = row["id"] if row else None
             known = artist_id is not None
-            if artist_id is None and name:
+            # the provider id alone is enough to find a row: a similar-artist
+            # bubble links /artist-detail/deezer/<id> with no name, and an
+            # owned artist (a$ap rocky, deezer id on the row) opened the
+            # provider page instead of the library one
+            if artist_id is None and (name or (provider_id and not legacy)):
                 artist_id = find_or_create_artist(
                     conn, name,
                     spotify_id=None if legacy else (provider_id or None),
@@ -1768,7 +1823,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         if outbox_ids:
             from core.library2.mirror_outbox import drain
-            drain(db)
+            drain(db, ids=outbox_ids)
         if create and artist_id is not None and not known:
             # Adopted from one provider's search result — resolve the rest so
             # the artist arrives matched, not matched-to-one.
@@ -1780,16 +1835,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if create and artist_id is None:
             return _fail("Could not materialize this artist")
         owned = False
+        in_library = False
         focus_album_id = None
         album_provider_id = str(request.args.get("album_provider_id") or "").strip()
         if artist_id is not None:
             # owned = a live file in this library. a watchlisted, bookmarked or
             # discography-only row is catalogued but not owned.
-            from core.library2.sql_util import owned_sql
+            # in_library = the artist list's rule (files, or a watch or wish of
+            # its own): only those open the library page, the rest are browsed
+            from core.library2.sql_util import library_member_sql, owned_sql
             with closing(_conn()) as oconn:
                 owned = oconn.execute(
                     f"SELECT 1 FROM lib2_artists a WHERE a.id=? AND {owned_sql('artist', 'a')}",
                     (artist_id,)).fetchone() is not None
+                in_library = owned or oconn.execute(
+                    "SELECT 1 FROM lib2_artists a WHERE a.id = (SELECT COALESCE("
+                    "canonical_artist_id, id) FROM lib2_artists WHERE id=?) "
+                    f"AND {library_member_sql('a')}", (artist_id,)).fetchone() is not None
                 if album_provider_id and not legacy:
                     # a provider album link (?album=) focuses that release here too
                     from core.library2.provider_ids import parse_external_ids
@@ -1802,7 +1864,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                             focus_album_id = row["id"]
                             break
         return jsonify({"success": True, "artist_id": artist_id,
-                        "monitored": monitor, "owned": owned,
+                        "monitored": monitor, "owned": owned, "in_library": in_library,
                         "album_id": focus_album_id})
 
     @_route("/api/library/v2/discovery/album", methods=["POST"])
@@ -1878,7 +1940,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         if outbox_ids:
             from core.library2.mirror_outbox import drain
-            drain(db)
+            drain(db, ids=outbox_ids)
         if not track_ids:
             _schedule_tracklist_resolve(album_id)
 
@@ -1893,6 +1955,36 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                          name=f"lib2-discovery-{artist_id}", daemon=True).start()
         return jsonify({"success": True, "artist_id": artist_id,
                         "album_id": album_id, "monitored": True})
+
+    @_route("/api/library/v2/discovery/album-status")
+    def lib2_discovery_album_status():
+        """Which of these provider releases are on this profile's Wishlist.
+
+        The release card's Add to Wishlist was write-only: the tick lived in
+        component state and was gone on reload. A release counts once its
+        album carries this profile's monitor rule -- what the add writes,
+        and true before its tracklist has even resolved."""
+        ids = [i.strip() for i in request.args.getlist("id") if i.strip()][:500]
+        source = str(request.args.get("source") or "").strip().lower()
+        from core.library2.provider_ids import indexed_provider_id_sql
+        column = indexed_provider_id_sql(source, alias="al") if source else None
+        if not ids or not column:
+            return jsonify({"success": True, "statuses": {}})
+        with closing(_conn()) as conn:
+            rows = conn.execute(
+                f"""SELECT {column} AS provider_id, al.id AS album_id,
+                           EXISTS (SELECT 1 FROM lib2_monitor_rules r
+                                    WHERE r.entity_type = 'album' AND r.entity_id = al.id
+                                      AND r.profile_id = ? AND r.monitored = 1) AS wished
+                      FROM lib2_albums al
+                     WHERE {column} IN (SELECT value FROM json_each(?))""",
+                (_intent_profile(), json.dumps(ids))).fetchall()
+        statuses: Dict[str, Any] = {}
+        for row in rows:
+            key = str(row["provider_id"])
+            if key and (key not in statuses or row["wished"]):
+                statuses[key] = {"album_id": int(row["album_id"]), "wished": bool(row["wished"])}
+        return jsonify({"success": True, "statuses": statuses})
 
     @_route("/api/library/v2/discovery/track-status")
     def lib2_discovery_track_status():
@@ -2034,7 +2126,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
         if outbox_ids:
             from core.library2.mirror_outbox import drain
-            drain(db)
+            drain(db, ids=outbox_ids)
         if created:
             # A row created from one provider's payload knows one provider. Everything downstream —
             # tracklist resolution, artwork, matching — walks the stored ids, so resolve the rest in
@@ -2349,10 +2441,24 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """The files filed under Unknown Artist, each with its best guess:
         the album its folder holds, the title its name gives, and the
         matched copy it duplicates (core/library2/unmatched_review)."""
+        from core.library2.unmatched_matcher import get_unmatched_matcher
         from core.library2.unmatched_review import list_unmatched
         with closing(_conn()) as conn:
             tracks = list_unmatched(conn)
-        return jsonify({"success": True, "tracks": tracks})
+        matcher = get_unmatched_matcher()
+        return jsonify({"success": True, "tracks": tracks,
+                        "matcher": matcher.status() if matcher else None})
+
+    @_route("/api/library/v2/unmatched/match", methods=["POST"])
+    def lib2_unmatched_match():
+        """Wake the background matcher now (the review asks when it opens on
+        files nothing has looked at yet)."""
+        from core.library2.unmatched_matcher import get_unmatched_matcher
+        matcher = get_unmatched_matcher()
+        if matcher is None:
+            return _fail("The background matcher isn't running", 503)
+        matcher.nudge()
+        return jsonify({"success": True, "matcher": matcher.status()})
 
     @_route("/api/library/v2/unmatched/<int:file_id>/identify", methods=["POST"])
     def lib2_unmatched_identify(file_id):
@@ -2434,6 +2540,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # blocking provider HTTP calls, so it runs *after* the commit and off
         # the request thread — inside the request it reliably blew through the
         # web client's 10s timeout and made a successful match look failed.
+        if request.method == "PUT":
+            # the new release's guests (the worker never revisits a manual match)
+            from core.library2.provider_credits import schedule_match_credits
+            schedule_match_credits(get_database(), entity_type, entity_id, service, service_id)
         if request.method == "PUT" and entity_type in ("artist", "artists"):
             try:
                 from core.library2 import native_enrich
@@ -2544,7 +2654,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         ReplayGain endpoint next to it."""
         from core.library2.lyrics import fetch_track_lyrics
         with closing(_conn()) as conn:
-            result = fetch_track_lyrics(conn, track_id, config_manager=config_manager)
+            result = fetch_track_lyrics(conn, track_id, config_manager=config_manager,
+                                        max_wait_seconds=10)
         if not result["fetched"]:
             return _fail(result["error"] or "Fetch failed")
         return jsonify({"success": True, **result})
@@ -2557,45 +2668,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         media_server_engine_getter=media_server_engine_getter,
     )
 
-    # -- reorganize (docs §50, bridges onto the legacy planner/queue) ---------
-
-    @_route("/api/library/v2/reorganize/sources")
-    def lib2_reorganize_sources_global():
-        """Sources authed/configured on this instance — used by the artist-
-        level "Reorganize All" source picker (no per-album ID coverage
-        check, mirrors the legacy bulk modal)."""
-        from core.library2.reorganize_bridge import global_reorganize_sources
-        return jsonify({"success": True, "sources": global_reorganize_sources()})
-
-    @_route("/api/library/v2/albums/<int:album_id>/reorganize/sources")
-    def lib2_album_reorganize_sources(album_id):
-        """Sources this album has a stored provider ID for AND an
-        authenticated client — used by the per-album source picker."""
-        from core.library2.reorganize_bridge import (
-            ReorganizeBridgeError,
-            album_reorganize_sources,
-        )
-        try:
-            sources = album_reorganize_sources(get_database(), album_id)
-        except ReorganizeBridgeError as exc:
-            return _fail(str(exc), exc.status)
-        return jsonify({"success": True, "sources": sources})
+    # -- reorganize (docs §50, the catalogue planner and the shared queue) ----
 
     @_route("/api/library/v2/albums/<int:album_id>/reorganize/preview", methods=["POST"])
     def lib2_album_reorganize_preview(album_id):
         """Preview current-vs-proposed file paths for one lib2 album, WITHOUT
-        moving anything. Body: ``{source?, mode?: 'api'|'tags'}``."""
+        moving anything. The plan comes from the catalogue, so a body is
+        ignored."""
         from core.library2.reorganize_bridge import (
             ReorganizeBridgeError,
             preview_album_reorganize,
         )
-        body = request.get_json(silent=True) or {}
         try:
-            result = preview_album_reorganize(
-                get_database(), config_manager, album_id,
-                source=body.get("source") or None,
-                mode=body.get("mode") or "api",
-            )
+            result = preview_album_reorganize(get_database(), config_manager, album_id)
         except ReorganizeBridgeError as exc:
             return _fail(str(exc), exc.status)
         return jsonify(result)
@@ -2603,39 +2688,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     @_route("/api/library/v2/albums/<int:album_id>/reorganize", methods=["POST"])
     def lib2_album_reorganize_apply(album_id):
         """Enqueue one lib2 album for reorganize. Returns immediately — the
-        queue worker processes items FIFO. Body: ``{source?, mode?, rename_only?}``."""
+        queue worker processes items FIFO."""
         from core.library2.reorganize_bridge import (
             ReorganizeBridgeError,
             enqueue_album_reorganize,
         )
-        body = request.get_json(silent=True) or {}
         try:
-            result = enqueue_album_reorganize(
-                get_database(), album_id,
-                source=body.get("source") or None,
-                mode=body.get("mode") or "api",
-                rename_only=bool(body.get("rename_only")),
-            )
+            result = enqueue_album_reorganize(get_database(), album_id)
         except ReorganizeBridgeError as exc:
             return _fail(str(exc), exc.status)
         return jsonify({"success": True, **result})
 
     @_route("/api/library/v2/artists/<int:artist_id>/reorganize-all", methods=["POST"])
     def lib2_artist_reorganize_all(artist_id):
-        """Enqueue every album of one lib2 artist for reorganize. Body:
-        ``{source?, mode?}`` applied to every album (same as legacy bulk
-        modal — per-album overrides aren't supported here)."""
+        """Enqueue every album of one lib2 artist for reorganize."""
         from core.library2.reorganize_bridge import (
             ReorganizeBridgeError,
             enqueue_artist_reorganize_all,
         )
-        body = request.get_json(silent=True) or {}
         try:
-            result = enqueue_artist_reorganize_all(
-                get_database(), artist_id,
-                source=body.get("source") or None,
-                mode=body.get("mode") or "api",
-            )
+            result = enqueue_artist_reorganize_all(get_database(), artist_id)
         except ReorganizeBridgeError as exc:
             return _fail(str(exc), exc.status)
         return jsonify({"success": True, **result})
@@ -2668,7 +2740,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def lib2_get_ui_preferences():
         from core.library2.ui_preferences import get_ui_preferences
         with closing(_conn()) as conn:
-            preferences = get_ui_preferences(conn)
+            preferences = get_ui_preferences(conn, _profile())
         return jsonify({"success": True, "preferences": preferences})
 
     @_route("/api/library/v2/ui-preferences", methods=["PUT"])
@@ -2686,7 +2758,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # into a dozen stuck workers. Fail fast and let the click be lost;
             # the next one re-sends the same state anyway.
             conn.execute("PRAGMA busy_timeout = 2000")
-            preferences = update_ui_preferences(conn, body)
+            preferences = update_ui_preferences(conn, body, _profile())
         except sqlite3.OperationalError as exc:
             if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
                 raise
@@ -3109,13 +3181,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """Reset failed mirror ops and drain the outbox once."""
         db = get_database()
         with closing(db._get_connection()) as conn:
-            from core.library2.mirror_outbox import drain, outbox_status, prune_done, retry_failed
+            from core.library2.mirror_outbox import drain_soon, outbox_status, prune_done, retry_failed
             retried = retry_failed(conn)
             prune_done(conn)
             conn.commit()
-            result = drain(db)
-            return jsonify({"success": True, "retried": retried, **result,
-                            **outbox_status(conn)})
+            # the queue works through in the background; draining 500 rows
+            # inside this request held it (and the drain lock) for minutes
+            # behind a backlog
+            started = drain_soon(db)
+            return jsonify({"success": True, "retried": retried, "draining": True,
+                            "started": started, **outbox_status(conn)})
 
     @_route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
     def lib2_set_monitored(entity, eid):
@@ -3230,7 +3305,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.commit()
             mirrored = mirror_pending = 0
             if outbox_ids:
-                drain_mirror_outbox(db)
+                drain_mirror_outbox(db, ids=outbox_ids)
                 marks = ",".join("?" for _ in outbox_ids)
                 mirrored = conn.execute(
                     f"SELECT COUNT(*) FROM lib2_mirror_outbox "
@@ -4155,9 +4230,16 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # Enqueue the wishlist un-mirrors BEFORE the rows vanish (the payload
         # builder needs them) and in the SAME transaction as the deletes —
         # the route drains the outbox after committing (audit P0-04).
-        from core.library2.mirror_outbox import enqueue_tracks
-        unmirrored = len(enqueue_tracks(conn, track_ids, False,
-                                        profile_id=_intent_profile())) if track_ids else 0
+        # every profile that wished for one of them: the delete below drops
+        # every profile's wanted rows, and each wishlist holds its own copy.
+        # only the clicking profile's was withdrawn, so the others kept
+        # searching for tracks of an album that is gone
+        from core.library2.mirror_outbox import enqueue_tracks, intent_profile_ids
+        unmirrored = 0
+        if track_ids:
+            profiles = intent_profile_ids(conn, track_ids=track_ids, album_ids=album_ids)
+            for profile_id in sorted(profiles | {_intent_profile()}):
+                unmirrored += len(enqueue_tracks(conn, track_ids, False, profile_id=profile_id))
         removed_albums = 0
         for aid_ in album_ids:
             conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (aid_,))
@@ -4216,6 +4298,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as e:  # noqa: BLE001
             logger.debug("artwork cleanup failed (%s %s): %s", kind, eid, e)
 
+    def _artist_media_servers(conn, artist_id):
+        """The media servers that know this artist (or one of its aliases):
+        removing it here, its files still on that server, the server's next
+        sync adds it back."""
+        from core.library2.queries import _media_server_sources_many
+        canonical = conn.execute(
+            "SELECT COALESCE(canonical_artist_id, id) FROM lib2_artists WHERE id=?",
+            (artist_id,)).fetchone()
+        if canonical is None:
+            return []
+        try:
+            return sorted(_media_server_sources_many(conn, "artist", [int(canonical[0])])
+                          .get(int(canonical[0]), []))
+        except Exception as exc:  # noqa: BLE001 - a hint, never a failed delete
+            logger.debug("media server lookup for artist %s failed: %s", artist_id, exc)
+            return []
+
     @_route("/api/library/v2/artists/<int:artist_id>/delete-preview")
     def lib2_artist_delete_preview(artist_id):
         """Impact preview for artist delete: what cascades, what survives.
@@ -4242,9 +4341,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                    JOIN lib2_albums al ON al.id = aa.album_id
                    WHERE aa.artist_id=? AND al.primary_artist_id<>?""",
                 (artist_id, artist_id)).fetchone()[0]
+            servers = _artist_media_servers(conn, artist_id)
             return jsonify({"success": True, "artist": row["name"],
                             "albums": len(album_ids), "tracks": len(track_ids),
-                            "file_links": file_links, "detached_albums": detached})
+                            "file_links": file_links, "detached_albums": detached,
+                            "media_servers": servers, "returns_on_rescan": bool(servers)})
 
     @_route("/api/library/v2/<entity>/<int:eid>/file-delete-preview")
     def lib2_file_delete_preview(entity, eid):
@@ -4332,15 +4433,31 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         db = get_database()
         with closing(db._get_connection()) as conn:
             from core.library2.wanted import recompute_wanted_for_entity
-            for track_id in ids:
-                recompute_wanted_for_entity(
-                    conn, "tracks", track_id, profile_id=_intent_profile()
-                )
             from core.library2.mirror_outbox import enqueue_projected_tracks
-            enqueue_projected_tracks(conn, ids, profile_id=_intent_profile())
+            # every profile that tracks these songs, not only the one acting:
+            # under "all libraries" a delete can take another profile's copy,
+            # and that profile's wishlist must learn the song is missing too
+            profiles = {int(_intent_profile())}
+            marks = ",".join("?" for _ in ids)
+            try:
+                profiles.update(int(r[0]) for r in conn.execute(
+                    f"SELECT DISTINCT profile_id FROM lib2_wanted_tracks WHERE track_id IN ({marks})",
+                    ids))
+                profiles.update(int(r[0]) for r in conn.execute(
+                    f"SELECT DISTINCT profile_id FROM lib2_monitor_rules"
+                    f" WHERE entity_type='track' AND entity_id IN ({marks})", ids))
+            except Exception as exc:  # noqa: BLE001 - the acting profile still updates
+                logger.debug("profiles for re-projection unknown: %s", exc)
+            outbox_ids: List[int] = []
+            for profile_id in sorted(profiles):
+                for track_id in ids:
+                    recompute_wanted_for_entity(conn, "tracks", track_id, profile_id=profile_id)
+                outbox_ids.extend(enqueue_projected_tracks(conn, ids, profile_id=profile_id))
             conn.commit()
-        from core.library2.mirror_outbox import drain as drain_mirror_outbox
-        drain_mirror_outbox(db)
+        # just these rows: a bare drain worked through the oldest rows of the
+        # whole queue first, so behind a backlog the delete hung
+        from core.library2.mirror_outbox import drain
+        drain(db, ids=outbox_ids)
 
     @_route(
         "/api/library/v2/<entity>/<int:eid>/file-remove",
@@ -4377,7 +4494,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except FileDeleteError as exc:
             return _fail(str(exc), exc.status)
 
-    def _legacy_delete(entity: str, eid: int, track_id: Optional[int], delete_files: bool):
+    def _legacy_delete(entity: str, eid: int, track_id: Optional[int], delete_files: bool,
+                       add_blacklist: bool = False):
         """The artist page's and the songs view's delete, on the journaled
         ADR-05 path: remove the library record and keep the file, or move the
         file to the deleted-files folder. A track is its album's files narrowed
@@ -4388,6 +4506,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         )
         db = get_database()
         file_ids = None
+        blacklist_entry = None
         if track_id is not None:
             with closing(db._get_connection()) as conn:
                 row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?",
@@ -4395,6 +4514,19 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 if not row:
                     return _fail("Track not found", 404)
                 eid = int(row[0])
+                if add_blacklist:
+                    # 3.6.1's "delete and blacklist": the file's name is kept
+                    # from coming back from the same source
+                    hit = conn.execute(
+                        "SELECT t.title, COALESCE(ar.name,''), f.path FROM lib2_tracks t "
+                        "JOIN lib2_albums al ON al.id=t.album_id "
+                        "LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id "
+                        "LEFT JOIN lib2_track_files f ON f.track_id=t.id "
+                        "AND COALESCE(f.file_state,'active')<>'deleted' "
+                        "WHERE t.id=? ORDER BY f.is_primary DESC LIMIT 1", (int(track_id),)).fetchone()
+                    if hit and hit[2]:
+                        blacklist_entry = (hit[0] or "", hit[1] or "",
+                                           os.path.basename(str(hit[2]).replace("\\", "/")))
                 file_ids = [int(r[0]) for r in conn.execute(
                     "SELECT id FROM lib2_track_files WHERE track_id=? "
                     "AND COALESCE(file_state,'active')<>'deleted'", (int(track_id),))]
@@ -4406,8 +4538,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     db, entity=entity, entity_id=eid, file_ids=file_ids,
                     actor="user", actor_profile_id=_profile())
                 _reproject_after_file_removal(operation.get("track_ids") or [])
-                return jsonify({"success": True, "deleted_count": len(operation.get("track_ids") or []),
-                                "file_deleted": False, "blacklisted": False})
+                count = len(operation.get("track_ids") or [])
+                return jsonify({"success": True, "deleted_count": count, "tracks_deleted": count,
+                                "file_deleted": False, "files_deleted": 0, "files_failed": 0,
+                                "blacklisted": _blacklist(db, blacklist_entry)})
             preview = preview_entity_files(db, entity=entity, entity_id=eid, file_ids=file_ids)
             from core.imports.paths import docker_resolve_path
             from core.library.deleted_quarantine import quarantine_mover
@@ -4417,20 +4551,39 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 file_ids=file_ids, actor="user", actor_profile_id=_profile(),
                 unlink=quarantine_mover(transfer, "library_delete"), mode="quarantine")
             _reproject_after_file_removal(operation.get("track_ids") or [])
-            result = {"success": True, "deleted_count": len(operation.get("track_ids") or []),
-                      "file_deleted": bool(preview.get("deletable_count")), "blacklisted": False}
+            count = len(operation.get("track_ids") or [])
+            items = operation.get("items") or []
+            # the album route's own keys too: the artist page's album delete
+            # reads tracks_deleted / files_deleted / files_failed
+            result = {"success": True, "deleted_count": count, "tracks_deleted": count,
+                      "file_deleted": bool(preview.get("deletable_count")),
+                      "files_deleted": sum(1 for i in items if i.get("status") == "deleted"),
+                      "files_failed": sum(1 for i in items if i.get("status") == "failed"),
+                      "blacklisted": _blacklist(db, blacklist_entry)}
             if not preview.get("deletable_count"):
                 result["file_error"] = "The file couldn't be reached, so only the library record was removed"
             return jsonify(result)
         except FileDeleteError as exc:
             return _fail(str(exc), exc.status)
 
+    def _blacklist(db, entry) -> bool:
+        if not entry:
+            return False
+        try:
+            return bool(db.add_to_blacklist(track_title=entry[0], track_artist=entry[1],
+                                            blocked_filename=entry[2], blocked_username="",
+                                            reason="user_rejected"))
+        except Exception as exc:  # noqa: BLE001 - the delete already happened
+            logger.debug("blacklist after delete failed: %s", exc)
+            return False
+
     @_route("/api/library/track/<int:track_id>", methods=["DELETE"])
     def lib2_legacy_delete_track(track_id):
-        """DELETE /api/library/track/<id>[?delete_file=true], the route the
-        artist page and the songs view have always called."""
+        """DELETE /api/library/track/<id>[?delete_file=true][&blacklist=true],
+        the route the artist page and the songs view have always called."""
         return _legacy_delete("albums", 0, track_id,
-                              request.args.get("delete_file", "false").lower() == "true")
+                              request.args.get("delete_file", "false").lower() == "true",
+                              add_blacklist=request.args.get("blacklist", "false").lower() == "true")
 
     @_route("/api/library/album/<int:album_id>", methods=["DELETE"])
     def lib2_legacy_delete_album(album_id):
@@ -4459,9 +4612,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             row = conn.execute("SELECT id FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()
             if not row:
                 return _fail("Artist not found", 404)
-            from core.library2.mirror_outbox import drain as drain_mirror_outbox
-            from core.library2.mirror_outbox import enqueue_artist_watchlist
-            enqueue_artist_watchlist(conn, artist_id, False, profile_id=_intent_profile())
+            # asked before the rows go: a media-server artist comes back on the
+            # server's next sync, and the answer says so (3.6.1 did)
+            servers = _artist_media_servers(conn, artist_id)
+            from core.library2.artist_settings import watching_profile_ids
+            from core.library2.mirror_outbox import (
+                drain_since, enqueue_artist_watchlist, intent_profile_ids, queue_mark,
+            )
+            mark = queue_mark(conn)
+            # off every watchlist that has it, each profile keeps its own. only
+            # the clicking profile's was removed, and another profile's
+            # watchlist scan kept finding new releases for a deleted artist
+            watchers = (set(watching_profile_ids(conn, artist_id))
+                        | intent_profile_ids(conn, artist_ids=[artist_id])
+                        | {_intent_profile()})
+            for profile_id in sorted(watchers):
+                enqueue_artist_watchlist(conn, artist_id, False, profile_id=profile_id)
             stats = _unmonitor_tracks_and_delete(db, conn, artist_id=artist_id)
             # Detach the artist from releases owned by OTHER primary artists
             # (featured/various credits). Those albums, tracks, files and
@@ -4480,9 +4646,11 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 (artist_id,))
             conn.execute("DELETE FROM lib2_artists WHERE id=?", (artist_id,))
             conn.commit()
-            drain_mirror_outbox(db)
+            # this delete's own withdrawals, not the oldest rows of a backlog
+            drain_since(db, mark)
             _delete_artwork_files(db, "artist", artist_id)
-        return jsonify({"success": True, **stats})
+        return jsonify({"success": True, **stats, "media_servers": servers,
+                        "returns_on_rescan": bool(servers)})
 
     @_route("/api/library/v2/albums/<int:album_id>", methods=["DELETE"])
     def lib2_delete_album(album_id):
@@ -4491,10 +4659,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             row = conn.execute("SELECT id FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
             if not row:
                 return _fail("Album not found", 404)
+            from core.library2.mirror_outbox import drain_since, queue_mark
+            mark = queue_mark(conn)
             stats = _unmonitor_tracks_and_delete(db, conn, album_ids=[album_id])
             conn.commit()
-            from core.library2.mirror_outbox import drain as drain_mirror_outbox
-            drain_mirror_outbox(db)
+            # this delete's own withdrawals, not the oldest rows of a backlog
+            drain_since(db, mark)
         return jsonify({"success": True, **stats})
 
     @_route("/api/library/v2/artists/<int:artist_id>/duplicates")
@@ -4747,9 +4917,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             limit = int(request.args.get("limit", 50))
         except (TypeError, ValueError):
-            return _fail("limit must be an integer between 1 and 200")
-        if not 1 <= limit <= 200:
-            return _fail("limit must be an integer between 1 and 200")
+            return _fail("limit must be an integer between 1 and 500")
+        if not 1 <= limit <= 500:
+            return _fail("limit must be an integer between 1 and 500")
         from core.library2.history_feed import scoped_history
         with closing(_conn()) as conn:
             artist = conn.execute(
@@ -5000,14 +5170,29 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """
         if entity not in ("artists", "albums"):
             return _fail("Unknown entity")
-        from core.library2.enhance import enhance_candidates
+        from core.library2.enhance import enhance_candidates, target_quality_profile
         profile = _intent_profile()
+        body = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
+        if not isinstance(body, dict):
+            return _fail("JSON body must be an object")
+        raw_target = (request.args.get("quality_profile_id") if request.method == "GET"
+                      else body.get("quality_profile_id"))
         db = get_database()
         with closing(db._get_connection()) as conn:
-            candidates = enhance_candidates(conn, entity, eid, profile_id=profile)
+            try:
+                target = target_quality_profile(conn, raw_target)
+            except LookupError:
+                return _fail("Quality profile not found", 404)
+            except ValueError as exc:
+                return _fail(str(exc))
+            # "upgrade to" pins the picks to that profile: a catalogue column
+            # every library shares, so it is the admin's to set
+            if target is not None and request.method == "POST" and not _is_admin():
+                return _fail("Choosing another quality profile requires the admin profile", 403)
+            candidates = enhance_candidates(conn, entity, eid, profile_id=profile, target=target)
             if request.method == "GET":
                 return jsonify({"success": True, "tracks": candidates})
-            requested = (request.get_json(silent=True) or {}).get("track_ids")
+            requested = body.get("track_ids")
             if not isinstance(requested, list) or any(type(t) is not int for t in requested):
                 return _fail("track_ids must be a list of track ids")
             picked = sorted({c["track_id"] for c in candidates} & set(requested))
@@ -5016,6 +5201,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             from core.library2.mirror_outbox import drain, enqueue_projected_tracks
             from core.library2.monitor_rules import PROVENANCE_USER, record_rules
             from core.library2.wanted import recompute_wanted
+            if target is not None:
+                # the Wishlist keeps aiming for the chosen quality after this
+                # search, the way 3.6.1's picked tier did for its run
+                from core.library2.profile_lookup import (
+                    assign_quality_profile, effective_quality_profile)
+                for track_id in picked:
+                    if effective_quality_profile(conn, "tracks", track_id)["id"] != target["id"]:
+                        assign_quality_profile(conn, "tracks", track_id, int(target["id"]))
             if _shared_intent():
                 conn.execute("UPDATE lib2_tracks SET monitored=1"
                              " WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(picked),))
@@ -5026,7 +5219,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             outbox = enqueue_projected_tracks(conn, picked, profile_id=profile, user_initiated=True)
             conn.commit()
         if outbox:
-            drain(db)
+            drain(db, ids=outbox)
         return _start_scoped_search(entity, eid, only_track_ids=set(picked))
 
     # -- §73/I6: live queue status for track/album rows -------------------------

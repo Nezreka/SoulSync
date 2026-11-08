@@ -34,6 +34,11 @@ logger = get_logger("library.server_paths")
 _MIN_SHARED_SEGMENTS = 3
 # misses in one reported namespace before disabling expensive fuzzy scans
 _GIVE_UP_AFTER = 200
+# misses before the cheap probes stop too. a library that isn't mounted here
+# at all (or a NAS that's down) cost stats per track for the whole scan;
+# 3.6.1 stopped after _GIVE_UP_AFTER. a flat layout that resolves keeps going
+# because every hit resets the count
+_STOP_AFTER = 2000
 
 _lock = threading.Lock()
 _learned: Dict[str, str] = {}  # server prefix -> local prefix
@@ -88,6 +93,26 @@ def _from_learned(normalized: str) -> Optional[str]:
     return None
 
 
+def local_folder_for(server_folder: Any) -> Optional[str]:
+    """SoulSync's own path for a library folder the server reported, or None.
+    Only an exact folder or a learned mount counts here, never a guess: the
+    answer decides where a delete may reach."""
+    if not isinstance(server_folder, str) or not server_folder.strip():
+        return None
+    folder = server_folder.strip()
+    if os.path.isdir(folder):
+        return os.path.abspath(folder)
+    normalized = folder.replace('\\', '/').rstrip('/')
+    with _lock:
+        pairs = list(_learned.items())
+    for server_prefix, local_prefix in pairs:
+        if normalized == server_prefix or normalized.startswith(server_prefix + '/'):
+            candidate = local_prefix + normalized[len(server_prefix):]
+            if candidate and os.path.isdir(candidate):
+                return os.path.abspath(candidate)
+    return None
+
+
 def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str]:
     """SoulSync's own path for a file the server reported, or None when it
     can't be found from here. Never raises."""
@@ -102,7 +127,10 @@ def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str
             return os.path.abspath(hit)
         namespace = _namespace(normalized)
         with _lock:
-            allow_fuzzy = _misses.get(namespace, 0) < _GIVE_UP_AFTER
+            misses = _misses.get(namespace, 0)
+        if misses >= _STOP_AFTER:
+            return None
+        allow_fuzzy = misses < _GIVE_UP_AFTER
         from core.library.path_resolver import resolve_library_file_path
         resolved = resolve_library_file_path(
             server_path, config_manager=config_manager, allow_fuzzy=allow_fuzzy,
@@ -116,7 +144,7 @@ def local_path_for(server_path: Any, config_manager: Any = None) -> Optional[str
             _learn(normalized, resolved)
             return resolved
         with _lock:
-            _misses[namespace] = min(_misses.get(namespace, 0) + 1, _GIVE_UP_AFTER)
+            _misses[namespace] = min(_misses.get(namespace, 0) + 1, _STOP_AFTER)
         return None
     except Exception as e:  # noqa: BLE001 - a lookup must never cost the scan a track
         logger.debug("local path lookup failed for %r: %s", server_path, e)

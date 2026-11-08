@@ -15,11 +15,18 @@ import sqlite3
 import types
 import collections
 import functools
+import contextlib
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# localhost connects try the loopback address that answers, before any client
+# opens one: ::1 first cost ~2s per connection to an IPv4-only server on
+# windows (utils/localhost_connect.py)
+from utils.localhost_connect import install as _install_localhost_connect
+_install_localhost_connect()
 from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_mimetypes
 # Register correct web-asset MIME types before the app serves anything — a bad OS
 # registry (Windows: .js -> text/plain) otherwise blanks the module-loaded React
@@ -27,7 +34,7 @@ from core.webui.mimetypes_fix import corrected_script_content_type, ensure_web_m
 ensure_web_mimetypes()
 from flask import Flask, abort, render_template, request, jsonify, redirect, send_file, send_from_directory, Response, session, g
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from utils.logging_config import get_logger, setup_logging
+from utils.logging_config import app_log_path, get_logger, setup_logging
 from utils.async_helpers import run_async
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
@@ -39,13 +46,13 @@ from core.settings import config_manager
 
 # Setup logging early to avoid any import-time logs from being swallowed
 _log_level = config_manager.get('logging.level', 'INFO')
-_log_path = config_manager.get('logging.path', 'logs/app.log')
+_log_path = app_log_path(config_manager.get('logging.path', 'logs/app.log'))
 _log_dir = Path(_log_path).parent
 logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "3.6.1"
+_SOULSYNC_BASE_VERSION = "3.6.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -1335,6 +1342,10 @@ def _register_matched_download_context(context_key: str, context: dict) -> None:
         context['library_owner_id'] = _selected_library_owner()
     with matched_context_lock:
         matched_downloads_context[context_key] = context
+    # a new grab of a file we already processed once (same deezer id, same
+    # name) is a new download. the key stayed in the processed set until a
+    # restart, so the poll skipped it and the file sat in downloads (#1983)
+    processed_download_ids.discard(context_key)
 
 
 IS_SHUTTING_DOWN = False
@@ -2467,8 +2478,12 @@ def get_cached_transfer_data():
                 all_downloads = []
                 if download_orchestrator and hasattr(download_orchestrator, 'engine'):
                     try:
+                        # display only: a client slower than this sits the
+                        # refresh out (and is named in the log) instead of
+                        # holding every page that reads live progress
                         all_downloads = run_async(
-                            download_orchestrator.engine.get_all_downloads(exclude=('soulseek',))
+                            download_orchestrator.engine.get_all_downloads(
+                                exclude=('soulseek',), plugin_timeout=3.0)
                         )
                     except Exception as e:
                         logger.debug("get_all_downloads failed: %s", e)
@@ -4499,7 +4514,7 @@ def handle_settings():
                     for key, value in _experimental_in.items():
                         config_manager.set(f'experimental.{key}', value)
 
-                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'mcp']:
+                for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'music_assistant', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi', 'hifi_download', 'soundcloud_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'lrclib', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'pollinations', 'fanart', 'import', 'lossy_copy', 'album_downloads', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'concerts', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'podcasts', 'audiobooks', 'experimental', 'image_cache', 'beatport', 'lidarr_compat', 'mcp']:
                     if service in new_settings:
                         if service == 'experimental' and isinstance(_experimental_in, dict):
                             continue
@@ -4917,6 +4932,13 @@ def setup_complete_endpoint():
     # what setup was told soulsync is for, the dashboard checklist reads it
     if isinstance(purposes, list):
         config_manager.set('setup.purposes', [str(p) for p in purposes][:10])
+        # and hide what wasn't picked (#1909). setup used to say "switch the
+        # rest on whenever you like" and then show everything anyway
+        try:
+            from core import ui_features
+            ui_features.seed_from_purposes(get_database(), get_current_profile_id(), purposes)
+        except Exception as e:  # noqa: BLE001 - setup still finishes, the picker can fix it
+            logger.warning("setup: couldn't save visible features: %s", e)
     return jsonify({"success": True})
 
 @app.route('/api/test-connection', methods=['POST'])
@@ -7750,8 +7772,12 @@ def start_download():
                         context_key, data.get('title'), data.get('artist'),
                         _skip_checks, _requesting_profile)
 
-                # Extract track name from filename for activity
-                track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
+                # Extract track name from filename for activity. a streaming
+                # 'id||name' isn't a path, a '/' in its title would cut it (#1983)
+                if '||' in filename:
+                    track_name = filename.split('||', 1)[1]
+                else:
+                    track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
                 _track_quick_download(
                     download_id,
                     title=data.get('title') or track_name,
@@ -9097,7 +9123,8 @@ def delete_download_origins():
                     failed_ids.add(row['id'])
                     continue
                 files_missing += 1  # already gone — still clean up the rows
-            db.delete_track_by_file_path(raw_path)
+            db.delete_track_by_file_path(raw_path, release_wish=True,
+                                         profile_id=get_current_profile_id() or 1)
         removed = db.delete_library_history_rows(
             [r['id'] for r in rows if r['id'] not in failed_ids])
         return jsonify({
@@ -9309,7 +9336,21 @@ def get_library_unmatched_summary():
     'Unknown Artist' rows, no per-track work.
     """
     try:
-        return jsonify({"success": True, **get_database().get_unmatched_import_summary()})
+        database = get_database()
+        summary = database.get_unmatched_import_summary()
+        # how many of them have a strong match waiting: one count, no per-file work
+        summary["ready"] = 0
+        if summary.get("count"):
+            try:
+                from core.library2.unmatched_identify import strong_matches_ready
+                conn = database._get_connection()
+                try:
+                    summary["ready"] = strong_matches_ready(conn)
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001 - the count still stands
+                logger.debug(f"unmatched ready count failed: {e}")
+        return jsonify({"success": True, **summary})
     except Exception as e:
         logger.error(f"Error fetching unmatched import summary: {e}")
         return jsonify({"success": False, "error": str(e), "count": 0, "artist_id": None}), 500
@@ -10133,62 +10174,22 @@ def get_reconcile_embedded_ids_status():
 #
 # Reorganize requests flow through ``core.reorganize_queue`` — a FIFO
 # queue with a single background worker. The endpoints here are thin
-# enqueue / snapshot / cancel wrappers; the heavy lifting is in
-# :mod:`core.library_reorganize`.
-
-
-@app.route('/api/library/reorganize/sources', methods=['GET'])
-def reorganize_sources_global():
-    """List metadata sources the user has authed on this instance.
-    Used by the bulk "Reorganize All" modal where per-album ID coverage
-    varies. No network calls."""
-    try:
-        from core.library_reorganize import authed_sources
-        return jsonify({"success": True, "sources": authed_sources()})
-    except Exception as e:
-        logger.error(f"Reorganize sources (global) error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@app.route('/api/library/album/<album_id>/reorganize/sources', methods=['GET'])
-def reorganize_album_sources(album_id):
-    """List metadata sources the user can pick for this album's
-    reorganize — every entry has both a stored album ID on the local
-    row AND an authenticated client. No network calls."""
-    try:
-        from core.library_reorganize import available_sources_for_album, load_album_and_tracks
-        album_data, _tracks = load_album_and_tracks(get_database(), album_id)
-        if album_data is None:
-            return jsonify({"success": False, "error": "Album not found"}), 404
-        return jsonify({"success": True, "sources": available_sources_for_album(album_data)})
-    except Exception as e:
-        logger.error(f"Reorganize sources error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+# enqueue / snapshot / cancel wrappers. Every plan comes from the
+# catalogue (:mod:`core.library2.reorganize_plan`), for the preview as
+# for the move, so no source or metadata mode is asked for.
 
 
 @app.route('/api/library/album/<album_id>/reorganize/preview', methods=['POST'])
 def reorganize_album_preview(album_id):
     """Preview file reorganization for an album — returns current vs
-    proposed paths without moving anything. Implementation lives in
-    :mod:`core.library_reorganize` and shares the planning logic with
-    the apply endpoint, so the preview is guaranteed to match what
-    apply would actually produce.
-
-    Optional body params:
-        source: when provided, only that metadata source is queried
-            (no fallback chain).
-        mode: 'api' (default — query metadata source) or 'tags' (read
-            embedded file tags as the source of truth, issue #592)."""
+    proposed paths without moving anything. It plans with the same
+    catalogue planner the queue runner moves with, so the preview is
+    what apply produces."""
     try:
-        from core.library_reorganize import preview_album_reorganize, resolve_album_profile_id
+        from core.library_reorganize import resolve_album_profile_id
+        from core.library2.reorganize_bridge import catalogue_preview_fn
+        from core.library_scope import library_scope, scope_for_owner
         from core.imports.paths import library_root_for_profile
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
         db = get_database()
         # #1504: resolve the owning profile so preview destinations are
         # computed against the right library root, not the shared folder.
@@ -10203,17 +10204,16 @@ def reorganize_album_preview(album_id):
             or config_root_path(
                 config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer')
         )
-        result = preview_album_reorganize(
-            album_id=album_id,
-            db=db,
-            transfer_dir=transfer_dir,
-            resolve_file_path_fn=_resolve_library_file_path,
-            build_final_path_fn=_build_final_path_for_track,
-            primary_source=chosen_source,
-            strict_source=bool(chosen_source),
-            metadata_source=metadata_source,
-            profile_id=profile_id,
-        )
+        # The planner picks files by the library scope; plan in the owner's
+        # library, the way the runner moves within it.
+        with library_scope(scope_for_owner(profile_id)):
+            result = catalogue_preview_fn(
+                album_id=album_id,
+                db=db,
+                transfer_dir=transfer_dir,
+                resolve_file_path_fn=_resolve_library_file_path,
+                build_final_path_fn=_build_final_path_for_track,
+            )
         if result.get('status') == 'no_album':
             return jsonify({"success": False, "error": "Album not found"}), 404
         if result.get('status') == 'no_tracks':
@@ -10229,27 +10229,9 @@ def reorganize_album_files(album_id):
     """Enqueue an album for reorganize. Returns immediately — the
     queue worker processes items FIFO. Repeat clicks for an album
     that's already queued or running are deduped (returns
-    ``{queued: false, reason: 'already_queued'}``).
-
-    Body params:
-        source (optional): per-album source pick (Spotify / iTunes /
-            Deezer / Discogs / Hydrabase). When omitted, the
-            orchestrator uses the configured primary with fallback.
-        mode (optional): 'api' (default — query metadata source) or
-            'tags' (read embedded file tags as the source of truth,
-            issue #592). When omitted, falls back to the
-            ``library.reorganize_metadata_source`` config setting,
-            then to 'api'.
-    """
+    ``{queued: false, reason: 'already_queued'}``)."""
     try:
         from core.reorganize_queue import get_queue
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
 
         # Capture display fields at enqueue time so the status panel
         # can render them without a DB lookup later.
@@ -10271,11 +10253,6 @@ def reorganize_album_files(album_id):
             album_title=meta['album_title'],
             artist_id=meta['artist_id'],
             artist_name=meta['artist_name'],
-            source=chosen_source,
-            metadata_source=metadata_source,
-            # Rename-only (#875): just move files to the current naming scheme — skip
-            # the copy + post-processing (re-tag / quality / AcoustID) of the full flow.
-            rename_only=bool(data.get('rename_only')),
         )
         return jsonify({"success": True, **result})
     except Exception as e:
@@ -10287,35 +10264,15 @@ def reorganize_album_files(album_id):
 def reorganize_all_artist_albums(artist_id):
     """Enqueue every album for an artist. Replaces the old frontend
     bulk-loop. Each album becomes its own queue item, processed FIFO.
-    Albums already queued or running are deduped silently.
-
-    Body params:
-        source (optional): same pick applied to every album. Per-album
-            overrides aren't supported here — use the per-album modal
-            for that.
-        mode (optional): 'api' or 'tags' applied to every album, same
-            shape as the per-album endpoint.
-    """
+    Albums already queued or running are deduped silently."""
     try:
         from core.reorganize_queue import get_queue
-        data = request.get_json() or {}
-        chosen_source = data.get('source') or None
-        metadata_source = data.get('mode') or config_manager.get(
-            'library.reorganize_metadata_source', 'api'
-        ) or 'api'
-        if metadata_source not in ('api', 'tags'):
-            metadata_source = 'api'
 
         albums = get_database().get_artist_albums_for_reorganize(artist_id)
         if not albums:
             return jsonify({"success": False, "error": "No albums found for this artist"}), 404
 
-        # Apply the user's chosen source + mode to every album, then
-        # hand off to the queue's bulk-enqueue helper which owns the
-        # loop+tally.
-        for album in albums:
-            album['source'] = chosen_source
-            album['metadata_source'] = metadata_source
+        # The queue's bulk-enqueue helper owns the loop+tally.
         result = get_queue().enqueue_many(albums)
 
         return jsonify({
@@ -10383,22 +10340,18 @@ try:
     _get_reorganize_queue().set_runner(_build_reorganize_runner(
         get_database=get_database,
         resolve_file_path_fn=lambda p: _resolve_library_file_path(p),
-        post_process_fn=lambda *a, **kw: _post_process_matched_download(*a, **kw),
         cleanup_empty_directories_fn=lambda *a, **kw: _cleanup_empty_directories(*a, **kw),
         is_shutting_down_fn=lambda: bool(IS_SHUTTING_DOWN),
-        # Canonical absolute roots: the reorganize destination is written into
+        # Canonical absolute root: the reorganize destination is written into
         # the catalogue, so a relative './Transfer' would store a path whose
         # meaning depends on the process CWD (and never matches the realpath'd
         # form the repair scanners see for the same file).
-        get_download_path=lambda: config_root_path(
-            config_manager.get('soulseek.download_path', './downloads'), './downloads'
-        ),
         get_transfer_path=lambda: config_root_path(
             config_manager.get('soulseek.transfer_path', './Transfer'), './Transfer'
         ),
         get_config_manager=lambda: config_manager,
-        # Rename-only mode (#875) computes destinations via the same path builder the
-        # preview uses, so apply matches exactly what the user saw.
+        # The mover computes destinations via the same path builder the preview
+        # uses, so apply matches exactly what the user saw (#875).
         build_final_path_fn=lambda *a, **kw: _build_final_path_for_track(*a, **kw),
     ))
 except Exception as _runner_init_err:
@@ -11142,6 +11095,11 @@ def _library_match_request(clear: bool):
     finally:
         conn.close()
 
+    if not clear:
+        # the new release's guests (the worker never revisits a manual match)
+        from core.library2.provider_credits import schedule_match_credits
+        schedule_match_credits(database, entity_type, int(entity_id), str(service).lower(),
+                               service_id)
     artist_id = (data.get('artist_id', entity_id) if entity_type == 'artist'
                  else _get_artist_id_for_entity(database, entity_type, entity_id))
     updated = database.get_artist_full_detail(artist_id)
@@ -14127,7 +14085,8 @@ def _apply_path_template(template: str, context: dict) -> str:
         if not primary and context.get('_track_artists_list'):
             primary = listed_primary_of(_raw_album_artist, context['_track_artists_list'][0])
         if primary:
-            album_artist_value = primary
+            # raw list name: sanitize like every other value (#1954)
+            album_artist_value = _sanitize_filename(primary)
         elif artists_list and len(artists_list) == 1:
             # Single artist string — could be a combined name from iTunes
             # Resolve via artistId if available (safe: "Simon & Garfunkel" ID → "Simon & Garfunkel")
@@ -14136,7 +14095,7 @@ def _apply_path_template(template: str, context: dict) -> str:
                 try:
                     resolved = _get_itunes_client().resolve_primary_artist(itunes_artist_id)
                     if resolved and resolved != album_artist_value:
-                        album_artist_value = resolved
+                        album_artist_value = _sanitize_filename(resolved)
                 except Exception as e:
                     logger.debug("itunes primary artist resolve failed: %s", e)
     # $cdnum — smart CD label for multi-disc filenames. Produces "CD01" /
@@ -14465,11 +14424,18 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         attach_recovered_staging_context,
         record_recovered_staging_result,
     )
-    recovered_context = attach_recovered_staging_context(
-        get_database()._get_connection, file_path, context,
-    )
-    context.clear()
-    context.update(recovered_context)
+    # recovery bookkeeping only: an error here (a locked db, a bad recovery
+    # row) must not abort the import of an ordinary download
+    try:
+        recovered_context = attach_recovered_staging_context(
+            get_database()._get_connection, file_path, context,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("staging recovery lookup failed, importing as is: %s", exc)
+        recovered_context = None
+    if recovered_context is not None:
+        context.clear()
+        context.update(recovered_context)
     from core.imports.pipeline import (
         import_rejection_reason,
         post_process_matched_download_with_verification,
@@ -14619,11 +14585,18 @@ def _post_process_matched_download(context_key, context, file_path):
         attach_recovered_staging_context,
         record_recovered_staging_result,
     )
-    recovered_context = attach_recovered_staging_context(
-        get_database()._get_connection, file_path, context,
-    )
-    context.clear()
-    context.update(recovered_context)
+    # recovery bookkeeping only: an error here (a locked db, a bad recovery
+    # row) must not abort the import of an ordinary download
+    try:
+        recovered_context = attach_recovered_staging_context(
+            get_database()._get_connection, file_path, context,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("staging recovery lookup failed, importing as is: %s", exc)
+        recovered_context = None
+    if recovered_context is not None:
+        context.clear()
+        context.update(recovered_context)
     from core.imports.pipeline import import_rejection_reason, post_process_matched_download
     result = post_process_matched_download(
         context_key,
@@ -16246,20 +16219,66 @@ def get_batch_history():
 
 @app.route('/api/downloads/clear-completed', methods=['POST'])
 def clear_completed_downloads():
-    """Clear completed/failed downloads from the Downloads page: the live
-    session tasks AND the persisted download-history tail (so the list actually
-    empties and stays empty across restart). Rows still awaiting verification
-    (unverified / force_imported) are preserved — they belong to the review
-    queue, not this cleanup."""
+    """Clear finished rows from the Downloads page.
+
+    With no body this is Clear everything: every completed, failed and
+    cancelled live task AND the whole persisted download-history tail, review
+    queue included (so the list empties and stays empty across restart).
+
+    ``{"scope": "finished"}`` is Clear finished: completed / skipped /
+    already-owned tasks and the history tail, but rows waiting in the review
+    queue (unverified / force_imported) stay -- they leave through Review.
+    ``{"scope": "failed"}`` is Clear failed: failed / not-found / cancelled
+    tasks only. Those live only in memory, so no history is touched. Neither
+    scope retries anything."""
+    data = request.get_json(silent=True) or {}
+    scope = data.get('scope') if isinstance(data, dict) else None
+    if scope not in (None, 'finished', 'failed'):
+        return jsonify({'success': False, 'error': f'Unknown scope: {scope}'}), 400
     try:
-        cleared = _downloads_cancel.clear_completed_local()
-        history_cleared = get_database().clear_completed_download_history()
+        if scope == 'failed':
+            cleared = _downloads_cancel.clear_completed_local(_downloads_cancel.FAILED_STATUSES)
+            history_cleared = 0
+        elif scope == 'finished':
+            cleared = _downloads_cancel.clear_completed_local(_downloads_cancel.FINISHED_STATUSES)
+            history_cleared = get_database().clear_completed_download_history(keep_review=True)
+        else:
+            cleared = _downloads_cancel.clear_completed_local()
+            history_cleared = get_database().clear_completed_download_history()
         return jsonify({'success': True, 'cleared': cleared,
                         'history_cleared': history_cleared,
                         'total_cleared': cleared + history_cleared})
     except Exception as e:
         logger.error(f"Error clearing completed downloads: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+_REMOVE_REFUSALS = {
+    'missing': (404, 'That download is no longer in the list'),
+    'not_removable': (409, 'Only failed, not-found or cancelled downloads can be removed'),
+    'batch_running': (409, 'Its batch is still running; it can be removed once the batch ends'),
+}
+
+
+@app.route('/api/downloads/remove', methods=['POST'])
+def remove_download_from_list():
+    """Take one failed / not-found / cancelled row off the Downloads page.
+
+    Nothing is retried, and history, the wishlist and files on disk are left
+    alone."""
+    data = request.get_json(silent=True) or {}
+    task_id = data.get('task_id') if isinstance(data, dict) else None
+    if not task_id or not isinstance(task_id, str):
+        return jsonify({'success': False, 'error': 'Missing task_id'}), 400
+    try:
+        outcome = _downloads_cancel.remove_local_task(task_id)
+    except Exception as e:
+        logger.error(f"Error removing download {task_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+    if outcome == 'removed':
+        return jsonify({'success': True})
+    status, message = _REMOVE_REFUSALS.get(outcome, (409, outcome))
+    return jsonify({'success': False, 'error': message, 'reason': outcome}), status
 
 
 @app.route('/api/downloads/task/download-next', methods=['POST'])
@@ -17256,7 +17275,8 @@ def get_server_playlists():
         def _row(pl):
             return {'id': str(getattr(pl, 'id', '')), 'name': getattr(pl, 'title', ''),
                     'track_count': getattr(pl, 'leaf_count', 0) or 0,
-                    'owner': getattr(pl, 'owner', None)}
+                    'owner': getattr(pl, 'owner', None),
+                    'readonly': bool(getattr(pl, 'readonly', False))}
 
         others = []
         server_admin = []
@@ -17282,6 +17302,105 @@ def get_server_playlists():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _fetch_server_playlist_tracks(active_server, client, playlist_id, playlist_name):
+    """(server_tracks, playlist_name) for one server playlist: id, title,
+    artist, album, duration (ms) and thumb per track, in playlist order. the
+    compare view and adopt read the same tracks. plex can fill in the name."""
+    server_tracks = []
+    if active_server == 'plex' and client:
+        try:
+            # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
+            raw_playlist = None
+            try:
+                raw_playlist = client.server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("plex playlist fetchItem failed: %s", e)
+            if not raw_playlist and playlist_name:
+                try:
+                    raw_playlist = client.server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("plex playlist by-name lookup failed: %s", e)
+            if not raw_playlist:
+                logger.warning(
+                    f"[ServerPlaylistTracks] Plex playlist not found by "
+                    f"id={playlist_id} or name='{playlist_name}' — "
+                    f"compare view will show every source track as Find & Add"
+                )
+            if raw_playlist:
+                if not playlist_name:
+                    playlist_name = raw_playlist.title
+                plex_base = getattr(client.server, '_baseurl', '') or ''
+                plex_token = getattr(client.server, '_token', '') or ''
+                if not plex_base:
+                    # Fallback: get from config
+                    _pc = config_manager.get_plex_config()
+                    plex_base = (_pc.get('base_url', '') or '').rstrip('/')
+                    plex_token = plex_token or _pc.get('token', '')
+                logger.debug(f"[ServerPlaylistTracks] Plex base URL: {plex_base}")
+                for item in raw_playlist.items():
+                    grandparent = getattr(item, 'grandparentTitle', '') or ''
+                    parent = getattr(item, 'parentTitle', '') or ''
+                    # Build full thumb URL from Plex relative path
+                    thumb = ''
+                    raw_thumb = getattr(item, 'thumb', '') or getattr(item, 'parentThumb', '') or ''
+                    if raw_thumb and plex_base and plex_token:
+                        thumb = f"{plex_base}{raw_thumb}?X-Plex-Token={plex_token}"
+                    server_tracks.append({
+                        'id': str(item.ratingKey),
+                        'title': item.title,
+                        # originalTitle is plex's per-track artist; grandparent is the
+                        # album artist ('Various Artists' on a compilation)
+                        'artist': getattr(item, 'originalTitle', None) or grandparent,
+                        'album': parent,
+                        'duration': item.duration or 0,
+                        'thumb': thumb,
+                    })
+        except Exception as e:
+            logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
+    elif active_server == 'jellyfin' and client:
+        tracks = client.get_playlist_tracks(playlist_id)
+        for t in (tracks or []):
+            raw = t._data if hasattr(t, '_data') else {}
+            artists = raw.get('Artists', [])
+            # Through the token-safe proxy, NOT a raw {jf_base}/Items/...
+            # URL. The raw form handed the BROWSER an unauthenticated
+            # request against whatever address SOULSYNC uses for Jellyfin —
+            # and Jellyfin answers those with 200 and an empty body, which
+            # is #1159's "all requests for the images return a 200 response
+            # but with an empty body", verbatim. The server-activity proxy
+            # already exists for exactly this (its jellyfin fetch even
+            # guards on `r.content` because someone hit the empty-200
+            # before); it attaches the api_key server-side so the token
+            # never reaches the browser, same reason Navidrome thumbs go
+            # through /api/navidrome/cover/.
+            album_id = raw.get('AlbumId', '')
+            thumb = f"/api/server-activity/image?path=jf:{album_id}" if album_id else ''
+            server_tracks.append({
+                'id': str(t.ratingKey),
+                'title': t.title,
+                'artist': artists[0] if artists else raw.get('AlbumArtist', ''),
+                'album': raw.get('Album', ''),
+                'duration': t.duration,
+                'thumb': thumb,
+            })
+    elif active_server == 'navidrome' and client:
+        tracks = client.get_playlist_tracks(playlist_id)
+        for t in (tracks or []):
+            raw = t._data if hasattr(t, '_data') else {}
+            # Navidrome cover art via Subsonic API
+            cover_id = raw.get('coverArt', '') or raw.get('albumId', '')
+            thumb = f"/api/navidrome/cover/{cover_id}" if cover_id else ''
+            server_tracks.append({
+                'id': str(t.ratingKey),
+                'title': t.title,
+                'artist': raw.get('artist', ''),
+                'album': raw.get('album', ''),
+                'duration': t.duration,
+                'thumb': thumb,
+            })
+    return server_tracks, playlist_name
+
+
 @app.route('/api/server/playlist/<playlist_id>/tracks', methods=['GET'])
 def get_server_playlist_tracks(playlist_id):
     """Get tracks from a server playlist with source match info from sync history."""
@@ -17295,99 +17414,8 @@ def get_server_playlist_tracks(playlist_id):
         if _sp_refusal is not None:
             return _sp_refusal
 
-        # Get tracks from server
-        server_tracks = []
-        if active_server == 'plex' and _sp_client:
-            try:
-                # Try by ID first, fall back to name lookup (ID changes when playlist is recreated)
-                raw_playlist = None
-                try:
-                    raw_playlist = _sp_client.server.fetchItem(int(playlist_id))
-                except Exception as e:
-                    logger.debug("plex playlist fetchItem failed: %s", e)
-                if not raw_playlist and playlist_name:
-                    try:
-                        raw_playlist = _sp_client.server.playlist(playlist_name)
-                    except Exception as e:
-                        logger.debug("plex playlist by-name lookup failed: %s", e)
-                if not raw_playlist:
-                    logger.warning(
-                        f"[ServerPlaylistTracks] Plex playlist not found by "
-                        f"id={playlist_id} or name='{playlist_name}' — "
-                        f"compare view will show every source track as Find & Add"
-                    )
-                if raw_playlist:
-                    if not playlist_name:
-                        playlist_name = raw_playlist.title
-                    plex_base = getattr(_sp_client.server, '_baseurl', '') or ''
-                    plex_token = getattr(_sp_client.server, '_token', '') or ''
-                    if not plex_base:
-                        # Fallback: get from config
-                        _pc = config_manager.get_plex_config()
-                        plex_base = (_pc.get('base_url', '') or '').rstrip('/')
-                        plex_token = plex_token or _pc.get('token', '')
-                    logger.debug(f"[ServerPlaylistTracks] Plex base URL: {plex_base}")
-                    for item in raw_playlist.items():
-                        grandparent = getattr(item, 'grandparentTitle', '') or ''
-                        parent = getattr(item, 'parentTitle', '') or ''
-                        # Build full thumb URL from Plex relative path
-                        thumb = ''
-                        raw_thumb = getattr(item, 'thumb', '') or getattr(item, 'parentThumb', '') or ''
-                        if raw_thumb and plex_base and plex_token:
-                            thumb = f"{plex_base}{raw_thumb}?X-Plex-Token={plex_token}"
-                        server_tracks.append({
-                            'id': str(item.ratingKey),
-                            'title': item.title,
-                            # originalTitle is plex's per-track artist; grandparent is the
-                            # album artist ('Various Artists' on a compilation)
-                            'artist': getattr(item, 'originalTitle', None) or grandparent,
-                            'album': parent,
-                            'duration': item.duration or 0,
-                            'thumb': thumb,
-                        })
-            except Exception as e:
-                logger.error(f"[ServerPlaylistTracks] Plex error: {e}", exc_info=True)
-        elif active_server == 'jellyfin' and _sp_client:
-            tracks = _sp_client.get_playlist_tracks(playlist_id)
-            for t in (tracks or []):
-                raw = t._data if hasattr(t, '_data') else {}
-                artists = raw.get('Artists', [])
-                # Through the token-safe proxy, NOT a raw {jf_base}/Items/...
-                # URL. The raw form handed the BROWSER an unauthenticated
-                # request against whatever address SOULSYNC uses for Jellyfin —
-                # and Jellyfin answers those with 200 and an empty body, which
-                # is #1159's "all requests for the images return a 200 response
-                # but with an empty body", verbatim. The server-activity proxy
-                # already exists for exactly this (its jellyfin fetch even
-                # guards on `r.content` because someone hit the empty-200
-                # before); it attaches the api_key server-side so the token
-                # never reaches the browser, same reason Navidrome thumbs go
-                # through /api/navidrome/cover/.
-                album_id = raw.get('AlbumId', '')
-                thumb = f"/api/server-activity/image?path=jf:{album_id}" if album_id else ''
-                server_tracks.append({
-                    'id': str(t.ratingKey),
-                    'title': t.title,
-                    'artist': artists[0] if artists else raw.get('AlbumArtist', ''),
-                    'album': raw.get('Album', ''),
-                    'duration': t.duration,
-                    'thumb': thumb,
-                })
-        elif active_server == 'navidrome' and _sp_client:
-            tracks = _sp_client.get_playlist_tracks(playlist_id)
-            for t in (tracks or []):
-                raw = t._data if hasattr(t, '_data') else {}
-                # Navidrome cover art via Subsonic API
-                cover_id = raw.get('coverArt', '') or raw.get('albumId', '')
-                thumb = f"/api/navidrome/cover/{cover_id}" if cover_id else ''
-                server_tracks.append({
-                    'id': str(t.ratingKey),
-                    'title': t.title,
-                    'artist': raw.get('artist', ''),
-                    'album': raw.get('album', ''),
-                    'duration': t.duration,
-                    'thumb': thumb,
-                })
+        server_tracks, playlist_name = _fetch_server_playlist_tracks(
+            active_server, _sp_client, playlist_id, playlist_name)
 
         # Get source tracks — prefer mirrored playlist, fall back to sync history
         source_tracks = []
@@ -17543,10 +17571,79 @@ def get_server_playlist_tracks(playlist_id):
             "source_track_count": len(source_tracks),
             "order_status": order_status,
             "server_order": server_order,
+            # the "Tag in Plex" mood action (admin, plex): see tag-mood below
+            "can_tag": active_server == 'plex' and is_admin_request(),
         })
     except Exception as e:
         logger.error(f"Error getting server playlist tracks: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/adopt', methods=['POST'])
+def adopt_server_playlist_route(playlist_id):
+    """a server playlist soulsync didn't make becomes a My Playlist under the
+    same name, each track pinned to its server track, so syncing it writes
+    back to this playlist (core/playlists/adopt_server_playlist)."""
+    from core.playlists.adopt_server_playlist import AdoptError, adopt_server_playlist
+    try:
+        active_server = config_manager.get_active_media_server()
+        data = request.get_json(silent=True) or {}
+        client, playlist_id, playlist_name, refusal = _server_playlist_guard(
+            active_server, playlist_id, str(data.get('name') or ''))
+        if refusal is not None:
+            return refusal
+        # name and read-only come from the server's listing, not the request
+        from core.sync.server_playlist_access import list_playlists
+        listed = next((p for p in list_playlists(active_server, client)
+                       if str(getattr(p, 'id', '')) == str(playlist_id)), None)
+        if listed is None:
+            return jsonify({"success": False, "error": "That playlist isn't on the server anymore"}), 404
+        server_tracks, playlist_name = _fetch_server_playlist_tracks(
+            active_server, client, playlist_id, getattr(listed, 'title', '') or playlist_name)
+        result = adopt_server_playlist(
+            get_database(), get_current_profile_id(), active_server, playlist_name,
+            server_tracks, readonly=bool(getattr(listed, 'readonly', False)))
+        from api.user_playlists import _identify_soon
+        _identify_soon(result['id'])
+        return jsonify({"success": True, **result})
+    except AdoptError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Error adopting server playlist {playlist_id}: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Could not adopt the playlist"}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/tag-mood', methods=['POST'])
+def server_playlist_tag_mood(playlist_id):
+    """Add a mood tag to every song on a plex playlist (wolf39us), so a plex
+    smart playlist can be built on "mood is <tag>". Plex metadata only; it
+    is the household's shared library, so admin only. Runs in the background
+    (one plex call per song) and answers with how many songs it will look at."""
+    try:
+        if not is_admin_request():
+            return jsonify({"success": False, "error": "Admin only"}), 403
+        data = request.get_json(silent=True) or {}
+        tag = str(data.get('tag') or '').strip()
+        if not tag or len(tag) > 100:
+            return jsonify({"success": False, "error": "Give the tag a name (100 characters at most)"}), 400
+        active_server = config_manager.get_active_media_server()
+        if active_server != 'plex':
+            return jsonify({"success": False, "error": "Tagging songs needs Plex"}), 400
+        client, playlist_id, playlist_name, refusal = _server_playlist_guard(
+            active_server, playlist_id, str(data.get('name') or ''))
+        if refusal is not None:
+            return refusal
+        tracks = client.playlist_tracks_for_tagging(playlist_id)
+
+        def _run():
+            counts = client.tag_tracks_mood(tracks, tag)
+            logger.info(f"[ServerPlaylist] mood '{tag}' on playlist '{playlist_name}': {counts}")
+
+        threading.Thread(target=_run, daemon=True, name='plex-playlist-mood').start()
+        return jsonify({"success": True, "tag": tag, "total": len(tracks)})
+    except Exception as e:
+        logger.error(f"Error tagging server playlist {playlist_id}: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Could not tag the playlist"}), 500
 
 
 @app.route('/api/server/playlist/<playlist_id>/align', methods=['POST'])
@@ -18254,6 +18351,57 @@ def server_playlist_delete(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _library_thumb_resolver(active_server):
+    """album art a library row stores, as a url the browser can load. shared by
+    the track search and the pre-sync match editor."""
+    # Build thumb URL resolver for this server. Only Plex was ever
+    # handled here — Jellyfin rows store /Items/<id>/Images/Primary and
+    # Navidrome rows /rest/getCoverArt?id=<id>, both server-relative
+    # paths the BROWSER can't use: relative they hit SoulSync's SPA
+    # catch-all (200, index.html), absolutized they hit Jellyfin
+    # unauthenticated (200, EMPTY body — #1159's signature). That's why
+    # the Add Track / Swap Track modals still had no art after the
+    # compare-view fix (#1164). Route both through the same token-safe
+    # proxies the compare view uses.
+    _art_prefix = ''
+    _art_suffix = ''
+    if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
+        _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
+        _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
+        if not _ab:
+            _pc = config_manager.get_plex_config()
+            _ab = (_pc.get('base_url', '') or '').rstrip('/')
+            _at = _at or _pc.get('token', '')
+        _art_prefix = _ab
+        _art_suffix = f"?X-Plex-Token={_at}" if _at else ''
+
+    _jf_item_re = re.compile(r'/Items/([^/?#]+)/Images/Primary')
+    _nd_cover_re = re.compile(r'getCoverArt\?(?:[^#]*?[?&])?id=([^&#]+)')
+
+    def _resolve_search_thumb(url):
+        if not url:
+            return ''
+        if active_server == 'jellyfin':
+            m = _jf_item_re.search(url)
+            if m:
+                return f"/api/server-activity/image?path=jf:{m.group(1)}"
+            # external art (enrichment CDN) passes through; a relative
+            # path we can't parse renders as no-art, not as index.html
+            return url if url.startswith('http') else ''
+        if active_server == 'navidrome':
+            m = _nd_cover_re.search(url)
+            if m:
+                return f"/api/navidrome/cover/{m.group(1)}"
+            return url if url.startswith('http') else ''
+        if url.startswith('http'):
+            return url
+        if url.startswith('/') and _art_prefix:
+            return f"{_art_prefix}{url}{_art_suffix}"
+        return url
+
+    return _resolve_search_thumb
+
+
 @app.route('/api/library/search-tracks', methods=['GET'])
 def library_search_tracks():
     """Search SoulSync's local database for tracks (for manual match correction)."""
@@ -18270,50 +18418,7 @@ def library_search_tracks():
         active_server = config_manager.get_active_media_server()
         database = get_database()
 
-        # Build thumb URL resolver for this server. Only Plex was ever
-        # handled here — Jellyfin rows store /Items/<id>/Images/Primary and
-        # Navidrome rows /rest/getCoverArt?id=<id>, both server-relative
-        # paths the BROWSER can't use: relative they hit SoulSync's SPA
-        # catch-all (200, index.html), absolutized they hit Jellyfin
-        # unauthenticated (200, EMPTY body — #1159's signature). That's why
-        # the Add Track / Swap Track modals still had no art after the
-        # compare-view fix (#1164). Route both through the same token-safe
-        # proxies the compare view uses.
-        _art_prefix = ''
-        _art_suffix = ''
-        if active_server == 'plex' and media_server_engine.client('plex') and media_server_engine.client('plex').server:
-            _ab = getattr(media_server_engine.client('plex').server, '_baseurl', '') or ''
-            _at = getattr(media_server_engine.client('plex').server, '_token', '') or ''
-            if not _ab:
-                _pc = config_manager.get_plex_config()
-                _ab = (_pc.get('base_url', '') or '').rstrip('/')
-                _at = _at or _pc.get('token', '')
-            _art_prefix = _ab
-            _art_suffix = f"?X-Plex-Token={_at}" if _at else ''
-
-        _jf_item_re = re.compile(r'/Items/([^/?#]+)/Images/Primary')
-        _nd_cover_re = re.compile(r'getCoverArt\?(?:[^#]*?[?&])?id=([^&#]+)')
-
-        def _resolve_search_thumb(url):
-            if not url:
-                return ''
-            if active_server == 'jellyfin':
-                m = _jf_item_re.search(url)
-                if m:
-                    return f"/api/server-activity/image?path=jf:{m.group(1)}"
-                # external art (enrichment CDN) passes through; a relative
-                # path we can't parse renders as no-art, not as index.html
-                return url if url.startswith('http') else ''
-            if active_server == 'navidrome':
-                m = _nd_cover_re.search(url)
-                if m:
-                    return f"/api/navidrome/cover/{m.group(1)}"
-                return url if url.startswith('http') else ''
-            if url.startswith('http'):
-                return url
-            if url.startswith('/') and _art_prefix:
-                return f"{_art_prefix}{url}{_art_suffix}"
-            return url
+        _resolve_search_thumb = _library_thumb_resolver(active_server)
 
         results = database.search_tracks(title=query, artist='', limit=limit,
                                          server_source=active_server, rank_artist=artist_hint)
@@ -18338,6 +18443,200 @@ def library_search_tracks():
         return jsonify({"success": True, "tracks": tracks})
     except Exception as e:
         logger.error(f"Error searching library tracks: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── Pre-sync match editor (#1958) ─────────────────────────────────────────────
+# a mirrored playlist that hasn't synced has no server playlist for the compare
+# editor to open. what it does have is which library track each song will sync
+# as: the background library check (#1910) stamps it on every mirror track, and
+# a manual match overrides it. this is that view, and changing a pick stores
+# the same durable match the server editor stores, so the first sync uses it.
+
+def _presync_track_rows(database, active_server, ids):
+    """{id: {id, title, artist, thumb, duration}} for the library tracks the
+    mirror rows point at. the active server's track id first (what the check
+    stamps and the sync matches by), the catalogue id for a manual match that
+    named one."""
+    ids = [str(i) for i in dict.fromkeys(ids) if i]
+    out = {}
+    if not ids:
+        return out
+    thumb = _library_thumb_resolver(active_server)
+    select = ("SELECT {key} AS key, t.title, COALESCE(t.track_artist, a.name) AS artist, "
+              "al.image_url AS thumb, t.duration FROM lib2_tracks t "
+              "JOIN lib2_albums al ON al.id = t.album_id "
+              "JOIN lib2_artists a ON a.id = al.primary_artist_id ")
+    conn = database._get_connection()
+    try:
+        for i in range(0, len(ids), 400):
+            chunk = ids[i:i + 400]
+            ph = ','.join('?' * len(chunk))
+            queries = (
+                (select.format(key="m.server_id") + "JOIN lib2_media_server_mappings m "
+                 f"ON m.entity_id = t.id WHERE m.entity_type = 'track' AND m.server_source = ? "
+                 f"AND m.server_id IN ({ph})", [active_server, *chunk]),
+                (select.format(key="t.server_id") + f"WHERE t.server_source = ? AND t.server_id IN ({ph})",
+                 [active_server, *chunk]),
+            )
+            for sql, params in queries:
+                for row in conn.execute(sql, params).fetchall():
+                    out.setdefault(str(row['key']), row)
+        rest = [i for i in ids if i not in out and i.isdigit()]
+        for i in range(0, len(rest), 400):
+            chunk = rest[i:i + 400]
+            ph = ','.join('?' * len(chunk))
+            for row in conn.execute(select.format(key="t.id") + f"WHERE t.id IN ({ph})",
+                                    [int(x) for x in chunk]).fetchall():
+                out.setdefault(str(row['key']), row)
+    finally:
+        conn.close()
+    return {key: {'id': key, 'title': row['title'] or '', 'artist': row['artist'] or '',
+                  'thumb': thumb(row['thumb'] or ''),
+                  'duration': row['duration'] or 0}
+            for key, row in out.items()}
+
+
+def _presync_mirror(playlist_id):
+    """(database, playlist) for a mirror this profile may edit, or a refusal."""
+    from api.mirrored_playlists import _owned_mirrored_playlist
+    database = get_database()
+    playlist = _owned_mirrored_playlist(database, playlist_id)
+    if not playlist:
+        return database, None, (jsonify({"success": False, "error": "Playlist not found"}), 404)
+    return database, playlist, None
+
+
+def _presync_extra(row):
+    try:
+        extra = row.get('extra_data')
+        extra = json.loads(extra) if isinstance(extra, str) and extra else (extra or {})
+        return extra if isinstance(extra, dict) else {}
+    except (TypeError, ValueError):
+        return {}
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/presync', methods=['GET'])
+def mirrored_presync_matches(playlist_id):
+    """every song of a mirror next to the library track it will sync as."""
+    try:
+        database, playlist, refusal = _presync_mirror(playlist_id)
+        if refusal:
+            return refusal
+        active_server = config_manager.get_active_media_server()
+        rows = database.get_mirrored_playlist_tracks(playlist_id)
+        extras = [_presync_extra(r) for r in rows]
+        profile_id = int(playlist.get('profile_id') or get_current_profile_id() or 1)
+        manual = {}
+        try:
+            manual = database.find_manual_library_matches_bulk(
+                profile_id, [r.get('source_track_id') for r in rows], active_server) or {}
+        except Exception as e:
+            logger.debug(f"[PreSync] manual matches unavailable: {e}")
+        library = _presync_track_rows(
+            database, active_server,
+            [e.get('library_track_id') for e in extras if e.get('in_library')])
+        tracks = []
+        unchecked = 0
+        for row, extra in zip(rows, extras, strict=True):
+            if not extra.get('library_checked_at'):
+                unchecked += 1
+            lib = library.get(str(extra.get('library_track_id') or '')) if extra.get('in_library') else None
+            tracks.append({
+                'mirror_track_id': row.get('id'),
+                'match_status': 'matched' if lib else 'missing',
+                'has_manual_match': bool(manual.get(str(row.get('source_track_id') or ''))),
+                'source_track': {
+                    'position': row.get('position'),
+                    'name': row.get('track_name') or '',
+                    'artist': row.get('artist_name') or '',
+                    'image_url': row.get('image_url') or '',
+                    'duration_ms': row.get('duration_ms') or 0,
+                    'source_track_id': row.get('source_track_id') or '',
+                    'source': playlist.get('source') or '',
+                },
+                'server_track': lib,
+            })
+        return jsonify({
+            'success': True,
+            'server_type': active_server,
+            'source_track_count': len(tracks),
+            'server_track_count': sum(1 for t in tracks if t['server_track']),
+            'unchecked': unchecked,
+            'tracks': tracks,
+        })
+    except Exception as e:
+        logger.error(f"[PreSync] loading matches for mirror {playlist_id} failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _presync_row(database, playlist_id, mirror_track_id):
+    for row in database.get_mirrored_playlist_tracks(playlist_id):
+        if str(row.get('id')) == str(mirror_track_id):
+            return row
+    return None
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/presync/match', methods=['POST'])
+def mirrored_presync_set_match(playlist_id):
+    """pick the library track one song of a mirror syncs as. stored the way the
+    server editor stores a swap (a user-confirmed match the sync honours), and
+    the song's library stamp follows so every view says the same thing."""
+    try:
+        data = request.get_json(silent=True) or {}
+        track_id = str(data.get('track_id') or '').strip()
+        if not track_id:
+            return jsonify({"success": False, "error": "track_id required"}), 400
+        database, playlist, refusal = _presync_mirror(playlist_id)
+        if refusal:
+            return refusal
+        row = _presync_row(database, playlist_id, data.get('mirror_track_id'))
+        if not row:
+            return jsonify({"success": False, "error": "That song isn't in this playlist"}), 404
+        source_track_id = str(row.get('source_track_id') or '').strip()
+        if not source_track_id:
+            return jsonify({"success": False,
+                            "error": "This song has no source id to remember the match by"}), 400
+        active_server = config_manager.get_active_media_server()
+        _persist_find_and_add_match(
+            source_track_id, active_server, track_id, data.get('track_title', ''),
+            row.get('track_name') or '', row.get('artist_name') or '',
+            source=playlist.get('source') or 'spotify')
+        database.update_mirrored_track_extra_data(row['id'], {
+            'in_library': True, 'library_track_id': track_id,
+            'library_checked_at': int(time.time()), 'library_checked_via': 'manual'})
+        return jsonify({"success": True, "message": "Match saved, the next sync uses it"})
+    except Exception as e:
+        logger.error(f"[PreSync] saving a match on mirror {playlist_id} failed: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/presync/unmatch', methods=['POST'])
+def mirrored_presync_unmatch(playlist_id):
+    """this library track is the wrong one: never match the two again, and the
+    song goes back to missing so the sync downloads it."""
+    try:
+        data = request.get_json(silent=True) or {}
+        database, playlist, refusal = _presync_mirror(playlist_id)
+        if refusal:
+            return refusal
+        row = _presync_row(database, playlist_id, data.get('mirror_track_id'))
+        if not row:
+            return jsonify({"success": False, "error": "That song isn't in this playlist"}), 404
+        track_id = str(_presync_extra(row).get('library_track_id') or data.get('track_id') or '')
+        source_track_id = str(row.get('source_track_id') or '').strip()
+        active_server = config_manager.get_active_media_server()
+        if source_track_id and track_id:
+            from core.sync.match_overrides import reject_match
+            if not reject_match(database, get_current_profile_id(), active_server,
+                                source_track_id, track_id):
+                return jsonify({"success": False, "error": "Could not save the unmatch"}), 500
+        database.update_mirrored_track_extra_data(row['id'], {
+            'in_library': False, 'library_track_id': None,
+            'library_checked_at': int(time.time()), 'library_checked_via': 'manual'})
+        return jsonify({"success": True, "message": "Match removed"})
+    except Exception as e:
+        logger.error(f"[PreSync] unmatching on mirror {playlist_id} failed: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -18483,7 +18782,6 @@ def playlist_ownership_preview(playlist_id):
             is_album=is_album,
             profile_id=get_current_profile_id() or 1,
             source=_downloads_history.detect_sync_source(playlist_id),
-            active_server=config_manager.get_active_media_server(),
             allow_duplicates=config_manager.get('wishlist.allow_duplicate_tracks', True),
         )
         return jsonify({"success": True, "results": results})
@@ -18637,12 +18935,12 @@ def start_missing_tracks_process(playlist_id):
                 _lib2_conn.close()
     except ValueError as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
-    except Exception as exc:
-        logger.exception("Confirmed Search intent materialization failed")
-        return jsonify({
-            "success": False,
-            "error": f"Could not prepare Library v2 search intent: {exc}",
-        }), 500
+    except Exception:
+        # the library v2 intent is bookkeeping on top of the download (3.6.1
+        # had no such step). a locked db or odd metadata here must not refuse
+        # the download the admin asked for: it goes ahead without the intent
+        logger.exception("Confirmed Search intent materialization failed; "
+                         "starting the download without it")
 
     with tasks_lock:
         download_batches[batch_id] = {
@@ -20375,12 +20673,17 @@ def _autostart_library_v2_bootstrap_import():
             result = lib2_bootstrap.run_bootstrap_if_needed(database, config_manager.get)
             if lib2_bootstrap.should_stop_autostart(result):
                 from core.library2.migration_gate import start_deferred_workers
-                from core.library2.post_import import start_background_preparation
+                from core.library2.post_import import (
+                    full_preparation_pending, start_background_preparation,
+                )
                 start_deferred_workers(database)
                 # the credit split, tracklists and tags run behind a library
                 # that already works. the worker queues skip an unresolved
-                # combined credit on their own, so nothing waits on this
-                if result.get("success"):
+                # combined credit on their own, so nothing waits on this.
+                # a restart in the middle of the full pass runs it again
+                if result.get("success") or (
+                        result.get("skipped") == "already_done"
+                        and full_preparation_pending(database)):
                     start_background_preparation(
                         database, config_manager, full=True,
                         after=lambda: start_artwork_precache(get_database, config_manager))
@@ -20505,10 +20808,11 @@ def start_metadata_update():
             else:
                 logger.debug("Plex server is NOT connected!")
 
-        # Check Spotify client - EXACTLY like dashboard.py
+        # Spotify is optional (#1957): photos and backgrounds come from fanart.tv,
+        # TheAudioDB and Deezer, genres from the library. without it there is
+        # no Spotify photo fallback and no album art.
         if not spotify_client:
-            add_activity_item("", "Metadata Update", "Spotify client not available", "Now")
-            return jsonify({"success": False, "error": "Spotify client not available"}), 400
+            add_activity_item("", "Metadata Update", "No Spotify: HD artwork and library genres only", "Now")
 
         # Reset state
         metadata_update_state.update({
@@ -21758,7 +22062,14 @@ _DISCOVER_WARM_PATHS = [
 from core.discovery.warm_refresh import refresh as refresh_discover_caches  # noqa: E402
 
 
-def _discover_warm_sweep(paths=None):
+# the Library page's first view. its member list is cached per process and
+# keyed by the counter in core.library2.member_version, so the first click
+# after a restart (or after an import moved the counter) computed it on the
+# request: ~5s on a 30k-artist library. warmed with the discover shelves.
+_LIBRARY_WARM_PATHS = ['/api/library/v2/artists?sort=name&monitored=all&page=1']
+
+
+def _discover_warm_sweep(paths=None, recompute=True):
     """one pass over the discover shelves, as every profile.
 
     the shelf caches are per profile, and a request with no profile is refused
@@ -21797,7 +22108,7 @@ def _discover_warm_sweep(paths=None):
                     # recompute, don't read. a sweep inside the 30 min ttl
                     # otherwise finds every answer still valid and refreshes
                     # nothing, so every other sweep was a no-op
-                    with refresh_discover_caches():
+                    with (refresh_discover_caches() if recompute else contextlib.nullcontext()):
                         status = client.get(p).status_code
                 except Exception as e:
                     logger.debug(f"discover warmup {p} as profile {pid} failed: {e}")
@@ -21828,6 +22139,11 @@ def _start_discover_warmer():
         _t.sleep(15)  # let boot finish before the first sweep
         while True:
             started = _t.time()
+            # library first: it's the page people open first. a cache hit when
+            # nothing changed, so it costs nothing on a quiet library
+            lib = _discover_warm_sweep(_LIBRARY_WARM_PATHS, recompute=False)
+            if lib['failed']:
+                logger.debug(f"Library warmup: {lib['failed'][:3]}")
             stats = _discover_warm_sweep()
             took = _t.time() - started
             if stats['failed']:
@@ -21843,13 +22159,31 @@ def _start_discover_warmer():
     threading.Thread(target=loop, name='discover-warmer', daemon=True).start()
 
 
-# NEVER under pytest: dozens of tests import web_server, and a leaked
-# background thread touching databases mid-suite is exactly the bug class
-# behind the video-db split-brain incident (conftest locks video installs
-# for the same reason). Opt-out env for anyone who wants it off in prod.
+# the warmer is started from start_runtime_services(), not here: it sends
+# requests through app.test_client(), and a request made while this module is
+# still importing makes Flask refuse every register_blueprint() below it.
 import sys as _sys
-if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
-    _start_discover_warmer()
+
+
+def _start_library_background():
+    """the unmatched files' matcher, and the watch that tells it (and the
+    "could be better" counts) when new files have landed"""
+    from core.library2.artist_reader import refresh_upgradable_counts
+    from core.library2.library_watch import on_files_arrived, start_library_watch
+    from core.library2.unmatched_matcher import start_unmatched_matcher
+    connect = lambda: get_database()._get_connection()  # noqa: E731
+    matcher = start_unmatched_matcher(connect)
+    on_files_arrived(refresh_upgradable_counts)
+    on_files_arrived(matcher.nudge)
+    start_library_watch(connect)
+
+
+# never under pytest, for the same reason as the warmer
+if 'pytest' not in _sys.modules and os.environ.get('SOULSYNC_NO_LIBRARY_BACKGROUND', '0') != '1':
+    try:
+        _start_library_background()
+    except Exception as _e:  # noqa: BLE001 - the library works without it
+        logger.warning(f"library background workers did not start: {_e}")
 
 _init_download_validation(
     matching_engine_obj=matching_engine,
@@ -22243,6 +22577,17 @@ def _build_status_payload():
     except Exception as e:
         logger.debug("active download count failed: %s", e)
 
+    # files waiting in quarantine, for the downloads nav badge when nothing is
+    # downloading. a listdir, no sidecar reads (#2001: nothing said a file
+    # had been downloaded and was waiting)
+    quarantined = 0
+    try:
+        from api.quarantine import _get_quarantine_dir
+        from core.imports.quarantine import count_quarantine_entries
+        quarantined = count_quarantine_entries(_get_quarantine_dir())
+    except Exception as e:
+        logger.debug("quarantine count failed: %s", e)
+
     return {
         'metadata_source': metadata_status['metadata_source'],
         'spotify': _spotify_status_with_availability(metadata_status['spotify']),
@@ -22251,6 +22596,7 @@ def _build_status_payload():
         'active_media_server': config_manager.get_active_media_server(),
         'enrichment': _get_enrichment_status(),
         'active_downloads': active_dl_count,
+        'quarantined': quarantined,
     }
 
 def _build_watchlist_count_payload(profile_id=1):
@@ -24592,6 +24938,27 @@ def _active_playlist_sync_summaries():
                 'status': state.get('status'),
                 'progress': progress,
             })
+    # a Sync & download run spends its first minutes refreshing and
+    # identifying before the sync step registers above, and the dashboard
+    # showed nothing live for all of it. its own progress is listed under the
+    # id the sync step will use, until that step takes over
+    syncing = {s['playlist_id'] for s in summaries}
+    with playlist_pipeline_progress_lock:
+        pipelines = [dict(s) for s in playlist_pipeline_progress_states.values() if s]
+    for state in pipelines:
+        if state.get('status') != 'running' or state.get('playlist_id') is None:
+            continue
+        pid = f"auto_mirror_{state['playlist_id']}"
+        if pid in syncing:
+            continue
+        summaries.append({
+            'playlist_id': pid,
+            'playlist_name': state.get('playlist_name') or '',
+            'status': 'running',
+            'progress': {'progress': state.get('progress') or 0,
+                         'current_step': state.get('phase') or 'Running',
+                         'playlist_name': state.get('playlist_name') or ''},
+        })
     return summaries
 
 
@@ -25131,6 +25498,15 @@ def start_runtime_services():
         # Live log tail — streams new log lines to the log viewer
         socketio.start_background_task(_emit_live_log_loop)
         logger.info("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor + live logs)")
+
+        # Discover warmer. Started here, after the import has registered every
+        # blueprint: it sends real requests through app.test_client() 15 s
+        # after it starts, and a request served while web_server is still
+        # importing makes Flask refuse every later register_blueprint() --
+        # a slow boot (a big library upgrade) then fails to start at all.
+        # Opt-out env for anyone who wants it off.
+        if os.environ.get('SOULSYNC_NO_DISCOVER_WARMUP', '0') != '1':
+            _start_discover_warmer()
 
         _runtime_started = True
 

@@ -109,6 +109,9 @@ class PlaylistInfo:
     # None when unknown; a name lookup that scopes by owner treats None as
     # "not ours to edit" only when it has an owner to compare against.
     owner: Optional[str] = None
+    # the server won't let this user edit it: a smart playlist, someone
+    # else's (opensubsonic `readonly`, plex `smart`)
+    readonly: bool = False
 
     # ------------------------------------------------------------------
     # Per-server constructors

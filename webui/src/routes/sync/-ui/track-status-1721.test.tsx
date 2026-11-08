@@ -42,8 +42,8 @@ describe('status helpers', () => {
   });
 
   it('the card link only exists when something needs a match', () => {
-    expect(needsMatchLabel({ needs_match_count: 42 })).toBe('42 need a match');
-    expect(needsMatchLabel({ needs_match_count: 1 })).toBe('1 needs a match');
+    expect(needsMatchLabel({ needs_match_count: 42 })).toBe('42 guesses to review');
+    expect(needsMatchLabel({ needs_match_count: 1 })).toBe('1 guess to review');
     expect(needsMatchLabel({ needs_match_count: 0 })).toBeNull();
     expect(needsMatchLabel({})).toBeNull();
   });
@@ -68,21 +68,21 @@ function renderCard(over: Partial<MirroredPlaylistRow>, extra = {}) {
 }
 
 describe('the card', () => {
-  it('says how many need a match and opens the pool, not the card', () => {
+  it('says how many guesses wait for review and opens the pool, not the card', () => {
     const { onOpen, onNeedsMatch } = renderCard({ needs_match_count: 42 });
-    fireEvent.click(screen.getByRole('button', { name: '42 need a match' }));
+    fireEvent.click(screen.getByRole('button', { name: '42 guesses to review' }));
     expect(onNeedsMatch).toHaveBeenCalledTimes(1);
     expect(onOpen).not.toHaveBeenCalled();
   });
 
   it('a card with nothing to fix shows no link', () => {
     renderCard({ needs_match_count: 0 });
-    expect(document.querySelector('.pl-card-attn')).toBeNull();
+    expect(document.querySelector('.plc-guesses')).toBeNull();
   });
 
   it('live narration replaces the link while a run is going', () => {
     renderCard({ needs_match_count: 42 }, { status: <span>discovering 40%</span> });
-    expect(document.querySelector('.pl-card-attn')).toBeNull();
+    expect(document.querySelector('.plc-guesses')).toBeNull();
   });
 });
 

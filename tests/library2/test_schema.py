@@ -11,7 +11,7 @@ from tests.lib2_seed import row_conn
 
 _EXPECTED_TABLES = {
     "lib2_artists", "lib2_albums", "lib2_album_artists",
-    "lib2_tracks", "lib2_track_artists", "lib2_track_files", "lib2_file_origins",
+    "lib2_tracks", "lib2_track_artists", "lib2_track_files", "lib2_file_origins", "lib2_unmatched_matches",
     "lib2_manual_skips", "lib2_mirror_outbox", "lib2_monitor_rules",
     "lib2_release_editions", "lib2_recordings", "lib2_release_tracks",
     "lib2_recording_review", "lib2_wanted_tracks", "lib2_external_id_history",
@@ -29,6 +29,8 @@ _EXPECTED_TABLES = {
     "lib2_song_search", "lib2_song_search_data", "lib2_song_search_idx",
     "lib2_song_search_content", "lib2_song_search_docsize", "lib2_song_search_config",
     "lib2_song_search_dirty", "lib2_song_search_state",
+    # the artist grid's membership counter (core.library2.member_version)
+    "lib2_member_state",
 }
 
 

@@ -715,3 +715,68 @@ def test_routes_answer_a_merged_id_with_its_survivor(library):
     client = app.test_client()
     assert client.get(f"/api/library/v2/albums/{albums[1]}").get_json()["album"]["id"] == albums[0]
     assert client.get(f"/api/library/v2/tracks/{tracks[1]}").get_json()["track"]["id"] == tracks[0]
+
+
+def server_twins(library, *, second_server='navidrome'):
+    """bbno$'s "bag or die" as plex and a second server each reported it:
+    one artist row per server (the second an alias of the first), one album
+    row each, its own files and 3.6.1 legacy ids"""
+    db = library[0]
+    with closing(db._get_connection()) as conn:
+        plex = conn.execute("INSERT INTO lib2_artists(name,spotify_id,server_source) VALUES('bbno$','sp-bbno','plex')").lastrowid
+        other = conn.execute("INSERT INTO lib2_artists(name,spotify_id,server_source,canonical_artist_id)"
+                             " VALUES('bbno$','sp-bbno',?,?)", (second_server, plex)).lastrowid
+        albums, tracks = [], []
+        for artist, server, legacy, root in ((plex, 'plex', '584180', '/m/Music'),
+                                             (other, second_server, '1gltq3', '/m/Test')):
+            album = conn.execute("""INSERT INTO lib2_albums(primary_artist_id,title,album_type,spotify_id,
+                musicbrainz_id,release_date,origin,monitored,track_count,expected_track_count,tracklist_status,
+                server_source,server_id,legacy_album_id) VALUES(?,'bag or die','album','sp-bag','mb-bag',
+                '2022-10-21','library',0,2,2,'ready',?,?,?)""", (artist, server, legacy, legacy)).lastrowid
+            conn.execute("INSERT INTO lib2_album_artists(album_id,artist_id,role) VALUES(?,?,'primary')", (album, artist))
+            for number, title in ((1, 'bag or die'), (2, 'top gun')):
+                track = conn.execute("""INSERT INTO lib2_tracks(album_id,title,spotify_id,track_number,disc_number,
+                    duration,monitored,server_source,server_id,legacy_track_id) VALUES(?,?,?,?,1,150000,0,?,?,?)""",
+                    (album, title, f'sp-t{number}', number, server, f'{legacy}-{number}', f'{legacy}-{number}')).lastrowid
+                conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'primary',0)",
+                             (track, artist))
+                conn.execute("INSERT INTO lib2_track_files(track_id,path,file_state,is_primary) VALUES(?,?,'active',1)",
+                             (track, f'{root}/bbno$/bag or die/0{number} - {title}.mp3'))
+                tracks.append(track)
+            albums.append(album)
+        conn.commit()
+    return plex, albums, tracks
+
+
+def test_two_servers_copies_of_one_release_are_found_and_merge(library):
+    """v2 filed each media server's copy of an album as its own release under
+    its own artist row, and the review never paired them: the artist page
+    listed bag or die three times. grouped by the canonical artist, with 3.6.1's
+    per-server legacy ids no conflict, the pair is proven and merges"""
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    plex, albums, _tracks = server_twins(library)
+    _result, findings = scan(library)
+    pair = [f for f in findings if {a['album_id'] for a in f['details'].get('albums', [])} == set(albums)]
+    assert pair, findings
+    details = pair[0]['details']
+    assert details['blocked_reasons'] == []
+    assert details['merge_eligible'] is True and details['auto_merge_eligible'] is True
+
+    result = merge_catalogue_duplicate(library[0], details, albums[0], automatic=True)
+    assert result['success'], result
+    with closing(library[0]._get_connection()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE title='bag or die'").fetchone()[0] == 1
+        # both libraries' files hang off the one release now
+        per_track = conn.execute("""SELECT t.track_number, COUNT(f.id) FROM lib2_tracks t
+            JOIN lib2_track_files f ON f.track_id=t.id WHERE t.album_id=? GROUP BY t.id ORDER BY t.track_number""",
+            (albums[0],)).fetchall()
+        assert [tuple(r) for r in per_track] == [(1, 2), (2, 2)]
+
+
+def test_one_servers_two_albums_of_a_release_stay_review_only(library):
+    """plex itself lists the release twice (a stray folder): merging the
+    catalogue can't change what plex shows, so that pair waits for review"""
+    _plex, albums, _tracks = server_twins(library, second_server='plex')
+    _result, findings = scan(library)
+    pair = [f for f in findings if {a['album_id'] for a in f['details'].get('albums', [])} == set(albums)]
+    assert pair and pair[0]['details']['merge_eligible'] is False

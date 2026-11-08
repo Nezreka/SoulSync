@@ -283,8 +283,14 @@ def provider_id_owner(
     elif service == "musicbrainz":
         predicate, params = "musicbrainz_id = ?", (value,)
     else:
-        predicate = "json_extract(external_ids, '$.' || ?) = ?"
-        params = (service, value)
+        # a literal path in the indexed form: a bound path can never use the
+        # external_ids expression indexes, so it scanned the whole table
+        from core.library2.provider_ids import external_id_sql
+        try:
+            predicate, params = f"{external_id_sql('external_ids', service)} = ?", (value,)
+        except ValueError:  # not a provider the indexes know
+            predicate = "json_extract(external_ids, '$.' || ?) = ?"
+            params = (service, value)
     row = conn.execute(
         f"SELECT id FROM {table} WHERE {predicate} LIMIT 1", params,
     ).fetchone()
@@ -373,6 +379,7 @@ def set_library_v2_match(
         raise LookupError(f"Library v2 {canonical} {entity_id} not found")
 
     ids = parse_external_ids(row["external_ids"])
+    previous = str(ids.get(service) or "").strip()
     value = str(external_id).strip() if external_id not in (None, "") else None
     if value and service == "spotify":
         from core.library2.importer import looks_like_foreign_provider_id
@@ -420,6 +427,15 @@ def set_library_v2_match(
     # stale ``matched`` row, so the queue never offered that entity again. Same
     # transaction as the id, so the two can never be half-applied.
     _sync_attempt_ledger(conn, canonical, int(entity_id), service, value)
+
+    # A source's credit list belongs to the release it matched: a rematch or a
+    # cleared match takes that list's featured artists away with it (3.6.1
+    # did the same). The new match's credits are fetched after the commit
+    # (provider_credits.schedule_match_credits). Same transaction as the id.
+    if (canonical in ("track", "album") and service in ("spotify", "deezer")
+            and (value or "") != previous):
+        from core.library2.provider_credits import drop_source_credits
+        drop_source_credits(conn, canonical, int(entity_id), service)
 
     # The default edition names the release the album row stands for, or the
     # chip says one release while completeness and track-number repair read

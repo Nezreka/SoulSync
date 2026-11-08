@@ -145,6 +145,7 @@ def active_file_subjects(
                                     ta2.position, ar2.id LIMIT 1),
                          ar.name
                        ) AS artist_name,
+                       ar.name AS album_artist_name,
                        ar.sort_name AS artist_sort_name,
                        ar.spotify_id AS artist_spotify_id,
                        ar.musicbrainz_id AS artist_musicbrainz_id,

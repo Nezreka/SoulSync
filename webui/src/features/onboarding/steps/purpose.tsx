@@ -54,7 +54,7 @@ export function PurposeStep() {
       step="purpose"
       wide
       title="What will you use SoulSync for?"
-      lead="Pick everything that applies. Setup only asks about what you choose, and you can switch the rest on whenever you like."
+      lead="Pick everything that applies. Setup only asks about what you choose, and the rest stays out of your way. Customize in the sidebar brings it back any time."
     >
       <div className={s.grid3}>
         {TILES.map((t) => {

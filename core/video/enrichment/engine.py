@@ -329,7 +329,7 @@ class VideoEnrichmentEngine:
         self._backfill_ratings("movie", movie_id)
         return {"ok": True}
 
-    def item_extras(self, kind, item_id) -> dict:
+    def item_extras(self, kind, item_id, watcher=None) -> dict:
         """Live TMDB extras (trailer / where-to-watch / similar) for the detail
         page. Not cached — fetched per view so providers stay current. For an
         owned item we also surface a 'watch on your server' deep link as the first
@@ -363,7 +363,7 @@ class VideoEnrichmentEngine:
                 # Continue Watching: point the CTA at the NEXT episode, not the
                 # show root — Plex/Jellyfin resume an in-progress item themselves.
                 try:
-                    nu = self.db.show_next_up(item_id)
+                    nu = self.db.show_next_up(item_id, watcher=watcher)
                 except Exception:
                     nu = None
                 if nu and nu.get("server_id"):
@@ -889,6 +889,7 @@ class VideoEnrichmentEngine:
             d["episode_total"] = sum(s["episode_total"] for s in seasons)
             d["episode_owned"] = 0
         self._fill_tmdb_ratings(d)
+        self._fill_preview_anime(kind, tmdb_id, d)
         self._cache_put(("detail", kind, tmdb_id, region), d)
         # Stamp ownership AFTER caching so library state is never baked in —
         # the cached-hit path above re-stamps the same rails per call.
@@ -914,6 +915,53 @@ class VideoEnrichmentEngine:
         self._cache_put(("posters", kind, tmdb_id), out)
         return out
 
+    def _fill_preview_anime(self, kind, tmdb_id, d) -> None:
+        """the anime layer for a title that isn't in the library (Frieren from
+        search, Thibs): the AniList worker only links library titles, so a
+        preview the id map knows asks AniList itself, one request, cached
+        with the rest of the detail. never raises."""
+        try:
+            if str(self.db.get_setting("anilist_enabled") or "0") != "1":
+                return
+            entries = []
+            if kind == "show" and d.get("tvdb_id"):
+                entries = self.db.anime_map_entries("show", tvdb_id=d.get("tvdb_id"))
+            if not entries:
+                entries = self.db.anime_map_entries(kind, tmdb_id=tmdb_id, imdb_id=d.get("imdb_id"))
+            if not entries:
+                return
+            from core.video import anilist
+            from core.video.enrichment.backfill import _http_post_json
+            facts = anilist.by_ids(_http_post_json, [e["anilist_id"] for e in entries])
+        except Exception:   # noqa: BLE001 - AniList being down never breaks a preview
+            logger.debug("preview anime layer failed for %s %s", kind, tmdb_id, exc_info=True)
+            return
+        rows = [{**e, **facts[e["anilist_id"]]} for e in entries if e["anilist_id"] in facts]
+        if not rows:
+            return
+        rows.sort(key=lambda r: (r.get("tvdb_season") if r.get("tvdb_season") is not None else 999,
+                                 r.get("tvdb_offset") or 0, r["anilist_id"]))
+        regular = [r for r in rows if (r.get("tvdb_season") or 0) >= 1 and r.get("format") != "MOVIE"]
+        main = (regular or rows)[0]
+        public = self.db._ANIME_PUBLIC
+        slim = lambda r: {k: r.get(k) for k in public}   # noqa: E731
+        d["anime"] = {"main": slim(main), "entries": [slim(r) for r in rows]}
+        if main.get("score"):
+            d["anilist_score"] = main["score"]
+        # split TMDB's lumped seasons the way the library does (Thibs: Frieren
+        # and JJK showed one season on a preview). the season fetch below reads
+        # the same map, so a split season loads its slice of the TMDB season
+        if kind == "show" and d.get("seasons"):
+            from core.video.numbering import split_preview_seasons
+            seasons, source = split_preview_seasons(d["seasons"], rows)
+            if source:
+                d["seasons"] = seasons
+                d["season_count"] = len(seasons)
+                try:
+                    self._cache_put(("anime_split", tmdb_id), {"source": source, "rows": rows})
+                except AttributeError:
+                    pass   # an engine built without its cache (tests)
+
     def _fill_tmdb_ratings(self, d) -> None:
         imdb_id = d.get("imdb_id")
         ow = self.workers.get("omdb")
@@ -934,7 +982,26 @@ class VideoEnrichmentEngine:
 
     def tmdb_season(self, tv_id, season_number) -> dict | None:
         """One season's episodes for a TMDB (un-owned) show — lazy-loaded when the
-        season is selected on the search detail page. Nothing is owned."""
+        season is selected on the search detail page. Nothing is owned. A season
+        the preview split (anime, see _fill_preview_anime) is its slice of the
+        TMDB season it came from, renumbered."""
+        split = None
+        try:
+            split = self._cache_get(("anime_split", tv_id))
+        except AttributeError:
+            split = None
+        src = (split or {}).get("source", {}).get(int(season_number)) if split else None
+        if src is not None:
+            raw = self._tmdb_season_raw(tv_id, src)
+            if not raw:
+                return None
+            from core.video.numbering import anilist_regroup
+            groups, _moved = anilist_regroup(src, raw.get("episodes") or [], split["rows"])
+            return dict(raw, season_number=int(season_number),
+                        episodes=groups.get(int(season_number), []))
+        return self._tmdb_season_raw(tv_id, season_number)
+
+    def _tmdb_season_raw(self, tv_id, season_number) -> dict | None:
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return None

@@ -546,3 +546,30 @@ describe('the made-over hero', () => {
     expect(screen.queryByRole('menu')).toBeNull();
   });
 });
+
+describe('MirroredDetailModal — open editor', () => {
+  const data = { name: 'Road Trip', source: 'spotify', tracks: [] };
+
+  it('a mirror opens its server copy in the editor', async () => {
+    const onOpenEditor = vi.fn(async () => {});
+    renderModal(data, { onOpenEditor });
+    fireEvent.click(screen.getByRole('button', { name: 'Open editor' }));
+    expect(onOpenEditor).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Open editor' })).not.toBeDisabled(),
+    );
+  });
+
+  it('no editor without the action (a user playlist edits itself)', () => {
+    renderModal(data);
+    expect(screen.queryByRole('button', { name: 'Open editor' })).toBeNull();
+  });
+});
+
+it('opens export from the mirrored playlist detail menu', () => {
+  const onExport = vi.fn();
+  renderModal({ name: 'Local Mix', source: 'spotify', tracks: [] }, { onExport });
+  openMore();
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Export playlist' }));
+  expect(onExport).toHaveBeenCalledOnce();
+});

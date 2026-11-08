@@ -6,10 +6,10 @@
  * /library?artist=1) has already resolved by the time the page mounts, so a
  * page asking "where did i come from" there got its own url back.
  *
- * an ARRIVAL is a step from outside the artist views into one (search,
- * discover, the library grid -> an artist or album). it's recorded the moment
- * it happens, so the url tweaks the artist page makes right after it opens
- * can't overwrite where you really came from, and it's handed out once.
+ * An artist origin is the step from outside the artist views into one (search,
+ * discover, the library grid -> an artist or album). It survives redirects,
+ * header changes, and album hops. Both artist page implementations read it,
+ * so it cannot be a one-shot handoff.
  */
 
 export interface NavigationFrom {
@@ -23,7 +23,7 @@ interface Loc {
 }
 
 let lastFrom: NavigationFrom | null = null;
-let arrival: NavigationFrom | null = null;
+let artistOrigin: NavigationFrom | null = null;
 
 /** an artist or album page: the library's artist/album views, or artist-detail */
 export function isArtistView(loc: Loc | null | undefined): boolean {
@@ -34,29 +34,35 @@ export function isArtistView(loc: Loc | null | undefined): boolean {
   return params.has('artist') || params.has('album') || params.has('discover');
 }
 
-export function noteNavigation(from: Loc | undefined, to?: Loc | undefined) {
+export function noteNavigation(from: Loc | undefined, to?: Loc) {
   if (!from) {
     lastFrom = null;
     return;
   }
-  lastFrom = { pathname: from.pathname, searchStr: from.searchStr ?? '' };
-  if (to && isArtistView(to) && !isArtistView(from)) arrival = lastFrom;
+  const previous = { pathname: from.pathname, searchStr: from.searchStr ?? '' };
+  lastFrom = previous;
+  if (!to) return;
+  if (isArtistView(to)) {
+    if (!isArtistView(from)) artistOrigin = previous;
+  } else {
+    artistOrigin = null;
+  }
 }
 
+/** The source of the current router transition, if there is one. */
 export function lastNavigationFrom(): NavigationFrom | null {
   return lastFrom;
 }
 
-/** the page an arrival at an artist view came from, once; null when there
- *  was none since the last time it was taken (a cold load, or a hop inside) */
-export function takeArtistArrival(): NavigationFrom | null {
-  const taken = arrival;
-  arrival = null;
-  return taken;
+/** The page this artist navigation chain started on. Reading it does not
+ * consume it: route redirects and both artist page implementations need the
+ * same answer until the chain is left. */
+export function artistNavigationOrigin(): NavigationFrom | null {
+  return artistOrigin;
 }
 
 /** a new router starts with no history (tests make one per render) */
 export function resetNavigationHistory() {
   lastFrom = null;
-  arrival = null;
+  artistOrigin = null;
 }

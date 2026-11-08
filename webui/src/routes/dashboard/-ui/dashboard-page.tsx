@@ -25,6 +25,7 @@
 import { useEffect } from 'react';
 
 import { FinishSetupCard } from '@/features/onboarding/checklist-card';
+import { useFeatureOn } from '@/platform/features';
 
 import { useDashboardHeader } from '../-dash.header';
 import { ActiveDownloadsShell } from './active-downloads-shell';
@@ -40,6 +41,10 @@ import { WeeklyDigest } from './weekly-digest';
 
 export function DashboardPage() {
   const header = useDashboardHeader();
+  // cards for parts this profile switched off stay off the dashboard (#1909)
+  const statsOn = useFeatureOn('stats');
+  const playlistsOn = useFeatureOn('playlists');
+  const automationsOn = useFeatureOn('automations');
 
   useEffect(() => {
     window.workerOrbs?.setPage('dashboard');
@@ -57,7 +62,7 @@ export function DashboardPage() {
               dismissed, or for anyone who isn't an admin. */}
           <FinishSetupCard />
           {/* This week in listening — renders nothing until plays exist. */}
-          <WeeklyDigest />
+          {statsOn ? <WeeklyDigest /> : null}
           {/* Only while something is downloading. It stays full width: the
               download cards are painted by vanilla into this shell. */}
           <ActiveDownloadsShell />
@@ -69,8 +74,8 @@ export function DashboardPage() {
           <ListenBand />
         </div>
         <aside className="dash-side" aria-label="Your system">
-          <SyncRail />
-          <AutomationsCard compact />
+          {playlistsOn ? <SyncRail /> : null}
+          {automationsOn ? <AutomationsCard compact /> : null}
           <QuickNavTiles header={header} />
         </aside>
       </div>

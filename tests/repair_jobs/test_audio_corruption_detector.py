@@ -543,6 +543,32 @@ def test_a_run_stopped_partway_keeps_what_it_already_decoded(tmp_path, monkeypat
     assert db.remembered() == set(decoded)          # nothing decoded was lost
 
 
+def test_a_decode_still_running_at_the_stop_is_kept_too(tmp_path, monkeypatch):
+    """two workers: when the stop lands one file is mid-decode. the pool
+    waits for it, and its pass is remembered instead of thrown away"""
+    import time
+    db, files = _library(tmp_path, count=40)
+    monkeypatch.setattr(mod, "_decoder_available", lambda: True)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: p)
+    decoded = []
+
+    def slow(p):
+        time.sleep(0.05)
+        decoded.append(p)
+        return True, ""
+    monkeypatch.setattr(mod, "check_flac_integrity", slow)
+    cfg = MagicMock()
+    cfg.get.side_effect = lambda key, default=None: (
+        {"workers": 2} if key.endswith(".settings") else default)
+    ctx = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=cfg,
+                     should_stop=lambda: len(decoded) >= 9)
+
+    AudioCorruptionDetectorJob().scan(ctx)
+
+    assert 9 <= len(decoded) < 40
+    assert db.remembered() == set(decoded)
+
+
 def test_an_unreachable_library_does_not_wipe_the_memory(tmp_path, monkeypatch):
     db, files = _library(tmp_path)
     _run(db, tmp_path, monkeypatch)
@@ -600,3 +626,32 @@ def test_a_scoped_run_does_not_forget_what_it_did_not_see(tmp_path, monkeypatch)
     AudioCorruptionDetectorJob().scan(ctx)
 
     assert db.remembered() == set(files)
+
+
+def test_a_catalogue_read_failure_is_an_error_and_forgets_nothing(tmp_path, monkeypatch):
+    """3.6.1 counted a failed track read as an error. v2 logged it at warning,
+    walked the disk alone, and called that a full pass: the remembered
+    verdicts of every catalogue file it never saw were pruned, so the next
+    run re-decoded the whole library."""
+    _prep(monkeypatch, {})
+
+    def broken(*_a, **_k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects", broken)
+    pruned = []
+
+    class _Memory:
+        def load(self): return {"/lib/known.flac": (1, 1, "ok")}
+        def prune(self, keep, known): pruned.append(1); return 0
+        def commit(self): pass
+        def close(self): pass
+        def get(self, *_a, **_k): return None
+        def remember(self, *_a, **_k): pass
+
+    monkeypatch.setattr(mod._IntegrityMemory, "open", classmethod(lambda cls, db: _Memory()))
+    ctx, _findings = _context([], tmp_path)
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert result.errors == 1
+    assert pruned == []

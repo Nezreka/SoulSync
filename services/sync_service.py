@@ -1290,6 +1290,7 @@ class PlaylistSyncService:
                 if owned:
                     match_result.owned_in_library = True
                     logger.info("Skipping wishlist for already-owned recording: %s", spotify_track.name)
+                    wishlist_covered_count += 1  # you have it: nothing is missing
                     continue
 
                 if not add_to_wishlist:
@@ -1377,7 +1378,7 @@ class PlaylistSyncService:
                     drop_reasons[drop_reason] = drop_reasons.get(drop_reason, 0) + 1
 
             logger.info(f"Successfully added {wishlist_added_count}/{len(unmatched_tracks)} tracks to wishlist")
-            if unmatched_tracks and wishlist_covered_count == 0:
+            if add_to_wishlist and unmatched_tracks and wishlist_covered_count == 0:
                 # #1621: the "doesn't seem to try" silence — every miss dropped
                 # without a trace (wing-it stub gate / ignore-list swallows).
                 # Loud at WARNING so a 0-of-N wishlist add is diagnosable.

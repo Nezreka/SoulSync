@@ -504,9 +504,15 @@ def export_library_artists():
         conn = database._get_connection()
         try:
             cur = conn.cursor()
+            # the artists you have, once each: lib2_artists also holds
+            # featured credits, discography / wishlist / watchlist rows and
+            # alias members, and 3.6.1's export was the owned library
+            from core.library2.sql_util import owned_sql
             cur.execute(f"""
                 SELECT id, name, soul_id, {_ARTIST_IDS_SQL}
-                FROM lib2_artists ORDER BY name COLLATE NOCASE
+                FROM lib2_artists
+                WHERE canonical_artist_id IS NULL AND {owned_sql('artist', 'lib2_artists')}
+                ORDER BY name COLLATE NOCASE
             """)
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
@@ -1432,6 +1438,19 @@ def get_watchlist_scan_history():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route('/api/watchlist/found', methods=['GET'])
+def get_watchlist_found():
+    """What recent scans added to the wishlist, grouped by release (the page shelf)."""
+    try:
+        limit = min(50, max(1, int(request.args.get('limit', 24) or 24)))
+        releases = get_database().get_watchlist_found_releases(
+            limit=limit, profile_id=get_current_profile_id())
+        return jsonify({"success": True, "releases": releases})
+    except Exception as e:
+        logger.error(f"Error getting watchlist found releases: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/watchlist/scan/history/<run_id>/tracks', methods=['GET'])
 def get_watchlist_scan_history_tracks(run_id):
     """The track ledger (added/skipped) for one past scan run."""
@@ -1635,9 +1654,9 @@ def watchlist_artist_config(artist_id):
                     SELECT banner_url, summary, style, mood, label, genres
                     FROM lib2_artists
                     WHERE spotify_id = ?
-                       OR json_extract(external_ids, '$.itunes') = ?
-                       OR json_extract(external_ids, '$.deezer') = ?
-                       OR json_extract(external_ids, '$.discogs') = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.discogs') AS TEXT)) = ?
                        OR musicbrainz_id = ?
                     LIMIT 1
                 """, (

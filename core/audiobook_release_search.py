@@ -1071,6 +1071,24 @@ def score_release(
     return release
 
 
+def _blocked_keys_for_search() -> set:
+    """The blocks a search honours: the searching profile's own, and the
+    shared ones the download monitor makes for a release that failed (those
+    are written as profile 1). It read profile 1's list only, so a release
+    another profile blocked kept being offered and grabbed for them."""
+    from core.audiobook_database import get_audiobook_db
+    from core.profile_context import get_current_profile_id
+    db = get_audiobook_db()
+    blocked = set(db.blocked_keys(1))
+    try:
+        pid = int(get_current_profile_id() or 1)
+    except Exception:  # noqa: BLE001 - no readable profile: the shared list alone
+        pid = 1
+    if pid != 1:
+        blocked |= set(db.blocked_keys(pid))
+    return blocked
+
+
 def rank_releases(
     releases: Sequence[AudiobookRelease],
     book: Dict[str, Any],
@@ -1122,8 +1140,7 @@ def rank_releases(
     # automatically. Without this the wishlist re-grabs the same broken posting
     # forever: it fails, returns to the wishlist, and is found again next pass.
     try:
-        from core.audiobook_database import get_audiobook_db
-        blocked = get_audiobook_db().blocked_keys()
+        blocked = _blocked_keys_for_search()
         if blocked:
             from core.audiobook_database import AudiobookDatabase
             keep = [r for r in keep

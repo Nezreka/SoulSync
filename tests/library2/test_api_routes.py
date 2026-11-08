@@ -76,6 +76,10 @@ def api(tmp_path, monkeypatch):
     # The trigger's debounce/runner and both migration hooks have own tests.
     monkeypatch.setattr('core.library2.unmapped_trigger.schedule_unmapped_artist_reconcile',
                         lambda *args, **kwargs: True)
+    # a job kind still marked running by an earlier test must not 409 this one
+    from api import library_v2 as _api_module
+    from core.library2.job_registry import JobRegistry
+    monkeypatch.setattr(_api_module, "_job_registry", JobRegistry())
     db_path = str(tmp_path / "lib2.db")
     conn = row_conn(db_path)
     from core.library2.schema import ensure_library_v2_schema
@@ -149,6 +153,26 @@ def api(tmp_path, monkeypatch):
            "ep": ep_id, "album_track": album_track,
            "single_track": single_track, "ep_track": ep_track}
     yield app.test_client(), db, ids
+    # the routes hand their work to "lib2-*" threads. one left running into the
+    # next test ran against that test's monkeypatched fakes (the same row ids
+    # in every fresh db) and held its job kind, so under xdist load a later
+    # test saw a resolve it never asked for or a 409 for a retag it never ran
+    _join_route_threads()
+
+
+def _join_route_threads(timeout: float = 30.0) -> None:
+    deadline = time.monotonic() + timeout
+    for thread in list(threading.enumerate()):
+        if thread is not threading.current_thread() and thread.name.startswith("lib2-"):
+            thread.join(max(0.0, deadline - time.monotonic()))
+
+
+def _patience(seconds: float = 30.0):
+    """Polls until a deadline, not a fixed count: 200 x 10ms was two seconds,
+    which a loaded xdist worker overran and then failed on a stale status."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        yield
 
 
 def _conn(db: FakeDB) -> sqlite3.Connection:
@@ -156,7 +180,7 @@ def _conn(db: FakeDB) -> sqlite3.Connection:
 
 
 def _wait_for_job(client, job_id: str):
-    for _ in range(300):
+    for _ in _patience():
         state = client.get(
             "/api/library/v2/jobs/status", query_string={"job_id": job_id},
         ).get_json()
@@ -476,7 +500,7 @@ def test_track_replaygain_analyzes_synchronously(api, monkeypatch):
     monkeypatch.setattr("core.replaygain.is_ffmpeg_available", lambda: True)
     monkeypatch.setattr(
         "core.library2.replaygain.analyze_track_replaygain",
-        lambda conn, track_id, config_manager=None: {
+        lambda conn, track_id, config_manager=None, **_kw: {
             "analyzed": True, "track_gain_db": 2.5, "error": None,
         },
     )
@@ -489,7 +513,7 @@ def test_fetch_lyrics_endpoint_writes_synchronously(api, monkeypatch):
     client, _db, ids = api
     monkeypatch.setattr(
         "core.library2.lyrics.fetch_track_lyrics",
-        lambda conn, track_id, config_manager=None: {"fetched": True, "error": None},
+        lambda conn, track_id, config_manager=None, **_kw: {"fetched": True, "error": None},
     )
     response = client.post(f"/api/library/v2/tracks/{ids['album_track']}/fetch-lyrics")
     assert response.status_code == 200
@@ -500,7 +524,7 @@ def test_fetch_lyrics_endpoint_surfaces_unavailable_error(api, monkeypatch):
     client, _db, ids = api
     monkeypatch.setattr(
         "core.library2.lyrics.fetch_track_lyrics",
-        lambda conn, track_id, config_manager=None: {
+        lambda conn, track_id, config_manager=None, **_kw: {
             "fetched": False, "error": "No lyrics available for this track",
         },
     )
@@ -1500,7 +1524,7 @@ def test_bulk_monitor_updates_rules_projection_and_sets_hand_set_tracks(api):
     assert response.status_code == 200
     started = response.get_json()
     assert started["job_id"]
-    for _ in range(200):
+    for _ in _patience():
         status = client.get(
             "/api/library/v2/jobs/status",
             query_string={"job_id": started["job_id"]},
@@ -1548,7 +1572,7 @@ def test_bulk_monitor_album_allowlist_excludes_hidden_releases(api):
     )
     assert response.status_code == 200
     job_id = response.get_json()["job_id"]
-    for _ in range(200):
+    for _ in _patience():
         status = client.get(
             "/api/library/v2/jobs/status",
             query_string={"job_id": job_id},
@@ -1631,7 +1655,7 @@ def test_artist_actions_include_linked_alias_releases(api, monkeypatch):
         json={"scope": "all", "monitored": False},
     )
     job_id = response.get_json()["job_id"]
-    for _ in range(200):
+    for _ in _patience():
         status = client.get(
             "/api/library/v2/jobs/status", query_string={"job_id": job_id},
         ).get_json()
@@ -1816,6 +1840,46 @@ def test_delete_artist_removes_rows_mirrors_and_artwork(api):
     assert db.watchlist_removes and db.watchlist_removes[0]["ext_id"] == "sp-drake"
     assert not art.exists()
     assert not thumb.exists()
+
+
+def _seed_other_profiles_intent(db, ids, profile_id=3):
+    with _conn(db) as conn:
+        conn.execute(
+            "INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored, "
+            "provenance) VALUES('artist', ?, ?, 1, 'user_explicit')", (ids["artist"], profile_id))
+        conn.execute(
+            "INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, "
+            "projection_version) VALUES(?, ?, 1, 'track_rule:user_explicit', 1)",
+            (profile_id, ids["ep_track"]))
+        conn.commit()
+
+
+def test_delete_artist_withdraws_every_profiles_wish_and_watch(api):
+    """profile 3 watches the artist and wished for one of its tracks. the
+    admin deletes the artist: the delete drops every profile's wanted rows,
+    so the withdrawals go out for profile 3 too, not only for the profile
+    that clicked. before, profile 3's wishlist kept searching for the track
+    and its watchlist kept finding new releases of a deleted artist."""
+    client, db, ids = api
+    _seed_other_profiles_intent(db, ids)
+
+    resp = client.delete(f"/api/library/v2/artists/{ids['artist']}").get_json()
+
+    assert resp["success"] is True
+    assert {r["profile_id"] for r in db.wishlist_removes} == {1, 3}
+    assert {r["profile_id"] for r in db.watchlist_removes} == {1, 3}
+
+
+def test_delete_album_withdraws_every_profiles_wish(api):
+    client, db, ids = api
+    _seed_other_profiles_intent(db, ids)
+
+    resp = client.delete(f"/api/library/v2/albums/{ids['ep']}").get_json()
+
+    assert resp["success"] is True
+    assert {r["profile_id"] for r in db.wishlist_removes} == {1, 3}
+    # an album delete leaves the artist on everyone's watchlist
+    assert db.watchlist_removes == []
 
 
 def test_delete_featured_artist_keeps_owner_album(api):
@@ -2028,6 +2092,28 @@ def test_artist_delete_preview_for_primary_artist(api):
     assert missing.status_code == 404
 
 
+def test_a_media_server_artist_is_said_to_come_back_on_the_next_sync(api):
+    """3.6.1 told you a media-server artist comes back on the next scan; the
+    preview says it before the delete, and the delete's answer says it too"""
+    client, db, ids = api
+    quiet = client.get(f"/api/library/v2/artists/{ids['artist']}/delete-preview").get_json()
+    assert quiet["returns_on_rescan"] is False and quiet["media_servers"] == []
+
+    conn = _conn(db)
+    conn.executemany(
+        "INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source,"
+        " server_id, match_status) VALUES ('artist', ?, ?, ?, 'recognized')",
+        [(ids["artist"], "plex", "p1"), (ids["artist"], "jellyfin", "j1")])
+    conn.commit()
+    conn.close()
+
+    preview = client.get(f"/api/library/v2/artists/{ids['artist']}/delete-preview").get_json()
+    assert preview["returns_on_rescan"] is True
+    assert preview["media_servers"] == ["jellyfin", "plex"]
+    deleted = client.delete(f"/api/library/v2/artists/{ids['artist']}").get_json()
+    assert deleted["success"] is True and deleted["returns_on_rescan"] is True
+
+
 def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, monkeypatch):
     client, db, ids = api
     root = tmp_path / "music"
@@ -2072,6 +2158,37 @@ def test_physical_file_delete_preview_is_separate_and_root_safe(api, tmp_path, m
         assert conn.execute(
             "SELECT 1 FROM lib2_albums WHERE id=?", (ids["views"],)
         ).fetchone()
+
+
+def test_a_removed_file_reprojects_wanted_for_every_profile_tracking_the_song(
+        api, tmp_path, monkeypatch):
+    """found in the second #1062 review: a removal re-projected wanted only
+    for the profile acting, so another profile that monitors the song never
+    learned it was missing and its wishlist went stale"""
+    client, db, ids = api
+    path = tmp_path / "keep.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        file_id = conn.execute(
+            "UPDATE lib2_track_files SET path=? WHERE track_id=? RETURNING id",
+            (str(path), ids["album_track"]),
+        ).fetchone()[0]
+        conn.execute("INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id,"
+                     " monitored, provenance) VALUES('track', ?, 3, 1, 'user_explicit')",
+                     (ids["album_track"],))
+        conn.commit()
+    seen = []
+    import core.library2.wanted as wanted
+    real = wanted.recompute_wanted_for_entity
+    monkeypatch.setattr(wanted, "recompute_wanted_for_entity",
+                        lambda conn, kind, eid, profile_id=1, **kw: seen.append(profile_id)
+                        or real(conn, kind, eid, profile_id=profile_id, **kw))
+
+    response = client.post(f"/api/library/v2/albums/{ids['views']}/file-remove",
+                           json={"file_ids": [file_id]})
+
+    assert response.status_code == 200
+    assert {1, 3} <= set(seen)
 
 
 def test_database_only_file_remove_keeps_disk_file_and_reprojects_wanted(api, tmp_path):
@@ -2561,7 +2678,7 @@ def test_quality_profile_assignment_handles_invalid_stored_repair_settings(api):
         ).fetchone()[0] == 2
 
 
-@pytest.mark.parametrize("limit", ["abc", "0", "-1", "201"])
+@pytest.mark.parametrize("limit", ["abc", "0", "-1", "501"])
 def test_artist_history_rejects_invalid_limits(api, limit):
     client, _db, ids = api
     response = client.get(
@@ -3180,6 +3297,24 @@ def test_ui_preferences_write_rejected_for_non_admin_profile(api):
     assert client.get("/api/library/v2/ui-preferences").status_code == 200
 
 
+def test_a_profile_may_change_only_its_own_artist_toolbar(api):
+    client, db, _ids = api
+    db.active_profile = 7
+
+    resp = client.put("/api/library/v2/ui-preferences",
+                      json={"artist_toolbar": {"enhance_quality": False}})
+
+    assert resp.status_code == 200
+    assert resp.get_json()["preferences"]["artist_toolbar"]["enhance_quality"] is False
+    db.active_profile = 1
+    admin = client.get("/api/library/v2/ui-preferences").get_json()["preferences"]
+    assert admin["artist_toolbar"]["enhance_quality"] is True
+    db.active_profile = 7
+    mixed = client.put("/api/library/v2/ui-preferences",
+                       json={"artist_toolbar": {"history": False}, "track_table": {}})
+    assert mixed.status_code == 403
+
+
 def test_discography_refresh_kicks_mb_reconcile_in_background(api, monkeypatch):
     """§62.6 Stufe 3 wiring: a successful refresh schedules the MB
     release-group reconcile off the hot path (background thread)."""
@@ -3351,6 +3486,23 @@ def test_discovery_resolve_is_read_only_and_finds_an_existing_artist(api):
         ).fetchone()[0] == 0
 
 
+def test_discovery_resolve_finds_an_artist_by_provider_id_alone(api):
+    """a similar-artist bubble links /artist-detail/deezer/<id> with no name.
+    the provider id must still find the artist's row, or an owned artist
+    opens the provider page instead of the library one."""
+    client, db, _ids = api
+
+    found = client.get("/api/library/v2/discovery/artist",
+                       query_string={"source": "spotify", "provider_id": "sp-drake",
+                                     "name": ""}).get_json()
+    nobody = client.get("/api/library/v2/discovery/artist",
+                        query_string={"source": "spotify", "provider_id": "sp-nobody",
+                                      "name": ""}).get_json()
+
+    assert found["artist_id"] == _ids_artist(db, "Drake")
+    assert nobody["artist_id"] is None
+
+
 def test_discovery_materialize_creates_the_artist_once(api):
     """The bookmark/monitor action is the first write — and it is idempotent."""
     client, db, _ids = api
@@ -3423,6 +3575,29 @@ def test_discovery_album_monitor_materializes_only_after_explicit_action(
     assert artist["monitored"] == 0
     assert (album["monitored"], album["origin"], album["expected_track_count"]) == (
         1, "discography", 9)
+
+
+def test_discovery_album_status_survives_a_reload(api, monkeypatch):
+    """the release card's Add to Wishlist tick lived in component state, so
+    it was gone on reload. the status read answers from the monitor rule."""
+    client, _db, _ids = api
+    monkeypatch.setattr("core.library2.completeness.resolve_tracklist",
+                        lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("core.library2.discography.expand_artist_discography",
+                        lambda *_args, **_kwargs: {})
+    client.post("/api/library/v2/discovery/album", json={
+        "source": "deezer", "artist_source": "deezer", "artist_provider_id": "dz-fresh",
+        "artist_name": "Fresh Artist", "album_provider_id": "301",
+        "album_name": "Fresh Album", "album_type": "album", "track_count": 9,
+    })
+
+    body = client.get("/api/library/v2/discovery/album-status",
+                      query_string=[("source", "deezer"), ("id", "301"), ("id", "999")]).get_json()
+
+    assert body["statuses"]["301"]["wished"] is True
+    assert "999" not in body["statuses"]
+    assert client.get("/api/library/v2/discovery/album-status",
+                      query_string=[("id", "301")]).get_json()["statuses"] == {}
 
 
 def test_discovery_never_writes_a_legacy_id_into_a_provider_column(api):
@@ -3505,6 +3680,28 @@ def test_discovery_reports_owned_only_for_live_files(api):
     assert owned["owned"] is True
     assert watched["artist_id"] is not None
     assert watched["owned"] is False
+
+
+def test_discovery_reports_whether_the_library_holds_the_artist(api):
+    """a watched artist is in the library and opens there; a row that is only
+    a guest credit is not, and stays on the provider page, writing nothing."""
+    client, db, _ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("INSERT INTO lib2_artists(name, sort_name, spotify_id, monitored) "
+                     "VALUES('Watched Only','Watched Only','sp-watched',1),"
+                     "('Guest Only','Guest Only','sp-guest',0)")
+        conn.commit()
+
+    def lookup(provider_id, name):
+        return client.get("/api/library/v2/discovery/artist",
+                          query_string={"source": "spotify", "provider_id": provider_id,
+                                        "name": name}).get_json()
+
+    assert lookup("sp-drake", "Drake")["in_library"] is True
+    assert lookup("sp-watched", "Watched Only")["in_library"] is True
+    guest = lookup("sp-guest", "Guest Only")
+    assert guest["artist_id"] is not None
+    assert guest["in_library"] is False
 
 
 def _ids_artist(db, name: str) -> int:
@@ -3819,7 +4016,7 @@ def test_resolved_tracklist_gets_every_provider_id_it_can(api, monkeypatch):
 
     client.get(f"/api/library/v2/albums/{ids['single']}?resolve=1")
     _drain(resolved)
-    for _ in range(200):
+    for _ in _patience():
         if len(chain) >= 2:
             break
         time.sleep(0.01)
@@ -3900,7 +4097,7 @@ def test_album_resolve_stops_polling_when_no_provider_answers(api, monkeypatch):
     _drain(resolved)
 
     with closing(_conn(db)) as conn:
-        for _ in range(200):
+        for _ in _patience():
             status = conn.execute(
                 "SELECT tracklist_status FROM lib2_albums WHERE id=?",
                 (ids["single"],)).fetchone()[0]
@@ -4396,6 +4593,24 @@ def test_a_forced_import_still_runs_over_a_converged_library(api, monkeypatch):
         time.sleep(0.01)
 
 
+def test_a_manual_match_fetches_the_new_releases_credits(api, monkeypatch):
+    """3.6.1 queued a credit refetch on a rematch; the native route asks for
+    the new match's guests after it commits, and a clear asks for nothing."""
+    from core.library2 import provider_credits
+    client, _db, ids = api
+    calls = []
+    monkeypatch.setattr(provider_credits, "schedule_match_credits",
+                        lambda database, *a: calls.append(a))
+
+    assert client.put(f"/api/library/v2/albums/{ids['views']}/manual-match",
+                      json={"service": "spotify", "service_id": "sp-views-2"}
+                      ).status_code == 200
+    assert client.delete(f"/api/library/v2/albums/{ids['views']}/manual-match",
+                         json={"service": "spotify"}).status_code == 200
+
+    assert calls == [("albums", ids["views"], "spotify", "sp-views-2")]
+
+
 def test_a_manual_album_match_pins_and_locks_that_release(api):
     """#758 on the native route: the album the user matched is the canonical
     release every tool reads, and the default edition names it (A01)."""
@@ -4562,6 +4777,47 @@ def test_the_old_track_delete_route_can_delete_the_file(api, tmp_path, monkeypat
     assert not path.exists()
     # restorable, the way the v2 page's delete is
     assert list((tmp_path / "Transfer" / ".deleted").rglob(path.name))
+
+
+def test_the_old_album_delete_route_reports_what_it_removed(api, tmp_path, monkeypatch):
+    """the artist page's album delete toast reads tracks_deleted / files_deleted
+    / files_failed, as the 3.6.1 route answered: it always said (0 tracks)."""
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "song.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        album_id = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?",
+                                (ids["album_track"],)).fetchone()[0]
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(path), ids["album_track"]))
+        conn.commit()
+    monkeypatch.setattr("core.library2.file_delete._library_roots", lambda _config=None: [str(root)])
+    body = client.delete(f"/api/library/album/{album_id}?delete_files=true").get_json()
+    assert body["success"] is True
+    assert body["tracks_deleted"] >= 1 and body["files_deleted"] >= 1
+    assert body["files_failed"] == 0
+
+
+def test_the_old_track_delete_route_blacklists_when_asked(api, tmp_path, monkeypatch):
+    """?blacklist=true keeps the file's name from coming back, as in 3.6.1."""
+    client, db, ids = api
+    root = tmp_path / "music"
+    root.mkdir()
+    path = root / "rejected.flac"
+    path.write_bytes(b"audio")
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                     (str(path), ids["album_track"]))
+        conn.commit()
+    monkeypatch.setattr("core.library2.file_delete._library_roots", lambda _config=None: [str(root)])
+    blocked = []
+    monkeypatch.setattr(db, "add_to_blacklist", lambda **kw: blocked.append(kw) or True, raising=False)
+    body = client.delete(
+        f"/api/library/track/{ids['album_track']}?delete_file=true&blacklist=true").get_json()
+    assert body["success"] is True and body["blacklisted"] is True
+    assert [b["blocked_filename"] for b in blocked] == ["rejected.flac"]
 
 
 def test_the_old_track_delete_route_answers_404_for_an_unknown_track(api):

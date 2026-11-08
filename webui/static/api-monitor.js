@@ -801,9 +801,9 @@ async function checkAndHideMetadataUpdaterForNonPlex() {
                     const descElement = metadataCard.querySelector('.metadata-updater-description');
                     if (descElement) {
                         if (data.active_server === 'jellyfin') {
-                            descElement.textContent = 'Download and upload high-quality artist images from Spotify to your Jellyfin server for artists without photos.';
+                            descElement.textContent = 'HD artist photos and backgrounds from fanart.tv, TheAudioDB and Deezer, plus genres, for Jellyfin artists missing them.';
                         } else {
-                            descElement.textContent = 'Download and upload high-quality artist images from Spotify to your Plex server for artists without photos.';
+                            descElement.textContent = 'HD artist photos and backgrounds from fanart.tv, TheAudioDB and Deezer, plus genres and album art, for Plex artists missing them.';
                         }
                     }
                 } else {

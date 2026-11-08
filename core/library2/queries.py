@@ -16,10 +16,12 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from .metadata_overrides import project_metadata, project_metadata_many
 from .paths import library_relative_path
 from .sql_util import (
-    intent_profile_id, monitored_sql, owner_clause, pick, scoped_monitored, scope_visibility_sql,
+    intent_profile_id, library_member_sql, monitored_sql, owner_clause, pick, scoped_monitored,
+    scope_visibility_sql,
 )
 from .status import compute_metadata_gaps, file_status, metadata_scan_status, quality_tier, _coerce_tags
 from .track_files import primary_order
+from utils.logging_config import get_logger
 
 def _alpha_key(column: str) -> str:
     """Upstream's A-Z key (33da6be49): leading punctuation is skipped, so
@@ -92,7 +94,7 @@ def _quality_profile_dict(row: Any) -> Optional[Dict[str, Any]]:
         "id": row["id"],
         "name": row["name"],
         "description": row["description"] if "description" in keys else None,
-        "upgrade_policy": row["upgrade_policy"] or "none",
+        "upgrade_policy": row["upgrade_policy"] or "acceptable",
         "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0) if "upgrade_cutoff_index" in keys else 0,
         "ranked_targets": _ranked(row["ranked_targets"] if "ranked_targets" in keys else None),
         "repair_job_id": row["repair_job_id"] if "repair_job_id" in keys else "quality_upgrade",
@@ -216,7 +218,7 @@ def find_artists_by_name(conn, name: str, *, limit: int = 5) -> List[Dict[str, A
         return []
     rows = conn.execute(
         """
-        SELECT id, name, genres, spotify_id, external_ids
+        SELECT id, name, genres, spotify_id, musicbrainz_id, external_ids
           FROM lib2_artists
          WHERE canonical_artist_id IS NULL AND name LIKE :pattern
          ORDER BY LENGTH(name), name
@@ -237,6 +239,9 @@ def find_artists_by_name(conn, name: str, *, limit: int = 5) -> List[Dict[str, A
             "name": effective["name"],
             "genres": _json_list(effective["genres"]),
             "spotify_id": _artist_provider_ids(row).get("spotify"),
+            # the ids that tie artwork to this artist (#1957)
+            "musicbrainz_id": _artist_provider_ids(row).get("musicbrainz"),
+            "deezer_id": _artist_provider_ids(row).get("deezer"),
         })
     return found
 
@@ -346,6 +351,16 @@ _ALBUM_SORTS = {
 }
 
 
+def _source_has_albums(source: str) -> bool:
+    """Whether a provider's ids are kept on albums at all. A provider the
+    match table doesn't list is filtered as before."""
+    from .match_status import SERVICES
+    for name, _label, entity_types in SERVICES:
+        if name == source:
+            return "album" in entity_types
+    return True
+
+
 def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
                 page: int = 1, limit: int = 75, letter: str = "all",
                 source_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
@@ -390,6 +405,11 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
             params["letter"] = str(letter)[:1]
     from .provider_ids import normalize_provider_name
     source = normalize_provider_name(str(source_filter or "").lstrip("!"))
+    if source and not _source_has_albums(source):
+        # an artist-only provider (genius) carried over from the Artists view:
+        # albums never hold its id, so the filter would empty the grid (3.6.1
+        # left it out)
+        source = ""
     if source:
         # has / has no id from one provider; a leading ! means has none
         parts = [f"COALESCE(json_extract(al.external_ids, '$.{source}'),'') <> ''"]
@@ -503,6 +523,97 @@ _SONG_SORTS = {
 }
 
 
+logger = get_logger("library2.queries")
+
+# The sorts above read every song and sort them all: ~25 s a page on a 310k
+# library (3.6.1 walked an index). With these indexes the same order is read
+# off an index, one page at a time (25 s -> 0.03 s). Built once, off the
+# startup path (bootstrap.run_deferred_backfills): the two on lib2_tracks
+# read the whole table. Until they exist the sorts run as before, which is
+# faster than an index walk without its index.
+SONG_SORT_INDEXES = {
+    "idx_lib2_tracks_added_order": "lib2_tracks(added_at, id, album_id)",
+    "idx_lib2_tracks_album_order": "lib2_tracks(album_id, disc_number, track_number, id)",
+    "idx_lib2_albums_title_order": "lib2_albums(title COLLATE NOCASE, id)",
+    "idx_lib2_albums_year_order": "lib2_albums(year DESC, title COLLATE NOCASE, id)",
+    "idx_lib2_albums_artist_order": "lib2_albums(primary_artist_id, title COLLATE NOCASE, id)",
+    "idx_lib2_artists_sort_order": "lib2_artists(COALESCE(sort_name, name) COLLATE NOCASE, id)",
+}
+_TRACK_ORDER = "t.disc_number, t.track_number, t.id"
+_ALBUM_WALK = ("FROM lib2_albums al CROSS JOIN lib2_tracks t ON t.album_id = al.id"
+               " LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id")
+# the same order as _SONG_SORTS, written the way the indexes are. "x IS NULL,
+# x DESC" is "x DESC": sqlite sorts NULL lowest, so DESC already puts it last
+_INDEXED_SONG_SORTS = {
+    "recent": ("FROM lib2_tracks t CROSS JOIN lib2_albums al ON al.id = t.album_id"
+               " LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id",
+               "t.added_at DESC, t.id DESC"),
+    "album": (_ALBUM_WALK, f"al.title COLLATE NOCASE, al.id, {_TRACK_ORDER}"),
+    "year": (_ALBUM_WALK, f"al.year DESC, al.title COLLATE NOCASE, al.id, {_TRACK_ORDER}"),
+    # albums whose artist row is gone sort first (no name), see _artist_sorted_ids
+    "artist": ("FROM lib2_artists ar CROSS JOIN lib2_albums al ON al.primary_artist_id = ar.id"
+               " CROSS JOIN lib2_tracks t ON t.album_id = al.id",
+               f"COALESCE(ar.sort_name, ar.name) COLLATE NOCASE, ar.id,"
+               f" al.title COLLATE NOCASE, al.id, {_TRACK_ORDER}"),
+}
+_sort_indexes_ready: set = set()
+
+
+def ensure_song_sort_indexes(conn) -> int:
+    """Create the Songs sort indexes that are missing; how many were made.
+    Never raises: without them the sorts are slow, not wrong."""
+    made = 0
+    for name, target in SONG_SORT_INDEXES.items():
+        try:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                            (name,)).fetchone():
+                continue
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {target}")
+            conn.commit()
+            made += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("songs sort index %s not built (retried next start): %s", name, exc)
+    return made
+
+
+def song_sort_indexes_ready(conn) -> bool:
+    """Every Songs sort index exists in this database (kept once true)."""
+    db_file = conn.execute("PRAGMA database_list").fetchone()[2]
+    if db_file and db_file in _sort_indexes_ready:
+        return True
+    names = list(SONG_SORT_INDEXES)
+    have = {r[0] for r in conn.execute(
+        f"SELECT name FROM sqlite_master WHERE type='index' AND name IN ({','.join('?' * len(names))})",
+        names)}
+    ready = have == set(names)
+    if ready and db_file:
+        _sort_indexes_ready.add(db_file)
+    return ready
+
+
+def _artist_sorted_ids(conn, where_sql: str, params: Dict[str, Any], limit: int,
+                       offset: int) -> List[int]:
+    """One page of the artist sort: songs on albums whose artist row is gone
+    first (their name is NULL, which sorts first), then the artist index walk."""
+    gone = [r[0] for r in conn.execute(
+        "SELECT primary_artist_id FROM lib2_albums EXCEPT SELECT id FROM lib2_artists")]
+    lead: List[int] = []
+    if gone:
+        lead = [r[0] for r in conn.execute(
+            f"SELECT t.id {_ALBUM_WALK} WHERE al.primary_artist_id IN"
+            f" (SELECT value FROM json_each(:gone)) AND {where_sql}"
+            f" ORDER BY al.primary_artist_id, al.title COLLATE NOCASE, al.id, {_TRACK_ORDER}",
+            {**params, "gone": json.dumps(gone)})]
+    head = lead[offset:offset + limit]
+    if len(head) >= limit:
+        return head
+    frm, order = _INDEXED_SONG_SORTS["artist"]
+    rest = [r[0] for r in conn.execute(
+        f"SELECT t.id {frm} WHERE {where_sql} ORDER BY {order} LIMIT :limit OFFSET :offset",
+        {**params, "limit": limit - len(head), "offset": max(0, offset - len(lead))})]
+    return head + rest
+
+
 _song_count_cache: Dict[tuple, int] = {}
 
 
@@ -598,9 +709,23 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
     page_sql = (f"WITH hits AS MATERIALIZED (SELECT t.id, t.album_id, t.disc_number, t.track_number,"
                 f" {_fold_sql('t.title')} AS ft, {_alpha_key('t.title')} AS ak {base})"
                 f" SELECT t.id FROM hits t" if q else f"SELECT t.id {base}")
-    ids = [r[0] for r in conn.execute(
-        f"{page_sql} ORDER BY {order} LIMIT :limit OFFSET :offset",
-        {**params, "limit": limit, "offset": (page - 1) * limit})] if total else []
+    indexed = (not q and sort in _INDEXED_SONG_SORTS and total
+               and song_sort_indexes_ready(conn))
+    offset = (page - 1) * limit
+    where_sql = " AND ".join(where)
+    if not total:
+        ids = []
+    elif indexed and sort == "artist":
+        ids = _artist_sorted_ids(conn, where_sql, params, limit, offset)
+    elif indexed:
+        frm, indexed_order = _INDEXED_SONG_SORTS[sort]
+        ids = [r[0] for r in conn.execute(
+            f"SELECT t.id {frm} WHERE {where_sql} ORDER BY {indexed_order}"
+            " LIMIT :limit OFFSET :offset", {**params, "limit": limit, "offset": offset})]
+    else:
+        ids = [r[0] for r in conn.execute(
+            f"{page_sql} ORDER BY {order} LIMIT :limit OFFSET :offset",
+            {**params, "limit": limit, "offset": offset})]
     songs = song_rows(conn, ids)
     capped = filtered and total > SONGS_COUNT_CAP
     total = min(total, SONGS_COUNT_CAP) if capped else total
@@ -626,7 +751,7 @@ def song_rows(conn, track_ids: List[int], *, per_file: bool = False) -> List[Dic
         f"""SELECT t.id, t.title, t.track_number, t.disc_number, t.duration, t.play_count,
                    t.track_artist, t.album_id, al.title AS album_title, al.image_url, al.year,
                    COALESCE(ar.canonical_artist_id, ar.id) AS artist_id, ar.name AS artist_name,
-                   f.id AS file_id, f.path, f.bitrate, f.size,
+                   f.id AS file_id, f.path, f.bitrate, f.sample_rate, f.bit_depth, f.size,
                    (SELECT json_group_array(owned_f.id) {_song_files_sql('t')}) AS file_ids,
                    {_song_copies_sql()} AS copies
               {_SONG_FROM} {files_join}
@@ -649,6 +774,7 @@ def song_rows(conn, track_ids: List[int], *, per_file: bool = False) -> List[Dic
             "year": r["year"], "track_number": r["track_number"],
             "disc_number": r["disc_number"], "duration": r["duration"],
             "bitrate": _bitrate_kbps(r["bitrate"]),
+            "sample_rate": r["sample_rate"], "bit_depth": r["bit_depth"],
             "format": ext if 1 < len(ext) <= 5 else "", "file_path": path,
             "play_count": r["play_count"] or 0, "file_size": r["size"],
             "copies": max(1, int(r["copies"] or 0)),
@@ -825,7 +951,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                al.image_url, {monitored_sql("album", "al")} AS monitored, al.quality_profile_id,
                al.quality_profile_explicit, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id, al.musicbrainz_id,
-               al.primary_artist_id,
+               al.external_ids, al.primary_artist_id,
                pa.quality_profile_id AS artist_quality_profile_id,
                pa.quality_profile_explicit AS artist_quality_profile_explicit,
                al.explicit, al.label, al.style, al.mood,
@@ -881,7 +1007,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         entity_type="release_group",
         provider_fields={int(row["id"]): dict(row) for row in album_rows},
     )
-    albums, eps, singles = [], [], []
+    own_ids = _own_release_ids(conn, album_rows, group)
+    albums, eps, singles, appears_on = [], [], [], []
     for r in album_rows:
         effective, overrides = projected_albums[int(r["id"])]
         album_owns_profile = bool(r["quality_profile_explicit"])
@@ -912,6 +1039,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "spotify_id": r["spotify_id"],
             # the release card's "view on musicbrainz" link
             "musicbrainz_id": r["musicbrainz_id"],
+            # a release you don't have opens dev's download modal from its
+            # provider id, the way the provider page did
+            "provider_ids": _album_provider_ids(r),
             "explicit": (bool(effective["explicit"]) if effective["explicit"] is not None else None),
             "label": effective["label"],
             "style": effective["style"],
@@ -930,7 +1060,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "total_size_bytes": r["total_size_bytes"] or 0,
             "user_overrides": overrides,
         }
-        if effective["album_type"] == "single":
+        if int(r["id"]) not in own_ids:
+            appears_on.append(entry)
+        elif effective["album_type"] == "single":
             singles.append(entry)
         elif effective["album_type"] == "ep":
             eps.append(entry)
@@ -969,6 +1101,18 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "albums": albums,
         "eps": eps,
         "singles": singles,
+        # releases the artist is credited on but not the album artist of
+        # (core/library2/artist_page.appears_on_payload reads these)
+        "appears_on": appears_on,
+        # the artist's OWN tracks on those releases that are on disk here: the
+        # releases' own counts are every track on them (810 for 2 chainz,
+        # whose 62 tracks are guest verses)
+        **_guest_track_counts(conn, group, [e["id"] for e in appears_on]),
+        # the artist list's own rule: one outside it is browsed, its
+        # discography read from the provider rather than written in
+        "in_library": conn.execute(
+            f"SELECT 1 FROM lib2_artists a WHERE a.id = ? AND {library_member_sql('a')}",
+            (canonical_id,)).fetchone() is not None,
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
         "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
@@ -980,6 +1124,78 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "total_size_bytes": sum(e["total_size_bytes"] for e in albums + eps + singles),
         "user_overrides": artist_overrides,
     }
+
+
+def _album_provider_ids(row) -> Dict[str, str]:
+    from .provider_ids import parse_external_ids
+    ids = {k: str(v) for k, v in parse_external_ids(row["external_ids"]).items()
+           if v and k in ("spotify", "deezer", "itunes", "musicbrainz", "tidal", "qobuz")}
+    if row["spotify_id"]:
+        ids.setdefault("spotify", str(row["spotify_id"]))
+    return ids
+
+
+def _guest_track_counts(conn, group, album_ids) -> Dict[str, int]:
+    if not album_ids:
+        return {"guest_track_count": 0, "guest_release_count": 0}
+    marks = ",".join("?" for _ in group)
+    row = conn.execute(
+        f"""SELECT COUNT(DISTINCT t.id), COUNT(DISTINCT t.album_id)
+              FROM lib2_track_artists x
+              JOIN lib2_tracks t ON t.id = x.track_id
+             WHERE x.artist_id IN ({marks})
+               AND t.album_id IN (SELECT value FROM json_each(?))
+               AND EXISTS (SELECT 1 FROM lib2_track_files f
+                            WHERE f.track_id = t.id
+                              AND COALESCE(f.file_state, 'active') = 'active')""",
+        (*[int(g) for g in group], json.dumps([int(a) for a in album_ids])),
+    ).fetchone()
+    return {"guest_track_count": int(row[0] or 0), "guest_release_count": int(row[1] or 0)}
+
+
+def _own_release_ids(conn, album_rows, group) -> set:
+    """The releases that are the artist's own, out of every one they're
+    credited on. A release they only guest on (SZA's SOS, the 1989 deluxe,
+    a soundtrack with one verse) belongs under Appears On, not in the
+    discography beside their own albums.
+
+    The album junction can't tell: it files every track artist who isn't the
+    release's main artist as "featured", the co-headliner of a collaboration
+    and a one-verse guest alike. The track credits can. A release is theirs
+    when they are its main artist, or the lead credit on more than half its
+    tracks (a collaboration). Exactly half is a split single: one side each,
+    and it stays with the artist credited first. One the library holds no tracks of yet (a
+    provider discography entry) goes by its album credit."""
+    group = [int(g) for g in group]
+    own = {int(r["id"]) for r in album_rows if r["primary_artist_id"] in group}
+    rest = [int(r["id"]) for r in album_rows if int(r["id"]) not in own]
+    if not rest:
+        return own
+    marks = ",".join("?" for _ in group)
+    led = {}
+    for row in conn.execute(
+        f"""SELECT t.album_id, COUNT(DISTINCT t.id) AS total,
+                   COUNT(DISTINCT CASE WHEN x.artist_id IN ({marks})
+                                        AND COALESCE(x.role, 'primary') = 'primary'
+                                       THEN t.id END) AS led
+              FROM lib2_tracks t
+              LEFT JOIN lib2_track_artists x ON x.track_id = t.id
+             WHERE t.album_id IN (SELECT value FROM json_each(?))
+             GROUP BY t.album_id""",
+        (*group, json.dumps(rest)),
+    ):
+        led[int(row["album_id"])] = (int(row["total"] or 0), int(row["led"] or 0))
+    for album_id in rest:
+        total, lead = led.get(album_id, (0, 0))
+        # more than half: a split single, one side each, belongs to the
+        # artist it is credited to first, and appears on the other (#2003)
+        if total and lead * 2 > total:
+            own.add(album_id)
+        elif not total and conn.execute(
+                f"SELECT 1 FROM lib2_album_artists WHERE album_id=? AND artist_id IN ({marks})",
+                (album_id, *group)).fetchone():
+            own.add(album_id)
+    return own
 
 
 def _track_artists(conn, track_id: int) -> List[Dict[str, Any]]:

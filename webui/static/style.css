@@ -1605,6 +1605,101 @@ body.max-performance .nav-button.active:hover {
     box-shadow: 0 4px 20px rgba(98, 126, 234, 0.12);
 }
 
+/* the support modal's "my other projects": quieter than the support links
+   above, so the ask stays the ask */
+.support-projects {
+    margin-top: 26px;
+    padding-top: 20px;
+    border-top: 1px solid var(--white-a08);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: left;
+}
+
+.support-projects-label {
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--white-a40);
+    margin-bottom: 2px;
+}
+
+.support-project {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-control);
+    border: 1px solid var(--white-a06);
+    background: var(--white-a03);
+    text-decoration: none;
+    transition: background var(--dur-base) ease, border-color var(--dur-base) ease, transform var(--dur-base) ease;
+}
+
+.support-project:hover {
+    background: rgba(var(--accent-rgb), 0.08);
+    border-color: rgba(var(--accent-rgb), 0.28);
+    transform: translateY(-1px);
+}
+
+.support-project:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb), 0.7);
+    outline-offset: 2px;
+}
+
+.support-project-icon {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-card);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.12);
+}
+
+.support-project-icon svg {
+    width: 18px;
+    height: 18px;
+}
+
+.support-project-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.support-project-name {
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 13px;
+    font-weight: 650;
+    color: var(--white-a90);
+}
+
+.support-project-desc {
+    font-family: 'SF Pro Text', -apple-system, sans-serif;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--white-a50);
+}
+
+.support-project-go {
+    flex-shrink: 0;
+    font-size: 14px;
+    color: var(--white-a30);
+    transition: color var(--dur-base) ease;
+}
+
+.support-project:hover .support-project-go {
+    color: rgb(var(--accent-light-rgb));
+}
+
 /* Version Section */
 .version-section {
     display: flex;
@@ -11730,6 +11825,36 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     align-items: center;
 }
 
+/* the header is add playlist + one More menu now (#1909) */
+.sync-more-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.sync-more-menu {
+    min-width: 300px;
+    max-width: min(360px, calc(100vw - 16px));
+}
+.sync-more-menu .lib-menu-item {
+    padding: 9px 12px;
+}
+.sync-more-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.sync-more-name {
+    font-weight: 600;
+    color: var(--white-a90);
+}
+.sync-more-desc {
+    font-size: 12px;
+    line-height: 1.35;
+    color: var(--white-a50);
+    white-space: normal;
+}
+
 .auto-sync-bulk-menu-custom-row {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -15343,6 +15468,33 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     animation: mirroredOverlayFadeIn 0.25s ease forwards;
 }
 
+/* The sync page shows the window as the playlist's own PAGE: the content
+   area beside the sidebar, no backdrop, no frame. Under the page's sheets
+   and menus (Settings, the schedule picker), which it opens. */
+.mirrored-modal-overlay.mm-as-page {
+    z-index: var(--z-card-overlay);
+    padding: 0;
+    align-items: stretch;
+    justify-content: stretch;
+    background: var(--bg-primary);
+    backdrop-filter: none;
+}
+
+@media (min-width: 769px) {
+    .mirrored-modal-overlay.mm-as-page {
+        left: var(--sidebar-w, 240px);
+    }
+}
+
+.mm-as-page .mirrored-modal {
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
 @keyframes mirroredOverlayFadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -17672,45 +17824,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     filter: saturate(0.55) brightness(0.72);
 }
 
-/* The ring: a conic arc on the cover's corner, the coverage as its sweep and
-   its number in the middle. Only ever rendered when it has something to say. */
-.pl-ring {
-    position: absolute;
-    right: -6px;
-    bottom: -6px;
-    width: 30px;
-    height: 30px;
-    border-radius: var(--radius-circle);
-    display: grid;
-    place-items: center;
-    --ring-color: #e3a63c;
-    background: conic-gradient(var(--ring-color) calc(var(--pct, 0) * 1%), var(--white-a10) 0);
-    box-shadow: 0 0 0 3px #0d0d10;
-}
-
-.pl-ring::after {
-    content: attr(data-pct);
-    position: absolute;
-    inset: 3px;
-    border-radius: var(--radius-circle);
-    background: #111114;
-    display: grid;
-    place-items: center;
-    font-size: 8.5px;
-    font-weight: 700;
-    color: var(--ring-color);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.02em;
-}
-
-.pl-ring--error { --ring-color: #e0554e; }
-.pl-ring--working { --ring-color: rgb(var(--accent-rgb)); animation: pl-ring-pulse 1.6s ease-in-out infinite; }
-
-@keyframes pl-ring-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.55; }
-}
-
 .pl-card-body {
     display: flex;
     flex-direction: column;
@@ -17841,14 +17954,13 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 @media (prefers-reduced-motion: reduce) {
     .pl-card { transition: none; }
     .pl-card:hover { transform: none; }
-    .pl-ring--working { animation: none; }
 }
 
 /* The overflow menu — five actions that used to be five icon-only buttons on
    every card at once, each with tooltip-only meaning. */
 .pl-menu {
     position: fixed;
-    z-index: 1400;
+    z-index: var(--z-menu);
     min-width: 188px;
     padding: 6px;
     border-radius: var(--radius-lg);
@@ -23390,6 +23502,27 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     font-weight: 600;
     color: var(--text-primary);
     letter-spacing: -0.005em;
+    /* the whole name, wrapped: "You Make Me ..." six times told you nothing */
+    white-space: normal;
+    text-overflow: clip;
+    line-height: 1.35;
+}
+.download-missing-modal-content .download-tracks-table .track-name-text {
+    overflow-wrap: anywhere;
+}
+
+/* column widths: the name gets whatever the fixed columns leave */
+.download-missing-modal-content .download-tracks-table .dmt-col-select { width: 44px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-num { width: 48px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-artist { width: 18%; }
+.download-missing-modal-content .download-tracks-table .dmt-col-duration { width: 78px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-status { width: 150px; }
+.download-missing-modal-content .download-tracks-table .dmt-col-actions { width: 112px; }
+
+/* a phone can't fit the fixed columns and a readable name: scroll sideways */
+@media (max-width: 768px) {
+    .download-missing-modal-content .download-tracks-table-container { overflow-x: auto; }
+    .download-missing-modal-content .download-tracks-table { min-width: 720px; }
 }
 
 /* Artist — dim, centered */
@@ -37490,7 +37623,8 @@ div.artist-hero-badge {
 #enhanced-search-input {
     flex-grow: 1; background: transparent; border: none; outline: none;
     font-family: 'Segoe UI', sans-serif; font-size: 16px; font-weight: 500;
-    color: #ffffff; padding: 14px 0;
+    /* the input leads the search box now (#1909), so it keeps a left inset */
+    color: #ffffff; padding: 14px 0 14px 14px;
 }
 #enhanced-search-input::placeholder { color: rgba(255, 255, 255, 0.38); font-weight: 400; }
 .enhanced-cancel-btn {
@@ -37582,7 +37716,7 @@ div.artist-hero-badge {
 @media (max-width: 480px) {
     #enhanced-search-input {
         font-size: 13px;
-        padding: 10px 0;
+        padding: 10px 0 10px 12px;
     }
 
     /* Better album/track results on mobile */
@@ -49661,8 +49795,28 @@ tr.tag-diff-same {
     margin-bottom: 5px;
     transition: filter var(--dur-fast) ease;
 }
-.artist-appears-on-album:hover .artist-appears-on-album-art {
+.artist-appears-on-album-play {
+    display: block;
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+}
+.artist-appears-on-album-play:not(:disabled):hover .artist-appears-on-album-art {
     filter: brightness(1.1);
+}
+.artist-appears-on-link {
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.artist-appears-on-link:hover {
+    text-decoration: underline;
 }
 .artist-appears-on-list {
     list-style: none;
@@ -49687,7 +49841,14 @@ tr.tag-diff-same {
     cursor: pointer;
     transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
-.artist-appears-on-row:hover {
+.artist-appears-on-row:disabled,
+.artist-appears-on-album-play:disabled {
+    cursor: default;
+}
+.artist-appears-on-row:disabled .artist-appears-on-time {
+    color: rgb(var(--accent-rgb));
+}
+.artist-appears-on-row:not(:disabled):hover {
     background: var(--white-a07);
     border-color: var(--white-a10);
 }
@@ -55995,7 +56156,8 @@ tr.tag-diff-same {
 .server-search-overlay.visible { opacity: 1; }
 
 .server-search-popover {
-    width: 580px;
+    /* wide enough for classical titles; long ones wrap below, never cut */
+    width: 760px;
     max-width: 95vw;
     max-height: 80vh;
     background: rgba(20, 20, 28, 0.98);
@@ -56174,19 +56336,26 @@ tr.tag-diff-same {
 .server-search-result-title {
     font-size: 13px;
     font-weight: 600;
+    line-height: 1.35;
     color: var(--white-a90);
-    white-space: nowrap;
+    /* two lines, not one: "Op. 8: I." and "Op. 8: VII." differed only in the cut-off part */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .server-search-result-meta {
     font-size: 11px;
+    line-height: 1.35;
     color: var(--white-a35);
     margin-top: 2px;
-    white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-wrap: anywhere;
 }
 
 .server-search-result-details {
@@ -57177,6 +57346,13 @@ body.max-performance #page-particles-canvas {
     text-align: center;
     padding: 0 4px;
     box-shadow: 0 2px 6px rgba(var(--accent-rgb), 0.3);
+}
+
+/* files waiting in quarantine, nothing downloading */
+.dl-nav-badge.dl-nav-badge--review {
+    background: rgb(var(--warning-rgb));
+    color: #1a1204;
+    box-shadow: 0 2px 6px rgba(var(--warning-rgb), 0.3);
 }
 
 /* Batch filter banner above download list (also the review sub-view banner
@@ -59756,6 +59932,7 @@ body.max-performance #page-particles-canvas {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    /* holds Select All now (#1909), its label inherits the head's caps */
     margin-bottom: 10px;
     color: rgba(255, 255, 255, 0.48);
     font-size: 12px;
@@ -66656,12 +66833,33 @@ select.ma-input { appearance: auto; }
 .ma-import-text { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: rgba(var(--text-bright-rgb), 0.5); }
 .ma-pct { font-variant-numeric: tabular-nums; color: rgba(var(--text-bright-rgb), 0.75); }
 
+/* scrobbling your own plays (Phonk_Ben_67): one line under its service row */
+.ma-scrobble {
+    padding: 0 18px 16px 72px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    font-size: 12.5px; color: rgba(var(--text-bright-rgb), 0.62);
+}
+.ma-scrobble b { color: rgba(var(--text-bright-rgb), 0.88); font-weight: 600; }
+.ma-scrobble .ma-btn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+.ma-switch { position: relative; width: 36px; height: 20px; flex: none; }
+.ma-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.ma-switch span {
+    position: absolute; inset: 0; border-radius: var(--radius-pill); background: var(--white-a12);
+    pointer-events: none; transition: background var(--dur-fast) ease;
+}
+.ma-switch span::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+    background: rgb(var(--text-bright-rgb)); transition: transform var(--dur-fast) ease;
+}
+.ma-switch input:checked + span { background: rgb(var(--accent-rgb)); }
+.ma-switch input:checked + span::after { transform: translateX(16px); }
+.ma-switch input:focus-visible + span { outline: 2px solid rgba(var(--accent-light-rgb), 0.8); outline-offset: 2px; }
+
 .ma-foot { margin: 0; padding: 0 4px 26px; font-size: 12px; line-height: 1.5; color: rgba(var(--text-bright-rgb), 0.45); }
 
 @media (max-width: 520px) {
     .ma-head { padding: 22px 20px 18px; }
     .ma-body { padding: 0 16px 4px; }
-    .ma-panel, .ma-import { padding-left: 18px; }
+    .ma-panel, .ma-import, .ma-scrobble { padding-left: 18px; }
     .ma-row-main { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -67797,6 +67995,138 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .nav-section-label.collapsed .nav-section-chevron { transform: rotate(-90deg); }
 .nav-item-hidden { display: none !important; }
 
+/* what this profile chose to hide (#1909, shell/features.ts). the html
+   attribute is set before paint, the doubled class out-ranks every display
+   rule on nav items and the side toggle without another !important. */
+html[data-features-off] .nav-feature-hidden.nav-feature-hidden { display: none; }
+
+/* the way into the picker. quiet on purpose, it's not a page. */
+.sidebar-customize {
+    padding: 6px 12px 0;
+}
+.sidebar-customize-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-sizing: border-box;
+    width: 100%;
+    height: 34px;
+    padding: 0 12px 0 16px;
+    background: transparent;
+    border: 1px dashed var(--white-a14);
+    border-radius: var(--radius-md);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--white-a60);
+    cursor: pointer;
+    transition: background var(--dur-xfast) ease, color var(--dur-xfast) ease, border-color var(--dur-xfast) ease;
+}
+.sidebar-customize-btn:hover,
+.sidebar-customize-btn:focus-visible {
+    background: var(--white-a05);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: var(--white-a90);
+}
+.sidebar-customize-btn svg {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+}
+/* a page this profile hid, opened from a link (#1909, shell/hidden-page-note.ts).
+   sits over the top of the content column, not the sidebar */
+.hidden-page-note {
+    position: fixed;
+    top: 14px;
+    left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: calc(100vw - var(--sidebar-w) - 32px);
+    padding: 7px 8px 7px 16px;
+    border: 1px solid var(--white-a14);
+    border-radius: var(--radius-pill);
+    background: var(--bg-raised);
+    box-shadow: 0 10px 30px var(--black-a45);
+    color: var(--white-a90);
+    font-size: 13px;
+}
+.hidden-page-note-show {
+    padding: 5px 14px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: rgb(var(--accent-rgb));
+    color: var(--black-a90);
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+}
+.hidden-page-note-show:disabled { opacity: 0.6; cursor: default; }
+.hidden-page-note-close {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-circle);
+    background: transparent;
+    color: var(--white-a60);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+}
+.hidden-page-note-close:hover { background: var(--white-a08); color: var(--white-a90); }
+@media (max-width: 768px) {
+    .hidden-page-note {
+        left: 50%;
+        max-width: calc(100vw - 32px);
+    }
+}
+/* the one-time offer above the button (shell/features.ts renderOffer) */
+.sidebar-customize-offer {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+    padding: 12px 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: var(--radius-lg);
+    background: rgba(var(--accent-rgb), 0.08);
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--white-a65);
+}
+.sidebar-customize-offer strong {
+    font-size: 13px;
+    color: var(--white-a90);
+}
+.sidebar-customize-keep {
+    align-self: flex-start;
+    margin-top: 2px;
+    padding: 0;
+    border: none;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--white-a60);
+    cursor: pointer;
+}
+.sidebar-customize-keep:hover { color: var(--white-a90); text-decoration: underline; }
+.sidebar-customize.has-offer .sidebar-customize-btn {
+    border-style: solid;
+    border-color: rgba(var(--accent-rgb), 0.55);
+    color: var(--white-a90);
+}
+html[data-sidebar="collapsed"] .sidebar-customize-offer { display: none; }
+html[data-sidebar="collapsed"] .sidebar-customize { padding: 6px 0 0; }
+html[data-sidebar="collapsed"] .sidebar-customize-btn {
+    width: 44px;
+    margin: 0 auto;
+    padding: 0;
+    justify-content: center;
+}
+
 /* ══ Collapsible sidebar (#1155, wishx) ═══════════════════════════════════
    One toggle, two states: full width, or just wide enough for the icons.
    The state is an attribute on <html> so --sidebar-w resolves before first
@@ -67887,7 +68217,7 @@ html[data-sidebar="collapsed"] .nav-section-label {
     pointer-events: none;
     overflow: hidden;
 }
-html[data-sidebar="collapsed"] .nav-item-hidden { display: flex !important; }
+html[data-sidebar="collapsed"] .nav-item-hidden:not(.nav-feature-hidden) { display: flex !important; }
 
 /* The header's 24px side padding eats 48px of a 68px sidebar, leaving a 20px
    content box — everything inside it overflowed right and got clipped by the
@@ -75725,6 +76055,34 @@ body.src-modal-open { overflow: hidden; }
 @media (max-width: 600px) {
     #settings-page .video-4k-path { margin-left: 0; }
 }
+/* the drive map: each server drive, where soulsync reaches it, its check */
+#settings-page .video-drive-map { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 12px; }
+#settings-page .video-drive-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    gap: 4px 12px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--white-a08);
+    border-radius: 10px;
+    background: var(--white-a03);
+}
+#settings-page .video-drive-server { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#settings-page .video-drive-server code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings-page .video-drive-count { color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-drive-status { grid-column: 2; color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-drive-status.is-ok { color: var(--success); }
+#settings-page .video-drive-status.is-bad { color: var(--danger-light); }
+#settings-page .video-drive-row.is-auto { background: transparent; }
+#settings-page .video-drive-known {
+    overflow: hidden; color: var(--text-secondary); font-size: 13px;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+#settings-page .video-extra-heading { margin: 18px 0 4px; font-size: 14px; }
+@media (max-width: 600px) {
+    #settings-page .video-drive-row { grid-template-columns: minmax(0, 1fr); }
+    #settings-page .video-drive-status { grid-column: 1; }
+}
 
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -77417,3 +77775,56 @@ body.src-modal-open { overflow: hidden; }
 .mm-hero--adding .mm-desc,
 .mm-hero--adding .mm-desc-edit,
 .mm-hero--adding .mm-eyebrow { display: none; }
+
+/* adopt: a server playlist made outside soulsync, offered to My Playlists */
+.server-no-source-banner:has(.server-adopt-btn) {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+.server-adopt-btn {
+    flex: none;
+    padding: 7px 14px;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    border-radius: var(--radius-pill);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 650;
+    cursor: pointer;
+    transition: background var(--dur-fast) ease;
+}
+.server-adopt-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.28); }
+.server-adopt-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* tag every song on a plex playlist with a mood (wolf39us) */
+.server-tag-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+.server-tag-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.server-tag-input {
+    width: 180px;
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--white-a12);
+    border-radius: var(--radius-pill);
+    background: var(--white-a04);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+.server-tag-hint {
+    flex-basis: 100%;
+    font-size: 11px;
+    color: var(--text-secondary);
+}

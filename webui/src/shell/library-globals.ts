@@ -179,19 +179,37 @@ window.addEventListener(_PAGE_WILL_CHANGE, (event) => {
 // nav button width stays consistent across the rest of the sidebar.
 const _SIDEBAR_BREADCRUMB_ARTIST_MAXLEN = 14;
 
+// The artist the Library page is showing. Every artist opens there now (the
+// one artist page), not on artist-detail, so the breadcrumb lost its name;
+// the library artist views set this while they're up.
+let _libraryArtistName: string | null = null;
+
+/** The Library page shows (or stopped showing) an artist: repaint the
+ *  sidebar's "Library / <Artist>". */
+export function setLibraryArtistBreadcrumb(name: string | null): void {
+  _libraryArtistName = name && name.trim() ? name : null;
+  _updateSidebarLibraryBreadcrumb();
+}
+
 export function _updateSidebarLibraryBreadcrumb(): void {
   // Rewrite the Library nav button label between plain "Library" and a
-  // "Library / <Artist>" breadcrumb depending on whether the user is on
-  // the artist-detail pseudo-page. Pure visual - touches no app state.
+  // "Library / <Artist>" breadcrumb: on the artist-detail pseudo-page, or on
+  // the Library page while it shows an artist. Pure visual - touches no app
+  // state.
   const btn = document.querySelector('[data-page="library"]');
   if (!btn) return;
   const textEl = btn.querySelector('.nav-text') as HTMLElement | null;
   if (!textEl) return;
 
   const onArtistDetail = typeof currentPage === 'string' && currentPage === 'artist-detail';
-  const artistName = onArtistDetail ? artistDetailPageState.currentArtistName || '' : '';
+  const onLibrary = typeof currentPage === 'string' && currentPage === 'library';
+  const artistName = onArtistDetail
+    ? artistDetailPageState.currentArtistName || ''
+    : onLibrary
+      ? _libraryArtistName || ''
+      : '';
 
-  if (!onArtistDetail || !artistName) {
+  if (!artistName) {
     // Default state: plain "Library" label. Use textContent so we wipe
     // any previously-injected breadcrumb spans cleanly.
     textEl.textContent = 'Library';
@@ -372,6 +390,8 @@ export async function playLibraryTrack(
           album_thumb_url?: string;
           album_title?: string;
           artist_name?: string;
+          lib2_track_id?: number | string | null;
+          lib2_artist_id?: number | string | null;
         };
       };
       if (_dbData && _dbData.success && _dbData.track) {
@@ -384,6 +404,9 @@ export async function playLibraryTrack(
           bitrate: _row.bitrate ?? track.bitrate,
           artist_id: _row.artist_id ?? track.artist_id,
           album_id: _row.album_id ?? track.album_id,
+          // the row is a v2 row: keep its ids, or Now Playing loses Report issue
+          lib2_track_id: _row.lib2_track_id ?? track.lib2_track_id,
+          lib2_artist_id: _row.lib2_artist_id ?? track.lib2_artist_id,
           _stats_image: _row.image_url || _row.album_thumb_url || track._stats_image || null,
         };
         if (_row.album_title) albumTitle = _row.album_title;

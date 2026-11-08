@@ -53,7 +53,10 @@ import { useArtistImages } from '../-search.use-artist-images';
 import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
 import { useLibraryCheck } from '../-search.use-library-check';
 import { useVideoDownloads } from '../-search.use-video-downloads';
-import { libraryScopesQueryOptions } from '../../library/-library-v2.api';
+import {
+  libraryScopesQueryOptions,
+  libraryV2UiPreferencesQueryOptions,
+} from '../../library/-library-v2.api';
 import { BasicSearch } from './basic-search';
 import { PlaylistPreviewModal } from './playlist-preview-modal';
 import { SearchBar } from './search-bar';
@@ -130,6 +133,21 @@ export function SearchPage() {
     select: (s) => new URLSearchParams(s.location.searchStr).get('browse'),
   });
   const browsing = Boolean(browseId) && !query.trim() && !soulseekActive;
+
+  // /search?q=: arrive with a search already run (an artist page that has no
+  // provider page to open sends its name here). once per q, so typing after
+  // it isn't undone
+  const askedQuery = useRouterState({
+    select: (s) => new URLSearchParams(s.location.searchStr).get('q'),
+  });
+  const ranAskedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const asked = (askedQuery ?? '').trim();
+    if (!asked || ranAskedRef.current === asked) return;
+    ranAskedRef.current = asked;
+    setQuery(asked);
+    submitQuery(asked);
+  }, [askedQuery, submitQuery]);
   const browseQuery = useQuery({
     queryKey: ['search-browse', browseId],
     queryFn: ({ signal }) => fetchBrowse(browseId ?? '', signal),
@@ -297,6 +315,8 @@ export function SearchPage() {
     return hasSourceResults ? 'results' : 'empty';
   }, [dismissed, soulseekActive, idLookupPending, loading, cached, state.query, hasSourceResults]);
 
+  const loadingFor = useSecondsWhile(view === 'loading');
+
   // results are the page now, not a dropdown over it, so a click elsewhere no
   // longer throws them away. clearing the box does.
   const open = view !== 'hidden';
@@ -343,9 +363,14 @@ export function SearchPage() {
    * route still checks the catalogue first, so an artist this result list did
    * not recognise lands in Library V2 all the same.
    */
+  // a library artist opens in the header this profile picked for arrivals from
+  // outside the library (View Settings); no preferences yet means the rich one
+  const headerFromSearch =
+    useQuery({ ...libraryV2UiPreferencesQueryOptions(), retry: false }).data?.artist_page
+      ?.header_elsewhere ?? 'rich';
   const onArtistHref = (artist: SearchArtist, inLibrary: boolean) =>
     inLibrary
-      ? inLibraryArtistPath(artist)
+      ? inLibraryArtistPath(artist, headerFromSearch)
       : artistDetailPath(artist.id ?? '', state.activeSource, artist.name);
 
   const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);
@@ -562,7 +587,7 @@ export function SearchPage() {
                     onFilter={setBrowseFilter}
                     onArtistHref={(artist, inLibrary) =>
                       inLibrary
-                        ? inLibraryArtistPath(artist)
+                        ? inLibraryArtistPath(artist, headerFromSearch)
                         : artistDetailPath(
                             artist.id ?? '',
                             artist.source ?? state.activeSource,
@@ -602,6 +627,23 @@ export function SearchPage() {
                     ? 'Looking up that link…'
                     : `Searching ${sourceLabel(state.activeSource)}…`}
                 </p>
+                {/* a search that hangs used to say "Searching Deezer…" for
+                    as long as it took, two minutes once, with nothing else */}
+                {loadingFor >= 8 ? (
+                  <p className={styles.stateHint} role="status">
+                    Taking longer than usual. SoulSync is busy, results will show as soon as it
+                    answers.
+                  </p>
+                ) : null}
+                {loadingFor >= 20 && !idLookupPending ? (
+                  <button
+                    type="button"
+                    className={styles.stateRetry}
+                    onClick={() => runSearch(query)}
+                  >
+                    Try again
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -710,4 +752,17 @@ function filesSubtitle(source: BasicSource | undefined): string {
   if (!source) return 'Raw files from your download sources, grabbed as they come';
   if (source.name === 'soulseek') return 'Raw files from Soulseek, grabbed exactly as shared';
   return `Files straight from ${basicSourceLabel(source)}, grabbed as they come`;
+}
+
+/** whole seconds since `active` turned true, 0 while it is false */
+function useSecondsWhile(active: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    setSeconds(0);
+    if (!active) return;
+    const started = Date.now();
+    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return seconds;
 }

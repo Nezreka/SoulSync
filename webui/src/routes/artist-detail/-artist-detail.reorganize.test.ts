@@ -7,14 +7,12 @@ import {
   formatReorganizeResultMessage,
   queueReorganizeAllRequest,
   queueReorganizeRequest,
-  readReorganizeMode,
   refreshReorganizeQueue,
   reorganizeStateForAlbum,
   reorgDisplayLabel,
   startReorganizeQueuePolling,
   stopReorganizeQueuePolling,
   summarizeReorganizePreview,
-  writeReorganizeMode,
 } from './-artist-detail.reorganize';
 
 /**
@@ -27,7 +25,6 @@ afterEach(() => {
   _resetReorganizePolling();
   vi.unstubAllGlobals();
   vi.useRealTimers();
-  localStorage.removeItem('soulsync-reorganize-mode');
 });
 
 describe('preview row classification', () => {
@@ -45,7 +42,7 @@ describe('preview row classification', () => {
     });
     // Unmatched: reason with a default.
     expect(classifyPreviewTrack({ file_exists: true, matched: false })).toMatchObject({
-      newCell: { kind: 'reason', text: "Not in selected source's tracklist" },
+      newCell: { kind: 'reason', text: 'Not placed on the release' },
     });
     // Matched but no path computed.
     expect(classifyPreviewTrack({ file_exists: true, matched: true })).toMatchObject({
@@ -67,14 +64,14 @@ describe('preview row classification', () => {
       { file_exists: true, new_path: '/a' }, // will move
       { file_exists: true, unchanged: true, new_path: '/b' }, // unchanged
       { file_exists: false }, // missing on disk
-      { file_exists: true, matched: false }, // not in source
+      { file_exists: true, matched: false }, // not placed on the release
       { file_exists: true, matched: true }, // no destination
     ];
     const summary = summarizeReorganizePreview(tracks);
     expect(summary.chips.map((c) => c.text)).toEqual([
       '1 will move',
       '1 unchanged',
-      '1 not in source — try a different source',
+      '1 not placed',
       "1 couldn't compute destination",
       '1 missing on disk',
     ]);
@@ -84,7 +81,7 @@ describe('preview row classification', () => {
       ...tracks,
       { file_exists: true, collision: true, new_path: '/c' },
     ]);
-    expect(colliding.chips.at(-1)?.text).toBe('1 collision — likely a source data issue');
+    expect(colliding.chips.at(-1)?.text).toBe('1 collision — two files would get the same path');
     expect(colliding.canApply).toBe(false);
 
     // Nothing movable → no apply, even with no collisions.
@@ -103,11 +100,8 @@ describe('outcome classification (#377)', () => {
   });
 
   it('formats each skip status and the moved/skipped/failed line', () => {
-    expect(formatReorganizeResultMessage({ result_status: 'no_source_id' })).toBe(
-      'Reorganize skipped — album has no metadata source ID. Run enrichment first.',
-    );
     expect(formatReorganizeResultMessage({ result_status: 'setup_failed' })).toBe(
-      "Reorganize failed — couldn't create staging directory.",
+      'Reorganize failed — the path builder is unavailable.',
     );
     expect(
       formatReorganizeResultMessage({
@@ -118,14 +112,6 @@ describe('outcome classification (#377)', () => {
       }),
     ).toBe('Reorganized: 3 moved, 1 skipped, 2 failed (disk full)');
     expect(formatReorganizeResultMessage({})).toBe('Reorganized: 0 moved');
-  });
-});
-
-describe('mode persistence', () => {
-  it('defaults to api and round-trips through localStorage', () => {
-    expect(readReorganizeMode()).toBe('api');
-    writeReorganizeMode('tags');
-    expect(readReorganizeMode()).toBe('tags');
   });
 });
 
@@ -140,42 +126,33 @@ describe('queue requests', () => {
 
   it('single album: queued with position, already queued, and the fallback', async () => {
     const spy = stubFetch({ success: true, queued: true, position: 3 });
-    expect(
-      await queueReorganizeRequest(7, 'SAW 85-92', { source: '', mode: 'api', renameOnly: true }),
-    ).toBe('Queued: SAW 85-92 (#3 in queue)');
-    expect(JSON.parse(String(spy.mock.calls[0]?.[1]?.body))).toEqual({
-      source: '',
-      mode: 'api',
-      rename_only: true,
-    });
+    expect(await queueReorganizeRequest(7, 'SAW 85-92')).toBe('Queued: SAW 85-92 (#3 in queue)');
+    // The plan comes from the catalogue: the request names no source and no mode.
+    expect(JSON.parse(String(spy.mock.calls[0]?.[1]?.body))).toEqual({});
 
     stubFetch({ success: true, queued: true, position: 1 });
-    expect(
-      await queueReorganizeRequest(7, 'SAW 85-92', { source: '', mode: 'api', renameOnly: false }),
-    ).toBe('Queued: SAW 85-92');
+    expect(await queueReorganizeRequest(7, 'SAW 85-92')).toBe('Queued: SAW 85-92');
 
     stubFetch({ success: true, reason: 'already_queued' });
-    expect(
-      await queueReorganizeRequest(7, 'SAW 85-92', { source: '', mode: 'api', renameOnly: false }),
-    ).toBe('Already queued: SAW 85-92');
+    expect(await queueReorganizeRequest(7, 'SAW 85-92')).toBe('Already queued: SAW 85-92');
   });
 
   it('reorganize-all: the four toast combos', async () => {
     stubFetch({ success: true, enqueued: 3, already_queued: 2 });
-    expect(await queueReorganizeAllRequest(42, 'Aphex Twin', { source: '', mode: 'api' })).toEqual({
+    expect(await queueReorganizeAllRequest(42, 'Aphex Twin')).toEqual({
       message: 'Queued 3 albums; 2 already in queue',
       tone: 'info',
     });
     stubFetch({ success: true, enqueued: 1 });
-    expect(
-      (await queueReorganizeAllRequest(42, 'Aphex Twin', { source: '', mode: 'api' })).message,
-    ).toBe('Queued 1 album for Aphex Twin');
+    expect((await queueReorganizeAllRequest(42, 'Aphex Twin')).message).toBe(
+      'Queued 1 album for Aphex Twin',
+    );
     stubFetch({ success: true, already_queued: 4 });
-    expect(
-      (await queueReorganizeAllRequest(42, 'Aphex Twin', { source: '', mode: 'api' })).message,
-    ).toBe('All 4 albums already in queue');
+    expect((await queueReorganizeAllRequest(42, 'Aphex Twin')).message).toBe(
+      'All 4 albums already in queue',
+    );
     stubFetch({ success: true });
-    expect(await queueReorganizeAllRequest(42, 'Aphex Twin', { source: '', mode: 'api' })).toEqual({
+    expect(await queueReorganizeAllRequest(42, 'Aphex Twin')).toEqual({
       message: 'No albums to queue',
       tone: 'warning',
     });

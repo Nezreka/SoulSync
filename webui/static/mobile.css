@@ -940,10 +940,10 @@
         flex-wrap: wrap;
     }
 
+    /* folds like on a wide screen (style.css: 8em and Read more); lifting
+       the cap here left a phone scrolling past the whole biography */
     .artist-hero-bio {
         font-size: 12px;
-        -webkit-line-clamp: 3;
-        max-height: fit-content;
     }
 
     .artist-hero-numbers {
@@ -1635,8 +1635,10 @@
        16px circle) and this rule stretched them into ovals / made them
        protrude from their track (mobile CSS batch #2, RC1). The import
        page's pills are a CSS module (hashed class), so they are hooked by
-       data attribute like the other import-page exclusions. */
-    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close) {
+       data attribute like the other import-page exclusions. The Library v2
+       page sizes its own controls (its toolbar, chips and row actions are
+       built shorter than 38px), so it opts out as a whole. */
+    button:not(.watchlist-card-remove):not(.wishlist-delete-btn):not(.wishlist-delete-album-btn):not(.wishlist-delete-btn-small):not(.wishlist-back-btn):not(.alphabet-btn):not(.filter-btn):not(.playlist-modal-close):not(.notif-bell-btn):not(.helper-float-btn):not(.hero-indicator):not(.discover-blacklist-btn):not(.tool-help-button):not(.vst-half):not([data-import-page-result-row]):not([data-import-page-inline-action]):not([data-import-page-pill]):not(.modal-track-play-btn):not(.cancel-track-btn):not(.dash-qs-swatch):not(.watchlist-filter-btn):not(.play-button):not(.stop-button):not(.mini-nav-btn):not(.mini-toggle-btn):not(.expand-hint):not(.sync-tab-button):not(.sync-tab-close):not([data-library-v2] button) {
         min-height: 38px;
     }
 

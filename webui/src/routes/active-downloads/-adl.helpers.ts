@@ -79,12 +79,16 @@ export function downloadFailureSummary(dl: Pick<AdlDownload, 'status' | 'error'>
   if (!['failed', 'not_found'].includes(dl.status) || !dl.error?.startsWith('No match found for '))
     return null;
   const diagnostics = dl.error.split('Breakdown: ')[1] || '';
-  if (diagnostics.includes('passed filters but download failed to start'))
+  if (diagnostics.includes('passed filters but download failed to start')) {
+    // newer workers say why (#1981): "(why: deezer_dl: the download client refused it)"
+    const why = /failed to start \(why: ([^)]*)\)/.exec(diagnostics)?.[1];
     return {
       status: 'failed',
-      message:
-        'Matching results found, but the download could not start. No specific failure reason was recorded.',
+      message: why
+        ? `Matching results found, but the download could not start: ${why}.`
+        : 'Matching results found, but the download could not start. No specific failure reason was recorded.',
     };
+  }
   if (diagnostics.includes('results but none passed quality/artist filters'))
     return {
       status: dl.status,

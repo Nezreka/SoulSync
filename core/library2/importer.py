@@ -22,6 +22,7 @@ populates the v2 schema. It is:
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sqlite3
@@ -62,6 +63,11 @@ class ResumePoint(NamedTuple):
     stage: str
     rowid: int
     run_id: str
+
+
+def _clean_summary(text):
+    from core.library2.summary_markers import clean_summary
+    return clean_summary(text)
 
 
 def _rebuild_album_artist_credits(cursor: Any, album_ids: Set[int]) -> None:
@@ -160,6 +166,18 @@ def looks_like_foreign_provider_id(value: Any) -> bool:
     return bool(text) and (text.isdigit() or bool(_UUID_RE.match(text)))
 
 
+_BYTES_REPR_RE = re.compile(r"""^b(['"])(.*)\1$""", re.S)
+
+
+def unwrap_bytes_repr(text: Any) -> Any:
+    """``"b'Above & Beyond'"`` -> ``"Above & Beyond"``: a tag read as bytes
+    and turned into text with str(). Anything else comes back as it was."""
+    if not isinstance(text, str):
+        return text
+    match = _BYTES_REPR_RE.match(text.strip())
+    return match.group(2) if match else text
+
+
 def split_artist_credits(*sources: str) -> List[str]:
     """Split one or more raw artist/credit strings into individual artist names.
 
@@ -172,6 +190,7 @@ def split_artist_credits(*sources: str) -> List[str]:
     for raw in sources:
         if not raw:
             continue
+        raw = unwrap_bytes_repr(raw)
         # Promote any "feat." segment to a plain separator, then split the list.
         flattened = _FEAT_RE.sub(",", raw)
         for piece in _LIST_SEP_RE.split(flattened):
@@ -183,6 +202,24 @@ def split_artist_credits(*sources: str) -> List[str]:
                 seen.add(key)
                 out.append(name)
     return out
+
+
+# "<frontman> & The <band>": the band an artist leads, filed on that artist's
+# own album ("Bob Marley & The Wailers" on Bob Marley's Legend, "Nick Cave &
+# The Bad Seeds", "Tom Petty and the Heartbreakers", "Marina and the
+# Diamonds"). It carries the album artist as one of its parts and is still one
+# artist, so the album-artist anchor must not read it as a list.
+_FRONTMAN_BAND_RE = re.compile(
+    r"^\s*(?P<lead>.+?)\s*(?:&|\band\b|\+)\s*(?P<band>the\s+\S.*)$", re.IGNORECASE)
+
+
+def leads_a_band(name: str, anchors) -> bool:
+    """True for "<one of ``anchors``> & The <band>" without a feat. / x / vs."""
+    display = unwrap_bytes_repr(name or "")
+    if _EXPLICIT_CREDIT_RE.search(display):
+        return False  # "A & The B feat. C" says it's a list
+    match = _FRONTMAN_BAND_RE.match(display)
+    return bool(match) and normalize_name(match.group("lead")) in set(anchors)
 
 
 def featured_from_title(title: str) -> List[str]:
@@ -214,7 +251,7 @@ def _credit_names_for_import(
     provider match or manual alias link can refine it; creating several phantom
     artists cannot be reversed reliably from the source text alone (P2-24).
     """
-    display = (raw or "").strip()
+    display = unwrap_bytes_repr(raw or "").strip()
     if not display:
         return []
     if known_name(display):
@@ -235,9 +272,12 @@ def _credit_names_for_import(
     # "any part is known" would not be. Most of a big library's guest
     # credits look like this; keeping them whole made ~18k ghost artists
     # out of 300k tracks, each one later looked up online one by one.
+    # The one exception is the band a frontman leads ("Nick Cave & The Bad
+    # Seeds" on a Nick Cave album): that name is the band, see leads_a_band.
     if album_artist:
         anchor = normalize_name(album_artist)
-        if anchor and any(normalize_name(piece) == anchor for piece in pieces):
+        if (anchor and any(normalize_name(piece) == anchor for piece in pieces)
+                and not leads_a_band(display, {anchor})):
             return pieces
     return [display]
 
@@ -324,6 +364,64 @@ def _require_importable_legacy_source(cursor: Any) -> None:
                            required=required, optional=())
 
 
+# The legacy columns the walks hand on as numbers. They're INTEGER, but sqlite
+# keeps whatever doesn't look like a number as text. One such row stopped the
+# whole migration at the first comparison and every retry stopped at the same row
+# (#1989), and what didn't stop it sat in lib2 for a later reader to trip over.
+_LEGACY_NUMBER_COLUMNS = frozenset({
+    "track_count", "api_track_count", "year", "explicit", "art_locked",
+    "canonical_score", "canonical_locked",
+    "track_number", "disc_number", "duration", "bpm", "play_count",
+    "file_size", "bitrate", "sample_rate", "bit_depth",
+})
+# The same values in lib2. Named on purpose: the legacy_*_id columns are INTEGER
+# too and hold real text ids.
+_LIB2_NUMBER_COLUMNS = {
+    "lib2_artists": ("art_locked",),
+    "lib2_albums": ("year", "explicit", "art_locked", "canonical_score", "canonical_locked",
+                    "track_count", "expected_track_count"),
+    "lib2_tracks": ("track_number", "disc_number", "duration", "bpm", "explicit", "play_count"),
+    "lib2_track_files": ("size", "bitrate", "sample_rate", "bit_depth"),
+}
+# what unknown is where the walk doesn't write NULL for it
+_LIB2_NUMBER_DEFAULTS = {"art_locked": 0, "play_count": 0, "disc_number": 1}
+
+
+def _legacy_number(value: Any) -> Optional[float]:
+    """A legacy value as a number, ``None`` when it isn't one. Unknown is a state
+    all of these already have, the import goes on without it."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _with_clean_numbers(row: Any, columns: Iterable[str]) -> Any:
+    """The row with the text in ``columns`` read as a number or as unknown."""
+    text = [column for column in columns if isinstance(row[column], str)]
+    if not text:
+        return row
+    clean = dict(row)
+    clean.update((column, _legacy_number(row[column])) for column in text)
+    return clean
+
+
+def _clear_text_numbers(cursor) -> None:
+    """What an attempt before #1989 wrote until it stopped. A resume doesn't walk
+    those rows again, and the finalize reads them as numbers."""
+    # one pass per table. this runs at every import start, and a column at a
+    # time was 17 full scans of tables that hold a million rows on a big library
+    for table, columns in _LIB2_NUMBER_COLUMNS.items():
+        sets = ", ".join(f"{column}=CASE WHEN typeof({column})='text' THEN ? ELSE {column} END"
+                         for column in columns)
+        where = " OR ".join(f"typeof({column})='text'" for column in columns)
+        cursor.execute(f"UPDATE {table} SET {sets} WHERE {where}",
+                       tuple(_LIB2_NUMBER_DEFAULTS.get(column) for column in columns))
+
+
 def _legacy_rows(
     conn: Any,
     table: str,
@@ -342,6 +440,7 @@ def _legacy_rows(
         return
     size = max(int(batch_size), 1)
     projection = ", ".join(f'"{column}"' for column in selected)
+    numbers = [column for column in selected if column in _LEGACY_NUMBER_COLUMNS]
     last_rowid = max(int(after_rowid or 0), 0)
     while True:
         rows = conn.execute(
@@ -351,7 +450,7 @@ def _legacy_rows(
         ).fetchall()
         if not rows:
             return
-        yield from rows
+        yield from (_with_clean_numbers(row, numbers) for row in rows)
         last_rowid = int(rows[-1]["__lib2_source_rowid"])
 
 
@@ -1099,14 +1198,14 @@ def _legacy_album_copies(cursor, actual_track_counts: Dict[str, int],
         key = _legacy_key(row["id"])
         album_type = _normalize_album_type(
             _pick(row, "album_type", "record_type", "release_type", "type"),
-            _pick(row, "track_count"), actual_track_counts.get(key, 0))
+            _legacy_number(_pick(row, "track_count")), actual_track_counts.get(key, 0))
         identity = (normalize_name(row["artist_name"] or ""), release_title_key(row["title"]),
                     album_type == "single")
         if identity[0] and identity[1]:
             names = album_playlists.get(key, ())
             owner = _live_owner(row, live)
             groups.setdefault(identity, []).append({
-                "key": key, "owner": owner, "year": _pick(row, "year"),
+                "key": key, "owner": owner, "year": _legacy_number(_pick(row, "year")),
                 # Two playlist saves in one library are two physical versions,
                 # exactly as two libraries' copies are.
                 "slot": (owner, next(iter(names)) if len(names) == 1 else None),
@@ -1657,6 +1756,7 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
         resolver.seed_existing()
         canonical_artists = _CanonicalArtists(cursor)
         discography_albums = _discography_album_index(cursor)
+        _clear_text_numbers(cursor)
         conn.commit()
 
         # --- Artists -------------------------------------------------------
@@ -1729,7 +1829,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 "image_url": _pick(row, "thumb_url", "banner_url"),
                 "art_locked": _pick(row, "art_locked"),
                 "genres": _normalize_genres(_pick(row, "genres")),
-                "summary": _pick(row, "summary"),
+                # the plex summary carries the legacy updater's "-updatedAt…"
+                # bookkeeping, which is not a biography
+                "summary": _clean_summary(_pick(row, "summary")),
                 # §17.7 remainder: AudioDB-sourced fields + MusicBrainz aliases
                 # had no lib2 destination column at all.
                 "style": _pick(row, "style"),
@@ -2894,11 +2996,12 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
         album = payload.get("album") if isinstance(payload.get("album"), dict) else {}
         album_title = album.get("name") or title
         album_provider_id = album.get("id")
-        total_tracks = int(album.get("total_tracks") or 1)
+        known_tracks = _legacy_number(album.get("total_tracks"))
+        total_tracks = int(known_tracks or 1)
         album_type = _album_type_from_payload(album, total_tracks)
         # A sparse legacy payload (no type, no track count) only GUESSES a single;
         # it must neither mint a twin of the owned album nor retype it.
-        typed = bool(album.get("album_type") or album.get("type") or album.get("total_tracks"))
+        typed = bool(album.get("album_type") or album.get("type") or known_tracks)
         if not typed:
             album_type = "album" if album.get("name") else "single"
         release_date = album.get("release_date")
@@ -3012,10 +3115,10 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
                 quality_profile_id,
             )
         assigned_profiles[entity_key] = (quality_profile_id, row["id"])
-        track_number = payload.get("track_number")
-        disc_number = payload.get("disc_number") or 1
+        track_number = _legacy_number(payload.get("track_number"))
+        disc_number = _legacy_number(payload.get("disc_number")) or 1
         # 0 is "unknown" here; stored, COALESCE kept it over every real length
-        duration = payload.get("duration_ms") or None
+        duration = _legacy_number(payload.get("duration_ms")) or None
         track_spotify, track_external = _provider_id_fields(provider, track_id)
         if existing_track_id is not None and not shared_intent:
             lib2_track_id = existing_track_id
@@ -3478,6 +3581,7 @@ __all__ = [
     "apply_monitoring_from_watchlist_wishlist",
     "reconcile_import_monitoring",
     "split_artist_credits",
+    "leads_a_band",
     "featured_from_title",
     "normalize_name",
 ]

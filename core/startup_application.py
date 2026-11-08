@@ -7,6 +7,7 @@ into a half-initialized catalogue.
 """
 import json
 import logging
+import os
 import threading
 
 logger = logging.getLogger(__name__)
@@ -62,8 +63,25 @@ class StartupApplication:
     def wait(self, timeout=None):
         return self._done.wait(timeout)
 
+    @staticmethod
+    def _url_base():
+        """SOULSYNC_URL_BASE, read here because the app's own middleware is not
+        loaded until the boot finishes. An invalid value is the app's error."""
+        from core.url_base import normalize_url_base
+        try:
+            return normalize_url_base(os.environ.get('SOULSYNC_URL_BASE', ''))
+        except ValueError:
+            return ''
+
     def __call__(self, environ, start_response):
-        if environ.get('PATH_INFO') == '/api/startup-status':
+        # a proxy may keep the mount prefix or strip it: answer both. after the
+        # boot Flask has no route for the status poll, so this stays the one
+        # place that answers it, prefixed or not
+        base = self._url_base()
+        path = environ.get('PATH_INFO', '/') or '/'
+        if base and (path == base or path.startswith(base + '/')):
+            path = path[len(base):] or '/'
+        if path == '/api/startup-status':
             status = 'failed' if self._failed else ('ready' if self._app else 'starting')
             from core import startup_progress
             body = json.dumps({'status': status, **startup_progress.snapshot()}).encode()
@@ -72,7 +90,7 @@ class StartupApplication:
             return [body]
         if self._app is not None:
             return self._app(environ, start_response)
-        if environ.get('PATH_INFO', '/').startswith('/api/'):
+        if path.startswith('/api/'):
             start_response('503 Service Unavailable', [('Content-Type', 'application/json'),
                                                       ('Retry-After', '2')])
             return [b'{"success":false,"error":"SoulSync is starting"}']
@@ -80,6 +98,6 @@ class StartupApplication:
                        [('Content-Type', 'text/html; charset=utf-8'), ('Cache-Control', 'no-store')])
         # SCRIPT_NAME is the mount point supplied by the WSGI reverse proxy.
         # JSON escaping plus HTML escaping keeps it safe inside the script.
-        endpoint = str(environ.get('SCRIPT_NAME') or '').rstrip('/') + '/api/startup-status'
+        endpoint = str(environ.get('SCRIPT_NAME') or base or '').rstrip('/') + '/api/startup-status'
         encoded = json.dumps(endpoint).replace('<', '\\u003c').encode()
         return [_PAGE.replace(b'__STARTUP_STATUS_URL__', encoded)]

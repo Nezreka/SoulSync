@@ -649,6 +649,9 @@ def test_track_download_surfaces_via_path_fallback_when_legacy_id_stale(imported
     history = scoped_history(imported_conn, scope="track", entity_id=drake["track_id"])
 
     assert any(e["event_type"] == "downloaded" for e in history)
+    # filed under its library track, so the artist history tree can place it
+    artist = scoped_history(imported_conn, scope="artist", entity_id=drake["artist_id"])
+    assert [e["track_id"] for e in artist if e["event_type"] == "downloaded"] == [drake["track_id"]]
 
 
 def test_track_download_history_accepts_text_legacy_id(imported_conn):
@@ -675,7 +678,8 @@ def test_track_download_history_accepts_text_legacy_id(imported_conn):
         imported_conn, scope="track", entity_id=drake["track_id"]
     )
 
-    assert any(e["event_type"] == "downloaded" for e in history)
+    assert [e.get("track_id") for e in history if e["event_type"] == "downloaded"] == [
+        drake["track_id"]]
 
 
 def test_unsupported_scope_raises(imported_conn):
@@ -718,3 +722,16 @@ def test_changed_fields_is_always_the_list_the_ui_is_promised(
     event = next(e for e in history if e["event_type"] == "track_updated")
 
     assert event["changed_fields"] == expected
+
+
+def test_id_lists_past_the_sqlite_variable_limit_still_read():
+    """a placeholder per id broke past ~32k ids and the history went empty"""
+    import sqlite3
+    from core.library2 import history_feed
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE lib2_album_artists(album_id INTEGER, artist_id INTEGER)")
+    conn.executemany("INSERT INTO lib2_album_artists VALUES(?,?)", [(i, i) for i in range(1, 40001)])
+    ids = list(range(1, 40001))
+    assert len(history_feed._album_ids_for_artists(conn, ids)) == 40000
+

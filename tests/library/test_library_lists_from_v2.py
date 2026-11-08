@@ -77,6 +77,22 @@ def test_export_skips_a_file_that_is_only_history(db):
     assert db.get_all_library_tracks_for_export() == []
 
 
+def test_export_names_the_songs_own_artist_on_a_compilation(db):
+    """found in the second #1062 review: 3.6.1 wrote the track's own artist
+    into the M3U; v2 wrote the album artist, so every compilation line read
+    'Various Artists - Song'."""
+    various = _artist(db, 'Various Artists')
+    album = _album(db, various, 'Now 99')
+    track = _track(db, album, 'Alright', path='/m/alright.flac', track_number=1)
+    _track(db, album, 'Untagged', path='/m/untagged.flac', track_number=2)
+    with closing(db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_tracks SET track_artist='Kendrick Lamar' WHERE id=?", (track,))
+        conn.commit()
+
+    assert [(t['title'], t['artist']) for t in db.get_all_library_tracks_for_export()] == [
+        ('Alright', 'Kendrick Lamar'), ('Untagged', 'Various Artists')]
+
+
 def test_export_is_ordered_by_artist_album_track(db):
     b_artist = _artist(db, 'Beck')
     m_artist = _artist(db, 'Muse')

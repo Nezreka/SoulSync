@@ -28,15 +28,33 @@ def conn():
 
 
 def _artist(conn, name, *, image_url=None, genres=None, legacy_artist_id=None,
-            canonical_of=None) -> int:
+            canonical_of=None, owned=True) -> int:
     artist_id = conn.execute(
         "INSERT INTO lib2_artists(name, name_key, image_url, genres,"
         "                         legacy_artist_id, canonical_artist_id)"
         " VALUES(?,?,?,?,?,?)",
         (name, normalize_name(name), image_url, json.dumps(genres or []),
          legacy_artist_id, canonical_of)).lastrowid
+    if owned:  # a library artist has music in the library
+        album_id = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, ?)",
+                                (artist_id, f"{name} album")).lastrowid
+        track_id = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, ?)",
+                                (album_id, f"{name} song")).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, file_state) VALUES(?, ?, 'active')",
+                     (track_id, f"/music/{name}/song.flac"))
     conn.commit()
     return int(artist_id)
+
+
+def test_an_artist_with_no_music_here_is_not_owned(conn):
+    """lib2_artists also holds featured credits, discography and wishlist rows
+    and every watchlist add. calling those owned dropped them from the
+    Discovery Web's suggestions; 3.6.1's set was the server's artists."""
+    _artist(conn, 'Muse')
+    _artist(conn, 'Watched Only', owned=False)
+    owned, _meta, artists = load_library_artists(conn)
+    assert owned == {'muse'}
+    assert [a[0] for a in artists] == ['Muse']
 
 
 def test_nodes_carry_the_catalogue_id_the_link_resolves(conn):

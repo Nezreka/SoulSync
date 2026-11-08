@@ -18,13 +18,15 @@ import { AdlClientsTab } from './adl-clients';
 import { useReportActive } from './dl-header';
 import { VdlHeader } from './vdl-header';
 import { VdlHistoryModal } from './vdl-history';
-import { VdlList } from './vdl-list';
+import { VdlList, useVdlCanImport } from './vdl-list';
 import { VdlReviewPane, useVdlReview } from './vdl-review';
 
 const toast = (message: string, type: string) => window.showToast?.(message, type);
 
 export function VideoDownloadsView() {
   const dl = useVideoDownloads();
+  // blocking writes the household's blocklist: admin only, like one row's block
+  const canBlockAll = useVdlCanImport();
   // the Music | Video switch shows this side's live count
   useReportActive('video', dl.counts.active);
   const review = useVdlReview();
@@ -52,6 +54,7 @@ export function VideoDownloadsView() {
     onCancel: (id) => void dl.cancelOne(id),
     onRetry: (id) => void dl.retryOne(id),
     onBlock: (d) => void dl.blockOne(d),
+    onRemove: (id) => void dl.removeOne(id),
     onToggle: dl.toggleExpanded,
   };
 
@@ -84,7 +87,11 @@ export function VideoDownloadsView() {
             onOpenHistory={() => setHistoryOpen(true)}
             onCancelAll={() => void dl.cancelAll()}
             onRetryAll={() => void dl.retryAllFailed()}
+            blockableFailedCount={canBlockAll ? dl.blockableFailedCount : 0}
+            onBlockRetryAll={() => void dl.blockAndRetryAllFailed()}
             onClearFinished={() => void dl.clearFinished()}
+            onClearFailed={() => void dl.clearFailed()}
+            onClearEverything={() => void dl.clearEverything()}
             retryAllPending={dl.retryAllPending}
           />
 

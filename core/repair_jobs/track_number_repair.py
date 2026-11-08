@@ -84,10 +84,17 @@ class TrackNumberRepairJob(RepairJob):
         scope_key = scope_artist.casefold() if scope_artist else None
         # hand-tagged: the user typed this release and its numbering; the
         # service's tracklist is the studio album and would renumber it
+        # one hand-tagged file is enough: renumbering the rest of its album
+        # against that tracklist would split the release the user typed
+        # (3.6.1 skipped the whole album folder)
+        everything = active_file_subjects(context.db, context.config_manager)
+        kept = drop_hand_tagged(context, everything)
+        kept_ids = {id(row) for row in kept}
+        hand_albums = {int(row["album_id"]) for row in everything if id(row) not in kept_ids}
         subjects = [
-            row for row in drop_hand_tagged(
-                context, active_file_subjects(context.db, context.config_manager))
-            if not scope_key or str(row.get("artist_name") or "").casefold() == scope_key
+            row for row in kept
+            if int(row["album_id"]) not in hand_albums
+            and (not scope_key or str(row.get("artist_name") or "").casefold() == scope_key)
         ]
         by_album: Dict[int, list[Dict[str, Any]]] = {}
         for subject in subjects:
@@ -971,9 +978,13 @@ def _plan_track_repair(file_path: str, filename: str, api_tracks: List[Dict],
     stored_totals = [values[0] for key in ('tracktotal', 'totaltracks') if (values := audio.get(key))]
     if (values := audio.get('tracknumber')) and '/' in str(values[0]):
         stored_totals.append(str(values[0]).split('/')[1])
+    # a total that isn't there is not a wrong total: most files carry "5", not
+    # "5/12" (mp4 trkn (5, 0) reads the same), and 3.6.1 accepted that. A total
+    # that IS there must be this disc's (the ID3 convention): a whole-album
+    # 5/24 on a two-disc set is still corrected.
     tag_ok = (current_num == correct_num
-              and current_total == disc_total
-              and all(str(total) == str(disc_total) for total in stored_totals))
+              and (not current_total or current_total == disc_total)
+              and all(str(total).strip() in ('', '0', str(disc_total)) for total in stored_totals))
     # #1075: per-disc track numbers are meaningless without disc tags — a
     # repair that writes "track 10 of 11" onto a disc-tagless file in a
     # 3-disc folder just manufactures a duplicate track number. On multi-disc

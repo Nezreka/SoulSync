@@ -114,7 +114,7 @@ def register_completed_playlist_batch(
     # 3. Tasks snapshot: check completed tracks for playlist origin
     if tasks_snapshot:
         for task in tasks_snapshot.values():
-            if not isinstance(task, dict) or task.get('status') != 'completed':
+            if not isinstance(task, dict) or task.get('status') not in ('completed', 'already_owned'):
                 continue
             ti = task.get('track_info') or {}
             source_type = ti.get('source_type')

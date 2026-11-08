@@ -58,8 +58,16 @@ export function createAppRouter(
   });
   // the artist page's back button labels itself with where you came from
   resetNavigationHistory();
-  router.subscribe('onBeforeNavigate', (event) => {
-    if (event.fromLocation) noteNavigation(event.fromLocation, event.toLocation);
+  let navigationLocation = router.latestLocation;
+  // onBeforeLoad, not onBeforeNavigate: TanStack keeps the last redirect in its
+  // store and skips onBeforeNavigate while it is there, so after the library's
+  // first header redirect no navigation was noted until a reload
+  router.subscribe('onBeforeLoad', (event) => {
+    // TanStack can omit fromLocation while the previous route is resolving,
+    // or still report the older resolved page during a quick follow-up hop.
+    // The last target seen here is the page the user visibly clicked on.
+    noteNavigation(navigationLocation, event.toLocation);
+    navigationLocation = event.toLocation;
   });
   return router;
 }

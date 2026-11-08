@@ -819,3 +819,73 @@ def test_a_scan_hands_its_own_result_to_acquisition(imported_conn):
 
     assert stats["tracks"] == 1
     assert db.added == ["scn-gone"], "scoped: only what the scan actually changed"
+
+
+# --- the reconcile's full recompute never holds the write lock for the whole run
+
+
+def test_reconcile_commits_the_wanted_recompute_batch_by_batch(imported_conn, monkeypatch):
+    """one transaction over every track held the write lock ~23s on a 313k
+    library at every start; chat, enrichment and caches all queued behind it.
+    between batches another writer gets in now, and the result is the same."""
+    import core.library2.monitor_sync as monitor_sync
+    import core.library2.wanted as wanted
+
+    conn = imported_conn
+    artist = _add_artist(conn, "Batch Artist", spotify_id="batch-art")
+    tracks = [_add_track(conn, artist, f"Song {n}", monitored=1, spotify_id=f"batch-{n}")
+              for n in range(5)]
+    conn.commit()
+    path = conn.execute("PRAGMA database_list").fetchone()[2]
+
+    monkeypatch.setattr(monitor_sync, "_RECOMPUTE_BATCH", 2)
+    real = wanted.recompute_wanted
+    other_writer_got_in = []
+
+    def probe_write():
+        other = sqlite3.connect(path, timeout=0)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            other.rollback()
+            return True
+        except sqlite3.OperationalError:
+            return False
+        finally:
+            other.close()
+
+    def watched(c, **kw):
+        if kw.get("track_ids") is None and kw.get("on_batch") is not None:
+            commit = kw["on_batch"]
+
+            def on_batch(done, total):
+                commit(done, total)
+                other_writer_got_in.append(probe_write())
+            kw["on_batch"] = on_batch
+        return real(c, **kw)
+
+    monkeypatch.setattr(wanted, "recompute_wanted", watched)
+    db = _FakeDB(path)
+    stats = monitor_sync.reconcile_track_wishlist(db, profile_id=1)
+
+    assert len(other_writer_got_in) >= 3 and all(other_writer_got_in)
+    assert stats["wanted"] >= len(tracks)
+    assert {f"batch-{n}" for n in range(5)} <= set(db.added)
+
+
+def test_a_full_recompute_prunes_rows_of_deleted_tracks(imported_conn):
+    conn = imported_conn
+    artist = _add_artist(conn, "Prune Artist")
+    keep = _add_track(conn, artist, "Kept", monitored=1)
+    conn.execute(
+        "INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, "
+        "effective_profile_id, projection_version) VALUES(1, 999999, 1, 'gone', NULL, 1)")
+    conn.commit()
+
+    stats = recompute_wanted(conn, profile_id=1)
+    conn.commit()
+
+    assert stats["pruned"] == 1
+    rows = {r[0] for r in conn.execute("SELECT track_id FROM lib2_wanted_tracks WHERE profile_id=1")}
+    assert 999999 not in rows and keep in rows
+    # nothing left to prune: the next run writes no delete
+    assert recompute_wanted(conn, profile_id=1)["pruned"] == 0

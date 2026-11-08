@@ -36,7 +36,7 @@ from the schema-ensure step and repairs installs that predate the columns.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from core.quality.lossless import LOSSLESS_FORMATS as _CANONICAL_LOSSLESS
 from core.quality.lossless import (
@@ -77,15 +77,28 @@ def quality_order(alias: str = "") -> str:
     unranked files fall back to lossless first.
     """
     p = f"{alias}." if alias else ""
-    return (
-        f"CASE WHEN COALESCE({p}file_state,'active')='active' THEN 0 ELSE 1 END, "
-        f"COALESCE({p}profile_rank, 2147483647), "
-        f"CASE WHEN lower(COALESCE({p}format,'')) IN {_LOSSLESS_FORMATS} THEN 0 ELSE 1 END, "
-        f"COALESCE({p}bit_depth,0) DESC, "
-        f"COALESCE({p}sample_rate,0) DESC, "
-        f"COALESCE({p}bitrate,0) DESC, "
-        f"{p}id DESC"
-    )
+    return ", ".join(
+        f"{expr} DESC" if desc else expr for expr, desc in _quality_columns(alias)
+    ) + f", {p}id DESC"
+
+
+def _quality_columns(alias: str = "") -> List[Tuple[str, bool]]:
+    """``quality_order``'s sort keys before the id tie-break, as (expr, desc)."""
+    p = f"{alias}." if alias else ""
+    return [
+        (f"CASE WHEN COALESCE({p}file_state,'active')='active' THEN 0 ELSE 1 END", False),
+        (f"COALESCE({p}profile_rank, 2147483647)", False),
+        (f"CASE WHEN lower(COALESCE({p}format,'')) IN {_LOSSLESS_FORMATS} THEN 0 ELSE 1 END", False),
+        (f"COALESCE({p}bit_depth,0)", True),
+        (f"COALESCE({p}sample_rate,0)", True),
+        (f"COALESCE({p}bitrate,0)", True),
+    ]
+
+
+def quality_tier_columns(alias: str = "") -> str:
+    """The columns two files of the same quality share under ``quality_order``
+    (everything but the id), for telling a tie from a better file."""
+    return ", ".join(expr for expr, _desc in _quality_columns(alias))
 
 
 def primary_order(alias: str = "") -> str:
@@ -286,7 +299,7 @@ def set_file_state(conn, file_id: int, state: str) -> bool:
     return True
 
 
-def track_id_for_path(conn, file_path: Any) -> Optional[int]:
+def track_id_for_path(conn, file_path: Any, *, scoped: bool = False) -> Optional[int]:
     """The catalogue track that owns a file path, or ``None``.
 
     Exact path first, then the basename — a media server and SoulSync often
@@ -297,14 +310,21 @@ def track_id_for_path(conn, file_path: Any) -> Optional[int]:
 
     Live files win over deleted ones: a deleted row is history (ADR-03) and
     must not out-vote the file that actually sits at that path today.
+
+    ``scoped`` keeps it to the asking profile's library, the way 3.6.1's
+    lookup was: a basename guess must never land in someone else's files.
     """
     file_path = str(file_path or "")
     if not file_path:
         return None
+    owner = ""
+    if scoped:
+        from core.library2.sql_util import owner_clause
+        owner = owner_clause(column="owner_profile_id")
     row = conn.execute(
         f"SELECT track_id FROM lib2_track_files"
         f" WHERE path = ? AND track_id IS NOT NULL"
-        f" AND COALESCE(file_state,'active') <> 'deleted'"
+        f" AND COALESCE(file_state,'active') <> 'deleted'{owner}"
         f" ORDER BY {primary_order()} LIMIT 1", (file_path,)).fetchone()
     if row:
         return int(row[0])
@@ -317,7 +337,7 @@ def track_id_for_path(conn, file_path: Any) -> Optional[int]:
         " WHERE track_id IS NOT NULL"
         "   AND COALESCE(file_state,'active') <> 'deleted'"
         "   AND (path LIKE ? ESCAPE '^' OR path LIKE ? ESCAPE '^')"
-        " LIMIT 2", (f"%/{escaped}", f"%\\{escaped}")).fetchall()
+        f"{owner} LIMIT 2", (f"%/{escaped}", f"%\\{escaped}")).fetchall()
     return int(rows[0][0]) if len(rows) == 1 else None
 
 
@@ -459,6 +479,20 @@ def retire_replaced_files(
     return retired
 
 
+def _update_files(cursor, set_sql: str, select_ids_sql: str) -> int:
+    """Run an every-start repair as a read, then write only the rows it found.
+    A set-based UPDATE holds the write lock for its whole scan even when it
+    changes nothing (1.3s on a 300k-file library, every start)."""
+    ids = [row[0] for row in cursor.execute(select_ids_sql).fetchall() if row[0] is not None]
+    changed = 0
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        cursor.execute(f"UPDATE lib2_track_files SET {set_sql} "
+                       f"WHERE id IN ({','.join('?' * len(chunk))})", chunk)
+        changed += cursor.rowcount
+    return changed
+
+
 def backfill_primary_flags(cursor) -> int:
     """Repair/seed the one-primary-per-track invariant. Idempotent.
 
@@ -467,15 +501,15 @@ def backfill_primary_flags(cursor) -> int:
     (``track_id IS NULL``) never carry the flag. Returns rows changed.
     """
     changed = 0
-    cursor.execute(
-        "UPDATE lib2_track_files SET is_primary=0, primary_manual=0 "
+    changed += _update_files(
+        cursor, "is_primary=0, primary_manual=0",
+        "SELECT id FROM lib2_track_files "
         "WHERE track_id IS NULL AND (is_primary=1 OR primary_manual=1)")
-    changed += cursor.rowcount
     # A manual choice is meaningful only while that file is usable.  Keep at
     # most one historical manual flag per track (the newest explicit row wins
     # if an older buggy version managed to create several).
-    cursor.execute("""
-        UPDATE lib2_track_files SET primary_manual=0
+    changed += _update_files(cursor, "primary_manual=0", """
+        SELECT id FROM lib2_track_files
          WHERE primary_manual=1
            AND (COALESCE(file_state,'active')<>'active'
                 OR id NOT IN (
@@ -484,11 +518,10 @@ def backfill_primary_flags(cursor) -> int:
                        AND COALESCE(m.file_state,'active')='active'
                      GROUP BY m.track_id))
     """)
-    changed += cursor.rowcount
     # Older triggers could leave a deleted/missing row primary after a fresh
     # active import arrived.  Active files always own the operative flag.
-    cursor.execute("""
-        UPDATE lib2_track_files AS stale SET is_primary=0
+    changed += _update_files(cursor, "is_primary=0", """
+        SELECT stale.id FROM lib2_track_files AS stale
          WHERE stale.is_primary=1
            AND COALESCE(stale.file_state,'active')<>'active'
            AND EXISTS (
@@ -497,12 +530,11 @@ def backfill_primary_flags(cursor) -> int:
                   AND COALESCE(active.file_state,'active')='active'
            )
     """)
-    changed += cursor.rowcount
     # Keep only the desired primary: a valid manual selection first, otherwise
     # the documented quality ordering.  This also replaces stale but singular
     # automatic primaries when a better retained file arrived later.
-    cursor.execute(f"""
-        UPDATE lib2_track_files SET is_primary=0
+    changed += _update_files(cursor, "is_primary=0", f"""
+        SELECT id FROM lib2_track_files
          WHERE is_primary=1 AND track_id IS NOT NULL
            AND id <> (SELECT f.id FROM lib2_track_files f
                        WHERE f.track_id=lib2_track_files.track_id
@@ -512,11 +544,8 @@ def backfill_primary_flags(cursor) -> int:
                            THEN 0 ELSE 1 END,
                            {quality_order('f')} LIMIT 1)
     """)
-    changed += cursor.rowcount
     # Elect a primary where none exists.
-    cursor.execute(f"""
-        UPDATE lib2_track_files SET is_primary=1
-         WHERE id IN (
+    changed += _update_files(cursor, "is_primary=1", f"""
                SELECT (SELECT f.id FROM lib2_track_files f
                         WHERE f.track_id = t.track_id
                         ORDER BY CASE
@@ -528,9 +557,8 @@ def backfill_primary_flags(cursor) -> int:
                         WHERE track_id IS NOT NULL) t
                 WHERE NOT EXISTS (
                       SELECT 1 FROM lib2_track_files p
-                       WHERE p.track_id = t.track_id AND p.is_primary=1))
+                       WHERE p.track_id = t.track_id AND p.is_primary=1)
     """)
-    changed += cursor.rowcount
     return changed
 
 

@@ -12,9 +12,13 @@ export interface AppearsOnTrack {
   disc_number?: number | null;
   duration?: number | null;
   file_path?: string | null;
+  /** credited and wanted, not here yet: listed, nothing to play */
+  wanted?: boolean;
   album_id?: string | number;
   album_title?: string;
   album_thumb_url?: string | null;
+  /** the provider's cover, painted while a cold local one is built */
+  album_thumb_remote_url?: string | null;
   year?: number | null;
   artist_id?: string | number;
   artist_name?: string;
@@ -25,6 +29,7 @@ export interface AppearsOnAlbum {
   id: string | number;
   title?: string;
   thumb_url?: string | null;
+  thumb_remote_url?: string | null;
   year?: number | null;
   artist_id?: string | number;
   artist_name?: string;
@@ -64,6 +69,7 @@ export function albumTracks(album: AppearsOnAlbum): AppearsOnTrack[] {
       album_id: album.id,
       album_title: album.title,
       album_thumb_url: album.thumb_url,
+      album_thumb_remote_url: album.thumb_remote_url,
       year: album.year,
       artist_id: album.artist_id,
       artist_name: album.artist_name,

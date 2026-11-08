@@ -671,6 +671,16 @@ def _is_staging_task(task_id) -> bool:
         return bool(download_tasks.get(task_id, {}).get('staging_match'))
 
 
+def _remember_quarantine(task_id, reason) -> None:
+    """if the retry this precedes finds nothing, the task says the file was
+    quarantined and why, not "no match found" (#2001)"""
+    if not task_id or not reason:
+        return
+    with tasks_lock:
+        if task_id in download_tasks:
+            download_tasks[task_id]['last_quarantine_reason'] = str(reason)
+
+
 def _requeue_quarantined_task_for_retry(task_id, batch_id, trigger) -> bool:
     """Ask the download monitor to re-run this task on its next-best candidate.
 
@@ -1408,6 +1418,9 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             logger.error(f"[Integrity] Rejected {_basename}: {integrity.reason}")
             context['_integrity_failure_msg'] = integrity.reason
             context['_integrity_checks'] = integrity.checks
+            # the review shows "expected 4:26, got 13:04" from these (#2001)
+            context['_expected_length_s'] = (round(_expected_duration_ms / 1000.0, 1)
+                                             if _expected_duration_ms else None)
             _journal_checks_not_run(
                 context,
                 checks=('quality', 'acoustic_id'),
@@ -1947,7 +1960,8 @@ def _post_process_matched_download(context_key, context, file_path, runtime, met
             # scan from batch_complete, scanning here too would run it twice
             if web_scan_manager and _auto_scan_on and not context.get('batch_id'):
                 threading.Thread(
-                    target=lambda: web_scan_manager.request_scan("Simple download completed"),
+                    target=lambda: web_scan_manager.request_scan("Simple download completed",
+                                                                 scope="downloads"),
                     daemon=True,
                 ).start()
 
@@ -2885,8 +2899,12 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         # accounting stays owned by this wrapper. Stash it under a dedicated key
         # the redirect reads. Flag-gated so flag-off downloads are byte-identical
         # (no extra context key), and popped again before the wrapper continues.
-        if original_batch_id and config_manager.get('album_downloads.atomic_publish', False):
-            context['_atomic_publish_batch_id'] = original_batch_id
+        # The staging route (try_staging_match) never puts batch_id in its
+        # context, so the wrapper's argument is the fallback here too: without
+        # it, tracks claimed from an album-bundle staging folder skipped the
+        # redirect and landed one by one in the live library.
+        if (original_batch_id or batch_id) and config_manager.get('album_downloads.atomic_publish', False):
+            context['_atomic_publish_batch_id'] = original_batch_id or batch_id
         # the album-consistency registration needs the batch too. without it
         # no batched download ever reached the album pass (#1618).
         # the staging route never puts batch_id in its context, so the argument
@@ -2944,6 +2962,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             # Requeue-first, fail-second — the same order the direct path uses.
             # A successful requeue means the task is live again on its next-best
             # candidate, so it must not be marked failed.
+            _remember_quarantine(task_id, reason)
             if _requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
                 logger.info(
                     f"Task {task_id} quarantined by the {trigger} guard — "
@@ -3010,6 +3029,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             # source flagged used) picks the runner-up match instead.
             with matched_context_lock:
                 matched_downloads_context.pop(context_key, None)
+            _remember_quarantine(task_id, f"verification failed: {failure_msg}")
             if _requeue_quarantined_task_for_retry(task_id, batch_id, 'acoustid'):
                 logger.info(
                     f"AcoustID mismatch for task {task_id} — retrying next-best candidate: {failure_msg}"
@@ -3075,6 +3095,7 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             # file and retry the next-best candidate before failing.
             with matched_context_lock:
                 matched_downloads_context.pop(context_key, None)
+            _remember_quarantine(task_id, f"integrity check failed: {failure_msg}")
             if _requeue_quarantined_task_for_retry(task_id, batch_id, 'integrity'):
                 logger.info(
                     f"Integrity check failed for task {task_id} — retrying next-best candidate: {failure_msg}"

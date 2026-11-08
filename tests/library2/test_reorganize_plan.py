@@ -319,6 +319,41 @@ def test_a_track_landing_on_an_unchanged_file_is_a_collision(imported_conn):
     assert by_title["Move"]["collision"] is True
 
 
+
+def test_a_file_already_in_place_is_unchanged_under_any_spelling(imported_conn, tmp_path):
+    """#1080: an album that is already organized must plan as `unchanged`, or
+    every run rewrites it. The catalogue often stores another spelling of the
+    same location than the path builder returns: a media-server mount reached
+    through a symlink, a `.` segment. Both name the file it would move, so
+    neither may count as a move."""
+    conn = imported_conn
+    _, album_id, track_ids = _seed(conn, tracks=(("Linked", 1, 1), ("Dotted", 2, 1), ("Moves", 3, 1)))
+    real = tmp_path / "lib" / "Drake" / "Views"
+    real.mkdir(parents=True)
+    (tmp_path / "mount").symlink_to(tmp_path / "lib")
+    for name in ("Linked", "Dotted", "Moves"):
+        (real / f"{name}.flac").write_bytes(b"audio")
+    stored = {
+        track_ids[0]: tmp_path / "mount" / "Drake" / "Views" / "Linked.flac",
+        track_ids[1]: f"{tmp_path}/lib/./Drake/Views/Dotted.flac",
+        track_ids[2]: real / "Moves.flac",
+    }
+    for track_id, path in stored.items():
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?", (str(path), track_id))
+    conn.commit()
+
+    def build(context, _artist, _album_info, file_ext, create_dirs=True):
+        title = context["track_info"]["name"]
+        folder = real if title != "Moves" else tmp_path / "lib" / "Drake" / "Elsewhere"
+        return str(folder / f"{title}{file_ext}"), True
+
+    plan = _plan(conn, album_id, build, transfer_dir=str(tmp_path / "lib"))
+
+    by_title = {t["title"]: t for t in plan["tracks"]}
+    assert by_title["Linked"]["unchanged"] is True
+    assert by_title["Dotted"]["unchanged"] is True
+    assert by_title["Moves"]["unchanged"] is False
+
 # ── the release type a download filed the album under (upstream 558d96864) ──
 
 class _Cfg:
@@ -428,10 +463,240 @@ def test_recorded_secondary_types_fill_only_an_empty_list(imported_conn):
                        (album_id,)).fetchone()
     assert json.loads(row["secondary_types"]) == ["live"]
     assert json.loads(row["filed_release"]) == {
-        "type": "ep", "total_tracks": 5, "source": "musicbrainz", "locked": False}
+        "type": "ep", "total_tracks": 5, "source": "musicbrainz", "locked": False,
+        "disambiguation": ""}
 
     conn.execute("UPDATE lib2_albums SET secondary_types='[\"soundtrack\"]' WHERE id=?",
                  (album_id,))
     reorganize_plan.record_filed_release(conn, album_id, ctx)
     row = conn.execute("SELECT secondary_types FROM lib2_albums WHERE id=?", (album_id,)).fetchone()
     assert json.loads(row["secondary_types"]) == ["soundtrack"]
+
+
+# ── #1299: a release's disambiguation keeps its own folder through reorganize ──
+
+def _plain_builder(monkeypatch, tmp_path, *, auto=True):
+    from core.imports import paths
+
+    monkeypatch.setattr(paths, "_get_config_manager", lambda: _Cfg({
+        "file_organization.templates": {"album_path": "$albumartist/$album/$track - $title"},
+        "file_organization.enabled": True,
+        "file_organization.auto_disambiguation": auto,
+        "soulseek.transfer_path": str(tmp_path),
+    }))
+    return paths.build_final_path_for_track
+
+
+def _album_folder(conn, album_id, build, tmp_path, resolve=lambda p: p):
+    plan = reorganize_plan.plan_album_reorganize(
+        conn, album_id, build_final_path_fn=build, transfer_dir=str(tmp_path),
+        resolve_file_path_fn=resolve)
+    return os.path.basename(os.path.dirname(plan["tracks"][0]["new_path_abs"]))
+
+
+def _downloaded_with(monkeypatch, tmp_path, disambiguation):
+    from core.library_reorganize import _build_album_info, _build_post_process_context
+
+    build = _plain_builder(monkeypatch, tmp_path)
+    ctx = _build_post_process_context(
+        {"id": "MB1", "name": "Views", "release_date": "2016-01-01", "total_tracks": 1,
+         "images": [{"url": ""}], "disambiguation": disambiguation},
+        {"name": "One Dance", "track_number": 1, "disc_number": 1,
+         "artists": [{"name": "Drake"}]},
+        "Drake", "Views", 1, record_type="album")
+    path, _ = build(ctx, ctx["spotify_artist"], _build_album_info(ctx), ".flac",
+                    create_dirs=False)
+    return ctx, os.path.basename(os.path.dirname(path))
+
+
+def test_a_disambiguated_release_stays_in_the_folder_its_download_made(
+        imported_conn, monkeypatch, tmp_path):
+    """import, press reorganize, nothing moves: the download filed it under
+    "Views (baby punk version)" and reorganize used to pull it into "Views",
+    on top of the other release of that name"""
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    ctx, download_folder = _downloaded_with(monkeypatch, tmp_path, "baby punk version")
+    assert download_folder == "Views (baby punk version)"
+
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    conn.commit()
+
+    assert _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path), tmp_path) == \
+        "Views (baby punk version)"
+
+
+def test_an_upgraded_album_reads_the_disambiguation_off_its_files(
+        imported_conn, monkeypatch, tmp_path):
+    """3.6.1 libraries have no recorded filing: the file's MusicBrainz album
+    comment answers, the way 3.6.1's reorganize read it"""
+    from tests.test_album_consistency_adopt import _make_flac
+
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    song = tmp_path / "song.flac"
+    _make_flac(song, {"MUSICBRAINZ_ALBUMCOMMENT": "baby punk version"})
+
+    folder = _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path), tmp_path,
+                           resolve=lambda _p: str(song))
+
+    assert folder == "Views (baby punk version)"
+
+
+def test_a_recorded_plain_filing_wins_over_a_tag(imported_conn, monkeypatch, tmp_path):
+    """a download that filed it plain stays plain even if a later tag says otherwise"""
+    from tests.test_album_consistency_adopt import _make_flac
+
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    ctx, download_folder = _downloaded_with(monkeypatch, tmp_path, "")
+    assert download_folder == "Views"
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    conn.commit()
+    song = tmp_path / "song.flac"
+    _make_flac(song, {"MUSICBRAINZ_ALBUMCOMMENT": "baby punk version"})
+
+    assert _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path), tmp_path,
+                         resolve=lambda _p: str(song)) == "Views"
+
+
+def test_the_auto_disambiguation_setting_still_decides(imported_conn, monkeypatch, tmp_path):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    ctx, _ = _downloaded_with(monkeypatch, tmp_path, "baby punk version")
+    reorganize_plan.record_filed_release(conn, album_id, ctx)
+    conn.commit()
+
+    assert _album_folder(conn, album_id, _plain_builder(monkeypatch, tmp_path, auto=False),
+                         tmp_path) == "Views"
+
+
+# --- 3.6.1 lossy-copy twins an upgraded library never catalogued ---------------
+
+
+def _lossy_copy(monkeypatch, enabled=True, codec="opus"):
+    from core.settings import config_manager
+    real = config_manager.get
+    monkeypatch.setattr(config_manager, "get", lambda key, default=None: (
+        enabled if key == "lossy_copy.enabled" else codec if key == "lossy_copy.codec"
+        else real(key, default)))
+
+
+def _twin_on_disk(tmp_path, twin_ext=".opus"):
+    from tests.test_album_consistency_adopt import _make_flac
+    folder = tmp_path / "old" / "Views"
+    folder.mkdir(parents=True)
+    song = folder / "01 - One Dance.flac"
+    _make_flac(song, {})
+    twin = folder / f"01 - One Dance{twin_ext}"
+    twin.write_bytes(b"lossy copy")
+    return song, twin
+
+
+def _siblings(conn, album_id, monkeypatch, tmp_path, song):
+    plan = reorganize_plan.plan_album_reorganize(
+        conn, album_id, build_final_path_fn=_plain_builder(monkeypatch, tmp_path),
+        transfer_dir=str(tmp_path), resolve_file_path_fn=lambda _p: str(song))
+    return plan["tracks"][0]["sibling_files"]
+
+
+def test_the_lossy_copy_no_row_knows_travels_with_its_track(imported_conn, monkeypatch, tmp_path):
+    """an upgraded 3.6.1 library catalogued the flac only; its opus copy
+    stayed in the old folder and the folder never emptied (Foxxify)"""
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    song, twin = _twin_on_disk(tmp_path)
+    _lossy_copy(monkeypatch)
+
+    siblings = _siblings(conn, album_id, monkeypatch, tmp_path, song)
+
+    assert siblings == [{"file_id": None, "source_db_path": None,
+                         "current_path_abs": str(twin), "uncatalogued": True}]
+
+
+def test_a_same_named_file_the_lossy_copy_does_not_explain_stays(imported_conn, monkeypatch, tmp_path):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn)
+    song, _twin = _twin_on_disk(tmp_path, twin_ext=".mp3")
+    _lossy_copy(monkeypatch, codec="opus")      # an mp3 is no opus copy
+    assert _siblings(conn, album_id, monkeypatch, tmp_path, song) == []
+
+    _lossy_copy(monkeypatch, enabled=False)     # no lossy copy at all
+    assert _siblings(conn, album_id, monkeypatch, tmp_path, song) == []
+
+
+def test_another_tracks_file_is_never_carried_as_a_twin(imported_conn, monkeypatch, tmp_path):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, tracks=(("One Dance", 1, 1), ("Hype", 2, 1)))
+    song, twin = _twin_on_disk(tmp_path)
+    other = conn.execute("SELECT id FROM lib2_tracks WHERE title='Hype'").fetchone()[0]
+    conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?",
+                 ("/server/Views/01 - One Dance.opus", other))
+    conn.commit()
+    _lossy_copy(monkeypatch)
+
+    plan = reorganize_plan.plan_album_reorganize(
+        conn, album_id, build_final_path_fn=_plain_builder(monkeypatch, tmp_path),
+        transfer_dir=str(tmp_path),
+        resolve_file_path_fn=lambda p: str(twin) if p.endswith(".opus") else str(song))
+    first = next(t for t in plan["tracks"] if t["title"] == "One Dance")
+    assert first["sibling_files"] == []
+
+
+def test_reorganize_dates_an_album_the_way_its_download_did():
+    """a download files under the album's year when its release_date is
+    another edition's (core.library2.release_dates). a reorganize preferring
+    the release_date moved those files to a second [year] folder."""
+    from core.library2.reorganize_plan import _as_provider_album
+
+    album = {"title": "Different Route", "year": 2017, "release_date": "2021-03-05"}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017"
+    album = {"title": "Different Route", "year": 2017, "release_date": "2017-08-25"}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017-08-25"
+    album = {"title": "Different Route", "year": 2017, "release_date": None}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017"
+
+
+def test_reorganize_files_explicit_and_artist_identity_like_the_download(imported_conn):
+    """#1859/#1860: $explicit, $contentrating and $albumartistinfo. the catalogue
+    planner never handed the path builder the flags or the artist's mbid, so a
+    reorganize stripped [E] off a folder the next download put back."""
+    conn = imported_conn
+    artist_id, album_id, track_ids = _seed(conn)
+    conn.execute("UPDATE lib2_tracks SET explicit=1 WHERE id=?", (track_ids[0],))
+    conn.execute("UPDATE lib2_albums SET explicit=1 WHERE id=?", (album_id,))
+    conn.execute("UPDATE lib2_artists SET musicbrainz_id='mb-drake' WHERE id=?", (artist_id,))
+    conn.commit()
+    build, seen = _recorder()
+
+    _plan(conn, album_id, build)
+
+    context = seen[0]["context"]
+    assert context["track_info"]["explicit"] is True
+    assert context["spotify_album"]["explicit"] is True
+    assert context["spotify_artist"]["musicbrainz_id"] == "mb-drake"
+
+
+def test_reorganize_refuses_an_unknown_artist_album(imported_conn):
+    """3.6.1 refused placeholder metadata and pointed at Fix Unknown Artists.
+    planning it moved a hand-sorted folder into 'Unknown Artist/'."""
+    conn = imported_conn
+    artist_id, album_id, _ = _seed(conn, album_title="OK Computer")
+    conn.execute("UPDATE lib2_artists SET name='Unknown Artist' WHERE id=?", (artist_id,))
+    conn.commit()
+    build, seen = _recorder()
+
+    plan = _plan(conn, album_id, build)
+
+    assert plan["status"] == "placeholder_metadata"
+    assert "Fix Unknown Artists" in plan["error"]
+    assert seen == []
+
+
+def test_reorganize_refuses_an_album_titled_with_an_id(imported_conn):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, album_title="1234567890")
+    build, seen = _recorder()
+
+    assert _plan(conn, album_id, build)["status"] == "placeholder_metadata"
+    assert seen == []

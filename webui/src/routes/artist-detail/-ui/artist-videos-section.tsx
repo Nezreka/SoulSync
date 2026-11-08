@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useFeatureOn } from '@/platform/features';
 import { acquireVerb, profileAsksFirst } from '@/platform/shell/download-rights';
 
 import type { SearchVideo } from '../../search/-search.types';
@@ -472,7 +473,14 @@ function ArtistVideoRailItem({
   );
 }
 
-export function ArtistVideosSection({
+/** music videos switched off (#1909): no section, and no yt-dlp search
+ *  behind it either */
+export function ArtistVideosSection(props: { artistName?: string | null; standalone?: boolean }) {
+  const on = useFeatureOn('music_videos');
+  return on ? <ArtistVideosPanel {...props} /> : null;
+}
+
+function ArtistVideosPanel({
   artistName,
   standalone = false,
 }: {

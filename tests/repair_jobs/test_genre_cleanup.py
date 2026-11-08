@@ -50,9 +50,21 @@ def db():
     cur.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, album_type, "
                 "genres, image_url) VALUES (1, 1, 'Dirty Album', 'album', ?, 'alb.jpg')",
                 (json.dumps(['favorites', 'Rock']),))
+    # the library is what has files: a song on the album, Clean Artist a guest on it
+    _owned_track(cur, 1, [1, 2])
     conn.commit()
     conn.close()
     return d
+
+
+def _owned_track(cur, album_id, artist_ids):
+    track_id = cur.execute("INSERT INTO lib2_tracks (album_id, title) VALUES (?, 'Song')",
+                           (album_id,)).lastrowid
+    cur.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                (track_id, f'/music/{track_id}.flac'))
+    for artist_id in artist_ids:
+        cur.execute("INSERT INTO lib2_track_artists (track_id, artist_id) VALUES (?, ?)",
+                    (track_id, artist_id))
 
 
 def _ctx(db, cfg, findings):
@@ -185,8 +197,9 @@ def test_scanned_counts_the_whole_library_not_just_genre_rows(db):
     conn = db._get_connection()
     cur = conn.cursor()
     for i in range(5):
-        cur.execute("INSERT INTO lib2_artists (name, sort_name) VALUES (?, ?)",
-                    (f'No Genres {i}', f'No Genres {i}'))
+        artist_id = cur.execute("INSERT INTO lib2_artists (name, sort_name) VALUES (?, ?)",
+                                (f'No Genres {i}', f'No Genres {i}')).lastrowid
+        _owned_track(cur, 1, [artist_id])
     conn.commit()
     conn.close()
 
@@ -195,5 +208,23 @@ def test_scanned_counts_the_whole_library_not_just_genre_rows(db):
     # 2 seeded artists + 5 bare artists + 1 seeded album = 8 examined
     assert res.scanned == 8
     # findings unchanged by the counting fix: only the dirty rows raise them
+    assert {f['title'] for f in findings} == {
+        'Off-whitelist genres: Dirty Artist', 'Off-whitelist genres: Dirty Album'}
+
+
+def test_rows_the_library_does_not_hold_are_not_scanned(db):
+    """watchlist discography and wishlist rows share the catalogue tables; their
+    provider genres are not the library's, and cleaning them was noise"""
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_artists (id, name, sort_name, genres) VALUES (9, 'Watched', 'Watched', ?)",
+                 (json.dumps(['seen live']),))
+    conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title, album_type, genres) "
+                 "VALUES (9, 9, 'Wished Album', 'album', ?)", (json.dumps(['favorites']),))
+    conn.commit()
+    conn.close()
+
+    findings = []
+    GenreCleanupJob().scan(_ctx(db, _Cfg(), findings))
+
     assert {f['title'] for f in findings} == {
         'Off-whitelist genres: Dirty Artist', 'Off-whitelist genres: Dirty Album'}

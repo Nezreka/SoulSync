@@ -36,6 +36,7 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Optional
 
+from core.library2.release_dates import album_release_date
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.reorganize_plan")
@@ -64,6 +65,7 @@ def record_filed_release(conn, album_id: Any, context: Any) -> None:
             "total_tracks": int(filed.get("total_tracks") or 0),
             "source": str(filed.get("source") or ""),
             "locked": bool(filed.get("locked")),
+            "disambiguation": str(filed.get("disambiguation") or "").strip(),
         }
         conn.execute("UPDATE lib2_albums SET filed_release=? WHERE id=?",
                      (json.dumps(payload), int(album_id)))
@@ -86,20 +88,115 @@ def _filing(album_row: Any, album: Dict[str, Any]) -> Dict[str, Any]:
     """
     base_type = str(album_row["album_type"] or "album").strip().lower() or "album"
     effective_type = str(album.get("album_type") or base_type).strip().lower() or base_type
-    if effective_type != base_type:
-        return {"type": effective_type, "source": "", "locked": True, "total_tracks": 0}
     try:
         filed = json.loads(album_row["filed_release"] or "{}")
     except (TypeError, ValueError, IndexError, KeyError):
         filed = {}
+    # #1299: None means nothing recorded (a download from before it was kept,
+    # or an upgraded 3.6.1 library): the files' own tag answers then
+    recorded = (str(filed.get("disambiguation") or "").strip()
+                if isinstance(filed, dict) and "disambiguation" in filed else None)
+    if effective_type != base_type:
+        return {"type": effective_type, "source": "", "locked": True, "total_tracks": 0,
+                "disambiguation": recorded}
     if isinstance(filed, dict) and filed.get("type"):
         return {
             "type": str(filed["type"]).strip().lower(),
             "source": str(filed.get("source") or ""),
             "locked": bool(filed.get("locked")),
             "total_tracks": int(filed.get("total_tracks") or 0),
+            "disambiguation": recorded,
         }
-    return {"type": base_type, "source": "tags", "locked": None, "total_tracks": 0}
+    return {"type": base_type, "source": "tags", "locked": None, "total_tracks": 0,
+            "disambiguation": recorded}
+
+
+def _lossy_companion_exts(conn) -> set:
+    """The extensions any enabled lossy-copy setting writes (global or a
+    quality profile), read through this connection."""
+    from core.library.duplicate_rules import LOSSY_CODEC_EXTS
+    exts: set = set()
+    try:
+        from core.settings import config_manager
+        if config_manager.get("lossy_copy.enabled", False):
+            codec = str(config_manager.get("lossy_copy.codec", "mp3")).lower()
+            exts.add(LOSSY_CODEC_EXTS.get(codec, ".mp3"))
+    except Exception as e:  # noqa: BLE001 - optional
+        logger.debug("lossy copy setting not read: %s", e)
+    try:
+        for (codec,) in conn.execute(
+                "SELECT lossy_copy_codec FROM quality_profiles WHERE lossy_copy_enabled = 1"):
+            exts.add(LOSSY_CODEC_EXTS.get(str(codec or "mp3").lower(), ".mp3"))
+    except Exception as e:  # noqa: BLE001 - an older schema has no profiles
+        logger.debug("quality profile lossy codecs not read: %s", e)
+    return exts
+
+
+def _uncatalogued_lossy_twins(conn, resolved: str, planned: list,
+                              resolve_file_path_fn=None) -> list:
+    """Same-named files beside ``resolved`` that no file row knows and that
+    the lossy-copy setting explains as the lossless/lossy pair of it. They
+    move with the track and keep no catalogue row (``file_id`` None)."""
+    from core.library.duplicate_rules import is_lossy_companion_pair
+    from core.library_reorganize import _AUDIO_EXTS
+    exts = _lossy_companion_exts(conn)
+    if not exts or not resolved:
+        return []
+    folder = os.path.dirname(resolved)
+    stem = os.path.splitext(os.path.basename(resolved))[0]
+    taken = {os.path.normcase(os.path.abspath(f["current_path_abs"])) for f in planned}
+    taken.add(os.path.normcase(os.path.abspath(resolved)))
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    twins = []
+    for name in sorted(names):
+        candidate = os.path.join(folder, name)
+        cand_stem, cand_ext = os.path.splitext(name)
+        if (cand_stem.lower() != stem.lower() or cand_ext.lower() not in _AUDIO_EXTS
+                or os.path.normcase(os.path.abspath(candidate)) in taken
+                or not os.path.isfile(candidate)
+                or not is_lossy_companion_pair(resolved, candidate, exts)):
+            continue
+        if _catalogued(conn, candidate, name, resolve_file_path_fn):
+            continue  # some track's file: never ours to move as a twin
+        twins.append({"file_id": None, "source_db_path": None,
+                      "current_path_abs": candidate, "uncatalogued": True})
+    return twins
+
+
+def _catalogued(conn, local_path: str, name: str, resolve_file_path_fn) -> bool:
+    """Whether any file row resolves to ``local_path``. Stored paths are the
+    server's view (a Windows drive path, a container path), so the rows ending
+    in the same file name are resolved and compared, as the planner resolves
+    its own."""
+    escaped = name.replace(BACK, BACK + BACK).replace("%", BACK + "%").replace("_", BACK + "_")
+    target = os.path.normcase(os.path.abspath(local_path))
+    for (path,) in conn.execute(
+            "SELECT path FROM lib2_track_files WHERE path LIKE ? ESCAPE ?",
+            (f"%{escaped}", BACK)):
+        resolved = resolve_file_path_fn(path) if resolve_file_path_fn else path
+        if resolved and os.path.normcase(os.path.abspath(resolved)) == target:
+            return True
+    return False
+
+
+BACK = chr(92)  # the LIKE escape character (a backslash)
+
+
+def _tagged_disambiguation(tracks: List[Dict[str, Any]],
+                           resolve_file_path_fn: Callable[[Optional[str]], Optional[str]]) -> str:
+    """The release disambiguation off the album's own files (MusicBrainz's
+    MUSICBRAINZ_ALBUMCOMMENT), as 3.6.1's reorganize read it. One readable
+    file answers: a release's files carry the same release tags."""
+    from core.library.release_identity import read_release_identity
+
+    for track in tracks:
+        resolved = resolve_file_path_fn(track.get("file_path")) if track.get("file_path") else None
+        if resolved and os.path.isfile(resolved):
+            return (read_release_identity(resolved)[1] or "").strip()
+    return ""
 
 
 def _album_row(conn, album_id: int):
@@ -107,8 +204,8 @@ def _album_row(conn, album_id: int):
         """SELECT al.id, al.title, al.year, al.release_date, al.album_type,
                   al.secondary_types, al.filed_release,
                   al.image_url, al.spotify_id, al.primary_artist_id,
-                  al.expected_track_count, al.track_count,
-                  ar.name AS artist_name
+                  al.expected_track_count, al.track_count, al.explicit,
+                  ar.name AS artist_name, ar.musicbrainz_id AS artist_musicbrainz_id
              FROM lib2_albums al
              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             WHERE al.id = ?""",
@@ -128,7 +225,7 @@ def _track_rows(conn, album_id: int) -> List[Any]:
     # the file of the library this runs in: a reorganize never moves another
     # library's copy into this library's folder (#1199)
     return conn.execute(
-        f"""SELECT t.id, t.title, t.track_number, t.disc_number,
+        f"""SELECT t.id, t.title, t.track_number, t.disc_number, t.explicit,
                    selected.id AS file_id, selected.path AS file_path
               FROM lib2_tracks t
               LEFT JOIN lib2_track_files selected ON selected.id =
@@ -181,6 +278,15 @@ def _credited_artists(conn, track_id: int) -> List[str]:
     return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
 
 
+def _flag(value: Any) -> Optional[bool]:
+    if value is None or value == "":
+        return None
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _as_provider_album(album: Dict[str, Any], track_count: int,
                        total_discs: int) -> Dict[str, Any]:
     """Shape the catalogue album like the provider payload the context builder
@@ -197,8 +303,9 @@ def _as_provider_album(album: Dict[str, Any], track_count: int,
     return {
         "id": album.get("spotify_id") or "",
         "name": album.get("title") or "Unknown Album",
-        "release_date": album.get("release_date") or (
-            str(album["year"]) if album.get("year") else ""),
+        # the same date a download of this album files under, so a
+        # reorganize never moves it to another [year] folder
+        "release_date": album_release_date(album.get("release_date"), album.get("year")),
         "total_tracks": track_count,
         "total_discs": total_discs,
         "image_url": album.get("image_url") or "",
@@ -206,6 +313,9 @@ def _as_provider_album(album: Dict[str, Any], track_count: int,
         "record_type": album_type,
         "secondary_types": [str(value) for value in secondary_types if value],
         "is_compilation": album_type == "compilation",
+        # #1299: the context builder hands this to the path builder, which
+        # suffixes the folder exactly as the download did
+        "disambiguation": str(album.get("disambiguation") or "").strip(),
     }
 
 
@@ -250,11 +360,26 @@ def plan_album_reorganize(
         conn, album_row["primary_artist_id"], album_row["artist_name"]
     ) or "Unknown Artist"
 
+    # 3.6.1 refused an album with placeholder metadata: a scan of untagged
+    # files reads "Unknown Artist", and an old import titled the album with
+    # its provider id. reorganizing either moves a hand-sorted folder into
+    # "Unknown Artist/" or "Artist/1234567890/". say what to run instead.
+    from core.library_reorganize import _is_unknown_artist
+    _title = str(album_title or "").strip()
+    if (_is_unknown_artist(album_row["artist_name"]) or _is_unknown_artist(artist_name)
+            or (len(_title) >= 6 and _title.isdigit())):
+        return {"success": False, "status": "placeholder_metadata",
+                "source": None, "album": album_title, "artist": artist_name,
+                "transfer_dir": transfer_dir, "tracks": [],
+                "error": ("Album has placeholder metadata (Unknown Artist or numeric "
+                          "title). Run the 'Fix Unknown Artists' repair job to recover "
+                          "the real artist and album from the file tags before reorganize.")}
+
     all_rows = _track_rows(conn, album_id)
     from core.library2.retag import track_contexts
     references = {r['id']: r['db_data'] for r in track_contexts(conn, [r['id'] for r in all_rows])}
     all_tracks = [{**references[r['id']], 'id': r['id'], 'file_path': r['file_path'],
-                   'file_id': r['file_id']} for r in all_rows]
+                   'file_id': r['file_id'], 'explicit': r['explicit']} for r in all_rows]
     tracks = [t for t in all_tracks if t["file_path"]]
     common = {
         "source": None,
@@ -281,6 +406,8 @@ def plan_album_reorganize(
     # landed — the #1080 oscillation from the other direction.
     total_discs = max((int(t.get('total_discs') or t['disc_number'] or 1) for t in all_tracks), default=1)
     filing = _filing(album_row, album)
+    album["disambiguation"] = (filing["disambiguation"] if filing["disambiguation"] is not None
+                               else _tagged_disambiguation(tracks, resolve_file_path_fn))
 
     planned: List[Dict[str, Any]] = []
     for track in tracks:
@@ -346,6 +473,14 @@ def plan_album_reorganize(
                     'file_id': sibling['id'], 'source_db_path': sibling['path'],
                     'current_path_abs': sibling_abs,
                 })
+        # 3.6.1's lossy copy kept the lossless file beside the copy it made,
+        # and an upgraded library often catalogued only one of them: the other
+        # stayed behind in the old folder and the folder never emptied. Only
+        # a pair the lossy-copy setting itself explains is carried; any other
+        # same-named audio is someone else's recording and stays put.
+        item['sibling_files'].extend(
+            _uncatalogued_lossy_twins(conn, resolved, item['sibling_files'],
+                                      resolve_file_path_fn))
 
         artists = _credited_artists(conn, track["id"]) or [artist_name]
         context = _build_post_process_context(
@@ -364,6 +499,12 @@ def plan_album_reorganize(
             total_discs,
             local_title=title,
             local_year=(str(album["year"]) if album.get("year") else None),
+            # #1859/#1860: the same $explicit / $contentrating and the artist's
+            # mbid for $albumartistinfo a download filed it with, so a
+            # reorganize never strips [E] off a folder the next download adds
+            local_explicit=_flag(track.get("explicit")),
+            local_album_explicit=_flag(album_row["explicit"]),
+            local_artist_mbid=(album_row["artist_musicbrainz_id"] or None),
             record_type=filing["type"],
             type_source=filing["source"],
         )

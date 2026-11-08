@@ -193,7 +193,11 @@ def _cutoff_fingerprint(conn: Any, profile_id: int) -> Tuple[Any, ...]:
 
 def _cutoff_unmet_cached(conn: Any, *, search: str, profile_id: int) -> List[Dict[str, Any]]:
     db_file = conn.execute("PRAGMA database_list").fetchone()[2]
-    key = (db_file, int(profile_id), search or "")
+    # the rows depend on which library's files count (_has_file_sql's owner
+    # clause): "all libraries" and "shared" both map to profile 1, so the
+    # scope is part of the key, or one was served the other's list
+    from core.library2.sql_util import owner_clause
+    key = (db_file, int(profile_id), search or "", owner_clause(column="tf.owner_profile_id"))
     fingerprint = _cutoff_fingerprint(conn, profile_id)
     hit = _cutoff_cache.get(key)
     if hit and hit[1] == fingerprint and time.monotonic() - hit[0] < _CUTOFF_TTL:

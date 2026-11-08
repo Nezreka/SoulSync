@@ -2,9 +2,10 @@
 
 Physical deletion is deliberately separate from removing a Library-v2 entity.
 This module first materializes the DB scope, closes SQLite, then resolves and
-stats files. A file is deletable only when its real path is contained by an
-explicitly configured ``library.music_paths`` root; unknown mounts, symlink
-escapes and paths outside those roots fail closed.
+stats files. A file is deletable only when its real path is contained by a
+library root: ``library.music_paths``, the folders SoulSync imports into, or
+the media server's own music folders (see ``_library_roots``); unknown mounts,
+symlink escapes and paths outside those roots fail closed.
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ import os
 import uuid
 from contextlib import closing
 from typing import Any, Callable, Dict, List, Optional
+
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.file_delete")
 
 
 FILE_DELETE_OPERATIONS_DDL = """
@@ -126,19 +131,138 @@ def _library_roots(
         import_root = _read("soulseek.transfer_path")
         if isinstance(import_root, str) and import_root.strip():
             candidates.append(import_root)
+        # a profile's own library is a folder SoulSync imports into, same as
+        # the shared one
+        candidates.extend(_own_library_folders())
 
     from core.imports.paths import docker_resolve_path
+
+    def _real(raw: str) -> str:
+        return os.path.realpath(
+            os.path.abspath(os.path.expanduser(docker_resolve_path(raw.strip()).replace("\\", "/")))
+        )
 
     roots: List[str] = []
     for raw in candidates:
         if not isinstance(raw, str) or not raw.strip():
             continue
-        resolved = os.path.realpath(
-            os.path.abspath(os.path.expanduser(docker_resolve_path(raw.strip()).replace("\\", "/")))
-        )
+        resolved = _real(raw)
         if (include_missing or os.path.isdir(resolved)) and resolved not in roots:
             roots.append(resolved)
+
+    # the media server's own music folders. an upgraded plex or jellyfin
+    # install never filled music_paths, and 3.6.1 deleted what the server
+    # listed. a folder holding the download folder stays out: those files
+    # are the downloader's until the import moves them.
+    download = _read("soulseek.download_path")
+    download_real = _real(download) if isinstance(download, str) and download.strip() else ""
+    for folder in _media_server_music_folders():
+        resolved = os.path.realpath(folder)
+        if resolved in roots or resolved == os.path.dirname(resolved):
+            continue  # already a root, or the filesystem root
+        if download_real and _is_within(download_real, resolved):
+            continue
+        roots.append(resolved)
     return roots
+
+
+def _is_within(path: str, folder: str) -> bool:
+    try:
+        return os.path.commonpath((folder, path)) == folder
+    except (OSError, ValueError):
+        return False
+
+
+def _own_library_folders() -> List[str]:
+    """Each profile's own library folder (#1199), from the folder table's rule."""
+    try:
+        from core.library2.library_roots import SHARED, configured_roots
+        return [prefix for prefix, pid in configured_roots().items() if pid != SHARED]
+    except Exception as exc:  # noqa: BLE001 - no profiles readable: no own folders
+        logger.debug("own library folders unavailable for delete roots: %s", exc)
+        return []
+
+
+#: tests turn this off (tests/conftest.py): a test's delete must not ask
+#: whatever media server the process happens to hold
+MEDIA_SERVER_FOLDERS = True
+_SERVER_FOLDERS_TTL = 600.0
+_SERVER_FOLDERS_RETRY = 60.0
+_server_folders_cache: Dict[str, Any] = {"key": None, "at": 0.0, "folders": []}
+
+
+def _media_server_music_folders() -> List[str]:
+    """The active media server's music folders, as SoulSync opens them.
+
+    Plex and Jellyfin say where their music library lives; each folder counts
+    once it maps to a folder this process can see (as is, or through a mount
+    the scan learned). Navidrome's API names no folders, so there it stays
+    ``library.music_paths``. Cached: a delete preview must not wait on the
+    server every time, and a server that can't be reached gives no folders."""
+    import time
+
+    if not MEDIA_SERVER_FOLDERS:
+        return []
+    try:
+        from core.media_server import engine as engine_module
+        engine = engine_module._default_engine  # never build clients from here
+        if engine is None:
+            return []
+        server = engine.active_server
+        client = engine.active_client()
+    except Exception:  # noqa: BLE001
+        return []
+    if client is None or not hasattr(client, "get_music_library_locations"):
+        return []
+    now = time.monotonic()
+    cache = _server_folders_cache
+    ttl = _SERVER_FOLDERS_TTL if cache["folders"] else _SERVER_FOLDERS_RETRY
+    if cache["key"] == server and now - cache["at"] < ttl:
+        return list(cache["folders"])
+    folders: List[str] = []
+    try:
+        from core.library.server_paths import local_folder_for
+        for location in client.get_music_library_locations() or []:
+            local = local_folder_for(location)
+            if local and local not in folders:
+                folders.append(local)
+    except Exception as exc:  # noqa: BLE001 - no answer: no extra roots
+        logger.debug("media server music folders unavailable: %s", exc)
+    cache.update(key=server, at=now, folders=folders)
+    return list(folders)
+
+
+_AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".mp4", ".aac", ".ogg", ".opus", ".wav",
+               ".aiff", ".aif", ".alac", ".ape", ".wv", ".wma", ".dsf", ".dff"}
+
+
+def _clean_after_delete(path: str, unlink: Callable[[str], None], roots: List[str]) -> None:
+    """What 3.6.1's delete took with the file: its .lrc / .txt lyrics, and the
+    album folder once nothing is left in it. A sidecar shared with another
+    copy of the song (a FLAC and an MP3 with one stem) stays while that copy
+    does, and a library root is never removed."""
+    folder, name = os.path.split(path)
+    stem = os.path.splitext(name)[0]
+    try:
+        siblings = os.listdir(folder)
+    except OSError:
+        return
+    if not any(os.path.splitext(other)[0] == stem and os.path.splitext(other)[1].lower() in _AUDIO_EXTS
+               for other in siblings):
+        for ext in (".lrc", ".txt"):
+            sidecar = os.path.join(folder, stem + ext)
+            if os.path.isfile(sidecar):
+                try:
+                    unlink(sidecar)
+                except Exception as exc:  # noqa: BLE001 - a sidecar never fails the delete
+                    logger.debug("sidecar %s left in place: %s", sidecar, exc)
+    real_folder = os.path.realpath(folder)
+    if real_folder in {os.path.realpath(root) for root in roots}:
+        return
+    try:
+        os.rmdir(folder)  # only when empty: rmdir refuses anything else
+    except OSError:
+        pass
 
 
 def _containing_root(path: str, roots: List[str]) -> Optional[str]:
@@ -248,6 +372,11 @@ def _scope_snapshot(
         marks = ",".join("?" for _ in file_ids)
         id_filter = f" AND tf.id IN ({marks})"
         id_params = [int(f) for f in file_ids]
+    # the library the caller is looking at (#1199): an album can have files
+    # in two libraries, and removing it from one must not take the other's
+    # copy too. "All libraries" (no scope) still means all of them.
+    from core.library2.sql_util import owner_clause
+    owner = owner_clause(column="tf.owner_profile_id")
     with closing(database._get_connection()) as conn:
         if entity == "artists":
             from core.library2.artist_aliases import resolve_alias_group
@@ -267,7 +396,7 @@ def _scope_snapshot(
                      JOIN lib2_tracks t ON t.id=tf.track_id
                      JOIN lib2_albums al ON al.id=t.album_id
                     WHERE al.primary_artist_id IN ({artist_marks})
-                      AND tf.file_state<>'deleted'{id_filter}
+                      AND tf.file_state<>'deleted'{id_filter}{owner}
                     ORDER BY al.id, t.id, tf.id""",
                 (*artist_ids, *id_params),
             ).fetchall()
@@ -285,7 +414,7 @@ def _scope_snapshot(
                      FROM lib2_track_files tf
                      JOIN lib2_tracks t ON t.id=tf.track_id
                      JOIN lib2_albums al ON al.id=t.album_id
-                    WHERE al.id=? AND tf.file_state<>'deleted'{id_filter}
+                    WHERE al.id=? AND tf.file_state<>'deleted'{id_filter}{owner}
                     ORDER BY t.id, tf.id""",
                 (int(entity_id), *id_params),
             ).fetchall()
@@ -708,6 +837,10 @@ def _execute_delete_items(
             )
             conn.commit()
         deleted.append(item["path"])
+        try:
+            _clean_after_delete(item["path"], unlink, _library_roots(config_manager))
+        except Exception as exc:  # noqa: BLE001 - cleanup never fails a delete
+            logger.debug("post-delete cleanup skipped for %s: %s", item["path"], exc)
 
     return {"deleted": deleted, "failed": failed}
 

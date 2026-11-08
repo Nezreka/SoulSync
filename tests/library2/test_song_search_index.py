@@ -147,3 +147,30 @@ def test_an_index_table_of_another_shape_is_rebuilt(tmp_path):
     assert song_search.rebuild(_Database(path))
     assert song_search.matching_ids(conn, "sour") is not None
     conn.close()
+
+
+def test_the_build_holds_the_write_lock_a_batch_at_a_time(library, monkeypatch):
+    """the whole catalogue used to go in one transaction: on a 300k-track
+    library the write lock was held for the entire build. it goes a batch
+    per transaction now, and the index reads as unbuilt until the last one."""
+    conn, database, ids = library
+    monkeypatch.setattr(song_search, "_BATCH", 3)
+    commits = []
+
+    class _Counting(_Database):
+        def _get_connection(self):
+            real = super()._get_connection()
+
+            class _Conn:
+                def __getattr__(self, name):
+                    return getattr(real, name)
+
+                def commit(self):
+                    commits.append(1)
+                    return real.commit()
+            return _Conn()
+    assert song_search.rebuild(_Counting(database.path)) is True
+    assert len(commits) >= 1 + (len(ids) + 2) // 3   # the clear, then one per batch
+    indexed = {int(r[0]) for r in conn.execute("SELECT rowid FROM lib2_song_search")}
+    assert indexed == set(ids.values())
+    assert conn.execute("SELECT built FROM lib2_song_search_state").fetchone()[0] == 1

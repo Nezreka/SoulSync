@@ -276,7 +276,6 @@ def _owned_in_library(track: dict, album_name: str, owner=None) -> bool:
     """Ownership in the library the request was filed in (``owner``: its
     profile id, None for the shared one), as the missing-track analysis decides it."""
     from core.library_scope import reset_library_scope, scope_for_owner, set_library_scope
-    from core.settings import config_manager
     from database.music_database import MusicDatabase
 
     title = str(track.get("name") or track.get("title") or "")
@@ -285,10 +284,12 @@ def _owned_in_library(track: dict, album_name: str, owner=None) -> bool:
     token = set_library_scope(scope_for_owner(owner))
     try:
         db = MusicDatabase()
-        server = config_manager.get_active_media_server()
+        # a live file in that library is ownership, whether the active media
+        # server has mapped it or not (#1952): scoped to the server, a song
+        # imported before the next server scan was fetched a second time
         for name in filter(None, names):
             found, confidence = db.check_track_exists(
-                title, str(name), confidence_threshold=0.7, server_source=server, album=album_name,
+                title, str(name), confidence_threshold=0.7, server_source=None, album=album_name,
                 include_downloads=True)
             if found and confidence >= 0.7:
                 return True
@@ -330,6 +331,11 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
     Opt-in per quality profile. Each paired, not yet owned track is copied out
     of the client's download (originals stay for seeding) and runs the complete
     normal import pipeline with the same profile. Returns how many imported.
+
+    Sets ``context['_album_tracks_incomplete']`` when the profile wanted the
+    album's tracks and any of them was not imported (track list unavailable,
+    a copy or an import failed, the expansion stopped): Remove Completed then
+    keeps the client's job, whose folder is the only copy left of those tracks.
     """
     from core.imports.context import get_import_context_album, get_import_source
     from core.imports.pipeline import _resolve_context_quality_profile
@@ -361,10 +367,12 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
         payload = hydrate_download_album(catalogue_context, lookup_album=lookup_album)
         if not isinstance(payload, dict) or not payload.get("success"):
             logger.info("[Album Tracks] Track list for %r is unavailable", name)
+            context['_album_tracks_incomplete'] = True
             return 0
         catalogue_album = payload.get("album") or {}
         if _text(catalogue_album.get("name")) != _text(name):
             logger.info("[Album Tracks] Catalogue edition %r is not %r", catalogue_album.get("name"), name)
+            context['_album_tracks_incomplete'] = True
             return 0
         tracks = payload.get("tracks") or []
         requested_path = Path(requested.path).resolve()
@@ -393,6 +401,7 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
                 continue
             path = copy_file(item.path, transfer_dir)
             if not path:
+                context['_album_tracks_incomplete'] = True
                 continue
             ctx = _album_track_context(context, track, album, source)
             if catalogue_context.get('_album_catalogue_id'):
@@ -419,8 +428,11 @@ def import_album_tracks(context_key: str, context: dict, files: list[ReleaseFile
             if ctx.get("_pipeline_import_succeeded"):
                 imported += 1
                 _recently_imported(key, published_path=ctx.get('_final_processed_path') or ctx.get('_final_path'))
+            else:
+                context['_album_tracks_incomplete'] = True
         logger.info("[Album Tracks] Imported %d of %d other tracks of %r", imported, len(pairs), name)
     except Exception as exc:
+        context['_album_tracks_incomplete'] = True
         logger.warning("[Album Tracks] Album expansion stopped: %s", exc, exc_info=True)
     finally:
         with _state_lock:

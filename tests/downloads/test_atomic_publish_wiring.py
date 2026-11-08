@@ -7,6 +7,8 @@ state — i.e. normal downloads are byte-for-byte unchanged.
 from __future__ import annotations
 
 import os
+
+import pytest
 from pathlib import Path
 
 import core.imports.pipeline as pl
@@ -364,32 +366,38 @@ def _real_db_batch(monkeypatch, tmp_path, server):
     return batch, staged, final
 
 
-def test_a_dangling_row_count_rolls_back_on_a_media_server_too(monkeypatch, tmp_path):
-    """The media-server axis upstream added does NOT apply on this branch.
+def _misspelled_row(staged):
+    """a file row naming the staged file with other case: repointing by exact
+    path misses it, and it would be left pointing into the staging tree"""
+    import database.music_database as mdb_mod
+    from tests.lib2_seed import track
+    db = mdb_mod.MusicDatabase()
+    conn = db._get_connection()
+    track(conn, "Artist", "Album", "Song", path=staged.upper())
+    conn.commit()
+    conn.close()
 
-    Upstream gates the rowcount proof on the active server being 'soulsync',
-    because there the staged row comes from record_soulsync_library_entry and a
-    Plex/Navidrome/Jellyfin install legitimately has none until the server
-    scans the published files (3934742fd — atomic albums stranded in staging).
-    Here the row this repoints is a ``lib2_track_files`` row written by
-    ``require_library_v2_registration``, which the import pipeline runs on
-    EVERY install. So a zero count is real evidence whatever the media server
-    is, and the guard must keep rolling back rather than strand the catalogue
-    on a staging path.
-    """
-    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "navidrome")
+
+@pytest.mark.parametrize("server", ["navidrome", "soulsync"])
+def test_a_row_that_would_dangle_rolls_back_on_every_server(monkeypatch, tmp_path, server):
+    """L2-002 on this branch: the row is lib2_track_files, written on every
+    install, so a row the repoint can't reach rolls the album back whatever
+    the media server (upstream gated this on 'soulsync')."""
+    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, server)
+    _misspelled_row(staged)
     assert lc._publish_atomic_album("B", batch) is False
     assert os.path.isfile(staged), "the failed publish must keep the staged copy"
     assert not os.path.isfile(final)
 
 
-def test_a_soulsync_install_still_fails_on_a_dangling_row_count(monkeypatch, tmp_path):
-    """The same on a 'soulsync' install: a zero count is the proof of a dangle
-    the guard was built for."""
-    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, "soulsync")
-    assert lc._publish_atomic_album("B", batch) is False
-    assert os.path.isfile(staged), "the failed publish must keep the staged copy"
-    assert not os.path.isfile(final)
+@pytest.mark.parametrize("server", ["navidrome", "soulsync"])
+def test_a_file_no_row_names_still_publishes(monkeypatch, tmp_path, server):
+    """v2 rolled the whole album back for one file the import never
+    registered, hiding every good track in staging. nothing can dangle when
+    no row names the file: it publishes and the next scan registers it."""
+    batch, staged, final = _real_db_batch(monkeypatch, tmp_path, server)
+    assert lc._publish_atomic_album("B", batch) is True
+    assert os.path.isfile(final)
 
 
 def _registered(db, path):
@@ -568,3 +576,42 @@ def test_repair_leaves_a_row_whose_file_is_gone_everywhere(tmp_path):
 
     assert repair_staged_path_records(db) == {}
     assert _ledger_path(db) == staged
+
+
+# --- the staging route carries no batch_id in its context -------------------
+
+def _wrapper_sees_stash(monkeypatch, *, context, batch_id, flag):
+    """Run the verification wrapper with a stub inner pipeline and return the
+    batch id the inner pipeline would have read for the stage redirect."""
+    import types
+    seen = {}
+
+    def _inner(context_key, ctx, file_path, runtime, metadata_runtime=None):
+        seen["stash"] = ctx.get("_atomic_publish_batch_id")
+        ctx["_upgrade_rejected"] = True  # short-circuit the wrapper's tail
+
+    monkeypatch.setattr(pl, "config_manager", _Cfg({"album_downloads.atomic_publish": flag}))
+    monkeypatch.setattr(pl, "post_process_matched_download", _inner)
+    runtime = types.SimpleNamespace(on_download_completed=lambda *a, **kw: None,
+                                    automation_engine=None, web_scan_manager=None,
+                                    repair_worker=None)
+    pl.post_process_matched_download_with_verification(
+        "staging_T", context, "/fake/source.mp3", "T", batch_id, runtime)
+    return seen.get("stash")
+
+
+def test_staging_route_stashes_the_wrapper_batch_id(monkeypatch):
+    # try_staging_match builds its context without batch_id, so the wrapper's
+    # own argument is the only place the batch is named. Tracks claimed from an
+    # album-bundle staging folder used to skip the stage redirect and land in
+    # the live library one by one.
+    assert _wrapper_sees_stash(monkeypatch, context={}, batch_id="B", flag=True) == "B"
+
+
+def test_context_batch_id_still_wins_over_the_argument(monkeypatch):
+    assert _wrapper_sees_stash(monkeypatch, context={"batch_id": "CTX"},
+                               batch_id="ARG", flag=True) == "CTX"
+
+
+def test_flag_off_stashes_nothing_on_the_staging_route(monkeypatch):
+    assert _wrapper_sees_stash(monkeypatch, context={}, batch_id="B", flag=False) is None

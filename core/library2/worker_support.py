@@ -167,8 +167,10 @@ def owned_album_titles(conn, artist_id: Any) -> List[str]:
             """
             SELECT DISTINCT al.title
               FROM lib2_albums al
-              LEFT JOIN lib2_album_artists aa ON aa.album_id = al.id
-             WHERE (al.primary_artist_id = ? OR aa.artist_id = ?)
+             -- the artist's albums as two indexed lookups: an OR across the
+             -- LEFT JOIN walked every album (1.6s per artist, per worker)
+             WHERE al.id IN (SELECT id FROM lib2_albums WHERE primary_artist_id = ?
+                             UNION SELECT album_id FROM lib2_album_artists WHERE artist_id = ?)
                AND EXISTS (SELECT 1 FROM lib2_tracks t
                             JOIN lib2_track_files f ON f.track_id=t.id
                            WHERE t.album_id=al.id AND f.path IS NOT NULL

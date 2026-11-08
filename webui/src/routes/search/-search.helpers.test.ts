@@ -421,6 +421,10 @@ describe('detail paths', () => {
     expect(inLibraryArtistPath({ id: 42, library_v2_id: 7 })).toBe(
       '/library?artist=7&releases=all&releaseView=cards&header=rich&immersive=true',
     );
+    // unless this profile opens artists from search compact (View Settings)
+    expect(inLibraryArtistPath({ id: 42, library_v2_id: 7 }, 'compact')).toContain(
+      '&header=compact&',
+    );
   });
 
   it('falls back to artist detail when v2 has not mapped the artist', () => {

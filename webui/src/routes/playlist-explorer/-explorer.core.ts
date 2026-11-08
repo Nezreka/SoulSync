@@ -27,6 +27,15 @@ const SOURCE_NAMES: Record<string, string> = {
   beatport: 'Beatport',
   file: 'File',
   other: 'Other',
+  // the tabs showed raw ids like Spotify_public and Soulsync_discovery (#1909)
+  spotify_public: 'Spotify Link',
+  itunes_link: 'iTunes Link',
+  listenbrainz: 'ListenBrainz',
+  lastfm: 'Last.fm',
+  qobuz: 'Qobuz',
+  metasync: 'MetaSync',
+  soulsync: 'SoulSync',
+  soulsync_discovery: 'SoulSync Discovery',
 };
 
 export function explorerSourceKey(playlist: MirroredPlaylist): string {
@@ -34,7 +43,11 @@ export function explorerSourceKey(playlist: MirroredPlaylist): string {
 }
 
 export function explorerSourceLabel(source: string): string {
-  return SOURCE_NAMES[source] || source.charAt(0).toUpperCase() + source.slice(1);
+  if (SOURCE_NAMES[source]) return SOURCE_NAMES[source];
+  return source
+    .split('_')
+    .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(' ');
 }
 
 export interface ExplorerSourceGroup {

@@ -358,6 +358,29 @@ def get_wishlist_tracks():
         logger.error(f"Error getting wishlist tracks: {e}")
         return jsonify({"error": str(e)}), 500
 
+@bp.route('/api/wishlist/export', methods=['GET'])
+def export_wishlist():
+    """The music wishlist as json or csv, exactly the rows the page lists.
+    ``category`` limits it to albums or singles like the page's filter.
+    X-Export-Count / X-Export-Ext carry the count and file extension."""
+    try:
+        from flask import Response
+        from core.exports.artist_export import export_mime_and_ext
+        from core.exports.wishlist_export import MUSIC_FIELDS, music_rows, render
+        from core.wishlist.selection import prepare_wishlist_tracks_for_display
+        from core.wishlist_service import get_wishlist_service
+        fmt = 'csv' if request.args.get('format') == 'csv' else 'json'
+        category = request.args.get('category') if request.args.get('category') in ('albums', 'singles') else None
+        raw = get_wishlist_service().get_wishlist_tracks_for_download(profile_id=_wishlist_profile_id())
+        rows = music_rows(prepare_wishlist_tracks_for_display(raw, category=category)['tracks'])
+        mime, ext = export_mime_and_ext(fmt)
+        return Response(render(rows, MUSIC_FIELDS, fmt), mimetype=mime,
+                        headers={'X-Export-Count': str(len(rows)), 'X-Export-Ext': ext})
+    except Exception as e:
+        logger.error(f"Wishlist export failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 def _build_wishlist_route_runtime(
     *,
     is_actually_processing_fn=None,

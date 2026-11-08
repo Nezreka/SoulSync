@@ -106,6 +106,8 @@ afterEach(() => {
 });
 
 function openAutoSync() {
+  // Bulk schedule lives in the header's More menu (#1909)
+  fireEvent.click(screen.getByRole('button', { name: 'Playlist tools' }));
   fireEvent.click(screen.getByText('Bulk schedule'));
 }
 
@@ -182,7 +184,7 @@ describe('the modal mount', () => {
  * paste-a-link tab now that the strip carries three chips instead of fifteen.
  */
 function routeViaAddPlaylist(url: string): void {
-  fireEvent.click(screen.getByText('+ Add playlist'));
+  fireEvent.click(screen.getByText('Add playlist'));
   fireEvent.change(screen.getByLabelText('Paste a link'), { target: { value: url } });
   fireEvent.click(screen.getByRole('button', { name: 'Add' }));
 }
@@ -225,7 +227,7 @@ describe('the panel map', () => {
 
   it('the ListenBrainz panel opens from Add playlist', () => {
     render(<SyncPage />);
-    fireEvent.click(screen.getByText('+ Add playlist'));
+    fireEvent.click(screen.getByText('Add playlist'));
     fireEvent.click(screen.getByRole('button', { name: /ListenBrainz/ }));
     expect(screen.getByText('lb-tab')).toBeInTheDocument();
   });
@@ -242,7 +244,9 @@ describe('the panel map', () => {
     // you which. So this asserts the pane by its ID, which the component has
     // always had.
     render(<SyncPage />);
-    fireEvent.click(screen.getByText('Beatport'));
+    // Beatport opens from Add now, as a panel over the page
+    fireEvent.click(screen.getByText('Add playlist'));
+    fireEvent.click(screen.getByRole('button', { name: /Beatport/ }));
     expect(document.getElementById('beatport-rebuild-content')).not.toBeNull();
   });
 });

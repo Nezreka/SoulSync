@@ -289,8 +289,11 @@ def test_on_complete_failed_task_hands_the_wishlist_its_real_reason():
     assert _failed_reason('failed', why) == why
     assert _failed_reason('failed') == 'Download failed'
     assert _failed_reason('failed', '') == 'Download failed'
-    # not_found keeps the fixed text the wishlist page reads as "no match"
-    assert _failed_reason('not_found', 'No match found for "x" after 3 queries') == 'No matching track found'
+    # not_found leads with the fixed text the wishlist page files as "no
+    # match", then says which searches ran (#1981)
+    assert _failed_reason('not_found', 'No match found for "x" after 3 queries') == (
+        'No matching track found. No match found for "x" after 3 queries')
+    assert _failed_reason('not_found') == 'No matching track found'
 
 
 def test_on_complete_cancelled_task_added_to_cancelled_tracks():
@@ -1076,6 +1079,12 @@ def _completion_recorder(monkeypatch, rec):
 
     monkeypatch.setattr(lc, 'record_sync_history_completion',
                         lambda db, bid, b: rec.append(('history', bid, _held())))
+    # the completion path reads the tasks under the lock and writes after it
+    import core.downloads.history as hist
+    monkeypatch.setattr(hist, 'build_sync_history_completion',
+                        lambda bid, b: rec.append(('history_read', bid, _held())) or {'batch': bid})
+    monkeypatch.setattr(hist, 'write_sync_history_completion',
+                        lambda db, bid, payload: rec.append(('history', bid, _held())))
 
     class _Mat:
         playlist_dir, linked, copied, unchanged, removed_stale, fellback = 'd', 0, 0, 0, 0, False
@@ -1146,7 +1155,10 @@ def test_the_slow_half_runs_with_the_lock_released(monkeypatch, path):
     else:
         lc.check_batch_completion_v2('b1', deps)
     by_kind = {r[0]: r for r in rec}
-    assert by_kind['history'][2] is True, "history is bookkeeping, it stays under the lock"
+    # the history reads download_tasks, so under the lock; the db write held
+    # every downloads page while the write lock was busy, so it is out here
+    assert by_kind['history_read'][2] is True, "the history must read the tasks under the lock"
+    assert by_kind['history'][2] is False, f"{path}: the sync history db write ran under tasks_lock"
     assert by_kind['consistency'][2] is False, f"{path}: album consistency ran under tasks_lock"
     assert by_kind['materialize'][2] is False, f"{path}: playlist materialize ran under tasks_lock"
     # the post-download playlist sync lookup is db work too

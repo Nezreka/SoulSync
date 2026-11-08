@@ -52,7 +52,7 @@ def test_discography_config_and_manual_ids_have_safe_compatibility():
         "repair.jobs.discography_backfill": {
             "enabled": True,
             "interval_hours": 12,
-            "settings": {"include_singles": False},
+            "settings": {"include_singles": False, "max_artists_per_run": 25},
         },
     })
     RepairWorker(database=None).set_config_manager(config)
@@ -62,5 +62,8 @@ def test_discography_config_and_manual_ids_have_safe_compatibility():
     assert migrated["interval_hours"] == 12
     assert migrated["settings"]["mode"] == "review"
     assert migrated["settings"]["include_singles"] is False
+    assert migrated["settings"]["max_artists_per_run"] == 25
+    # the old job walked every library artist, so the merged one does too
+    assert migrated["settings"]["artists"] == "library"
     assert JOB_ID_MIGRATIONS["discography_backfill"] == "monitored_discography_refresh"
     assert "discography_backfill" in PRESERVED_RETIRED_FINDING_IDS

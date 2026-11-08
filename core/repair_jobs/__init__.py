@@ -25,6 +25,7 @@ JOB_DATA_BASIS: dict[str, str] = {
     'mbid_mismatch_detector': 'lib2',
     'native_enrichment_sweep': 'lib2',
     'replaygain_filler': 'lib2',
+    'streamed_aac_repair': 'lib2',
     'empty_folder_cleaner': 'filesystem',
     'metadata_gap_filler': 'lib2',
     'fake_lossless_detector': 'lib2',
@@ -95,6 +96,8 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     # rows. Touches no file and changes nothing about what is wanted.
     'native_enrichment_sweep': frozenset({'metadata', 'artwork'}),
     'replaygain_filler': frozenset({'observe', 'tags'}),
+    # rewrites the container in place, same path, every tag put back
+    'streamed_aac_repair': frozenset({'observe', 'tags'}),
     'empty_folder_cleaner': frozenset({'none'}),
     'metadata_gap_filler': frozenset({'observe', 'metadata', 'tags'}),
     'fake_lossless_detector': frozenset({'observe', 'delete', 'wanted'}),
@@ -187,6 +190,10 @@ JOB_ID_MIGRATIONS = {
     'discography_backfill': 'monitored_discography_refresh',
     'canonical_version_resolve': 'album_edition_review',
     'duplicate_detector': 'native_duplicate_detector',
+    # 3.6.1's Single/Album Dedup: the native detector keeps the album's copy
+    # over the single's, so this is its successor too (its settings keys,
+    # title/artist similarity, are the detector's own)
+    'single_album_dedup': 'native_duplicate_detector',
     'lib2_skips_cleanup': 'skip_audit_cleanup',
     'lib2_discography_refresh': 'monitored_discography_refresh',
     # The two transitional jobs return as one neutral, complete invariant
@@ -261,6 +268,7 @@ _JOB_MODULES = [
     'core.repair_jobs.native_enrichment_sweep',
     'core.repair_jobs.missing_lyrics',
     'core.repair_jobs.replaygain_filler',
+    'core.repair_jobs.streamed_aac_repair',
     'core.repair_jobs.empty_folder_cleaner',
     'core.repair_jobs.metadata_gap_filler',
     'core.repair_jobs.fake_lossless_detector',

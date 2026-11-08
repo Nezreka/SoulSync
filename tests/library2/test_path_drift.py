@@ -367,3 +367,37 @@ def test_a_manual_refresh_still_refuses_to_guess_between_two_candidates(drift_db
     assert row["file_state"] == "missing_suspected"
     assert stats["path_repointed"] == 0
     assert stats["path_drift"] == 1
+
+
+def _offline_rows(conn, tmp_path, count=60):
+    track = conn.execute("SELECT id FROM lib2_tracks LIMIT 1").fetchone()[0]
+    conn.execute("DELETE FROM lib2_track_files")
+    conn.executemany(
+        "INSERT INTO lib2_track_files(track_id, path, legacy_import_run_id) VALUES(?,?,'upgrade')",
+        [(track, str(tmp_path / "nas" / f"{n:03d}.flac")) for n in range(count)])
+    conn.commit()
+
+
+def test_an_unmounted_library_is_not_walked_row_by_row(drift_db, tmp_path, monkeypatch):
+    """storage down at upgrade time: the first batch finds nothing and the root
+    is unreachable, so the walk stops instead of resolving every row 3 times"""
+    db, conn, _ids = drift_db
+    _offline_rows(conn, tmp_path)
+    monkeypatch.setattr("core.library2.paths.missing_path_root_is_healthy", lambda *a, **k: False)
+
+    stats = PD.reconcile_imported_path_drift(db, batch_size=50)
+
+    assert stats["skipped_unreachable"] == 1
+    assert stats["checked"] == 50
+
+
+def test_files_really_gone_from_healthy_storage_are_all_walked(drift_db, tmp_path, monkeypatch):
+    db, conn, _ids = drift_db
+    _offline_rows(conn, tmp_path)
+    monkeypatch.setattr("core.library2.paths.missing_path_root_is_healthy", lambda *a, **k: True)
+
+    stats = PD.reconcile_imported_path_drift(db, batch_size=50)
+
+    assert "skipped_unreachable" not in stats
+    assert stats["checked"] == 60
+

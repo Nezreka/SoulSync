@@ -193,14 +193,22 @@
     function render(container, opts) {
         if (!container) return;
         opts = opts || {};
-        if (opts.kind === 'show') { renderShow(container, opts); return; }
+        // a show reads its title off container._dl: an earlier movie's _opts left on a
+        // reused modal would name that movie in this show's searches and grabs
+        if (opts.kind === 'show') { container._opts = null; renderShow(container, opts); return; }
         container._opts = opts;
         container.innerHTML = contentHTML();
         if (!container._vdlWired) { container._vdlWired = true; container.addEventListener('click', onClick); }
 
         var isYt = !!opts.isYt;
-        getJSON(isYt ? '/api/video/downloads/youtube-quality' : '/api/video/downloads/quality')
-            .then(function (p) { if (container.isConnected && p) renderTarget(container, p, isYt); });
+        if (isYt) {
+            getJSON('/api/video/downloads/youtube-quality')
+                .then(function (p) { if (container.isConnected && p) renderTarget(container, p, true); });
+        } else {
+            loadTitleProfile(container, function () { return container._opts || {}; },
+                opts.kind === 'show' ? 'show' : 'movie',
+                function (p, info) { renderTarget(container, p, false, info); });
+        }
         if (isYt) {
             renderSources(container, ['youtube']);
         } else {
@@ -275,7 +283,73 @@
 
     function chip(text, mod) { return '<span class="vdl-chip' + (mod ? ' vdl-chip--' + mod : '') + '">' + esc(text) + '</span>'; }
 
-    function renderTarget(container, p, isYt) {
+    // ── the title's quality profile (picked here, kept on the title) ──────────
+    // Seadog's request: a new title had no assignment, so Get / Manual search
+    // judged it by the Default with no way to pick "Movie 4K". The pick becomes
+    // the title's own profile: this search and grab, its wishlist rows, and its
+    // library row when it lands (POST /downloads/quality/choose).
+    function titleQS(o, kind) {
+        o = o || {};
+        var q = ['kind=' + encodeURIComponent(kind || 'movie')];
+        var id = o.id || o.mediaId, src = o.source || o.mediaSource, tmdb = o.tmdbId || o.tvId;
+        if (id != null && id !== '') q.push('media_id=' + encodeURIComponent(id));
+        if (src) q.push('media_source=' + encodeURIComponent(src));
+        if (tmdb != null && tmdb !== '') q.push('tmdb_id=' + encodeURIComponent(tmdb));
+        return q.join('&');
+    }
+    function titleBody(o, kind, profileId) {
+        o = o || {};
+        return { kind: kind || 'movie', media_id: o.id || o.mediaId || null,
+            media_source: o.source || o.mediaSource || null, tmdb_id: o.tmdbId || o.tvId || null,
+            profile_id: profileId };
+    }
+    function profilePickerHTML(info) {
+        if (!info || !info.profiles || info.profiles.length < 2) return '';
+        var kindDefault = null;
+        info.profiles.forEach(function (p) { if (p.id === info.kind_default_id) kindDefault = p; });
+        var cur = info.assigned ? info.profile_id : 0;
+        var opts = info.profiles.map(function (p) {
+            var label = p.id === 0
+                ? (kindDefault && kindDefault.id !== 0 ? 'Default (' + kindDefault.name + ')' : 'Default')
+                : p.name;
+            return '<option value="' + p.id + '"' + (p.id === cur ? ' selected' : '') + '>' + esc(label) + '</option>';
+        }).join('');
+        return '<label class="vdl-prof" title="The quality profile this title is searched, grabbed and upgraded by">' +
+            '<span class="vdl-prof-lab">Profile</span>' +
+            '<select class="vdl-prof-sel" data-vdl-profile>' + opts + '</select></label>';
+    }
+    // fetch the title's profile, render it, and keep the picker's change wired.
+    // onChanged runs after a pick is saved (the overlay re-runs its searches)
+    function loadTitleProfile(host, getIdent, kind, render, onChanged) {
+        var url = '/api/video/downloads/quality/for?' + titleQS(getIdent(), kind);
+        getJSON(url).then(function (info) {
+            if (!host.isConnected) return;
+            if (info && info.profile) { render(info.profile, info); return; }
+            // an older server without /quality/for: the classic Default, no picker
+            getJSON('/api/video/downloads/quality').then(function (p) { if (host.isConnected && p) render(p, null); });
+        });
+        if (host._vdlProfWired) return;
+        host._vdlProfWired = true;
+        host.addEventListener('change', function (e) {
+            var sel = e.target.closest && e.target.closest('[data-vdl-profile]');
+            if (!sel) return;
+            var pid = parseInt(sel.value, 10) || 0;
+            sel.disabled = true;
+            postJSON('/api/video/downloads/quality/choose', titleBody(getIdent(), kind, pid)).then(function (res) {
+                sel.disabled = false;
+                if (!res || res.success === false) {
+                    toast((res && res.error) || 'Could not change the quality profile', 'error');
+                    loadTitleProfile(host, getIdent, kind, render, onChanged);
+                    return;
+                }
+                toast('Quality profile saved for this title', 'success');
+                loadTitleProfile(host, getIdent, kind, render, onChanged);
+                if (onChanged) onChanged();
+            });
+        });
+    }
+
+    function renderTarget(container, p, isYt, info) {
         var box = container.querySelector('[data-vdl-target]'); if (!box) return;
         var chips = [];
         if (isYt) {
@@ -293,7 +367,7 @@
             if (p.max_movie_gb) chips.push(chip('Movie ≤ ' + p.max_movie_gb + ' GB'));
             if (p.max_episode_gb) chips.push(chip('Episode ≤ ' + p.max_episode_gb + ' GB'));
         }
-        box.innerHTML = chips.join('');
+        box.innerHTML = (isYt ? '' : profilePickerHTML(info)) + chips.join('');
     }
 
     // Owned copy → "In your library · 720p · BluRay · X265" + a verdict against the
@@ -369,31 +443,351 @@
             return;
         }
         resultsEl._rows = rows; resultsEl._search = params;   // for the Grab button
+        resultsEl._render = { params: params, live: live, done: done, totalFiles: totalFiles };
         resultsEl.classList.toggle('vdl-res-noanim', !!live);   // live re-renders → no per-card blink
         var okN = rows.filter(function (r) { return r.accepted; }).length;
         var badge = !live ? '<span class="vdl-res-demo">demo data</span>'
             : done ? '<span class="vdl-res-live">● live</span>'
             : '<span class="vdl-res-searching"><span class="vdl-res-spin vdl-res-spin--sm"></span>searching…</span>';
-        resultsEl.innerHTML =
-            '<div class="vdl-res-head"><strong>' + rows.length + '</strong> result' + (rows.length === 1 ? '' : 's') +
-                ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span>' + badge + '</div>' +
-            rows.map(resultCardHTML).join('');
+        // the toolbar is built once per search and kept, so typing in it never
+        // loses focus to a re-render; only the head and the cards are redrawn
+        var list = resultsEl.querySelector('[data-vdl-res-list]');
+        if (!list || !resultsEl.querySelector('[data-vdl-rf]')) {
+            resultsEl.innerHTML = '<div class="vdl-res-head" data-vdl-res-head></div>' + _rfBarHTML() +
+                '<div class="vdl-res-list" data-vdl-res-list></div>';
+            list = resultsEl.querySelector('[data-vdl-res-list]');
+            _rfWire(resultsEl.querySelector('[data-vdl-rf]'));
+        }
+        _rfSync(resultsEl.querySelector('[data-vdl-rf]'));
+        var shown = window.VideoSearchFilters
+            ? window.VideoSearchFilters.view(rows, _rf)
+            : rows.map(function (row, index) { return { row: row, index: index }; });
+        var narrowed = shown.length !== rows.length;
+        resultsEl.querySelector('[data-vdl-res-head]').innerHTML =
+            '<strong>' + rows.length + '</strong> result' + (rows.length === 1 ? '' : 's') +
+            ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span>' +
+            (narrowed ? ' · <span class="vdl-res-shown">' + shown.length + ' match your filter</span>' : '') + badge;
+        list.innerHTML = shown.length
+            ? shown.map(function (it) { return resultCardHTML(it.row, it.index); }).join('')
+            : '<div class="vdl-res-empty">No release matches your filter. <button type="button" class="vdl-rf-link" data-vdl-rf-clear>Show all</button></div>';
+        // a card that was grabbed keeps its live tracker through a re-sort
+        Object.keys(resultsEl._grabbed || {}).forEach(function (idx) {
+            var card = list.querySelector('[data-vdl-card="' + idx + '"]');
+            if (card && !card.querySelector('[data-vdl-track]')) beginTracking(card, resultsEl._grabbed[idx]);
+        });
+    }
+
+    // ── result filters + sorting (SeadogsBooty) ──────────────────────────────
+    // One state for every results panel in the modal, so a filter picked on one
+    // episode applies to the next search too. The sort and the picked saved
+    // filter are remembered on this browser; the filters themselves are saved
+    // per profile on the server. Display only: Auto and the wishlist never
+    // read any of it.
+    var RF_KEY = 'ss.video.search.view';
+    var _rfSaved = null;           // this profile's saved filters, once fetched
+    var _rf = (function () {
+        var st = { text: '', sort: 'rank', dir: 'desc', filter: null, filterName: '' };
+        try {
+            var saved = JSON.parse(localStorage.getItem(RF_KEY) || 'null');
+            if (saved && typeof saved === 'object') {
+                if (saved.sort) st.sort = saved.sort;
+                if (saved.dir === 'asc' || saved.dir === 'desc') st.dir = saved.dir;
+                if (saved.filter && Array.isArray(saved.filter.conditions)) st.filter = saved.filter;
+                st.filterName = saved.filterName || '';
+            }
+        } catch (e) { /* private window: defaults */ }
+        return st;
+    })();
+    // the direction a sort starts in: smallest, newest and A-Z first, else highest first
+    var RF_ASC_FIRST = { size_gb: 1, age_days: 1, indexer: 1 };
+
+    function _rfRemember() {
+        try {
+            localStorage.setItem(RF_KEY, JSON.stringify({ sort: _rf.sort, dir: _rf.dir,
+                filter: _rf.filter, filterName: _rf.filterName }));
+        } catch (e) { /* not stored, still applied */ }
+    }
+    function _rfApplyAll() {
+        _rfRemember();
+        document.querySelectorAll('.vdl-results').forEach(function (el) {
+            if (el._rows && el._render && el.querySelector('[data-vdl-rf]')) {
+                var r = el._render;
+                renderResults(el, r.params, el._rows, r.live, r.done, r.totalFiles);
+            }
+        });
+    }
+    function _rfLoadSaved() {
+        if (_rfSaved) return Promise.resolve(_rfSaved);
+        return getJSON('/api/video/search-filters').then(function (d) {
+            _rfSaved = (d && d.filters) || [];
+            document.querySelectorAll('[data-vdl-rf]').forEach(_rfSync);
+            return _rfSaved;
+        });
+    }
+    function _rfPutSaved(list) {
+        return fetch('/api/video/search-filters', { method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ filters: list }) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) { toast('Could not save the filter', 'error'); return null; }
+                _rfSaved = d.filters || [];
+                return _rfSaved;
+            }).catch(function () { toast('Could not save the filter', 'error'); return null; });
+    }
+
+    function _rfBarHTML() {
+        var F = window.VideoSearchFilters;
+        var sorts = F ? F.SORTS : { rank: 'Best match' };
+        return '<div class="vdl-rf" data-vdl-rf>' +
+            '<div class="vdl-rf-row">' +
+                '<input type="search" class="vdl-rf-q" data-vdl-rf-q placeholder="Filter by name, group, indexer…" aria-label="Filter results">' +
+                '<select class="vdl-rf-sel" data-vdl-rf-saved aria-label="Saved filter"></select>' +
+                '<select class="vdl-rf-sel" data-vdl-rf-sort aria-label="Sort by">' +
+                    Object.keys(sorts).map(function (k) { return '<option value="' + k + '">Sort: ' + esc(sorts[k]) + '</option>'; }).join('') +
+                '</select>' +
+                '<button type="button" class="vdl-rf-btn vdl-rf-dir" data-vdl-rf-dir aria-label="Reverse the order"></button>' +
+                '<button type="button" class="vdl-rf-btn" data-vdl-rf-edit aria-expanded="false">Filters</button>' +
+            '</div>' +
+            '<div class="vdl-rf-builder" data-vdl-rf-builder hidden></div>' +
+        '</div>';
+    }
+
+    // bring a toolbar's controls in line with the shared state (another panel
+    // may have changed it); never touches the box someone is typing in
+    function _rfSync(bar) {
+        if (!bar) return;
+        var q = bar.querySelector('[data-vdl-rf-q]');
+        if (q && document.activeElement !== q && q.value !== _rf.text) q.value = _rf.text;
+        var sort = bar.querySelector('[data-vdl-rf-sort]'); if (sort) sort.value = _rf.sort;
+        var dir = bar.querySelector('[data-vdl-rf-dir]');
+        if (dir) {
+            dir.textContent = _rf.dir === 'asc' ? '↑' : '↓';
+            dir.title = _rf.sort === 'rank' ? 'Best match first or last' : (_rf.dir === 'asc' ? 'Lowest first' : 'Highest first');
+        }
+        var sel = bar.querySelector('[data-vdl-rf-saved]');
+        if (sel) {
+            var names = (_rfSaved || []).map(function (f) { return f.name; });
+            var custom = _rf.filter && !(_rf.filterName && names.indexOf(_rf.filterName) !== -1);
+            sel.innerHTML = '<option value="">All releases</option>' +
+                names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join('') +
+                (custom ? '<option value="__custom">Unsaved filter</option>' : '') +
+                '<option value="__new">New filter…</option>';
+            sel.value = custom ? '__custom' : (_rf.filter ? _rf.filterName : '');
+        }
+        var edit = bar.querySelector('[data-vdl-rf-edit]');
+        if (edit) {
+            var n = _rf.filter ? (_rf.filter.conditions || []).length : 0;
+            edit.textContent = n ? 'Filters · ' + n : 'Filters';
+            edit.classList.toggle('is-on', !!n);
+        }
+    }
+
+    function _rfCondHTML(c) {
+        var F = window.VideoSearchFilters;
+        var field = F.FIELDS[c.field] ? c.field : 'title';
+        var ops = F.opsFor(field);
+        var op = ops.indexOf(c.op) !== -1 ? c.op : ops[0];
+        var kind = F.FIELDS[field].kind;
+        var input = kind === 'bool'
+            ? '<select class="vdl-rf-sel" data-rf-value><option value="yes"' + (c.value === 'no' ? '' : ' selected') + '>yes</option>' +
+              '<option value="no"' + (c.value === 'no' ? ' selected' : '') + '>no</option></select>'
+            : '<input class="vdl-rf-in" data-rf-value type="' + (kind === 'number' ? 'number' : 'text') + '" step="any"' +
+              ' value="' + esc(c.value || '') + '" placeholder="' + esc(F.FIELDS[field].hint || '') + '">';
+        return '<div class="vdl-rf-cond" data-rf-cond>' +
+            '<select class="vdl-rf-sel" data-rf-field>' + Object.keys(F.FIELDS).map(function (k) {
+                return '<option value="' + k + '"' + (k === field ? ' selected' : '') + '>' + esc(F.FIELDS[k].label) + '</option>';
+            }).join('') + '</select>' +
+            '<select class="vdl-rf-sel" data-rf-op>' + ops.map(function (o) {
+                return '<option value="' + o + '"' + (o === op ? ' selected' : '') + '>' + esc(F.OPS[o].label) + '</option>';
+            }).join('') + '</select>' +
+            input +
+            '<button type="button" class="vdl-rf-x" data-rf-remove aria-label="Remove condition">×</button>' +
+        '</div>';
+    }
+
+    function _rfOpenBuilder(bar, draft) {
+        var box = bar.querySelector('[data-vdl-rf-builder]');
+        if (!box || !window.VideoSearchFilters) return;
+        draft = draft || { name: '', match: 'all', conditions: [] };
+        if (!draft.conditions.length) draft.conditions = [{ field: 'title', op: 'contains', value: '' }];
+        var isSaved = draft.name && (_rfSaved || []).some(function (f) { return f.name === draft.name; });
+        box.innerHTML =
+            '<div class="vdl-rf-match">Show releases matching ' +
+                '<select class="vdl-rf-sel" data-rf-match><option value="all"' + (draft.match === 'any' ? '' : ' selected') + '>all</option>' +
+                '<option value="any"' + (draft.match === 'any' ? ' selected' : '') + '>any</option></select> of these</div>' +
+            '<div class="vdl-rf-conds" data-rf-conds>' + draft.conditions.map(_rfCondHTML).join('') + '</div>' +
+            '<button type="button" class="vdl-rf-link" data-rf-add>+ Add a condition</button>' +
+            '<div class="vdl-rf-foot">' +
+                '<input class="vdl-rf-in vdl-rf-name" data-rf-name maxlength="60" placeholder="Name it to save it" value="' + esc(draft.name || '') + '">' +
+                '<button type="button" class="vdl-rf-btn is-primary" data-rf-apply>Apply</button>' +
+                '<button type="button" class="vdl-rf-btn" data-rf-save>Save</button>' +
+                (isSaved ? '<button type="button" class="vdl-rf-btn is-danger" data-rf-delete>Delete</button>' : '') +
+                '<button type="button" class="vdl-rf-btn" data-rf-close>Close</button>' +
+            '</div>';
+        box.hidden = false;
+        var edit = bar.querySelector('[data-vdl-rf-edit]'); if (edit) edit.setAttribute('aria-expanded', 'true');
+    }
+    function _rfCloseBuilder(bar) {
+        var box = bar.querySelector('[data-vdl-rf-builder]');
+        if (box) { box.hidden = true; box.innerHTML = ''; }
+        var edit = bar.querySelector('[data-vdl-rf-edit]'); if (edit) edit.setAttribute('aria-expanded', 'false');
+    }
+    function _rfReadBuilder(bar) {
+        var box = bar.querySelector('[data-vdl-rf-builder]');
+        var conds = [];
+        box.querySelectorAll('[data-rf-cond]').forEach(function (row) {
+            var v = row.querySelector('[data-rf-value]');
+            conds.push({ field: row.querySelector('[data-rf-field]').value, op: row.querySelector('[data-rf-op]').value,
+                value: v ? String(v.value || '').trim() : '' });
+        });
+        var match = box.querySelector('[data-rf-match]');
+        var name = box.querySelector('[data-rf-name]');
+        return { name: name ? name.value.trim() : '', match: match && match.value === 'any' ? 'any' : 'all',
+            conditions: conds.filter(function (c) {
+                var kind = (window.VideoSearchFilters.FIELDS[c.field] || {}).kind;
+                return kind === 'bool' || c.value !== '';
+            }) };
+    }
+
+    document.addEventListener('click', function (e) {
+        if (e.target && e.target.closest && e.target.closest('[data-vdl-rf-clear]')) {
+            _rf.text = ''; _rf.filter = null; _rf.filterName = '';
+            _rfApplyAll();
+        }
+    });
+
+    function _rfWire(bar) {
+        if (!bar || bar._rfWired) return;
+        bar._rfWired = true;
+        _rfLoadSaved();
+        var qTimer = null;
+        bar.addEventListener('input', function (e) {
+            if (e.target.matches('[data-vdl-rf-q]')) {
+                var text = e.target.value;
+                clearTimeout(qTimer);
+                qTimer = setTimeout(function () { _rf.text = text; _rfApplyAll(); }, 160);
+            }
+        });
+        bar.addEventListener('change', function (e) {
+            var t = e.target;
+            if (t.matches('[data-vdl-rf-sort]')) {
+                _rf.sort = t.value;
+                _rf.dir = RF_ASC_FIRST[t.value] ? 'asc' : 'desc';
+                _rfApplyAll();
+            } else if (t.matches('[data-vdl-rf-saved]')) {
+                if (t.value === '__new') { _rfOpenBuilder(bar, null); _rfSync(bar); return; }
+                if (t.value === '__custom') return;
+                var f = (_rfSaved || []).filter(function (x) { return x.name === t.value; })[0];
+                _rf.filter = f ? { match: f.match, conditions: f.conditions } : null;
+                _rf.filterName = f ? f.name : '';
+                _rfCloseBuilder(bar);
+                _rfApplyAll();
+            } else if (t.matches('[data-rf-field]')) {
+                // a new field brings the operators and the input that fit it
+                var row = t.closest('[data-rf-cond]');
+                var tmp = document.createElement('div');
+                tmp.innerHTML = _rfCondHTML({ field: t.value, op: '', value: '' });
+                row.replaceWith(tmp.firstChild);
+            }
+        });
+        bar.addEventListener('click', function (e) {
+            var t = e.target;
+            if (t.closest('[data-vdl-rf-dir]')) { _rf.dir = _rf.dir === 'asc' ? 'desc' : 'asc'; _rfApplyAll(); return; }
+            if (t.closest('[data-vdl-rf-edit]')) {
+                var box = bar.querySelector('[data-vdl-rf-builder]');
+                if (box && !box.hidden) { _rfCloseBuilder(bar); return; }
+                _rfOpenBuilder(bar, _rf.filter ? { name: _rf.filterName, match: _rf.filter.match,
+                    conditions: _rf.filter.conditions.map(function (c) { return Object.assign({}, c); }) } : null);
+                return;
+            }
+            if (t.closest('[data-rf-add]')) {
+                var conds = bar.querySelector('[data-rf-conds]');
+                var tmp = document.createElement('div');
+                tmp.innerHTML = _rfCondHTML({ field: 'title', op: 'contains', value: '' });
+                conds.appendChild(tmp.firstChild);
+                return;
+            }
+            if (t.closest('[data-rf-remove]')) { t.closest('[data-rf-cond]').remove(); return; }
+            if (t.closest('[data-rf-close]')) { _rfCloseBuilder(bar); return; }
+            if (t.closest('[data-rf-apply]')) {
+                var d = _rfReadBuilder(bar);
+                _rf.filter = d.conditions.length ? { match: d.match, conditions: d.conditions } : null;
+                _rf.filterName = d.conditions.length ? d.name : '';
+                _rfApplyAll();
+                return;
+            }
+            if (t.closest('[data-rf-save]')) {
+                var draft = _rfReadBuilder(bar);
+                if (!draft.name) { toast('Give the filter a name to save it', 'error'); return; }
+                if (!draft.conditions.length) { toast('Add a condition with a value first', 'error'); return; }
+                var list = (_rfSaved || []).filter(function (f) { return f.name.toLowerCase() !== draft.name.toLowerCase(); });
+                list.push(draft);
+                _rfPutSaved(list).then(function (saved) {
+                    if (!saved) return;
+                    _rf.filter = { match: draft.match, conditions: draft.conditions };
+                    _rf.filterName = draft.name;
+                    toast('Saved "' + draft.name + '"', 'success');
+                    _rfCloseBuilder(bar);
+                    _rfApplyAll();
+                });
+                return;
+            }
+            if (t.closest('[data-rf-delete]')) {
+                var gone = _rfReadBuilder(bar).name;
+                _rfPutSaved((_rfSaved || []).filter(function (f) { return f.name !== gone; })).then(function (saved) {
+                    if (!saved) return;
+                    if (_rf.filterName === gone) { _rf.filter = null; _rf.filterName = ''; }
+                    _rfCloseBuilder(bar);
+                    _rfApplyAll();
+                });
+            }
+        });
     }
 
     // Start a search; for Soulseek, stream results in (poll like the music side —
     // results trickle in over ~30s, so a single short wait misses them).
+    // the title this panel searches for, so the server judges results by ITS
+    // quality profile and asks the indexers by its ids (the wishlist search's
+    // way). episode, season and series searches sent neither, so they were
+    // judged by the Default profile on a title-only search.
+    function withIdentity(container, resultsEl, params) {
+        if (params.media_id != null || params.tmdb_id != null) return params;
+        var host = resultsEl.closest('[data-vgm-dl-content]');
+        var o = (host && host._opts) || (container && (container._opts || container._dl)) || {};
+        var extra = {};
+        var id = o.id || o.mediaId;
+        if (id) { extra.media_id = id; extra.media_source = o.source || o.mediaSource || 'library'; }
+        var tmdb = o.tmdbId || o.tvId;
+        if (tmdb) extra.tmdb_id = tmdb;
+        return Object.keys(extra).length ? Object.assign({}, params, extra) : params;
+    }
+
     function searchInto(container, resultsEl, params, triggerRows, onDone) {
         if (!resultsEl) return;
+        params = withIdentity(container, resultsEl, params);
         triggerRows = (triggerRows || []).filter(Boolean);
         if (resultsEl._poll) { clearTimeout(resultsEl._poll); resultsEl._poll = null; }
         resultsEl._rows = null;   // drop any prior search's rows so Auto can't grab a stale hit
+        resultsEl._grabbed = null;   // a new search's cards are new cards
         _setScanning(triggerRows, true);
         resultsEl.hidden = false;
         resultsEl.classList.remove('vdl-res-noanim');
         resultsEl.innerHTML = '<div class="vdl-res-loading"><span class="vdl-res-spin"></span>Searching ' + esc(scopeWord(params.scope)) + '…</div>';
+        // every way a search can end calls onDone. the error and closed-panel
+        // exits used to return without it, so Grab season's per-episode promise
+        // never settled: the row sat on Searching forever, nothing reached the
+        // client and the pump never freed its slot (SeadogsBooty, MobLand S1)
+        resultsEl._error = null;
         postJSON('/api/video/downloads/search/start', params).then(function (d) {
-            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
-            if (d && d.error) { _setScanning(triggerRows, false); resultsEl.innerHTML = '<div class="vdl-res-empty vdl-res-err">⚠ ' + esc(d.error) + '</div>'; return; }
+            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
+            if (d && d.error) {
+                _setScanning(triggerRows, false);
+                resultsEl._error = d.error;
+                resultsEl.innerHTML = '<div class="vdl-res-empty vdl-res-err">⚠ ' + esc(d.error) + '</div>';
+                if (onDone) onDone();
+                return;
+            }
             if (!d || !d.id) {   // mock / immediate
                 _setScanning(triggerRows, false);
                 renderResults(resultsEl, params, d ? d.results : [], !!(d && d.live), true);
@@ -411,13 +805,16 @@
         var started = Date.now(), lastN = -1, stable = 0, total = 0;
         var MAX_MS = Math.min(80000, pollMs || 60000);
         function tick() {
-            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
+            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
             var qs = '?id=' + encodeURIComponent(id) + '&scope=' + encodeURIComponent(params.scope || 'movie') +
                 '&title=' + encodeURIComponent(params.title || '') +
                 (params.season != null ? '&season=' + params.season : '') +
-                (params.episode != null ? '&episode=' + params.episode : '');
+                (params.episode != null ? '&episode=' + params.episode : '') +
+                (params.media_id != null ? '&media_id=' + encodeURIComponent(params.media_id) +
+                    '&media_source=' + encodeURIComponent(params.media_source || '') : '') +
+                (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '');
             getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
-                if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
+                if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
                 var rows = (d && d.results) || [];
                 total = (d && d.total_files) || total;
                 if (rows.length === lastN) { stable++; } else { stable = 0; lastN = rows.length; }
@@ -643,17 +1040,20 @@
             : (r.format_score ? '<div class="vdl-r-formats"><span>Format score</span> ' +
                 (r.format_score > 0 ? '+' : '') + esc(r.format_score) + '</div>' : '');
         var isBest = i === 0 && r.accepted;
+        // the verdict is the short answer, the note says why, once. the verdict
+        // used to shout the whole reason in caps and the note repeat it
         var verdict = r.accepted
             ? '<span class="vdl-r-verdict vdl-r-verdict--ok">&#10003; MEETS PROFILE</span>'
-            : '<span class="vdl-r-verdict vdl-r-verdict--no" title="' + esc(r.rejected || '') + '">&#10007; ' + esc((r.rejected || 'FILTERED').toUpperCase()) + '</span>';
-        var note = !r.accepted && r.rejected
-            ? '<div class="vdl-r-note vdl-r-note--warn">Reason · ' + esc(r.rejected) + '</div>'
+            : '<span class="vdl-r-verdict vdl-r-verdict--no" title="' + esc(r.rejected || '') + '">&#10007; BELOW YOUR PROFILE</span>';
+        var why = r.rejected ? String(r.rejected) : '';
+        var note = !r.accepted && why
+            ? '<div class="vdl-r-note vdl-r-note--warn">' + esc(why.charAt(0).toUpperCase() + why.slice(1)) + '</div>'
             : (isBest ? '<div class="vdl-r-note vdl-r-note--best">Best ranked match for this source</div>' : '');
         // Manual pick = the user overrides the quality profile. Auto-grab still only
         // takes accepted releases; here we let them GET a below-profile one anyway.
         var grab = r.username
             ? '<button class="vdl-res-grab' + (r.accepted ? '' : ' vdl-res-grab--override') + '" type="button" data-vdl-grab="' + i +
-                '" title="' + (r.accepted ? 'Download this release' : 'Below your quality profile — download anyway') + '">[ GET ]</button>'
+                '" title="' + (r.accepted ? 'Download this release' : 'Below your quality profile — download anyway') + '">' + (r.accepted ? '[ GET ]' : '[ GET ANYWAY ]') + '</button>'
             : '';
         return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + (isBest ? ' vdl-res--best' : '') + '" data-vdl-card="' + i + '">' +
             '<div class="vdl-res-main">' +
@@ -686,6 +1086,8 @@
     // /downloads/status?id= until the download reaches a terminal state.
     function beginTracking(card, dlId) {
         if (!card) return;
+        var panel = card.closest('.vdl-results');
+        if (panel) { panel._grabbed = panel._grabbed || {}; panel._grabbed[card.getAttribute('data-vdl-card')] = dlId; }
         card.classList.add('vdl-res--grabbed');
         var gb = card.querySelector('[data-vdl-grab]'); if (gb) gb.remove();
         var main = card.querySelector('.vdl-res-main') || card;
@@ -708,11 +1110,75 @@
         _trackPoll(card, foot, dlId);
     }
 
+    // a failed grab the monitor is replacing: its row says so until the next
+    // release is taken, then the chain carries on from it
+    var RETRYING_RE = /trying the next release/i;
+    var CHAIN_WAIT_MS = 5 * 60 * 1000;
+
+    function _chainLabel(c) {
+        var st = c.status, pct = Math.max(0, Math.min(100, c.progress || 0));
+        if (st === 'completed') return 'Downloaded';
+        if (st === 'failed' || st === 'cancelled') return TRACK_LABEL[st] || 'Failed';
+        if (st === 'downloading') return 'Downloading ' + pct + '%';
+        return TRACK_LABEL[st] || 'Queued';
+    }
+    function _chainKind(st) {
+        return st === 'completed' ? 'done' : (st === 'failed' || st === 'cancelled' ? 'fail' : 'active');
+    }
+
+    // What happened after this card's release failed (SeadogsBooty): every later
+    // grab for the same episode or movie, in order, under the card, and a badge
+    // on the result card of each release it took instead.
+    function _renderChain(card, foot, chain) {
+        var box = foot.querySelector('[data-vdl-track-chain]');
+        if (!chain.length) { if (box) box.remove(); return; }
+        if (!box) {
+            box = document.createElement('div');
+            box.className = 'vdl-res-track-chain';
+            box.setAttribute('data-vdl-track-chain', '');
+            foot.appendChild(box);
+        }
+        box.innerHTML = '<div class="vdl-res-track-chain-head">Then tried</div>' + chain.map(function (c) {
+            var kind = _chainKind(c.status);
+            var ic = kind === 'done' ? '✓' : (kind === 'fail' ? '✕' : '↻');
+            return '<div class="vdl-res-track-step vdl-res-track-step--' + kind + '">' +
+                '<span class="vdl-res-track-step-ic">' + ic + '</span>' +
+                '<span class="vdl-res-track-step-rel" title="' + esc(c.release_title || c.filename || '') + '">' +
+                    esc(c.release_title || c.filename || 'Another release') + '</span>' +
+                '<span class="vdl-res-track-step-st">' + esc(_chainLabel(c)) + '</span></div>';
+        }).join('');
+        var panel = card.closest('.vdl-results');
+        var rows = (panel && panel._rows) || [];
+        chain.forEach(function (c) {
+            var name = c.release_title || c.filename;
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                if (!name || (r.title !== name && r.filename !== name)) continue;
+                var other = panel.querySelector('[data-vdl-card="' + i + '"]');
+                if (!other || other === card) continue;
+                var kind = _chainKind(c.status);
+                other.classList.add('vdl-res--chain');
+                var l1 = other.querySelector('.vdl-r-l1');
+                var badge = other.querySelector('[data-vdl-chain-badge]');
+                if (!badge && l1) {
+                    badge = document.createElement('span');
+                    badge.setAttribute('data-vdl-chain-badge', '');
+                    l1.appendChild(badge);
+                }
+                if (badge) {
+                    badge.className = 'vdl-r-chain vdl-r-chain--' + kind;
+                    badge.textContent = kind === 'done' ? 'Downloaded instead'
+                        : (kind === 'fail' ? 'Also failed' : 'Grabbed instead');
+                }
+            }
+        });
+    }
+
     function _trackPoll(card, foot, dlId) {
         if (foot._t) { clearTimeout(foot._t); foot._t = null; }
         function tick() {
             if (!card.isConnected) return;   // modal closed → stop
-            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId)).then(function (d) {
+            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId) + '&chain=1').then(function (d) {
                 if (!card.isConnected) return;
                 var dl = d && d.download;
                 if (!dl) { foot._t = setTimeout(tick, 2000); return; }
@@ -731,6 +1197,19 @@
                         ? '<span class="vdl-res-track-spin"></span>' : '';
                     var ic = st === 'completed' ? '✓ ' : (st === 'failed' || st === 'cancelled' ? '✕ ' : '');
                     stEl.innerHTML = spin + ic + esc(TRACK_LABEL[st] || 'Downloading');
+                }
+                var chain = (d && d.chain) || [];
+                var retrying = st === 'failed' && RETRYING_RE.test(dl.error || '');
+                if (stEl && retrying && !chain.length) {
+                    stEl.innerHTML = '<span class="vdl-res-track-spin"></span>✕ Failed · finding the next release…';
+                }
+                _renderChain(card, foot, chain);
+                var last = chain.length ? chain[chain.length - 1] : null;
+                if (!active) {
+                    // keep following while the replacement is still on its way
+                    if (!foot._chainSince) foot._chainSince = Date.now();
+                    var waiting = retrying && !last && Date.now() - foot._chainSince < CHAIN_WAIT_MS;
+                    if ((last && !(last.status in TRACK_DONE)) || waiting) active = true;
                 }
                 if (active) foot._t = setTimeout(tick, 1700);
             });
@@ -779,7 +1258,8 @@
             container.addEventListener('click', onShowClick);
             container.addEventListener('change', onShowChange);
         }
-        getJSON('/api/video/downloads/quality').then(function (p) { if (container.isConnected && p) renderTarget(container, p, false); });
+        loadTitleProfile(container, function () { return container._dl || {}; }, 'show',
+            function (p, info) { renderTarget(container, p, false, info); });
         getJSON('/api/video/downloads/config').then(function (c) {
             if (!container.isConnected) return;
             st.sources = sourcesFromConfig(c);
@@ -821,10 +1301,11 @@
                 '<button class="vdl-season-search" type="button" data-vdl-season-search="' + sn + '" title="Search this season as a pack">⌕</button>' +
                 '<span class="vdl-season-chev" aria-hidden="true">⌄</span>' +
             '</div>' +
-            '<div class="vdl-season-body">' +
+            // one inner wrapper so the body can open on grid rows (see video-side.css)
+            '<div class="vdl-season-body"><div class="vdl-season-inner">' +
                 '<div class="vdl-results vdl-results--season" data-vdl-season-results hidden></div>' +
                 '<div class="vdl-season-eps"><div class="vdl-season-empty">Loading…</div></div>' +
-            '</div>' +
+            '</div></div>' +
         '</div>';
     }
 
@@ -835,7 +1316,9 @@
         eps.forEach(function (e) {
             var es = epState(e, st.today);
             st.epMeta[sn + '_' + e.episode_number] = { state: es };
-            if (es === 'missing') { missing++; st.sel.add(sn + '_' + e.episode_number); }
+            // specials start unticked: grabbing a whole show shouldn't pull in
+            // every extra and bonus clip. one click on the season ticks them (SeadogsBooty)
+            if (es === 'missing') { missing++; if (sn !== 0) st.sel.add(sn + '_' + e.episode_number); }
         });
         body.innerHTML = eps.map(function (e) { return epRowHTML(sn, e, st); }).join('');
         var meta = card.querySelector('[data-vdl-season-meta]');
@@ -923,14 +1406,20 @@
             var sn = ss.getAttribute('data-vdl-season-search');
             var sc = container.querySelector('.vdl-season[data-vdl-season="' + sn + '"]');
             if (sc) sc.classList.add('vdl-season--open');
-            searchInto(container, sc && sc.querySelector('[data-vdl-season-results]'),
-                { scope: 'season', title: st.title, season: +sn }, [ss]);
+            var seasonEl = sc && sc.querySelector('[data-vdl-season-results]');
+            var packSrc = _packSource(st);
+            if (!packSrc) { _noSourceInto(seasonEl); return; }
+            searchInto(container, seasonEl,
+                { scope: 'season', title: st.title, season: +sn, source: packSrc }, [ss]);
             return;
         }
         // Whole-show search → complete-series pack.
         if (e.target.closest('[data-vdl-search-show]')) {
-            searchInto(container, container.querySelector('[data-vdl-show-results]'),
-                { scope: 'series', title: st.title, season_end: st.maxSeason || 5 },
+            var showEl = container.querySelector('[data-vdl-show-results]');
+            var showSrc = _packSource(st);
+            if (!showSrc) { _noSourceInto(showEl); return; }
+            searchInto(container, showEl,
+                { scope: 'series', title: st.title, season_end: st.maxSeason || 5, source: showSrc },
                 [e.target.closest('[data-vdl-search-show]')]);
             return;
         }
@@ -1005,11 +1494,15 @@
         var s = epEl.querySelector('[data-vdl-ep-status]');
         if (s) s.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--active"><span class="vdl-ep-dl-spin"></span>Searching…</span>';
     }
-    function epNoRelease(epEl) {
+    // why, when there is one: a refused grab or a search error used to read as
+    // a plain "No release found" and looked like an empty search
+    function epNoRelease(epEl, reason) {
         if (!epEl) return;
         epEl.classList.remove('vdl-ep--dl-active');
         var s = epEl.querySelector('[data-vdl-ep-status]');
-        if (s) s.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--none">No release found</span>';
+        if (s) s.innerHTML = reason
+            ? '<span class="vdl-ep-dl vdl-ep-dl--none" title="' + esc(reason) + '">Not grabbed: ' + esc(reason) + '</span>'
+            : '<span class="vdl-ep-dl vdl-ep-dl--none">No release found</span>';
     }
 
     // Poll one episode's download by id and paint its row until it finishes. Robust to
@@ -1018,14 +1511,25 @@
         if (!epEl || dlId == null) return;
         if (epEl._eptimer) { clearTimeout(epEl._eptimer); epEl._eptimer = null; }
         epEl._epdl = dlId;
+        var since = Date.now();
         (function tick() {
             if (!epEl.isConnected || epEl._epdl !== dlId) return;
-            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId)).then(function (d) {
+            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId) + '&chain=1').then(function (d) {
                 if (!epEl.isConnected || epEl._epdl !== dlId) return;
                 var dl = d && d.download;
                 if (!dl) { epEl._eptimer = setTimeout(tick, 2200); return; }
-                epStatusRender(epEl, dl);
-                if (!(dl.status in TRACK_DONE)) epEl._eptimer = setTimeout(tick, 2000);
+                // a failed release the monitor replaced: the row shows the newest
+                // attempt, not the first failure (SeadogsBooty)
+                var chain = (d && d.chain) || [];
+                var shown = chain.length ? chain[chain.length - 1] : dl;
+                var retrying = dl.status === 'failed' && RETRYING_RE.test(dl.error || '') && !chain.length;
+                if (retrying && Date.now() - since < CHAIN_WAIT_MS) {
+                    epSearching(epEl);
+                    epEl._eptimer = setTimeout(tick, 2500);
+                    return;
+                }
+                epStatusRender(epEl, shown);
+                if (!(shown.status in TRACK_DONE)) epEl._eptimer = setTimeout(tick, 2000);
             });
         })();
     }
@@ -1040,7 +1544,8 @@
         }
         if (!best) return Promise.resolve({ ok: false });
         return sendGrab(buildGrabPayload(panel, best)).then(function (res) {
-            return (res && res.ok) ? { ok: true, id: res.id } : { ok: false };
+            return (res && res.ok) ? { ok: true, id: res.id }
+                : { ok: false, error: (res && res.error) || 'the download client refused it' };
         });
     }
 
@@ -1058,9 +1563,11 @@
         return s;
     }
 
-    function autoGrabEpisode(container, st, sn, en, src) {
+    function autoGrabEpisode(container, st, sn, en, src, willRetry) {
         // Resolves once the search SETTLES (throttle the searches, not the grabs); the
-        // row then tracks the live download itself.
+        // row then tracks the live download itself. willRetry: a search that ERRORED
+        // (an indexer timeout, not "nothing found") is left on Searching, the caller
+        // tries it again
         return new Promise(function (resolve) {
             var epEl = _epEl(container, sn, en);
             epSearching(epEl);
@@ -1075,7 +1582,8 @@
                             epTrack(epEl, r.id);
                             document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
                         } else {
-                            epNoRelease(epEl);
+                            r = Object.assign({}, r, { errored: !!panel._error });
+                            if (!(r.errored && willRetry)) epNoRelease(epEl, r.error || panel._error);
                         }
                         resolve(r);
                     });
@@ -1083,20 +1591,22 @@
         });
     }
 
-    // Ask ONE source for a season pack. Resolves {ok, id} or {ok:false} — a search
-    // that finds nothing is an ordinary outcome here, not a failure.
-    function _trySeasonPack(container, st, sn, src) {
-        return new Promise(function (resolve) {
-            var panel = document.createElement('div');
-            panel.className = 'vdl-results vdl-res-noanim';
-            ensureScratch(container).appendChild(panel);
-            // scope 'season' rides through buildGrabPayload into search_ctx, which is
-            // what tells the monitor this lands as a FOLDER and must be mapped to
-            // episodes rather than narrowed to its largest file.
-            searchInto(container, panel,
-                { scope: 'season', title: st.title, season: sn, source: src },
-                [], function () { _pickAndGrab(panel).then(resolve); });
-        });
+    // where a season or whole-show PACK search goes. packs live on usenet and
+    // torrent indexers, so those first in the user's order, then whatever else
+    // is set up. these searches used to send no source at all, and the server
+    // answered with its placeholder releases marked DEMO DATA (SeadogsBooty)
+    function _packSource(st) {
+        var list = (st.sources || []).filter(function (s) { return SRC_META[s]; });
+        for (var i = 0; i < list.length; i++) {
+            if (list[i] === 'usenet' || list[i] === 'torrent') return list[i];
+        }
+        return list[0] || null;
+    }
+
+    function _noSourceInto(el) {
+        if (!el) return;
+        el.hidden = false;
+        el.innerHTML = '<div class="vdl-res-empty">No download source configured — pick one on Settings → Downloads.</div>';
     }
 
     function grabSeason(container, st, sn) {
@@ -1106,7 +1616,8 @@
         if (!sources.length) { toast('No download source configured', 'error'); return; }
         var eps = [];
         for (var k in st.epMeta) {
-            if (k.indexOf(sn + '_') === 0 && st.epMeta[k].state === 'missing') eps.push(+k.split('_')[1]);
+            if (k.indexOf(sn + '_') !== 0) continue;
+            if (st.epMeta[k].state === 'missing') eps.push(+k.split('_')[1]);
         }
         eps.sort(function (a, b) { return a - b; });
         if (!eps.length) { toast('No missing episodes in this season', 'info'); return; }
@@ -1121,41 +1632,41 @@
             if (btn) btn.textContent = 'Grabbing…';
             toast('Grabbing ' + eps.length + ' episode' + (eps.length > 1 ? 's' : '') +
                 ' — each row shows live status', 'info');
-            var idx = 0, active = 0, done = 0, MAX = 3;
+            // queue entries are [episode, tries]. an episode whose search errored
+            // (Prowlarr took past its 75s, an indexer refused) goes to the back for
+            // one more try, and from then on one search runs at a time: three at
+            // once is what backs Prowlarr up past its timeout on a slow indexer,
+            // and every episode after the first few failed (SeadogsBooty, Dexter S1)
+            var queue = eps.map(function (en) { return [en, 0]; });
+            var n = 0, active = 0, MAX = 3;
+            function finished() { return !queue.length && !active; }
             function pump() {
-                while (active < MAX && idx < eps.length) {
+                while (active < MAX && queue.length) {
+                    var item = queue.shift();
                     active++;
                     // Round-robin the sources so one dead indexer can't sink the season.
-                    var src = sources[idx % sources.length];
-                    autoGrabEpisode(container, st, sn, eps[idx++], src).then(function () {
-                        active--; done++;
-                        if (done >= eps.length) { if (btn) { btn.disabled = false; btn.textContent = 'Grab season'; } }
-                        else pump();
-                    });
+                    var src = sources[n++ % sources.length];
+                    (function (en, tries) {
+                        autoGrabEpisode(container, st, sn, en, src, tries === 0).then(function (r) {
+                            active--;
+                            if (r && !r.ok && r.errored && tries === 0) {
+                                MAX = 1;
+                                queue.push([en, 1]);
+                            }
+                            if (finished()) { if (btn) { btn.disabled = false; btn.textContent = 'Grab season'; } }
+                            else pump();
+                        });
+                    })(item[0], item[1]);
                 }
             }
             pump();
         }
 
-        // A season pack first: one grab, one torrent, one seeded swarm, instead of
-        // 22 separate searches for a 22-episode season. Falls back the moment no
-        // source has an acceptable pack — the per-episode path is still the one
-        // that works for a half-owned season.
-        toast('Looking for a season pack…', 'info');
-        var i = 0;
-        (function next() {
-            if (i >= sources.length) { perEpisode(); return; }
-            _trySeasonPack(container, st, sn, sources[i++]).then(function (r) {
-                if (r && r.ok) {
-                    if (btn) { btn.disabled = false; btn.textContent = 'Grab season'; }
-                    eps.forEach(function (en) { epTrack(_epEl(container, sn, en), r.id); });
-                    toast('Season pack grabbed — episodes import as it finishes', 'success');
-                    document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
-                    return;
-                }
-                next();
-            });
-        })();
+        // one episode at a time, as the button says. a whole-missing season
+        // used to try a season pack first, so The Office S1 went to sabnzbd as
+        // one pack and all six rows shared its progress (SeadogsBooty). the
+        // season's search button is the way to grab a pack on purpose
+        perEpisode();
     }
 
     // On (re)open, resume live tracking for any episodes of THIS show already in flight,
@@ -1301,6 +1812,7 @@
                     '<div class="vms-eyebrow">Manual search</div>' +
                     '<div class="vms-title">' + esc(opts.title || '') + '</div>' +
                     '<div class="vms-scope">' + esc(scopeLabel) + '</div>' +
+                    '<div class="vms-prof" data-vms-prof></div>' +
                     '<div class="vms-sub" data-vms-sub>Searching your sources…</div>' +
                 '</div>' +
                 '<div class="vms-body" data-vms-body data-vgm-dl-content></div>' +
@@ -1310,7 +1822,7 @@
         var body = ov.querySelector('[data-vms-body]');
         // buildGrabPayload reads media context off the nearest [data-vgm-dl-content]._opts
         body._opts = { id: opts.mediaId, mediaId: opts.mediaId, source: opts.mediaSource,
-            mediaSource: opts.mediaSource, year: opts.year, poster: opts.poster };
+            mediaSource: opts.mediaSource, tmdbId: opts.tmdbId || null, year: opts.year, poster: opts.poster };
 
         ov.addEventListener('click', function (e) {
             if (e.target === ov || e.target.closest('[data-vms-close]')) { _closeManual(ov); return; }
@@ -1333,6 +1845,17 @@
         var onKey = function (e) { if (e.key === 'Escape') { _closeManual(ov); document.removeEventListener('keydown', onKey); } };
         document.addEventListener('keydown', onKey);
 
+        var profHost = ov.querySelector('[data-vms-prof]');
+        loadTitleProfile(profHost, function () { return body._opts || {}; },
+            scope === 'movie' ? 'movie' : 'show',
+            function (p, info) {
+                var picker = profilePickerHTML(info);
+                profHost.innerHTML = picker;
+                profHost.hidden = !picker;
+            },
+            function () { runAll(); });   // a new profile re-judges every result
+
+        function runAll() {
         getJSON('/api/video/downloads/config').then(function (c) {
             // Search every configured source that returns REAL, grabbable results. Soulseek
             // (slskd), Torrent + Usenet (Prowlarr) are all wired end-to-end now — live search
@@ -1355,6 +1878,8 @@
                     episode: (scope === 'episode' ? opts.episode : null), source: s }, []);
             });
         });
+        }
+        runAll();
     }
 
     window.VideoDownload = { render: render, manualSearch: manualSearch };

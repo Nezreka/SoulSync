@@ -790,6 +790,54 @@
                     </a>
                 </nav>
 
+                <!-- what this profile chose to see (#1909). the full rule and the
+                     server's answer live in shell/features.ts; this only replays the
+                     last cached answer before paint so the sidebar doesn't flash
+                     every item and then shrink. -->
+                <script>
+                    (function () {
+                        var c = null;
+                        try { c = JSON.parse(localStorage.getItem('ss_features') || 'null'); } catch (e) { }
+                        if (!c || !Array.isArray(c.pages)) return;
+                        document.documentElement.setAttribute('data-features-off', (c.off || []).join(' '));
+                        var pages = {};
+                        c.pages.forEach(function (p) { pages[p] = true; });
+                        document.querySelectorAll('.sidebar-nav .nav-button').forEach(function (b) {
+                            var id = b.getAttribute('data-page') || b.getAttribute('data-video-page');
+                            if (pages[id]) b.classList.add('nav-feature-hidden');
+                        });
+                        document.querySelectorAll('.sidebar-nav .nav-section-label').forEach(function (label) {
+                            var el = label.nextElementSibling, any = false;
+                            while (el && !el.classList.contains('nav-section-label')) {
+                                if (el.classList.contains('nav-button') && !el.classList.contains('nav-feature-hidden')
+                                    && el.style.display !== 'none') { any = true; break; }
+                                el = el.nextElementSibling;
+                            }
+                            if (!any) label.classList.add('nav-feature-hidden');
+                        });
+                        if (Array.isArray(c.off) && c.off.indexOf('video') !== -1) {
+                            var t = document.querySelector('.side-toggle');
+                            if (t) t.classList.add('nav-feature-hidden');
+                        }
+                    })();
+                </script>
+
+                <!-- one place to choose what shows, for every profile (#1909) -->
+                <div class="sidebar-customize">
+                    <button type="button" class="sidebar-customize-btn" id="sidebar-customize-btn"
+                        onclick="window.openFeaturePicker && window.openFeaturePicker()"
+                        title="Choose what shows in SoulSync" aria-label="Customize SoulSync">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="4" y1="7" x2="20" y2="7" />
+                            <line x1="4" y1="17" x2="20" y2="17" />
+                            <circle cx="9" cy="7" r="2.2" fill="currentColor" stroke="none" />
+                            <circle cx="15" cy="17" r="2.2" fill="currentColor" stroke="none" />
+                        </svg>
+                        <span class="nav-text">Customize</span>
+                    </button>
+                </div>
+
                 <!-- Spacer -->
                 <div class="sidebar-spacer"></div>
 
@@ -1000,12 +1048,18 @@
                             <h1 class="vsr-hero-title">Search</h1>
                             <p class="vsr-hero-sub">Movies, TV shows &amp; people &mdash; everything stays in-app</p>
                             <div class="vsr-tabs" role="tablist" aria-label="Search mode">
+                                <!-- named for what each searches (#1909). "enhanced" and
+                                     "basic" said nothing about that; data-vsr-tab keeps the
+                                     old ids so the code is unchanged -->
                                 <button class="vsr-tab active" type="button" role="tab" aria-selected="true"
-                                    data-vsr-tab="enhanced" aria-controls="vsr-enhanced-panel">Enhanced</button>
+                                    data-vsr-tab="enhanced" aria-controls="vsr-enhanced-panel"
+                                    title="Movies, shows and people, by title">Titles</button>
                                 <button class="vsr-tab" type="button" role="tab" aria-selected="false"
-                                    data-vsr-tab="basic" aria-controls="vsr-basic-panel">Basic</button>
+                                    data-vsr-tab="basic" aria-controls="vsr-basic-panel"
+                                    title="Search your indexers for exact releases">Releases</button>
                                 <button class="vsr-tab" type="button" role="tab" aria-selected="false"
-                                    data-vsr-tab="fresh" aria-controls="vsr-fresh-panel">Fresh Releases</button>
+                                    data-vsr-tab="fresh" aria-controls="vsr-fresh-panel"
+                                    title="The newest releases going around">Fresh</button>
                             </div>
                             <div class="vsr-panel active" data-vsr-panel="enhanced" id="vsr-enhanced-panel"
                                 role="tabpanel">
@@ -1552,6 +1606,9 @@
                                 <div class="vd-toolbar-right">
                                     <button class="vd-missing-toggle" type="button" data-vd-missing-toggle
                                         hidden>Missing only</button>
+                                    <button class="vd-missing-toggle" type="button" data-vd-specials-toggle
+                                        aria-pressed="false" title="Only hides them here, they can still be grabbed"
+                                        hidden>Hide specials</button>
                                     <div class="vd-view-toggle" data-vd-view-toggle></div>
                                 </div>
                             </div>
@@ -2108,12 +2165,16 @@
                                         API keys SoulSync connects to</span>
                                 </div>
                                 <div class="header-actions">
-                                    <button class="save-button" id="save-settings">
-                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                                            <path
-                                                d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm2 16H5V5h11.17L19 7.83V19zm-7-7c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zM6 6h9v4H6z" />
+                                    <!-- settings save as you go; this is their status and a
+                                         save-now (settings.js setSettingsSaveState, #1909) -->
+                                    <button class="save-button" id="save-settings" data-state="idle"
+                                        aria-live="polite" title="Settings save as you go. Click to save again now.">
+                                        <svg class="save-state-icon" viewBox="0 0 24 24" width="16" height="16"
+                                            fill="none" stroke="currentColor" stroke-width="2.4"
+                                            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M5 12.5l4.5 4.5L19 7.5" />
                                         </svg>
-                                        <span>Save Settings</span>
+                                        <span>All changes saved</span>
                                     </button>
                                 </div>
                             </div>
@@ -2678,6 +2739,32 @@
                                             </div>
                                         </div>
 
+                                        <!-- fanart.tv (optional; HD artist photos and backgrounds, #1957) -->
+                                        <div class="api-service-frame stg-service" data-service="artist-fanart">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: rgb(var(--accent-rgb));"></span>
+                                                <h4 class="service-title">fanart.tv</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>API Key (optional):</label>
+                                                    <input type="password" id="artist-fanart-api-key"
+                                                        placeholder="fanart.tv personal API key" autocomplete="off">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">HD artist photos and the wide background Plex and Jellyfin show behind an artist page, used by <b>Update media server metadata</b> on the Tools page.
+                                                        Without a key SoulSync still tries TheAudioDB and Deezer.</div>
+                                                    <div class="callback-help">A free key from <a
+                                                            href="https://fanart.tv/get-an-api-key/" target="_blank" rel="noopener noreferrer"
+                                                            style="color: rgb(var(--accent-rgb));">fanart.tv</a>. The video side's fanart.tv key is used when this is empty.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('fanart')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
+
                                         <!-- MusicBrainz server (optional; public API requires no credentials) -->
                                         <div class="api-service-frame stg-service" id="musicbrainz-server-settings"
                                             data-service="musicbrainz">
@@ -3107,9 +3194,10 @@
                                                     <span>TVmaze (TV community rating)</span>
                                                 </label>
                                                 <label class="vid-pref-row">
-                                                    <input type="checkbox" id="video-anilist-enabled">
-                                                    <span>AniList (anime score) — off by default; enable if you have
-                                                        anime</span>
+                                                    <input type="checkbox" id="video-anilist-enabled" checked>
+                                                    <span>AniList (anime): links your anime to AniList by id and adds
+                                                        their romaji and English names to release searches, plus score,
+                                                        studio and the next episode. Only ever touches anime</span>
                                                 </label>
                                                 <label class="vid-pref-row">
                                                     <input type="checkbox" id="video-wikidata-enabled" checked>
@@ -3516,6 +3604,14 @@
                                                 <div class="setting-help-text">The Local files source whose tracks
                                                     SoulSync scans. Save the URL and token first, then pick one.</div>
                                             </div>
+                                            <div class="form-group">
+                                                <label>Source folder:</label>
+                                                <input type="text" id="music_assistant-source-folder"
+                                                    placeholder="/media/music">
+                                                <div class="setting-help-text">Only needed when Music Assistant
+                                                    doesn't share it (2.10.9 doesn't). The folder your source reads, as
+                                                    Music Assistant sees it.</div>
+                                            </div>
                                             <div class="form-actions">
                                                 <button class="test-button" type="button"
                                                     onclick="loadMusicAssistantSources()">Load sources</button>
@@ -3652,9 +3748,9 @@
                                     <div class="settings-section-body collapsed" data-stg="quality">
                                         <div class="settings-group" data-stg="quality">
                                             <div class="setting-help-text">
-                                                Profiles apply <strong>per title</strong>: everything uses
-                                                <strong>Default</strong> unless you assign another profile from a
-                                                movie/show's Manage panel. Quality is read from the release name — pick
+                                                Profiles apply <strong>per title</strong>: pick one in a title's
+                                                Get or Manual search, or its Manage panel. A title with none uses
+                                                its kind's default below. Quality is read from the release name — pick
                                                 the ladder you'll accept, where to stop upgrading, what to reject
                                                 outright, then the soft tie-breakers.
                                             </div>
@@ -3671,6 +3767,23 @@
                                                     profile</button>
                                                 <button class="test-button hidden" type="button" data-vq-profile-delete
                                                     style="background:#663333;">Delete</button>
+                                            </div>
+                                            <div class="form-group" data-vq-kind-defaults
+                                                style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+                                                <label style="display:inline-flex; gap:8px; align-items:center;">
+                                                    <span>New movies use</span>
+                                                    <select class="library-source-filter-select" data-vq-kind-default="movie"
+                                                        title="The profile a movie gets when you haven't picked one for it">
+                                                        <option value="0">Default</option>
+                                                    </select>
+                                                </label>
+                                                <label style="display:inline-flex; gap:8px; align-items:center;">
+                                                    <span>New shows use</span>
+                                                    <select class="library-source-filter-select" data-vq-kind-default="show"
+                                                        title="The profile a show gets when you haven't picked one for it">
+                                                        <option value="0">Default</option>
+                                                    </select>
+                                                </label>
                                             </div>
                                             <div class="vq-block">
                                                 <div class="vq-label">Quality ladder <span class="vq-hint">toggle what
@@ -5004,6 +5117,63 @@
                                                                     style="margin-left: 8px;"></span>
                                                             </div>
                                                         </div>
+                                                        <!-- Remove Completed: what happens to a usenet job once
+                                         its import has landed. Shown on both sides like the
+                                         seeding goals (the Sources tab carries no side gating);
+                                         the music value lives in config (usenet_client.remove_completed,
+                                         settings.js), the video value in the video db (video-settings.js). -->
+                                                        <div class="form-group" id="music-usenet-remove-completed-group">
+                                                            <label>When a usenet download has imported (music):</label>
+                                                            <select id="music-usenet-remove-completed"
+                                                                class="form-select">
+                                                                <option value="off">Leave it in the client</option>
+                                                                <option value="history">Remove it from the client's
+                                                                    history</option>
+                                                                <option value="files">Remove it and delete what's left
+                                                                    in its folder</option>
+                                                            </select>
+                                                            <div class="setting-help-text">
+                                                                Music grabs copy the audio out, so without this the whole
+                                                                release stays in your client's completed folder. Only
+                                                                downloads SoulSync has imported are touched: an album goes
+                                                                once every track in it imported, and a failed or unmatched
+                                                                download stays for you.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group" id="video-usenet-remove-completed-group">
+                                                            <label>When a usenet download has imported (video):</label>
+                                                            <select id="video-usenet-remove-completed"
+                                                                class="form-select">
+                                                                <option value="off">Leave it in the client</option>
+                                                                <option value="history">Remove it from the client's
+                                                                    history</option>
+                                                                <option value="files">Remove it and delete what's left
+                                                                    in its folder</option>
+                                                            </select>
+                                                            <div class="setting-help-text">
+                                                                SoulSync already clears the file it imported; this also
+                                                                takes the job out of the client and, with the last option,
+                                                                deletes what it left behind (nfo, sample). Failed and import-failed
+                                                                downloads keep their job for Manual import, and a season
+                                                                pack only goes when every episode in it imported.
+                                                            </div>
+                                                        </div>
+                                                        <!-- A video release the client failed: block it and grab the
+                                         next one the profile ranks (core/video/download_monitor.py,
+                                         redownload_failed in the video db). -->
+                                                        <div class="form-group" id="video-redownload-failed-group">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="video-redownload-failed" checked>
+                                                                When a video download fails, grab the next best release
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                When SABnzbd or the torrent client fails a movie or episode,
+                                                                or a torrent stalls, that release is blocklisted and the next
+                                                                one your quality profile ranks is grabbed right away. It stops
+                                                                after 5 failed releases of the same title in 2 days, and you
+                                                                get the failed notification when nothing else could be taken.
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
@@ -5637,7 +5807,7 @@
                                             </p>
                                             <div class="qp-editing-banner" id="qp-editing-banner" style="display:none">
                                                 Editing <strong class="qp-editing-banner-name">this profile</strong> —
-                                                not the active default. Changes autosave to this profile; Save Settings saves it too.
+                                                not the active default. Changes autosave to this profile; the save status at the top saves it right away too.
                                             </div>
                                             <div class="qp-profile-list" id="qp-profile-list">
                                                 <!-- rows injected by renderCustomQualityProfiles() -->
@@ -6414,21 +6584,33 @@
                                             </div>
 
                                             <div class="settings-group" data-stg="library">
-                                                <h3>Collections on other drives</h3>
+                                                <h3>Your library's folders</h3>
                                                 <div class="setting-help-text">
-                                                    Extra folders SoulSync scans and manages but never downloads into,
-                                                    for an existing collection on another drive. Add them to your
-                                                    Plex / Jellyfin scan too. No need to repeat the main folder.
+                                                    Every folder your Plex / Jellyfin libraries read, Movies or TV.
+                                                    The ones SoulSync already reaches are ticked. Tell it where it
+                                                    reaches the rest and every file in them is found, renamed to
+                                                    your templates, recycled on delete and kept track of. New
+                                                    downloads still go to the folders above. Leave one blank and it
+                                                    works the way it does today.
+                                                </div>
+                                                <div id="video-drive-map" class="video-drive-map"></div>
+                                                <button type="button" class="test-button" id="video-drive-map-save">Save
+                                                    folders</button>
+
+                                                <h4 class="video-extra-heading">Folders your server doesn't list</h4>
+                                                <div class="setting-help-text">
+                                                    A collection SoulSync should manage that your server doesn't
+                                                    read. New downloads never go here.
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>More movie folders:</label>
+                                                    <label>Movie folders:</label>
                                                     <div id="video-movies-additional-paths"
                                                         data-video-extra-kind="movies"></div>
                                                     <button type="button" class="test-button"
                                                         data-video-add-path="movies">+ Add folder</button>
                                                 </div>
                                                 <div class="form-group">
-                                                    <label>More TV folders:</label>
+                                                    <label>TV folders:</label>
                                                     <div id="video-tv-additional-paths" data-video-extra-kind="tv">
                                                     </div>
                                                     <button type="button" class="test-button" data-video-add-path="tv">+
@@ -6789,14 +6971,15 @@
                                                 <div class="form-group">
                                                     <label class="checkbox-label">
                                                         <input type="checkbox" id="write-multi-artist">
-                                                        <span>Write multi-value ARTISTS tag</span>
+                                                        <span>Write multi-value ARTISTS and GENRE tags</span>
                                                     </label>
                                                     <span class="info-icon" role="button" tabindex="0"
                                                         title="What's this?" onclick="toggleSettingHelp(this)"
                                                         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                                     <small class="settings-hint setting-help-body" hidden>Write each
-                                                        artist as a separate tag value for Navidrome/Jellyfin
-                                                        multi-artist support</small>
+                                                        artist, and each genre, as a separate tag value (one
+                                                        GENRE= per genre) for Navidrome/Jellyfin/Plex. Off
+                                                        writes one comma-joined value</small>
                                                 </div>
                                                 <div class="form-group">
                                                     <label class="checkbox-label">
@@ -7388,8 +7571,10 @@
                                                         placeholder="$title ($year)/$title ($year) $quality">
                                                     <small class="settings-hint">Variables: $title, $titlefirst, $year,
                                                         $quality (e.g. Bluray-1080p), $resolution, $source, $codec,
-                                                        $edition, $tmdbid, $imdbid. Folders split on "/", the last
-                                                        segment is the filename.</small>
+                                                        $edition, $audiolangs, $sublangs, $tmdbid, $imdbid. Folders split
+                                                        on "/", the last segment is the filename. <code>[$audiolangs]</code>
+                                                        gives <code>[JA+EN]</code> and disappears when a file has no
+                                                        language tags.</small>
                                                     <small class="settings-hint">Example: <code
                                                             id="vo-movie-preview">&hellip;</code></small>
                                                 </div>
@@ -7400,10 +7585,23 @@
                                                         placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
                                                     <small class="settings-hint">Variables: $series, $season (01),
                                                         $seasonraw (1), $episode (01), $episodetitle, $year, $quality,
-                                                        $resolution, $source, $codec, $tmdbid, $imdbid, $tvdbid (the show's
-                                                        ids).</small>
+                                                        $resolution, $source, $codec, $audiolangs, $sublangs, $tmdbid,
+                                                        $imdbid, $tvdbid (the show's ids).</small>
                                                     <small class="settings-hint">Example: <code
                                                             id="vo-episode-preview">&hellip;</code></small>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label for="vo-colon-replacement">Colons in titles:</label>
+                                                    <select id="vo-colon-replacement">
+                                                        <option value="delete">Delete (Dexter Resurrection)</option>
+                                                        <option value="smart">Smart (Dexter - Resurrection, 12:30 becomes 12-30)</option>
+                                                        <option value="space_dash_space">Space dash space (Dexter - Resurrection)</option>
+                                                        <option value="dash">Dash (Dexter- Resurrection)</option>
+                                                    </select>
+                                                    <small class="settings-hint">File systems don't allow a colon, so
+                                                        it's replaced in movie and episode names. Mass Rename can
+                                                        bring files you already have in line.</small>
                                                 </div>
 
                                                 <div class="form-group">
@@ -9191,6 +9389,20 @@
 
                                 <!-- Third Column - Database, Metadata, Playlist Sync, Logging -->
                                 <div class="settings-third-column">
+                                    <!-- what shows in the app (#1909). per profile, so it lives in
+                                         the picker, this is just a door to it -->
+                                    <div class="settings-group" data-stg="appearance">
+                                        <h3>Show only what you use</h3>
+                                        <div class="form-group">
+                                            <small class="settings-hint">Hide the parts of SoulSync you don't use,
+                                                like podcasts, audiobooks or the video side. They keep working and
+                                                come back with one switch. Each profile picks its own.</small>
+                                            <button type="button" class="test-button" id="settings-open-feature-picker"
+                                                onclick="window.openFeaturePicker && window.openFeaturePicker()">Customize
+                                                SoulSync</button>
+                                        </div>
+                                    </div>
+
                                     <!-- UI Appearance -->
                                     <div class="settings-group" data-stg="appearance">
                                         <h3>UI Appearance</h3>
@@ -11895,6 +12107,34 @@
                     <span>Ethereum</span>
                 </button>
             </div>
+            <div class="support-projects">
+                <div class="support-projects-label">My other projects</div>
+                <a href="https://github.com/Nezreka/MetaSync" target="_blank" rel="noopener" class="support-project">
+                    <span class="support-project-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="5" r="2.2"/><circle cx="5" cy="18" r="2.2"/><circle cx="19" cy="18" r="2.2"/>
+                            <path d="M10.9 6.9 6.1 16.1M13.1 6.9l4.8 9.2M7.2 18h9.6"/>
+                        </svg>
+                    </span>
+                    <span class="support-project-text">
+                        <span class="support-project-name">MetaSync</span>
+                        <span class="support-project-desc">Shared charts from SoulSync installs. Anonymous, opt-in.</span>
+                    </span>
+                    <span class="support-project-go" aria-hidden="true">&#8599;</span>
+                </a>
+                <a href="https://github.com/Nezreka/soulsync-extension" target="_blank" rel="noopener" class="support-project">
+                    <span class="support-project-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 3.5h3.5v2a1.75 1.75 0 1 0 3.5 0v-2h4.5v6h-2a1.75 1.75 0 1 0 0 3.5h2v7.5H3.5V13h2a1.75 1.75 0 1 0 0-3.5h-2V3.5H9z"/>
+                        </svg>
+                    </span>
+                    <span class="support-project-text">
+                        <span class="support-project-name">SoulSync Companion</span>
+                        <span class="support-project-desc">Your library on Spotify, YouTube, Bandcamp and more. Chrome and Firefox.</span>
+                    </span>
+                    <span class="support-project-go" aria-hidden="true">&#8599;</span>
+                </a>
+            </div>
         </div>
     </div>
 
@@ -12495,6 +12735,7 @@
     <script src="{{ url_for('static', filename='video/video-collection-editor.js', v=static_v) }}"></script>
     <!-- Download VIEW renderer (movie / show / youtube): per-source search + quality verdict;
          rendered inline inside the get-modal (not its own modal) -->
+    <script src="{{ url_for('static', filename='video/search-filters.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-download-view.js', v=static_v) }}"></script>
     <!-- Headless per-episode / per-season auto-grab + wishlist helper (VideoGrab),
          used by the detail page's inline acquisition buttons -->

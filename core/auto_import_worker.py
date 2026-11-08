@@ -121,6 +121,26 @@ def _summarize_names(names: List[str], limit: int = 10) -> str:
     return f"{', '.join(names[:limit])} … and {len(names) - limit} more"
 
 
+def _hinted_track_match(candidate, identification: Dict, tracks: List) -> List[Dict]:
+    """A re-identify names the exact track the user picked (#889). When the
+    tracklist matcher turns the file down (its length differs from the
+    release's track, a live take, an extended cut), the user's pick still
+    stands: the file is matched to that track. Only for a hint, and only
+    for the one file a re-identify stages."""
+    if identification.get('method') != 'rematch_hint' or len(candidate.audio_files or []) != 1:
+        return []
+    chosen = str(identification.get('track_id') or '')
+    if not chosen:
+        return []
+    for track in tracks:
+        track_id = track.get('id') if isinstance(track, dict) else getattr(track, 'id', None)
+        if str(track_id or '') == chosen:
+            logger.info("[Auto-Import] Re-identify: '%s' filed as the chosen track %s "
+                        "though the tracklist match turned it down", candidate.name, chosen)
+            return [{'track': track, 'file': candidate.audio_files[0], 'confidence': 1.0}]
+    return []
+
+
 def _read_file_tags(file_path: str) -> Dict[str, Any]:
     """Read embedded tags from an audio file.
 
@@ -153,7 +173,8 @@ def _read_file_tags(file_path: str) -> Dict[str, Any]:
         # AIFF/WAV carry raw ID3 the easy view can't map (#1919)
         from core.metadata.easy_tags import open_easy
         audio = open_easy(file_path)
-        if audio:
+        # an untagged file is falsy to mutagen; its duration still counts (#1920)
+        if audio is not None:
             # Audio length comes off audio.info, not tags. Mutagen returns
             # seconds as a float; convert to int milliseconds to match the
             # metadata-source convention (Spotify/Deezer/iTunes all return
@@ -2067,6 +2088,9 @@ class AutoImportWorker:
             matches = match_result['matches']
             unmatched_files = match_result['unmatched_files']
 
+            if not matches:
+                matches = _hinted_track_match(candidate, identification, tracks)
+                unmatched_files = []
             if not matches:
                 return None
 

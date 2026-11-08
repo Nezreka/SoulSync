@@ -357,9 +357,10 @@ def get_library_artist_identity(artist_id):
         if row is None:
             return jsonify({"success": False, "error": "artist not found"}), 404
         row = dict(row)
+        # every source the provider artist page can open (core.artist_source_detail)
         for source, key in (("spotify", "spotify_artist_id"), ("deezer", "deezer_id"),
                             ("itunes", "itunes_artist_id"), ("musicbrainz", "musicbrainz_id"),
-                            ("discogs", "discogs_id")):
+                            ("discogs", "discogs_id"), ("amazon", "amazon_id")):
             value = str(row.get(key) or "").strip()
             if value:
                 return jsonify({"success": True, "name": row.get("name") or "",
@@ -456,11 +457,21 @@ def debug_library_photos():
 @bp.route('/api/artist/similar/<path:artist_name>/stream')
 def get_similar_artists_stream(artist_name):
     """Stream MusicMap similar artists using source-priority metadata matching."""
+    from core.metadata.similar_artists import iter_fallback_similar_artist_events
     from core.metadata_service import iter_musicmap_similar_artist_events
 
     def generate():
         logger.info(f"Streaming similar artists for: {artist_name}")
         for event in iter_musicmap_similar_artist_events(artist_name, limit=20):
+            # MusicMap has no page for many smaller and newer artists ("Gizmo
+            # & Mac" is a 404 there). the page sat on "Finding similar
+            # artists..." for good; the providers' own lists answer instead
+            if event.get('type') == 'error' and int(event.get('status_code') or 0) in (400, 404):
+                for fallback in iter_fallback_similar_artist_events(artist_name, limit=20):
+                    yield f"data: {json.dumps(fallback)}\n\n"
+                    if fallback.get('artist'):
+                        time.sleep(0.1)
+                return
             yield f"data: {json.dumps(event)}\n\n"
             if event.get('artist'):
                 time.sleep(0.1)
@@ -702,8 +713,8 @@ def get_artist_top_tracks_endpoint(artist_id):
                     FROM lib2_artists
                     WHERE id = ?
                        OR spotify_id = ?
-                       OR json_extract(external_ids, '$.itunes') = ?
-                       OR json_extract(external_ids, '$.deezer') = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
+                       OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
                        OR musicbrainz_id = ?
                     LIMIT 1
                 """, (artist_id, artist_id, artist_id, artist_id, artist_id))
@@ -781,8 +792,8 @@ def _resolve_artist_source_ids(artist_id) -> dict:
                 FROM lib2_artists
                 WHERE id = ?
                    OR spotify_id = ?
-                   OR json_extract(external_ids, '$.itunes') = ?
-                   OR json_extract(external_ids, '$.deezer') = ?
+                   OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
+                   OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
                    OR musicbrainz_id = ?
                 LIMIT 1
             """, (artist_id, artist_id, artist_id, artist_id, artist_id))
@@ -1945,12 +1956,16 @@ def get_artist_db_record(artist_id):
             # Owned counts off the v2 catalogue. Tracks hang off albums, not off
             # the artist row, so the track count walks album -> track rather than
             # reading a legacy tracks.artist_id that does not exist here.
+            # owned only: a wanted album with nothing downloaded is a slot,
+            # not something you have (3.6.1's tables held owned rows only)
+            from core.library2.sql_util import owned_sql
             counts = {}
             count_sql = {
-                'albums': "SELECT COUNT(*) FROM lib2_albums WHERE primary_artist_id = ?",
+                'albums': ("SELECT COUNT(*) FROM lib2_albums al "
+                           f"WHERE al.primary_artist_id = ? AND {owned_sql('album', 'al')}"),
                 'tracks': ("SELECT COUNT(*) FROM lib2_tracks t "
                            "JOIN lib2_albums al ON al.id = t.album_id "
-                           "WHERE al.primary_artist_id = ?"),
+                           f"WHERE al.primary_artist_id = ? AND {owned_sql('track', 't')}"),
             }
             for label, sql in count_sql.items():
                 try:

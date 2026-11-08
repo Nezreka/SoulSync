@@ -136,8 +136,8 @@ describe('config-driven vertical calls', () => {
     expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
       'GET /api/qobuz/discovery/status/9',
       'POST /api/deezer/sync/start/5',
-      // The borrowed youtube cancel — LB has none of its own.
-      'POST /api/youtube/sync/cancel/mbid-2',
+      // its own cancel, not the youtube one it used to borrow
+      'POST /api/listenbrainz/sync/cancel/mbid-2',
       'GET /api/beatport/sync/status/h',
     ]);
   });

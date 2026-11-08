@@ -90,8 +90,11 @@ def register_routes(bp):
         except ValueError:
             return jsonify({"error": "season must be a number"}), 400
         try:
-            data = (library_manage.movie_library(db, item_id) if kind == "movie"
-                    else library_manage.show_library(db, item_id, season=season))
+            from core.video.watch_scope import current_watcher
+            watcher = current_watcher().rows
+            data = (library_manage.movie_library(db, item_id, watcher=watcher) if kind == "movie"
+                    else library_manage.show_library(db, item_id, season=season,
+                                                     watcher=watcher))
         except Exception:
             logger.exception("library tab failed for %s %s", kind, item_id)
             return jsonify({"error": "Couldn't read this title's files"}), 500

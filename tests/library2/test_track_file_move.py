@@ -214,3 +214,25 @@ def test_move_rejects_self_and_unknown(imported_conn):
     with pytest.raises(MoveError) as exc:
         move_track_file(_NoWishlistDB(), conn, single, 999999)
     assert exc.value.status == 404
+
+
+def test_a_move_in_another_profiles_library_stops_wanting_it_for_that_profile(imported_conn):
+    """found in the second #1062 review: the unmonitor rule went to the acting
+    profile but wanted was recomputed for profile 1, so the source stayed
+    wanted in that profile's wishlist and was downloaded again. and the
+    row's monitored column (profile 1's) was cleared for a profile 3 move"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library2.wanted import recompute_wanted
+    conn = imported_conn
+    single, album = _seed_pair(conn)
+    for track_id in (single, album):
+        record_rule(conn, "track", track_id, True, PROVENANCE_USER, profile_id=3)
+    recompute_wanted(conn, profile_id=3, track_ids=[single, album])
+    conn.commit()
+
+    move_track_file(_NoWishlistDB(), conn, single, album, wishlist_profile_id=3)
+
+    wanted = conn.execute("SELECT wanted FROM lib2_wanted_tracks WHERE track_id=? AND profile_id=3",
+                          (single,)).fetchone()
+    assert wanted is not None and wanted[0] == 0
+    assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?", (single,)).fetchone()[0] == 1

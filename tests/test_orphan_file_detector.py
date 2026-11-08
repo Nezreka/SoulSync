@@ -472,3 +472,39 @@ def test_same_filename_in_another_album_does_not_hide_orphan(tmp_path: Path) -> 
 
     assert result.findings_created == 1
     assert [finding['file_path'] for finding in findings] == [str(track)]
+
+
+def test_a_loose_file_matching_only_a_wanted_track_is_still_an_orphan(tmp_path: Path) -> None:
+    """lib2_tracks also holds wanted and discography rows with no file; the
+    title/artist fallback counted those as known, so a download that never
+    imported (its tags naming the wanted song) was never reported."""
+    import struct
+    from mutagen.flac import FLAC
+
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (200, 10, 'Wanted Song')")
+    conn.commit()
+    conn.close()
+
+    stray = tmp_path / "Stray"
+    stray.mkdir()
+    path = stray / "never imported.flac"
+    block = bytearray(34)
+    block[0:2] = struct.pack('>H', 4096)
+    block[2:4] = struct.pack('>H', 4096)
+    block[10] = 0x0A
+    block[12] = 0x70
+    path.write_bytes(b'fLaC' + bytes([0x80, 0x00, 0x00, 0x22]) + bytes(block))
+    audio = FLAC(str(path))
+    audio['title'] = ['Wanted Song']
+    audio['artist'] = ['Clouddead89']
+    audio.save()
+
+    findings = []
+    context = JobContext(db=_DB(db_path), transfer_folder=str(tmp_path),
+                         config_manager=_Config(True),
+                         create_finding=lambda **kwargs: findings.append(kwargs) or True)
+    OrphanFileDetectorJob().scan(context)
+    assert [f['finding_type'] for f in findings] == ['orphan_file']

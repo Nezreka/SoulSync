@@ -106,18 +106,42 @@ class _IndexedPaths:
             return False
         from core.library2.paths import resolve_lib2_path
 
+        # the stored path itself first: one index probe
+        if self._conn.execute(
+                """SELECT 1 FROM lib2_track_files WHERE path = ?
+                      AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')
+                    LIMIT 1""", (normalized,)).fetchone():
+            return True
+        # the name search reads every file row (a leading wildcard has no
+        # index). a grab that never gets indexed was asked again every 15 s,
+        # so a miss is believed for a few minutes before the next search
+        missed = _NAME_MISSES.get(normalized)
+        if missed is not None and time.monotonic() - missed < _NAME_MISS_TTL:
+            return False
         pattern = "%" + name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         rows = self._conn.execute(
             """SELECT path FROM lib2_track_files
-                WHERE (path LIKE ? ESCAPE '\\' OR path = ?)
+                WHERE path LIKE ? ESCAPE '\\'
                   AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')""",
-            (pattern, normalized),
+            (pattern,),
         ).fetchall()
-        return any(
+        found = any(
             _normalized_path(row[0]) == normalized
             or _normalized_path(resolve_lib2_path(row[0]) or "") == normalized
             for row in rows if row[0]
         )
+        if found:
+            _NAME_MISSES.pop(normalized, None)
+        else:
+            if len(_NAME_MISSES) > 2000:
+                _NAME_MISSES.clear()
+            _NAME_MISSES[normalized] = time.monotonic()
+        return found
+
+
+#: name searches that found nothing: normalized path -> when (monotonic)
+_NAME_MISSES: Dict[str, float] = {}
+_NAME_MISS_TTL = 300.0
 
 
 def _path_is_indexed(path: Any, known_paths: Any) -> bool:

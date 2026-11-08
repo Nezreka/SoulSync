@@ -21,6 +21,7 @@ from core.wishlist.processing import (
     record_failed_attempt as _record_failed_attempt,
     recover_uncaptured_failed_tracks as _recover_uncaptured_failed_tracks,
     remove_completed_tracks_from_wishlist as _remove_completed_tracks_from_wishlist,
+    resolve_failed_track_requeue_provenance as _resolve_failed_track_requeue_provenance,
     resolve_wishlist_source_type_for_batch as _resolve_wishlist_source_type_for_batch,
 )
 from core.wishlist.resolution import (
@@ -57,12 +58,15 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
     """
     failed_count = len(permanently_failed_tracks)
     wishlist_added_count = 0
+    already_count = 0
     error_count = 0
 
-    # Create source_context identical to sync.py
-    source_context = _build_wishlist_source_context(batch)
-    batch_source_type = _resolve_wishlist_source_type_for_batch(batch)
     owner_profile_id = batch.get('profile_id', 1)
+
+    # the batch pair, built once so every track shares one timestamp. also
+    # the fallback if the per-track resolver fails
+    batch_source_context = _build_wishlist_source_context(batch)
+    batch_source_type = _resolve_wishlist_source_type_for_batch(batch)
 
     # Process each failed track (matching sync.py's loop) with safety limit
     max_failed_tracks = min(failed_count, 50)  # Safety limit on the expensive add
@@ -76,9 +80,6 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
             # on, which is exactly the choice to search the guess anyway.
             # Check the track ID prefix since the wishlist payload helper overwrites source.
             track_data = failed_track_info.get('track_data') or failed_track_info.get('spotify_track', {})
-            track_source_context = dict(source_context or {})
-            if isinstance(track_data, dict):
-                track_source_context.update(track_data.get('_curation_origin') or {})
             sp_id = track_data.get('id', '') if isinstance(track_data, dict) else ''
             _artists = track_data.get('artists') if isinstance(track_data, dict) else None
             _artist = (_artists or [None])[0] if isinstance(_artists, list) else _artists
@@ -94,14 +95,44 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
                 logger.info(f"[Wishlist Processing] Skipping wing-it track: {track_name}")
                 continue
 
-            logger.error(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
+            logger.info(f"[Wishlist Processing] Adding track {i+1}/{max_failed_tracks}: {track_name}")
 
-            success = wishlist_service.add_failed_track_from_modal(
+            # a playlist song that failed inside an album batch goes back as
+            # its playlist's, not the batch's, or its playlist never re-syncs
+            # when it finally downloads (#1981)
+            try:
+                track_source_type, track_source_context = (
+                    _resolve_failed_track_requeue_provenance(
+                        batch, track_data, batch_context=batch_source_context))
+            except Exception as e:
+                # never let this skip the re-add, fall back to the batch pair
+                logger.exception(f"[Wishlist Processing] Provenance resolution failed for {track_name}, falling back to batch provenance: {e}")
+                track_source_type = batch_source_type
+                track_source_context = dict(batch_source_context)
+
+            # Preserve PR #1942's per-track mirrored-playlist identity after
+            # upstream's per-track provenance resolver has selected its source.
+            track_source_context = dict(track_source_context or {})
+            if isinstance(track_data, dict):
+                track_source_context.update(track_data.get('_curation_origin') or {})
+
+            # the detailed outcome tells "already on the wishlist" and
+            # "blocklisted" apart from a real failure, the bare bool reported
+            # all of them as "Failed to add"
+            outcome = wishlist_service.add_failed_track_from_modal(
                 track_info=failed_track_info,
-                source_type=batch_source_type,
+                source_type=track_source_type,
                 source_context=track_source_context,
                 profile_id=owner_profile_id,
+                detailed=True,
             )
+            if not isinstance(outcome, dict):
+                # a service that only answers with the old bool
+                outcome = {'created': bool(outcome), 'reason': None,
+                           'status': 'created' if outcome else 'error'}
+            success = bool(outcome.get('created'))
+            status = outcome.get('status')
+            reason = outcome.get('reason')
             # Count the attempt EITHER way — a fresh add becomes
             # attempt 1; a duplicate-skip (track already wishlisted,
             # i.e. it failed again this cycle) accumulates. This is
@@ -123,8 +154,15 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
                         })
                 except Exception as e:
                     logger.debug("emit wishlist_item_added failed: %s", e)
+            elif status == 'updated' or (status == 'skipped' and reason == 'duplicate'):
+                already_count += 1
+                logger.info(f"[Wishlist Processing] {track_name} is already on the wishlist")
+            elif status == 'skipped':
+                logger.info(f"[Wishlist Processing] {track_name} not re-added to wishlist ({reason})")
             else:
-                logger.error(f"[Wishlist Processing] Failed to add {track_name} to wishlist")
+                logger.warning(
+                    f"[Wishlist Processing] Failed to add {track_name} to wishlist: "
+                    f"{status} ({reason})")
 
         except Exception as e:
             error_count += 1
@@ -154,7 +192,9 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
 
     if wing_it_skipped:
         logger.warning(f"[Wishlist Processing] Skipped {wing_it_skipped} wing-it fallback tracks")
-    logger.error(f"[Wishlist Processing] Added {wishlist_added_count}/{failed_count} failed tracks to wishlist (errors: {error_count})")
+    logger.info(
+        f"[Wishlist Processing] Added {wishlist_added_count}/{failed_count} failed tracks to wishlist "
+        f"({already_count} already on it, errors: {error_count})")
 
     return {
         'tracks_added': wishlist_added_count,
@@ -240,7 +280,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
         error_count = 0
         requeue_failed = batch.get('requeue_failed_to_wishlist', True) is not False
 
-        logger.error(f"[Wishlist Processing] Processing {failed_count} failed tracks for wishlist")
+        logger.info(f"[Wishlist Processing] Processing {failed_count} failed tracks for wishlist")
 
         if permanently_failed_tracks and requeue_failed:
             try:
@@ -254,7 +294,7 @@ def _process_failed_tracks_to_wishlist_exact(batch_id):
                 import traceback
                 traceback.print_exc()
         elif not permanently_failed_tracks:
-            logger.error("ℹ️ [Wishlist Processing] No failed tracks to add to wishlist")
+            logger.info("ℹ️ [Wishlist Processing] No failed tracks to add to wishlist")
         else:
             logger.info(
                 "[Wishlist Processing] Keeping %d transient search failure(s) out of Wishlist",

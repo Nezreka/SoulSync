@@ -1,5 +1,5 @@
 import { createMemoryHistory } from '@tanstack/react-router';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppRouterProvider, createAppRouter } from '@/app/router';
@@ -7,7 +7,11 @@ import { HttpResponse, http, server } from '@/test/msw';
 import { createTestQueryClient } from '@/test/query-client';
 import { createShellBridge } from '@/test/shell-bridge';
 
-/** Unknown artists keep the original provider page and native monitoring. */
+import { resetGoingBackForTests } from '../../artist-detail/-artist-detail.back-label';
+
+/** An artist the catalogue does not hold opens on the same Library v2 artist
+ *  page as every other artist (dev had one artist page for everyone), read
+ *  from the provider: no My Library, nothing written until you act. */
 function renderAt(entry: string) {
   const queryClient = createTestQueryClient();
   const history = createMemoryHistory({ initialEntries: [entry] });
@@ -25,8 +29,11 @@ describe('an artist the catalogue does not hold', () => {
   let resolveResponse: number | null;
   let materializeCalls: unknown[];
   let monitoredAlbums: unknown[];
+  let wishedAlbums: Record<string, { album_id: number; wished: boolean }>;
 
   beforeEach(() => {
+    window.artistDetailLabelStack = [];
+    resetGoingBackForTests();
     window.SoulSyncWebShellBridge = createShellBridge();
     window.showToast = vi.fn();
     window.loadSimilarArtists = vi.fn();
@@ -36,7 +43,11 @@ describe('an artist the catalogue does not hold', () => {
     resolveResponse = null;
     materializeCalls = [];
     monitoredAlbums = [];
+    wishedAlbums = {};
     server.use(
+      http.get('/api/library/v2/discovery/album-status', () =>
+        HttpResponse.json({ success: true, statuses: wishedAlbums }),
+      ),
       http.get('/api/library/v2/enabled', () =>
         HttpResponse.json({ success: true, enabled: true, can_write: true }),
       ),
@@ -54,10 +65,15 @@ describe('an artist the catalogue does not hold', () => {
         monitoredAlbums.push(await request.json());
         return HttpResponse.json({ success: true, artist_id: 55, album_id: 77 });
       }),
-      http.get('/api/artist-detail/:id', () =>
-        HttpResponse.json({
+      http.get('/api/artist-detail/:id', ({ params }) => {
+        const secondArtist = params.id === 'sp-2';
+        return HttpResponse.json({
           success: true,
-          artist: { id: 'sp-1', name: 'Boards of Canada', image_url: 'https://cdn.test/a.jpg' },
+          artist: {
+            id: secondArtist ? 'sp-2' : 'sp-1',
+            name: secondArtist ? 'Tycho' : 'Boards of Canada',
+            image_url: 'https://cdn.test/a.jpg',
+          },
           discography: {
             albums: [
               {
@@ -72,8 +88,8 @@ describe('an artist the catalogue does not hold', () => {
             singles: [],
             source: 'spotify',
           },
-        }),
-      ),
+        });
+      }),
       http.get('/api/album/:id/tracks', () =>
         HttpResponse.json({
           success: true,
@@ -104,24 +120,89 @@ describe('an artist the catalogue does not hold', () => {
     delete document.body.dataset.artistSource;
   });
 
-  it("renders upstream's artist page without creating a catalogue row", async () => {
+  it('renders on the library artist page without creating a catalogue row', async () => {
     const { router } = renderAt(ARTIST_URL);
 
     expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
-    expect(document.querySelector('.artist-detail-page')).not.toBeNull();
-    expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1');
+    // the one artist page, not the old provider page
+    expect(document.querySelector('.artist-detail-page')).toBeNull();
+    expect(router.state.location.pathname).toBe('/library');
+    expect(router.state.location.search).toMatchObject({ discover: 'spotify:sp-1' });
+    expect(screen.getByText('Not in your library')).toBeInTheDocument();
+    // nothing in the library: no My Library view
     expect(screen.queryByRole('button', { name: 'My Library' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Discovery' })).not.toBeInTheDocument();
     // Read-only until the user asks for something (issues §28.6 question 1).
     expect(materializeCalls).toHaveLength(0);
     expect(monitoredAlbums).toHaveLength(0);
+  });
+
+  it.each([
+    ['rich', true],
+    ['compact', false],
+  ])(
+    'opens in the header arrivals from elsewhere get, the video only with the rich one (%s)',
+    async (header, rich) => {
+      // the backdrop video looks its clip up on YouTube: a compact header has
+      // no backdrop, so it asks nothing
+      server.use(
+        http.get('/api/library/v2/ui-preferences', () =>
+          HttpResponse.json({
+            success: true,
+            preferences: { artist_page: { header_elsewhere: header } },
+          }),
+        ),
+      );
+      renderAt(ARTIST_URL);
+      expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
+      await waitFor(() => expect(Boolean(document.querySelector('[data-live]'))).toBe(rich));
+      // a compact header of its own, not the hero with its video switched off
+      expect(Boolean(document.querySelector('.artist-hero-identity'))).toBe(rich);
+      expect(
+        screen.getByRole('button', { name: rich ? 'Compact header' : /^Rich header/ }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it('returns an unowned artist to its exact source without browser history', async () => {
+    (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [
+      { type: 'page', pageId: 'discover', href: '/discover' },
+    ];
+    const { router, history } = renderAt('/search?q=Boards%20of%20Canada');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    await act(async () => router.navigate({ href: ARTIST_URL }));
+
+    const back = vi.spyOn(router.history, 'back');
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to Search' }));
+
+    expect(back).not.toHaveBeenCalled();
+    await waitFor(() => expect(history.location.pathname).toBe('/search'));
+    expect(history.location.search).toBe('?q=Boards+of+Canada');
+  });
+
+  it('walks artist hops back to the previous artist and then the exact source', async () => {
+    (window as { artistDetailLabelStack?: unknown[] }).artistDetailLabelStack = [];
+    const { router, history } = renderAt('/search?q=Boards%20of%20Canada');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    await act(async () => router.navigate({ href: ARTIST_URL }));
+    await screen.findByText('Boards of Canada');
+
+    await act(async () => router.navigate({ href: '/artist-detail/spotify/sp-2?name=Tycho' }));
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to Boards of Canada' }));
+
+    // an unknown artist is the library's artist page, read from the provider
+    await waitFor(() => expect(history.location.pathname).toBe('/library'));
+    expect(new URLSearchParams(history.location.search).get('discover')).toBe('spotify:sp-1');
+    fireEvent.click(await screen.findByRole('button', { name: '← Back to Search' }));
+
+    await waitFor(() => expect(history.location.pathname).toBe('/search'));
+    expect(history.location.search).toBe('?q=Boards+of+Canada');
   });
 
   it('monitors a release from the bookmark on its card', async () => {
     const { router } = renderAt(ARTIST_URL);
     await screen.findByText('Music Has the Right to Children');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Start monitoring' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add to Wishlist' }));
 
     await waitFor(() => expect(monitoredAlbums).toHaveLength(1));
     expect(monitoredAlbums[0]).toMatchObject({
@@ -134,12 +215,22 @@ describe('an artist the catalogue does not hold', () => {
       album_type: 'album',
       track_count: 1,
     });
-    expect(await screen.findByRole('button', { name: 'Monitored' })).toBeDisabled();
-    expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1');
+    expect(await screen.findByRole('button', { name: 'On your Wishlist' })).toBeDisabled();
+    expect(router.state.location.pathname).toBe('/library');
     expect(screen.queryByRole('button', { name: 'My Library' })).not.toBeInTheDocument();
     // The bookmark is not a click on the card.
     expect(window.openDownloadMissingModalForArtistAlbum).not.toHaveBeenCalled();
     expect(materializeCalls).toHaveLength(0);
+  });
+
+  it('shows a release already on the Wishlist as wishlisted after a reload', async () => {
+    // the tick used to live in component state only, so it was gone on reload
+    wishedAlbums = { a1: { album_id: 77, wished: true } };
+    renderAt(ARTIST_URL);
+    await screen.findByText('Music Has the Right to Children');
+
+    expect(await screen.findByRole('button', { name: 'On your Wishlist' })).toBeDisabled();
+    expect(monitoredAlbums).toHaveLength(0);
   });
 
   it('opens a release in the shared download dialog, with its tracks', async () => {
@@ -155,6 +246,64 @@ describe('an artist the catalogue does not hold', () => {
     // Opening is not monitoring.
     expect(monitoredAlbums).toHaveLength(0);
     expect(materializeCalls).toHaveLength(0);
+  });
+
+  it('opens a known artist in the header this profile picked for arrivals from elsewhere', async () => {
+    resolveResponse = 42;
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { artist_page: { header: 'rich', header_elsewhere: 'compact' } },
+        }),
+      ),
+    );
+    const { router } = renderAt(ARTIST_URL);
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 42, header: 'compact' }),
+    );
+  });
+
+  it('uses the elsewhere header when arriving from Wishlist without a header in the URL', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { artist_page: { header: 'rich', header_elsewhere: 'compact' } },
+        }),
+      ),
+    );
+    const { router } = renderAt('/wishlist');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/wishlist'));
+
+    await act(async () => {
+      await router.navigate({ href: '/library?artist=42&view=discovery&immersive=true' });
+    });
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 42, header: 'compact' }),
+    );
+  });
+
+  it('uses the library header setting when opening an artist from the library index', async () => {
+    server.use(
+      http.get('/api/library/v2/ui-preferences', () =>
+        HttpResponse.json({
+          success: true,
+          preferences: { artist_page: { header: 'compact', header_elsewhere: 'rich' } },
+        }),
+      ),
+    );
+    const { router } = renderAt('/library');
+    await waitFor(() => expect(router.state.location.pathname).toBe('/library'));
+
+    await act(async () => {
+      await router.navigate({ href: '/library?artist=42&view=discovery&immersive=true' });
+    });
+
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ artist: 42, header: 'compact' }),
+    );
   });
 
   it('opens a known artist in native Discovery', async () => {
@@ -179,11 +328,11 @@ describe('an artist the catalogue does not hold', () => {
         '&discoverAlbum=%22spotify%3Aa1%22',
     );
 
-    await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/spotify/sp-1'));
-    expect(router.state.location.search).toMatchObject({
-      name: 'Boards of Canada',
-      album: 'a1',
-    });
     expect(await screen.findByText('Music Has the Right to Children')).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/library');
+    // the album link opens that release's download dialog
+    await waitFor(() => expect(window.openDownloadMissingModalForArtistAlbum).toHaveBeenCalled());
+    const call = vi.mocked(window.openDownloadMissingModalForArtistAlbum!).mock.calls[0]!;
+    expect(call[3]).toMatchObject({ id: 'a1' });
   });
 });

@@ -15,6 +15,7 @@ logger = get_logger("repair_jobs.library_reorganize")
 
 @register_job
 class LibraryReorganizeJob(RepairJob):
+    scan_key_fields = ('dry run', 'recheck placed', 'naming settings')
     job_id = "library_reorganize"
     display_name = "Library Reorganize"
     description = "Reviews or queues files whose paths do not match the organization template"
@@ -123,9 +124,16 @@ class LibraryReorganizeJob(RepairJob):
         start = self.resume_index(context, [a["id"] for a in albums], scan_key) if library_wide else 0
         if start:
             logger.info("Reorganize: resuming at album %d of %d", start + 1, len(albums))
-        for index in range(start, len(albums)):
+        total = len(albums)
+        if context.update_progress:
+            context.update_progress(start, total)
+        for index in range(start, total):
             album = albums[index]
-            stopping = context.check_stop()
+            # a pause waits here, between albums; a stop while paused ends the run
+            stopping = context.check_stop() or context.wait_if_paused()
+            if index % 5 == 0 and context.report_progress:
+                context.report_progress(scanned=index, total=total,
+                                        phase=f"Checking album {index + 1} of {total}")
             if library_wide and index > start and (stopping or (index - start) % 25 == 0):
                 self.save_checkpoint(context, albums[index - 1]["id"], scan_key)
             if stopping:
@@ -150,19 +158,15 @@ class LibraryReorganizeJob(RepairJob):
             # and reorganized nothing, advising a re-import that cannot help.
             # The bridge validates the album id itself; nothing downstream
             # consults the legacy back-reference.
-            mode = "api"
             try:
-                preview = preview_album_reorganize(
-                    context.db, context.config_manager, album_id, mode=mode,
-                )
-                if preview.get("status") == "no_source_id":
-                    tagged = preview_album_reorganize(
-                        context.db, context.config_manager, album_id, mode="tags",
-                    )
-                    if tagged.get("status") == "planned":
-                        preview = tagged
-                        mode = "tags"
+                preview = preview_album_reorganize(context.db, context.config_manager, album_id)
             except ReorganizeBridgeError as exc:
+                if getattr(exc, "status", None) == 404:
+                    # deleted (or emptied) while the scan ran: nothing to do,
+                    # not a failure (3.6.1 skipped it the same way)
+                    logger.debug("Reorganize: album %s is gone (%s), skipped", album_id, exc)
+                    result.skipped += 1
+                    continue
                 logger.warning("Reorganize bridge rejected album %s: %s", album_id, exc)
                 result.errors += 1
                 continue
@@ -182,7 +186,7 @@ class LibraryReorganizeJob(RepairJob):
                     and all(t.get("matched") and t.get("file_exists") and t.get("unchanged")
                             and not t.get("collision") for t in tracks)):
                 from core.library_reorganize import mark_album_placed
-                mark_album_placed(context.db, album_id, preview.get("source"), None)
+                mark_album_placed(context.db, album_id)
             if dry_run:
                 for track in mismatched:
                     # `track_id` is ALREADY the lib2 id: the preview is built
@@ -236,10 +240,7 @@ class LibraryReorganizeJob(RepairJob):
                     result.findings_skipped_dedup += int(not inserted)
             elif mismatched:
                 try:
-                    outcome = enqueue_album_reorganize(
-                        context.db, album_id,
-                        source=preview.get("source"), mode=mode,
-                    )
+                    outcome = enqueue_album_reorganize(context.db, album_id)
                     result.auto_fixed += int(bool(outcome.get("queued")))
                     result.skipped += int(not outcome.get("queued"))
                 except Exception as exc:

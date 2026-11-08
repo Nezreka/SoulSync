@@ -248,3 +248,15 @@ def test_a_rows_source_field_is_the_release_source_not_the_download_source(searc
 
     row = search(endpoint=endpoint).get_json()["results"][0]
     assert str(row.get("source") or "").lower() not in ("torrent", "usenet", "soulseek", "extto")
+
+
+# ── no source is not a demo (SeadogsBooty) ───────────────────────────────────
+# the season-pack and whole-show buttons sent no source, and a release list
+# marked DEMO DATA came back instead of their indexers.
+
+def test_a_search_with_no_source_says_so_instead_of_inventing_releases(search):
+    data = search(source="", scope="season", title="Dexter Resurrection",
+                  season=1, endpoint=START).get_json()
+    assert "Settings" in data["error"]
+    assert not data.get("results")
+    assert data.get("live") is not False, "never the mock path's live:false"

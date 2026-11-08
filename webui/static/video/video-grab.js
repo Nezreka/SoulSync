@@ -57,7 +57,13 @@
     // Mirrors the modal's _pollSearch heuristic, minus the DOM streaming.
     function runSearch(params) {
         return postJSON('/api/video/downloads/search/start', params).then(function (d) {
-            if (!d || d.error) return [];
+            if (!d || d.error) {
+                // an errored search (Prowlarr past its timeout) is not "nothing
+                // found": the season loop tries it again
+                var none = [];
+                none.error = (d && d.error) || 'search failed';
+                return none;
+            }
             if (!d.id) return d.results || [];   // immediate / mock
             return pollSearch(d.id, params, d.poll_ms);
         });
@@ -99,7 +105,7 @@
             episode: opts.episode, source: src };
         return runSearch(params).then(function (rows) {
             var best = bestRow(rows);
-            if (!best) return { ok: false, error: 'no release found' };
+            if (!best) return { ok: false, error: rows.error || 'no release found', errored: !!rows.error };
             var payload = {
                 kind: 'show', title: opts.title, release_title: best.title,
                 source: src, size_bytes: best.size_bytes, quality_label: best.quality_label,
@@ -131,46 +137,9 @@
         });
     }
 
-    // One source, one question: is there a whole-season pack? Resolves {ok, id}.
-    // scope 'season' is what rides into search_ctx and tells the monitor this lands
-    // as a FOLDER to be mapped onto episodes, not a file to be narrowed to one.
-    function seasonPack(opts, src) {
-        return runSearch({ scope: 'season', title: opts.title, season: opts.season, source: src })
-            .then(function (rows) {
-                var best = bestRow(rows);
-                if (!best) return { ok: false };
-                var payload = {
-                    kind: 'show', title: opts.title, release_title: best.title,
-                    source: src, size_bytes: best.size_bytes, quality_label: best.quality_label,
-                    media_id: opts.mediaId, media_source: opts.mediaSource, year: opts.year,
-                    poster_url: opts.poster,
-                    search_ctx: { scope: 'season', title: opts.title, year: opts.year,
-                        season: opts.season, episode: null }
-                };
-                if (src === 'soulseek') {
-                    payload.username = best.username; payload.filename = best.filename;
-                    payload.candidates = [];
-                } else {
-                    payload.download_url = best.download_url; payload.protocol = best.protocol;
-                    payload.magnet_uri = best.magnet_uri;
-                    payload.indexer_id = best.indexer_id; payload.guid = best.guid;
-                    payload.username = best.username; payload.filename = best.filename || best.title;
-                    payload.candidates = [];
-                }
-                return postJSON('/api/video/downloads/grab', payload).then(function (res) {
-                    if (res && res.ok) {
-                        document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
-                        return { ok: true, id: res.id };
-                    }
-                    return { ok: false };
-                });
-            });
-    }
-
-    // Auto-grab a season: try a PACK from each configured source first, then fall
-    // back to per-episode, 3 at a time. The pack is one grab and one swarm instead
-    // of 22 separate searches for a 22-episode season; the episode path is still
-    // the right answer for a half-owned season, so it stays.
+    // Auto-grab a season: every missing episode on its own, as the button says.
+    // a whole-missing season used to try a season pack first, so all its rows
+    // shared one pack's progress (SeadogsBooty). a pack is the season search's job
     function season(opts, onEp) {
         opts = opts || {};
         var eps = (opts.episodes || []).slice().sort(function (a, b) { return a - b; });
@@ -178,43 +147,37 @@
         if (!total) return Promise.resolve({ grabbed: 0, total: 0 });
         return allSources().then(function (sources) {
             if (opts.source && sources.indexOf(opts.source) === -1) sources = [opts.source].concat(sources);
-            var i = 0;
-            function tryPack() {
-                if (i >= sources.length) return Promise.resolve({ ok: false });
-                return seasonPack(opts, sources[i++]).then(function (r) {
-                    return (r && r.ok) ? r : tryPack();
-                });
-            }
             if (onEp) eps.forEach(function (en) { onEp(en, 'searching'); });
-            return tryPack().then(function (packed) {
-                if (packed && packed.ok) {
-                    if (onEp) eps.forEach(function (en) { onEp(en, 'grabbing'); });
-                    return { grabbed: total, total: total, pack: true, id: packed.id };
-                }
-                return perEpisode(opts, eps, total, sources, onEp);
-            });
+            return perEpisode(opts, eps, total, sources, onEp);
         });
     }
 
+    // queue entries are [episode, tries]. an episode whose search errored goes to
+    // the back for one more try and the loop drops to one search at a time: three
+    // at once backs Prowlarr up past its timeout on a slow indexer (SeadogsBooty)
     function perEpisode(opts, eps, total, sources, onEp) {
-        var idx = 0, active = 0, grabbed = 0, MAX = 3;
+        var queue = eps.map(function (en) { return [en, 0]; });
+        var n = 0, active = 0, grabbed = 0, MAX = 3;
         return new Promise(function (resolve) {
-            function launch(en, n) {
+            function launch(en, tries) {
                 active++;
                 if (onEp) onEp(en, 'searching');
                 // Round-robin the sources so one dead indexer can't sink a season.
-                episode({ title: opts.title, source: sources[n % sources.length],
+                episode({ title: opts.title, source: sources[n++ % sources.length],
                     season: opts.season, episode: en,
                     mediaId: opts.mediaId, mediaSource: opts.mediaSource, year: opts.year, poster: opts.poster })
                     .then(function (r) {
                         active--;
                         if (r.ok) { grabbed++; if (onEp) onEp(en, 'grabbing'); }
+                        else if (r.errored && tries === 0) { MAX = 1; queue.push([en, 1]); }
                         else if (onEp) { onEp(en, 'none'); }
-                        if (idx >= eps.length && active === 0) resolve({ grabbed: grabbed, total: total });
+                        if (!queue.length && active === 0) resolve({ grabbed: grabbed, total: total });
                         else pump();
                     });
             }
-            function pump() { while (active < MAX && idx < eps.length) { launch(eps[idx], idx); idx++; } }
+            function pump() {
+                while (active < MAX && queue.length) { var item = queue.shift(); launch(item[0], item[1]); }
+            }
             pump();
         });
     }

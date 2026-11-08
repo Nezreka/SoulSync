@@ -177,3 +177,34 @@ def test_copy_mode_still_idempotent_when_source_untouched(tmp_path: Path):
     rebuild_playlist_folder(root, "USB", real, mode="copy")
     s2 = rebuild_playlist_folder(root, "USB", real, mode="copy")
     assert s2.unchanged == 2 and s2.copied == 0
+
+
+def _coarse_copy(src, dst):
+    """shutil.copy2 on a filesystem that keeps whole-second timestamps
+    (FAT keeps 2 s, WSL's drvfs and some network shares 1 s)"""
+    import shutil
+    shutil.copy2(src, dst)
+    mtime = int(os.stat(src).st_mtime)
+    os.utime(dst, (mtime, mtime))
+
+
+def test_copy_mode_stays_idempotent_on_a_coarse_timestamp_filesystem(tmp_path: Path):
+    """found on E: (drvfs): the exact-nanosecond check never held where the
+    filesystem rounds the copied time, so every rebuild re-copied every file"""
+    real = _library(tmp_path)
+    for path in real:
+        os.utime(path, ns=(1_700_000_000_123_456_789, 1_700_000_000_123_456_789))
+    root = str(tmp_path / "Playlists")
+    rebuild_playlist_folder(root, "Mix", real, mode="copy", copy_fn=_coarse_copy)
+    s2 = rebuild_playlist_folder(root, "Mix", real, mode="copy", copy_fn=_coarse_copy)
+    assert s2.unchanged == 2 and s2.copied == 0
+
+
+def test_a_retagged_source_of_the_same_size_is_still_recopied(tmp_path: Path):
+    real = _library(tmp_path)
+    root = str(tmp_path / "Playlists")
+    rebuild_playlist_folder(root, "Mix", real, mode="copy")
+    later = os.stat(real[0]).st_mtime + 60  # a retag rewrites the file a minute on
+    os.utime(real[0], (later, later))
+    s2 = rebuild_playlist_folder(root, "Mix", real, mode="copy")
+    assert s2.copied == 1 and s2.unchanged == 1

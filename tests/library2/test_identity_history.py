@@ -162,3 +162,34 @@ def test_history_reader_rejects_unknown_entity_types(imported_conn, entity_type)
         list_external_id_history(
             imported_conn, entity_type=entity_type, entity_id=1
         )
+
+
+def test_rerun_skips_the_backfill_scan_while_triggers_stand():
+    conn = row_conn(":memory:")
+    conn.execute("CREATE TABLE lib2_artists(id INTEGER PRIMARY KEY, spotify_id TEXT)")
+    conn.execute("INSERT INTO lib2_artists(id, spotify_id) VALUES(1, 'sp-a')")
+    assert ensure_external_id_history_schema(conn.cursor()) == 1
+
+    scans = []
+    conn.set_trace_callback(lambda sql: scans.append(sql) if "schema_backfill" in sql else None)
+    assert ensure_external_id_history_schema(conn.cursor()) == 0
+    assert scans == []
+    conn.set_trace_callback(None)
+
+    # writes since are on the triggers, not the backfill
+    conn.execute("INSERT INTO lib2_artists(id, spotify_id) VALUES(2, 'sp-b')")
+    assert [(e.new_value, e.change_source) for e in _events(conn, "artist", 2)] == [
+        ("sp-b", "database_write")]
+
+
+def test_a_row_written_without_triggers_is_backfilled_next_start():
+    conn = row_conn(":memory:")
+    conn.execute("CREATE TABLE lib2_artists(id INTEGER PRIMARY KEY, spotify_id TEXT)")
+    ensure_external_id_history_schema(conn.cursor())
+    for suffix in ("insert", "update", "delete"):
+        conn.execute(f"DROP TRIGGER trg_lib2_idhist_artists_spotify_id_{suffix}")
+    conn.execute("INSERT INTO lib2_artists(id, spotify_id) VALUES(3, 'sp-c')")
+
+    assert ensure_external_id_history_schema(conn.cursor()) == 1
+    assert [(e.new_value, e.change_source) for e in _events(conn, "artist", 3)] == [
+        ("sp-c", "schema_backfill")]

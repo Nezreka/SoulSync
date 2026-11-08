@@ -244,3 +244,150 @@ def test_the_automation_still_acts_directly_as_shipped(catalogue):
     result = run(db, as_shipped=True, scope={'max_albums': 3})
 
     assert result.auto_fixed == 1 and rules(db) == [(gap, 1, 1)]
+
+
+def _same_recording(conn, track_id, other_id):
+    """put two positions on one recording, the way a single and its album share one"""
+    rec = conn.execute("INSERT INTO lib2_recordings(title) VALUES('Missing')").lastrowid
+    for tid in (track_id, other_id):
+        album = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (tid,)).fetchone()[0]
+        edition = conn.execute('INSERT INTO lib2_release_editions(release_group_id,is_default) VALUES(?,0)',
+                               (album,)).lastrowid
+        conn.execute('INSERT INTO lib2_release_tracks(release_edition_id,recording_id,track_id) VALUES(?,?,?)',
+                     (edition, rec, tid))
+
+
+def test_a_song_owned_on_its_single_is_not_filled(catalogue):
+    """Fill Album must not download a second copy of a song you have on the single."""
+    db, _, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        single = lib2_seed.track(conn, 'Artist', 'Missing - Single', 'Missing', track_number=1)
+        conn.execute("UPDATE lib2_albums SET album_type='single' WHERE id=(SELECT album_id FROM lib2_tracks WHERE id=?)",
+                     (single,))
+        _same_recording(conn, missing, single)
+        conn.commit()
+    result = run(db)
+    assert result.errors == 0
+    assert (missing, 1, 1) not in rules(db)
+
+
+def test_a_single_does_not_count_toward_the_owned_floor(catalogue):
+    """owning the single drops the song from the fill, it doesn't make an album
+    you barely have look collected"""
+    db, aid, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        third = lib2_seed.track(conn, 'Artist', 'Album', 'Third', owned=False, track_number=3, disc_number=1, monitored=0)
+        single = lib2_seed.track(conn, 'Artist', 'Missing - Single', 'Missing', track_number=1)
+        _same_recording(conn, missing, single)
+        conn.commit()
+    run(db, settings={'min_owned_tracks': 2})
+    assert rules(db) == []
+    run(db, settings={'min_owned_tracks': 1})
+    assert rules(db) == [(third, 1, 1)]
+
+
+
+def _only_credit(conn, track_id, name):
+    """the song credited to ``name`` alone (no album-artist credit)"""
+    conn.execute('DELETE FROM lib2_track_artists WHERE track_id=?', (track_id,))
+    conn.execute('INSERT INTO lib2_track_artists(track_id,artist_id) VALUES(?,?)',
+                 (track_id, lib2_seed.artist(conn, name)))
+
+
+def test_a_duo_members_solo_song_is_the_duos_own(tmp_path, monkeypatch):
+    """3.6.1: Double Fantasy is "John Lennon & Yoko Ono", and Yoko's songs on
+    it are credited to her alone. they are the album's own songs, not another
+    artist's, so a bulk run fills them; a real stranger's song still waits."""
+    db = MusicDatabase(str(tmp_path / 'duo.db'))
+    duo = 'John Lennon & Yoko Ono'
+    with db._get_connection() as conn:
+        lib2_seed.artist(conn, 'John Lennon')
+        lib2_seed.artist(conn, 'Yoko Ono')
+        lib2_seed.track(conn, duo, 'Double Fantasy', 'Starting Over', track_number=1)
+        kiss = lib2_seed.track(conn, duo, 'Double Fantasy', 'Kiss Kiss Kiss', owned=False, track_number=2)
+        clean = lib2_seed.track(conn, duo, 'Double Fantasy', 'Cleanup Time', owned=False, track_number=3)
+        other = lib2_seed.track(conn, duo, 'Double Fantasy', 'Not Theirs', owned=False, track_number=4)
+        _only_credit(conn, kiss, 'Yoko Ono')
+        _only_credit(conn, clean, 'John Lennon')
+        _only_credit(conn, other, 'Someone Else')
+        conn.commit()
+    monkeypatch.setattr('core.library2.completeness.load_album_catalogue', lambda *a, **kw: [])
+
+    run(db)
+
+    assert [r[0] for r in rules(db)] == sorted([kiss, clean])
+
+
+def test_a_second_primary_album_artist_is_the_albums_own(catalogue):
+    """a collaboration album with two primary album artists"""
+    db, aid, _, missing, _ = catalogue
+    with db._get_connection() as conn:
+        partner = lib2_seed.artist(conn, 'Partner')
+        conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,'primary')",
+                     (aid, partner))
+        theirs = lib2_seed.track(conn, 'Artist', 'Album', 'Partner Song', owned=False,
+                                 track_number=6, disc_number=1, monitored=0)
+        _only_credit(conn, theirs, 'Partner')
+        conn.commit()
+
+    run(db)
+    assert [r[0] for r in rules(db)] == sorted([missing, theirs])
+
+
+def _worker(db):
+    from core.repair_worker import RepairWorker
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = db
+    return worker
+
+
+def _record_with_a_guest_gap(db, *, own_gap=True):
+    with db._get_connection() as conn:
+        for n in (1, 2, 3):
+            lib2_seed.track(conn, 'Band', 'Record', f'Have {n}', track_number=n, disc_number=1, monitored=0)
+        gap = (lib2_seed.track(conn, 'Band', 'Record', 'Gap', owned=False, track_number=4,
+                               disc_number=1, monitored=0) if own_gap else None)
+        guest = lib2_seed.track(conn, 'Band', 'Record', 'Their Song', owned=False, track_number=5,
+                                disc_number=1, monitored=0)
+        _only_credit(conn, guest, 'Someone Else')
+        aid = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (guest,)).fetchone()[0]
+        conn.commit()
+    return aid, gap, guest
+
+
+def test_fixing_one_finding_on_its_own_adds_the_guest_songs_too(catalogue):
+    """3.6.1: an explicit "Fill Album" on one finding filled the other
+    artists' songs too; a bulk fix left them alone"""
+    db = catalogue[0]
+    aid, gap, guest = _record_with_a_guest_gap(db)
+    found, create = _collector()
+    run(db, as_shipped=True, create_finding=create)
+    finding, = [f for f in found if f['entity_id'] == f'lib2:{aid}']
+    assert finding['details']['track_ids'] == [gap]
+    assert finding['details']['guest_track_ids'] == [guest]
+    assert 'by other artists' in finding['description']
+
+    bulk = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
+                                             {**finding['details'], '_explicit_single_fix': False})
+    assert bulk['success'] is True and [r[0] for r in rules(db)] == [gap]
+
+    explicit = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
+                                                 {**finding['details'], '_explicit_single_fix': True})
+    assert explicit['success'] is True and [r[0] for r in rules(db)] == sorted([gap, guest])
+
+
+def test_an_album_missing_only_guest_songs_still_files_a_finding(catalogue):
+    db = catalogue[0]
+    aid, _gap, guest = _record_with_a_guest_gap(db, own_gap=False)
+    found, create = _collector()
+    run(db, as_shipped=True, create_finding=create)
+    finding, = [f for f in found if f['entity_id'] == f'lib2:{aid}']
+    assert finding['details']['track_ids'] == [] and finding['details']['guest_track_ids'] == [guest]
+
+    bulk = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
+                                             {**finding['details'], '_explicit_single_fix': False})
+    assert bulk['success'] is False and 'on its own' in bulk['error'] and rules(db) == []
+
+    explicit = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
+                                                 {**finding['details'], '_explicit_single_fix': True})
+    assert explicit['success'] is True and [r[0] for r in rules(db)] == [guest]

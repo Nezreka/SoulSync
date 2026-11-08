@@ -172,9 +172,17 @@ class AcoustIDScannerJob(RepairJob):
             logger.info("No library tracks with file paths found")
             return result
 
+        # an artist's (or one own library's) run is not a pass over the
+        # library: it never resumes from, saves or clears the library's
+        # checkpoint, and never moves the cutoff skip_verified trusts. a
+        # scoped run that did lost a stopped library pass and skipped files
+        # the pass never re-checked (bpm had the same bug, e6021fe10).
+        from core.repair_jobs.base import whole_library_run
+        whole_pass = whole_library_run(context)
+
         # Read checkpoint (last processed track ID) to resume from
         checkpoint_id = None
-        if context.config_manager:
+        if context.config_manager and whole_pass:
             checkpoint_id = context.config_manager.get(
                 f'repair.jobs.{self.job_id}.checkpoint_id', None
             )
@@ -187,7 +195,10 @@ class AcoustIDScannerJob(RepairJob):
         # that ``skip_verified`` trusts. The cutoff is the START of the last
         # pass that finished clean: a file changed while the pass was running
         # has a newer mtime and is scanned again by the next one.
-        if checkpoint_id is None:
+        if not whole_pass:
+            pass_started_at = None
+            pass_dirty = True
+        elif checkpoint_id is None:
             pass_started_at = time.time()
             pass_dirty = False
             self._set_cfg(context, 'pass_started_at', pass_started_at)
@@ -216,6 +227,10 @@ class AcoustIDScannerJob(RepairJob):
 
         hand_tagged = hand_tagged_path_keys(context.db)
 
+        def save_progress(track_id):
+            if whole_pass:
+                self._save_progress(context, track_id, result, pass_dirty)
+
         batch_count = 0
         unread = 0
         # Checkpoint = the last track that FINISHED scanning. Saving the
@@ -224,10 +239,10 @@ class AcoustIDScannerJob(RepairJob):
         last_completed_id = None
         for i, (track_id, track_info) in enumerate(track_list):
             if context.check_stop():
-                self._save_progress(context, last_completed_id, result, pass_dirty)
+                save_progress(last_completed_id)
                 return result
             if i % 10 == 0 and context.wait_if_paused():
-                self._save_progress(context, last_completed_id, result, pass_dirty)
+                save_progress(last_completed_id)
                 return result
 
             # Resolve the DB path to an actual file on disk
@@ -305,12 +320,13 @@ class AcoustIDScannerJob(RepairJob):
 
             try:
                 status = self._scan_file(
-                    resolved, track_id, track_info, acoustid_client, context, result,
+                    resolved, track_info.get("entity_id") or track_id, track_info,
+                    acoustid_client, context, result,
                     fp_threshold, title_threshold, artist_threshold
                 )
                 if status == 'abort_invalid_key':
                     logger.warning("Aborting AcoustID scan due to invalid API key")
-                    self._save_progress(context, last_completed_id, result, pass_dirty)
+                    save_progress(last_completed_id)
                     return result
             except Exception as e:
                 logger.debug("Error scanning %s: %s", fname, e)
@@ -324,7 +340,7 @@ class AcoustIDScannerJob(RepairJob):
             # Rate limit: pause between batches to avoid hammering AcoustID API
             if batch_count >= batch_size:
                 batch_count = 0
-                self._save_progress(context, last_completed_id, result, pass_dirty)
+                save_progress(last_completed_id)
                 if context.sleep_or_stop(2):
                     return result
 
@@ -335,7 +351,9 @@ class AcoustIDScannerJob(RepairJob):
         # when nothing in it errored or went unread, then clear the checkpoint.
         # A pass that does not promote is counted and reported, since the only
         # visible effect would be a library that never gets skipped.
-        if pass_started_at is not None and not pass_dirty and result.errors == 0:
+        if not whole_pass:
+            pass
+        elif pass_started_at is not None and not pass_dirty and result.errors == 0:
             self._set_cfg(context, 'verified_cutoff', pass_started_at)
             self._set_cfg(context, 'dirty_passes', 0)
         elif skip_verified:
@@ -350,7 +368,8 @@ class AcoustIDScannerJob(RepairJob):
             logger.warning(msg)
             if context.report_progress:
                 context.report_progress(log_line=msg, log_type='warning')
-        self._save_checkpoint_id(context, None)
+        if whole_pass:
+            self._save_checkpoint_id(context, None)
 
         if context.update_progress:
             context.update_progress(total, total)
@@ -871,12 +890,19 @@ class AcoustIDScannerJob(RepairJob):
     def _load_db_tracks(self, context: JobContext) -> dict:
         tracks: Dict[str, Dict[str, Any]] = {}
         try:
+            # every file of a track, as 3.6.1 fingerprinted every file row: a
+            # wrong download in a second copy (another library's, a kept
+            # format twin) is a finding too. a lossy copy soulsync made from
+            # one of these files is that file's audio, so it is skipped.
             for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager)):
-                key = f"lib2:{subject['track_id']}"
-                current = tracks.get(key)
-                if current is not None and not subject.get("is_primary"):
+                if subject.get("derived_from_file_id"):
+                    continue
+                entity = f"lib2:{subject['track_id']}"
+                key = entity if subject.get("is_primary") else f"{entity}#{int(subject['file_id'])}"
+                if key in tracks:
                     continue
                 tracks[key] = {
+                    "entity_id": entity,
                     "title": subject.get("title") or "",
                     "artist": subject.get("artist_name") or "",
                     "file_path": str(subject["path"]),
@@ -955,9 +981,9 @@ class AcoustIDScannerJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         try:
             return len({
-                int(subject["track_id"])
+                int(subject["file_id"])
                 for subject in scoped_file_subjects(context, active_file_subjects(context.db, context.config_manager))
-                if subject.get("is_primary")
+                if not subject.get("derived_from_file_id")
             })
         except Exception:
             return 0

@@ -425,12 +425,14 @@ def test_healthchecks_use_lightweight_endpoint():
     root = Path(__file__).resolve().parents[1]
     dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
-    assert "http://localhost:8008/api/setup/status" in dockerfile
-    assert "http://localhost:8008/api/setup/status" in compose
+    assert "http://localhost:8008/api/startup-status" in dockerfile
+    assert "http://localhost:8008/api/startup-status" in compose
     # The old render-the-index probes are gone in both spellings.
     assert "curl -f http://localhost:8008/" not in dockerfile.replace(
-        "http://localhost:8008/api/setup/status", "")
+        "http://localhost:8008/api/startup-status", "")
     assert '"http://localhost:8008/"' not in compose
+    # a stuck probe must end on its own: Docker doesn't reliably kill it
+    assert "--max-time" in dockerfile and '"--max-time"' in compose
     assert '"http://localhost:8008"' not in compose
 
 
@@ -449,6 +451,7 @@ def test_healthcheck_probe_is_skipped_by_the_access_log_filter():
     browser = {"HTTP_USER_AGENT": "Mozilla/5.0"}
 
     assert skip({"PATH_INFO": "/api/setup/status", **curl}) is True
+    assert skip({"PATH_INFO": "/api/startup-status", **curl}) is True
     assert skip({"PATH_INFO": "/", **curl}) is True
     # A real browser/API call to the same path is still logged.
     assert skip({"PATH_INFO": "/api/setup/status", **browser}) is False

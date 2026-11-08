@@ -34,7 +34,15 @@ import {
   setSeasonMonitored,
 } from './api';
 import { FixMatchDialog } from './fix-match-dialog';
-import { dateLabel, fileFacts, formatBytes, pad2, resolutionTone, subtitleLabel } from './format';
+import {
+  audioLanguagesLabel,
+  dateLabel,
+  fileFacts,
+  formatBytes,
+  pad2,
+  resolutionTone,
+  subtitleLabels,
+} from './format';
 import s from './video-library.module.css';
 
 /** the page's own flows, which the tab borrows instead of re-implementing. */
@@ -253,16 +261,27 @@ function FileStatus({
       </Chip>,
     );
   }
-  if (f.subtitles) {
+  // audio, subtitles and resolution: the three a file is picked by (Thibs)
+  const audio = audioLanguagesLabel(f.audio_languages);
+  if (audio) {
     chips.push(
-      f.subtitles.length ? (
+      <Chip key="audio" tone="info" title="The languages of the file's audio tracks">
+        <span className={s.cc}>Audio</span>
+        {audio}
+      </Chip>,
+    );
+  }
+  const subs = subtitleLabels(f.subtitles, f.subtitle_languages);
+  if (subs) {
+    chips.push(
+      subs.length ? (
         <Chip key="subs" tone="info">
           <span className={s.cc}>CC</span>
-          {f.subtitles.map(subtitleLabel).join(', ')}
+          {subs.join(', ')}
         </Chip>
       ) : (
         <Chip key="subs" tone="muted">
-          No subtitle files beside it
+          {f.subtitle_languages == null ? 'No subtitle files beside it' : 'No subtitles'}
         </Chip>
       ),
     );

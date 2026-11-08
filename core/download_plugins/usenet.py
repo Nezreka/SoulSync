@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.archive_pipeline import collect_audio_after_extraction
+from core.async_utils import run_blocking
 from core.download_plugins.album_bundle import (
     TransientMissCounter,
     copy_audio_files_atomically,
@@ -68,6 +69,106 @@ from utils.async_helpers import run_async
 from utils.logging_config import get_logger
 
 logger = get_logger("download_plugins.usenet")
+
+
+def _remove_completed_mode() -> str:
+    """The music side's Remove Completed setting (off / history / files)."""
+    from core.downloads import remove_completed
+    try:
+        from core.settings import config_manager
+        return remove_completed.normalize(
+            config_manager.get('usenet_client.remove_completed', 'off'))
+    except Exception:  # noqa: BLE001 - no config means the old behavior
+        return remove_completed.OFF
+
+
+def _music_protected_roots() -> list:
+    """Folders Remove Completed must never delete, nor a folder holding one:
+    the download, transfer and staging folders, the client's usenet folder
+    (as configured and as resolved here) and the music library."""
+    roots = []
+    try:
+        from core.settings import config_manager
+        for key in ('soulseek.download_path', 'soulseek.transfer_path',
+                    'import.staging_path', 'download_source.album_bundle_staging_path'):
+            value = config_manager.get(key, '')
+            if value:
+                roots.append(str(value))
+        client_root = config_manager.get('download_source.usenet_download_path', '')
+        if client_root:
+            roots.append(str(client_root))
+            roots.append(str(resolve_reported_save_path(str(client_root))))
+        for value in config_manager.get('library.music_paths', []) or []:
+            if value:
+                roots.append(str(value))
+    except Exception as e:  # noqa: BLE001 - the job-name check still guards the delete
+        logger.debug("remove completed: couldn't read the protected folders: %s", e)
+    return roots
+
+
+def _music_library_roots() -> list:
+    """Folders a job folder may never lie inside: the transfer folder and the
+    music library (a client completing straight into them)."""
+    roots = []
+    try:
+        from core.settings import config_manager
+        transfer = config_manager.get('soulseek.transfer_path', '')
+        if transfer:
+            roots.append(str(transfer))
+        for value in config_manager.get('library.music_paths', []) or []:
+            if value:
+                roots.append(str(value))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("remove completed: couldn't read the library folders: %s", e)
+    return roots
+
+
+def _remove_job(job_id, mode: str, *, adapter=None, label: str = '') -> bool:
+    from core.downloads import remove_completed
+    return remove_completed.remove_imported_job(
+        job_id, mode, run=run_async,
+        adapter=adapter if adapter is not None else get_active_usenet_adapter(),
+        label=label, resolve=resolve_reported_save_path,
+        protected=_music_protected_roots(), libraries=_music_library_roots())
+
+
+def remove_imported_album_job(job_id: str, label: str = '') -> bool:
+    """Remove Completed for an album grab, once its batch has finished with
+    every track imported (the batch decides that; see
+    ``core.downloads.lifecycle``). Best-effort, like the track grab."""
+    from core.downloads import remove_completed
+    mode = _remove_completed_mode()
+    if mode == remove_completed.OFF or not job_id:
+        return False
+    return _remove_job(job_id, mode, label=label)
+
+
+def remove_imported_usenet_job(download_id: str) -> bool:
+    """Remove Completed for a single-track grab: once post-processing has
+    imported the requested track (and any other album tracks the profile
+    takes from the release), take the job out of the client per
+    ``usenet_client.remove_completed``. The client job id comes from the
+    grab row (written at submit, so it survives a restart). Best-effort: a
+    job left in the client is the old behavior, never an error."""
+    from core.downloads import remove_completed
+    mode = _remove_completed_mode()
+    if mode == remove_completed.OFF or not download_id:
+        return False
+    conn = _grabs_conn()
+    if conn is None:
+        return False
+    try:
+        from core.acquisition.grabs import get_grab
+        grab = get_grab(conn, str(download_id))
+    except Exception as e:  # noqa: BLE001
+        logger.debug("remove completed: grab lookup failed for %s: %s", download_id, e)
+        return False
+    finally:
+        conn.close()
+    if not grab or str(grab.get('source') or '') != 'usenet':
+        return False
+    return _remove_job(grab.get('external_job_id'), mode,
+                       label=str(grab.get('title') or ''))
 
 
 def _grabs_conn():
@@ -394,7 +495,10 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         results = await prowlarr_track_search(
             self._prowlarr, query, "usenet", timeout=timeout,
         )
-        return self._project_results(results)
+        # off the shared loop: projecting writes two candidate-store rows per
+        # release (a SQLite transaction each), and ~100 releases of that on
+        # the loop thread stalled every page and worker waiting on it
+        return await run_blocking(self._project_results, results)
 
     def _project_results(
         self, results: List[ProwlarrSearchResult], *, release_evidence=None
@@ -898,6 +1002,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         with self._lock:
             row = self.active_downloads.get(download_id)
             job_id = row.get('job_id') if row else None
+            # the submit thread hasn't heard the client's job id yet: it reads
+            # the flag below and retires the job itself (_download_thread).
+            # only an Initializing row is mid-submit; a later row that lost
+            # its job id has nobody left to retire the client's job
+            in_submission = (row is not None and not job_id
+                             and row.get('state') == 'Initializing')
             if row is not None:
                 # Upstream: the download thread may still be waiting for the
                 # client's job id; the flag tells it to retire the late job
@@ -922,6 +1032,16 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         # the central monitor which checks it (client_monitor `removed = ...`).
         cancel_confirmed = False
         self._update_grab(download_id, status=STATUS_CANCEL_PENDING)
+        if in_submission and not job_id:
+            # pending is right: the submit thread confirms it once the late
+            # job is gone. 3.6.1 said yes here too
+            with self._lock:
+                row = self.active_downloads.get(download_id)
+                if remove:
+                    self.active_downloads.pop(download_id, None)
+                elif row is not None and row.get('state') != 'Cancelled':
+                    row['state'] = 'Cancelling'
+            return True
         if adapter and job_id:
             try:
                 cancel_confirmed = bool(
@@ -1159,4 +1279,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         self._update_grab(grab_id, status=STATUS_COMPLETED, output_path=str(local_path))
         result['success'] = True
         result['files'] = copied
+        # Remove Completed waits for the batch: the job is removed only once
+        # every track imported (core.downloads.lifecycle), so a release whose
+        # import fails keeps its files for a retry or a manual import.
+        result['client_job_id'] = job_id
+        result['client_job_label'] = picked.title
         return result

@@ -8,6 +8,7 @@ import os
 from typing import Any, Dict, Optional
 
 from core.settings import config_manager
+from core.imports.paths import _coerce_int
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
@@ -139,6 +140,16 @@ _SOULSYNC_FILLABLE_COLUMNS = {
 }
 
 
+# the providers whose ids are page urls
+_URL_ID_PROVIDERS = frozenset({"lastfm", "bandcamp"})
+
+
+def _known_id_providers() -> frozenset:
+    from core.library2.match_status import SERVICES
+    from core.metadata.registry import METADATA_SOURCE_PRIORITY
+    return frozenset(name for name, _label, _columns in SERVICES) | frozenset(METADATA_SOURCE_PRIORITY)
+
+
 def _fill_external_id(cursor, table: str, row_id: Any, source: Optional[str],
                       value: Optional[str]) -> None:
     """Record the provider id this import came from, without clobbering.
@@ -150,6 +161,13 @@ def _fill_external_id(cursor, table: str, row_id: Any, source: Optional[str],
     provider = (source or "").strip().lower()
     identifier = str(value or "").strip()
     if not provider or not identifier or table not in _SOULSYNC_FILLABLE_COLUMNS:
+        return
+    # only a real provider, and only an id that can be one. 'webui_modal' is a
+    # screen, not a provider, and a last.fm page url landed under deezer, so
+    # the deezer worker asked for it on every pass (#1996)
+    if provider not in _known_id_providers():
+        return
+    if "://" in identifier and provider not in _URL_ID_PROVIDERS:
         return
     try:
         if provider in ("spotify", "musicbrainz"):
@@ -664,6 +682,19 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     album_ctx.get("name", "") or "album", _va_artist, artist_name,
                 )
                 artist_name = _va_artist
+            else:
+                # #2003: a release credited to several artists goes under
+                # its lead, the same artist its folder is named after, not
+                # under whichever of them the download was for
+                from core.imports.collab_artist import album_lead_artist
+                _lead = album_lead_artist(album_ctx, artist_name)
+                if _lead:
+                    logger.info(
+                        "[Import] '%s' is credited to %s first, filing the album "
+                        "there instead of under %s (the track keeps its own artist)",
+                        album_ctx.get("name", "") or "album", _lead, artist_name,
+                    )
+                    artist_name = _lead
 
         album_name = ""
         if _album_ctx_distrusted:
@@ -826,7 +857,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # fill-only writers + enrichment to resolve.
             total_tracks = _own_provider_album.get("total_tracks") or 0
         else:
-            total_tracks = album_ctx.get("total_tracks", 0) or 0
+            # goes straight into track_count, so a number or unknown. an album's
+            # title sat there until it stopped the library v2 migration (#1989)
+            total_tracks = _coerce_int(album_ctx.get("total_tracks"), 0)
         if _album_ctx_distrusted:
             # The batch's summed duration is a stranger's album total — use
             # the track's own duration (the only duration this import

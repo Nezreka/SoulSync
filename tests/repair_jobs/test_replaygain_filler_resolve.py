@@ -58,6 +58,11 @@ def test_scan_resolves_paths_with_the_job_context(tmp_path, monkeypatch):
 
     f = tmp_path / "01 - Track.flac"
     f.write_bytes(b"x")
+    # the job reads library v2's files (3.6.1: library tracks, not the disk)
+    monkeypatch.setattr(
+        "core.library2.maintenance_subjects.active_file_subjects",
+        lambda *_a, **_k: [{"track_id": 1, "file_id": 1, "title": "Track",
+                            "artist_name": "Artist", "path": str(f)}])
     cfg = MagicMock()
     cfg.get.side_effect = lambda key, default=None: default
     ctx = JobContext(db=_FakeDB([(1, "Track", "Artist", str(f))]),
@@ -66,3 +71,27 @@ def test_scan_resolves_paths_with_the_job_context(tmp_path, monkeypatch):
 
     assert seen.get("transfer_folder") == str(tmp_path)
     assert seen.get("config_manager") is cfg
+
+
+def test_a_file_the_library_never_imported_is_not_tagged(tmp_path, monkeypatch):
+    """3.6.1 checked library tracks; v2 also queued every audio file on disk."""
+    import sys
+    import types
+    fake_rg = types.SimpleNamespace(is_ffmpeg_available=lambda: True,
+                                    read_replaygain_tags=lambda p: {})
+    monkeypatch.setitem(sys.modules, "core.replaygain", fake_rg)
+    monkeypatch.setattr(mod, "resolve_library_file_path", lambda p, **kw: p)
+    loose = tmp_path / "Unimported.flac"
+    loose.write_bytes(b"x")
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: [])
+    cfg = MagicMock()
+    cfg.get.side_effect = lambda key, default=None: default
+    findings = []
+    ctx = JobContext(db=_FakeDB([]), transfer_folder=str(tmp_path), config_manager=cfg,
+                     create_finding=lambda **kw: findings.append(kw) or True)
+
+    result = ReplayGainFillerJob().scan(ctx)
+
+    assert result.scanned == 0
+    assert findings == []

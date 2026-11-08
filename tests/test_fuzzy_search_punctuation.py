@@ -71,6 +71,14 @@ def _library(titles):
     return db
 
 
+def _with_fold_index(stub):
+    """the fuzzy pass reads its word matches from database/fold_index, keyed
+    by the database's path; each test library is its own"""
+    stub.database_path = f"test-library-{id(stub)}"
+    stub._fold_fuzzy_ids = lambda cursor, terms: MusicDatabase._fold_fuzzy_ids(stub, cursor, terms)
+    return stub
+
+
 def _search(db, title, artist='', limit=15):
     """The REAL fuzzy method, bound to a stub that supplies only what it uses."""
     stub = types.SimpleNamespace(
@@ -83,6 +91,7 @@ def _search(db, title, artist='', limit=15):
         # the admin's view: every library (#1199)
         _current_scope_sql=lambda column='owner_profile_id': ("1=1", []),
     )
+    _with_fold_index(stub)
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), title, artist, limit, None)
     return [r['title'] for r in rows]
@@ -226,6 +235,7 @@ def test_a_comma_in_a_band_name_does_not_bury_it():
         # the admin's view: every library (#1199)
         _current_scope_sql=lambda column='owner_profile_id': ("1=1", []),
     )
+    _with_fold_index(stub)
     rows = MusicDatabase._search_tracks_fuzzy_rows(
         stub, db.cursor(), '', "Crosby, Stills & Nash", 15, None)
     assert [r['artist_name'] for r in rows][0] == "Crosby Stills & Nash"

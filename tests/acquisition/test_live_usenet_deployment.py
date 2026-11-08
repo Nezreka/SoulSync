@@ -192,7 +192,13 @@ def _seed_expected_edition(conn: sqlite3.Connection) -> None:
                title TEXT NOT NULL,
                album_type TEXT,
                release_date TEXT,
-               spotify_id TEXT)""",
+               year INTEGER,
+               spotify_id TEXT,
+               image_url TEXT,
+               track_count INTEGER,
+               expected_track_count INTEGER,
+               explicit INTEGER,
+               musicbrainz_id TEXT)""",
     )
     conn.execute(
         """CREATE TABLE IF NOT EXISTS lib2_tracks(
@@ -202,7 +208,8 @@ def _seed_expected_edition(conn: sqlite3.Connection) -> None:
                track_number INTEGER,
                disc_number INTEGER,
                duration INTEGER,
-               spotify_id TEXT)""",
+               spotify_id TEXT,
+               explicit INTEGER)""",
     )
     for ddl in (
         LIB2_RELEASE_EDITIONS_DDL,

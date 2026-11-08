@@ -47,6 +47,8 @@ export interface LibrarySong {
   /** milliseconds */
   duration?: number | null;
   bitrate?: number | null;
+  sample_rate?: number | null;
+  bit_depth?: number | null;
   /** the file's extension, upper-cased ('FLAC'); '' when unknown */
   format: string;
   file_path: string;

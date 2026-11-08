@@ -411,7 +411,8 @@ def register_routes(bp):
         try:
             db = get_database()
             tracks = db.api_get_curated_playlist_tracks(pid, profile_id=profile_id)
-            return api_success({"tracks": [serialize_track(t, fields) for t in tracks]})
+            # the ids every other v1 track route shows (core.library2.v1_ids)
+            return api_success({"tracks": [serialize_track(t, fields) for t in _pub("track", tracks)]})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 
@@ -422,7 +423,8 @@ def register_routes(bp):
         profile_id = parse_profile_id(request)
         try:
             db = get_database()
-            playlists = db.get_mirrored_playlists(profile_id=profile_id)
+            # a GET open to read keys must not write; the web page fills covers in
+            playlists = db.get_mirrored_playlists(profile_id=profile_id, backfill_covers=False)
             out = []
             for pl in playlists:
                 out.append({
@@ -448,7 +450,7 @@ def register_routes(bp):
         try:
             db = get_database()
             mtracks = db.get_mirrored_playlist_tracks(pid, profile_id=profile_id)
-            out = []
+            found = []
             for mt in mtracks:
                 t = None
                 # Try external ID first (source_track_id is Spotify/etc).
@@ -460,8 +462,9 @@ def register_routes(bp):
                     t = db.api_find_track_by_title_artist(
                         mt.get("track_name"), mt.get("artist_name") or "")
                 if t:
-                    out.append(serialize_track(t, fields))
-            return api_success({"tracks": out})
+                    found.append(t)
+            # the ids every other v1 track route shows (core.library2.v1_ids)
+            return api_success({"tracks": [serialize_track(t, fields) for t in _pub("track", found)]})
         except Exception as e:
             return api_error("LIBRARY_ERROR", str(e), 500)
 

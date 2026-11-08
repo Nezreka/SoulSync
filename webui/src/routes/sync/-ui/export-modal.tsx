@@ -12,11 +12,6 @@
  * paint immediately and grey out a moment later. A probe that fails gates
  * nothing (its `.catch(() => {})`).
  *
- * DECLARED FAITHFULNESS NOTE: the subtitle reads "<name> → ListenBrainz" even
- * though two of the four destinations are Spotify and Deezer. That is the
- * vanilla's text (668) — the service choices were added to an export modal that
- * was originally ListenBrainz-only. Transcribed as-is; changing user-visible
- * copy is not this port's job.
  */
 
 import { useEffect, useState } from 'react';
@@ -131,9 +126,7 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
         <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-1)', marginBottom: 4 }}>
           Export playlist
         </div>
-        <div style={{ fontSize: 13, color: 'var(--white-a55)', marginBottom: 18 }}>
-          {name} → ListenBrainz
-        </div>
+        <div style={{ fontSize: 13, color: 'var(--white-a55)', marginBottom: 18 }}>{name}</div>
         {EXPORT_DESTINATIONS.map((dest, index) => {
           const gated = isExportModeGated(dest.mode, connected);
           const last = index === EXPORT_DESTINATIONS.length - 1;
@@ -178,9 +171,10 @@ export function ExportModal({ name, onClose, onChoose, onGated }: ExportModalPro
           );
         })}
         <div style={{ fontSize: 11.5, color: 'var(--white-a40)', lineHeight: 1.5 }}>
-          Tracks are matched by ID (MusicBrainz for ListenBrainz/JSPF; the stored Spotify/Deezer ID
-          for those). Tracks without a match can&apos;t be included — you&apos;ll see how many made
-          it. Renaming/re-syncing can reset play counts on the destination.
+          M3U files use local library paths, which must be accessible to your player. Other exports
+          are matched by ID (MusicBrainz for ListenBrainz/JSPF; the stored Spotify/Deezer ID for
+          those). Tracks without a match can&apos;t be included — you&apos;ll see how many made it.
+          Renaming/re-syncing can reset play counts on the destination.
         </div>
         <label
           style={{

@@ -13,6 +13,47 @@ from utils.logging_config import get_logger
 logger = get_logger('repair.album_completeness')
 
 
+def _own_artist_ids(conn, album_id: int, primary) -> list:
+    """The artists an album's own songs may be credited to: its primary
+    artist, its other primary album artists, and each member named in a
+    combined credit ("John Lennon & Yoko Ono" -> John Lennon, Yoko Ono),
+    every one with its aliases. A duo's album has songs credited to one
+    member alone; those are the album's own, not another artist's (3.6.1
+    counted the credit's members). Never a guest: a featured credit is not
+    the album's artist."""
+    from core.library2.artist_aliases import resolve_alias_group
+    from core.library2.importer import normalize_name, split_artist_credits
+
+    if primary is None:
+        return []
+    ids = {int(primary)}
+    ids.update(int(r[0]) for r in conn.execute(
+        "SELECT artist_id FROM lib2_album_artists WHERE album_id=? AND role='primary'",
+        (int(album_id),)))
+    name = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (int(primary),)).fetchone()
+    members = split_artist_credits(name[0] or "") if name else []
+    if len(members) > 1:
+        for member in members:
+            ids.update(int(r[0]) for r in conn.execute(
+                "SELECT id FROM lib2_artists WHERE name_key=?", (normalize_name(member),)))
+    own: set = set()
+    for artist_id in ids:
+        own.update(int(a) for a in (resolve_alias_group(conn, artist_id) or [artist_id]))
+    return sorted(own)
+
+
+def _gap_description(own: int, guests: int) -> str:
+    """What an incomplete-album finding will do when it is fixed."""
+    def songs(n):
+        return f"{n} missing track{'s' if n != 1 else ''}"
+    parts = []
+    if own:
+        parts.append(f"{songs(own)}. Approve to monitor them; Wanted and the Wishlist take it from there.")
+    if guests:
+        parts.append(f"{songs(guests)} by other artists, added only when you fix this finding on its own.")
+    return " ".join(parts)
+
+
 @register_job
 class AlbumCompletenessJob(RepairJob):
     job_id = 'album_completeness'
@@ -51,13 +92,14 @@ class AlbumCompletenessJob(RepairJob):
     supports_file_scope = True
 
     def scan(self, context):
-        from core.library2.artist_aliases import resolve_alias_group
         from core.library2.completeness import load_album_catalogue
         from core.library2.editions import default_edition_id
         from core.library2.maintenance_subjects import active_file_subjects
         from core.library2.monitor_rules import PROVENANCE_USER, record_rules
         from core.library2.mirror_outbox import drain, enqueue_projected_tracks
         from core.library2.wanted import recompute_wanted
+        from core.library2.recording_links import owned_by_recording_sql
+        from core.library_scope import library_scope
 
         result = JobResult()
         settings = dict(self.default_settings)
@@ -105,7 +147,9 @@ class AlbumCompletenessJob(RepairJob):
                     # and so is a credit to one of the album artist's aliases
                     primary = conn.execute('SELECT primary_artist_id FROM lib2_albums WHERE id=?',
                                            (album_id,)).fetchone()[0]
-                    own = resolve_alias_group(conn, primary) if primary is not None else []
+                    own = _own_artist_ids(conn, album_id, primary)
+                    with library_scope('shared' if owner is None else int(owner)):
+                        owned_elsewhere_sql = owned_by_recording_sql(conn, 't')
                     tracks = conn.execute(
                         'SELECT t.id,t.title,'
                         'EXISTS(SELECT 1 FROM lib2_track_artists ta WHERE ta.track_id=t.id) AND NOT EXISTS('
@@ -115,7 +159,10 @@ class AlbumCompletenessJob(RepairJob):
                         'WHERE f.track_id=t.id AND f.owner_profile_id IS ? '
                         "AND COALESCE(f.file_state,'active') NOT IN ('missing_confirmed','deleted') "
                         "AND COALESCE(f.import_status,'imported')='imported' "
-                        "AND TRIM(COALESCE(f.path,''))<>'') AS owned "
+                        "AND TRIM(COALESCE(f.path,''))<>'') AS owned, "
+                        # the song on disk under another release (its single):
+                        # filling it would copy a song you already have
+                        f"{owned_elsewhere_sql} AS owned_elsewhere "
                         'FROM lib2_tracks t WHERE t.album_id=? AND (? IS NULL OR EXISTS('
                         'SELECT 1 FROM lib2_release_tracks rt WHERE rt.track_id=t.id '
                         'AND rt.release_edition_id=?))',
@@ -129,15 +176,20 @@ class AlbumCompletenessJob(RepairJob):
                             or 100 * owned / len(tracks) < float(settings['min_completion_pct'])):
                         result.skipped += 1
                         continue
-                    missing = [int(t['id']) for t in tracks if not t['owned']
-                               and (target or not t['other_artist'])
-                               and str(t['title'] or '').strip()
-                               and not re.fullmatch(r'Track\s+\d+', t['title'], re.I)]
+                    gaps = [t for t in tracks if not t['owned']
+                            and not t['owned_elsewhere']
+                            and str(t['title'] or '').strip()
+                            and not re.fullmatch(r'Track\s+\d+', t['title'], re.I)]
                     existing = {int(r[0]) for r in conn.execute(
                         "SELECT r.entity_id FROM lib2_monitor_rules r JOIN lib2_tracks t ON t.id=r.entity_id WHERE r.entity_type='track' "
                         'AND r.profile_id=? AND r.monitored=1 AND t.album_id=?', (profile_id, album_id))}
-                    missing = [tid for tid in missing if tid not in existing]
-                    if missing and review and settings.get('dry_run') is not True:
+                    gaps = [t for t in gaps if int(t['id']) not in existing]
+                    missing = [int(t['id']) for t in gaps if target or not t['other_artist']]
+                    # other artists' songs (a compilation's, a soundtrack's):
+                    # listed on the finding, filled only when that finding is
+                    # fixed on its own (3.6.1's explicit "Fill Album")
+                    guests = [int(t['id']) for t in gaps if not target and t['other_artist']]
+                    if (missing or guests) and review and settings.get('dry_run') is not True:
                         if context.create_finding:
                             title = conn.execute('SELECT al.title, ar.name FROM lib2_albums al '
                                                  'LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id '
@@ -147,9 +199,9 @@ class AlbumCompletenessJob(RepairJob):
                                 entity_type='album', entity_id=f'lib2:{album_id}', file_path=None,
                                 title=f"Incomplete album: {title[1] or 'Unknown'} - {title[0]} "
                                       f"({owned}/{len(tracks)})",
-                                description=f'{len(missing)} missing track(s). Approve to monitor them; '
-                                            'Wanted and the Wishlist take it from there.',
+                                description=_gap_description(len(missing), len(guests)),
                                 details={'lib2_album_id': album_id, 'track_ids': missing,
+                                         'guest_track_ids': guests,
                                          'profile_id': profile_id, 'owned': owned,
                                          'total': len(tracks)})
                             if created:

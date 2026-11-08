@@ -41,6 +41,7 @@ def fetch_track_lyrics(
     config_manager: Any = None,
     resolve_fn: Optional[ResolveFn] = None,
     lyrics_client_obj: Any = None,
+    max_wait_seconds: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Fetch + write lyrics (``.lrc`` sidecar + embed) for one track's file.
 
@@ -86,7 +87,10 @@ def fetch_track_lyrics(
     if not resolved:
         return {"fetched": False, "error": "File not found on disk"}
 
-    # upstream #1879: a rate limit or timeout is not "no lyrics"
+    # upstream #1879: a rate limit or timeout is not "no lyrics", and an
+    # inline caller passes a cap, or a cooldown holds the request until the
+    # server times it out
+    wait = {"max_wait_seconds": max_wait_seconds} if max_wait_seconds is not None else {}
     detailed = getattr(client, "create_lrc_file_detailed", None)
     try:
         ok, reason = (detailed if callable(detailed) else
@@ -96,6 +100,7 @@ def fetch_track_lyrics(
             context["artist"],
             album_name=context["album_title"],
             duration_seconds=context["duration_seconds"],
+            **wait,
         )
     except Exception as e:  # noqa: BLE001
         logger.error("Lyrics fetch failed for track %s: %s", track_id, e)
@@ -137,6 +142,7 @@ def fetch_track_lyrics(
                 context["artist"],
                 album_name=context["album_title"],
                 duration_seconds=context["duration_seconds"],
+                **wait,
             )
             from core.library2.tag_cache import read_and_persist_tag_cache
             read_and_persist_tag_cache(conn, sibling["id"], sibling_resolved)

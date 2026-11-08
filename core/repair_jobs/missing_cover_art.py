@@ -9,10 +9,61 @@ from core.library2.maintenance_subjects import subject_details
 from core.lookup_failures import LookupFailures, watch_lookup_failures
 from core.repair_jobs import register_job
 from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
-from core.repair_jobs.base import JobContext, JobResult, RepairJob, drop_hand_tagged
+from core.repair_jobs.base import (
+    JobContext, JobResult, RepairJob, drop_hand_tagged, whole_library_run,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.cover_art")
+
+_NAME_STOPWORDS = {'the', 'a', 'an', 'and', 'of', 'feat', 'ft', 'featuring'}
+
+
+def _name_tokens(value) -> set:
+    """significant words of a name: case, punctuation, (qualifiers) and a
+    trailing feat. dropped"""
+    import re
+    s = (value or '').lower()
+    s = re.sub(r'[\(\[\{].*?[\)\]\}]', ' ', s)
+    s = re.sub(r'\b(?:feat|ft|featuring)\b.*', ' ', s)
+    s = re.sub(r'[^a-z0-9]+', ' ', s)
+    return set(s.split()) - _NAME_STOPWORDS
+
+
+def _artist_art_by_name(artist_name, source_order=None):
+    """3.6.1's artist-photo search by name, for an artist no provider id
+    reaches. exact significant-word match only, never a fuzzy photo.
+    returns (url, source) or (None, None)"""
+    if not artist_name or not _name_tokens(artist_name):
+        return None, None
+    try:
+        from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
+        order = list(source_order or get_source_priority(get_primary_source()))
+    except Exception as e:  # noqa: BLE001 - no registry, no search
+        logger.debug("artist-art name search unavailable: %s", e)
+        return None, None
+    for source in order:
+        try:
+            client = get_client_for_source(source)
+        except Exception:  # noqa: BLE001
+            client = None
+        if not client or not hasattr(client, 'search_artists'):
+            continue
+        try:
+            for res in (client.search_artists(artist_name, limit=5) or []):
+                name = res.get('name') if isinstance(res, dict) else getattr(res, 'name', None)
+                if not name or _name_tokens(name) != _name_tokens(artist_name):
+                    continue
+                url = getattr(res, 'image_url', None)
+                if isinstance(res, dict):
+                    url = res.get('image_url') or next(
+                        (i.get('url') for i in (res.get('images') or []) if isinstance(i, dict)),
+                        None)
+                if url:
+                    return url, source
+        except Exception as e:  # noqa: BLE001 - one source must not end the search
+            logger.debug("%s artist-art lookup failed for %r: %s", source, artist_name, e)
+    return None, None
 
 
 @register_job
@@ -76,8 +127,9 @@ class MissingCoverArtJob(RepairJob):
         try:
             with watching as health:
                 finished = self._scan_albums(context, result, albums, source_order, memory, health)
-            if memory and finished:
-                # only a scan that saw every album may forget the missing ones
+            if memory and finished and whole_library_run(context):
+                # only a scan that saw every album may forget the missing ones,
+                # and a run in one library saw that library's albums only
                 memory.prune(str(subject['album_id']) for subject in albums)
         finally:
             if memory:
@@ -142,6 +194,13 @@ class MissingCoverArtJob(RepairJob):
                 artist_name=subject.get("artist_name") or "",
                 source_ids=subject.get("artist_source_ids") or {},
             )
+            if artist_result is None:
+                # no provider id reaches this artist: search by name, as 3.6.1 did
+                url, source = _artist_art_by_name(subject.get("artist_name"))
+                if url:
+                    from core.library2.provider_adapters import ArtworkProviderResult
+                    artist_result = ArtworkProviderResult(
+                        kind="artist", source=source, provider_entity_id=None, url=url)
             details = {
                 "album_id": f"lib2:{subject['album_id']}",
                 "library_owner_id": subject.get("owner_profile_id"),

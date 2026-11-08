@@ -4,12 +4,14 @@ import { createContext, type ReactNode, useContext, useMemo, useState } from 're
 import type { DiscographyRelease } from '../../artist-detail/-artist-detail.types';
 
 import {
+  fetchLibraryV2DiscoveryAlbumStatus,
   LIBRARY_V2_QUERY_KEY,
   libraryV2EnabledQueryOptions,
   monitorLibraryV2DiscoveryAlbum,
 } from '../-library-v2.api';
 import { artistDetailQueryOptions } from '../../artist-detail/-artist-detail.api';
 import styles from './library-v2-page.module.css';
+import { WishlistIcon } from './list-icons';
 
 /**
  * What Library v2 adds to upstream's artist page.
@@ -26,8 +28,6 @@ import styles from './library-v2-page.module.css';
  * release card) the card is exactly upstream's.
  */
 
-const BOOKMARK_PATH = 'M5 3.5A1.5 1.5 0 0 1 6.5 2h11A1.5 1.5 0 0 1 19 3.5V22l-7-4.2L5 22V3.5z';
-
 interface ArtistPageLibrary {
   /** The route's source and provider id: the artist the page is about. */
   source: string;
@@ -35,6 +35,8 @@ interface ArtistPageLibrary {
   artistName: string;
   /** The source that produced the discography, which owns the release ids. */
   discographySource: string;
+  /** `source:providerId` of every release already on this profile's Wishlist. */
+  wished: ReadonlySet<string>;
 }
 
 interface ArtistPageRelease {
@@ -48,6 +50,7 @@ interface ArtistPageRelease {
 }
 
 const ArtistPageLibraryContext = createContext<ArtistPageLibrary | null>(null);
+const EMPTY_SET: ReadonlySet<string> = new Set();
 
 /** `null` unless the card sits on the artist page under the provider. */
 function useArtistPageLibrary(): ArtistPageLibrary | null {
@@ -90,9 +93,49 @@ export function ArtistPageLibraryProvider({
   const normalizedSource = source.toLowerCase();
   const discographySource = detail.data?.discography?.source || normalizedSource;
 
+  // one status read for the whole page, per source that owns release ids
+  const idsBySource = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    const discography = detail.data?.discography;
+    for (const bucket of [discography?.albums, discography?.eps, discography?.singles]) {
+      for (const release of bucket ?? []) {
+        const target = describeRelease(release, discographySource);
+        if (target) (out[target.source] ??= []).push(target.providerId);
+      }
+    }
+    return out;
+  }, [detail.data?.discography, discographySource]);
+  const enabled = useQuery(libraryV2EnabledQueryOptions());
+  const statusSources = Object.keys(idsBySource).sort();
+  const status = useQuery({
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'discovery-album-status', idsBySource],
+    queryFn: async () => {
+      const wished = new Set<string>();
+      for (const src of statusSources) {
+        const statuses = await fetchLibraryV2DiscoveryAlbumStatus({
+          source: src,
+          ids: idsBySource[src] ?? [],
+        });
+        for (const [providerId, entry] of Object.entries(statuses)) {
+          if (entry.wished) wished.add(`${src}:${providerId}`);
+        }
+      }
+      return wished;
+    },
+    enabled: enabled.data?.enabled === true && statusSources.length > 0,
+    staleTime: 30_000,
+  });
+  const wished = status.data;
+
   const value = useMemo<ArtistPageLibrary>(
-    () => ({ source: normalizedSource, id, artistName, discographySource }),
-    [normalizedSource, id, artistName, discographySource],
+    () => ({
+      source: normalizedSource,
+      id,
+      artistName,
+      discographySource,
+      wished: wished ?? EMPTY_SET,
+    }),
+    [normalizedSource, id, artistName, discographySource, wished],
   );
 
   return (
@@ -121,7 +164,8 @@ function MonitorButton({
   if (!target) return null;
 
   const canWish = enabled.data?.enabled === true && enabled.data.canWish;
-  const monitored = state === 'done';
+  // on the Wishlist already (an add from before this visit), or added just now
+  const monitored = state === 'done' || library.wished.has(`${target.source}:${target.providerId}`);
   const busy = state === 'busy';
 
   async function monitor() {
@@ -146,7 +190,7 @@ function MonitorButton({
     } catch (error) {
       setState('idle');
       window.showToast?.(
-        `Could not monitor ${target.title || 'this release'}: ${(error as Error).message}`,
+        `Could not add ${target.title || 'this release'} to your Wishlist: ${(error as Error).message}`,
         'error',
       );
     }
@@ -157,21 +201,21 @@ function MonitorButton({
       <button
         type="button"
         className={`${styles.monitorBtn} ${monitored ? styles.monitorOn : ''}`}
-        aria-label={monitored ? 'Monitored' : busy ? 'Starting monitoring' : 'Start monitoring'}
+        aria-label={
+          monitored ? 'On your Wishlist' : busy ? 'Adding to Wishlist' : 'Add to Wishlist'
+        }
         aria-pressed={monitored}
         title={
           monitored
-            ? 'Monitored'
+            ? 'On your Wishlist'
             : canWish
-              ? 'Monitor this release'
-              : 'Monitoring needs Library access for this profile'
+              ? 'Add this release to your Wishlist'
+              : 'The Wishlist needs Library access for this profile'
         }
         disabled={!canWish || busy || monitored}
         onClick={() => void monitor()}
       >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d={BOOKMARK_PATH} strokeLinejoin="round" />
-        </svg>
+        <WishlistIcon on={monitored} />
       </button>
     </div>
   );

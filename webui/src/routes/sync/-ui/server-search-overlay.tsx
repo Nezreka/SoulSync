@@ -61,9 +61,19 @@ export interface ServerSearchOverlayProps {
     newTrackId: string,
     resolvePicked: () => LibrarySearchTrack | undefined,
   ) => Promise<boolean>;
+  /** the pre-sync editor's own wording (#1958): it picks a match, it edits no server */
+  title?: string;
+  note?: string;
 }
 
-export function ServerSearchOverlay({ track, mode, onClose, onSelect }: ServerSearchOverlayProps) {
+export function ServerSearchOverlay({
+  track,
+  mode,
+  onClose,
+  onSelect,
+  title,
+  note,
+}: ServerSearchOverlayProps) {
   const seed = searchSeed(track);
   const [query, setQuery] = useState(seed.query);
   // 826/832: the same branch the mount search takes one tick later.
@@ -176,7 +186,7 @@ export function ServerSearchOverlay({ track, mode, onClose, onSelect }: ServerSe
       <div className="server-search-popover" id="server-search-popover">
         <div className="server-search-header">
           <div>
-            <div className="server-search-title">{searchModalTitle(mode)}</div>
+            <div className="server-search-title">{title ?? searchModalTitle(mode)}</div>
             {/* 772: the context line is omitted entirely when neither side
                 named the track. */}
             {seed.contextName ? (
@@ -187,7 +197,9 @@ export function ServerSearchOverlay({ track, mode, onClose, onSelect }: ServerSe
                 <span className="server-search-context-name">{seed.contextName}</span>
               </div>
             ) : null}
-            {mode === 'add' ? (
+            {note ? (
+              <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{note}</div>
+            ) : mode === 'add' ? (
               <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
                 Adds the picked track to the server playlist — this edits the server, not just a
                 match.
@@ -295,8 +307,15 @@ export function ServerSearchOverlay({ track, mode, onClose, onSelect }: ServerSe
                     )}
                   </div>
                   <div className="server-search-result-info">
-                    <div className="server-search-result-title">{searchTrack.title}</div>
-                    <div className="server-search-result-meta">
+                    <div className="server-search-result-title" title={searchTrack.title}>
+                      {searchTrack.title}
+                    </div>
+                    <div
+                      className="server-search-result-meta"
+                      title={[searchTrack.artist_name, searchTrack.album_title]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    >
                       {searchTrack.artist_name}
                       {searchTrack.album_title ? ` · ${searchTrack.album_title}` : ''}
                     </div>

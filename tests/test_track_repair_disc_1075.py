@@ -100,7 +100,7 @@ def test_full_plan_lands_on_the_right_disc(tmp_path):
     plan = _plan_track_repair(str(f), f.name, _kid_a_mnesia(), 0.8)
     assert plan is not None
     assert plan['correct_disc'] == 3 and plan['correct_num'] == 1
-    assert plan['tag_ok'] is False         # number is right, but its total is missing
+    assert plan['tag_ok'] is True          # number is right; a missing total isn't wrong
     assert plan['disc_ok'] is False        # the missing disc tag IS the finding
     assert plan['total_discs'] == 3
 

@@ -97,7 +97,7 @@ Keys are generated as `sk_` followed by a random token. Only the SHA-256 hash is
 
 ## Rate Limiting
 
-Requests are rate-limited to **60 per minute** per IP address.
+Requests with a valid API key are rate-limited to **600 per minute**, counted per key. Requests with no key or an invalid key are rate-limited to **60 per minute** per IP address.
 
 Exceeding the limit returns `429 RATE_LIMITED`.
 
@@ -1670,11 +1670,32 @@ Delete a profile and all its per-profile data (watchlist, wishlist, discovery po
 }
 ```
 
+#### What a profile shows: `GET` / `POST /api/profiles/me/features`
+
+Session routes (the signed-in browser, not an API key) behind **Customize** in the sidebar. Each profile hides the parts of SoulSync it doesn't use. This is a preference, not access: hidden pages still open from a link and their background jobs keep running. Page access stays with `allowed_pages`.
+
+`GET` returns `chosen` (false until this profile saves anything, which is when the sidebar offers the picker once), the list of features that can be hidden (`features`, each with `id`, `label`, `desc`, `group` and the page ids it owns), the `groups`, the `presets`, what is `off` for this profile, which `preset` that matches (`full`, `simple` or `custom`) and the resulting `hidden_pages`.
+
+`POST` takes one of:
+
+| Body | Effect |
+|------|--------|
+| `{"off": ["podcasts", "video"]}` | exactly these off, unknown ids dropped |
+| `{"preset": "simple"}` | `simple` (music, Discover, playlist sync and import) or `full` (everything) |
+| `{"purposes": ["music", "podcasts"]}` | what first-run setup asks; hides podcasts, audiobooks or video when they weren't picked |
+
+and answers with the same shape as `GET`. Admins also get `background`: for `podcasts` and `audiobooks`, whether their jobs are `paused` and whether `everyone_hid` them.
+
+`POST /api/profiles/me/features/background` (admin only) takes `{"feature": "podcasts", "paused": true}`. A paused part's scheduled and event automations are skipped only while every profile has it hidden (a profile that can't open the page counts as hidden); turning it back on for anyone resumes them. Run now still runs. The video side's jobs have their own master switch on the video Automations page. Feature ids: `discover`, `playlists`, `explorer`, `import`, `stats`, `music_videos`, `sample_studio`, `podcasts`, `audiobooks`, `video`, `video_discover`, `video_calendar`, `chat`, `automations`, `tools`. Search, library, watchlist, wishlist, downloads and settings can't be hidden, on either side.
+
 ---
 
 ### Retag Queue
 
 Browse and manage the retag queue — albums/tracks pending metadata corrections.
+The queue is the Library Re-tag job's pending findings: a group is an album with
+pending findings (`id` = the album's id), a track is one finding (`id` = the
+finding's id), and deleting a group dismisses its findings.
 
 #### `GET /api/v1/retag/groups`
 
@@ -1719,7 +1740,7 @@ List all retag groups with track counts. Groups are ordered by artist name (asce
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | int | Group ID (auto-increment) |
+| `id` | int | Group ID (the album's id) |
 | `group_type` | string | Type of retag group (currently always `album`) |
 | `artist_name` | string | Artist name for this retag group |
 | `album_name` | string | Album name for this retag group |
@@ -1797,7 +1818,7 @@ Get a retag group with its full track list. Tracks are ordered by disc number th
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | int | Track ID (auto-increment) |
+| `id` | int | Track ID (the Re-tag finding's id) |
 | `group_id` | int | Parent retag group ID (foreign key) |
 | `track_number` | int? | Track number on disc |
 | `disc_number` | int | Disc number (default 1) |
@@ -1806,11 +1827,11 @@ Get a retag group with its full track list. Tracks are ordered by disc number th
 | `file_format` | string? | Audio format (`flac`, `mp3`, `opus`, etc.) |
 | `spotify_track_id` | string? | Spotify track ID for metadata lookup |
 | `itunes_track_id` | string? | iTunes/Apple Music track ID for metadata lookup |
-| `created_at` | string | ISO 8601 timestamp when track was added to queue |
+| `created_at` | string | When the Re-tag finding was raised |
 
 #### `DELETE /api/v1/retag/groups/<group_id>`
 
-Delete a specific retag group and all its tracks (cascade delete).
+Dismiss a retag group: every pending Re-tag finding of that album.
 
 ```json
 {
@@ -1822,7 +1843,7 @@ Delete a specific retag group and all its tracks (cascade delete).
 
 #### `DELETE /api/v1/retag/groups`
 
-Clear all retag groups and tracks from the queue.
+Dismiss every pending Re-tag finding; the message counts the groups (albums) cleared.
 
 ```json
 {
@@ -2379,9 +2400,13 @@ Ask for a library scan. Body: `{"mode"?: "incremental|deep|full"}`. `409 CONFLIC
 
 #### `GET /api/v1/video/scan/status`
 
+#### `GET /api/v1/video/stats`
+
+One call for a dashboard widget. `library` (`movies`, `shows`, `episodes` on disk, `episodes_missing` = monitored and aired with no file, `size_bytes`), scoped to the video server; `database` (`size_mb`, `last_update`, `last_scan`, ISO UTC); `downloads` (`active`, `failed`, `completed`, `cancelled`, `by_status`, `speed_bps`, `completed_all_time`); `wishlist` (`movies`, `episodes`, `videos`, `total`).
+
 #### `GET /api/v1/video/downloads`
 
-Active video downloads.
+Video downloads, active rows first then newest (the latest 100). `status` filters by one status or a comma list: `queued`, `searching`, `downloading`, `importing`, `failed`, `import_failed`, `completed`, `cancelled`, plus `active` and `failed` as shorthand for their groups. A filtered answer adds `count`. An unknown status is `400 BAD_REQUEST`.
 
 #### `GET /api/v1/video/downloads/status`
 
@@ -2733,7 +2758,8 @@ curl -H "Authorization: Bearer sk_..." \
 | DELETE | `/video/watchlist` | Unfollow |
 | POST | `/video/scan` | Ask for a library scan |
 | GET | `/video/scan/status` | Scan progress |
-| GET | `/video/downloads` | Active downloads |
+| GET | `/video/stats` | Library, database, download and wishlist counts |
+| GET | `/video/downloads` | Downloads (`?status=` filter) |
 | GET | `/video/downloads/status` | Download status |
 | GET | `/video/downloads/history` | Download history |
 | GET | `/video/calendar` | Upcoming / recent releases |

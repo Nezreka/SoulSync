@@ -93,6 +93,15 @@ RESOLVED_RECURRENCE_GRACE_DAYS = 7
 #   empty_folder names a directory that is empty by definition
 _ABSENCE_IS_THE_FINDING = frozenset({'dead_file', 'empty_folder'})
 
+# a selection of finding ids as ONE bound parameter. a placeholder per id
+# broke past SQLite's variable limit (32766) on a big library, which is how
+# many findings a library-wide job can leave
+_JSON_IDS = "SELECT value FROM json_each(?)"
+
+
+def _json_ids(ids) -> str:
+    return json.dumps([int(i) for i in ids])
+
 
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
@@ -126,6 +135,7 @@ FINDING_TYPE_META = {
     'missing_lyrics':           {'label': 'Missing Lyrics', 'verb': 'Apply Lyrics'},
     'missing_replaygain':       {'label': 'Missing ReplayGain', 'verb': 'Apply RG'},
     'replaygain_retag':         {'label': 'ReplayGain Retag', 'verb': 'Apply RG'},
+    'zero_length_mp4':          {'label': 'Shows 0:00', 'verb': 'Fix length'},
     'untagged_download':        {'label': 'Untagged Downloads', 'verb': 'Write Tags'},
     'empty_folder':             {'label': 'Empty Folders', 'verb': 'Delete Folder'},
     'expired_download':         {'label': 'Expired Downloads', 'verb': 'Delete'},
@@ -148,7 +158,7 @@ FINDING_TYPE_META = {
     'suspect_album_tag':        {'label': 'Suspect Album Tags', 'verb': 'Re-identify'},
     'acoustid_mismatch':        {'label': 'AcoustID Mismatch', 'verb': 'Re-tag'},
     'quality_upgrade':          {'label': 'Quality Upgrades', 'verb': 'Upgrade'},
-    'quality_upgrade_review':   {'label': 'Quality Upgrade Review', 'verb': 'Monitor & Upgrade'},
+    'quality_upgrade_review':   {'label': 'Quality Upgrade Review', 'verb': 'Wishlist & Upgrade'},
     'quality_format_not_targeted': {'label': 'Format Not in Profile', 'verb': 'Leave As-is'},
     'quality_unknown':          {'label': 'Quality Unknown', 'verb': 'Leave As-is'},
     'missing_discography_track':{'label': 'Missing Discography', 'verb': 'Add to Wishlist'},
@@ -212,6 +222,7 @@ JOB_CATEGORIES = {
     'quality_profile_audit': 'Audio quality',
     'short_preview_track': 'Audio quality',
     'replaygain_filler': 'Audio quality',
+    'streamed_aac_repair': 'Audio quality',
     # What is written on and about the tracks.
     'untagged_downloads': 'Tags & metadata',
     'track_number_repair': 'Tags & metadata',
@@ -260,9 +271,33 @@ def _findings_library_clause() -> str:
     owner_of = ("(SELECT r.profile_id FROM lib2_library_roots r"
                 " WHERE substr(file_path, 1, length(r.prefix)) = r.prefix"
                 " ORDER BY length(r.prefix) DESC LIMIT 1)")
-    if scope == "shared":
-        return f"COALESCE({owner_of}, 0) = 0"
-    return f"{owner_of} = {int(scope)}"
+    owner = "IS NULL" if scope == "shared" else f"= {int(scope)}"
+    by_path = (f"COALESCE({owner_of}, 0) = 0" if scope == "shared"
+               else f"{owner_of} = {int(scope)}")
+    # album / artist findings name no file (completeness, tag consistency,
+    # discography, genres...). they used to count as the shared library's,
+    # so a profile with its own library never saw its albums' findings.
+    # place them by their lib2 entity: shown where it has a file, or
+    # everywhere when it has none yet. the cast is on the finding's id, the
+    # catalogue side stays on its index
+    entity = "CAST(substr(entity_id, 6) AS INTEGER)"
+    live = "COALESCE(ef.file_state,'active') = 'active'"
+    files_of = {
+        "track": f"FROM lib2_track_files ef WHERE ef.track_id = {entity} AND {live}",
+        "album": (f"FROM lib2_tracks et JOIN lib2_track_files ef ON ef.track_id = et.id"
+                  f" WHERE et.album_id = {entity} AND {live}"),
+        "artist": (f"FROM lib2_albums ea JOIN lib2_tracks et ON et.album_id = ea.id"
+                   f" JOIN lib2_track_files ef ON ef.track_id = et.id"
+                   f" WHERE ea.primary_artist_id = {entity} AND {live}"),
+    }
+    by_entity = " ".join(
+        f"WHEN '{kind}' THEN (EXISTS (SELECT 1 {sql} AND ef.owner_profile_id {owner})"
+        f" OR NOT EXISTS (SELECT 1 {sql}))"
+        for kind, sql in files_of.items())
+    return (f"(CASE WHEN COALESCE(file_path, '') <> '' THEN {by_path}"
+            f" WHEN entity_id LIKE 'lib2:%' THEN (CASE entity_type {by_entity} ELSE "
+            f"{'1' if scope == 'shared' else '0'} END)"
+            f" ELSE {'1' if scope == 'shared' else '0'} END)")
 
 
 def job_category(job_id: str) -> str:
@@ -491,6 +526,20 @@ def _path_mapping_hint(config_manager) -> str:
     return 'Check Settings -> Library -> Music Paths so SoulSync can map this path.'
 
 
+# details that change without the problem changing: a rescan's size and
+# bitrate, ids enrichment adds, a provider's art url or a replaygain read.
+_VOLATILE_FINDING_KEYS = frozenset({
+    'dedup_file', 'provider_ids', 'file_size', 'current_gain',
+    'found_artwork_url', 'artist_thumb_url', 'found_artist_url',
+    '_dedup_fingerprint', '_file_identity',
+})
+
+
+def _stable_finding_payload(details) -> dict:
+    """the fields of a finding's details that say what the problem is."""
+    return {k: v for k, v in dict(details or {}).items() if k not in _VOLATILE_FINDING_KEYS}
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -505,6 +554,10 @@ class RepairWorker:
         # Worker state
         self.running = False
         self.enabled = False  # Master toggle (replaces 'paused')
+        # a library scan or a playlist sync holding the worker quiet
+        # (core/background_pause). in memory only: pause() saves the master
+        # toggle to config, and a restart mid-hold left repair switched off
+        self._held = False
         self.should_stop = False
         self._stop_event = threading.Event()
         # Per-job cancel: stopping ONE running job without tearing down the whole
@@ -654,6 +707,10 @@ class RepairWorker:
                 [disc_old], disc_new, force_review=True)
             settings = merged.setdefault('settings', {})
             settings.setdefault('migration_source', 'discography_backfill')
+            # the old job walked every library artist, not only the watchlist.
+            # its per-run limit, owned-tracks floor and release filters carry
+            # over under the same keys
+            settings.setdefault('artists', 'library')
             config_manager.set('repair.jobs.monitored_discography_refresh', merged)
 
         # P3 implementation-prefix renames are lossless one-to-one copies.
@@ -665,6 +722,47 @@ class RepairWorker:
             new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
             if new_cfg is None and isinstance(old_cfg, dict):
                 config_manager.set(f'repair.jobs.{new_id}', old_cfg)
+
+        # Two retired jobs share one successor. The copy above takes the first
+        # one's config; a second retired job that was switched ON still has to
+        # switch the successor on, once, without touching its settings (a
+        # Single/Album Dedup user must not end up with no dedup at all). The
+        # marker keeps a later "off" from being undone on the next start.
+        for old_id, new_id in JOB_ID_MIGRATIONS.items():
+            old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
+            if not isinstance(old_cfg, dict) or not old_cfg.get('enabled'):
+                continue
+            marker = f'repair.job_migrations.{old_id}_enabled_carried_to'
+            if config_manager.get(marker, None):
+                continue
+            new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
+            if isinstance(new_cfg, dict) and not new_cfg.get('enabled'):
+                config_manager.set(f'repair.jobs.{new_id}', {**new_cfg, 'enabled': True})
+                logger.info("Repair job %s was on at 3.6.1: its successor %s is switched on",
+                            old_id, new_id)
+            config_manager.set(marker, new_id)
+
+        # 3.6.1's weekly Quality Check flagged every library track below its
+        # profile, wishlisted or not. Library v2's review of exactly that is
+        # quality_profile_audit, and it ships off: someone who had the check
+        # on lost it with no notice. switch the audit on once for them, with
+        # their interval. only ever on: a scanner that was off changes nothing.
+        marker = 'repair.job_migrations.quality_check_carried_to_audit'
+        if not config_manager.get(marker, None):
+            for old_id in ('quality_upgrade_scanner', 'quality_upgrade_scan', 'quality_upgrade'):
+                old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
+                if isinstance(old_cfg, dict) and old_cfg.get('enabled'):
+                    audit = config_manager.get('repair.jobs.quality_profile_audit', None)
+                    audit = dict(audit) if isinstance(audit, dict) else {}
+                    if not audit.get('enabled'):
+                        audit['enabled'] = True
+                        if old_cfg.get('interval_hours') and not audit.get('interval_hours'):
+                            audit['interval_hours'] = old_cfg['interval_hours']
+                        config_manager.set('repair.jobs.quality_profile_audit', audit)
+                        logger.info("Quality Check (%s) was on at 3.6.1: Quality Profile "
+                                    "Audit is switched on in its place", old_id)
+                    break
+            config_manager.set(marker, 'quality_profile_audit')
 
     def set_metadata_enhancer(self, enhance_fn):
         """Inject the metadata enhancement function from web_server.py.
@@ -775,6 +873,8 @@ class RepairWorker:
                             defaults['settings'].update({key: policy[key] for key in job.default_settings})
                         except ValueError:
                             pass  # Keep invalid settings visible; the scan reports the error.
+        for key in getattr(job, 'retired_settings', ()) or ():
+            defaults['settings'].pop(key, None)
 
         return defaults
 
@@ -834,6 +934,14 @@ class RepairWorker:
                 current.update(settings)
             else:
                 current = settings
+            # a retired legacy switch the save left out: the user answered
+            # with the switch the page shows, and the stale value must not
+            # override it (see RepairJob.retired_settings)
+            self._ensure_jobs_loaded()
+            job = self._jobs.get(job_id)
+            for key in getattr(job, 'retired_settings', ()) or ():
+                if key not in settings:
+                    current.pop(key, None)
             if job_id == 'genre_enrichment':
                 defaults = self._jobs.get(job_id).default_settings if self._jobs.get(job_id) else {
                     'max_genres': 5, 'include_artists': True, 'include_albums': True, 'allow_live_calls': False}
@@ -1066,6 +1174,16 @@ class RepairWorker:
         except Exception as e:
             logger.debug("Could not bridge master toggle to engine metadata: %s", e)
 
+    def hold_for_foreground(self):
+        """Start no job and pause the running one at its next batch, without
+        touching the saved master toggle. Applies to Run Now jobs too: the
+        quality backfill is queued that way and probed 300k files through a
+        sync."""
+        self._held = True
+
+    def release_foreground(self):
+        self._held = False
+
     # Backward compatibility
     def pause(self):
         self.set_enabled(False)
@@ -1169,6 +1287,12 @@ class RepairWorker:
 
         while not self._stop_event.is_set():
             try:
+                # a scan or a sync holds the worker quiet; queued jobs wait
+                if self._held:
+                    if self._sleep_or_stop(1):
+                        break
+                    continue
+
                 # Check force-run queue even when disabled (user explicitly requested)
                 forced_job = None
                 with self._force_run_lock:
@@ -1341,7 +1465,7 @@ class RepairWorker:
             create_finding=self._create_finding,
             should_stop=lambda: self.should_stop or self._cancel_current_job.is_set(),
             stop_event=self._stop_event,
-            is_paused=(lambda: False) if forced else (lambda: not self.enabled),
+            is_paused=(lambda: self._held) if forced else (lambda: not self.enabled or self._held),
             # update_progress feeds the Tools page; report_progress feeds
             # the notification centre's card. They were two separate calls a
             # job had to remember to make BOTH of, and three jobs only ever
@@ -1660,28 +1784,66 @@ class RepairWorker:
                 # hide the repair issue itself.
                 logger.debug("Library-v2 finding annotation skipped: %s", e)
 
-            fingerprint_payload = dict(enriched_details)
+            # what changes on its own (a rescan's size and bitrate, a provider
+            # id enrichment adds, a provider's art url, a replaygain read) is
+            # not a new problem: hashing it brought dismissed findings back
+            # after any tag write or enrichment pass. 3.6.1 never did.
+            full_payload = dict(enriched_details)
+            fingerprint_payload = _stable_finding_payload(enriched_details)
             if finding_type == 'native_duplicate_releases' and enriched_details.get('pair_key'):
                 # One release pair is one decision; its catalogue rows change
                 # in the background and must not undo a dismissal.
                 fingerprint_payload = {'pair_key': enriched_details['pair_key']}
+            # "a new file may surface a dismissed finding again": a new file
+            # is a new inode (an import moves a replacement into place). size
+            # and mtime change on every in-place tag write, so with them a
+            # ReplayGain, lyrics or BPM pass on the same file brought every
+            # dismissed finding back. the size/mtime form is still accepted
+            # below for rows dismissed before this
+            legacy_payloads = []
+            file_identity = None
             if file_path and os.path.isfile(file_path):
                 try:
                     stat = os.stat(file_path)
-                    fingerprint_payload["_file_stat"] = {
-                        "size": stat.st_size,
-                        "mtime_ns": stat.st_mtime_ns,
-                    }
+                    file_identity = {"ino": stat.st_ino, "dev": stat.st_dev}
+                    # rows dismissed under the earlier fingerprints still match
+                    legacy_payloads.append({**full_payload, "_file_stat": {
+                        "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}})
+                    legacy_payloads.append({**full_payload, "_file_stat": dict(file_identity)})
+                    fingerprint_payload["_file_stat"] = dict(file_identity)
                 except OSError:
                     pass
-            dedup_fingerprint = hashlib.sha256(
-                json.dumps(
-                    fingerprint_payload, sort_keys=True, separators=(',', ':'),
-                    default=str,
-                ).encode('utf-8')
-            ).hexdigest()
+
+            def _fingerprint(payload):
+                return hashlib.sha256(
+                    json.dumps(
+                        payload, sort_keys=True, separators=(',', ':'),
+                        default=str,
+                    ).encode('utf-8')
+                ).hexdigest()
+            dedup_fingerprint = _fingerprint(fingerprint_payload)
+            same_fingerprints = {dedup_fingerprint}
+            for legacy_payload in legacy_payloads:
+                same_fingerprints.add(_fingerprint(legacy_payload))
             enriched_details = dict(enriched_details)
             enriched_details["_dedup_fingerprint"] = dedup_fingerprint
+            if file_identity is not None:
+                enriched_details["_file_identity"] = file_identity
+
+            def _same_problem(old: dict) -> bool:
+                """the stored row and this one describe the same problem,
+                judged on the stable fields only. a row stored before this
+                rule is judged the same way from its details; the file
+                identity counts only when the stored row recorded one."""
+                if finding_type == 'native_duplicate_releases' and enriched_details.get('pair_key'):
+                    return old.get('pair_key') == enriched_details.get('pair_key')
+                mine = _stable_finding_payload(enriched_details)
+                theirs = _stable_finding_payload(old)
+                if old.get('_file_identity') is not None:
+                    theirs["_file_stat"] = old['_file_identity']
+                    if file_identity is not None:
+                        mine["_file_stat"] = dict(file_identity)
+                return _fingerprint(mine) == _fingerprint(theirs)
 
             # A file finding is keyed by its concrete path, not merely by its
             # parent track: multiple active files for one track are independent
@@ -1705,6 +1867,13 @@ class RepairWorker:
                     # file changes which member is recommended as the survivor.
                     subject_clause = " AND entity_type=? AND CASE WHEN json_valid(details_json) THEN json_extract(details_json,'$.pair_key') END=?"
                     subject_params = (entity_type, enriched_details['pair_key'])
+                elif finding_type == 'comma_artist_split' and enriched_details.get('combined_name'):
+                    # One combined credit is one finding. Two of them can share
+                    # the first artist id ("A, B" and "A, C" on A's tracks), and
+                    # keyed on the entity alone the second overwrote the first.
+                    subject_clause = (" AND entity_type=? AND entity_id=? AND CASE WHEN json_valid(details_json)"
+                                      " THEN json_extract(details_json,'$.combined_name') END=?")
+                    subject_params = (entity_type, entity_id, enriched_details['combined_name'])
                 cursor.execute(f"""
                     SELECT id, status, resolved_at, details_json
                     FROM repair_findings
@@ -1752,14 +1921,16 @@ class RepairWorker:
                     # sides are fingerprinted, only the exact dismissed
                     # snapshot is suppressed; a new file/target may surface.
                     if (not old_fingerprint
-                            or old_fingerprint == dedup_fingerprint):
+                            or old_fingerprint in same_fingerprints
+                            or _same_problem(old_details)):
                         return False
                     continue
                 # A replaced file or changed target is new information and may
                 # surface immediately. An unchanged (or pre-fingerprint)
                 # resolved finding observes dev's recurrence grace, then may
                 # become pending again if the problem truly returned.
-                if (not old_fingerprint or old_fingerprint == dedup_fingerprint) \
+                if (not old_fingerprint or old_fingerprint in same_fingerprints
+                        or _same_problem(old_details)) \
                         and self._within_recurrence_grace(resolved_at):
                     return False
 
@@ -2805,6 +2976,7 @@ class RepairWorker:
             'album_mbid_mismatch': self._fix_album_mbid_mismatch,
             'missing_replaygain': self._fix_missing_replaygain,
             'replaygain_retag': self._fix_missing_replaygain,   # #1060 — same analyze+write
+            'zero_length_mp4': self._fix_zero_length_mp4,
             'untagged_download': self._fix_untagged_download,
             'expired_download': self._fix_expired_download,
             'empty_folder': self._fix_empty_folder,
@@ -3382,9 +3554,80 @@ class RepairWorker:
             'is_local': False,
         }
 
+    def _delete_quality_finding_file(self, entity_id, file_path):
+        """A quality finding's Delete: the low-quality file goes, through the
+        same journaled delete as the library page (into the deleted-files
+        folder, restorable), and its library row with it. 3.6.1 deleted it;
+        the v2 port quietly wishlisted the track instead."""
+        from core.library2.file_delete import (
+            FileDeleteError, delete_entity_files, preview_entity_files)
+        from contextlib import closing
+        from core.library.deleted_quarantine import quarantine_mover
+        track_id = _lib2_id(entity_id)
+        with closing(self.db._get_connection()) as conn:
+            if track_id is None and file_path:
+                row = conn.execute(
+                    "SELECT track_id FROM lib2_track_files WHERE path=? "
+                    "AND COALESCE(file_state,'active')<>'deleted' LIMIT 1", (file_path,)).fetchone()
+                track_id = int(row[0]) if row else None
+            if track_id is None:
+                return {'success': False, 'error': 'The file is no longer in the library'}
+            album = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (track_id,)).fetchone()
+            files = [int(r[0]) for r in conn.execute(
+                "SELECT id FROM lib2_track_files WHERE track_id=? AND COALESCE(file_state,'active')<>'deleted' "
+                "AND (? IS NULL OR path=?)", (track_id, file_path, file_path))]
+        if not album or not files:
+            return {'success': False, 'error': 'The file is no longer in the library'}
+        try:
+            preview = preview_entity_files(self.db, entity='albums', entity_id=int(album[0]), file_ids=files)
+            if not preview.get('deletable_count'):
+                reasons = {f.get('reason') for f in preview.get('files') or [] if f.get('reason')}
+                return {'success': False, 'error': 'The file could not be deleted safely'
+                        + (f" ({', '.join(sorted(reasons))})" if reasons else '')}
+            delete_entity_files(
+                self.db, entity='albums', entity_id=int(album[0]),
+                preview_token=preview.get('preview_token'), file_ids=files, actor='user',
+                unlink=quarantine_mover(self.transfer_folder, 'quality_delete'), mode='quarantine')
+        except FileDeleteError as exc:
+            return {'success': False, 'error': str(exc)}
+        return {'success': True, 'action': 'deleted_file',
+                'message': f'Deleted low-quality file: {os.path.basename(file_path or "")}'}
+
+    @staticmethod
+    def _owner_profile(details, track_data=None):
+        """#1504: the library's owner, whose wishlist the track goes on."""
+        for source in (details or {}, track_data or {}):
+            try:
+                value = int(source.get('owner_profile_id') or 0)
+            except (TypeError, ValueError, AttributeError):
+                value = 0
+            if value > 0:
+                return value
+        return 1
+
+    def _wishlist_add(self, **kwargs):
+        """add_to_wishlist_detailed when the database has it (it tells a track
+        that was already queued from a refusal), else the plain add."""
+        detailed = getattr(self.db, 'add_to_wishlist_detailed', None)
+        if callable(detailed):
+            return detailed(**kwargs)
+        return {'status': 'created'} if self.db.add_to_wishlist(**kwargs) else {'status': 'rejected'}
+
+    def _wishlist_outcome_result(self, outcome):
+        """3.6.1 answered success for a track that was already queued."""
+        status = (outcome or {}).get('status')
+        if status == 'created':
+            return {'success': True, 'action': 'added_to_wishlist'}
+        if (outcome or {}).get('applied') or status in ('updated', 'satisfied', 'skipped'):
+            return {'success': True, 'action': 'already_wishlisted'}
+        return {'success': False, 'error': (outcome or {}).get('reason') or 'Track could not be added'}
+
     def _fix_legacy_quality_upgrade(self, entity_type, entity_id, file_path, details):
-        """Approve a preserved pre-V2 quality finding without deleting its file."""
+        """Approve a preserved pre-V2 quality finding: queue the better copy,
+        or (Delete) remove the low-quality file."""
         action = str(details.get('_fix_action') or '')
+        if action == 'delete':
+            return self._delete_quality_finding_file(entity_id, file_path)
         if (not action or action.startswith('scheduled_quality_upgrade:')) and details.get('quality_issue') in ('format_not_in_profile', 'format_not_targeted'):
             return {'success': True, 'action': 'ignored', 'message': 'Format not targeted by profile; file left as-is'}
         track_data = (details.get('matched_track_data') or details.get('track_data')
@@ -3395,7 +3638,7 @@ class RepairWorker:
                 'error': 'Legacy quality finding has no reusable track payload; rerun the native review scan',
             }
         try:
-            added = self.db.add_to_wishlist(
+            outcome = self._wishlist_add(
                 spotify_track_data=track_data,
                 failure_reason='Quality upgrade (migrated review finding)',
                 source_type='repair',
@@ -3405,10 +3648,9 @@ class RepairWorker:
                     'original_file_path': file_path,
                 },
                 quality_profile_id=details.get('quality_profile_id'),
+                profile_id=self._owner_profile(details, track_data),
             )
-            if not added:
-                return {'success': False, 'error': 'Track is already queued or could not be added'}
-            return {'success': True, 'action': 'added_to_wishlist'}
+            return self._wishlist_outcome_result(outcome)
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
 
@@ -3418,7 +3660,7 @@ class RepairWorker:
         if not track_data:
             return {'success': False, 'error': 'Legacy discography finding has no track payload'}
         try:
-            added = self.db.add_to_wishlist(
+            outcome = self._wishlist_add(
                 spotify_track_data=track_data,
                 failure_reason='Discography backfill (migrated review finding)',
                 source_type='repair',
@@ -3427,10 +3669,9 @@ class RepairWorker:
                     'legacy_job': 'discography_backfill',
                     'artist': details.get('artist_name', ''),
                 },
+                profile_id=self._owner_profile(details, track_data),
             )
-            if not added:
-                return {'success': False, 'error': 'Track is already queued or could not be added'}
-            return {'success': True, 'action': 'added_to_wishlist'}
+            return self._wishlist_outcome_result(outcome)
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
 
@@ -3442,9 +3683,17 @@ class RepairWorker:
         details = details or {}
         try:
             track_ids = [int(t) for t in details.get('track_ids') or []]
+            guests = [int(t) for t in details.get('guest_track_ids') or []]
             profile_id = int(details.get('profile_id') or 1)
         except (TypeError, ValueError):
-            track_ids, profile_id = [], 1
+            track_ids, guests, profile_id = [], [], 1
+        # other artists' songs only when this one finding was fixed on its own:
+        # a bulk fix must not pull every artist on a compilation in (3.6.1)
+        if details.get('_explicit_single_fix'):
+            track_ids = track_ids + [t for t in guests if t not in track_ids]
+        elif guests and not track_ids:
+            return {'success': False, 'error': "Only other artists' songs are missing here; "
+                                               'fix this finding on its own to add them'}
         if album_id is None or not track_ids:
             return {'success': False, 'error': 'Nothing to fill on this finding; rerun Album Completeness'}
         from core.library2.monitor_rules import PROVENANCE_USER, record_rules
@@ -3462,14 +3711,14 @@ class RepairWorker:
             if profile_id == 1:
                 conn.executemany('UPDATE lib2_tracks SET monitored=1 WHERE id=?', [(t,) for t in live])
             recompute_wanted(conn, profile_id=profile_id, track_ids=live)
-            enqueue_projected_tracks(conn, live, profile_id=profile_id, user_initiated=True)
+            outbox_ids = enqueue_projected_tracks(conn, live, profile_id=profile_id, user_initiated=True)
             conn.commit()
         except Exception as exc:  # noqa: BLE001
             conn.rollback()
             return {'success': False, 'error': str(exc)}
         finally:
             conn.close()
-        drain(self.db)
+        drain(self.db, ids=outbox_ids)
         return {'success': True, 'action': 'monitored_missing',
                 'message': f'Monitoring {len(live)} missing track{"s" if len(live) != 1 else ""}'}
 
@@ -3478,35 +3727,24 @@ class RepairWorker:
         album_id = details.get('lib2_album_id') or _lib2_id(entity_id)
         if album_id is None:
             return {'success': False, 'error': 'Not a Library-v2 album finding'}
-        conn = self.db._get_connection()
-        try:
-            cursor = conn.execute(
-                """UPDATE lib2_albums
-                      SET monitored=1, tracklist_status='pending',
-                          tracklist_error=NULL, tracklist_retry_at=NULL,
-                          updated_at=CURRENT_TIMESTAMP
-                    WHERE id=?""",
-                (int(album_id),),
-            )
-            if cursor.rowcount == 0:
-                return {'success': False, 'error': 'Library-v2 album no longer exists'}
-            conn.commit()
-        finally:
-            conn.close()
         try:
             from core.library2 import ADMIN_PROFILE_ID
-            from core.library2.discography import auto_monitor_releases
-            mirrored = auto_monitor_releases(
-                self.db, self._config_manager, [int(album_id)],
-                wishlist_profile_id=ADMIN_PROFILE_ID,
+            from core.library2.discography import approve_release
+            # a back catalogue finding names the library that holds the
+            # artist (#1504); a new-release finding is the admin's as before
+            mirrored = approve_release(
+                self.db, self._config_manager, int(album_id),
+                profile_id=int(details.get('owner_profile_id') or ADMIN_PROFILE_ID),
             )
-            return {
-                'success': True,
-                'action': 'approved_new_release',
-                'mirrored_tracks': mirrored,
-            }
+        except LookupError as exc:
+            return {'success': False, 'error': str(exc)}
         except Exception as exc:
             return {'success': False, 'error': str(exc)}
+        return {
+            'success': True,
+            'action': 'approved_new_release',
+            'mirrored_tracks': mirrored,
+        }
 
     def _fix_quality_profile_audit(self, entity_type, entity_id, file_path, details):
         """Revalidate a reviewed native file before opting its track into monitoring."""
@@ -3574,7 +3812,7 @@ class RepairWorker:
                     conn, [tid], profile_id=owner, user_initiated=not scheduled,
                 )
                 conn.commit()
-            drain(self.db)
+            drain(self.db, ids=outbox_ids)
             if not outbox_ids:
                 return {'success': False, 'error': 'No upgrade could be queued'}
             marks = ','.join('?' for _ in outbox_ids)
@@ -4965,6 +5203,10 @@ class RepairWorker:
             # permissions or a locked file.
             msg = (f'Updated database thumbnail, but could not write art to '
                    f'{failed} file(s) — check file/folder permissions')
+        elif skipped and art_result.get('embedding_off'):
+            # nothing was looked at: embedding is switched off in settings
+            msg = ('Embedding cover art is off in Settings, so no file was changed. '
+                   'Database thumbnail updated')
         elif skipped:
             # Every file already had embedded art and no new cover.jpg was
             # needed — nothing to do, NOT a failure. This is the case that made
@@ -5173,6 +5415,30 @@ class RepairWorker:
         return {'success': True, 'action': 'applied_replaygain',
                 'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
 
+    def _fix_zero_length_mp4(self, entity_type, entity_id, file_path, details):
+        """Remux an AAC file that reads no length into a plain MP4 and put its
+        tags back (Skowl). The audio is copied, not re-encoded."""
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path in finding'}
+        resolved, native_track_id = self._resolve_finding_path(entity_id, raw_path)
+        if not os.path.isfile(resolved):
+            return {'success': False, 'stale': True,
+                    'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+        from core.downloads.mp4_remux import reads_zero_length, repair_streamed_mp4
+        from core.repair_jobs.streamed_aac_repair import ffmpeg_path
+        if not reads_zero_length(resolved):
+            return {'success': True, 'action': 'fixed_length', 'message': 'Already reads its length'}
+        ffmpeg = ffmpeg_path()
+        if not ffmpeg:
+            return {'success': False, 'error': 'ffmpeg not available, cannot fix the file'}
+        if not repair_streamed_mp4(resolved, ffmpeg):
+            return {'success': False, 'error': 'Could not fix the file, it was left as it was'}
+        if native_track_id is not None:
+            self._refresh_lib2_tag_cache(details, resolved)
+        return {'success': True, 'action': 'fixed_length',
+                'message': 'Fixed the length, tags kept'}
+
     def _fix_untagged_download(self, entity_type, entity_id, file_path, details):
         """write title/artist/album back from the download record. only the
         fields the file is missing, so a tag fixed by hand since the scan stays."""
@@ -5262,8 +5528,8 @@ class RepairWorker:
         """
         # Deezer-sourced BPM respects the deezer.tags.bpm setting.
         # Locally-analyzed BPM always writes (explicit user action).
-        if bpm_source == 'deezer':
-            if self._config_manager and self._config_manager.get('deezer.tags.bpm', True) is False:
+        if bpm_source in ('deezer', 'beatport'):
+            if self._config_manager and self._config_manager.get(f'{bpm_source}.tags.bpm', True) is False:
                 return ' (BPM tags are off in settings, file not changed)'
         try:
             bpm = float(bpm)
@@ -5379,6 +5645,29 @@ class RepairWorker:
         stale = _stale_legacy_subject(track_id)
         if stale:
             return stale
+        album_files = details.get('album_files')
+        if isinstance(album_files, list) and album_files:
+            # scope "albums": the finding names every file of the album, and
+            # the catalogue retires exactly those (details.library_v2.file_ids)
+            deleted = 0
+            for entry in album_files:
+                path = (entry or {}).get('file_path')
+                if not path:
+                    continue
+                removed = self._remove_native_repair_file(
+                    path, {**details, 'file_path': path}, reason='unwanted_content')
+                if not removed.get('success'):
+                    return {**removed, 'error': (
+                        f"{removed.get('error') or 'Could not remove a file'}"
+                        f" ({deleted} of {len(album_files)} removed, the rest left in place)")}
+                deleted += 1 if removed.get('deleted_file') else 0
+            return {
+                'success': True,
+                'action': 'removed_content',
+                'message': f'{type_label} album removed from Library v2 ({deleted} file(s) deleted)',
+                'library_v2_file_deleted': True,
+                'repair_intent': 'remove',
+            }
         removed = self._remove_native_repair_file(track_path, details, reason='unwanted_content')
         if not removed.get('success'):
             return removed
@@ -5748,51 +6037,17 @@ class RepairWorker:
             self.db, track_id, details or {},
             fix_tags=fix_tags, config_manager=self._config_manager)
         if result.get('success') and settings.get('reorganize_files', True):
-            moved = self._move_refiled_track(result.get('library_v2_rehomed_track_id'), fix_tags)
+            moved = self._move_refiled_track(result.get('library_v2_rehomed_track_id'))
             result['reorganize'] = moved
             if moved == 'queued':
                 result['message'] = f"{result.get('message')}; moving it into its folder"
         return result
 
-    def _move_refiled_track(self, track_id, from_tags: bool) -> str:
-        """dev's Fix Unknown Artists "reorganize files": the re-filed track moves
-        into its artist/album folder. Library Reorganize does the move. Only a
-        file inside SoulSync's own folders moves (the transfer folder, an own
-        library); a media server's library file stays where the server keeps
-        it (upstream test_repair_worker_unknown_artist_path)."""
-        if not track_id:
-            return 'skipped'
-        from contextlib import closing
-        from core.library2.paths import resolve_lib2_path
-        from core.repair_jobs.base import all_library_roots
-        with closing(self.db._get_connection()) as conn:
-            row = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (int(track_id),)).fetchone()
-            paths = [r[0] for r in conn.execute(
-                "SELECT path FROM lib2_track_files WHERE track_id=?"
-                " AND COALESCE(file_state,'active')='active'", (int(track_id),))]
-        if not row or not paths:
-            return 'skipped'
-
-        def _key(path):
-            return os.path.normcase(os.path.realpath(path))
-
-        roots = [_key(r) for r in all_library_roots(self) if r]
-        inside = False
-        for path in paths:
-            resolved = resolve_lib2_path(path, config_manager=self._config_manager) or path
-            here = _key(resolved)
-            if any(here == root or here.startswith(root.rstrip(os.sep) + os.sep) for root in roots):
-                inside = True
-                break
-        if not inside:
-            return 'kept_in_place'
-        try:
-            from core.library2.reorganize_bridge import enqueue_album_reorganize
-            enqueue_album_reorganize(self.db, int(row[0]), mode='tags' if from_tags else 'api')
-        except Exception as exc:  # noqa: BLE001 - the re-file stands; the move is a follow-up
-            logger.warning("Unknown Artist: reorganize for album %s not queued: %s", row[0], exc)
-            return 'not_queued'
-        return 'queued'
+    def _move_refiled_track(self, track_id) -> str:
+        """The approve path's "reorganize files" (upstream
+        test_repair_worker_unknown_artist_path); the scheduled auto-fix shares it."""
+        from core.repair_jobs.unknown_artist_recovery import move_refiled_track
+        return move_refiled_track(self, track_id, config_manager=self._config_manager)
 
     def _fix_album_release_year_mismatch(self, entity_type, entity_id, file_path, details):
         """Align album and track release years to canonical release dates and rename folder."""
@@ -6449,9 +6704,8 @@ class RepairWorker:
             params = list(fixable_types)
 
             if finding_ids:
-                id_placeholders = ','.join(['?'] * len(finding_ids))
-                where_parts.append(f"id IN ({id_placeholders})")
-                params.extend(finding_ids)
+                where_parts.append(f"id IN ({_JSON_IDS})")
+                params.append(_json_ids(finding_ids))
             if job_id:
                 where_parts.append("job_id = ?")
                 params.append(job_id)
@@ -6638,9 +6892,8 @@ class RepairWorker:
                 where.append("finding_type=?")
                 params.append(finding_type)
             if finding_ids:
-                marks = ','.join('?' for _ in finding_ids)
-                where.append(f"id IN ({marks})")
-                params.extend(finding_ids)
+                where.append(f"id IN ({_JSON_IDS})")
+                params.append(_json_ids(finding_ids))
             if safe_only and DESTRUCTIVE_FINDING_TYPES:
                 destructive = sorted(DESTRUCTIVE_FINDING_TYPES)
                 marks = ','.join('?' for _ in destructive)
@@ -6667,10 +6920,13 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            placeholders = ','.join(['?'] * len(ids))
+            # one json parameter: Fix All over 32k+ findings (track numbers
+            # flagged nearly every track, d8e924b69 for the history) broke
+            # the query, the types came back empty and the LRCLib breaker
+            # never tripped
             cursor.execute(
-                f"SELECT id, finding_type FROM repair_findings WHERE id IN ({placeholders})",
-                list(ids))
+                f"SELECT id, finding_type FROM repair_findings WHERE id IN ({_JSON_IDS})",
+                (_json_ids(ids),))
             return {row[0]: row[1] for row in cursor.fetchall()}
         except Exception as e:
             logger.debug("Could not read finding types for bulk run: %s", e)
@@ -6883,22 +7139,20 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            placeholders = ','.join(['?'] * len(finding_ids))
-
             if action == 'dismiss':
                 cursor.execute(f"""
                     UPDATE repair_findings
                     SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id IN ({placeholders})
-                """, finding_ids)
+                    WHERE id IN ({_JSON_IDS})
+                """, (_json_ids(finding_ids),))
             else:
                 cursor.execute(f"""
                     UPDATE repair_findings
                     SET status = 'resolved', user_action = ?, resolved_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE id IN ({placeholders})
-                """, [action] + finding_ids)
+                    WHERE id IN ({_JSON_IDS})
+                """, (action, _json_ids(finding_ids)))
 
             conn.commit()
             return cursor.rowcount

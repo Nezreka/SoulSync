@@ -29,7 +29,7 @@ from __future__ import annotations
 from core.repair_jobs import register_job
 from core.library2.retag import RETAG_SOURCES
 from core.repair_jobs.base import (
-    JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects,
+    JobContext, JobResult, RepairJob, drop_hand_tagged_albums, scoped_file_subjects,
 )
 from utils.logging_config import get_logger
 
@@ -39,6 +39,28 @@ logger = get_logger("repair_jobs.library_retag")
 #: bounds how much file I/O happens between two stop checks, so a cancelled
 #: run stops promptly on a large library.
 _BATCH = 100
+
+
+def _resolve_clean(db, job_id: str, track_ids: list) -> None:
+    """A track whose tags now check out has nothing left to fix. Its open
+    finding stayed open forever: a check that changed (a joiner or a curly
+    apostrophe no longer counts) left thousands of rows nobody could act on."""
+    if not track_ids:
+        return
+    conn = db._get_connection()
+    try:
+        ids = [f"lib2:{t}" for t in track_ids]
+        conn.execute(
+            "UPDATE repair_findings SET status = 'resolved', user_action = 'obsolete', "
+            "resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+            "WHERE job_id = ? AND status = 'pending' AND finding_type = 'library_retag' "
+            f"AND entity_type = 'track' AND entity_id IN ({','.join('?' for _ in ids)})",
+            [job_id, *ids])
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 - tidying old rows never fails a scan
+        logger.debug("[Library Re-tag] resolving clean findings failed: %s", exc)
+    finally:
+        conn.close()
 
 
 def _describe(entry: dict, manual_fields: list) -> str:
@@ -83,6 +105,7 @@ class LibraryRetagJob(RepairJob):
                        'cover_art': ['replace', 'fill_missing', 'skip'], 'lyrics': ['fetch', 'skip'],
                        'source': list(RETAG_SOURCES)}
     auto_fix = False
+    retired_settings = ('dry_run',)   # 3.6.1's switch; auto_apply answers it now
     supports_file_scope = True
     # Moves/rewrites real library files, so a LIVE run is refused when the
     # preflight says this process cannot see the library (upstream 36f13cdd8).
@@ -93,9 +116,11 @@ class LibraryRetagJob(RepairJob):
 
         # hand-tagged: the user typed this release, retagging from a service
         # would overwrite it with the studio album
-        return drop_hand_tagged(context, scoped_file_subjects(context, active_file_subjects(
-            context.db, context.config_manager,
-        )))
+        # one hand-tagged file locks its album, as in 3.6.1: retagging the
+        # rest from the service would split the release around it
+        everything = active_file_subjects(context.db, context.config_manager)
+        return drop_hand_tagged_albums(
+            context, scoped_file_subjects(context, everything), everything)
 
     def estimate_scope(self, context: JobContext) -> int:
         try:
@@ -159,6 +184,7 @@ class LibraryRetagJob(RepairJob):
                 contexts = retag.track_contexts(conn, batch, lyrics=options['lyrics'] == 'fetch')
             finally:
                 conn.close()
+            clean = []
             for row in contexts:
                 files = by_track[row['id']]
                 row.update(file_id=files[0].get('file_id'), file_path=files[0]['path'],
@@ -177,6 +203,7 @@ class LibraryRetagJob(RepairJob):
                     result.errors += 1
                     continue
                 if not entry.get("has_changes"):
+                    clean.append(int(entry['track_id']))
                     continue
                 diff = entry.get("diff") or []
                 manual_fields = [d.get("field") for d in diff if d.get("manual")]
@@ -230,6 +257,7 @@ class LibraryRetagJob(RepairJob):
                     result.findings_created += 1
                 else:
                     result.findings_skipped_dedup += 1
+            _resolve_clean(context.db, self.job_id, clean)
             if context.update_progress:
                 context.update_progress(done, total)
         return result

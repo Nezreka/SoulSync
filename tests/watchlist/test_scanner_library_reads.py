@@ -116,9 +116,11 @@ def test_seed_ids_come_from_columns_and_from_external_ids(conn):
     with. v2 promotes only Spotify and MusicBrainz to columns, so a seed whose
     graph was built on its Deezer id is only reachable through
     ``external_ids``."""
-    _artist(conn, 'Muse', spotify_id='SP1', musicbrainz_id='MB1',
-            external_ids={'deezer': 'DZ1'})
-    _artist(conn, 'Not A Seed', spotify_id='SP2')
+    muse = _artist(conn, 'Muse', spotify_id='SP1', musicbrainz_id='MB1',
+                   external_ids={'deezer': 'DZ1'})
+    _album(conn, muse, 'Absolution')
+    other = _artist(conn, 'Not A Seed', spotify_id='SP2')
+    _album(conn, other, 'Something')
 
     owned, seed_ids, id_to_name = watchlist_scanner.library_owned_and_seed_ids(
         conn, {'muse'})
@@ -128,15 +130,18 @@ def test_seed_ids_come_from_columns_and_from_external_ids(conn):
     assert id_to_name == {'SP1': 'Muse', 'MB1': 'Muse', 'DZ1': 'Muse'}
 
 
-def test_owned_includes_every_artist_the_library_holds(conn):
-    """Owned is the exclusion set for recommendations. A v2 artist row exists
-    because the user has the artist, downloaded them, or asked to follow them —
-    all three are reasons not to recommend them back."""
-    _artist(conn, 'Muse')
-    _artist(conn, 'Björk')
+def test_owned_is_the_artists_you_have_music_by(conn):
+    """Owned is the exclusion set for recommendations, and in 3.6.1 it was the
+    media server's artists. lib2_artists also holds a featured guest, a
+    discography row and the artist of one wishlisted song: none of those is
+    an artist you have, so they stay recommendable."""
+    _album(conn, _artist(conn, 'Muse'), 'Absolution')
+    _album(conn, _artist(conn, 'Björk'), 'Homogenic')
+    _artist(conn, 'Bon Iver')                                   # a featured guest
+    _album(conn, _artist(conn, 'Phoebe Bridgers'), 'Punisher', origin='wishlist')
 
-    owned, _seed_ids, _names = watchlist_scanner.library_owned_and_seed_ids(
-        conn, set())
+    owned, seed_ids, _names = watchlist_scanner.library_owned_and_seed_ids(
+        conn, {'bon iver'})
 
     assert owned == {'muse', 'björk'}
 

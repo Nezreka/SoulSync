@@ -8,6 +8,38 @@ from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.dead_files")
 
+# files per rescan call: Stop / Pause are honoured between them
+_CHUNK = 500
+# 3.6.1's guard: from this many files on, half of them unreachable at once is
+# a mount or path-mapping problem, not that many deleted files
+_GUARD_MIN_FILES = 25
+_GUARD_SHARE = 0.5
+
+
+def _unreachable_report(context, *, missing: int, checked: int, deferred: int,
+                        before: list) -> str:
+    """Say why a run with most of the library out of reach found nothing,
+    the way 3.6.1 did: how many, one example path, and what to check. The
+    scan itself already holds off on marking any of them missing."""
+    from core.library2.paths import resolve_lib2_path
+    from core.repair_worker import _path_mapping_hint
+
+    sample = None
+    for subject in before[:200]:
+        path = subject.get("path")
+        if path and not resolve_lib2_path(path, config_manager=context.config_manager):
+            sample = path
+            break
+    hint = _path_mapping_hint(context.config_manager)
+    reason = (f"{missing} of {checked} files point to paths SoulSync can't reach, which is "
+              f"almost always a path-mapping or mount problem, not deleted files. Nothing was "
+              f"marked missing. Example path: {sample or 'unknown'}. {hint}")
+    logger.error("Dead file scan: %s (%d deferred as a storage outage)", reason, deferred)
+    if context.report_progress:
+        context.report_progress(phase="Stopped: too many unreachable paths",
+                                log_line=reason, log_type="error")
+    return reason
+
 
 @register_job
 class DeadFileCleanerJob(RepairJob):
@@ -24,9 +56,33 @@ class DeadFileCleanerJob(RepairJob):
     icon = "repair-icon-deadfile"
     default_enabled = True
     default_interval_hours = 24
-    default_settings = {}
+    # 3.6.1's guard settings: from this many files on, this share unreachable
+    # at once is a mount or mapping problem
+    default_settings = {'max_unresolved_fraction': _GUARD_SHARE,
+                        'min_tracks_for_guard': _GUARD_MIN_FILES}
     auto_fix = False
     supports_file_scope = True
+
+    def _guard_settings(self, context: JobContext):
+        """The saved guard values, the 3.6.1 defaults when absent or garbage."""
+        saved = {}
+        try:
+            raw = context.config_manager.get(self.get_config_key('settings'), {}) \
+                if context.config_manager else {}
+            saved = raw if isinstance(raw, dict) else {}
+        except Exception as e:  # noqa: BLE001
+            logger.debug("dead file cleaner settings not read: %s", e)
+        try:
+            share = float(saved.get('max_unresolved_fraction', _GUARD_SHARE))
+            share = share if 0 < share <= 1 else _GUARD_SHARE
+        except (TypeError, ValueError):
+            share = _GUARD_SHARE
+        try:
+            minimum = int(saved.get('min_tracks_for_guard', _GUARD_MIN_FILES))
+            minimum = minimum if minimum >= 0 else _GUARD_MIN_FILES
+        except (TypeError, ValueError):
+            minimum = _GUARD_MIN_FILES
+        return share, minimum
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -43,8 +99,34 @@ class DeadFileCleanerJob(RepairJob):
             if not before:
                 return result
             file_ids = [int(subject["file_id"]) for subject in before]
-            scan = rescan_files(context.db, file_ids=file_ids)
-            result.scanned = int(scan.get("scanned") or 0)
+            # in chunks, so Stop and Pause work and the run shows progress, as
+            # 3.6.1's did: one rescan_files call over the whole library ran to
+            # the end with neither, however long it took
+            total_files = len(file_ids)
+            if context.report_progress:
+                context.report_progress(phase=f'Checking {total_files} files...', total=total_files)
+            missing = deferred = 0
+            for start in range(0, total_files, _CHUNK):
+                if context.check_stop() or context.wait_if_paused():
+                    return result
+                scan = rescan_files(context.db, file_ids=file_ids[start:start + _CHUNK])
+                result.scanned += int(scan.get("scanned") or 0)
+                missing += int(scan.get("missing") or 0)
+                deferred += int(scan.get("mass_missing_deferred") or 0)
+                done = min(start + _CHUNK, total_files)
+                if context.update_progress:
+                    context.update_progress(done, total_files)
+                if context.report_progress:
+                    context.report_progress(scanned=done, total=total_files)
+            checked = result.scanned + missing
+            share, minimum = self._guard_settings(context)
+            if deferred or (checked >= minimum and missing >= checked * share):
+                result.stopped_early = _unreachable_report(
+                    context, missing=missing, checked=checked, deferred=deferred, before=before)
+                # 3.6.1: a run that tripped the guard files nothing. files a
+                # healthy run confirmed missing earlier wait for the next one,
+                # so a review never opens while the library is out of reach
+                return result
             after = scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager, include_missing=True,
             ))

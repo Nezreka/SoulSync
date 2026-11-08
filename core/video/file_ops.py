@@ -33,7 +33,9 @@ def naming_fields(row: dict) -> dict:
             "episode": row.get("episode"), "episode_title": row.get("episode_title"),
             "quality": row.get("quality"), "resolution": row.get("resolution"),
             "codec": row.get("video_codec"), "tmdbid": row.get("tmdb_id"),
-            "imdbid": row.get("imdb_id"), "tvdbid": row.get("tvdb_id")}
+            "imdbid": row.get("imdb_id"), "tvdbid": row.get("tvdb_id"),
+            "audio_languages": row.get("audio_languages"),
+            "subtitle_languages": row.get("subtitle_languages")}
 
 
 def same_path(a: str, b: str) -> bool:
@@ -49,6 +51,8 @@ def expected_path(row: dict, real: str, roots: List[str], settings: dict) -> Opt
     if not root:
         return None
     fields = naming_fields(row)
+    if organization.languages_unknown(row.get("scope"), fields, settings):
+        return None   # not probed yet: its right name isn't known
     fields["quality"] = file_quality(fields.get("quality"), real)
     ext = os.path.splitext(real)[1]
     return organization.render_path(row.get("scope"), root, fields, settings, ext)["path"]

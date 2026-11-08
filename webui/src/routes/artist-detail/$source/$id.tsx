@@ -8,6 +8,7 @@ import { fetchLibraryArtistIdentity } from '../-artist-detail.api';
 import { artistDetailSearchSchema } from '../-artist-detail.types';
 import { ArtistDetailPage } from '../-ui/artist-detail-page';
 import {
+  artistHeaderFromElsewhere,
   LIBRARY_V2_QUERY_KEY,
   resolveLibraryV2DiscoveryArtistOwnership,
 } from '../../library/-library-v2.api';
@@ -50,10 +51,18 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
             replace: true,
           });
         }
+        // no provider page can open this artist (only tidal, qobuz or audiodb
+        // know it): search for the name rather than a library page this
+        // profile may not open
+        const name = (identity?.name || search.name || '').trim();
+        if (name) {
+          throw redirect({ href: `/search?q=${encodeURIComponent(name)}`, replace: true });
+        }
       }
       return;
     }
     let known: number | null = null;
+    let owned = true;
     let focusAlbum: number | undefined =
       isLibrary && search.album && /^\d+$/.test(search.album) ? Number(search.album) : undefined;
     if (isLibrary && /^\d+$/.test(params.id)) {
@@ -78,13 +87,18 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
             }),
         })
         .catch(() => null);
-      // only an artist with files here leaves the artist page. a watchlisted,
-      // bookmarked or discography-only row keeps the original page. a
-      // media-server id has no provider page, so any catalogue row will do.
-      if (found?.artistId && (isLibrary || found.owned)) known = found.artistId;
+      // a row the library holds (files, or a watch or wish of its own) opens
+      // the library page. a guest credit or a looked-up discography is read
+      // from the provider like one never heard of: opening the library page
+      // wrote its whole discography in. a media-server id has no provider
+      // page, so any catalogue row will do.
+      if (found?.artistId && (isLibrary || found.inLibrary)) known = found.artistId;
+      owned = isLibrary || found?.owned === true;
       // a provider ?album= keeps its focus when the release is catalogued here
       if (found?.albumId) focusAlbum = found.albumId;
     }
+    // every artist opens on the library's artist page, the way dev had one
+    // artist page for everyone: My Library only when there are files here
     if (known) {
       throw redirect({
         to: '/library',
@@ -93,13 +107,28 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
           album: focusAlbum,
           view: 'discovery',
           immersive: true,
+          header: await artistHeaderFromElsewhere(context.queryClient),
+          ...(owned ? {} : { releases: 'all' as const }),
         },
         replace: true,
       });
     }
-    // Unknown provider artists retain the original page. Media-server ids
-    // without a catalogue match have no provider page to fall back to.
+    // Media-server ids without a catalogue match have no provider page.
     if (isLibrary) throw redirect({ to: '/library', search: {}, replace: true });
+    // one the library has never heard of: the same page, read from the
+    // provider. nothing is written until you watch, monitor or download
+    throw redirect({
+      to: '/library',
+      search: {
+        discover: `${source}:${params.id}`,
+        discoverName: search.name || undefined,
+        discoverAlbum: search.album ? `${source}:${search.album}` : undefined,
+        view: 'discovery',
+        immersive: true,
+        releases: 'all',
+      },
+      replace: true,
+    });
   },
   component: ArtistDetailRouteComponent,
 });

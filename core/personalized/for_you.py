@@ -88,6 +88,9 @@ def _owned(conn, track_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
     from core.library2.sql_util import owned_sql
     from core.metadata import normalize_image_url
     out: Dict[str, Dict[str, Any]] = {}
+    # an album's cover comes back once per track; normalizing it (the image
+    # cache registration) is ~0.25ms, ~1.6s of a 7.6k-row for-you build
+    covers: Dict[str, Optional[str]] = {}
     for chunk in _chunks(list(track_ids), 900):
         rows = conn.execute(
             f"""{_TRACK_ROW_SQL}
@@ -102,7 +105,8 @@ def _owned(conn, track_ids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
             out[str(tid)] = {
                 'id': str(tid), 'title': title, 'artist': artist, 'album': album or '',
                 'duration': duration or 0,
-                'cover': normalize_image_url(cover) if cover else None,
+                'cover': (covers[cover] if cover in covers
+                          else covers.setdefault(cover, normalize_image_url(cover))) if cover else None,
             }
     return out
 

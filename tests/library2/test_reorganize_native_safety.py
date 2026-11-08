@@ -94,10 +94,8 @@ def run_reorganize(monkeypatch, tmp_path):
         runner = build_runner(
             get_database=lambda: db,
             resolve_file_path_fn=lambda p: p if os.path.exists(p) else None,
-            post_process_fn=lambda *a, **kw: None,
             cleanup_empty_directories_fn=lambda *a, **kw: None,
             is_shutting_down_fn=lambda: False,
-            get_download_path=lambda: str(tmp_path / "downloads"),
             get_transfer_path=lambda: str(tmp_path / "library"),
             get_config_manager=lambda: cm,
             build_final_path_fn=build_path,

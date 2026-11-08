@@ -157,6 +157,13 @@ def test_payload_failure_rolls_back_monitor_mutation(db, monkeypatch):
     assert _outbox_rows(conn) == []
 
 
+def _age_retries(conn, seconds=7200):
+    """Move every attempt back in time, as if the retry wait had passed."""
+    conn.execute("UPDATE lib2_mirror_outbox SET processed_at=datetime('now', ?)",
+                 (f"-{int(seconds)} seconds",))
+    conn.commit()
+
+
 def test_failed_mirror_stays_pending_and_later_drain_completes(db):
     """The audit's injected-failure scenario: the legacy write fails, the lib2
     command remains traceable as pending, and a later drain reconciles."""
@@ -174,6 +181,9 @@ def test_failed_mirror_stays_pending_and_later_drain_completes(db):
     assert flaky.adds == []
 
     flaky.fail_adds = False
+    # the retry waits its turn: a drain right away leaves it alone
+    assert MO.drain(flaky) == {"done": 0, "failed": 0, "superseded": 0}
+    _age_retries(conn)
     result = MO.drain(flaky)
     assert (result["done"], result["failed"]) == (1, 0)
     assert flaky.adds
@@ -203,6 +213,7 @@ def test_row_flips_to_failed_after_max_attempts_and_retry_resets(db):
     flaky.fail_adds = True
     for _ in range(MO.MAX_ATTEMPTS):
         MO.drain(flaky)
+        _age_retries(conn)
     row = _outbox_rows(conn)[0]
     assert row["status"] == "failed"
     assert row["attempts"] == MO.MAX_ATTEMPTS
@@ -281,7 +292,12 @@ def test_a_newer_op_supersedes_an_older_pending_one_for_the_same_entity(db):
     flaky.fail_adds = False
     second = MO.drain(flaky)
 
-    assert second["superseded"] == 1, "the stale add must not be replayed"
+    # the newer row supersedes the stale add as it is queued (or, for rows an
+    # older build left, at the drain): either way it is never replayed
+    assert conn.execute(
+        "SELECT status FROM lib2_mirror_outbox WHERE op='wishlist_add'"
+    ).fetchone()[0] == "superseded", "the stale add must not be replayed"
+    assert second["done"] == 1
     assert flaky.adds == [], "a superseded add must never reach the legacy table"
     assert len(flaky.removes) == 1
     assert MO.drain(flaky)["done"] == 0, "nothing may remain queued"
@@ -301,6 +317,23 @@ def test_retry_does_not_rearm_a_failed_op_superseded_by_a_later_success(db):
     assert conn.execute(
         "SELECT status FROM lib2_mirror_outbox WHERE id=?", (old,)
     ).fetchone()[0] == "superseded"
+
+
+def test_another_profiles_op_on_the_same_track_supersedes_nothing(db):
+    """the supersede key had no profile: profile 3's failed add for T was
+    marked superseded by profile 1's later remove of T, so T never reached
+    profile 3's wishlist."""
+    flaky, conn = db
+    track = flaky.ids["track"]
+    member = MO.enqueue_tracks(conn, [track], True, profile_id=3)[0]
+    conn.execute("UPDATE lib2_mirror_outbox SET status='failed' WHERE id=?", (member,))
+    admin = MO.enqueue_tracks(conn, [track], False, profile_id=1)[0]
+    conn.execute("UPDATE lib2_mirror_outbox SET status='done' WHERE id=?", (admin,))
+
+    assert MO.retry_failed(conn) == 1
+    assert conn.execute(
+        "SELECT status FROM lib2_mirror_outbox WHERE id=?", (member,)
+    ).fetchone()[0] == "pending"
 
 
 def test_artist_watchlist_add_pushes_explicit_catalog_profile(db):
@@ -390,8 +423,9 @@ def test_replay_is_idempotent_when_marking_crashes(db):
     MO.enqueue_tracks(conn, [flaky.ids["track"]], True)
     conn.commit()
     MO.drain(flaky)
-    # Simulate the crash: row back to pending although the op already ran.
-    conn.execute("UPDATE lib2_mirror_outbox SET status='pending'")
+    # Simulate the crash: the op ran, the marking never happened.
+    conn.execute("UPDATE lib2_mirror_outbox SET status='pending', attempts=0, "
+                 "processed_at=NULL")
     conn.commit()
     result = MO.drain(flaky)
     assert result["done"] == 1
@@ -595,3 +629,64 @@ def test_a_missing_track_someone_asked_for_still_queues(db, reason):
     flaky, conn = _missing_slot(db, reason)
     MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1)
     assert _ops(conn) == ["wishlist_add"]
+
+
+def test_a_song_owned_on_another_release_is_not_queued(db):
+    """the album track whose song you have on the single: Missing and the wanted
+    queue already call it owned, and the wishlist must not download it again."""
+    flaky, conn = db
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_albums(primary_artist_id, title, album_type) VALUES(?, 'T', 'single')",
+                (flaky.ids["artist"],))
+    single_album = cur.lastrowid
+    cur.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'T', 1)",
+                (single_album,))
+    single = cur.lastrowid
+    cur.execute("INSERT INTO lib2_track_files(track_id, path, is_primary) VALUES(?, '/music/A/T/01 T.flac', 1)",
+                (single,))
+    rec = cur.execute("INSERT INTO lib2_recordings(title) VALUES('T')").lastrowid
+    for tid, album in ((flaky.ids["track"], flaky.ids["album"]), (single, single_album)):
+        edition = cur.execute("INSERT INTO lib2_release_editions(release_group_id, is_default) VALUES(?, 1)",
+                              (album,)).lastrowid
+        cur.execute("INSERT INTO lib2_release_tracks(release_edition_id, recording_id, track_id) VALUES(?,?,?)",
+                    (edition, rec, tid))
+    conn.commit()
+
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True, profile_id=1, user_initiated=True)
+    conn.commit()
+    MO.drain(flaky)
+
+    assert flaky.adds == []
+
+
+
+def test_a_failing_row_waits_longer_after_each_try(db):
+    # the background drainer took the same failing row first in every batch,
+    # 0.1s apart, so "database is locked" spent all ten tries in a second
+    flaky, conn = db
+    MO.enqueue_tracks(conn, [flaky.ids["track"]], True)
+    conn.commit()
+    flaky.fail_adds = True
+    for _ in range(5):
+        MO.drain(flaky)
+    assert _outbox_rows(conn)[0]["attempts"] == 1
+
+    _age_retries(conn, 31)            # the first wait is 30s
+    MO.drain(flaky)
+    assert _outbox_rows(conn)[0]["attempts"] == 2
+    _age_retries(conn, 31)            # the second is 60s
+    MO.drain(flaky)
+    assert _outbox_rows(conn)[0]["attempts"] == 2
+    _age_retries(conn, 61)
+    MO.drain(flaky)
+    assert _outbox_rows(conn)[0]["attempts"] == 3
+
+
+def test_the_callers_own_rows_are_not_held_back(db):
+    flaky, conn = db
+    row_id = MO.enqueue_tracks(conn, [flaky.ids["track"]], True)[0]
+    conn.commit()
+    flaky.fail_adds = True
+    MO.drain(flaky)
+    flaky.fail_adds = False
+    assert MO.drain(flaky, ids=[row_id])["done"] == 1

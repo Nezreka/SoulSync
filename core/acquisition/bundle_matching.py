@@ -109,6 +109,8 @@ class ExpectedTrack:
     def key(self) -> str:
         if self.release_track_id is not None:
             return f"release_track:{self.release_track_id}"
+        if self.recording_id is None and self.track_id is not None:
+            return f"track:{self.track_id}"  # an album without editions
         return f"recording:{self.recording_id}"
 
     def to_dict(self) -> Dict[str, Any]:
@@ -174,6 +176,33 @@ def _edition_tracks(conn: Any, edition_id: int) -> Tuple[ExpectedTrack, ...]:
     return _expected_from_rows(rows)
 
 
+def _album_tracks(conn: Any, album_id: int) -> Tuple[ExpectedTrack, ...]:
+    """The album's own track rows, for an album whose editions were never
+    materialized. Without this the expected list was empty and every bundle
+    for it sat in needs_review forever, however well its files matched."""
+    try:
+        rows = _album_track_rows(conn, album_id)
+    except Exception:  # noqa: BLE001 - no track table yet: no tracklist
+        return ()
+    return _expected_from_rows(rows)
+
+
+def _album_track_rows(conn: Any, album_id: int) -> Sequence[Any]:
+    return conn.execute(
+        """SELECT NULL AS release_track_id,
+                  NULL AS recording_id,
+                  t.id AS track_id,
+                  COALESCE(t.disc_number, 1) AS disc_number,
+                  t.track_number AS track_number,
+                  t.title AS title,
+                  t.duration AS duration_ms
+             FROM lib2_tracks t
+            WHERE t.album_id = ? AND t.canonical_track_id IS NULL
+            ORDER BY COALESCE(t.disc_number, 1), t.track_number, t.id""",
+        (int(album_id),),
+    ).fetchall()
+
+
 def load_expected_tracks(
     conn: Any,
     scope: str,
@@ -190,16 +219,21 @@ def load_expected_tracks(
     scope = str(scope or "").strip().lower()
     entity_id = int(entity_id)
     if scope == "release_edition":
-        return _edition_tracks(conn, entity_id)
+        tracks = _edition_tracks(conn, entity_id)
+        if tracks:
+            return tracks
+        group = conn.execute(
+            "SELECT release_group_id FROM lib2_release_editions WHERE id=?",
+            (entity_id,)).fetchone()
+        return _album_tracks(conn, int(group[0])) if group and group[0] else ()
     if scope == "release_group":
         row = conn.execute(
             """SELECT id FROM lib2_release_editions
                 WHERE release_group_id=? AND is_default=1""",
             (entity_id,),
         ).fetchone()
-        if row is None:
-            return ()
-        return _edition_tracks(conn, int(row[0]))
+        tracks = _edition_tracks(conn, int(row[0])) if row is not None else ()
+        return tracks or _album_tracks(conn, entity_id)
     if scope == "recording":
         rows = conn.execute(
             """SELECT NULL AS release_track_id,

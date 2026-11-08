@@ -42,6 +42,7 @@ _ID3_TEXT_FRAMES = {
     "TPE2": "album_artist",
     "TALB": "album",
     "TDRC": "date",
+    "TSRC": "isrc",
     "TCON": "genre",
     "TRCK": "tracknumber",
     "TPOS": "discnumber",
@@ -350,6 +351,11 @@ def _stringify(value: Any) -> str:
         return ""
     if isinstance(value, str):
         return value.strip()
+    if isinstance(value, (bytes, bytearray)):
+        # MP4 freeform atoms (----:com.apple.iTunes:ARTISTS and the rest) are
+        # bytes. str() on them gave "b'Above & Beyond'", which the credit
+        # splitter then cut into artists called "b'Above" and "Beyond'"
+        return bytes(value).decode("utf-8", errors="replace").strip()
     if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, (list, tuple)):

@@ -86,6 +86,24 @@ def test_resolution_stops_at_the_first_missing_component(root):
     assert resolved == os.path.join(root, 'Artist', 'Album', 'Disc 1')
 
 
+def test_an_album_folder_spells_the_artist_like_its_artist_folder(root):
+    """#1994: the artist folder followed the disk, the album folder under it
+    kept each release's own casing, so '&friends' held '&Friends - Ode Ireti'"""
+    _mk(root, '&friends', 'Single', '&friends - Jackie B (2025)')
+
+    resolved = resolve_existing_case_dir(root, '&Friends/Single/&Friends - Ode Ireti (2023)/Disc 1')
+
+    assert resolved == os.path.join(root, '&friends', 'Single', '&friends - Ode Ireti (2023)', 'Disc 1')
+
+
+def test_a_longer_name_that_only_starts_like_the_artist_is_left_alone(root):
+    _mk(root, 'abba')
+
+    resolved = resolve_existing_case_dir(root, 'ABBA/ABBAcadabra - Live')
+
+    assert resolved == os.path.join(root, 'abba', 'ABBAcadabra - Live')
+
+
 # ── safety ───────────────────────────────────────────────────────────────────
 
 def test_the_root_itself_is_never_rewritten(root):

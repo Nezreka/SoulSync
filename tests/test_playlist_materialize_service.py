@@ -129,7 +129,7 @@ def test_materialize_from_batch_all_owned(tmp_path: Path):
     assert summary is not None and summary.linked + summary.copied == 2
     pdir = Path(summary.playlist_dir)
     assert pdir.parent == tmp_path / "Playlists"
-    assert pdir.name.startswith("profile-1-spotify-")
+    assert pdir.name == "Smack That"  # the playlist's name, as in 3.6.1
     for name, orig in [("A.mp3", owned[0]), ("B.mp3", owned[1])]:
         entry = pdir / name
         assert entry.is_file()

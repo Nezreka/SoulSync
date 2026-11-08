@@ -78,7 +78,11 @@ export const realEffects: Effects = {
     if (!body.success && body.status !== 'already_watching')
       throw new Error(body.error || 'follow failed');
   },
-  complete: (purposes) => postOk('setup/complete', { purposes }),
+  async complete(purposes) {
+    await postOk('setup/complete', { purposes });
+    // the server hid what wasn't picked (#1909), show it in the sidebar now
+    await window.SoulSyncFeatures?.load();
+  },
   async lock(account) {
     if (account.lock === 'pin') {
       await postOk('profiles/1/set-pin', { pin: account.pin });

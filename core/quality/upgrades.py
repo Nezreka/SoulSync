@@ -20,35 +20,86 @@ UNTIL_CUTOFF_POLICIES = frozenset({'until_cutoff', 'until_top'})
 
 
 def annotate_enhanced_payload(database, payload: dict) -> dict:
-    """Keep the enhanced artist adapter, using native live-profile evaluation."""
-    from core.library2.quality_eval import audio_quality_from_file, effective_track_profile, quality_issue
-    from core.library2.track_files import primary_file_row
+    """Mark tracks that could be better and count them per album, in place.
+
+    The badges are decoration on the enhanced artist view: a database error
+    while working them out leaves the view without badges, never a 500 for
+    the whole artist (3.6.1 never failed the view over them). All of them are
+    worked out first and applied together, so a failure halfway never shows
+    half an artist badged.
+    """
+    albums = payload.get('albums') or []
+    try:
+        found = _enhanced_upgrades(database, albums)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        logger.warning('could-be-better badges unavailable for this artist: %s', exc)
+        found = None
+    for album in albums:
+        count = 0
+        for track in album.get('tracks') or []:
+            track.pop('quality_upgrade', None)
+            hit = (found or {}).get(id(track))
+            if hit:
+                track['quality_upgrade'] = hit
+                count += 1
+        album['upgradable_count'] = count
+    return payload
+
+
+def _enhanced_upgrades(database, albums: list) -> dict:
+    """``{id(track dict): quality_upgrade}`` for the tracks below their
+    profile's cutoff. Native live-profile evaluation; raises on a db error."""
+    from core.library2.profile_lookup import effective_quality_profile
+    from core.library2.quality_eval import audio_quality_from_file, quality_issue
+    from core.library2.track_files import primary_file_rows
 
     conn = database._get_connection()
     try:
-        for album in payload.get('albums') or []:
-            count = 0
+        # one read for every track's primary file and one per distinct profile:
+        # this ran three queries per track, every visit to an enhanced artist
+        ids = []
+        for album in albums:
             for track in album.get('tracks') or []:
-                track.pop('quality_upgrade', None)
+                try:
+                    ids.append(int(track['id']))
+                except (KeyError, TypeError, ValueError):
+                    pass
+        files = primary_file_rows(conn, ids)
+        profile_rows: dict = {}
+
+        def profile_for(tid: int) -> dict:
+            resolved = effective_quality_profile(conn, 'tracks', tid)
+            row = profile_rows.get(resolved['id'])
+            if row is None:
+                found = conn.execute('SELECT * FROM quality_profiles WHERE id=?',
+                                     (resolved['id'],)).fetchone()
+                if found is None:
+                    raise LookupError('Effective quality profile not found')
+                row = profile_rows[resolved['id']] = dict(found)
+            return {**row, 'source': resolved['source'], 'source_id': resolved['source_id'],
+                    'explicit': resolved['explicit']}
+
+        out: dict = {}
+        for album in albums:
+            for track in album.get('tracks') or []:
                 try:
                     tid = int(track['id'])
-                    file = primary_file_row(conn, tid, scoped=True)
-                    profile = effective_track_profile(conn, tid)
-                    if (not file or (file.get('file_state') or 'active') != 'active'
-                            or quality_issue(file, profile) != 'below_cutoff'):
+                    file = files.get(tid)
+                    if not file or (file.get('file_state') or 'active') != 'active':
+                        continue
+                    profile = profile_for(tid)
+                    if quality_issue(file, profile) != 'below_cutoff':
                         continue
                     measured = audio_quality_from_file(file)
-                    track['quality_upgrade'] = {
+                    out[id(track)] = {
                         'lib2_track_id': tid, 'quality_profile_id': profile['id'],
                         'current': measured.label(),
                     }
-                    count += 1
                 except (LookupError, TypeError, ValueError) as exc:
                     logger.debug('enhanced track quality unavailable: %s', exc)
-            album['upgradable_count'] = count
+        return out
     finally:
         conn.close()
-    return payload
 
 
 def upgrade_bar(profile_id=None) -> Tuple[list, Optional[int], str]:

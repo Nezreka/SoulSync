@@ -62,7 +62,11 @@ class _FakeDB:
 _SEED_DEFAULTS = {"seed_ratio_goal": 0.0, "seed_time_goal_hours": 0, "seed_remove_data": True,
                   "seed_mode": "soulsync",
                   # per indexer rules, empty until someone sets one
-                  "seed_overrides": {}}
+                  "seed_overrides": {},
+                  # Remove Completed (usenet) is opt-in: off until someone picks it
+                  "usenet_remove_completed": "off",
+                  # a release the client failed is replaced by the next one: on
+                  "redownload_failed": True}
 
 
 def test_load_defaults():
@@ -350,3 +354,10 @@ def test_the_ytdlp_card_loads_where_it_actually_lives():
     opener = js.split("function openSourceModal(", 1)[1].split("\n}", 1)[0]
     assert "loadYtdlpStatus" in opener
 
+
+
+def test_redownload_failed_can_be_switched_off():
+    db = _FakeDB()
+    assert save(db, {"redownload_failed": False})["redownload_failed"] is False
+    assert load(db)["redownload_failed"] is False
+    assert save(db, {"redownload_failed": True})["redownload_failed"] is True

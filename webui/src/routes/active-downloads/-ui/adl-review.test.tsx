@@ -370,6 +370,43 @@ describe('AdlQuarantineRow', () => {
     // "03 Xtal.flac" is the same track as "Xtal": nothing lit
     expect(container.querySelector('.dlc-compare-diff')).toBeNull();
   });
+
+  it('puts the expected length beside the file length, a different cut lit (#2001)', () => {
+    const { container } = render(
+      <AdlQuarantineRow
+        entry={entry({ expected_length_s: 266, actual_length_s: 784 })}
+        open
+        onToggle={vi.fn()}
+        handlers={handlers()}
+      />,
+    );
+    const text = container.querySelector('.dlc-compare')?.textContent || '';
+    expect(text).toContain('Length');
+    expect(text).toContain('4:26');
+    expect(container.querySelector('.dlc-compare-diff')?.textContent).toBe('13:04');
+  });
+
+  it('leaves the length out when either side is unknown, and a near match unlit', () => {
+    const unknown = render(
+      <AdlQuarantineRow
+        entry={entry({ expected_length_s: 266, actual_length_s: null })}
+        open
+        onToggle={vi.fn()}
+        handlers={handlers()}
+      />,
+    );
+    expect(unknown.container.querySelector('.dlc-compare')?.textContent).not.toContain('Length');
+    unknown.unmount();
+    const close = render(
+      <AdlQuarantineRow
+        entry={entry({ expected_length_s: 266, actual_length_s: 270 })}
+        open
+        onToggle={vi.fn()}
+        handlers={handlers()}
+      />,
+    );
+    expect(close.container.querySelector('.dlc-compare-diff')).toBeNull();
+  });
 });
 
 describe('AdlQuarantineList grouping', () => {

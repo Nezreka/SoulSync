@@ -383,8 +383,9 @@ class MusicAssistantClient(MediaServerBase):
         chosen = self.source_instance or sources[0]['key']
         folder = self.source_folder(chosen)
         if not folder:
-            return False, (f"Connected to Music Assistant {self.server_version} as {self.user_name}, but the token "
-                           "cannot read the source's folder (config.providers.read).")
+            return False, (f"Connected to Music Assistant {self.server_version} as {self.user_name}, but it didn't "
+                           "say which folder the source reads. Enter it under Source folder, as Music Assistant "
+                           "sees it (for example /media/music).")
         names = ', '.join(s['title'] for s in sources)
         return True, (f"Connected to Music Assistant {self.server_version} as {self.user_name}; "
                       f"source {chosen} reads {folder} (sources: {names})")
@@ -433,6 +434,10 @@ class MusicAssistantClient(MediaServerBase):
                 folder = answer.get('path') or answer.get('folder')
             except MusicAssistantError:
                 folder = None
+        # 2.10.9 keeps the folder in setup data it never sends and has no
+        # storage/source_folder yet, so the user tells us (#1992)
+        if not folder and (not self.source_instance or instance == self.source_instance):
+            folder = str(config_manager.get('music_assistant.source_folder', '') or '').strip() or None
         folder = str(folder).rstrip('/') if folder else None
         if instance == self.source_instance:
             self._source_folder = folder

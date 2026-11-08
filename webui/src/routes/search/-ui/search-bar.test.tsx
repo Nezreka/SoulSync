@@ -164,11 +164,13 @@ describe('SearchBar', () => {
     expect(input().getAttribute('spellcheck')).toBe('false');
   });
 
-  it('puts the source picker inside the field, before the input', () => {
+  it('puts the source picker inside the field, after the input (#1909)', () => {
+    // people come to type. the catalogue picker up front was the first thing a
+    // new user read, so the input leads and the picker sits at the end
     render(<Host picker={<button type="button">Spotify</button>} />);
     const box = document.getElementById('enhanced-search-bar') as HTMLElement;
-    expect(box.firstElementChild?.textContent).toBe('Spotify');
-    expect(box.contains(input())).toBe(true);
+    expect(box.firstElementChild).toBe(input());
+    expect(box.lastElementChild?.textContent).toBe('Spotify');
   });
 
   it('shows a spinner only while searching', () => {

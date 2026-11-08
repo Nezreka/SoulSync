@@ -284,3 +284,33 @@ def test_a_real_upgrade_is_not_flagged_as_kept(import_case):
     c.run()
     assert c.existing.read_bytes() == b"better audio"
     assert not pipeline.kept_existing_library_file(c.context)
+
+
+def _replacing(c):
+    c.context["track_info"].pop("source_info")
+    c.profile["replace_lower_quality"] = True
+
+
+def test_a_truncated_download_never_replaces_the_library_file(import_case, monkeypatch):
+    """upstream guarded this on its finder route and the test went with that
+    route. the replace route still has to hold it: a better-ranked file that
+    is a fraction of the length is a broken download, not an upgrade."""
+    c = import_case
+    _replacing(c)
+    monkeypatch.setattr(pipeline, "_audio_length_seconds",
+                        lambda path: 30.0 if path == str(c.incoming) else 200.0)
+    monkeypatch.setattr(pipeline, "move_to_quarantine", lambda *a, **k: None)
+    c.run()
+    assert c.existing.read_bytes() == b"old audio"
+    assert not c.context.get("_pipeline_import_succeeded")
+
+
+def test_a_corrupt_download_never_replaces_the_library_file(import_case, monkeypatch):
+    c = import_case
+    _replacing(c)
+    monkeypatch.setattr(pipeline, "check_audio_integrity",
+                        lambda *a, **k: IntegrityResult(ok=False, reason="broken", checks={}))
+    monkeypatch.setattr(pipeline, "move_to_quarantine", lambda *a, **k: None)
+    c.run()
+    assert c.existing.read_bytes() == b"old audio"
+    assert c.context["_integrity_failure_msg"] == "broken"

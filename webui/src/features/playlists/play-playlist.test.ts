@@ -127,3 +127,32 @@ describe('playPlaylist', () => {
     );
   });
 });
+
+describe('the stored library link', () => {
+  // the library check stamps library_track_id on a mirrored row. play
+  // ignored it and guessed again by title + artist, so "Don't Chart" (credited
+  // "Cardi B, Grand Theft Auto VI") was skipped though the playlist knew the file
+  it('travels with the row, from the stamp in extra_data', () => {
+    const [pair] = toResolvePairs([
+      {
+        track_name: 'Don’t Chart',
+        artist_name: 'Cardi B',
+        extra_data: JSON.stringify({ in_library: true, library_track_id: '591381' }),
+      },
+    ]);
+    expect(pair.library_track_id).toBe('591381');
+  });
+
+  it('is left off when the check said the song is not owned, or never ran', () => {
+    const pairs = toResolvePairs([
+      {
+        track_name: 'A',
+        artist_name: 'x',
+        extra_data: '{"in_library": false, "library_track_id": "9"}',
+      },
+      { track_name: 'B', artist_name: 'x', extra_data: 'not json' },
+      { track_name: 'C', artist_name: 'x' },
+    ]);
+    expect(pairs.every((p) => !('library_track_id' in p))).toBe(true);
+  });
+});

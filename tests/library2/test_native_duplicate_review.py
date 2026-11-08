@@ -332,3 +332,208 @@ def test_unreadable_playlists_at_apply_keep_the_scans_playlist_protection(librar
     result = apply(library, candidate, approved=True, keep_file_id=bf, server_source="plex")
     assert result["success"] is True and result["removed_file_ids"] == []
     assert pa.exists() and states(library)[af] == "active"
+
+
+def test_keep_best_still_sees_a_hardlink_under_another_name(library):
+    """applying one finding no longer walks every file in the library, only
+    the rows that could be the same physical file: a hardlink under another
+    name still protects it."""
+    import os
+    _a, af, pa = copy(library)
+    _b, bf, pb = copy(library, album="Other", bit_depth=24)
+    candidate = review(library)[0]
+    alias = pa.parent / "renamed alias.flac"
+    os.link(pa, alias)
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,owner_profile_id,size) VALUES(?,?,9,?)",
+                     (_b, str(alias), os.path.getsize(pa)))
+        conn.commit()
+    result = apply(library, candidate, approved=True, keep_file_id=bf)
+    assert result["success"] is True
+    assert pa.exists()
+    assert states(library)[af] == "active"
+
+
+def _typed(library, tid, album_type):
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET album_type=? WHERE id=(SELECT album_id FROM lib2_tracks WHERE id=?)",
+                     (album_type, tid))
+        conn.commit()
+
+
+@pytest.mark.parametrize("single_first", [True, False])
+def test_the_album_copy_is_kept_over_the_single_of_the_same_quality(library, single_first):
+    """3.6.1's Single/Album Dedup kept the album version. Same quality, so
+    nothing is lost, and the album keeps its numbering whichever row is newer."""
+    order = [("Song - Single", "single"), ("Album", "album")]
+    if not single_first:
+        order.reverse()
+    made = {}
+    for album, kind in order:
+        tid, fid, _ = copy(library, album=album, fmt="flac", bit_depth=16, sample_rate=44100)
+        _typed(library, tid, kind)
+        made[kind] = fid
+    candidates = review(library)
+    assert len(candidates) == 1
+    assert candidates[0]["recommended_file_id"] == made["album"]
+
+
+def test_a_better_single_is_never_given_up_for_the_album(library):
+    single, single_fid, _ = copy(library, album="Song - Single", fmt="flac", bit_depth=24, sample_rate=96000)
+    album, album_fid, _ = copy(library, album="Album", fmt="flac", bit_depth=16, sample_rate=44100)
+    _typed(library, single, "single")
+    _typed(library, album, "album")
+    candidates = review(library)
+    assert candidates[0]["recommended_file_id"] == single_fid
+
+
+
+def test_a_hand_tagged_file_is_never_one_of_a_pair(library):
+    """3.6.1 left hand-tagged files out before grouping: the live take or the
+    bootleg someone tagged by hand next to the studio copy is not a
+    duplicate, and Keep Best keeping it would quarantine the studio copy."""
+    from database.music_database import MusicDatabase
+    _a, _af, studio = copy(library)
+    _b, _bf, bootleg = copy(library, album="Live Bootleg", bit_depth=24)
+    _c, _cf, _third = copy(library, album="Other")
+    library[0].manual_path_keys = lambda: {MusicDatabase.manual_path_key(str(bootleg))}
+
+    groups = review(library)
+
+    assert len(groups) == 1
+    paths = {t["file_path"] for t in groups[0]["tracks"]}
+    assert str(bootleg) not in paths and str(studio) in paths
+
+
+def test_keep_best_refuses_a_keeper_tagged_by_hand_after_the_review(library):
+    from database.music_database import MusicDatabase
+    _a, _af, studio = copy(library)
+    _b, bf, bootleg = copy(library, album="Live Bootleg", bit_depth=24)
+    candidate = review(library)[0]
+    library[0].manual_path_keys = lambda: {MusicDatabase.manual_path_key(str(bootleg))}
+
+    result = apply(library, candidate, approved=True, keep_file_id=bf)
+
+    assert result["success"] is False and "tagged by hand" in result["error"]
+    assert studio.exists() and bootleg.exists()
+
+
+# --- #1263: "Various Artists" is never artist evidence --------------------------
+
+
+def _performer(library, tid, name=None, tag=None):
+    import json
+    with closing(library[0]._get_connection()) as conn:
+        if name is not None:
+            conn.execute("UPDATE lib2_tracks SET track_artist=? WHERE id=?", (name, tid))
+        if tag is not None:
+            conn.execute("UPDATE lib2_track_files SET tags_json=? WHERE track_id=?",
+                         (json.dumps({"artist": tag}), tid))
+        conn.commit()
+
+
+def test_two_performers_intro_on_one_compilation_are_not_duplicates(library):
+    """every song on a compilation carries the album's "Various Artists"
+    credit, so two different performers' "Intro" matched on it"""
+    a, _af, _ = copy(library, artist="Various Artists", album="Now 99", title="Intro", isrc=None)
+    b, _bf, _ = copy(library, artist="Various Artists", album="Now 99 Disc 2", title="Intro", isrc=None)
+    _performer(library, a, "Kendrick Lamar")
+    _performer(library, b, tag="Taylor Swift")
+    assert review(library) == []
+
+
+def test_a_compilation_song_still_pairs_with_its_performers_own_copy(library):
+    """the #1263 match itself: the compilation copy and the artist's album copy"""
+    comp, _cf, _ = copy(library, artist="Various Artists", album="Now 99", title="Alright", isrc=None)
+    _own, _of, _ = copy(library, artist="Kendrick Lamar", album="To Pimp a Butterfly",
+                        title="Alright", isrc=None)
+    _performer(library, comp, tag="Kendrick Lamar")
+    groups = review(library)
+    assert len(groups) == 1 and groups[0]["count"] == 2
+
+
+def test_compilation_songs_with_no_performer_named_never_pair_on_the_credit(library):
+    copy(library, artist="Various Artists", album="Now 99", title="Intro", isrc=None)
+    copy(library, artist="Various Artists", album="Now 100", title="Intro", isrc=None)
+    assert review(library) == []
+
+
+# --- Keep Best says what stopped it (3.6.1's PUID/PGID hint) ---------------------
+
+
+def _failing_keep_best(library, monkeypatch, error):
+    from core.library import deleted_quarantine
+    _a, _af, pa = copy(library)
+    _b, bf, pb = copy(library, album="Other", bit_depth=24)
+    candidate = review(library)[0]
+
+    def move(source, target, *args, **kwargs):
+        raise error
+    monkeypatch.setattr(deleted_quarantine.shutil, "move", move)
+    result = apply(library, candidate, approved=True, keep_file_id=bf)
+    return result, pa, pb
+
+
+def test_a_permission_failure_names_the_file_and_the_puid_pgid_fix(library, monkeypatch):
+    result, pa, pb = _failing_keep_best(
+        library, monkeypatch, PermissionError(13, "Permission denied"))
+    assert result["success"] is False
+    assert str(pa) in result["error"] and "Permission denied" in result["error"]
+    assert "PUID/PGID" in result["error"]
+    assert "Nothing was removed" in result["error"]
+    assert pa.exists() and pb.exists()
+
+
+def test_another_failure_gives_its_reason_without_the_permission_hint(library, monkeypatch):
+    result, _pa, _pb = _failing_keep_best(library, monkeypatch, OSError("No space left on device"))
+    assert "No space left on device" in result["error"]
+    assert "PUID" not in result["error"]
+
+
+# --- slskd's "_<timestamp>" twin with no artist tag ------------------------------
+
+
+def _named(library, tid, name):
+    db, _config, root, _transfer = library
+    with closing(db._get_connection()) as conn:
+        old = conn.execute("SELECT path FROM lib2_track_files WHERE track_id=?", (tid,)).fetchone()[0]
+        new = os.path.join(str(root), name)
+        os.rename(old, new)
+        conn.execute("UPDATE lib2_track_files SET path=? WHERE track_id=?", (new, tid))
+        conn.commit()
+    return new
+
+
+@pytest.mark.parametrize("blank", ["", "Unknown Artist"])
+def test_an_slskd_twin_with_no_artist_pairs_on_name_and_length(library, blank):
+    """3.6.1 paired "Song.flac" with slskd's "Song_638662543210987654.flac" when the
+    twin carried no artist: same name, same length"""
+    a, _af, _ = copy(library, artist="M83", title="Midnight City", isrc=None)
+    b, _bf, _ = copy(library, album="Unknown Album", artist=blank or "Unknown Artist",
+                     title="midnight city (1)", isrc=None)
+    _named(library, a, "Midnight City.flac")
+    _named(library, b, "Midnight City_638662543210987654.flac")
+    if blank == "":
+        with closing(library[0]._get_connection()) as conn:
+            conn.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (b,))
+            conn.execute("UPDATE lib2_tracks SET track_artist=NULL WHERE id=?", (b,))
+            conn.commit()
+    groups = review(library)
+    assert len(groups) == 1 and groups[0]["count"] == 2
+
+
+def test_a_blank_artist_twin_of_another_length_is_not_paired(library):
+    a, _af, _ = copy(library, artist="M83", title="Midnight City", isrc=None)
+    b, _bf, _ = copy(library, album="Unknown Album", artist="Unknown Artist",
+                     title="midnight city (1)", isrc=None, duration=260000)
+    _named(library, a, "Midnight City.flac")
+    _named(library, b, "Midnight City_638662543210987654.flac")
+    assert review(library) == []
+
+
+def test_a_named_different_artist_twin_is_still_not_paired(library):
+    a, _af, _ = copy(library, artist="M83", title="Intro", isrc=None)
+    b, _bf, _ = copy(library, album="Other", artist="Someone Else", title="Intro (live)", isrc=None)
+    _named(library, a, "Intro.flac")
+    _named(library, b, "Intro_638662543210987654.flac")
+    assert review(library) == []

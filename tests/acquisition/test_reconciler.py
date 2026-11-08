@@ -272,3 +272,34 @@ def test_completed_import_requires_real_indexed_processed_files(conn, tmp_path):
     assert report.applied == 1
     assert report.counts["acquisition_import_completed_indexed"] == 1
     assert get_request(conn, request.id).status == "completed"
+
+
+def test_an_unindexed_grab_is_not_name_searched_every_tick(conn, tmp_path, monkeypatch):
+    """the name search reads every file row; a grab that never gets indexed
+    ran it on every 15 s monitor tick. a miss is believed for a few minutes,
+    and the indexed path is still found at once by its exact match"""
+    from core.acquisition import reconciler
+
+    final = tmp_path / "orphan.flac"
+    final.write_bytes(b"audio")
+    normalized = reconciler._normalized_path(str(final))
+    searches = []
+    real_execute = conn.execute
+
+    class _Spy:
+        def __getattr__(self, name):
+            return getattr(conn, name)
+
+        def execute(self, sql, *args):
+            if "LIKE" in sql:
+                searches.append(sql)
+            return real_execute(sql, *args)
+
+    assert normalized not in reconciler._IndexedPaths(_Spy())
+    assert normalized not in reconciler._IndexedPaths(_Spy())
+    assert len(searches) == 1
+
+    real_execute("INSERT INTO lib2_track_files(track_id, path) VALUES(1, ?)", (normalized,))
+    conn.commit()
+    assert normalized in reconciler._IndexedPaths(_Spy())
+

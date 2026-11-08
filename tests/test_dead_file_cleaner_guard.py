@@ -117,3 +117,107 @@ def test_native_rescan_failure_fails_closed(monkeypatch):
 
     assert result.errors == 1
     assert result.findings_created == 0
+
+
+# --- 3.6.1: a library out of reach says why, not "0 findings" --------------------
+
+
+def _unreachable(monkeypatch, *, total, missing, deferred=0, server=None):
+    before = [_subject(i) for i in range(total)]
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: list(before))
+    gone = {i for i in range(missing)}  # the first ``missing`` files are out of reach
+
+    def rescan(_db, **kw):
+        chunk = kw["file_ids"]
+        lost = sum(1 for f in chunk if f in gone)
+        return {"scanned": len(chunk) - lost, "missing": lost,
+                "mass_missing_deferred": lost if deferred else 0}
+    monkeypatch.setattr("core.library2.scan.rescan_files", rescan)
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
+    progress = []
+    context = JobContext(
+        db=SimpleNamespace(), transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: default,
+                                       get_active_media_server=lambda: server),
+        create_finding=lambda **_k: (_ for _ in ()).throw(AssertionError("no finding")),
+        report_progress=lambda **kw: progress.append(kw),
+    )
+    return DeadFileCleanerJob().scan(context), progress
+
+
+def test_a_mass_unreachable_library_says_it_is_a_mapping_problem(monkeypatch):
+    """#828 / 3.6.1: every path unreachable is a mount or mapping problem;
+    the run says so, with an example path and the navidrome advice"""
+    result, progress = _unreachable(monkeypatch, total=600, missing=600, deferred=600,
+                                    server="navidrome")
+    assert result.findings_created == 0
+    assert "600 of 600 files" in result.stopped_early
+    assert "/music/0.flac" in result.stopped_early
+    assert "Report Real Path" in result.stopped_early
+    assert any(p.get("log_type") == "error" and "path-mapping" in p.get("log_line", "")
+               for p in progress)
+
+
+def test_half_a_small_library_unreachable_points_at_music_paths(monkeypatch):
+    result, _ = _unreachable(monkeypatch, total=30, missing=15, server="plex")
+    assert "15 of 30 files" in result.stopped_early
+    assert "Music Paths" in result.stopped_early
+
+
+def test_a_few_missing_files_are_just_missing_files(monkeypatch):
+    result, progress = _unreachable(monkeypatch, total=30, missing=2)
+    assert result.stopped_early == ""
+    assert not any(p.get("log_type") == "error" for p in progress)
+
+
+def test_the_saved_guard_settings_still_decide(monkeypatch):
+    """found in the second #1062 review: 3.6.1 read max_unresolved_fraction
+    and min_tracks_for_guard; v2 hardcoded 0.5 / 25 while the Tools page still
+    showed the saved values"""
+    before = [_subject(i) for i in range(30)]
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: list(before))
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda _db, **kw: {
+        "scanned": len(kw["file_ids"]) - 18, "missing": 18})
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
+
+    def run(settings):
+        context = JobContext(
+            db=SimpleNamespace(), transfer_folder="/music",
+            config_manager=SimpleNamespace(
+                get=lambda key, default=None: settings if key.endswith(".settings") else default,
+                get_active_media_server=lambda: None),
+            create_finding=lambda **_k: True)
+        return DeadFileCleanerJob().scan(context).stopped_early
+
+    assert run({}) != ""                                        # 18 of 30 >= 0.5
+    assert run({"max_unresolved_fraction": 0.9}) == ""          # the user's 0.9
+    assert run({"min_tracks_for_guard": 100}) == ""             # too small a library
+    assert run({"max_unresolved_fraction": "junk"}) != ""       # garbage: default
+
+
+def test_a_run_that_trips_the_guard_files_nothing(monkeypatch):
+    """a file confirmed missing in an earlier healthy run waited, in 3.6.1,
+    for a run that could reach the library. v2 filed it while the guard said
+    the library was out of reach."""
+    total, lost = 30, 20
+    before = [_subject(i) for i in range(total)]
+    after = [_subject(i, "missing_confirmed" if i == 25 else "active") for i in range(total)]
+    calls = []
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: calls.append(1) or list(before if len(calls) == 1 else after))
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda _db, **kw: {
+        "scanned": len(kw["file_ids"]) - lost, "missing": lost})
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
+    findings = []
+    context = JobContext(
+        db=SimpleNamespace(), transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: default,
+                                       get_active_media_server=lambda: None),
+        create_finding=lambda **kw: findings.append(kw) or True)
+
+    result = DeadFileCleanerJob().scan(context)
+
+    assert result.stopped_early
+    assert findings == []

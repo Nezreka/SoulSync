@@ -77,6 +77,7 @@ def propose_album_edition(database, config_manager, album_id, *, mode='active_pr
                 stored_alternatives.setdefault(source, []).append({'album_id': release_id,
                     'tracks': tracks if edition['track_count'] and len(tracks) == edition['track_count'] else None})
         title = album['title']
+        year = album['year'] if 'year' in album.keys() else None
         previous_pin = [album['canonical_source'], album['canonical_album_id']]
 
     order = list(source_order if source_order is not None else configured_entity_source_order('album', source_ids))
@@ -109,10 +110,64 @@ def propose_album_edition(database, config_manager, album_id, *, mode='active_pr
     return {
         **resolved, **subject_details(subject), 'lib2_album_id': int(album_id),
         'album_title': title, 'artist_name': subject.get('artist_name'),
+        'year': year,
         'observed_release_ids': source_ids, 'observed_pin': previous_pin,
         'owned_track_ids': sorted(by_track),
         'review_scope': _review_scope(),
     }
+
+
+def _pct(value) -> str:
+    return f"{round(value * 100)}%" if isinstance(value, (int, float)) else "n/a"
+
+
+def describe_edition_proposal(proposal: dict) -> str:
+    """Why this edition, in words someone can judge before applying it.
+
+    3.6.1's Resolve Canonical Album Versions said it this way: the release and
+    its confidence, the fit to the owned files (count, durations, titles),
+    what the album is linked to now, which other sources it beat, and the
+    release's tracklist. The v2 finding kept only "N% fit", so a suggestion
+    was approved blind.
+    """
+    artist = proposal.get('artist_name') or ''
+    album = proposal.get('album_title') or ''
+    head = f"{artist} — {album}".strip(" —")
+    if proposal.get('year'):
+        head += f" ({proposal['year']})"
+    lines = [
+        head,
+        f"Suggests {proposal.get('source')} release {proposal.get('album_id')} "
+        f"(confidence {_pct(proposal.get('score'))}).",
+        f"Fit to your library: {proposal.get('file_track_count', '?')} owned tracks vs "
+        f"{proposal.get('release_track_count', '?')} tracks on this release — "
+        f"track count {_pct(proposal.get('count_fit'))}, "
+        f"durations {_pct(proposal.get('duration_fit'))}, "
+        f"titles {_pct(proposal.get('title_fit'))}.",
+    ]
+    linked = proposal.get('observed_release_ids') or {}
+    if linked:
+        lines.append("Currently linked: " + ", ".join(f"{s}={i}" for s, i in linked.items()) + ".")
+    pin = proposal.get('observed_pin') or []
+    if len(pin) == 2 and pin[0] and pin[1]:
+        lines.append(f"Currently pinned: {pin[0]} release {pin[1]}.")
+    winner = (str(proposal.get('source')), str(proposal.get('album_id')))
+    candidates = proposal.get('candidates') or []
+    others = [c for c in candidates
+              if (str(c.get('source')), str(c.get('album_id'))) != winner]
+    if others:
+        lines.append("Beat: " + ", ".join(
+            f"{c.get('source')} {c.get('album_id')} {_pct(c.get('score'))}"
+            f" ({c.get('track_count', '?')} tk)" for c in others) + ".")
+    elif len(candidates) == 1:
+        lines.append("Only this release was a candidate for this album.")
+    titles = proposal.get('release_track_titles') or []
+    if titles:
+        shown = "; ".join(f"{i + 1}. {t}" for i, t in enumerate(titles[:25]))
+        more = f" (+{len(titles) - 25} more)" if len(titles) > 25 else ""
+        lines.append(f"Release tracks: {shown}{more}")
+    lines.append("Apply to confirm this edition; no automatic pin is made.")
+    return "\n".join(line for line in lines if line)
 
 
 def _review_scope():

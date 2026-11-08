@@ -1177,8 +1177,6 @@ async function openDownloadMissingModalForTidal(virtualPlaylistId, playlistName,
     }
     modal.style.display = 'flex';
     hideLoadingOverlay();
-    // owned/missing per track straight away, not after Begin Analysis (#1910)
-    if (typeof previewModalOwnership === 'function') void previewModalOwnership(virtualPlaylistId);
 }
 
 
@@ -8009,7 +8007,14 @@ async function cancelYouTubeSync(urlHash) {
     try {
         console.log('❌ Cancelling YouTube sync:', urlHash);
 
-        const response = await fetch(`/api/youtube/sync/cancel/${urlHash}`, {
+        // a ListenBrainz playlist has its own cancel; the YouTube one looked
+        // the mbid up in the YouTube states and answered 404
+        const isListenBrainz = typeof listenbrainzPlaylistStates !== 'undefined'
+            && !!listenbrainzPlaylistStates[urlHash];
+        const cancelUrl = isListenBrainz
+            ? `/api/listenbrainz/sync/cancel/${urlHash}`
+            : `/api/youtube/sync/cancel/${urlHash}`;
+        const response = await fetch(cancelUrl, {
             method: 'POST'
         });
 

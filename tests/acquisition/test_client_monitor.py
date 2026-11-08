@@ -364,6 +364,61 @@ def test_failed_job_fails_request_and_blocklists_exact_candidate(conn):
     assert tuple(row) == (candidate.id, "candidate_failure")
 
 
+def test_a_job_deleted_in_the_client_ends_the_grab_without_blocklisting(conn):
+    """someone removing the job in SABnzbd is not the release failing: the
+    request ends, the release stays available for the next search"""
+    request, _candidate = _linked_grab(conn, "dl-deleted", external_job_id="job-deleted")
+    snapshot = UsenetClientSnapshot(
+        client="FakeUsenetAdapter", category="soulsync",
+        jobs=(UsenetJobSnapshot(id="job-deleted", name="Artist - Album", state="failed",
+                                category="soulsync", save_path=None, error="Deleted in SABnzbd",
+                                removed_by_user=True),),
+    )
+
+    result = reconcile_usenet_snapshot(conn, snapshot)
+
+    assert result.failed == ("dl-deleted",)
+    assert get_request(conn, request.id).status == "failed"
+    assert conn.execute("SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
+
+
+def test_one_inconsistent_grab_does_not_undo_the_others(conn, monkeypatch):
+    """the snapshot is one transaction: a grab whose request moved on raised
+    and rolled back every other grab's transition, on every cycle"""
+    from core.acquisition import client_monitor
+
+    good, _ = _linked_grab(conn, "dl-good", external_job_id="job-good")
+    _linked_grab(conn, "dl-bad", external_job_id="job-bad")
+    real = client_monitor.record_grab_outcome
+
+    def outcome(c, download_id, **kw):
+        if download_id == "dl-bad":
+            raise ValueError("request is no longer grabbing")
+        return real(c, download_id, **kw)
+
+    monkeypatch.setattr(client_monitor, "record_grab_outcome", outcome)
+    snapshot = UsenetClientSnapshot(
+        client="FakeUsenetAdapter", category="soulsync",
+        jobs=(_job("job-bad", state="failed", error="x"), _job("job-good", state="failed", error="y")),
+    )
+
+    result = reconcile_usenet_snapshot(conn, snapshot)
+
+    assert result.failed == ("dl-good",)
+    assert get_request(conn, good.id).status == "failed"
+
+
+def test_sabnzbd_marks_a_deleted_history_job_as_removed_by_its_user():
+    from core.usenet_clients.sabnzbd import SABnzbdAdapter
+
+    adapter = SABnzbdAdapter.__new__(SABnzbdAdapter)
+    deleted = adapter._parse_history_slot({"nzo_id": "n1", "name": "A", "status": "Deleted"})
+    failed = adapter._parse_history_slot({"nzo_id": "n2", "name": "B", "status": "Failed",
+                                          "fail_message": "Out of retention"})
+    assert (deleted.state, deleted.removed_by_user, deleted.error) == ("failed", True, "Deleted in SABnzbd")
+    assert (failed.removed_by_user, failed.error) == (False, "Out of retention")
+
+
 def test_record_download_completed_is_idempotent_but_rejects_path_change(conn):
     _linked_grab(conn, "dl-idempotent", external_job_id="job-idempotent")
 

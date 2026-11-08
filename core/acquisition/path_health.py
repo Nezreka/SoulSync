@@ -8,6 +8,9 @@ from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 
 MAPPINGS_KEY = "download_source.usenet_path_mappings"
+# the protocol-neutral key the resolver reads first (album_bundle); the usenet
+# one is the historical spelling and keeps working
+NEUTRAL_MAPPINGS_KEY = "download_source.path_mappings"
 
 
 def _normalized(value: Any) -> str:
@@ -59,8 +62,12 @@ class ReportedPathHealth:
 
 
 def _configured_mappings(config_get: Callable[..., Any]) -> Tuple[Any, ...]:
-    raw = config_get(MAPPINGS_KEY, None) or []
-    return tuple(raw) if isinstance(raw, (list, tuple)) else (raw,)
+    """Every mapping the resolver uses, in its order: the neutral key first."""
+    out: list = []
+    for key in (NEUTRAL_MAPPINGS_KEY, MAPPINGS_KEY):
+        raw = config_get(key, None) or []
+        out.extend(raw if isinstance(raw, (list, tuple)) else (raw,))
+    return tuple(out)
 
 
 def inspect_mapping_configuration(

@@ -438,6 +438,14 @@ def sync_edition_facts(cursor: Any, album_ids: Optional[Any] = None) -> int:
             f" FROM lib2_release_editions e WHERE e.is_default=1 AND {scope}").fetchall():
         album = cursor.execute(f"SELECT {_EDITION_ALBUM_COLUMNS} FROM lib2_albums WHERE id=?",
                                (edition["release_group_id"],)).fetchone()
+        # read first: an UPDATE that changes nothing still takes the write
+        # lock, and the start-up sweep of 71k editions kept it 15s+ (Nov 1 2026)
+        needs_fill = cursor.execute(
+            """SELECT EXISTS (SELECT 1 FROM lib2_release_tracks rt JOIN lib2_tracks t ON t.id=rt.track_id
+                WHERE rt.release_edition_id=? AND t.album_id=?
+                  AND ((rt.track_number IS NULL AND t.track_number IS NOT NULL)
+                       OR (rt.disc_number IS NULL AND t.disc_number IS NOT NULL)))""",
+            (edition["id"], edition["release_group_id"])).fetchone()[0]
         filled = cursor.execute(
             """UPDATE lib2_release_tracks
                   SET track_number=COALESCE(track_number, (SELECT t.track_number FROM lib2_tracks t WHERE t.id=track_id)),
@@ -446,7 +454,7 @@ def sync_edition_facts(cursor: Any, album_ids: Optional[Any] = None) -> int:
                       SELECT t.id FROM lib2_tracks t WHERE t.album_id=?
                          AND ((lib2_release_tracks.track_number IS NULL AND t.track_number IS NOT NULL)
                               OR (lib2_release_tracks.disc_number IS NULL AND t.disc_number IS NOT NULL)))""",
-            (edition["id"], edition["release_group_id"])).rowcount
+            (edition["id"], edition["release_group_id"])).rowcount if needs_fill else 0
         count = _edition_track_count(album) or edition["track_count"]
         slots, numbered, discs = cursor.execute(
             "SELECT COUNT(*), COUNT(track_number),"

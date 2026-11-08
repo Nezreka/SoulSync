@@ -13,7 +13,6 @@ import { albumQueueRows, queueableRows } from '../-library-v2.play';
 import { getServiceUrl } from '../-library-v2.service-links';
 import { filterJiosaavnEntries } from '../../artist-detail/-artist-detail.enrichment';
 import { loadTopTracks, trackArtistLabel } from '../../artist-detail/-artist-detail.top-tracks';
-import { ExportArtistsModal } from './export-modal';
 import extras from './library-index-extras.module.css';
 import { songsStripQueryOptions } from './library-songs';
 import styles from './library-v2-page.module.css';
@@ -188,11 +187,16 @@ type LibraryFilterSearch = {
   page: number;
 };
 
-const MONITORING_LABELS = {
-  all: 'All',
-  monitored: 'Monitored',
-  unmonitored: 'Not monitored',
-} as const;
+/** dev's lists: the artist list filters by the Watchlist, the album list by
+ *  the Wishlist (Library v2 called both "monitoring") */
+function listLabels(albums: boolean) {
+  const list = albums ? 'Wishlist' : 'Watchlist';
+  return {
+    heading: list,
+    labels: { all: 'All', monitored: `On ${list}`, unmonitored: `Not on ${list}` },
+  } as const;
+}
+type MonitoringValue = 'all' | 'monitored' | 'unmonitored';
 
 function sourceFilterLabel(value: string): string {
   const missing = value.startsWith('!');
@@ -255,20 +259,22 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
       {open ? (
         <div className={extras.filterPanel} role="dialog" aria-label="Filters">
           <section>
-            <h4>Monitoring</h4>
-            <div className={extras.segmented} role="group" aria-label="Filter monitoring">
-              {(Object.keys(MONITORING_LABELS) as (keyof typeof MONITORING_LABELS)[]).map(
-                (value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={search.monitored === value}
-                    onClick={() => set({ monitored: value })}
-                  >
-                    {MONITORING_LABELS[value]}
-                  </button>
-                ),
-              )}
+            <h4>{listLabels(albums).heading}</h4>
+            <div
+              className={extras.segmented}
+              role="group"
+              aria-label={`Filter by ${listLabels(albums).heading}`}
+            >
+              {(['all', 'monitored', 'unmonitored'] as MonitoringValue[]).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={search.monitored === value}
+                  onClick={() => set({ monitored: value })}
+                >
+                  {listLabels(albums).labels[value]}
+                </button>
+              ))}
             </div>
           </section>
           {albums ? null : (
@@ -337,7 +343,7 @@ export function LibraryActiveFilters({
   if (search.monitored !== 'all') {
     chips.push({
       key: 'monitored',
-      label: MONITORING_LABELS[search.monitored],
+      label: listLabels(albums).labels[search.monitored],
       clear: { monitored: 'all' },
     });
   }
@@ -394,24 +400,6 @@ export function LibraryRadioButton() {
     >
       <LineIcon name="radio" /> Radio
     </button>
-  );
-}
-
-/** Export artists (watchlist or library, JSON / CSV / text). */
-export function LibraryExportButton() {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        type="button"
-        className={styles.btnGhost}
-        title="Export artists: pick watchlist or whole library, as JSON / CSV / text"
-        onClick={() => setOpen(true)}
-      >
-        <LineIcon name="download" /> Export
-      </button>
-      {open ? <ExportArtistsModal initialScope="library" onClose={() => setOpen(false)} /> : null}
-    </>
   );
 }
 

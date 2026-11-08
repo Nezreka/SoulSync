@@ -95,6 +95,12 @@ def test_library_ids_finds_the_workers_ids_for_the_same_song(mdb):
     assert library_ids(mdb, "Not Like Us", "Someone Else") == {}
 
 
+def test_library_ids_folds_non_ascii_titles(mdb):
+    """LOWER() folds ASCII only, so a title with an accented capital never matched"""
+    _library_track(mdb, "ÉLAN VITAL", "Björk", spotify_track_id="sp-elan", deezer_id="42")
+    assert library_ids(mdb, "élan vital", "björk") == {"spotify": "sp-elan", "deezer": "42"}
+
+
 def test_origin_ids_prefers_what_the_page_knew_then_fills_from_the_library(mdb):
     _library_track(mdb, "Not Like Us", "Kendrick Lamar",
                    spotify_track_id="lib-spotify", deezer_id="lib-deezer")

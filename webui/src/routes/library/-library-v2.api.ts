@@ -8,6 +8,7 @@ import { apiClient, readJson } from '@/app/api-client';
 
 import type {
   LibraryV2AlbumDetail,
+  LibraryV2ArtistPageHeader,
   LibraryV2ArtistAliasMember,
   LibraryV2ArtistDetail,
   LibraryV2ArtistSettings,
@@ -26,7 +27,6 @@ import type {
   LibraryV2ReorganizePreview,
   LibraryV2ReorganizeQueueItem,
   LibraryV2ReorganizeQueueSnapshot,
-  LibraryV2ReorganizeSource,
   LibraryV2Search,
   LibraryV2Track,
   LibraryV2TrackDownload,
@@ -193,7 +193,7 @@ export async function setLibraryV2Monitored(
 ): Promise<void> {
   await lib2Json(
     apiClient.post(`library/v2/${entity}/${id}/monitor`, { json: { monitored } }),
-    'Failed to update monitoring',
+    'Could not update your list',
   );
 }
 
@@ -559,9 +559,19 @@ export async function resolveLibraryV2DiscoveryArtistOwnership(input: {
   name: string;
   /** a provider album id from an ?album= link, resolved to its release here */
   albumProviderId?: string;
-}): Promise<{ artistId: number | null; owned: boolean; albumId: number | null }> {
+}): Promise<{
+  artistId: number | null;
+  owned: boolean;
+  inLibrary: boolean;
+  albumId: number | null;
+}> {
   const payload = await lib2Json<
-    Ok & { artist_id: number | null; owned?: boolean; album_id?: number | null }
+    Ok & {
+      artist_id: number | null;
+      owned?: boolean;
+      in_library?: boolean;
+      album_id?: number | null;
+    }
   >(
     apiClient.get('library/v2/discovery/artist', {
       searchParams: {
@@ -576,6 +586,7 @@ export async function resolveLibraryV2DiscoveryArtistOwnership(input: {
   return {
     artistId: payload.artist_id,
     owned: payload.owned === true,
+    inLibrary: payload.in_library === true || payload.owned === true,
     albumId: payload.album_id ?? null,
   };
 }
@@ -608,7 +619,7 @@ export async function monitorLibraryV2DiscoveryAlbum(input: {
         track_count: input.trackCount ?? null,
       },
     }),
-    'Could not monitor this release',
+    'Could not add this release to your Wishlist',
   );
   return { artistId: payload.artist_id, albumId: payload.album_id };
 }
@@ -629,6 +640,22 @@ export async function fetchLibraryV2DiscoveryTrackStatus(input: {
     success: boolean;
     statuses?: Record<string, { track_id: number; monitored: boolean }>;
   }>(apiClient.get('library/v2/discovery/track-status', { searchParams: params }));
+  return payload.statuses ?? {};
+}
+
+/** Which of these provider releases are on this profile's Wishlist, keyed by
+ *  provider album id. Without it a release card's tick was gone on reload. */
+export async function fetchLibraryV2DiscoveryAlbumStatus(input: {
+  source: string;
+  ids: string[];
+}): Promise<Record<string, { album_id: number; wished: boolean }>> {
+  if (!input.ids.length || !input.source) return {};
+  const params = new URLSearchParams({ source: input.source });
+  for (const id of input.ids) params.append('id', id);
+  const payload = await readJson<{
+    success: boolean;
+    statuses?: Record<string, { album_id: number; wished: boolean }>;
+  }>(apiClient.get('library/v2/discovery/album-status', { searchParams: params }));
   return payload.statuses ?? {};
 }
 
@@ -663,7 +690,7 @@ export async function monitorLibraryV2DiscoveryTrack(input: {
         monitored: true,
       },
     }),
-    'Could not bookmark this track',
+    'Could not add this track to your Wishlist',
   );
   return payload.track_id;
 }
@@ -795,9 +822,9 @@ export async function bulkMonitorLibraryV2Releases(
     apiClient.post(`library/v2/artists/${artistId}/releases/monitor`, {
       json: { scope, monitored, ...(albumIds ? { album_ids: albumIds } : {}) },
     }),
-    'Bulk monitor failed',
+    'Could not update your Wishlist',
   );
-  if (!payload.job_id) throw new Error('Bulk monitor did not return a job id');
+  if (!payload.job_id) throw new Error('The Wishlist update did not start');
   return payload.job_id;
 }
 
@@ -964,6 +991,9 @@ export interface LibraryV2ArtistDeletePreview {
   tracks: number;
   file_links: number;
   detached_albums: number;
+  /** media servers that know this artist; its next sync adds it back */
+  media_servers?: string[];
+  returns_on_rescan?: boolean;
 }
 
 export async function fetchLibraryV2ArtistDeletePreview(
@@ -1534,13 +1564,20 @@ export async function startLibraryV2ScopedSearch(
 }
 
 /** Enhance Quality: the files of an artist/album its profile would still
- *  upgrade, monitored or not. */
-export function libraryV2EnhanceQueryOptions(entity: 'artists' | 'albums', id: number) {
+ *  upgrade, monitored or not. ``targetProfileId`` asks what that profile
+ *  would upgrade instead of each track's own ("upgrade to"). */
+export function libraryV2EnhanceQueryOptions(
+  entity: 'artists' | 'albums',
+  id: number,
+  targetProfileId: number | null = null,
+) {
   return queryOptions({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'enhance', entity, id],
+    queryKey: [...LIBRARY_V2_QUERY_KEY, 'enhance', entity, id, targetProfileId ?? 'own'],
     queryFn: () =>
       lib2Json<Ok & { tracks: LibraryV2EnhanceTrack[] }>(
-        apiClient.get(`library/v2/${entity}/${id}/enhance`),
+        apiClient.get(`library/v2/${entity}/${id}/enhance`, {
+          searchParams: targetProfileId != null ? { quality_profile_id: targetProfileId } : {},
+        }),
         'Failed to load quality upgrades',
       ),
   });
@@ -1553,10 +1590,14 @@ export async function startLibraryV2Enhance(
   entity: 'artists' | 'albums',
   id: number,
   trackIds: number[],
+  targetProfileId: number | null = null,
 ): Promise<string> {
   const payload = await readJson<{ success: boolean; job_id?: string; error?: string }>(
     apiClient.post(`library/v2/${entity}/${id}/enhance`, {
-      json: { track_ids: trackIds },
+      json:
+        targetProfileId != null
+          ? { track_ids: trackIds, quality_profile_id: targetProfileId }
+          : { track_ids: trackIds },
       throwHttpErrors: false,
     }),
   );
@@ -1641,30 +1682,6 @@ export async function enrichLibraryV2Entity(
   }>(apiClient.post(`library/v2/${entity}/${id}/enrich`, { json: { service } }));
   if (!payload.success) throw new Error(payload.error || payload.message || 'Enrichment failed');
   return { message: payload.message, resynced: payload.resynced };
-}
-
-/** Sources authed/configured on this instance — for the artist-level
- *  "Reorganize All" source picker (docs §50, no per-album ID coverage check). */
-export async function fetchLibraryV2ReorganizeSourcesGlobal(): Promise<
-  LibraryV2ReorganizeSource[]
-> {
-  const payload = await lib2Json<Ok & { sources: LibraryV2ReorganizeSource[] }>(
-    apiClient.get('library/v2/reorganize/sources'),
-    'Failed to load reorganize sources',
-  );
-  return payload.sources;
-}
-
-/** Sources this album has a stored provider ID for AND an authed client —
- *  for the per-album source picker (docs §50). */
-export async function fetchLibraryV2AlbumReorganizeSources(
-  albumId: number,
-): Promise<LibraryV2ReorganizeSource[]> {
-  const payload = await lib2Json<Ok & { sources: LibraryV2ReorganizeSource[] }>(
-    apiClient.get(`library/v2/albums/${albumId}/reorganize/sources`),
-    'Failed to load reorganize sources',
-  );
-  return payload.sources;
 }
 
 /** Preview current-vs-proposed file paths for one lib2 album, without moving
@@ -2209,6 +2226,8 @@ export interface LibraryV2UnmatchedSummary {
   count: number;
   /** The catalogue artist holding the most of them, for the link. */
   artist_id: number | null;
+  /** how many have a strong match waiting, found in the background */
+  ready?: number;
 }
 
 /**
@@ -2259,7 +2278,40 @@ export interface LibraryV2UnmatchedTrack {
     artist_name: string;
   } | null;
   /** re-identified and waiting for the import pass: the release it goes to */
-  filing: { album_name: string; artist_name: string } | null;
+  filing: {
+    album_name: string;
+    artist_name: string;
+    /** the import pass turned the staged copy down: why */
+    failed: string | null;
+    /** the import inbox row to retry it with */
+    retry_id: number | null;
+  } | null;
+  /** what the background matcher found, null until it has looked */
+  identified: LibraryV2UnmatchedIdentify | null;
+}
+
+/** the background matcher's progress through the files */
+export interface LibraryV2UnmatchedMatcher {
+  running: boolean;
+  done: number;
+  total: number;
+}
+
+export interface LibraryV2UnmatchedList {
+  tracks: LibraryV2UnmatchedTrack[];
+  /** null when the background matcher isn't running on this server */
+  matcher: LibraryV2UnmatchedMatcher | null;
+}
+
+/** send a re-file the import turned down through the import again */
+export async function retryUnmatchedFiling(retryId: number): Promise<void> {
+  const data = await readJson<Ok>(apiClient.post(`auto-import/retry/${retryId}`));
+  if (!data.success) throw new Error(data.error || 'Could not try again');
+}
+
+/** wake the background matcher now */
+export async function nudgeUnmatchedMatcher(): Promise<void> {
+  await lib2Json(apiClient.post('library/v2/unmatched/match'), 'Could not start matching');
 }
 
 /** one release the file could be, ranked by what backs it */
@@ -2309,10 +2361,15 @@ export function libraryV2UnmatchedTracksQueryOptions() {
   return queryOptions({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'unmatched', 'tracks'] as const,
     queryFn: () =>
-      lib2Json<Ok & { tracks: LibraryV2UnmatchedTrack[] }>(
+      lib2Json<Ok & LibraryV2UnmatchedList>(
         apiClient.get('library/v2/unmatched'),
         'Could not load the unmatched tracks',
-      ).then((data) => data.tracks),
+      ).then(
+        (data): LibraryV2UnmatchedList => ({
+          tracks: data.tracks,
+          matcher: data.matcher ?? null,
+        }),
+      ),
   });
 }
 
@@ -2348,6 +2405,8 @@ type UiPreferencesPatch = {
     columns?: Partial<LibraryV2ArtistTableColumns>;
     column_order?: (keyof LibraryV2ArtistTableColumns)[];
   };
+  artist_toolbar?: LibraryV2UiPreferences['artist_toolbar'];
+  artist_page?: LibraryV2UiPreferences['artist_page'];
 };
 
 export async function fetchLibraryV2UiPreferences(): Promise<LibraryV2UiPreferences> {
@@ -2376,6 +2435,28 @@ export function libraryV2UiPreferencesQueryOptions() {
     queryFn: fetchLibraryV2UiPreferences,
     staleTime: 60_000,
   });
+}
+
+/** The header an artist opens with when the visit comes from outside the
+ *  library (search, discover), as this profile picked it in View Settings.
+ *  For a route's redirect, which runs before any page has the preferences. */
+export async function artistHeaderFromElsewhere(
+  queryClient: QueryClient,
+): Promise<LibraryV2ArtistPageHeader> {
+  const prefs = await queryClient
+    .ensureQueryData(libraryV2UiPreferencesQueryOptions())
+    .catch(() => null);
+  return prefs?.artist_page?.header_elsewhere ?? 'rich';
+}
+
+/** The header an artist opens with when the visit starts in the library. */
+export async function artistHeaderFromLibrary(
+  queryClient: QueryClient,
+): Promise<LibraryV2ArtistPageHeader> {
+  const prefs = await queryClient
+    .ensureQueryData(libraryV2UiPreferencesQueryOptions())
+    .catch(() => null);
+  return prefs?.artist_page?.header ?? 'rich';
 }
 
 // --- Mirror outbox (lib2 → legacy wishlist/watchlist, audit P0-04) -----------

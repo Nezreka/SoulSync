@@ -100,3 +100,16 @@ def test_multidisc_slot_is_distinct_from_disc_one(imported_conn):
         (album_id,),
     ).fetchone()[0]
     assert first["track_id"] != disc1
+
+
+@pytest.mark.parametrize("title", [None, "", "   "])
+def test_a_slot_no_tracklist_names_gets_a_placeholder_not_a_500(imported_conn, title):
+    """title is NOT NULL, so a nameless slot raised and the route answered 500"""
+    album_id = _views_id(imported_conn)
+
+    result = MT.materialize_missing_track(imported_conn, album_id, track_number=9, title=title)
+
+    row = imported_conn.execute("SELECT title FROM lib2_tracks WHERE id=?",
+                                (result["track_id"],)).fetchone()
+    assert row["title"] == "Track 9"
+

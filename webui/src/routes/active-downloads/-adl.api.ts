@@ -214,8 +214,22 @@ export interface ClearCompletedResult extends AdlResult {
   total_cleared?: number;
 }
 
-export function clearCompleted(): Promise<ClearCompletedResult> {
-  return readJson<ClearCompletedResult>(apiClient.post('downloads/clear-completed'));
+/**
+ * Clear rows off the Downloads page. No scope is Clear everything (live rows
+ * and the whole history tail, review queue included); 'finished' keeps failed
+ * rows and the review queue; 'failed' takes failed rows only.
+ */
+export function clearCompleted(scope?: 'finished' | 'failed'): Promise<ClearCompletedResult> {
+  return readJson<ClearCompletedResult>(
+    scope
+      ? apiClient.post('downloads/clear-completed', { json: { scope } })
+      : apiClient.post('downloads/clear-completed'),
+  );
+}
+
+/** Take one failed / not-found / cancelled row off the list. Retries nothing. */
+export function removeDownload(taskId: string): Promise<AdlResult> {
+  return readJson<AdlResult>(apiClient.post('downloads/remove', { json: { task_id: taskId } }));
 }
 
 export interface DownloadNextResult extends AdlResult {

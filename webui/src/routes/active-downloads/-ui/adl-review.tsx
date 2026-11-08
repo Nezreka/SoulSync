@@ -86,16 +86,29 @@ function useCompare(handlers: ReviewActionHandlers | null) {
 }
 
 /** Asked for vs got, with the difference lit. Null when there's nothing to compare. */
+/** 784.0 -> "13:04" */
+function clock(seconds?: number | null): string {
+  if (!seconds || seconds <= 0) return '';
+  const s = Math.round(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// past this many seconds apart, two lengths are a different cut, not rounding
+const LENGTH_SLACK_S = 15;
+
 function AskedVsGot({
   asked,
   got,
 }: {
-  asked: { title?: string; artist?: string };
-  got: { title?: string; artist?: string };
+  asked: { title?: string; artist?: string; length?: number | null };
+  got: { title?: string; artist?: string; length?: number | null };
 }) {
   if (!asked.title) return null;
   const diff = (a?: string, b?: string) =>
     Boolean(a && b && a.trim().toLowerCase() !== b.trim().toLowerCase());
+  const lengths = Boolean(asked.length && got.length);
+  const lengthOff =
+    lengths && Math.abs((asked.length as number) - (got.length as number)) > LENGTH_SLACK_S;
   return (
     <div className="dlc-compare">
       <span />
@@ -113,6 +126,13 @@ function AskedVsGot({
           <span className={diff(asked.artist, got.artist) ? 'dlc-compare-diff' : undefined}>
             {got.artist || '—'}
           </span>
+        </>
+      ) : null}
+      {lengths ? (
+        <>
+          <span className="dlc-compare-k">Length</span>
+          <span>{clock(asked.length)}</span>
+          <span className={lengthOff ? 'dlc-compare-diff' : undefined}>{clock(got.length)}</span>
         </>
       ) : null}
     </div>
@@ -495,12 +515,17 @@ export function AdlQuarantineRow({
                 </div>
               ) : null}
               <AskedVsGot
-                asked={{ title: entry.expected_track, artist: entry.expected_artist }}
+                asked={{
+                  title: entry.expected_track,
+                  artist: entry.expected_artist,
+                  length: entry.expected_length_s,
+                }}
                 // the file name, minus its extension and any leading track number
                 got={{
                   title: (entry.original_filename || '')
                     .replace(/\.[a-z0-9]{2,5}$/i, '')
                     .replace(/^\d{1,3}[\s._-]+/, ''),
+                  length: entry.actual_length_s,
                 }}
               />
             </>

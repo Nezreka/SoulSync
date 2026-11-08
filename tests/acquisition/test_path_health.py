@@ -83,3 +83,19 @@ def test_path_health_public_shape_never_contains_paths(tmp_path):
     public = str(health.to_public_dict())
     assert "password" not in public
     assert str(secret_path) not in public
+
+
+def test_the_protocol_neutral_mapping_key_counts_too(tmp_path):
+    """the resolver reads download_source.path_mappings first; the diagnostics
+    only knew the usenet key, so a torrent-style mapping read as no mapping"""
+    mapped = tmp_path / "mapped"
+    mapped.mkdir()
+    config_get = _config({
+        "download_source.path_mappings": [{"from": "/data/complete", "to": str(mapped)}],
+    })
+
+    assert inspect_mapping_configuration(config_get).to_public_dict()["valid_count"] == 1
+    health = inspect_reported_path("/data/complete/Album", config_get=config_get,
+                                   resolver=lambda _path, _cfg: str(mapped))
+    assert health.matching_mapping is True and health.status == "mapped"
+

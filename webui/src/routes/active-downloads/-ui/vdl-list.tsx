@@ -35,6 +35,7 @@ import {
   vdlIsActive,
   vdlIsFail,
   vdlIsPackRow,
+  vdlIsRemovable,
   vdlKindIcon,
   vdlMatchesFilter,
   vdlPad2,
@@ -71,6 +72,7 @@ export interface VdlCardActions {
   onCancel: (id: number) => void;
   onRetry: (id: number) => void;
   onBlock: (d: VdlDownload) => void;
+  onRemove: (id: number) => void;
   onToggle: (id: number) => void;
 }
 
@@ -215,6 +217,9 @@ function VdlCard({
             onSelect: () => copyText(d.dest_path as string, 'Path copied'),
           },
         ]
+      : []),
+    ...(vdlIsRemovable(d.status)
+      ? [{ key: 'remove', label: 'Remove from list', onSelect: () => actions.onRemove(d.id) }]
       : []),
     ...(canBlock
       ? [

@@ -199,8 +199,49 @@ export function newReleasesResult(data: Row): BrowseResult {
   };
 }
 
+/** What's charting on Deezer for a tile (#1984), or null when Deezer has no
+ *  genre for it, is off, or answered nothing: the tile then reads the cache. */
+async function deezerBrowse(id: string, signal?: AbortSignal): Promise<Row | null> {
+  try {
+    const data = await getJson(
+      `/api/search/browse/deezer?${new URLSearchParams({ tile: id })}`,
+      signal,
+    );
+    return data.available ? data : null;
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    return null;
+  }
+}
+
 export async function fetchBrowse(id: string, signal?: AbortSignal): Promise<BrowseResult> {
   const genre = browseGenre(id);
+  const live = await deezerBrowse(id, signal);
+  if (live && genre) {
+    return {
+      ...genreResult(genre, live),
+      title: browseTitle(id),
+      subtitle: 'Charting on Deezer right now in this genre',
+    };
+  }
+  if (live && id === 'charts') {
+    const editorial = await getJson('/api/discover/deezer/editorial', signal).catch(() => ({}));
+    return {
+      ...genreResult('charts', live),
+      title: 'Top trending',
+      subtitle: "Deezer's charts right now",
+      playlists: chartsResult(editorial, {}).playlists,
+      related: [],
+    };
+  }
+  if (live && id === 'new') {
+    return {
+      ...genreResult('new', live),
+      title: 'New releases',
+      subtitle: 'New on Deezer this week',
+      related: [],
+    };
+  }
   if (genre) {
     const data = await getJson(
       `/api/discover/genre-deep-dive?${new URLSearchParams({ genre })}`,

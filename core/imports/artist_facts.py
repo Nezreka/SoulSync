@@ -3,9 +3,13 @@
 two artists can share a name (nirvana the us band, nirvana the uk band) and
 land in one folder. musicbrainz tells them apart with a disambiguation note,
 a country and tags. this reads those from what enrichment already stored (the
-lib2_artists row and the cached musicbrainz artist payload). it never calls out to
-musicbrainz: a path is built for every imported track, and an artist that
-isn't enriched yet simply has no facts until it is.
+lib2_artists row and the cached musicbrainz artist payload).
+
+an artist enrichment hasn't reached yet (a new artist in a bulk import) is
+asked of musicbrainz once, the same way enrichment would ask, picking among
+same-named artists by the album being imported. without that the first
+albums landed in "J. Cole" and the rest in "J. Cole (US rapper and
+producer)" once enrichment caught up mid-import (#1953, #1954).
 """
 
 from __future__ import annotations
@@ -23,6 +27,13 @@ _EMPTY = {"disambiguation": "", "country": "", "genre": "", "clash": False}
 _CACHE_TTL = 30.0
 _cache: dict = {}
 _cache_lock = threading.Lock()
+
+# the musicbrainz ask for an artist the library hasn't enriched yet. off in
+# tests (tests/conftest.py). one ask per name per hour, hit or miss, so an
+# import of 40 albums asks once and a musicbrainz outage doesn't slow every track
+ONLINE_LOOKUP = True
+_ONLINE_TTL = 3600.0
+_online: dict = {}  # name casefold -> (asked at, mbid or "")
 
 
 def _get_db():
@@ -63,6 +74,32 @@ def _resolve_mbid(cursor, name: str, mbid: str, source: str, source_id: str) -> 
     return ids[0] if len(ids) == 1 else ""
 
 
+def _match_online(name: str, album: str) -> str:
+    """the musicbrainz id enrichment would give this artist, asked now.
+    match_artist caches the search result (disambiguation and country
+    included) under that id, which is what _lookup reads next."""
+    if not ONLINE_LOOKUP or not album:
+        return ""
+    key = name.casefold()
+    now = time.monotonic()
+    with _cache_lock:
+        asked = _online.get(key)
+        if asked and now - asked[0] < _ONLINE_TTL:
+            return asked[1]
+    try:
+        from core.musicbrainz_service import get_musicbrainz_service
+        match = get_musicbrainz_service().match_artist(name, owned_titles=[album])
+        mbid = str((match or {}).get("mbid") or "")
+    except Exception as e:  # noqa: BLE001 - naming must never fail over a lookup
+        logger.debug("musicbrainz artist ask failed for %r: %s", name, e)
+        mbid = ""
+    with _cache_lock:
+        if len(_online) > 2048:
+            _online.clear()
+        _online[key] = (now, mbid)
+    return mbid
+
+
 def _mbids_named(cursor, name: str) -> list:
     cursor.execute(
         "SELECT DISTINCT musicbrainz_id FROM lib2_artists WHERE name = ? COLLATE NOCASE "
@@ -97,14 +134,20 @@ def _country(payload: dict) -> str:
     return str(codes[0]).upper() if codes else ""
 
 
-def _lookup(name: str, mbid: str, source: str, source_id: str) -> dict:
+def _lookup(name: str, mbid: str, source: str, source_id: str, album: str = "") -> dict:
     db = _get_db()
     conn = db._get_connection()
     try:
         cursor = conn.cursor()
         mbid = _resolve_mbid(cursor, name, mbid, source, source_id)
         if not mbid:
-            return dict(_EMPTY)
+            conn.close()  # not held across a network call
+            conn = None
+            mbid = _match_online(name, album)
+            if not mbid:
+                return dict(_EMPTY)
+            conn = db._get_connection()
+            cursor = conn.cursor()
         payload = {}
         cursor.execute(
             "SELECT metadata_json FROM musicbrainz_cache WHERE entity_type = 'artist' "
@@ -124,13 +167,15 @@ def _lookup(name: str, mbid: str, source: str, source_id: str) -> dict:
             "clash": bool(others),
         }
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
-def artist_facts(name, *, mbid=None, source=None, source_id=None) -> dict:
+def artist_facts(name, *, mbid=None, source=None, source_id=None, album=None) -> dict:
     """``{disambiguation, country, genre, clash}`` for an artist, empty when
-    the library doesn't know. ``clash`` is True when another musicbrainz
-    artist in the library has the same name."""
+    neither the library nor musicbrainz knows. ``clash`` is True when another
+    musicbrainz artist in the library has the same name. ``album`` is what
+    picks the right one of several same-named artists when musicbrainz is asked."""
     name = str(name or "").strip()
     if not name:
         return dict(_EMPTY)
@@ -141,7 +186,8 @@ def artist_facts(name, *, mbid=None, source=None, source_id=None) -> dict:
         if hit and now - hit[0] < _CACHE_TTL:
             return dict(hit[1])
     try:
-        facts = _lookup(name, str(mbid or ""), str(source or ""), str(source_id or ""))
+        facts = _lookup(name, str(mbid or ""), str(source or ""), str(source_id or ""),
+                        str(album or "").strip())
     except Exception as e:  # noqa: BLE001 - naming must never fail over a lookup
         logger.debug("artist facts lookup failed for %r: %s", name, e)
         facts = dict(_EMPTY)
@@ -169,6 +215,7 @@ def composite_chain(facts: dict) -> str:
 def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()
+        _online.clear()
 
 
 __all__ = ["artist_facts", "info_chain", "composite_chain", "clear_cache"]
