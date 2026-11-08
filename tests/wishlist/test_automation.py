@@ -287,6 +287,34 @@ def test_playlist_scope_dispatches_only_matching_wishlist_tracks_without_cycle_m
     assert batch["toggle_wishlist_cycle"] is False
 
 
+def test_playlist_scope_does_not_dispatch_a_track_the_library_sweep_removed(monkeypatch):
+    """review 5 R5-J-1: the scoped run read its rows before the cycle-start
+    library sweep, so a track the sweep removed as owned was still sent and
+    the force_download_all batch downloaded it again"""
+    def _row(tid, name):
+        return {"name": name, "track_id": tid, "spotify_track_id": tid,
+                "artists": [{"name": "Artist A"}],
+                "spotify_data": {"id": tid, "album": {"album_type": "album"}}}
+
+    runtime, service, _profiles_db, _music_db, executor, _logger, _progress, _guards = _build_runtime(
+        tracks=[_row("owned", "Owned Song"), _row("missing", "Missing Song")],
+        count=2,
+    )
+
+    def sweep(*_a, **_k):
+        # the library owns "owned": the sweep deletes its wishlist row
+        service._tracks = [t for t in service._tracks if t["track_id"] != "owned"]
+        return 1
+
+    monkeypatch.setattr(processing, "remove_tracks_already_in_library", sweep)
+
+    process_wishlist_automatically(
+        runtime, automation_id="playlist-run", track_ids=["owned", "missing"], profile_ids=[1])
+
+    sent = [t["track_id"] for _fn, args, _kw in executor.submissions for t in args[2]]
+    assert sent == ["missing"]
+
+
 def test_playlist_composite_scope_does_not_dispatch_same_track_from_other_album():
     batch_map = {}
     runtime, _service, _profiles_db, _music_db, executor, _logger, _progress, _guards = _build_runtime(
