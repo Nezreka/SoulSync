@@ -1067,6 +1067,14 @@ class VideoDatabase:
                 "WHERE monitored = 1 AND (show_id, season_number) IN ("
                 "SELECT show_id, season_number FROM episodes "
                 "GROUP BY show_id, season_number HAVING MAX(monitored) = 0)").rowcount
+            # review 5 R5-M-2: a Specials season with only SOME episodes
+            # unmonitored was also set by hand. unlocked, Monitor Specials
+            # off then on re-monitored every one of them. lock it as it is
+            moved += conn.execute(
+                "UPDATE seasons SET monitor_locked = 1 "
+                "WHERE season_number = 0 AND monitor_locked = 0 AND show_id IN ("
+                "SELECT show_id FROM episodes WHERE season_number = 0 "
+                "GROUP BY show_id HAVING MIN(monitored) = 0 AND MAX(monitored) = 1)").rowcount
             conn.execute("INSERT INTO video_settings (key, value) VALUES (?, '1') "
                          "ON CONFLICT(key) DO UPDATE SET value = '1'",
                          (VideoDatabase._SEASON_MONITOR_MARKER,))
