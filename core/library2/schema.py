@@ -1424,6 +1424,13 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_updated "
             "ON lib2_track_files(updated_at)")
+        # every boot's unverified-history heal reads the verified files; with
+        # no index that was a scan of every file row (2.6-3.4 s live) to find
+        # a few hundred. partial: it holds just those (review 5 R5-X2-3)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_verified "
+            "ON lib2_track_files(path) "
+            "WHERE verification_status IN ('verified', 'human_verified')")
         from core.library2.track_files import install_primary_triggers
         install_primary_triggers(cursor)
     except Exception as e:  # noqa: BLE001

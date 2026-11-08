@@ -203,3 +203,31 @@ def test_reconcile_titleless_row_does_not_heal_on_basename_collision():
     healed = db.reconcile_unverified_history_from_tracks()
     assert healed == 0
     assert db._status_of(1) == "unverified"
+
+
+def test_reconcile_reads_only_the_verified_files_through_an_index():
+    """review 5 R5-X2-3: every boot ran the heal's verified-file read as a scan
+    of every file row (2.6-3.4 s on a 300k library) to find a few hundred"""
+    from core.library2.schema import ensure_library_v2_schema
+
+    db = _InMemoryDB.__new__(_InMemoryDB)
+    db._conn = sqlite3.connect(":memory:")
+    db._conn.row_factory = sqlite3.Row
+    ensure_library_v2_schema(db._conn, run_backfills=False)
+    db._conn.execute(
+        "CREATE TABLE library_history ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT, title TEXT, "
+        "file_path TEXT, verification_status TEXT)")
+    db._conn.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'A')")
+    db._conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title) VALUES(1, 1, 'B')")
+    db._add_track(1, "/lib/A/01 - Song.flac", "verified")
+    db._add_history("/lib/A/01 - Song.flac", "unverified")
+
+    seen = []
+    db._conn.set_trace_callback(seen.append)
+    assert db.reconcile_unverified_history_from_tracks() == 1
+    db._conn.set_trace_callback(None)
+
+    read = next(q for q in seen if "FROM lib2_track_files" in q)
+    plan = " ".join(r[3] for r in db._conn.execute("EXPLAIN QUERY PLAN " + read))
+    assert "idx_lib2_track_files_verified" in plan, plan

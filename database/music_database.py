@@ -24761,6 +24761,8 @@ class MusicDatabase:
             by_base = {}   # basename -> list of (norm_title, status)
             # The verification verdict belongs to the FILE in v2 (ADR-03) —
             # it is a statement about the bytes on disk, not about the song.
+            # idx_lib2_track_files_verified holds just these rows: the scan
+            # of every file row ran on every boot (review 5 R5-X2-3)
             cursor.execute(
                 "SELECT f.path, f.verification_status, t.title "
                 "FROM lib2_track_files f "
