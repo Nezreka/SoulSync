@@ -667,9 +667,13 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
         exts = " OR ".join(f"LOWER(owned_f.path) LIKE '%.{ext}'" for ext in _LOSSLESS_EXTS)
         where.append(f"EXISTS (SELECT 1 {_song_files_sql('t')} AND ({exts}))")
     elif quality == "upgradable":
-        from .wanted_views import iter_cutoff_unmet
+        # the Cutoff Unmet tab's cached list: evaluating the whole library
+        # (~19 s at 300k) for every page, sort and letter was the cost
+        # (review 5 R5-G-2)
+        from .wanted_views import _cutoff_unmet_cached
         params["unmet"] = json.dumps(sorted({
-            int(row["track_id"]) for row in iter_cutoff_unmet(conn, profile_id=profile_id)}))
+            int(row["track_id"])
+            for row in _cutoff_unmet_cached(conn, search="", profile_id=profile_id)}))
         where.append("t.id IN (SELECT value FROM json_each(:unmet))")
     order = _SONG_SORTS.get(sort, _SONG_SORTS["title"]).replace("{title}", _alpha_key("t.title"))
     q = str(search or "").strip()

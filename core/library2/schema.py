@@ -1419,6 +1419,11 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_derived_from "
             "ON lib2_track_files(derived_from_file_id)")
+        # the Cutoff Unmet cache's change check reads MAX(updated_at) on
+        # every page; without this it scanned every file row (review 5 R5-G-2)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_updated "
+            "ON lib2_track_files(updated_at)")
         from core.library2.track_files import install_primary_triggers
         install_primary_triggers(cursor)
     except Exception as e:  # noqa: BLE001
