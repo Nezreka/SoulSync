@@ -681,6 +681,26 @@ def test_tag_preview_shows_what_the_write_changes_in_a_sibling_file(library):
     assert any(row['field'].endswith('.flac)') and row.get('file_id') for row in rows)
 
 
+def test_a_hand_tagged_albums_other_findings_still_close(library):
+    """review 4 R4-B-8: on a hand-tagged album with tag issues the check
+    returned early, so a fixed track number finding stayed open forever"""
+    db, path, _ = library
+    from database.music_database import MusicDatabase
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS manual_metadata_files (path_key TEXT PRIMARY KEY, "
+                     "file_path TEXT, album_title TEXT, album_artist TEXT)")
+        conn.execute("INSERT INTO manual_metadata_files(path_key, file_path) VALUES(?,?)",
+                     (MusicDatabase.manual_path_key(str(path)), str(path)))
+        conn.execute("INSERT INTO repair_findings(job_id,finding_type,entity_type,entity_id,file_path,title,details_json) "
+                     "VALUES('track_number_repair','track_number_mismatch','track','lib2:7',?,'Wrong number',"
+                     "'{\"current_track_num\":3,\"correct_track_num\":7,\"total_tracks\":13,\"tag_ok\":false,\"disc_ok\":true}')",
+                     (str(path),))
+    observe(library, {**read_tag_snapshot(str(path)), 'title': 'Something the user typed'})
+    with closing(db._get_connection()) as conn:
+        assert conn.execute("SELECT status FROM repair_findings WHERE finding_type='track_number_mismatch'"
+                            ).fetchone()[0] == 'resolved'
+
+
 def test_a_hand_tagged_album_gets_no_retag_findings(library):
     """third #1062 review G09-2: one hand-tagged file locked its album in
     3.6.1. the scan filed "Metadata issues" for the other files, and Apply

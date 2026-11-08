@@ -379,7 +379,10 @@ def persist_validation(conn, file_id, validation):
                 conn.execute("UPDATE repair_findings SET status='resolved', user_action='hand_tagged_album', "
                              "resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?",
                              (finding['id'],))
-        return
+        # review 4 R4-B-8: no return here. with no issues left, the file's
+        # other verified findings (cover art, track numbers) still close
+        findings = [f for f in findings if not (
+            f.get('finding_type') == 'library_retag' and f.get('status') == 'pending')]
     current = [f for f in findings if f['details'].get('validation')]
     for finding in current:
         if not issues and finding_verified(conn, finding, [file]):
