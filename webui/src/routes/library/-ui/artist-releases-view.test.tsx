@@ -460,6 +460,31 @@ describe('Library V2 artist detail — All Releases views', () => {
     );
   });
 
+  it('#2012: the collection counts take the releases "+ Other sources" puts on the page', async () => {
+    inLibrary();
+    server.use(
+      http.get('/api/artist/sp-1/discography/gap-fill', () =>
+        HttpResponse.json({
+          success: true,
+          gaps: {
+            albums: [
+              { id: 'dz-a', name: 'Third', album_type: 'album', release_date: '2008' },
+              { id: 'dz-b', name: 'Glory Times', album_type: 'album', release_date: '1995' },
+            ],
+          },
+        }),
+      ),
+    );
+    const { container } = renderArtist('/library?artist=1&header=rich&releases=all');
+    const albumsStats = () =>
+      [...container.querySelectorAll('.collection-category')]
+        .find((el) => el.querySelector('.category-label')?.textContent === 'Albums')
+        ?.querySelector('.category-stats')?.textContent;
+    await waitFor(() => expect(albumsStats()).toBe('0/2'), { timeout: 10_000 });
+    fireEvent.click(await screen.findByRole('button', { name: /Other sources/ }));
+    await waitFor(() => expect(albumsStats()).toBe('0/4'), { timeout: 10_000 });
+  }, 30_000);
+
   it('uses the existing rich header for immersive arrivals and keeps the artist tools on show', async () => {
     inLibrary();
     const { router } = renderArtist('/library?artist=1&view=discovery&immersive=true');

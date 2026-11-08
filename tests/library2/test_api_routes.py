@@ -1920,6 +1920,32 @@ def test_delete_album_withdraws_every_profiles_wish(api):
     assert db.watchlist_removes == []
 
 
+def test_deleting_a_listed_album_keeps_it_on_the_discography(api):
+    """#2012: removing an album the provider lists took it off the artist's
+    discography too, so "3 of 3" became "2 of 2". as in lidarr it stays
+    listed, not owned and not wanted; one no provider lists is deleted"""
+    client, db, ids = api
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_albums SET spotify_id='sp-views' WHERE id=?", (ids["views"],))
+        conn.execute("UPDATE lib2_albums SET spotify_id=NULL, musicbrainz_id=NULL, external_ids='{}'"
+                     " WHERE id=?", (ids["ep"],))
+        conn.commit()
+
+    assert client.delete(f"/api/library/v2/albums/{ids['views']}").get_json()["success"] is True
+    assert client.delete(f"/api/library/v2/albums/{ids['ep']}").get_json()["success"] is True
+
+    with _conn(db) as conn:
+        views = conn.execute("SELECT origin, monitored FROM lib2_albums WHERE id=?", (ids["views"],)).fetchone()
+        assert views is not None and views["origin"] == "discography" and views["monitored"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id"
+            " WHERE t.album_id=?", (ids["views"],)).fetchone()[0] == 0
+        rule = conn.execute("SELECT monitored, provenance FROM lib2_monitor_rules WHERE entity_type='album'"
+                            " AND entity_id=? AND profile_id=1", (ids["views"],)).fetchone()
+        assert rule is not None and rule["monitored"] == 0 and rule["provenance"] == "user_explicit"
+        assert conn.execute("SELECT 1 FROM lib2_albums WHERE id=?", (ids["ep"],)).fetchone() is None
+
+
 def test_delete_featured_artist_keeps_owner_album(api):
     """Audit P0-01: deleting an artist who is merely featured on another
     artist's album must NOT delete that album — only the credit rows."""

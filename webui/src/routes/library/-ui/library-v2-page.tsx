@@ -7747,11 +7747,14 @@ function CatalogueArtistHero({
   onPickImage,
   headerToggle,
   facts,
+  otherSourceCounts,
 }: {
   artist: LibraryV2ArtistDetail;
   onPickImage: () => void;
   headerToggle: ReactNode;
   facts?: ReactNode;
+  /** #2012: releases "+ Other sources" adds to the page count in the total */
+  otherSourceCounts?: { album: number; ep: number; single: number };
 }) {
   const matchStatus = useQuery(libraryV2ArtistMatchStatusQueryOptions(artist.id));
   const canWish = useLibraryV2CanWish();
@@ -7770,10 +7773,10 @@ function CatalogueArtistHero({
   // Only Spotify and Deezer expose a popularity ranking at all; for anything
   // else the sidebar falls through to Last.fm by name, exactly like legacy.
   const source = providerIds.spotify ? 'spotify' : providerIds.deezer ? 'deezer' : '';
-  const countOwned = (label: string, entries: LibraryV2AlbumSummary[]) => ({
+  const countOwned = (label: string, entries: LibraryV2AlbumSummary[], extra = 0) => ({
     label,
     owned: entries.filter((e) => e.tracks_present > 0).length,
-    total: entries.length,
+    total: entries.length + extra,
   });
   return (
     <LegacyArtistHero
@@ -7786,9 +7789,9 @@ function CatalogueArtistHero({
       playcount={info.data?.playcount ?? null}
       followers={info.data?.followers ?? null}
       sections={[
-        countOwned('Albums', artist.albums),
-        countOwned('EPs', artist.eps ?? []),
-        countOwned('Singles', artist.singles),
+        countOwned('Albums', artist.albums, otherSourceCounts?.album),
+        countOwned('EPs', artist.eps ?? [], otherSourceCounts?.ep),
+        countOwned('Singles', artist.singles, otherSourceCounts?.single),
       ]}
       providerId={providerIds.spotify ?? providerIds.deezer ?? null}
       source={source}
@@ -8163,7 +8166,12 @@ function ProviderArtistView({
                 sections={buckets.map(({ title, bucket }) => ({
                   label: title,
                   owned: discography.releasesFor(bucket).filter((r) => r.owned).length,
-                  total: discography.releasesFor(bucket).length,
+                  // #2012: "+ Other sources" releases are on the page, so in the total
+                  total:
+                    discography.releasesFor(bucket).length +
+                    otherSources.byBucket(
+                      ({ albums: 'album', eps: 'ep', singles: 'single' } as const)[bucket],
+                    ).length,
                 }))}
                 providerId={providerId}
                 source={source}
@@ -8946,6 +8954,11 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               onPickImage={() => setShowArtPicker(true)}
               headerToggle={headerToggle}
               facts={libraryFacts}
+              otherSourceCounts={{
+                album: otherSources.byBucket('album').length,
+                ep: otherSources.byBucket('ep').length,
+                single: otherSources.byBucket('single').length,
+              }}
             />
           ) : (
             <header className={styles.detailHeader}>

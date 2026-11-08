@@ -4279,7 +4279,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.close()
 
     def _unmonitor_tracks_and_delete(db, conn, *, artist_id: Optional[int] = None,
-                                     album_ids: Optional[List[int]] = None) -> Dict[str, int]:
+                                     album_ids: Optional[List[int]] = None,
+                                     keep_listed: bool = False) -> Dict[str, int]:
         """Shared delete path: unmirror wishlist entries, then delete lib2 rows.
 
         NEVER touches files on disk — this removes library entries only,
@@ -4309,7 +4310,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             for profile_id in sorted(profiles | {_intent_profile()}):
                 unmirrored += len(enqueue_tracks(conn, track_ids, False, profile_id=profile_id))
         removed_albums = 0
+        kept_listed = 0
         for aid_ in album_ids:
+            if keep_listed and _provider_listed(conn, aid_):
+                _forget_owned_release(conn, aid_)
+                kept_listed += 1
+                continue
             conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (aid_,))
             conn.execute(
                 "DELETE FROM lib2_track_artists WHERE track_id IN "
@@ -4324,7 +4330,45 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             conn.execute("DELETE FROM lib2_albums WHERE id=?", (aid_,))
             removed_albums += 1
             _delete_artwork_files(db, "album", aid_)
-        return {"albums": removed_albums, "tracks": len(track_ids), "unmirrored": unmirrored}
+        return {"albums": removed_albums, "tracks": len(track_ids), "unmirrored": unmirrored,
+                "kept_listed": kept_listed}
+
+    def _provider_listed(conn, album_id: int) -> bool:
+        """a release a metadata provider lists (it carries a provider id)"""
+        row = conn.execute("SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_albums WHERE id=?",
+                           (int(album_id),)).fetchone()
+        if not row:
+            return False
+        if row["spotify_id"] or row["musicbrainz_id"]:
+            return True
+        from core.library2.provider_ids import parse_external_ids, provider_only
+        return bool(provider_only(parse_external_ids(row["external_ids"])))
+
+    def _forget_owned_release(conn, album_id: int) -> None:
+        """#2012: removing a release the provider lists takes it out of the
+        library, not off the artist's discography. as in lidarr (and 3.6.1's
+        provider-counted page) it stays listed, not owned and not wanted, so
+        "2 of 3" doesn't become "2 of 2" until the next discography refresh.
+        its file links and wanted rows go, its intent becomes an explicit no,
+        so the back catalogue's auto add doesn't wish it straight back"""
+        from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+        track_ids = [r[0] for r in conn.execute("SELECT id FROM lib2_tracks WHERE album_id=?",
+                                                (int(album_id),))]
+        marks = ",".join("?" for _ in track_ids) or "NULL"
+        profiles = {int(r[0]) for r in conn.execute(
+            "SELECT DISTINCT profile_id FROM lib2_monitor_rules WHERE "
+            f"(entity_type='album' AND entity_id=?) OR (entity_type='track' AND entity_id IN ({marks}))",
+            (int(album_id), *track_ids))} | {_intent_profile()}
+        conn.execute(f"DELETE FROM lib2_track_files WHERE track_id IN ({marks})", track_ids)
+        conn.execute(f"DELETE FROM lib2_wanted_tracks WHERE track_id IN ({marks})", track_ids)
+        conn.execute(f"UPDATE lib2_tracks SET monitored=0, updated_at=CURRENT_TIMESTAMP "
+                     f"WHERE id IN ({marks})", track_ids)
+        conn.execute("UPDATE lib2_albums SET monitored=0, origin='discography', "
+                     "updated_at=CURRENT_TIMESTAMP WHERE id=?", (int(album_id),))
+        for profile in sorted(profiles):
+            record_rule(conn, "album", int(album_id), False, PROVENANCE_USER, profile_id=profile)
+            for track_id in track_ids:
+                record_rule(conn, "track", track_id, False, PROVENANCE_USER, profile_id=profile)
 
     def _refresh_cached_artwork(db, album_ids, artist_ids) -> None:
         """Rebuild the covers a refresh scope already shows, in place.
@@ -4729,7 +4773,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return _fail("Album not found", 404)
             from core.library2.mirror_outbox import drain_since, queue_mark
             mark = queue_mark(conn)
-            stats = _unmonitor_tracks_and_delete(db, conn, album_ids=[album_id])
+            stats = _unmonitor_tracks_and_delete(db, conn, album_ids=[album_id], keep_listed=True)
             conn.commit()
             # this delete's own withdrawals, not the oldest rows of a backlog
             drain_since(db, mark)
