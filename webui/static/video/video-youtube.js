@@ -352,6 +352,13 @@
                   body: JSON.stringify(payload) })
                 .then(function (r) { return r.json(); })
                 .then(function (d) {
+                    // review 4 R4-E-6: a refused save is not "saved" (a failed
+                    // "download new uploads" off kept downloads coming)
+                    if (!d || d.success === false) {
+                        saveBtn.disabled = false;
+                        if (typeof showToast === 'function') showToast((d && d.error) || 'Save failed', 'error');
+                        return;
+                    }
                     var dropped = (d && d.dropped) || 0;
                     var msg = (kind === 'playlist' ? 'Playlist' : 'Channel') + ' settings saved' +
                         (dropped ? '. ' + dropped + ' video' + (dropped === 1 ? '' : 's') + ' taken off your wishlist' : '');

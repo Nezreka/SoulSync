@@ -207,7 +207,9 @@ export function EnhanceQualityModal({
   }, [target, ownTracks, targeted.data, scope?.albumId]);
   const loadingTarget = target != null && targeted.isPending;
   // G15-6: a failed fetch is not "nothing to upgrade"
-  const targetFailed = target != null && targeted.isError;
+  // review 4 R4-E-3: a failed background refetch keeps the data on screen;
+  // only a fetch that never got any is "couldn't check"
+  const targetFailed = target != null && targeted.isError && !targeted.data;
   // each target keeps its own picks, all of its tracks until you change them
   const [picks, setPicks] = useState<Record<string, Set<number>>>({});
   const pickKey = String(target ?? 'own');

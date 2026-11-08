@@ -1364,7 +1364,8 @@ export function MatchChips({
             key={s.service}
             type="button"
             className={`${styles.matchChip} ${abbreviated ? styles.trackMatchChip : ''} ${matchChipClass(s.status)}`}
-            title={canWrite ? tip : 'Library changes require the admin profile'}
+            // review 4 R4-E-4: everyone reads why a chip says what it says
+            title={canWrite ? tip : `${tip}. Matching is the admin's`}
             data-requires-write=""
             disabled={!canWrite || s.library_v2_entity_id == null}
             onClick={() => {

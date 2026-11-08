@@ -100,6 +100,29 @@ describe('ArtistImagePickerModal', () => {
     expect(screen.getByAltText('Photo option from deezer')).toBeTruthy();
   });
 
+  it('Refresh images gives a failed image another try (review 4 R4-E-5)', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/9/art-options', () =>
+        HttpResponse.json({
+          success: true,
+          count: 1,
+          candidates: [{ source: 'itunes', url: 'https://it/flaky.jpg' }],
+        }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <ArtistImagePickerModal artistId={9} artistName="Adele" onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    fireEvent.error(await screen.findByAltText('Photo option from itunes'));
+    await waitFor(() => expect(screen.queryByAltText('Photo option from itunes')).toBeNull());
+    fireEvent.click(
+      screen.getByTitle('Refresh — re-query every provider instead of the cached result'),
+    );
+    expect(await screen.findByAltText('Photo option from itunes')).toBeTruthy();
+  });
+
   it('says a folder was not found instead of claiming a write', () => {
     expect(
       artAppliedMessage({ image_url: 'x', disk_skipped: 'No artist folder found.' }, 'photo'),

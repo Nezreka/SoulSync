@@ -49,3 +49,11 @@ def test_the_modal_offers_follow_without_downloading():
     assert "s.auto_download === false ? '' : ' checked'" in _YT     # on unless saved off
     assert 'payload.auto_download = autoEl.checked' in _YT
     assert 'taken off your wishlist' in _YT                        # says what it took back
+
+
+def test_a_refused_save_is_not_reported_as_saved():
+    """review 4 R4-E-6: a {success: false} answer showed "settings saved" and
+    closed the dialog, so a failed "download new uploads" off looked applied"""
+    save = _YT[_YT.index("' settings saved'") - 1200:_YT.index("' settings saved'")]
+    assert "d.success === false" in save
+    assert "showToast((d && d.error) || 'Save failed', 'error')" in save

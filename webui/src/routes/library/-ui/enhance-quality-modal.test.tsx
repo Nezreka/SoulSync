@@ -200,3 +200,49 @@ it('a failed profile check says so instead of "everything meets it"', async () =
   expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^Enhance \(/ })).toBeDisabled();
 });
+
+it('a failed background refetch keeps the checked profile usable (review 4 R4-E-3)', async () => {
+  let fail = false;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('quality-profiles'))
+        return new Response(
+          JSON.stringify({
+            success: true,
+            profiles: [{ id: 7, name: 'Hi-Res', upgrade_policy: 'acceptable' }],
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        );
+      if (fail)
+        return new Response(JSON.stringify({ success: false, error: 'boom' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      return new Response(JSON.stringify({ success: true, tracks: [track(1, 'Origin')] }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }),
+  );
+  const client = createTestQueryClient();
+  rtlRender(
+    <QueryClientProvider client={client}>
+      <EnhanceQualityModal
+        title="Muse"
+        tracks={[track(1, 'Origin')]}
+        scope={{ entity: 'artists', id: 3 }}
+        canChooseTarget
+        onEnhance={vi.fn()}
+        onClose={vi.fn()}
+      />
+    </QueryClientProvider>,
+  );
+  fireEvent.change(await screen.findByLabelText('Upgrade to'), { target: { value: '7' } });
+  await waitFor(() => expect(screen.getByRole('button', { name: /^Enhance \(/ })).toBeEnabled());
+  fail = true;
+  await client.refetchQueries();
+  await waitFor(() => expect(client.getQueryCache().getAll().some((q) => q.state.status === 'error')).toBe(true));
+  expect(screen.queryByText('Couldn’t check that profile.')).toBeNull();
+  expect(screen.getByRole('button', { name: /^Enhance \(/ })).toBeEnabled();
+});

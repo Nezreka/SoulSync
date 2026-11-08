@@ -175,7 +175,11 @@ export function AlbumArtPickerModal({
           className={styles.btnGhost}
           title="Refresh — re-query every provider instead of the cached result"
           disabled={optionsQuery.isFetching}
-          onClick={() => setRefreshNonce((n) => n + 1)}
+          onClick={() => {
+            // review 4 R4-E-5: a fresh query gives a failed image another try
+            setBroken(new Set());
+            setRefreshNonce((n) => n + 1);
+          }}
         >
           {optionsQuery.isFetching ? 'Refreshing…' : 'Refresh images'}
         </button>
@@ -311,7 +315,11 @@ export function ArtistImagePickerModal({
           className={styles.btnGhost}
           title="Refresh — re-query every provider instead of the cached result"
           disabled={optionsQuery.isFetching}
-          onClick={() => setRefreshNonce((n) => n + 1)}
+          onClick={() => {
+            // review 4 R4-E-5: a fresh query gives a failed image another try
+            setBroken(new Set());
+            setRefreshNonce((n) => n + 1);
+          }}
         >
           {optionsQuery.isFetching ? 'Refreshing…' : 'Refresh images'}
         </button>
