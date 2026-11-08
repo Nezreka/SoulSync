@@ -931,3 +931,58 @@ def test_write_tags_applies_the_strict_genre_whitelist(
     retag.write_tags(legacy_db, [track_id], embed_cover=False)
 
     assert [g.lower() for g in written[-1]["genres"]] == ["pop"]
+
+
+# review 5 R5-F-3: a hand-set album year lost to the provider's release_date,
+# which the diff and the writer read first
+
+def test_a_hand_set_year_beats_the_providers_release_date_in_the_diff(imported_conn):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='year', value=2018)
+
+    data = retag._db_data_for_row(conn, retag._track_rows(conn, [track_id])[0])
+    assert (data['year'], data['release_date']) == (2018, '2018')
+
+    diff = retag._policy_diff({'title': 'One Dance', 'year': '2018'}, data,
+                              retag.retag_options({'dry_run': False}))
+    year_row = next(d for d in diff if d['file_key'] == 'year')
+    assert not year_row['changed'], year_row
+
+
+def test_a_hand_set_year_is_what_gets_written(imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='year', value=2018)
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False)
+
+    assert written[0]['release_date'] == '2018'
+
+
+def test_releasing_the_year_hands_the_providers_date_back(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='year', value=2018)
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False,
+                     overwrite_manual=[(track_id, 'year')])
+
+    assert (written[0]['year'], written[0]['release_date']) == (2016, '2016-04-29')
+
+
+def test_a_hand_set_year_that_agrees_with_the_date_keeps_the_full_date(imported_conn):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    conn.execute("UPDATE lib2_albums SET year=2015 WHERE id=?", (album_id,))
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='year', value=2016)
+
+    data = retag._db_data_for_row(conn, retag._track_rows(conn, [track_id])[0])
+    assert (data['year'], data['release_date']) == (2016, '2016-04-29')

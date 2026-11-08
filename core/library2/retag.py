@@ -359,7 +359,19 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
             if field in overrides and overrides[field].value != data.get(key):
                 manual[key] = data.get(key)
                 data[key] = overrides[field].value
-    manual.update(_apply_overrides(conn, row, data))
+    overridden = _apply_overrides(conn, row, data)
+    manual.update(overridden)
+    if "year" in overridden and data.get("release_date"):
+        # a hand-set year beats the provider's date: the diff and the writer
+        # read release_date first, so it wrote '1999-05-01' over the user's
+        # 2001. the date stays when its year agrees, as reorganize does
+        # (review 5 R5-F-3)
+        from core.library2.release_dates import album_release_date
+        adjusted = album_release_date(data["release_date"], data["year"]) or None
+        if adjusted != data["release_date"]:
+            # releasing the year hands the provider's date back with it
+            data["_release_date_before_year"] = data["release_date"]
+            data["release_date"] = adjusted
     if not data["genres"] and _genres_list(row["album_artist_genres"]):
         # The import's order (artist genres, then album, core/metadata/source.py):
         # an album with none fills an EMPTY tag from its artist (build_tag_diff).
@@ -705,6 +717,8 @@ def _release_manual_fields(db_data: Dict[str, Any], track_id: Any,
         }
     for key in keys:
         db_data[key] = manual[key]
+    if "year" in keys and "_release_date_before_year" in db_data:
+        db_data["release_date"] = db_data.pop("_release_date_before_year")
 
 
 # the tags a library write may add beyond 3.6.1's core set, and the settings
