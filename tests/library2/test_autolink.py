@@ -1516,3 +1516,29 @@ def test_a_filled_slot_is_never_taken_by_number_alone(imported_conn):
     artist, album, track = _album_with_track_five(imported_conn, "Track Five", owned=True)
     assert A._find_or_create_track(imported_conn, album, artist, "Track 5",
                                    track_number=5, disc_number=1) != track
+
+
+@pytest.mark.parametrize("stored", ['{"deezer":"67890"}', '{"deezer":67890}'])
+def test_provider_artist_id_lookup_seeks_its_index_not_a_like_scan(imported_conn, stored):
+    """review 5 R5-E-3: a deezer/itunes/... credit looked its artist up with
+    external_ids LIKE '%id%', a scan of every artist, once per credit inside
+    the catalogue write transaction. it must use the expression index."""
+    guest = imported_conn.execute(
+        "INSERT INTO lib2_artists(name, sort_name, name_key, external_ids) "
+        "VALUES('Known Guest','Known Guest','known guest',?)", (stored,)).lastrowid
+    seen = []
+    imported_conn.set_trace_callback(
+        lambda sql: seen.append(sql) if "FROM lib2_artists WHERE" in sql else None)
+    try:
+        found = A._find_or_create_artist(
+            imported_conn, "Some Other Spelling", spotify_id="67890", source="deezer")
+    finally:
+        imported_conn.set_trace_callback(None)
+
+    assert found == guest
+    assert not [s for s in seen if "LIKE" in s]
+    lookup = next(s for s in seen if "json_extract" in s)
+    plan = " ".join(r[3] for r in imported_conn.execute(
+        "EXPLAIN QUERY PLAN " + lookup.replace("'67890'", "?"), ("67890",)))
+    assert "idx_lib2_artists_ext_deezer" in plan, plan
+    assert "SCAN lib2_artists" not in plan

@@ -202,9 +202,24 @@ def _find_or_create_artist(conn, name: str, *, spotify_id: Optional[str] = None,
                 return row["id"]
         elif namespace is not None:
             # A real qualified id wins over the old poisoned-column fallback.
-            for candidate in conn.execute(
+            # an indexed provider is a seek on its expression index; a LIKE
+            # scanned every artist, once per credit, inside the catalogue
+            # write transaction (review 5 R5-E-3)
+            from core.library2.match_status import SERVICES
+            from core.library2.provider_ids import external_id_sql
+
+            if namespace in {service for service, _label, _ids in SERVICES}:
+                lookup = (
+                    "SELECT id, external_ids FROM lib2_artists WHERE "
+                    f"{external_id_sql('external_ids', namespace)} = ?",
+                    (provider_id,),
+                )
+            else:
+                lookup = (
                     "SELECT id, external_ids FROM lib2_artists WHERE external_ids LIKE ?",
-                    (f"%{provider_id}%",)):
+                    (f"%{provider_id}%",),
+                )
+            for candidate in conn.execute(*lookup):
                 ids = _row_external_ids(candidate["external_ids"])
                 if ids.get(namespace) == provider_id:
                     return candidate["id"]
