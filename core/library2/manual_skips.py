@@ -57,17 +57,20 @@ def active_skip_paths(
     conn,
     checks: Iterable[str],
     *,
-    profile_id: int = 1,
+    profile_id: Optional[int] = 1,
 ) -> set[str]:
-    """Final paths protected by an unacknowledged override for any check."""
+    """Final paths protected by an unacknowledged override for any check.
+
+    ``profile_id=None`` takes every profile's overrides: a file check is about
+    the file, not who asked (review 5 R5-I-2)."""
     wanted = {str(check).strip() for check in checks if str(check).strip()}
     if not wanted:
         return set()
     rows = conn.execute(
         """SELECT file_path, skipped_checks FROM lib2_manual_skips
-            WHERE profile_id=? AND acknowledged=0
+            WHERE (? IS NULL OR profile_id=?) AND acknowledged=0
               AND file_path IS NOT NULL AND file_path<>''""",
-        (int(profile_id),),
+        (None if profile_id is None else int(profile_id),) * 2,
     ).fetchall()
     paths = set()
     for row in rows:
@@ -85,7 +88,7 @@ def check_is_skipped(
     file_paths: Iterable[Any],
     checks: Iterable[str],
     *,
-    profile_id: int = 1,
+    profile_id: Optional[int] = 1,
 ) -> bool:
     candidates = {str(path) for path in file_paths if path}
     return bool(candidates.intersection(

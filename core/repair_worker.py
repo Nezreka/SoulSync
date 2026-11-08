@@ -3832,7 +3832,8 @@ class RepairWorker:
                     return {'success': False, 'error': 'The primary file changed; rerun the audit'}
                 from core.library2.manual_skips import active_skip_paths
                 from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
-                if (row['path'] in active_skip_paths(conn, ('quality', 'bit_depth'), profile_id=owner)
+                # any profile's override, as the audit itself (review 5 R5-I-2)
+                if (row['path'] in active_skip_paths(conn, ('quality', 'bit_depth'), profile_id=None)
                         or is_hand_tagged_path(row['path'], hand_tagged_path_keys(self.db))):
                     return {'success': True, 'action': 'ignored', 'message': 'A manual quality choice protects this file'}
                 profile = effective_track_profile(conn, tid)
