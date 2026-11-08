@@ -261,7 +261,10 @@ def _snapshot_tracks(snapshot: Any, reference: Mapping[str, Any]) -> Optional[Li
 
 
 def _delete_track_row(conn, track_id: int) -> None:
-    """Remove one track row and its dependent rows (not the edition prune)."""
+    """Remove one track row and its dependent rows, its edition shadow rows
+    included (only its own: see ``prune_edition_rows_for_track``)."""
+    from core.library2.editions import prune_edition_rows_for_track
+    prune_edition_rows_for_track(conn.cursor(), track_id)
     conn.execute(
         "DELETE FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=?",
         (track_id,),
@@ -321,9 +324,6 @@ def _trim_excess_fileless_tracks(conn, album_id: int, expected: int,
             continue
         _delete_track_row(conn, row["id"])
         deleted += 1
-    if deleted:
-        from core.library2.editions import prune_orphaned_edition_rows
-        prune_orphaned_edition_rows(conn.cursor())
     return deleted
 
 
@@ -391,8 +391,6 @@ def _unique_untouched_title_match(conn, album_id: int, title: str,
         return None
     for r in without_file:
         _delete_track_row(conn, r["id"])
-    from core.library2.editions import prune_orphaned_edition_rows
-    prune_orphaned_edition_rows(conn.cursor())
     return with_file[0]["id"]
 
 

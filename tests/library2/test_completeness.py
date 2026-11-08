@@ -571,6 +571,64 @@ def test_persist_tracklist_tracks_trims_surplus_fileless_rows(imported_conn):
     ).fetchone()[0] == 0
 
 
+def test_a_placeholder_trim_prunes_only_its_own_edition_rows(imported_conn):
+    """review 5 R5-E-5: trimming one placeholder ran the library-wide edition
+    prune (three anti-joins, about 1.7 s on a big library) inside the
+    tracklist write transaction. only the trimmed track's own release
+    positions, the recordings they pointed at, and its review rows go; any
+    other orphan is the backfill's to sweep."""
+    from core.library2.editions import backfill_editions
+
+    views_id = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE title='Views'"
+    ).fetchone()[0]
+    imported_conn.execute(
+        "UPDATE lib2_albums SET expected_track_count=2 WHERE id=?", (views_id,))
+    stale_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, monitored) "
+        "VALUES(?, 'stale provider row', 3, 1, 0)", (views_id,)).lastrowid
+    backfill_editions(imported_conn.cursor())
+    stale_recordings = [r[0] for r in imported_conn.execute(
+        "SELECT recording_id FROM lib2_release_tracks WHERE track_id=?", (stale_id,))]
+    assert stale_recordings
+    keeper = imported_conn.execute(
+        "SELECT id FROM lib2_tracks WHERE album_id=? AND id<>? LIMIT 1",
+        (views_id, stale_id)).fetchone()[0]
+    imported_conn.execute(
+        "INSERT INTO lib2_recording_review(track_id, other_track_id, reason) "
+        "VALUES(?, ?, 'canonical_link_unverified')", (keeper, stale_id))
+    # somebody else's orphan: a position whose track is long gone
+    edition = imported_conn.execute("SELECT id FROM lib2_release_editions LIMIT 1").fetchone()[0]
+    orphan_recording = imported_conn.execute(
+        "INSERT INTO lib2_recordings(title) VALUES('elsewhere')").lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_release_tracks(release_edition_id, recording_id, track_id) "
+        "VALUES(?, ?, NULL)", (edition, orphan_recording))
+    imported_conn.commit()
+    seen = []
+    imported_conn.set_trace_callback(seen.append)
+    try:
+        changed = _persist_tracklist_tracks(imported_conn, views_id, [
+            {"track_number": 1, "title": "One Dance"},
+            {"track_number": 2, "title": "Hotline Bling"},
+        ])
+    finally:
+        imported_conn.set_trace_callback(None)
+
+    assert changed == 1
+    assert not [s for s in seen if "NOT IN (SELECT" in s]
+    q = lambda sql, *a: imported_conn.execute(sql, a).fetchone()[0]  # noqa: E731
+    assert q("SELECT COUNT(*) FROM lib2_tracks WHERE id=?", stale_id) == 0
+    assert q("SELECT COUNT(*) FROM lib2_release_tracks WHERE track_id=? OR track_id IS NULL "
+             "AND recording_id IN (SELECT value FROM json_each(?))",
+             stale_id, str(stale_recordings)) == 0
+    assert q("SELECT COUNT(*) FROM lib2_recordings WHERE id IN (SELECT value FROM json_each(?))",
+             str(stale_recordings)) == 0
+    assert q("SELECT COUNT(*) FROM lib2_recording_review WHERE other_track_id=?", stale_id) == 0
+    # the backfill's job, not this one's
+    assert q("SELECT COUNT(*) FROM lib2_release_tracks WHERE recording_id=?", orphan_recording) == 1
+
+
 def test_persist_tracklist_does_not_truncate_provider_rows_to_stale_expected_count(
         imported_conn):
     views_id = imported_conn.execute(
