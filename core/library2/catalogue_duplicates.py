@@ -497,10 +497,20 @@ def _move_references(conn, kind, source_id, target_id):
     if _table(conn, "lib2_monitor_rules"):
         from core.library2.monitor_rules import merge_rules_into
         merge_rules_into(conn, kind, source_id, target_id)
-    if _table(conn, "repair_findings") and {"entity_type", "entity_id"} <= {
-            r[1] for r in conn.execute("PRAGMA table_info(repair_findings)")}:
-        # P2A-6, for releases and tracks too: a finding (or a dismissal) on
-        # the twin follows the survivor instead of naming a deleted row
+    finding_cols = ({r[1] for r in conn.execute("PRAGMA table_info(repair_findings)")}
+                    if _table(conn, "repair_findings") else set())
+    if {"entity_type", "entity_id"} <= finding_cols:
+        # review 4 R4-A-7: an open finding describes the twin (its ids, its
+        # files), and moved it read as the survivor's, sometimes twice. it
+        # is settled as obsolete; the next scan raises it again if it holds
+        if {"status", "user_action", "resolved_at"} <= finding_cols:
+            conn.execute("UPDATE repair_findings SET status='resolved', user_action='obsolete', "
+                         "resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP "
+                         "WHERE entity_type=? AND entity_id=? AND status='pending'",
+                         (kind, f"lib2:{source_id}"))
+        # P2A-6, for releases and tracks too: a dismissal (any settled
+        # finding) on the twin follows the survivor instead of naming a
+        # deleted row
         conn.execute("UPDATE repair_findings SET entity_id=?,updated_at=CURRENT_TIMESTAMP "
                      "WHERE entity_type=? AND entity_id=?",
                      (f"lib2:{target_id}", kind, f"lib2:{source_id}"))
@@ -534,7 +544,9 @@ def _move_references(conn, kind, source_id, target_id):
         conn.execute("UPDATE lib2_tracks SET canonical_track_id=? WHERE canonical_track_id=?", (target_id, source_id))
         for table, column, discriminator in (
             ("manual_library_track_matches", "library_track_id", "library_track_id_kind"),
-            ("sample_stash", "track_id", "track_id_kind")):
+            ("sample_stash", "track_id", "track_id_kind"),
+            # review 4 R4-A-6: Source Info reads the survivor's downloads
+            ("track_downloads", "track_id", "track_id_kind")):
             if _table(conn, table):
                 columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
                 if column in columns:

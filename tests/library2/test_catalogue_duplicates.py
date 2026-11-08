@@ -1077,3 +1077,35 @@ def test_the_upgrade_merges_only_what_3_6_1_listed_once_per_server(library):
     stats = merge_import_twins(db)
     assert stats['merged'] == 0 and stats['left_for_review'] >= 1
     assert _albums_left(db, albums) == 2
+
+
+def test_a_merge_settles_the_twins_open_findings_and_moves_its_downloads(library):
+    """review 4 R4-A-6/A-7: the twin's download history stayed on the deleted
+    track (Source Info lost it), and its open findings moved onto the
+    survivor while still describing the twin"""
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    _artist, albums, tracks = ark_pair(library)
+    twin, keeper = tracks[1], tracks[0]
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS repair_findings(id INTEGER PRIMARY KEY, entity_type TEXT, "
+                     "entity_id TEXT, finding_type TEXT, status TEXT, user_action TEXT, resolved_at TEXT, "
+                     "updated_at TEXT, details_json TEXT)")
+        conn.execute("INSERT INTO repair_findings(entity_type,entity_id,finding_type,status) "
+                     "VALUES('track',?,'missing_file','pending')", (f"lib2:{twin}",))
+        conn.execute("INSERT INTO repair_findings(entity_type,entity_id,finding_type,status) "
+                     "VALUES('track',?,'bad_tag','dismissed')", (f"lib2:{twin}",))
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(track_downloads)")}
+        if not cols:
+            conn.execute("CREATE TABLE track_downloads(id INTEGER PRIMARY KEY, track_id TEXT, "
+                         "track_id_kind TEXT, source_username TEXT)")
+        conn.execute("INSERT INTO track_downloads(track_id, track_id_kind, source_username) "
+                     "VALUES(?, 'lib2', 'uploader')", (str(twin),))
+        conn.commit()
+    assert merge_catalogue_duplicate(library[0], scan(library)[1][0]["details"], albums[0])["success"]
+    with closing(library[0]._get_connection()) as conn:
+        assert conn.execute("SELECT track_id FROM track_downloads WHERE source_username='uploader'"
+                            ).fetchone()[0] == str(keeper)
+        found = {r[0]: tuple(r[1:]) for r in conn.execute(
+            "SELECT finding_type, status, entity_id FROM repair_findings")}
+    assert found["bad_tag"] == ("dismissed", f"lib2:{keeper}")       # a dismissal follows
+    assert found["missing_file"][0] == "resolved"                    # the twin's own gap is settled
