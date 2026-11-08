@@ -76,9 +76,15 @@ def _sync_plex(database, ids, client, result) -> None:
     for track_id in ids:
         try:
             with closing(database._get_connection()) as conn:
+                # review 4 R4-B-10: the shared library's keys only. an own
+                # library's ratingKey came from that profile's scan, possibly
+                # of another Plex server, and on the active one it can name an
+                # unrelated track (whose title and artist the edit rewrote).
+                # the written file tags reach Plex on its next scan anyway
                 keys = [r[0] for r in conn.execute(
                     "SELECT server_id FROM lib2_media_server_mappings "
                     "WHERE entity_type='track' AND entity_id=? AND server_source='plex' "
+                    "AND COALESCE(server_library_id,'') NOT LIKE 'own:%' "
                     "ORDER BY last_seen_at DESC", (track_id,))]
                 rows = _track_rows(conn, [track_id])
                 data = _db_data_for_row(conn, rows[0]) if rows and keys else None

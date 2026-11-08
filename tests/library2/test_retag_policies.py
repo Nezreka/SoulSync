@@ -549,3 +549,23 @@ def test_server_sync_skips_tracks_plex_never_saw_and_scans_jellyfin(api):
 
     out = sync_tracks_to_server(db, [ids['album_track']], resolve=lambda: (None, None))
     assert out['skipped'] == 1 and out['errors']
+
+
+def test_server_sync_never_edits_an_own_librarys_plex_key(api):
+    """review 4 R4-B-10: an own library's ratingKey came from that profile's
+    scan, maybe of another Plex server; on the active one it can name an
+    unrelated track, whose title and artist the push rewrote"""
+    from contextlib import closing
+    from core.library2.server_tag_sync import sync_tracks_to_server
+    _, db, ids = api
+    track = ids['album_track']
+    with closing(db._get_connection()) as conn:
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source, server_id, "
+                     "server_library_id) VALUES('track', ?, 'plex', '4242', '')", (track,))
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source, server_id, "
+                     "server_library_id) VALUES('track', ?, 'plex', '9999', 'own:2')", (track,))
+        conn.commit()
+    plex = _FakePlex()
+    out = sync_tracks_to_server(db, [track], resolve=lambda: ('plex', plex))
+    assert out['synced'] == 1
+    assert [key for key, _meta in plex.edits] == ['4242']
