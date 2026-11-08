@@ -432,3 +432,25 @@ def test_a_deleted_profiles_session_may_not_start_a_download(world):
         conn.commit()
     body = world.client.get("/api/library/v2/enabled").get_json()
     assert body["can_download"] is False
+
+
+@pytest.mark.parametrize("who,auto", [("admin", True), ("kim", True), ("sam", False)])
+def test_a_members_refresh_never_files_the_admins_new_releases_as_their_wishes(world, monkeypatch, who, auto):
+    """review 4 R4-D-2: refresh decides auto-monitor from the shared artist
+    row (the admin's watch) and filed what it added under the caller"""
+    import threading
+    seen, done = {}, threading.Event()
+
+    def fake(db, artist_id, cm, *, wishlist_profile_id=1, auto_monitor=True):
+        seen.update(profile=wishlist_profile_id, auto=auto_monitor)
+        done.set()
+        return ({"added": 0, "enriched": 0, "removed": 0, "total": 0, "auto_monitor_album_ids": []}, 0)
+
+    monkeypatch.setattr("core.library2.discography.refresh_artist_discography", fake)
+    monkeypatch.setattr("core.library2.mb_reconcile.reconcile_artist_release_groups",
+                        lambda *a, **k: {"assigned": 0, "merged": 0, "review": 0})
+    world.as_profile({"admin": 1, "kim": world.kim, "sam": world.sam}[who])
+    artist = world.ids["k" if who == "kim" else "h"]
+    assert world.client.post(f"/api/library/v2/artists/{artist}/discography/refresh").status_code == 200
+    assert done.wait(5)
+    assert seen["auto"] is auto

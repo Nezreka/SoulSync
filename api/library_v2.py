@@ -3581,6 +3581,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         job_id = job["job_id"]
         # Resolve the active profile in the request context, never in the thread.
         active_profile = _intent_profile()
+        # review 4 R4-D-2: new-release auto-monitor follows the SHARED artist
+        # row's watch, which is the admin's. a household member reading the
+        # shared library refreshes the catalogue only; otherwise the admin's
+        # new releases were filed as the member's own wishes
+        from core.library2.sql_util import shared_library_member
+        auto_monitor = _is_admin() or shared_library_member() is None
 
         def _run():
             db = get_database()
@@ -3591,6 +3597,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     artist_id,
                     config_manager,
                     wishlist_profile_id=active_profile,
+                    auto_monitor=auto_monitor,
                 )
             except ValueError:
                 _job_registry.update(job_id, error="Artist not found")
