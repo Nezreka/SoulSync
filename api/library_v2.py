@@ -2566,6 +2566,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                           watchlist_row_id=body.get("watchlist_row_id"),
                                           profile_id=_profile())
             conn.commit()
+            # the enrichment modal's unmatched list (review 5 R5-D-1)
+            from core.enrichment.unmatched import invalidate_unmatched_snapshots
+            invalidate_unmatched_snapshots()
         except WatchlistMismatch as exc:
             conn.rollback()
             return _fail(str(exc), 409)

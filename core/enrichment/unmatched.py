@@ -12,7 +12,9 @@ entity table map before any column name is interpolated — user-supplied values
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+import threading
+import time
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Which entity types each enrichment source covers. Mirrors the authoritative
 # ``_SERVICE_ID_COLUMNS`` map in web_server.py (used by manual-match), kept here
@@ -107,9 +109,20 @@ def _universe(service: str, entity_type: str) -> List[str]:
     without this the list and the breakdown counted pending rows the worker
     never hands out and the modal never reached the worker's own 100%.
     The same predicates as core/library2/worker_queue.status_counts."""
-    from core.library2.artist_credit_gate import worker_credit_ready_sql
+    from core.library2.artist_credit_gate import unresolved_credit_sql, worker_credit_ready_sql
     from core.library2.sql_util import ANY_OWNER, owned_sql
-    out = [owned_sql(entity_type, 'e', scope=ANY_OWNER), worker_credit_ready_sql(entity_type)]
+    if entity_type == 'track':
+        # the credit gate is the album's: the gated albums are listed once
+        # instead of an album + artist lookup per track (review 5 R5-D-1).
+        # a track with no album, or one whose album is not gated, passes,
+        # exactly as worker_credit_ready_sql's NOT EXISTS lets it
+        credit = ("(e.album_id IS NULL OR e.album_id NOT IN ("
+                  "SELECT gal.id FROM lib2_albums gal "
+                  "JOIN lib2_artists a ON a.id = gal.primary_artist_id "
+                  f"WHERE {unresolved_credit_sql('a')}))")
+    else:
+        credit = worker_credit_ready_sql(entity_type)
+    out = [owned_sql(entity_type, 'e', scope=ANY_OWNER), credit]
     if service == 'similar_artists':
         from core.library2.worker_queue import _HAS_PROVIDER_ID
         out.append(f"({_HAS_PROVIDER_ID})")
@@ -358,6 +371,148 @@ def build_breakdown_query(service: str, entity_type: str) -> Tuple[str, List]:
     return sql, [entity_type, service]
 
 
+# ── one pass per (service, entity type), kept briefly ───────────────────────
+#
+# review 5 R5-D-1: every list page, count and breakdown scanned the whole
+# owned universe (311k tracks live: the owned check and the attempts lookup
+# per row), 17-21s for one tracks page and 13s for a breakdown. one pass now
+# reads every row of the universe with its attempt status, keeps the counts
+# and the still-unmatched rows (display columns are read for those only), and
+# every page, search, status filter and breakdown is served from it, like the
+# worker progress snapshot. a manual match or a reset drops it; the workers'
+# own progress shows up within SNAPSHOT_TTL.
+
+SNAPSHOT_TTL = 120.0
+_snapshot_lock = threading.Lock()
+_snapshots: Dict[tuple, Dict[str, Any]] = {}
+_snapshot_builds: Dict[tuple, threading.Event] = {}
+_generation = 0
+
+_SNAPSHOT_DISPLAY = {
+    'artist': ('e.name', 'e.image_url', 'NULL'),
+    'album': ('e.title', 'e.image_url',
+              '(SELECT sar.name FROM lib2_artists sar WHERE sar.id = e.primary_artist_id)'),
+    'track': ('e.title',
+              '(SELECT sal.image_url FROM lib2_albums sal WHERE sal.id = e.album_id)',
+              '(SELECT sal.title FROM lib2_albums sal WHERE sal.id = e.album_id)'),
+}
+
+_ASCII_FOLD = str.maketrans('ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')
+
+
+def _nocase(text) -> str:
+    """SQLite's NOCASE: ASCII letters fold, nothing else does."""
+    return str(text).translate(_ASCII_FOLD)
+
+
+def validate_request(service: str, entity_type: str, status: Optional[str] = None) -> None:
+    _validate(service, entity_type)
+    if status is not None and status not in VALID_STATUSES:
+        raise UnmatchedQueryError(f"Invalid status: {status!r}")
+
+
+def build_snapshot_query(service: str, entity_type: str) -> Tuple[str, List]:
+    """Every row of the worker's universe with its attempt status; name,
+    artwork and parent only for the rows still unmatched."""
+    _validate(service, entity_type)
+    table = _ENTITY_TABLE[entity_type]['table']
+    name, image, parent = _SNAPSHOT_DISPLAY[entity_type]
+    open_ = "(pa.status IS NULL OR pa.status = 'not_found')"
+    sql = (
+        f"SELECT e.id, pa.status, "
+        f"CASE WHEN {open_} THEN {name} END, "
+        f"CASE WHEN {open_} THEN {image} END, "
+        f"CASE WHEN {open_} THEN {parent} END, "
+        f"CASE WHEN {open_} THEN pa.last_attempted_at END "
+        f"FROM {table} e LEFT JOIN lib2_provider_attempts pa "
+        f"ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=? "
+        f"WHERE {' AND '.join(_universe(service, entity_type))}"
+    )
+    return sql, [entity_type, service]
+
+
+def _compute_snapshot(connect: Callable[[], Any], service: str, entity_type: str) -> Dict[str, Any]:
+    sql, params = build_snapshot_query(service, entity_type)
+    conn = connect()
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    finally:
+        conn.close()
+    counts = {'matched': 0, 'not_found': 0, 'pending': 0, 'total': 0}
+    items = []
+    for entity_id, status, name, image, parent, attempted in rows:
+        counts['total'] += 1
+        if status == 'matched':
+            counts['matched'] += 1
+        elif status == 'not_found' or status is None:
+            counts['not_found' if status else 'pending'] += 1
+            items.append({'id': entity_id, 'name': name, 'image_url': image,
+                          'parent': parent, 'status': status, 'last_attempted': attempted})
+    # ORDER BY name COLLATE NOCASE: NULL first, ties in row order
+    items.sort(key=lambda i: (i['name'] is not None, _nocase(i['name'] or '')))
+    return {'counts': counts, 'items': items}
+
+
+def unmatched_snapshot(connect: Callable[[], Any], db_key: Any, service: str,
+                       entity_type: str) -> Dict[str, Any]:
+    """The kept pass for one (service, entity type), built at most once at a
+    time per library; a caller arriving mid-build waits for it."""
+    _validate(service, entity_type)
+    key = (str(db_key), service, entity_type)
+    while True:
+        with _snapshot_lock:
+            snap = _snapshots.get(key)
+            if snap is not None and time.monotonic() - snap['at'] < SNAPSHOT_TTL:
+                return snap
+            building = _snapshot_builds.get(key)
+            if building is None:
+                building = threading.Event()
+                _snapshot_builds[key] = building
+                generation = _generation
+                break
+        building.wait(timeout=300)
+    try:
+        data = _compute_snapshot(connect, service, entity_type)
+        data['at'] = time.monotonic()
+        with _snapshot_lock:
+            now = time.monotonic()
+            for stale in [k for k, v in _snapshots.items() if now - v['at'] >= SNAPSHOT_TTL]:
+                del _snapshots[stale]
+            if generation == _generation:
+                # an invalidation during the build means this pass may predate it
+                _snapshots[key] = data
+        return data
+    finally:
+        with _snapshot_lock:
+            _snapshot_builds.pop(key, None)
+        building.set()
+
+
+def invalidate_unmatched_snapshots() -> None:
+    """A manual match, clear or reset changed what is unmatched."""
+    global _generation
+    with _snapshot_lock:
+        _generation += 1
+        _snapshots.clear()
+
+
+def page_unmatched(snapshot: Dict[str, Any], status: str, query: Optional[str],
+                   limit, offset) -> Dict[str, Any]:
+    """One page of a snapshot: the same rows, order and total the SQL list
+    and count gave for (status, name search, limit, offset)."""
+    if status not in VALID_STATUSES:
+        raise UnmatchedQueryError(f"Invalid status: {status!r}")
+    wanted = {'not_found': ('not_found',), 'pending': (None,),
+              'unmatched': ('not_found', None)}[status]
+    needle = _nocase(query) if query else None
+    rows = [item for item in snapshot['items']
+            if item['status'] in wanted
+            and (needle is None or (item['name'] is not None and needle in _nocase(item['name'])))]
+    start = max(int(offset or 0), 0)
+    return {'total': len(rows),
+            'items': [dict(r) for r in rows[start:start + _clamp_limit(limit)]]}
+
+
 def _clamp_limit(limit) -> int:
     try:
         n = int(limit)
@@ -379,6 +534,11 @@ __all__ = [
     'build_unmatched_query',
     'build_count_query',
     'build_breakdown_query',
+    'build_snapshot_query',
+    'unmatched_snapshot',
+    'invalidate_unmatched_snapshots',
+    'page_unmatched',
+    'validate_request',
     'build_reset_query',
     'RESET_SCOPES',
     'degenerate_title',

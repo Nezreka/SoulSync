@@ -11084,6 +11084,9 @@ def _library_match_request(clear: bool):
                                       watchlist_row_id=data.get('watchlist_row_id'),
                                       profile_id=get_current_profile_id())
         conn.commit()
+        # the enrichment modal's unmatched list (review 5 R5-D-1)
+        from core.enrichment.unmatched import invalidate_unmatched_snapshots
+        invalidate_unmatched_snapshots()
     except WatchlistMismatch as e:
         conn.rollback()
         return jsonify({"success": False, "error": str(e)}), 409

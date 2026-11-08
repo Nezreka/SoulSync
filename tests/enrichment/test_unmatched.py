@@ -367,3 +367,98 @@ def test_unowned_catalogue_rows_are_not_listed_or_counted(db):
     failed = db.get_enrichment_unmatched('spotify', 'album', status='not_found')
     assert failed['total'] == 1
 
+
+
+# --------------------------------------------------------------------------
+# review 5 R5-D-1: one kept pass, not a universe scan per page
+# --------------------------------------------------------------------------
+
+def _counting(db, monkeypatch):
+    """Count the statements that walk the attempts ledger."""
+    seen = []
+    real = db._get_connection
+
+    class _Conn:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, *args):
+            if 'lib2_provider_attempts' in sql:
+                seen.append(sql)
+            return self._conn.execute(sql, *args)
+
+        def cursor(self):
+            outer = self
+
+            class _Cur:
+                def __init__(self):
+                    self._cur = outer._conn.cursor()
+
+                def execute(self, sql, *args):
+                    if 'lib2_provider_attempts' in sql:
+                        seen.append(sql)
+                    return self._cur.execute(sql, *args)
+
+                def __getattr__(self, name):
+                    return getattr(self._cur, name)
+            return _Cur()
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(db, '_get_connection', lambda: _Conn(real()))
+    return seen
+
+
+def test_the_modal_reads_the_universe_once(db, monkeypatch):
+    seen = _counting(db, monkeypatch)
+    db.get_enrichment_breakdown('spotify', 'track')
+    db.get_enrichment_unmatched('spotify', 'track', status='unmatched', limit=1, offset=0)
+    db.get_enrichment_unmatched('spotify', 'track', status='unmatched', limit=1, offset=1)
+    db.get_enrichment_unmatched('spotify', 'track', status='not_found', query='believ')
+    assert len(seen) == 1, seen
+
+
+def test_a_reset_shows_up_at_once(db):
+    assert db.get_enrichment_breakdown('spotify', 'artist')['not_found'] == 1
+    db.reset_enrichment('spotify', 'artist', 'item', entity_id=2)
+    assert db.get_enrichment_breakdown('spotify', 'artist')['not_found'] == 0
+    assert db.get_enrichment_unmatched('spotify', 'artist', status='not_found')['total'] == 0
+
+
+@pytest.mark.parametrize('status', ['unmatched', 'not_found', 'pending'])
+@pytest.mark.parametrize('query', [None, 'a', 'ZED'])
+def test_kept_pages_match_the_sql_list(db, status, query):
+    """same rows, order and total as the per-request sql it replaces"""
+    from core.enrichment import unmatched as um
+    conn = db._get_connection()
+    names = ['zed', 'Alpha', 'alpha two', 'Émile', 'beta', 'Zed Zed', 'b']
+    for n, name in enumerate(names):
+        aid = 100 + n
+        conn.execute("INSERT INTO lib2_artists (id, name) VALUES (?, ?)", (aid, name))
+        conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title) VALUES (?,?,?)",
+                     (aid, aid, name.upper()))
+        conn.execute("INSERT INTO lib2_tracks (id, album_id, title) VALUES (?,?,?)", (aid, aid, name))
+        conn.execute("INSERT INTO lib2_track_files (track_id, path) VALUES (?,?)", (aid, f"/m/{aid}.flac"))
+        if n % 2:
+            conn.execute("INSERT INTO lib2_provider_attempts(entity_type,entity_id,service,status) "
+                         "VALUES('track',?,'spotify','not_found')", (aid,))
+    conn.commit()
+    for entity in ('artist', 'album', 'track'):
+        for offset in (0, 2):
+            sql, params = um.build_unmatched_query('spotify', entity, status, query, 3, offset)
+            want = [dict(r) for r in conn.execute(sql, params)]
+            csql, cparams = um.build_count_query('spotify', entity, status, query)
+            total = conn.execute(csql, cparams).fetchone()[0]
+            got = db.get_enrichment_unmatched('spotify', entity, status, query, 3, offset)
+            assert got == {'total': total, 'items': want}, (entity, offset)
+    conn.close()
+
+
+def test_the_track_credit_gate_is_listed_once_not_per_track(db):
+    from core.enrichment.unmatched import build_snapshot_query
+    sql, params = build_snapshot_query('spotify', 'track')
+    conn = db._get_connection()
+    plan = [r[3] for r in conn.execute('EXPLAIN QUERY PLAN ' + sql, params)]
+    conn.close()
+    assert any(step.startswith('LIST SUBQUERY') for step in plan), plan
