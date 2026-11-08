@@ -4980,3 +4980,30 @@ def test_an_import_waits_for_the_last_ones_convergence(api):
     finally:
         release.set()
         t.join(2)
+
+
+def test_reset_rearms_the_one_time_upgrade_carries(api):
+    """review 4 R4-A-5: the 3.6.1 carries and the twin merge kept their
+    run-once markers through a reset, so a re-run upgrade skipped them"""
+    client, db, _ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+                     "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        for name in ("legacy_columns_v1", "legacy_album_kind_known_v1", "legacy_issue_ids_v1",
+                     "legacy_genre_locks_v1", "quality_profile_ids_valid_v1"):
+            conn.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) VALUES(?)", (name,))
+        for table in ("_lib2_import_twins_merged_v2", "_lib2_legacy_credits_carried",
+                      "_lib2_member_watchlists_carried"):
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {table} (applied_at TEXT)")
+        conn.commit()
+
+    assert client.post("/api/library/v2/reset").status_code == 200
+
+    with closing(_conn(db)) as conn:
+        names = {r[0] for r in conn.execute("SELECT name FROM lib2_upgrade_repairs")}
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "quality_profile_ids_valid_v1" in names      # not an upgrade carry
+    assert not names & {"legacy_columns_v1", "legacy_album_kind_known_v1",
+                        "legacy_issue_ids_v1", "legacy_genre_locks_v1"}
+    assert not tables & {"_lib2_import_twins_merged_v2", "_lib2_legacy_credits_carried",
+                         "_lib2_member_watchlists_carried"}

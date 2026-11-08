@@ -5998,6 +5998,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 cursor.execute(f'DELETE FROM "{table}"')
                 if cursor.rowcount > 0:
                     cleared[table] = cursor.rowcount
+            # review 4 R4-A-5: the 3.6.1 carries and the twin merge run once
+            # after an upgrade import. their markers outlived the reset, so a
+            # re-run upgrade skipped them and wasn't what a user gets
+            from core.library2 import legacy_columns, legacy_issues, legacy_locks
+            from core.library2.catalogue_duplicates import _IMPORT_TWINS_MARKER
+            from core.library2.legacy_credits import _MARKER as _CREDITS_MARKER
+            from core.library2.monitor_sync import _MEMBER_WATCHLISTS_MARKER
+            carry_markers = (legacy_columns.MARKER, legacy_columns.KIND_MARKER,
+                             legacy_issues.MARKER, legacy_locks.MARKER)
+            cursor.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+                           "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            cursor.execute(
+                "DELETE FROM lib2_upgrade_repairs WHERE name IN (%s)"
+                % ",".join("?" * len(carry_markers)), carry_markers)
+            for marker_table in (_IMPORT_TWINS_MARKER, _CREDITS_MARKER, _MEMBER_WATCHLISTS_MARKER):
+                cursor.execute(f'DROP TABLE IF EXISTS "{marker_table}"')
             # Re-arm: 'pending' with no watermark and no checkpoint is exactly
             # the state a never-migrated installation is in.
             cursor.execute(
