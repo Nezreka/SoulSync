@@ -225,6 +225,21 @@ def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> d
     }
 
 
+def _retype_old_findings(db) -> None:
+    """review 4 R4-C-4: findings filed before G08-3 kept entity_type 'track'
+    for good (the pending refresh never touches it); they name a download"""
+    try:
+        conn = db._get_connection()
+        try:
+            conn.execute("UPDATE repair_findings SET entity_type='download' "
+                         "WHERE finding_type='expired_download' AND entity_type='track'")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 - the next run retries
+        logger.debug("expired-download findings not retyped: %s", exc)
+
+
 @register_job
 class ExpiredDownloadCleanerJob(RepairJob):
     job_id = 'expired_download_cleaner'
@@ -549,6 +564,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
+        _retype_old_findings(context.db)
         settings = self._get_settings(context)
         wl = (settings.get('watchlist_retention') or 'off')
         pl = (settings.get('playlist_retention') or 'off')

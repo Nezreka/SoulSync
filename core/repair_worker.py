@@ -2826,6 +2826,12 @@ class RepairWorker:
             # explicit request from one run into a later bulk run.
             details['_explicit_single_fix'] = bool(explicit)
 
+            # review 4 R4-C-4: an expired-download finding filed before G08-3
+            # says 'track' with a download-history id; read as a track, the
+            # bridge recomputed whichever unrelated song carries that id
+            if finding_type == 'expired_download' and entity_type == 'track':
+                entity_type = 'download'
+
             # Dispatch fix by finding type
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
 
