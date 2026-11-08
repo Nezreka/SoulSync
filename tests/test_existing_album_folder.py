@@ -169,14 +169,15 @@ def test_id_match_bypasses_name_guard(tmp_path):
     assert out == os.path.normpath(str(album_dir))
 
 
-def _db_with_kind(tmp_path, album_type, files):
+def _db_with_kind(tmp_path, album_type, files, *, known=0):
     import sqlite3
     path = str(tmp_path / "kind.db")
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, album_type TEXT NOT NULL "
                  "DEFAULT 'album', album_type_known INTEGER DEFAULT 0, filed_release TEXT, "
                  "musicbrainz_id TEXT)")
-    conn.execute("INSERT INTO lib2_albums(id, album_type) VALUES(1, ?)", (album_type,))
+    conn.execute("INSERT INTO lib2_albums(id, album_type, album_type_known) VALUES(1, ?, ?)",
+                 (album_type, known))
     conn.commit()
     conn.close()
     db = _FakeDb(album=_album(), album_conf=0.95, tracks=[_track(f) for f in files])
@@ -204,3 +205,15 @@ def test_a_known_single_never_takes_the_albums_track(tmp_path):
     assert resolve_existing_album_folder(
         db=db, transfer_dir=str(tmp_path), album_name="Ocean Avenue",
         album_artist="Yellowcard", incoming_album_type="album") is None
+
+
+def test_a_known_album_still_turns_away_its_same_named_single(tmp_path):
+    """#829 on the real schema: the full suite caught G10-1 dropping this.
+    "Ocean Avenue" the single never lands in "Ocean Avenue" the album's
+    folder when the album's kind is known"""
+    album_dir = tmp_path / "Yellowcard - Ocean Avenue"
+    files = [_mkfile(album_dir, f"0{n} - Song.mp3") for n in range(1, 5)]
+    db = _db_with_kind(tmp_path, "album", files, known=1)
+    assert resolve_existing_album_folder(
+        db=db, transfer_dir=str(tmp_path), album_name="Ocean Avenue",
+        album_artist="Yellowcard", incoming_album_type="single") is None

@@ -200,6 +200,32 @@ def _row_album_type(db: Any, album_id: Any) -> str:
     """
     if album_id is None:
         return ""
+    # full suite: the bare-'album' rule alone broke the #829 guard ("Ocean
+    # Avenue" the single must not land in "Ocean Avenue" the album's folder).
+    # lib2 says which 'album' is real: album_type_known, set by a provider
+    # or a classified import. known 'album' is evidence; the default isn't
+    conn = None
+    try:
+        conn = db._get_connection()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(lib2_albums)")}
+        known_sql = "album_type_known" if "album_type_known" in cols else "1"
+        row = conn.execute(f"SELECT album_type, {known_sql} FROM lib2_albums WHERE id = ?",
+                           (int(album_id),)).fetchone()
+    except Exception as e:  # noqa: BLE001
+        logger.debug("album_type lookup for album %s failed: %s", album_id, e)
+        return ""
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: S110 - cleanup only
+                pass
+    if not row:
+        return ""
+    kind = str(row[0] or "").strip().lower()
+    if kind and (kind != "album" or row[1]):
+        return kind
+    # an untyped row: a download's recorded filing still counts
     from core.metadata.completion import _stored_release_kind
     return _stored_release_kind(db, album_id)
 
