@@ -152,14 +152,19 @@ def test_a_full_refresh_never_imports_a_known_file_twice(tmp_path, monkeypatch):
     transfer.mkdir()
     staging.mkdir()
     known, gone, new = (transfer / "known.flac", transfer / "back.flac", transfer / "new.flac")
-    for f in (known, gone, new):
+    # review 4 R4-D-3: a file back at the path of a row SoulSync deleted
+    returned = transfer / "returned.flac"
+    for f in (known, gone, new, returned):
         f.write_bytes(b"test")
     db = MusicDatabase(str(tmp_path / "music.db"))
     _db_holder["db"] = db
     with db._get_connection() as conn:
         lib2_seed.track(conn, "Various Artists", "Now 100", "Known", path=str(known))
         back = lib2_seed.track(conn, "Various Artists", "Now 100", "Back", path=str(gone))
-        conn.execute("UPDATE lib2_track_files SET file_state='missing' WHERE track_id=?", (back,))
+        # review 4: 'missing' was a state the app never writes
+        conn.execute("UPDATE lib2_track_files SET file_state='missing_confirmed' WHERE track_id=?", (back,))
+        retired = lib2_seed.track(conn, "Various Artists", "Now 100", "Returned", path=str(returned))
+        conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE track_id=?", (retired,))
         conn.commit()
     _configure_paths(monkeypatch, web_server, transfer, staging)
     monkeypatch.setattr(web_server, "get_database", lambda: db)
@@ -174,7 +179,8 @@ def test_a_full_refresh_never_imports_a_known_file_twice(tmp_path, monkeypatch):
 
     db_admin._run_soulsync_full_refresh()
 
-    assert imports == [str(new)]
+    # a deleted row isn't a known file: autolink re-activates it
+    assert sorted(imports) == sorted([str(new), str(returned)])
     with db._get_connection() as conn:
         states = {r[0] for r in conn.execute(
             "SELECT file_state FROM lib2_track_files WHERE track_id=?", (back,))}

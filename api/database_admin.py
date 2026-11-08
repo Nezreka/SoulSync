@@ -389,12 +389,15 @@ def _file_key(path):
 
 
 def _known_library_files(db):
-    """every file row the library holds, by its real path: (id, state)"""
+    """every file row the library holds, by its real path: (id, state).
+    review 4 R4-D-3: a 'deleted' row is not a known file. a file back at that
+    path falls through to autolink, which re-activates the row"""
     from core.library2.paths import resolve_lib2_path
     known = {}
     with db._get_connection() as conn:
         rows = conn.execute("SELECT id, path, COALESCE(file_state,'active') FROM lib2_track_files "
-                            "WHERE path IS NOT NULL AND path<>''").fetchall()
+                            "WHERE path IS NOT NULL AND path<>'' "
+                            "AND COALESCE(file_state,'active') <> 'deleted'").fetchall()
     for file_id, path, state in rows:
         for candidate in {path, resolve_lib2_path(path, config_manager=config_manager) or path}:
             key = _file_key(candidate)
@@ -446,7 +449,7 @@ def _run_soulsync_full_refresh():
             existing = known.get(_file_key(file_path))
             if existing is not None:
                 file_row_id, state = existing
-                if state == 'missing':
+                if state in ('missing_suspected', 'missing_confirmed'):
                     with db._get_connection() as conn:
                         conn.execute("UPDATE lib2_track_files SET file_state='active', "
                                      "updated_at=CURRENT_TIMESTAMP WHERE id=?", (file_row_id,))
