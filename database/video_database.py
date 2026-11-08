@@ -5441,8 +5441,19 @@ class VideoDatabase:
                 "SELECT season_number FROM seasons WHERE show_id=? AND server_id IS NOT NULL", (show_id,)
             ).fetchall():
                 if row["season_number"] not in seen_seasons:
-                    conn.execute("DELETE FROM seasons WHERE show_id=? AND season_number=?",
-                                 (show_id, row["season_number"]))
+                    # review 5 R5-M-1: the episodes demoted just above hang off
+                    # this row (ON DELETE CASCADE), and so does the user's
+                    # monitored choice. a season that still has episodes is
+                    # demoted the same way; only an empty one is deleted
+                    conn.execute(
+                        "UPDATE seasons SET server_id=NULL WHERE show_id=? AND season_number=? "
+                        "AND EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=seasons.show_id "
+                        "AND e.season_id=seasons.id)",
+                        (show_id, row["season_number"]))
+                    conn.execute(
+                        "DELETE FROM seasons WHERE show_id=? AND season_number=? "
+                        "AND server_id IS NOT NULL",
+                        (show_id, row["season_number"]))
             self._apply_specials_policy(conn, show_id)
             conn.commit()
             return show_id
