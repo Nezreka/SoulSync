@@ -67,3 +67,19 @@ def test_the_watchlist_card_counts_the_same_way(tmp_path):
     db.add_to_watchlist("show", 114461, "Ahsoka", library_id=sid)
     show = next(w for w in db.list_watchlist("show") if w["tmdb_id"] == 114461)
     assert (show["owned_count"], show["episode_count"]) == (2, 2)
+
+
+def _missing(db):
+    return [it["title"] for it in db.query_library("shows", status="missing")["items"]]
+
+
+def test_the_missing_filter_uses_the_cards_rule(tmp_path):
+    """a show whose card reads 2/2 is not in Missing (#2018 follow-up)"""
+    db = _db(tmp_path)
+    sid = _ahsoka(db)
+    assert _missing(db) == ["Ahsoka"]            # the aired Specials are a gap
+    db.set_season_monitored(sid, 0, False)
+    assert _card(db) == (2, 2)
+    assert _missing(db) == []                    # unaired S2 and unmonitored S0 aren't
+    db.backfill_episodes(sid, 1, [{"episode_number": 3, "title": "E3", "air_date": PAST}])
+    assert _missing(db) == ["Ahsoka"]

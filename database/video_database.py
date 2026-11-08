@@ -12474,8 +12474,13 @@ class VideoDatabase:
             elif status == "missing":
                 # partially owned — you have SOME episodes but gaps remain (Sonarr's
                 # bread-and-butter 'which of my shows are incomplete' view)
+                # a gap is what the card counts as one (#2018): monitored and
+                # aired. an unaired or unmonitored episode left a show that
+                # reads 8/8 in this filter
                 where.append("EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) "
-                             "AND EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=0)")
+                             "AND EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=0 "
+                             "AND e.monitored=1 AND e.air_date IS NOT NULL "
+                             "AND substr(e.air_date, 1, 10) <= date('now'))")
             elif status == "watched":
                 where.append(f"COALESCE({s_watched}, 0) > 0")
             elif status == "unwatched":
