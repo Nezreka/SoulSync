@@ -382,3 +382,20 @@ def test_mp3_mood_and_language_edits_are_written(tmp_path, key, old, new):
     assert read_embedded_tags(p)["tags"][key] == old
     assert write_embedded_tag(p, key, new) == {"success": True}
     assert read_embedded_tags(p)["tags"].get(key) == new
+
+
+def test_mp3_custom_tag_edit_leaves_other_txxx_frames(tmp_path):
+    """review 5 R5-H-3: the TXXX clear was a substring match, so editing
+    'work' also deleted 'MusicBrainz Work Id'"""
+    from mutagen.id3 import ID3
+    from core.library.file_tags import read_embedded_tags, write_embedded_tag
+    p = _real_mp3(tmp_path / "a.mp3")
+    assert write_embedded_tag(p, "work", "Symphony 6") == {"success": True}
+    after = read_embedded_tags(p)["tags"]
+    assert after["work"] == "Symphony 6"
+    assert after.get("musicbrainz_work_id") == "11111111-2222-3333-4444-555555555555"
+    # the frame keeps the desc it was written with, not a .title() rebuild
+    assert [f.desc for f in ID3(p).getall("TXXX") if f.desc.lower() == "work"] == ["WORK"]
+    assert write_embedded_tag(p, "work", "") == {"success": True}
+    after = read_embedded_tags(p)["tags"]
+    assert "work" not in after and after.get("musicbrainz_work_id")
