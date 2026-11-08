@@ -90,6 +90,32 @@ def test_the_mapping_backfill_terminates_on_a_blank_server_id(conn):
     assert [row["server_id"] for row in mapped] == ["p-7"]
 
 
+@pytest.mark.parametrize("blank", ["\t", "\n", " \r\n ", "\u00a0"])
+def test_the_mapping_backfill_terminates_on_a_whitespace_server_id(conn, blank):
+    """review 5 R5-F-4: SQL TRIM strips spaces only, upsert_mapping's strip()
+    also tabs, newlines and unicode spaces, so such an id was selected and
+    skipped on every batch, forever (the importer passes no should_stop)."""
+    from core.library2.media_mappings import backfill_legacy_mappings
+
+    _artist(conn, "Blank", server_source="plex", server_id=blank)
+    _artist(conn, "Real", server_source="plex", server_id="p-7")
+
+    passes = []
+
+    def _on_batch():
+        passes.append(1)
+        if len(passes) > 4:
+            raise AssertionError("backfill_legacy_mappings did not terminate")
+
+    backfill_legacy_mappings(conn.cursor(), connection=conn, batch_size=1,
+                             on_batch=_on_batch)
+
+    mapped = conn.execute(
+        "SELECT server_id FROM lib2_media_server_mappings "
+        "WHERE entity_type='artist'").fetchall()
+    assert [row["server_id"] for row in mapped] == ["p-7"]
+
+
 def test_the_mapping_backfill_terminates_when_two_rows_share_a_server_id(conn):
     """Two old rows stamped with the same server id (a stale stamp) took turns.
 
