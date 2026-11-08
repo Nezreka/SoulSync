@@ -232,3 +232,27 @@ def test_a_3_6_1_folder_is_relinked_and_pruned_on_its_first_rebuild(tmp_path: Pa
     assert os.path.realpath(folder / name) == os.path.realpath(real[0])
     assert not os.path.lexists(folder / "dropped.flac")
     assert (folder / "notes.txt").read_text() == "mine"   # never the user's own file
+
+
+def test_a_3_6_1_copy_is_adopted_only_when_its_bytes_are_the_members(tmp_path: Path):
+    """G13-1 safety: in copy mode a same-named file is adopted (and so may be
+    replaced or pruned later) only when it is byte for byte the member. a file
+    with other bytes may be the user's only copy: left alone, reported"""
+    from core.playlists.materialize import rebuild_playlist_folder
+    music = tmp_path / "Music"
+    music.mkdir()
+    ours, theirs = music / "ours.flac", music / "theirs.flac"
+    ours.write_bytes(b"our audio")
+    theirs.write_bytes(b"new audio")
+    folder = tmp_path / "Playlists" / "Mix"
+    folder.mkdir(parents=True)
+    (folder / "ours.flac").write_bytes(b"our audio")           # 3.6.1's copy
+    (folder / "theirs.flac").write_bytes(b"user's own master")  # not ours
+    summary = rebuild_playlist_folder(str(tmp_path / "Playlists"), "Mix",
+                                      [str(ours), str(theirs)], "copy")
+    assert (folder / "theirs.flac").read_bytes() == b"user's own master"
+    assert summary.failed == 1
+    # the adopted copy goes when its song leaves the playlist
+    rebuild_playlist_folder(str(tmp_path / "Playlists"), "Mix", [str(theirs)], "copy")
+    assert not (folder / "ours.flac").exists()
+    assert (folder / "theirs.flac").read_bytes() == b"user's own master"
