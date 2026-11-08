@@ -501,6 +501,15 @@ class JobContext:
                 time.sleep(0.2)
         return self.check_stop()
 
+    def stop_or_paused(self) -> bool:
+        """True when the worker should stop or is paused, without waiting.
+
+        For a stop callback handed into work that holds a write transaction:
+        wait_if_paused blocks while paused, and a paused job then held the
+        write lock for minutes (every other writer got "database is
+        locked"). A paused run ends here instead; the next run carries on."""
+        return self.check_stop() or bool(self.is_paused and self.is_paused())
+
     def sleep_or_stop(self, seconds: float, step: float = 0.2) -> bool:
         """Sleep in small increments so stop requests can interrupt quickly."""
         if seconds <= 0:

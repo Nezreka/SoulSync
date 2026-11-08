@@ -75,7 +75,9 @@ class NativeDuplicateDetectorJob(RepairJob):
             server, _ = _active_server_and_client()
             # File reviews fingerprint their settings; catalogue options are not theirs.
             file_settings = {k: v for k, v in settings.items() if k != "auto_merge_catalogue"}
-            stop = lambda: context.check_stop() or context.wait_if_paused()  # noqa: E731
+            # never wait_if_paused here: the catalogue merge holds a write
+            # transaction while it asks
+            stop = context.stop_or_paused
             candidates = find_duplicate_candidates(
                 context.db, context.config_manager, settings=file_settings, scope=scope,
                 playlist_membership=membership, server_source=server, check_stop=stop,

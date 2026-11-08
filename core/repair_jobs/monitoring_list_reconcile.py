@@ -114,7 +114,9 @@ class MonitoringListReconcileJob(RepairJob):
                     context.db,
                     profile_id=profile_id,
                     batch=settings["batch_size"],
-                    should_stop=lambda: context.check_stop() or context.wait_if_paused(),
+                    # never wait_if_paused here: the reconcile holds a write
+                    # transaction between chunks
+                    should_stop=context.stop_or_paused,
                     progress=context.update_progress,
                 )
                 result.scanned += int(wishlist_stats["scanned"]) + int(wishlist_stats.get('intent_repaired', 0))
