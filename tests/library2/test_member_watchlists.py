@@ -83,3 +83,33 @@ def test_a_non_admin_wishlist_removal_drops_their_wish(tmp_path, monkeypatch):
                         lambda _db, descriptors, profile_id=1: seen.append(profile_id) or {"matched": 1})
     monitor_sync.sync_wishlist_removal(db, None, [{"spotify_track_id": "x"}], profile_id=sam)
     assert seen == [sam]
+
+
+def test_a_members_unwatch_leaves_their_wishlist_alone(tmp_path, monkeypatch):
+    """review 4 R4-B-3: a member's wishes were never seeded as track rules,
+    so their projection read "not wanted" for every one and mirroring the
+    removal deleted their whole wishlist for the artist. 3.6.1 never touched
+    the wishlist on a watchlist removal; the admin's projection still does"""
+    from core.library2 import mirror_outbox
+    db, sam, artist = _db(tmp_path)
+    with db._get_connection() as conn:
+        album = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Dummy')",
+                             (artist,)).lastrowid
+        conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')",
+                     (album, artist))
+        track = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Roads')", (album,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                     "VALUES(?, ?, 'primary', 0)", (track, artist))
+        conn.commit()
+    mirrored = []
+    real = mirror_outbox.enqueue_projected_tracks
+    monkeypatch.setattr(mirror_outbox, "enqueue_projected_tracks",
+                        lambda conn, ids, profile_id=1, **k: mirrored.append(profile_id) or real(
+                            conn, ids, profile_id=profile_id, **k))
+    for who in (sam, 1):
+        monitor_sync.sync_watchlist_addition(db, name="Portishead", provider_id="sp-porti",
+                                             source="spotify", profile_id=who)
+        monitor_sync.sync_watchlist_removal(db, None, {"name": "Portishead",
+                                                       "provider_ids": {"spotify": "sp-porti"}},
+                                            profile_id=who)
+    assert mirrored == [1]

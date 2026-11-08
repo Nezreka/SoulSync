@@ -261,7 +261,16 @@ def demonitor_lib2_artists_for_removed_watchlist(
             outbox_ids.extend(enqueue_artist_watchlist(
                 conn, artist_id, False, profile_id=profile_id,
             ))
-        if track_ids:
+        # review 4 R4-B-3: a shared-library member's wishes were never
+        # seeded as track rules (the import seeds the admin's and each own
+        # library's), so their projection reads "not wanted" for every wish
+        # and mirroring it deleted their whole wishlist for the artist. 3.6.1
+        # never touched wishlist rows on a watchlist removal; neither does
+        # a member's, now
+        from core.library_scope import own_library_ids
+        projection_owns_wishlist = (_is_admin_profile(profile_id)
+                                    or int(profile_id) in set(own_library_ids()))
+        if track_ids and projection_owns_wishlist:
             # Mirroring every affected projection is intentional: explicit
             # album/track rules remain wanted and are reasserted; artist-tier
             # tracks become removes. The final state is therefore authoritative
