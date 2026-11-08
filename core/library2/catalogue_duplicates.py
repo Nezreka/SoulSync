@@ -160,8 +160,21 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
                 f"SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists"
                 f" WHERE id IN ({','.join('?' for _ in chunk)})", chunk)})
 
+    def canonical_of(artist_id):
+        # R4-A-1: the narrow load read the alias map for album credits only,
+        # so a track's featured guest or a compilation performer kept its raw
+        # per-server row id, the two twins' credits differed, and a pair the
+        # full scan called proven failed every merge. an artist not read yet
+        # is looked up here, whatever names it
+        artist_id = int(artist_id)
+        if artist_id not in canonical and album_ids is not None:
+            row = conn.execute("SELECT COALESCE(canonical_artist_id, id) FROM lib2_artists WHERE id=?",
+                               (artist_id,)).fetchone()
+            canonical[artist_id] = int(row[0]) if row else artist_id
+        return canonical.get(artist_id, artist_id)
+
     def group_ids(ids):
-        return tuple(sorted({canonical.get(i, i) for i in ids}))
+        return tuple(sorted({canonical_of(i) for i in ids}))
     # Grouping needs titles only; full rows are read for possible duplicates.
     groups = defaultdict(list)
     for al in conn.execute(f"SELECT al.id,al.title,al.album_type,al.primary_artist_id {source}{predicate}", params):
@@ -201,7 +214,7 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
         for row in conn.execute(f"""SELECT ta.* FROM lib2_track_artists ta JOIN lib2_tracks t ON t.id=ta.track_id
             WHERE t.album_id IN ({marks}) ORDER BY ta.track_id,ta.position,ta.artist_id""", batch):
             credit = dict(row)
-            credit["canonical_artist_id"] = canonical.get(int(credit["artist_id"]), int(credit["artist_id"]))
+            credit["canonical_artist_id"] = canonical_of(credit["artist_id"])
             track_credits[int(row["track_id"])].append(credit)
     # A catalogue with files in another private library is not this scan's subject.
     from core.library2.sql_util import ANY_OWNER, ambient_scope
@@ -715,7 +728,7 @@ def merge_catalogue_duplicate(database, candidate, keep_album_id, *, automatic=F
     except (ValueError, KeyError, TypeError, sqlite3.Error) as exc:
         return {"success": False, "error": str(exc)}
 
-def auto_merge_proven(database, *, scope=None, check_stop=None, candidates=None):
+def auto_merge_proven(database, *, scope=None, check_stop=None, candidates=None, accept=None):
     """merge every proven twin pair (auto_merge_eligible) that wasn't dismissed.
 
     returns {"merged": n, "candidates": what's left for review}. a merge only
@@ -729,7 +742,8 @@ def auto_merge_proven(database, *, scope=None, check_stop=None, candidates=None)
     skip = dismissed_catalogue_pairs(database)
     merged = 0
     while candidate := next((c for c in candidates
-                             if c["auto_merge_eligible"] and pair(c) not in skip), None):
+                             if c["auto_merge_eligible"] and pair(c) not in skip
+                             and (accept is None or accept(c))), None):
         if check_stop and check_stop():
             break
         applied = merge_catalogue_duplicate(
@@ -745,7 +759,23 @@ def auto_merge_proven(database, *, scope=None, check_stop=None, candidates=None)
     return {"merged": merged, "candidates": candidates}
 
 
-_IMPORT_TWINS_MARKER = "_lib2_import_twins_merged"
+# v2 (review 4): the first version merged every proven pair on the install
+# and lost the pairs a featured guest kept apart. an install that ran it gets
+# the narrower, fixed pass once more
+_IMPORT_TWINS_MARKER = "_lib2_import_twins_merged_v2"
+
+
+def _is_import_twin(candidate) -> bool:
+    """the pair 3.6.1 left behind: both rows came from the upgrade import and
+    from two different media servers (3.6.1 kept a row set per server).
+    R4-A-3: anything else is a decision for the opt-in Duplicate Detector,
+    not something the upgrade does on its own"""
+    albums = candidate.get("albums") or []
+    if len(albums) != 2:
+        return False
+    sources = [str(a.get("server_source") or "").strip().lower() for a in albums]
+    return (all(a.get("legacy_album_id") is not None for a in albums)
+            and all(sources) and sources[0] != sources[1])
 
 
 def merge_import_twins(database):
@@ -767,7 +797,7 @@ def merge_import_twins(database):
         from core.library2.bootstrap import get_state
         if get_state(database).get("status") != "done":
             return stats
-        result = auto_merge_proven(database)
+        result = auto_merge_proven(database, accept=_is_import_twin)
         stats["merged"] = result["merged"]
         stats["left_for_review"] = len(result["candidates"])
         with closing(database._get_connection()) as conn:

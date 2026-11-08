@@ -1034,3 +1034,46 @@ def test_a_merge_reads_only_the_albums_it_merges(library):
         "SELECT album_id,artist_id,role FROM lib2_album_artists",
         "SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists")]
     assert whole == []
+
+
+def test_twins_with_a_featured_guest_on_each_servers_row_merge(library):
+    """review 4 R4-A-1: the merge reloads the pair with only those albums'
+    artists in its alias map. a track's featured guest has a row per server
+    too, so the two copies' credits differed and every merge failed with
+    "catalogue changed", though the full scan called the pair proven"""
+    from core.library2.catalogue_duplicates import find_catalogue_duplicates, merge_import_twins
+    db = library[0]
+    _plex, albums, tracks = server_twins(library)
+    with closing(db._get_connection()) as conn:
+        guest = conn.execute("INSERT INTO lib2_artists(name) VALUES('Guest')").lastrowid
+        guest_alias = conn.execute("INSERT INTO lib2_artists(name,canonical_artist_id) VALUES('Guest',?)",
+                                   (guest,)).lastrowid
+        # the first track of each copy features the guest, under its server's row
+        conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'featured',1)",
+                     (tracks[0], guest))
+        conn.execute("INSERT INTO lib2_track_artists(track_id,artist_id,role,position) VALUES(?,?,'featured',1)",
+                     (tracks[2], guest_alias))
+        conn.commit()
+    narrow = find_catalogue_duplicates(db, album_ids=albums)
+    assert narrow and narrow[0]["auto_merge_eligible"] is True, narrow and narrow[0]["blocked_reasons"]
+    _import_state(db, 'done')
+    assert merge_import_twins(db)['merged'] == 1
+    assert _albums_left(db, albums) == 1
+
+
+def test_the_upgrade_merges_only_what_3_6_1_listed_once_per_server(library):
+    """review 4 R4-A-3: the upgrade's own pass is for the per-server twins
+    3.6.1 left. a proven pair from one server, or one the import didn't make,
+    waits for the opt-in duplicate detector"""
+    from core.library2.catalogue_duplicates import merge_import_twins
+    db = library[0]
+    _plex, albums, _tracks = server_twins(library)
+    with closing(db._get_connection()) as conn:
+        # rows a later scan made, not the 3.6.1 import
+        conn.execute("UPDATE lib2_albums SET legacy_album_id=NULL")
+        conn.execute("UPDATE lib2_tracks SET legacy_track_id=NULL")
+        conn.commit()
+    _import_state(db, 'done')
+    stats = merge_import_twins(db)
+    assert stats['merged'] == 0 and stats['left_for_review'] >= 1
+    assert _albums_left(db, albums) == 2
