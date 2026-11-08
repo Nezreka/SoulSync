@@ -155,14 +155,29 @@ def _match_lib2_artists(
         "SELECT id, name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
     ).fetchall()
     if qualified:
+        # review 5 R5-F-2: a shared provider id first. the name fallback ran
+        # alongside it, so removing the US Nirvana (spotify id) demonitored a
+        # UK Nirvana that carries only a MusicBrainz id. a name is used only
+        # when no id matched, and only when it names one artist (A9 below)
+        by_name: set[int] = set()
         for row in rows:
             candidate_ids = source_ids_from_values(
                 spotify_id=row["spotify_id"],
                 musicbrainz_id=row["musicbrainz_id"],
                 external_ids=row["external_ids"],
             )
-            if _artist_identity_matches(row["name"], candidate_ids, name, qualified):
+            if _artist_identity_matches(None, candidate_ids, None, qualified):
                 ids.add(int(row["id"]))
+            elif _artist_identity_matches(row["name"], candidate_ids, name, qualified):
+                by_name.add(int(row["id"]))
+        if not ids and len(by_name) > 1:
+            logger.warning(
+                "Watchlist removal name fallback matched %d lib2 artists for "
+                "%r — ambiguous, skipping rather than risk demonitoring the "
+                "wrong artist", len(by_name), name,
+            )
+        elif not ids:
+            ids |= by_name
     elif exts:
         # Backward compatibility for descriptors captured by older builds.
         wanted_ext = set(exts)
