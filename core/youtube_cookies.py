@@ -295,3 +295,17 @@ def youtube_tab_skips(cookie_opts) -> list:
     if cookie_opts and (cookie_opts.get('cookiefile') or cookie_opts.get('cookiesfrombrowser')):
         skips.append('authcheck')
     return skips
+
+
+def empty_signed_in_parse_warning(url, cookie_opts, track_count: int):
+    """the log line for a signed-in playlist parse that found nothing, else None.
+    with the auth check skipped (#2013), cookies for several accounts can make
+    youtube answer for the wrong one, and expired or logged-out cookies look
+    the same: an empty playlist, with yt-dlp's own warning silenced. says
+    "may" because a playlist can really be empty"""
+    signed_in = bool(cookie_opts and (cookie_opts.get('cookiefile') or cookie_opts.get('cookiesfrombrowser')))
+    if track_count or not signed_in:
+        return None
+    return ("[YT Parse] %s returned 0 tracks with YouTube cookies configured. The cookies "
+            "may be expired, not logged in, or for a different account than the playlist's." % url)
+

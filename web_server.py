@@ -13776,6 +13776,11 @@ def parse_youtube_playlist(url):
             # music.youtube.com does NOT have that problem: its entries carry a
             # per-track channel, so `allow_channel_artist` resolves them inline.
 
+            from core.youtube_cookies import empty_signed_in_parse_warning
+            _empty_warning = empty_signed_in_parse_warning(url, cookie_opts, len(tracks))
+            if _empty_warning:
+                logger.warning(_empty_warning)
+
             # Create playlist object matching GUI structure
             playlist_data = {
                 'id': playlist_id,
