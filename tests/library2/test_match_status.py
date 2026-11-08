@@ -469,3 +469,20 @@ class TestManualMatchKeepsTheAttemptLedgerInStep:
         assert conn.execute(
             "SELECT spotify_id FROM lib2_artists WHERE id=?", (artist,),
         ).fetchone()[0] == "sp-1"
+
+
+def test_a_3_6_1_tag_it_yourself_status_is_not_read_as_cleared(imported_conn):
+    """review 4 R4-B-7: the ledger's 'manual' is both "the user cleared it"
+    and 3.6.1's "tag it yourself", seeded per service. the second read
+    "cleared, match it by hand" though nobody cleared anything"""
+    from core.library2.provider_attempts import ensure_provider_attempt_schema
+    ensure_provider_attempt_schema(imported_conn.cursor())
+    drake = _drake_lib2_id(imported_conn)
+    imported_conn.execute("INSERT INTO lib2_provider_attempts(entity_type, entity_id, service, status, attempts) "
+                          "VALUES('artist', ?, 'deezer', 'manual', 1)", (drake,))
+    imported_conn.execute("INSERT INTO lib2_provider_attempts(entity_type, entity_id, service, status, attempts, detail) "
+                          "VALUES('artist', ?, 'musicbrainz', 'manual', 1, 'cleared by user')", (drake,))
+    imported_conn.commit()
+    by_service = {r["service"]: r["status"] for r in MS.entity_match_status(imported_conn, "artist", drake)}
+    assert by_service["deezer"] == "not_found"
+    assert by_service["musicbrainz"] == "cleared"

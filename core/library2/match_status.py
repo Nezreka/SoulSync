@@ -78,14 +78,21 @@ def _ledger(conn: Any, canonical: str, entity_ids: List[int]) -> Dict[int, Dict[
             chunk = entity_ids[start:start + 500]
             marks = ",".join("?" for _ in chunk)
             for r in conn.execute(
-                    f"SELECT entity_id, service, status, last_attempted_at "
+                    f"SELECT entity_id, service, status, last_attempted_at, detail "
                     f"FROM lib2_provider_attempts WHERE entity_type=? AND entity_id IN ({marks})",
                     (canonical, *chunk)):
-                out.setdefault(int(r[0]), {})[str(r[1])] = (r[2], r[3])
+                status = r[2]
+                if status == "manual" and r[4] != _CLEARED_DETAIL:
+                    # review 4 R4-B-7: 3.6.1's "tag it yourself" (the workers
+                    # gave up), seeded into the ledger. nobody cleared it
+                    status = "not_found"
+                out.setdefault(int(r[0]), {})[str(r[1])] = (status, r[3])
     except Exception as exc:  # noqa: BLE001 - no ledger yet: chips as before
         logger.debug("no attempt ledger for chips: %s", exc)
     return out
 
+
+_CLEARED_DETAIL = "cleared by user"
 
 # no id, and the ledger says why
 _UNMATCHED_STATUS = {"not_found": "not_found", "error": "error", "manual": "cleared"}
@@ -269,7 +276,7 @@ def _sync_attempt_ledger(
             # "manual" answer does that, and a manual match overwrites it
             provider_attempts.record_attempt(
                 conn, entity_type=canonical, entity_id=entity_id,
-                service=service, status="manual", detail="cleared by user",
+                service=service, status="manual", detail=_CLEARED_DETAIL,
             )
     except ValueError:
         # A provider the ledger does not know (it also covers derived workers
