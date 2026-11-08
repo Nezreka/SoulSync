@@ -278,3 +278,36 @@ def test_a_3_6_1_copy_is_adopted_only_when_its_bytes_are_the_members(tmp_path: P
     rebuild_playlist_folder(str(tmp_path / "Playlists"), "Mix", [str(theirs)], "copy")
     assert not (folder / "ours.flac").exists()
     assert (folder / "theirs.flac").read_bytes() == b"user's own master"
+
+
+def test_a_3_6_1_fallback_copy_folder_works_in_symlink_mode(tmp_path: Path):
+    """review 5 R5-J-3: 3.6.1's symlink mode fell back to copies when links
+    failed (Windows, SMB, FAT). only copy mode adopted copies, so in symlink
+    mode each one failed every rebuild and stayed after its song left"""
+    from shutil import copy2
+
+    def no_symlinks(_src, _dst):
+        raise OSError("symlinks not supported")
+
+    music = tmp_path / "Music"
+    music.mkdir()
+    ours, theirs = music / "ours.flac", music / "theirs.flac"
+    ours.write_bytes(b"our audio")
+    theirs.write_bytes(b"new audio")
+    root = str(tmp_path / "Playlists")
+    folder = Path(root) / "Road Trip"
+    folder.mkdir(parents=True)
+    copy2(ours, folder / "ours.flac")                           # 3.6.1's fallback copy
+    (folder / "theirs.flac").write_bytes(b"user's own master")  # not ours
+
+    for _ in range(2):
+        s = rebuild_playlist_folder(root, "Road Trip", [str(ours), str(theirs)], "symlink",
+                                    symlink_fn=no_symlinks)
+        assert s.failed == 1 and "theirs.flac" in s.errors[0], s.errors
+    assert (folder / "ours.flac").read_bytes() == b"our audio"
+    assert (folder / "theirs.flac").read_bytes() == b"user's own master"
+
+    # the adopted copy goes when its song leaves the playlist
+    rebuild_playlist_folder(root, "Road Trip", [str(theirs)], "symlink", symlink_fn=no_symlinks)
+    assert not (folder / "ours.flac").exists()
+    assert (folder / "theirs.flac").read_bytes() == b"user's own master"
