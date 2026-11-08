@@ -10635,22 +10635,22 @@ def library_play_track():
             # Not on disk. For a streaming server (Navidrome/Subsonic) we can
             # play it through the server's own stream API instead of requiring
             # the library to be mounted into the SoulSync container (#809).
-            server_track_id = (
-                data.get('server_track_id') or data.get('legacy_track_id')
-                or (None if data.get('lib2_track_id') else data.get('track_id'))
-            )
-            if not server_track_id and data.get('lib2_track_id'):
+            # the active server's own id for a catalogue track wins: the
+            # sent id can be a 3.6.1 id from another server (a plex
+            # ratingKey after a move to navidrome) or a pre-rekey id, and
+            # streamed nothing. review 5 R5-X3-3
+            server_track_id = None
+            if data.get('lib2_track_id'):
                 active_server = config_manager.get_active_media_server()
                 from core.library2.media_mappings import is_media_server_source
                 if is_media_server_source(active_server):
-                    with get_database()._get_connection() as conn:
-                        row = conn.execute(
-                            "SELECT server_id FROM lib2_media_server_mappings "
-                            "WHERE entity_type='track' AND entity_id=? "
-                            "AND server_source=? LIMIT 1",
-                            (data.get('lib2_track_id'), active_server),
-                        ).fetchone()
-                    server_track_id = row[0] if row else None
+                    server_track_id = get_database().server_track_id(
+                        data.get('lib2_track_id'), active_server)
+            if not server_track_id:
+                server_track_id = (
+                    data.get('server_track_id') or data.get('legacy_track_id')
+                    or (None if data.get('lib2_track_id') else data.get('track_id'))
+                )
             stream_url = _build_library_stream_url(server_track_id, file_path)
             if not stream_url:
                 return jsonify({"success": False, "error": _get_file_not_found_error(file_path)}), 404

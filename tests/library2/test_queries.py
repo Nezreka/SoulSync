@@ -1322,3 +1322,37 @@ def test_an_artists_counts_are_their_own_releases_and_live_files(imported_conn):
     after = {a["name"]: a for a in Q.list_artists(conn)[0]}["Drake"]
     assert after["track_count"] == before["track_count"] - 1
     assert after["tracks_missing"] == 0
+
+
+def test_the_server_stream_id_is_the_active_servers_own(tmp_path, monkeypatch):
+    """review 5 R5-X3-3: the payload handed out the 3.6.1 id as the server
+    stream id. a track imported from plex and since mapped on navidrome
+    streamed the plex ratingKey from navidrome, which has no such song."""
+    from core.library2.media_mappings import upsert_mapping
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+
+    MusicDatabase(str(tmp_path / "m.db"))
+    conn = lib2_seed.row_conn(str(tmp_path / "m.db"))
+    track = lib2_seed.track(conn, "Artist", "Album", "Song", path="/mnt/plexonly/Song.flac")
+    album_id = conn.execute("SELECT album_id FROM lib2_tracks WHERE id=?", (track,)).fetchone()[0]
+    upsert_mapping(conn.cursor(), "track", track, "navidrome", "0IOchBY6UeMfO9StCNxMil")
+    # the row's own server columns (a one-slot projection) still say plex
+    conn.execute("UPDATE lib2_tracks SET legacy_track_id=584278, server_source='plex', "
+                 "server_id='584278' WHERE id=?", (track,))
+    conn.commit()
+
+    def ids(active):
+        monkeypatch.setattr(Q, "_active_media_server", lambda: active)
+        album_row = next(t for t in Q.get_album(conn, album_id)["tracks"] if t["id"] == track)
+        return (album_row["server_track_id"], Q.get_track(conn, track)["server_track_id"],
+                [v["server_track_id"] for v in Q.track_versions(conn, track)])
+
+    nav = "0IOchBY6UeMfO9StCNxMil"
+    assert ids("navidrome") == (nav, nav, [nav])
+    # the row's own server id when it came from the active server
+    assert ids("plex") == ("584278", "584278", ["584278"])
+    # nothing better known: the 3.6.1 id, as before
+    assert ids("jellyfin") == (584278, 584278, [584278])
+    # the 3.6.1 id itself is unchanged
+    assert Q.get_track(conn, track)["legacy_track_id"] == 584278

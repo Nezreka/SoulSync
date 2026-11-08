@@ -768,6 +768,42 @@ def _review_unverified_canonical_links(cursor: Any) -> int:
     return cursor.rowcount
 
 
+def prune_edition_rows_for_track(cursor: Any, track_id: int) -> int:
+    """Drop one track's shadow rows, run BEFORE the track row is deleted.
+
+    the whole-table prune below is three library-wide anti-joins (about
+    1.7 s on a big library); run per trimmed placeholder it held the
+    tracklist write transaction for that long. this touches the track's
+    own release positions, only the recordings they pointed at, and its
+    review rows. review 5 R5-E-5. ``lib2_release_tracks.track_id`` is
+    ON DELETE SET NULL, so after the delete these rows can't be found by id;
+    the full prune in the backfill still sweeps anything else."""
+    if not cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_release_tracks'"
+    ).fetchone():
+        return 0
+    track_id = int(track_id)
+    recordings = [int(r[0]) for r in cursor.execute(
+        "SELECT DISTINCT recording_id FROM lib2_release_tracks WHERE track_id=?",
+        (track_id,)).fetchall()]
+    cursor.execute("DELETE FROM lib2_release_tracks WHERE track_id=?", (track_id,))
+    pruned = cursor.rowcount
+    for recording_id in recordings:
+        cursor.execute(
+            """DELETE FROM lib2_recordings WHERE id=?
+                 AND NOT EXISTS (SELECT 1 FROM lib2_release_tracks WHERE recording_id=?)""",
+            (recording_id, recording_id))
+        pruned += cursor.rowcount
+    if cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_recording_review'"
+    ).fetchone():
+        cursor.execute("DELETE FROM lib2_recording_review WHERE track_id=?", (track_id,))
+        pruned += cursor.rowcount
+        cursor.execute("DELETE FROM lib2_recording_review WHERE other_track_id=?", (track_id,))
+        pruned += cursor.rowcount
+    return pruned
+
+
 def prune_orphaned_edition_rows(cursor: Any) -> int:
     """Drop shadow rows whose lib2 track vanished (entity deletes don't
     cascade through the compat link on every code path), then recordings and
@@ -925,6 +961,7 @@ __all__ = [
     "edition_signature",
     "ensure_editions_schema",
     "ensure_release_track",
+    "prune_edition_rows_for_track",
     "prune_orphaned_edition_rows",
     "reconcile_pinned_editions",
     "sync_default_edition",

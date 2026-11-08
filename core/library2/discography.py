@@ -138,13 +138,17 @@ def _link_release_artists(
         (album_id, primary_artist_id),
     )
     for name, key, provider_id in names:
-        resolved_id = find_or_create_artist(
+        # the primary credit is primary_artist_id already: resolving it was
+        # a lookup (and maybe a stray artist row) thrown away, inside the
+        # write transaction. review 5 R5-E-3
+        if key == primary_key:
+            continue
+        credited_id = find_or_create_artist(
             conn,
             name,
             spotify_id=provider_id,
             source=source,
         )
-        credited_id = primary_artist_id if key == primary_key else resolved_id
         if credited_id is None or int(credited_id) == int(primary_artist_id):
             continue
         conn.execute(

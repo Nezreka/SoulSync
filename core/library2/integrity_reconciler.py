@@ -237,9 +237,20 @@ def build_integrity_report(
                 resolved_key = _normalized(resolved)
                 if state not in {"missing_confirmed", "deleted"}:
                     lib2_real.add(resolved_key)
-                    lib2_paths_by_key.setdefault(resolved_key, set()).add(
-                        int(row["track_id"]),
-                    )
+                    # a staged file or one whose track was deleted (on delete
+                    # set null) has no track: report it, don't crash the
+                    # whole report on int(None). review 5 R5-E-7
+                    if row["track_id"] is None:
+                        collector.add(
+                            "lib2_file_unlinked", "warning", "library_v2",
+                            row["id"], "File row is not attached to any track",
+                            track_id=None, file_state=state, path=raw_path,
+                            resolved_path=resolved,
+                        )
+                    else:
+                        lib2_paths_by_key.setdefault(resolved_key, set()).add(
+                            int(row["track_id"]),
+                        )
                 if state in {"missing_suspected", "missing_confirmed", "deleted"}:
                     collector.add(
                         "lib2_state_file_recovered", "warning", "library_v2",

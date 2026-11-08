@@ -229,3 +229,26 @@ def test_findings_are_bounded_but_counts_cover_full_scan(tmp_path):
     assert report.findings_total == 3
     assert report.truncated is True
     assert report.counts["lib2_active_file_missing"] == 3
+
+
+def test_file_row_without_a_track_is_reported_not_a_crash(tmp_path):
+    # review 5 R5-E-7: a staged file or one whose track was deleted (on
+    # delete set null) has a NULL track_id; int(None) used to kill the report
+    conn = _connection()
+    linked = tmp_path / "linked.flac"
+    linked.write_bytes(b"x")
+    orphan = tmp_path / "orphan.flac"
+    orphan.write_bytes(b"y")
+    _track(conn, linked)
+    file_id = conn.execute(
+        "INSERT INTO lib2_track_files(track_id,path,file_state) VALUES(NULL,?,'active')",
+        (str(orphan),),
+    ).lastrowid
+    conn.commit()
+
+    report = build_integrity_report(conn, config_manager=_Config([str(tmp_path)]))
+
+    assert report.observed["lib2_files"] == 2
+    finding = next(item for item in report.findings if item.entity == str(file_id))
+    assert finding.code == "lib2_file_unlinked"
+    assert "lib2_path_multiple_tracks" not in _codes(report)

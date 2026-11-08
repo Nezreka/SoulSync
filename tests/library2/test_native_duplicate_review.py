@@ -570,3 +570,82 @@ def test_one_file_at_two_mount_roots_is_not_a_duplicate(library):
             conn.execute("UPDATE lib2_track_files SET path=? WHERE id=?", (str(alias), fid))
         conn.commit()
     assert review(library) == []
+
+
+def _keep_best_world(library):
+    """a group of two, plus a library around it: a dependent canonical row,
+    overrides, a server mapping, a shared path, other songs"""
+    a, af, pa = copy(library, album="Album")
+    b, bf, pb = copy(library, album="Other", bit_depth=24)
+    others = [copy(library, title=f"Other Song {i}", album=f"Elsewhere {i}", isrc=None)
+              for i in range(4)]
+    with closing(library[0]._get_connection()) as conn:
+        conn.execute("UPDATE lib2_tracks SET canonical_track_id=? WHERE id=?", (b, others[0][0]))
+        conn.execute("INSERT INTO lib2_metadata_overrides(entity_type,entity_id,field_name,value_json) "
+                     "VALUES('track',?,'title','\"x\"')", (others[1][0],))
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,owner_profile_id) VALUES(?,?,9)",
+                     (others[2][0], str(pa)))
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type,entity_id,server_source,server_id) "
+                     "VALUES('track',?,'plex','k1')", (others[3][0],))
+        conn.commit()
+    return (a, af), (b, bf)
+
+
+def test_keep_best_on_one_group_sees_what_the_whole_library_read_saw(library):
+    """review 5 R5-E-1: the narrowed read must judge the group's files
+    exactly like the full read did: same protection, same quality order."""
+    from core.library2.duplicate_review import _load_files, _recommended
+    db, config, *_ = library
+    (_a, af), (b, bf) = _keep_best_world(library)
+
+    full = {f["file_id"]: f for f in _load_files(db, config, playlist_membership={})}
+    narrow = {f["file_id"]: f for f in _load_files(
+        db, config, playlist_membership={}, only_file_ids=[af, bf])}
+
+    assert set(narrow) == {af, bf}
+    for fid in (af, bf):
+        assert narrow[fid]["protected_reasons"] == full[fid]["protected_reasons"]
+        assert narrow[fid]["snapshot"] == full[fid]["snapshot"]
+        assert narrow[fid]["artist_names"] == full[fid]["artist_names"]
+    # af is shared with another track's row, b is a canonical target
+    assert "shared_file_reference" in narrow[af]["protected_reasons"]
+    assert "canonical_reference" in narrow[bf]["protected_reasons"]
+    assert (_recommended(list(narrow.values()))["file_id"]
+            == _recommended([full[af], full[bf]])["file_id"] == bf)
+
+
+def test_keep_best_on_one_group_reads_only_that_group(library):
+    """review 5 R5-E-1: one Keep Best click read every file, credit and
+    mapping in the library twice (about 51 s of SQL on a big one). only the
+    reference check may walk the file table, and only through its
+    name/size filter."""
+    from core.library2.duplicate_review import _load_files
+    db, config, *_ = library
+    (_a, af), (_b, bf) = _keep_best_world(library)
+    statements = []
+    real = db._get_connection
+
+    def traced():
+        conn = real()
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    db._get_connection = traced
+    try:
+        _load_files(db, config, playlist_membership={}, only_file_ids=[af, bf])
+    finally:
+        db._get_connection = real
+
+    catalogue = ("lib2_tracks", "lib2_track_files", "lib2_track_artists", "lib2_albums",
+                 "lib2_artists", "lib2_media_server_mappings", "lib2_metadata_overrides")
+    with closing(real()) as conn:
+        for sql in statements:
+            if not sql.lstrip().upper().startswith(("SELECT", "WITH")) or "sqlite_master" in sql:
+                continue
+            if "LIKE" in sql and "size IN" in sql:
+                continue  # the reference filter: a superset the exact test trims
+            plan = [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql)]
+            scans = [p for p in plan if p.startswith("SCAN ")
+                     and not p.startswith("SCAN json_each")
+                     and any(name in sql for name in catalogue)]
+            assert not scans, (sql, plan)
