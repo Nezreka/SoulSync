@@ -156,3 +156,19 @@ def test_unowned_follow_airing_drops_specials_when_off():
     assert got(False) == [1, 2]
     eng.seasons = [0]                              # all specials: kept either way
     assert got(False) == [0]
+
+
+def test_a_special_unmonitored_by_hand_stays_off_when_the_setting_comes_back(tmp_path):
+    """#2017 follow-up: turning Monitor Specials back on re-monitored a
+    special the user had switched off by hand"""
+    db = _db(tmp_path)
+    sid = _show(db, "a")
+    db.backfill_episodes(sid, 0, [{"episode_number": 2, "title": "SP2"}])
+    conn = sqlite3.connect(db.database_path)
+    conn.execute("UPDATE shows SET tmdb_id=4242 WHERE id=?", (sid,))
+    conn.commit()
+    conn.close()
+    assert db.set_episode_monitored(4242, 0, 2, False) == 1
+    _set(db, False)
+    _set(db, True)
+    assert _eps(db, sid, 0) == [1, 0]

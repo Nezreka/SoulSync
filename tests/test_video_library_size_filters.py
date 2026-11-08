@@ -38,7 +38,9 @@ def _seed(db):
     db.upsert_show_tree("plex", {"server_id": "s1", "title": "Partial Show", "seasons": [
         {"season_number": 1, "episodes": [
             {"episode_number": 1, "file": {"relative_path": "e1.mkv", "size_bytes": 1_000_000_000}},
-            {"episode_number": 2}]}]})
+            # an aired gap: since #2018 an episode with no air date is not
+            # one (the card reads 1/1 and Missing agrees)
+            {"episode_number": 2, "air_date": "2020-01-01"}]}]})
     db.upsert_show_tree("plex", {"server_id": "s2", "title": "Complete Show", "seasons": [
         {"season_number": 1, "episodes": [
             {"episode_number": 1, "file": {"relative_path": "c1.mkv", "size_bytes": 500_000_000}}]}]})

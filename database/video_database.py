@@ -7301,6 +7301,13 @@ class VideoDatabase:
                 "AND show_id IN (SELECT id FROM shows WHERE tmdb_id=?)",
                 (1 if monitored else 0, int(season_number), int(episode_number),
                  int(show_tmdb_id)))
+            if int(season_number) == 0 and cur.rowcount:
+                # a special set by hand: this show's Specials are the user's
+                # now, so the 'Monitor Specials' setting leaves them alone
+                # (#2017 follow-up; turning it back on re-monitored this one)
+                conn.execute(
+                    "UPDATE seasons SET monitor_locked=1 WHERE season_number=0 "
+                    "AND show_id IN (SELECT id FROM shows WHERE tmdb_id=?)", (int(show_tmdb_id),))
             conn.commit()
             return int(cur.rowcount or 0)
         except (sqlite3.Error, TypeError, ValueError):
