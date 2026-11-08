@@ -7728,11 +7728,20 @@ function useOtherSources(input: {
 
 /** Everything the two "All Releases" render modes share: one filter bar, one
  *  set of visible releases (ldp-03/ldp-04 both apply in either mode). */
-function useDiscographyFilters(source?: string | null) {
+export function useDiscographyFilters(source?: string | null) {
   // a MusicBrainz discography starts with the non-studio releases hidden
   const [filters, setFilters] = useState<DiscographyFilterState>(() =>
     applyMusicBrainzDeclutter(DEFAULT_DISCOGRAPHY_FILTERS, source),
   );
+  // review 4 R4-E-2: one provider artist to another in place (no remount)
+  // kept the first one's filters: Deezer to MusicBrainz showed the whole MB
+  // catalogue, MusicBrainz to Deezer read flags Deezer releases don't have
+  const shownSource = useRef(source);
+  useEffect(() => {
+    if (shownSource.current === source) return;
+    shownSource.current = source;
+    setFilters(applyMusicBrainzDeclutter(DEFAULT_DISCOGRAPHY_FILTERS, source));
+  }, [source]);
   return { filters, setFilters };
 }
 

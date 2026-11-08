@@ -242,7 +242,14 @@ it('a failed background refetch keeps the checked profile usable (review 4 R4-E-
   await waitFor(() => expect(screen.getByRole('button', { name: /^Enhance \(/ })).toBeEnabled());
   fail = true;
   await client.refetchQueries();
-  await waitFor(() => expect(client.getQueryCache().getAll().some((q) => q.state.status === 'error')).toBe(true));
+  await waitFor(() =>
+    expect(
+      client
+        .getQueryCache()
+        .getAll()
+        .some((q) => q.state.status === 'error'),
+    ).toBe(true),
+  );
   expect(screen.queryByText('Couldn’t check that profile.')).toBeNull();
   expect(screen.getByRole('button', { name: /^Enhance \(/ })).toBeEnabled();
 });
