@@ -8977,13 +8977,22 @@ class VideoDatabase:
     def _title_download_where(self, kind: str, tmdb_id, library_ids):
         """(sql, args) matching the title's rows in video_downloads: grabbed
         from its TMDB page (media_id = tmdb id) or its library page (media_id
-        = a library row id)."""
-        idents = [("tmdb", str(int(tmdb_id)))] if tmdb_id else []
-        idents += [("library", str(int(i))) for i in library_ids or []]
-        if not idents:
+        = a library row id; older and manual rows leave media_source NULL).
+        A show's single-episode grabs are kind='episode' rows carrying the
+        SHOW's id, so a show matches both kinds."""
+        kinds = ("show", "episode") if kind == "show" else (kind,)
+        conds, args = [], []
+        if tmdb_id:
+            conds.append("(media_source='tmdb' AND media_id=?)")
+            args.append(str(int(tmdb_id)))
+        for i in library_ids or []:
+            conds.append("((media_source='library' OR media_source IS NULL) AND media_id=?)")
+            args.append(str(int(i)))
+        if not conds:
             return None, []
-        where = ("kind=? AND (" + " OR ".join("(media_source=? AND media_id=?)" for _ in idents) + ")")
-        return where, [kind] + [v for pair in idents for v in pair]
+        where = ("kind IN (" + ",".join("?" * len(kinds)) + ") AND ("
+                 + " OR ".join(conds) + ")")
+        return where, list(kinds) + args
 
     def title_active_downloads(self, kind: str, tmdb_id, library_ids) -> list:
         """the title's downloads still in flight (queued .. importing)."""
@@ -10249,6 +10258,27 @@ class VideoDatabase:
             cur = conn.execute(sql, args)
             conn.commit()
             return cur.rowcount
+        finally:
+            conn.close()
+
+    def wishlist_has(self, kind, *, tmdb_id, season_number=None, episode_number=None) -> bool:
+        """Is this still on ANY profile's wishlist? ``kind`` is 'movie' or
+        'episode'; for an episode, leaving ``episode_number`` None asks about the
+        whole season (a season pack). The drain asks right before it grabs,
+        because its item list was read before a long search and the title may
+        have been deleted or un-wished in between."""
+        if not tmdb_id:
+            return False
+        sql, args = "SELECT 1 FROM video_wishlist WHERE kind=? AND tmdb_id=?", [kind, int(tmdb_id)]
+        if kind == "episode" and season_number is not None:
+            sql += " AND season_number=?"
+            args.append(int(season_number))
+            if episode_number is not None:
+                sql += " AND episode_number=?"
+                args.append(int(episode_number))
+        conn = self._get_connection()
+        try:
+            return conn.execute(sql + " LIMIT 1", args).fetchone() is not None
         finally:
             conn.close()
 

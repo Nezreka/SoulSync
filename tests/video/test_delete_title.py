@@ -208,6 +208,116 @@ def test_a_seeding_torrent_is_left_alone(db, tmp_path):
     assert cancelled == [] and db.get_video_download(seed)["status"] == "completed"
 
 
+def test_a_shows_episode_grabs_are_found_whatever_page_they_came_from(db, tmp_path):
+    # Real rows, as the live delete found them: the drain files a show's
+    # episodes as kind='episode' carrying the SHOW's tmdb id, and library-page
+    # grabs can leave media_source NULL with the library row id.
+    show_id, _eps, _folder = _show(db, tmp_path)
+    wished = db.add_video_download({"kind": "episode", "title": "Tulsa King S02E04",
+                                    "status": "downloading", "media_id": "153312",
+                                    "media_source": "tmdb", "source": "torrent"})
+    manual = db.add_video_download({"kind": "episode", "title": "Tulsa King S02E05",
+                                    "status": "queued", "media_id": str(show_id),
+                                    "source": "usenet"})                     # media_source NULL
+    seeding = db.add_video_download({"kind": "episode", "title": "Tulsa King S01E01",
+                                     "status": "completed", "media_id": "153312",
+                                     "media_source": "tmdb", "source": "torrent",
+                                     "client_ref": "abc"})
+    # not this show: another show's episode, and a movie whose id collides
+    other = db.add_video_download({"kind": "episode", "title": "Other S01E01",
+                                   "status": "queued", "media_id": "999",
+                                   "media_source": "tmdb", "source": "torrent"})
+    movie = db.add_video_download({"kind": "movie", "title": "Some Film", "status": "queued",
+                                   "media_id": str(show_id), "source": "torrent"})
+    p = delete_title.plan(db, "show", show_id)
+    assert p["downloads"] == 2 and p["seeding"] == 1
+    cancelled = []
+    res = _run(db, "show", show_id, "Tulsa King",
+               cancel=lambda d, dl: (cancelled.append(dl["id"]), _no_cancel(d, dl)))
+    assert res["success"] and sorted(cancelled) == sorted([wished, manual])
+    assert db.get_video_download(seeding)["status"] == "completed"
+    assert db.get_video_download(other)["status"] == "queued"
+    assert db.get_video_download(movie)["status"] == "queued"
+
+
+# ── the drain race ──────────────────────────────────────────────────────────
+
+def test_wishlist_has_asks_every_profile_at_the_grain_given(db):
+    db.add_episodes_to_wishlist(153312, "Tulsa King",
+                                [{"season_number": 2, "episode_number": 4}], profile_id=4)
+    assert db.wishlist_has("episode", tmdb_id=153312, season_number=2, episode_number=4)
+    assert db.wishlist_has("episode", tmdb_id=153312, season_number=2)       # a season pack
+    assert not db.wishlist_has("episode", tmdb_id=153312, season_number=2, episode_number=5)
+    assert not db.wishlist_has("episode", tmdb_id=153312, season_number=1)
+    assert not db.wishlist_has("movie", tmdb_id=153312)
+
+
+def test_the_drain_skips_an_item_deleted_while_it_was_searching(db, tmp_path, monkeypatch):
+    # The live bug: the hourly drain read its items, the title was deleted
+    # during the search, the drain grabbed it anyway, the grab failed and
+    # put the episode straight back on profile 1's wishlist.
+    import api.video as videoapi
+    from core.automation.handlers import video_process_wishlist as vpw
+    monkeypatch.setattr(videoapi, "_video_db", db)
+    db.add_episodes_to_wishlist(153312, "Tulsa King",
+                                [{"season_number": 2, "episode_number": 4}], profile_id=1)
+    db.add_episodes_to_wishlist(81189, "Breaking Bad",
+                                [{"season_number": 1, "episode_number": 3}], profile_id=1)
+    items = [{"show_tmdb_id": 153312, "title": "Tulsa King", "season_number": 2,
+              "episode_number": 4},
+             {"show_tmdb_id": 81189, "title": "Breaking Bad", "season_number": 1,
+              "episode_number": 3}]
+    enq = []
+
+    def search(it, mt):
+        if it["show_tmdb_id"] == 153312:           # deleted mid-search
+            db.remove_from_wishlist("show", tmdb_id=153312, profile_id=None)
+        return [{"filename": "x.mkv", "title": "x", "username": "u", "size_bytes": 1000,
+                 "quality_label": "WEBDL-1080p", "accepted": True, "score": 10}]
+
+    class _Deps:
+        def __init__(self):
+            self.lines = []
+
+        def update_progress(self, _aid, **kw):
+            if kw.get("log_line"):
+                self.lines.append(kw["log_line"])
+
+    deps = _Deps()
+    res = vpw.auto_video_process_wishlist(
+        {"_automation_id": "a", "max_concurrent": 1, "season_pack_first": False}, deps,
+        media_type="episode", fetch_items=lambda mt: items, active_keys=lambda mt: set(),
+        target_dir=lambda mt: str(tmp_path / "TV"), search=search,
+        enqueue=lambda it, c, cs, mt, t: enq.append(it["show_tmdb_id"]) or True,
+        record_outcome=lambda *a: None, record_note=lambda *a, **k: None,
+        still_wanted=vpw._default_still_wanted)
+    assert enq == [81189] and res["grabbed"] == 1
+    assert any("removed from the wishlist while searching" in ln for ln in deps.lines)
+    assert not db.wishlist_has("episode", tmdb_id=153312)                    # nothing re-wished
+
+
+def test_the_drain_only_rechecks_the_db_for_items_it_read_from_the_db(db, tmp_path, monkeypatch):
+    # A caller that hands in its own items (a manual retry) has no wishlist
+    # row behind them; the re-check must not turn that into "never grab".
+    import api.video as videoapi
+    from core.automation.handlers import video_process_wishlist as vpw
+    monkeypatch.setattr(videoapi, "_video_db", db)                 # an empty wishlist
+    enq = []
+    res = vpw.auto_video_process_wishlist(
+        {"_automation_id": "a", "max_concurrent": 1, "season_pack_first": False},
+        type("D", (), {"update_progress": lambda self, *a, **k: None})(),
+        media_type="episode",
+        fetch_items=lambda mt: [{"show_tmdb_id": 81189, "title": "Breaking Bad",
+                                 "season_number": 1, "episode_number": 3}],
+        active_keys=lambda mt: set(), target_dir=lambda mt: str(tmp_path / "TV"),
+        search=lambda it, mt: [{"filename": "x.mkv", "title": "x", "username": "u",
+                                "size_bytes": 1000, "quality_label": "WEBDL-1080p",
+                                "accepted": True, "score": 10}],
+        enqueue=lambda it, c, cs, mt, t: enq.append(it["show_tmdb_id"]) or True,
+        record_outcome=lambda *a: None, record_note=lambda *a, **k: None)
+    assert enq == [81189] and res["grabbed"] == 1
+
+
 # ── the folder guards ───────────────────────────────────────────────────────
 
 def test_a_movie_loose_in_the_library_root_goes_file_by_file(db, tmp_path):

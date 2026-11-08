@@ -113,7 +113,7 @@ function RecycleRows({
       <BinStrip
         size={vdlFmtBytes(total) || '0 B'}
         count={items.length}
-        line={`Files removed by upgrades, retention and dismissed imports land here first. Restore puts one back where it was; anything older than the tracker restores into _restored. Kept for ${bin.keep_days ?? 7} days.`}
+        line={`Files removed by upgrades, retention and dismissed imports, and titles deleted from their page, land here first. Restore puts one back where it was; anything older than the tracker restores into _restored. Kept for ${bin.keep_days ?? 7} days.`}
         warn={
           bin.recycle_enabled === false
             ? 'Recycling is off in organization settings, so deletes are permanent right now.'
@@ -126,7 +126,7 @@ function RecycleRows({
         <div className="dlc-list">
           {items.map((e, i) => (
             <div className="dlc-row dlc-row-completed" key={`${e.trash_dir}:${e.name}:${i}`}>
-              <DlFileBadge ext={binExt(e.name)} />
+              <DlFileBadge ext={e.is_folder ? 'DIR' : binExt(e.name)} />
               <div className="dlc-main">
                 <div className="dlc-title">{vdlBinDisplayName(e.name)}</div>
                 <div className="dlc-sub dlc-mono">
@@ -141,7 +141,7 @@ function RecycleRows({
               <div className="dlc-acts">
                 <DlButton
                   primary
-                  title="Put this file back"
+                  title={e.is_folder ? 'Put this folder back' : 'Put this file back'}
                   onClick={() => onRestore(e.trash_dir, e.name)}
                 >
                   Restore

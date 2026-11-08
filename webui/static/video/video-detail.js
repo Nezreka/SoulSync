@@ -1500,7 +1500,7 @@
         }
         if (p.kind === 'show') {
             items.push('<li>Unfollowed for every profile' +
-                (p.followers.length ? ' (' + _plural(p.followers.length, 'profile') + ' follow it now)' : '') + '.</li>');
+                (p.followers.length ? ' (' + _plural(p.followers.length, 'profile') + (p.followers.length === 1 ? ' follows' : ' follow') + ' it now)' : '') + '.</li>');
         }
         if (p.wishlist) items.push('<li>' + _plural(p.wishlist, 'wishlist entry', 'wishlist entries') + ' removed, from every profile.</li>');
         if (p.downloads) items.push('<li>' + _plural(p.downloads, 'download') + ' in progress cancelled.</li>');
