@@ -144,8 +144,13 @@ def test_follow_without_downloading_takes_back_only_the_automatic_wishes(tmp_pat
         db.add_videos_to_wishlist(ch, [{"youtube_id": "both", "title": "B"}], auto=True)
         assert db.drop_auto_wished_videos("UC1") == 0
 
-        # on again stores nothing (the default)
+        # on again: only the day it came back on (review 4 R4-C-1: the
+        # next scan counts new uploads from then, not from the follow)
         r = client.post("/api/video/youtube/channel/UC1/settings", json={}).get_json()
-        assert r["settings"] == {}
+        assert set(r["settings"]) == {"auto_download_since"}
+        since = r["settings"]["auto_download_since"]
+        # a later save keeps it
+        r = client.post("/api/video/youtube/channel/UC1/settings", json={"min_minutes": 3}).get_json()
+        assert r["settings"].get("auto_download_since") == since
     finally:
         videoapi._video_db = None

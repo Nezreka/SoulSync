@@ -357,6 +357,14 @@ def register_routes(bp):
             db.set_playlist_settings(channel_id, out)
         else:
             was_off = auto_download_off(db, channel_id)
+            if out.get("auto_download") is not False:
+                # review 4 R4-C-1: switched back on, new uploads count from
+                # today, not from the follow (a backlog of every upload since)
+                from datetime import datetime, timezone
+                previous = (db.get_channel_settings(channel_id) or {}).get("auto_download_since")
+                since = (datetime.now(timezone.utc).strftime("%Y-%m-%d") if was_off else previous)
+                if since:
+                    out["auto_download_since"] = since
             db.set_channel_settings(channel_id, out)
             if out.get("auto_download") is False and not was_off:
                 # the follow's batch would otherwise download an hour later

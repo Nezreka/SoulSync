@@ -288,3 +288,20 @@ def test_a_channel_set_to_not_download_is_skipped():
     assert adds == [("UC2", "UC2-new")]
     assert res["videos_added"] == 1
 
+
+
+def test_downloads_switched_back_on_count_from_that_day():
+    """review 4 R4-C-1: turned back on, the scan paged back to the follow date
+    and wished every upload since (and the safety net reached behind it)"""
+    adds = []
+    ups = [_vid("after", date="2026-06-25"), _vid("before", date="2026-06-10"),
+           _vid("old", date="2026-06-02")]
+    auto_video_scan_watchlist_channels(
+        {"_automation_id": "a"}, _Deps(),
+        fetch_channels=lambda: [{"youtube_id": "UC1", "title": "Back on", "date_added": "2026-06-01"}],
+        fetch_uploads=lambda cid, limit: ups,
+        channel_settings=lambda cid: {"auto_download_since": "2026-06-20"},
+        wishlisted_ids=lambda cid: [], downloaded_ids=lambda cid: [], dismissed_ids=lambda cid: [],
+        add_videos=lambda ch, v: (adds.extend(x["youtube_id"] for x in v), len(v))[1],
+        today_fn=lambda: "2026-07-01", backfill_fn=lambda: 5)
+    assert adds == ["after"]
