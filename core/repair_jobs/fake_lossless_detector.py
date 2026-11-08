@@ -289,8 +289,11 @@ def _analyze_file(fpath: str) -> dict:
         #
         # For a reliable check, we use ffmpeg's volumedetect on a
         # high-pass filtered version of the audio.
+        # volumedetect reports at info level: '-v quiet' silenced the very
+        # mean_volume line parsed below, so nothing was ever flagged
+        # (review 5 R5-I-6). -nostats keeps the progress line out.
         highpass_cmd = [
-            'ffmpeg', '-v', 'quiet',
+            'ffmpeg', '-hide_banner', '-nostats', '-v', 'info',
             '-i', fpath,
             '-t', '30',  # Only analyze first 30 seconds
             '-af', f'highpass=f={int(sample_rate * 0.35)},volumedetect',
