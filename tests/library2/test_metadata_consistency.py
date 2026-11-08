@@ -210,6 +210,27 @@ def test_organize_moves_a_track_with_no_number_by_its_title(library):
     assert seen == [7]
 
 
+def test_organize_keeps_an_unbound_tracks_own_number(library):
+    """review 4 R4-B-1: a track bound to no edition, whose title the
+    tracklist spells differently, was planned as track 1 though its row
+    holds 7, and renamed "01 - ..." """
+    from core.library2.reorganize_plan import plan_album_reorganize
+    db, path, _ = library
+    seen = []
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('UPDATE lib2_tracks SET track_number=7 WHERE id=7')
+        conn.execute("UPDATE lib2_tracks SET title='Song (Bonus Mix)' WHERE id=7")
+        conn.execute('UPDATE lib2_release_tracks SET track_id=NULL WHERE track_id=7')
+
+        def build(context, artist, album, extension, **kwargs):
+            seen.append(context['track_info']['track_number'])
+            return str(path.parent / f"{context['track_info']['track_number']:02d} - Song{extension}"), True
+        plan = plan_album_reorganize(conn, 1, build_final_path_fn=build, transfer_dir=str(path.parent),
+                                     resolve_file_path_fn=lambda p: p)
+    assert plan['tracks'][0]['track_number'] == 7
+    assert seen == [7]
+
+
 def test_organize_does_not_guess_an_ambiguous_edition_position(library):
     from core.library2.reorganize_plan import plan_album_reorganize
     db, path, _ = library

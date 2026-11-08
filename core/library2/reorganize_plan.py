@@ -484,7 +484,14 @@ def plan_album_reorganize(
             # no number (a 3.6.1 row that had none, kept as 0): 3.6.1 matched
             # the title against the release's tracklist and fell back to 1, and
             # moved the file. same here, from the album's own editions
-            position = _position_by_title(conn, album_id, title)
+            # review 4 R4-B-1: a track bound to no edition comes here with its
+            # number blanked, though its own row holds one (a bonus track
+            # stored as #7). that number first; the title, then 1, only
+            # when the row has none
+            own = conn.execute("SELECT track_number, disc_number FROM lib2_tracks WHERE id=?",
+                               (track['id'],)).fetchone()
+            position = ((int(own[0]), int(own[1] or 1)) if own and own[0] and int(own[0]) > 0
+                        else _position_by_title(conn, album_id, title))
             track = {**track, 'track_number': position[0] if position else 1,
                      'disc_number': (position[1] if position else track.get('disc_number')) or 1}
             item.update(track_number=track['track_number'], disc_number=int(track['disc_number']))
