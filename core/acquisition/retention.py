@@ -45,7 +45,7 @@ _GATED_TRIGGER = """CREATE TRIGGER trg_acquisition_history_no_delete
 def retention_days(config_manager: Any = None) -> int:
     try:
         if config_manager is None:
-            from config.settings import config_manager as configured
+            from core.settings import config_manager as configured
             config_manager = configured
         value = int(config_manager.get("acquisition.history_retention_days",
                                        DEFAULT_RETENTION_DAYS))

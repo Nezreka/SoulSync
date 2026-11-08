@@ -102,3 +102,13 @@ def test_zero_days_keeps_everything(conn):
     conn.commit()
     assert not any(prune_acquisition_journal(conn, days=0).values())
     assert _ids(conn, "acquisition_requests") == {"done-old"}
+
+
+def test_the_retention_setting_is_read_from_the_app_config(monkeypatch):
+    """the full suite caught it: the import named the old config module, so
+    the setting was never read and every install got 90 days"""
+    from core import settings
+    from core.acquisition.retention import retention_days
+    monkeypatch.setattr(settings.config_manager, "get",
+                        lambda key, default=None: 30 if key == "acquisition.history_retention_days" else default)
+    assert retention_days() == 30
