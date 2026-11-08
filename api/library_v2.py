@@ -2289,6 +2289,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 database = get_database()
                 worker_conn = database._get_connection()
                 from core.library2.completeness import load_album_catalogue
+                from core.library2.mirror_outbox import drain_since, queue_mark
+                # the landed tracks queue a member's wish for their wishlist
+                # (review 5 R5-B-1): deliver it now, not at the hourly reconcile
+                try:
+                    mark = queue_mark(worker_conn)
+                except Exception as e:  # noqa: BLE001 - no outbox: nothing to deliver
+                    logger.debug("tracklist resolve outbox mark failed (%s): %s", album_id, e)
+                    mark = None
                 # the tracklist lands (and the polling page shows it) before
                 # the slow all-services enrichment runs
                 resolved = load_album_catalogue(
@@ -2303,6 +2311,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         "UPDATE lib2_albums SET tracklist_status='failed' "
                         "WHERE id=? AND tracklist_status='pending'", (album_id,))
                     worker_conn.commit()
+                elif mark is not None:
+                    drain_since(database, mark)
             except Exception as e:  # noqa: BLE001
                 logger.debug("background tracklist resolve failed (%s): %s", album_id, e)
             finally:

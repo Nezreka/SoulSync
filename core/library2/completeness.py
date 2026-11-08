@@ -496,6 +496,7 @@ def _persist_tracklist_tracks(
 
     created = 0
     touched_ids: set = set()
+    created_ids: set = set()
     for idx, entry in enumerate(entries):
         title = str(entry.get("title") or "").strip()
         if not title:
@@ -575,6 +576,7 @@ def _persist_tracklist_tracks(
             track_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             created += 1
             touched_ids.add(track_id)
+            created_ids.add(track_id)
 
         if incoming_ids:
             identity_row = conn.execute(
@@ -637,10 +639,39 @@ def _persist_tracklist_tracks(
     from core.library2.wanted import recompute_wanted_for_entity
     from core.library_scope import own_library_ids
     # each library judges completeness by its own files (#1199)
-    for profile_id in (1, *sorted(own_library_ids())):
+    reconciled = (1, *sorted(own_library_ids()))
+    for profile_id in reconciled:
         reconcile_import_monitoring(conn.cursor(), profile_id=profile_id, album_ids=[album_id])
         recompute_wanted_for_entity(conn, "album", album_id, profile_id=profile_id)
+    _project_for_rule_holders(conn, album_id, al["primary_artist_id"],
+                              created_ids, skip=reconciled)
     return changed
+
+
+def _project_for_rule_holders(conn, album_id: int, artist_id, created_ids: set,
+                              *, skip) -> None:
+    """Carry a household member's wish onto tracks that just landed.
+
+    review 5 R5-B-1: a member who wishes for a release with no tracks yet only
+    gets an album rule. the loop above recomputes the shared library and the
+    own libraries, and the hourly reconcile mirrors only those, so the member's
+    wanted rows and wishlist stayed empty for good. every other profile with an
+    album or artist rule here gets its projection recomputed, and the tracks
+    this call created get queued for its wishlist. only the new ones: existing
+    tracks were mirrored when the rule was written, and a cached tracklist
+    persists again on every resolve.
+    """
+    from core.library2.mirror_outbox import enqueue_projected_tracks, intent_profile_ids
+    from core.library2.wanted import recompute_wanted_for_entity
+    holders = intent_profile_ids(
+        conn, album_ids=[album_id],
+        artist_ids=[artist_id] if artist_id is not None else [])
+    for profile_id in sorted(holders - {int(p) for p in skip}):
+        if profile_id <= 0:
+            continue
+        recompute_wanted_for_entity(conn, "album", album_id, profile_id=profile_id)
+        if created_ids:
+            enqueue_projected_tracks(conn, sorted(created_ids), profile_id=profile_id)
 
 
 def resolve_tracklist(config_manager, conn, album_id: int, *,

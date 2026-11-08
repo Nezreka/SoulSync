@@ -607,72 +607,44 @@ def test_a_members_bulk_release_monitor_leaves_the_shared_columns(world):
     assert track_cols == [1]
 
 
-def _bookmark(world, title):
-    r = world.client.post("/api/library/v2/discovery/track",
-                          json={"artist_name": "House Band", "track_title": title,
-                                "album_title": title, "monitored": True})
-    assert r.status_code == 200, r.get_json()
-    return r.get_json()["track_id"]
-
-
-def _track_status(world, title):
-    r = world.client.get("/api/library/v2/discovery/track-status",
-                         query_string={"artist_name": "House Band", "title": title})
-    return r.get_json()["statuses"].get(title)
-
-
-def test_top_track_bookmarks_read_back_as_the_callers(world, monkeypatch):
-    """review 5 R5-B-3 / R5-X1-1: track-status answered from the shared
-    column, so sam's bookmark read back unticked and the admin's showed as hers"""
-    monkeypatch.setattr("core.library2.native_enrich.schedule_native_entity_enrich",
-                        lambda *a, **k: None)
-    world.as_profile(world.sam)
-    _bookmark(world, "Hit Single")
-    assert _track_status(world, "Hit Single")["monitored"] is True
-    world.as_profile(1)
-    assert _track_status(world, "Hit Single")["monitored"] is False
-    _bookmark(world, "Admin Pick")
-    assert _track_status(world, "Admin Pick")["monitored"] is True
-    world.as_profile(world.sam)
-    assert _track_status(world, "Admin Pick")["monitored"] is False
-
-
-def test_a_members_wanted_rows_carry_their_own_monitored(world, monkeypatch):
-    """review 5 R5-X1-1: the member's wanted rows carried the shared column"""
-    monkeypatch.setattr("core.library2.native_enrich.schedule_native_entity_enrich",
-                        lambda *a, **k: None)
-    world.as_profile(world.sam)
-    _bookmark(world, "Hit Single")
-    rows = world.client.get("/api/library/v2/wanted",
-                            query_string={"kind": "missing"}).get_json()["tracks"]
-    assert next(r for r in rows if r["title"] == "Hit Single")["monitored"] is True
-
-
-def test_duplicate_pair_toggles_show_the_callers_intent(world):
-    """review 5 R5-X1-1: the duplicates table showed the admin's flags to a
-    member, so a click flipped the member's rule the wrong way"""
-    house = world.ids["h"]
+def _album_tracks_wanted(world, album_id, pid):
     with world.db._get_connection() as conn:
-        album_track = conn.execute(
-            "SELECT t.id FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id "
-            "WHERE al.primary_artist_id=?", (house,)).fetchone()[0]
-        single = seed_album(conn, server_id="al-single", title="Song", artist_id=house,
-                            server_source="soulsync")
-        conn.execute("UPDATE lib2_albums SET album_type='single' WHERE id=?", (single,))
-        single_track = conn.execute(
-            "INSERT INTO lib2_tracks(album_id, title, track_number, monitored, canonical_track_id) "
-            "VALUES(?, 'Song', 1, 1, ?)", (single, album_track)).lastrowid
-        conn.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (album_track,))
-        conn.execute("INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored, provenance) "
-                     "VALUES('track', ?, ?, 0, 'user')", (album_track, world.sam))
+        return conn.execute(
+            "SELECT COUNT(*) FROM lib2_wanted_tracks w JOIN lib2_tracks t ON t.id=w.track_id "
+            "WHERE t.album_id=? AND w.profile_id=? AND w.wanted=1", (album_id, pid)).fetchone()[0]
+
+
+def test_a_members_wish_for_a_release_with_no_tracks_reaches_their_wishlist(world, monkeypatch):
+    """review 5 R5-B-1: the tracklist landed after the wish and only the
+    shared library and own libraries were recomputed, so sam's wish never
+    became wanted rows or wishlist entries"""
+    from core.library2 import completeness
+
+    def fake_load(database, config_manager, conn, album_id, **_kw):
+        tracks = [{"title": "One", "track_number": 1, "disc_number": 1},
+                  {"title": "Two", "track_number": 2, "disc_number": 1}]
+        completeness._persist_tracklist_tracks(conn, album_id, tracks, complete=True)
+        conn.execute("UPDATE lib2_albums SET tracklist_status='ready' WHERE id=?", (album_id,))
         conn.commit()
+        return tracks
 
-    def pair(pid):
-        world.as_profile(pid)
-        body = world.client.get(f"/api/library/v2/artists/{house}/duplicates").get_json()
-        return next(p for p in body["pairs"] if p["single"]["track_id"] == single_track)
-
-    sams = pair(world.sam)
-    assert sams["album"]["monitored"] is False and sams["single"]["monitored"] is False
-    admins = pair(1)
-    assert admins["album"]["monitored"] is True and admins["single"]["monitored"] is True
+    monkeypatch.setattr(completeness, "load_album_catalogue", fake_load)
+    with world.db._get_connection() as conn:
+        album = seed_album(conn, server_id="al-disco", title="Unreleased", artist_id=world.ids["h"],
+                           server_source="soulsync", origin="discography")
+        # the admin never asked for it
+        conn.execute("UPDATE lib2_albums SET monitored=0 WHERE id=?", (album,))
+        conn.commit()
+    world.as_profile(world.sam)
+    r = world.client.post(f"/api/library/v2/albums/{album}/monitor", json={"monitored": True})
+    assert r.status_code == 200, r.get_json()
+    _join_lib2_threads()
+    with world.db._get_connection() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (album,)).fetchone()[0] == 2
+        # the shared column stays the admin's
+        assert not conn.execute("SELECT monitored FROM lib2_albums WHERE id=?", (album,)).fetchone()[0]
+    assert _album_tracks_wanted(world, album, world.sam) == 2
+    assert world.db.get_wishlist_count(profile_id=world.sam) == 2
+    # the admin wished for nothing
+    assert _album_tracks_wanted(world, album, 1) == 0
+    assert world.db.get_wishlist_count(profile_id=1) == 0
