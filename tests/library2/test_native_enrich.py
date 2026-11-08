@@ -1538,3 +1538,62 @@ def test_prune_removes_the_lead_of_a_browse_only_single(imported_conn):
     stats = NE.prune_browse_only_artists(imported_conn)
 
     assert lead in stats["artist_ids"]
+
+
+def test_prune_keeps_an_artist_a_household_member_watches_or_wants(imported_conn):
+    """third #1062 review P2B-2: only the admin's columns were checked. a
+    member's watch is a rule (the column stays 0), and their wanted tracks
+    went with the deleted artist"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    watched, _ = _browse_only_artist(imported_conn, "Member Watched Guest")
+    record_rule(imported_conn, "artist", watched, True, PROVENANCE_USER, profile_id=2)
+    wanted, album_id = _browse_only_artist(imported_conn, "Member Wanted Guest")
+    track = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Wished', 1)",
+        (album_id,)).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, projection_version) "
+        "VALUES(2, ?, 1, 'track', 1)", (track,))
+
+    assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
+
+
+def test_a_split_ghosts_watches_go_to_the_artists_it_became(imported_conn):
+    """third #1062 review P2B-8: the ghost's watch rules were deleted for every
+    profile, so the real artists showed unwatched. 3.6.1's watchlist rows
+    survived a merge or split"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    ghost = _insert_native_artist(imported_conn, "Alpha & Beta")
+    alpha = _insert_native_artist(imported_conn, "Alpha")
+    beta = _insert_native_artist(imported_conn, "Beta")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    record_rule(imported_conn, "artist", ghost, True, PROVENANCE_USER, profile_id=2)
+    record_rule(imported_conn, "artist", beta, False, PROVENANCE_USER, profile_id=2)
+
+    NE._rehome_and_delete_combined(imported_conn, ghost, alpha, [alpha, beta])
+
+    rules = {(r[0], r[1]): r[2] for r in imported_conn.execute(
+        "SELECT entity_id, profile_id, monitored FROM lib2_monitor_rules WHERE entity_type='artist'")}
+    assert rules[(alpha, 2)] == 1
+    assert rules[(beta, 2)] == 0          # beta's own choice for profile 2 stands
+    assert imported_conn.execute("SELECT monitored FROM lib2_artists WHERE id=?",
+                                 (alpha,)).fetchone()[0] == 1
+
+
+def test_smart_split_reuses_the_artist_holding_the_resolved_id(imported_conn):
+    """third #1062 review P2B-7: "Ian Asher & Beyonce" splits to "Beyonce";
+    the library's "Beyoncé" holds that spotify id. a NOCASE name match missed
+    the accent and minted a second row carrying the same id"""
+    beyonce = _insert_native_artist(imported_conn, "Beyoncé")
+    imported_conn.execute("UPDATE lib2_artists SET spotify_id='SP_Beyonce' WHERE id=?", (beyonce,))
+    combined = _insert_native_artist(imported_conn, "Ian Asher & Beyonce")
+    album_id, _track = _make_collab_release(imported_conn, combined)
+
+    NE.smart_split_combined_artist(imported_conn, combined, resolver=_component_resolver)
+
+    holders = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE spotify_id='SP_Beyonce'").fetchall()
+    assert [r["id"] for r in holders] == [beyonce]
+    credited = {r["artist_id"] for r in imported_conn.execute(
+        "SELECT artist_id FROM lib2_album_artists WHERE album_id=?", (album_id,))}
+    assert beyonce in credited

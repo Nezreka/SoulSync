@@ -63,3 +63,22 @@ def test_none_when_file_not_tracked(tmp_path):
 
 def test_none_when_no_db():
     assert _lookup_canonical_from_db([("/p.flac", "p.flac", 1)], types.SimpleNamespace(db=None)) is None
+
+
+def test_another_artists_same_named_album_is_not_this_folders_tracklist(tmp_path):
+    """third #1062 review G12-9: a fresh download "Greatest Hits/01 - Intro.flac"
+    matched another artist's same-named album by its last two path parts,
+    and post-download renumbering ran against that album's tracklist"""
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    _seed(db, with_canonical=True, file_path="/music/Imagine Dragons/Greatest Hits/01 - Intro.flac")
+    other = [("/downloads/Queen/Greatest Hits/01 - Intro.flac", "01 - Intro.flac", 1)]
+    assert _lookup_canonical_from_db(other, _ctx(db)) is None
+    # the same artist folder under another mount prefix still resolves
+    same = [("H:\\Music\\Imagine Dragons\\Greatest Hits\\01 - Intro.flac", "01 - Intro.flac", 1)]
+    assert _lookup_canonical_from_db(same, _ctx(db)) == ("spotify", "sp_evolve")
+
+
+def test_an_underscore_in_a_name_is_not_a_wildcard(tmp_path):
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    _seed(db, with_canonical=True, file_path="/music/AB/Evolve/01 - Believer.flac")
+    assert _lookup_canonical_from_db([("/x/A_/Evolve/01 - Believer.flac", "f", 1)], _ctx(db)) is None

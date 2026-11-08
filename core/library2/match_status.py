@@ -67,14 +67,41 @@ def _source_ids(row: Any) -> Dict[str, str]:
     return ids
 
 
+def _ledger(conn: Any, canonical: str, entity_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    """what the workers last heard per (entity, service): third #1062 review
+    P2B-3. 3.6.1's chips read ``{service}_match_status`` and showed "not
+    found" with a date; v2 had the same answer in the ledger and said
+    "pending" forever, which hid that a manual match was needed."""
+    out: Dict[int, Dict[str, Any]] = {}
+    try:
+        for start in range(0, len(entity_ids), 500):
+            chunk = entity_ids[start:start + 500]
+            marks = ",".join("?" for _ in chunk)
+            for r in conn.execute(
+                    f"SELECT entity_id, service, status, last_attempted_at "
+                    f"FROM lib2_provider_attempts WHERE entity_type=? AND entity_id IN ({marks})",
+                    (canonical, *chunk)):
+                out.setdefault(int(r[0]), {})[str(r[1])] = (r[2], r[3])
+    except Exception as exc:  # noqa: BLE001 - no ledger yet: chips as before
+        logger.debug("no attempt ledger for chips: %s", exc)
+    return out
+
+
+# no id, and the ledger says why
+_UNMATCHED_STATUS = {"not_found": "not_found", "error": "error", "manual": "cleared"}
+
+
 def _native_chips(
     conn: Any,
     canonical: str,
     entity_id: int,
     row: Any,
     available_services: Optional[set],
+    ledger: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     ids = _source_ids(row)
+    if ledger is None:
+        ledger = _ledger(conn, canonical, [int(entity_id)]).get(int(entity_id), {})
     origins = load_match_provenance(
         conn, f"lib2_{canonical}", [int(entity_id)]
     ).get(str(entity_id), {})
@@ -88,12 +115,16 @@ def _native_chips(
             external_id
             and str(provenance.get("external_id") or "") == str(external_id)
         )
+        attempt_status, attempted_at = ledger.get(service) or (None, None)
+        status = ("matched" if external_id
+                  else _UNMATCHED_STATUS.get(str(attempt_status or ""), "pending"))
         chips.append({
             "service": service,
             "label": label,
-            "status": "matched" if external_id else "pending",
+            "status": status,
             "external_id": external_id,
-            "last_attempted": provenance.get("matched_at") if provenance_matches else None,
+            "last_attempted": (provenance.get("matched_at") if provenance_matches else None)
+                              or attempted_at,
             # Kept only as a response-shape compatibility field. P3 clients
             # always use library_v2_entity_id for mutation.
             "legacy_entity_id": None,
@@ -121,16 +152,22 @@ def artist_enrichment_coverage(conn: Any, artist_id: int) -> Dict[str, Any]:
     # two indexed halves, not one OR across two joined tables: the OR made
     # sqlite walk every track in the catalogue, 20s an artist page on a big
     # library. UNION keeps the DISTINCT.
+    # third #1062 review P2B-4: the tracks you own. 3.6.1's tracks table held
+    # nothing else; v2's also has the watched discography's fileless rows,
+    # which no worker enriches, so the rings sat low forever. guest spots
+    # stay in (the one artist page counts them)
+    from core.library2.sql_util import owned_sql
+    owned = owned_sql("track", "t")
     rows = conn.execute(
         f"""SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids
               FROM lib2_track_artists ta
               JOIN lib2_tracks t ON t.id = ta.track_id
-             WHERE ta.artist_id IN ({marks})
+             WHERE ta.artist_id IN ({marks}) AND {owned}
             UNION
             SELECT t.id, t.spotify_id, t.musicbrainz_id, t.external_ids
               FROM lib2_albums al
               JOIN lib2_tracks t ON t.album_id = al.id
-             WHERE al.primary_artist_id IN ({marks})""",
+             WHERE al.primary_artist_id IN ({marks}) AND {owned}""",
         tuple(group) * 2,
     ).fetchall()
     total = len(rows)
@@ -185,24 +222,28 @@ def album_match_bundle(
         "FROM lib2_tracks WHERE album_id=? ORDER BY id",
         (int(album_id),),
     ).fetchall()
+    ledger = _ledger(conn, "track", [int(r["id"]) for r in rows])
     for row in rows:
         track_id = int(row["id"])
         result["tracks"][track_id] = _native_chips(
             conn, "track", track_id, row, available_services,
+            ledger.get(track_id, {}),
         )
     return result
 
 
 def _sync_attempt_ledger(
     conn: Any, canonical: str, entity_id: int, service: str, value: Optional[str],
+    *, ask_again: bool = False, detail: str = "manual match",
 ) -> None:
     """Keep ``lib2_provider_attempts`` in step with a manually set/cleared id.
 
+    ``ask_again`` is for a repair that drops a bad id it stored itself: the
+    pair goes back to never attempted so the worker looks it up again.
+
     Setting an id settles that (entity, service) pair — the user has answered
-    the question the worker would ask. Clearing it makes the pair unanswered
-    again, which is a *deleted* row rather than a failure status: the queue's
-    "never attempted" half is what should pick it up next, ahead of the retry
-    backlog, and no retry window should have to expire first.
+    the question the worker would ask. Clearing it settles it too: the user
+    said the match was wrong, and the worker must not search it back.
     """
     try:
         from core.library2 import provider_attempts
@@ -212,13 +253,23 @@ def _sync_attempt_ledger(
         if value:
             provider_attempts.record_attempt(
                 conn, entity_type=canonical, entity_id=entity_id,
-                service=service, status="matched", detail="manual match",
+                service=service, status="matched", detail=detail,
             )
-        else:
+        elif ask_again:
             conn.execute(
                 "DELETE FROM lib2_provider_attempts "
                 "WHERE entity_type=? AND entity_id=? AND service=?",
                 (canonical, entity_id, service),
+            )
+        else:
+            # a clear is the user saying "that match was wrong". deleting the
+            # row made the pair "never attempted", the worker searched by name
+            # again and stored the same wrong id back. 3.6.1 left a cleared
+            # match cleared until the user matched it by hand: a settled
+            # "manual" answer does that, and a manual match overwrites it
+            provider_attempts.record_attempt(
+                conn, entity_type=canonical, entity_id=entity_id,
+                service=service, status="manual", detail="cleared by user",
             )
     except ValueError:
         # A provider the ledger does not know (it also covers derived workers
@@ -280,6 +331,10 @@ def provider_id_owner(
         return None
     if service == "spotify":
         predicate, params = "spotify_id = ?", (value,)
+    elif service == "musicbrainz" and canonical == "album":
+        # P2C-9: lib2_albums indexes LOWER(musicbrainz_id) only, so a plain =
+        # scanned every album; a uuid compares the same either way
+        predicate, params = "LOWER(musicbrainz_id) = LOWER(?)", (value,)
     elif service == "musicbrainz":
         predicate, params = "musicbrainz_id = ?", (value,)
     else:
@@ -352,8 +407,14 @@ def set_library_v2_match(
     *,
     actor: str = "admin",
     steal: bool = False,
+    ask_again: bool = False,
+    origin: str = "manual",
 ) -> None:
     """Set or clear one explicitly qualified provider identity.
+
+    ``origin='automatic'``: a background lookup made the match. It is labelled
+    as such (not as the user's own choice), and never relabels a manual match
+    of the same id.
 
     ``steal`` decides what happens when another entity already holds the id.
     Automated callers leave it False and get a :class:`ProviderIdentityConflict`
@@ -394,9 +455,16 @@ def set_library_v2_match(
             # Clear the previous claim first, in this same transaction — an
             # id that exists on two rows for even one statement is a state no
             # reader should ever be able to observe.
+            # the old holder didn't say its match was wrong: the id is simply
+            # someone else's. it goes back to the queue (not "cleared by
+            # user"), and a release pin naming the id goes with it
             set_library_v2_match(
-                conn, canonical, owner, service, None, actor=actor,
+                conn, canonical, owner, service, None, actor=actor, ask_again=True,
             )
+            if canonical == "album" and "canonical_source" in {
+                    r[1] for r in conn.execute("PRAGMA table_info(lib2_albums)")}:
+                from core.library2.editions import pin_album_release
+                pin_album_release(conn, owner, service, None)
             logger.info(
                 "Moved %s id %s from %s %s to %s %s",
                 service, value, canonical, owner, canonical, entity_id,
@@ -426,7 +494,8 @@ def set_library_v2_match(
     # straight back to the worker; a manual DELETE cleared the id but left a
     # stale ``matched`` row, so the queue never offered that entity again. Same
     # transaction as the id, so the two can never be half-applied.
-    _sync_attempt_ledger(conn, canonical, int(entity_id), service, value)
+    _sync_attempt_ledger(conn, canonical, int(entity_id), service, value, ask_again=ask_again,
+                         detail=("native enrichment" if origin == "automatic" else "manual match"))
 
     # A source's credit list belongs to the release it matched: a rematch or a
     # cleared match takes that list's featured artists away with it (3.6.1
@@ -454,8 +523,10 @@ def set_library_v2_match(
     provenance_type = f"lib2_{canonical}"
     if value:
         try:
-            from core.enrichment.match_provenance import record_manual_match
-            record_manual_match(
+            from core.enrichment.match_provenance import (
+                record_automatic_match, record_manual_match,
+            )
+            (record_automatic_match if origin == "automatic" else record_manual_match)(
                 conn,
                 entity_type=provenance_type,
                 entity_id=entity_id,

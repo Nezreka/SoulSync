@@ -447,11 +447,25 @@ def _find_or_create_track(conn, album_id: int, artist_id: int, title: str, *,
                 )
             return row["id"]
     if track_number is not None:
+        # a title the catalogue spells differently still finds its position,
+        # but only an empty one, and never a different version: "Song E -
+        # Radio Edit" at #5 is not the owned "Song E" at #5 (it became that
+        # track's primary file and could cost the album cut in a dedup).
+        # 3.6.1 gave every download its own row.
+        from core.library2.version_words import versions_differ
         wanted_disc = disc_number if disc_number is not None else 1
         for row in rows:
             row_disc = row["disc_number"] if row["disc_number"] is not None else 1
-            if row["track_number"] == track_number and row_disc == wanted_disc:
-                return row["id"]
+            if row["track_number"] != track_number or row_disc != wanted_disc:
+                continue
+            if versions_differ(row["title"] or "", title or ""):
+                continue
+            if conn.execute(
+                    "SELECT 1 FROM lib2_track_files WHERE track_id=? "
+                    "AND COALESCE(file_state,'active') NOT IN ('deleted','missing_confirmed') LIMIT 1",
+                    (row["id"],)).fetchone():
+                continue
+            return row["id"]
     from core.library2.profile_lookup import default_quality_profile_id
     album_profile = conn.execute(
         "SELECT quality_profile_id FROM lib2_albums WHERE id=?", (album_id,)
@@ -596,6 +610,10 @@ def _fallback_identity(context: Dict[str, Any],
         logger.debug("fallback tag read failed (%s): %s", file_path, exc)
     title = str(tags.get("title") or "").strip()
     artist = str(tags.get("artist") or tags.get("album_artist") or "").strip()
+    # the release belongs to its album artist ("Various Artists" for a
+    # compilation), the performer is the track's credit: 3.6.1 grouped a
+    # rescanned folder by album artist, so a compilation stayed one album
+    album_artist = str(tags.get("album_artist") or "").strip()
     album = str(tags.get("album") or "").strip()
 
     if not title or not artist:
@@ -621,6 +639,7 @@ def _fallback_identity(context: Dict[str, Any],
     return {
         "title": title,
         "artist": artist,
+        "album_artist": album_artist or None,
         "album": album or None,
         "release_mbid": release_mbid or None,
         "track_number": tags.get("track_number"),
@@ -900,8 +919,15 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                 # send the pipeline hunting for it. Matching an existing row
                 # leaves that row's own monitoring untouched.
                 derived_monitored = 0 if fallback or context.get("_scan_discovered") else None
+                release_artist_id = artist_id
+                album_artist_name = fallback.get("album_artist") if fallback else None
+                if (album_artist_name and normalize_name(album_artist_name)
+                        != normalize_name(artist_name or "")):
+                    release_artist_id = _find_or_create_artist(
+                        conn, album_artist_name, spotify_id=None,
+                        source=identity_source) or artist_id
                 album_id = _find_or_create_album(
-                    conn, artist_id, album_name,
+                    conn, release_artist_id, album_name,
                     album_type=album_type, spotify_album_id=spotify_album_id,
                     source=identity_source, monitored=derived_monitored,
                     release_mbid=fallback.get("release_mbid"))
@@ -910,6 +936,12 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                     track_number=track_number, spotify_track_id=spotify_track_id,
                     disc_number=disc_number, source=track_identity_source,
                     monitored=derived_monitored)
+                if release_artist_id != artist_id and track_id:
+                    # the performer of a compilation track, as the rows the
+                    # player, stats and presence checks read show it
+                    conn.execute(
+                        "UPDATE lib2_tracks SET track_artist=COALESCE(NULLIF(track_artist,''), ?) "
+                        "WHERE id=?", (artist_name, track_id))
 
             if not fallback:
                 # how this download filed the release, for a later reorganize

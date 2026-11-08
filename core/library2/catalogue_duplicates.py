@@ -14,6 +14,9 @@ from core.library2.catalogue_identity import wishlist_rows
 from core.library2.dedup_repair import _release_ids
 from core.library2.duplicate_relationship import _normalized_title, conflicting_recording_id, durations_compatible
 from core.library2.provider_ids import provider_only, source_ids_from_values
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.catalogue_duplicates")
 
 
 SCHEMA = "native_duplicate_releases/v1"
@@ -38,6 +41,11 @@ _FACTS = {
     "library_provider_snapshots": ("entity_id", "provider", "scope", "provider_entity_id"),
     "wishlist_tracks": ("id", "lib2_track_id", "profile_id", "spotify_track_id", "quality_profile_id", "request_status"),
 }
+
+
+# monitor rules a person (or their wishlist) chose, as opposed to ones an
+# import or scan derived
+_DELIBERATE = frozenset({"user_explicit", "wishlist_import", "cascade", "new_release"})
 
 
 def _table(conn, name):
@@ -122,20 +130,45 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
     source = """FROM lib2_albums al JOIN lib2_artists ar ON ar.id=al.primary_artist_id
         WHERE al.title IS NOT NULL AND al.title<>''"""
     credits = defaultdict(set)
-    for row in conn.execute("SELECT album_id,artist_id FROM lib2_album_artists"):
+    primaries = defaultdict(set)
+    # third #1062 review P2D-8: a load for named albums (every merge, inside
+    # its write lock, and each re-check after one) read the whole credit and
+    # artist tables; it reads only what those albums name
+    credit_sql = "SELECT album_id,artist_id,role FROM lib2_album_artists"
+    if album_ids is not None:
+        credit_sql += f" WHERE album_id IN ({','.join('?' for _ in album_ids)})"
+    for row in conn.execute(credit_sql, params):
         credits[int(row[0])].add(int(row[1]))
+        if row[2] == "primary":
+            primaries[int(row[0])].add(int(row[1]))
     # an alias row is its canonical artist: each media server's copy of an
     # artist (plex's bbno$, navidrome's bbno$) files its albums under its own
     # row, and grouping by the raw id never put those twins side by side
-    canonical = {int(r[0]): int(r[1]) for r in conn.execute(
-        "SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists")}
+    if album_ids is None:
+        canonical = {int(r[0]): int(r[1]) for r in conn.execute(
+            "SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists")}
+    else:
+        named = {a for ids in credits.values() for a in ids} | {
+            int(r[0]) for r in conn.execute(
+                f"SELECT primary_artist_id FROM lib2_albums WHERE id IN ({','.join('?' for _ in album_ids)})"
+                " AND primary_artist_id IS NOT NULL", params)}
+        canonical = {}
+        named_list = sorted(named)
+        for start in range(0, len(named_list), 500):
+            chunk = named_list[start:start + 500]
+            canonical.update({int(r[0]): int(r[1]) for r in conn.execute(
+                f"SELECT id, COALESCE(canonical_artist_id, id) FROM lib2_artists"
+                f" WHERE id IN ({','.join('?' for _ in chunk)})", chunk)})
 
     def group_ids(ids):
         return tuple(sorted({canonical.get(i, i) for i in ids}))
     # Grouping needs titles only; full rows are read for possible duplicates.
     groups = defaultdict(list)
     for al in conn.execute(f"SELECT al.id,al.title,al.album_type,al.primary_artist_id {source}{predicate}", params):
-        groups[(group_ids(credits[al[0]] | {int(al[3])}), _title(al[1]), al[2])].append(al[0])
+        # grouped by who the release is BY: one copy's enrichment adding
+        # featured artists to the album must not keep the twins apart (the
+        # id proof and the blockers still decide any merge)
+        groups[(group_ids(primaries[al[0]] | {int(al[3])}), _title(al[1]), al[2])].append(al[0])
     possible = sorted(i for ids in groups.values() if len(ids) > 1 for i in ids)
     albums = []
     for offset in range(0, len(possible), 400):
@@ -145,7 +178,7 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
     for al in albums:
         al["album_id"] = int(al["id"])
         al["artist_ids"] = sorted(credits[al["id"]] | {int(al["primary_artist_id"])})
-        al["group_artist_ids"] = list(group_ids(al["artist_ids"]))
+        al["group_artist_ids"] = list(group_ids(primaries[al["id"]] | {int(al["primary_artist_id"])}))
     scope = scope or {}
     if scope.get("artist_id"):
         from core.library2.artist_aliases import resolve_alias_group
@@ -205,16 +238,38 @@ def _load(conn, scope=None, check_stop=None, album_ids=None):
     return subjects
 
 
-def _track_match(a, b):
-    # credited by the canonical artist: two servers' rows of one artist agree
-    one = {(r.get("canonical_artist_id", r["artist_id"]), r["role"]) for r in a.get("artist_credits", [])}
-    two = {(r.get("canonical_artist_id", r["artist_id"]), r["role"]) for r in b.get("artist_credits", [])}
-    if one != two or _normalized_title(a["title"]) != _normalized_title(b["title"]):
+def _credits(track):
+    """(artist, role) by canonical artist, without a featured credit of an
+    artist who is already primary: plex credits bbno$ as featured on his own
+    song, navidrome doesn't, and that junk alone split the pair"""
+    rows = {(r.get("canonical_artist_id", r["artist_id"]), r["role"]) for r in track.get("artist_credits", [])}
+    primary = {artist for artist, role in rows if role == "primary"}
+    return {(artist, role) for artist, role in rows if not (role == "featured" and artist in primary)}
+
+
+def _track_match(a, b, *, same_release=False):
+    """Same recording? ``same_release``: the two releases are already proven
+    identical, so the track at the same position with the same title, length
+    and credits is that recording even without a track id (a media server
+    that never had one)."""
+    one, two = _credits(a), _credits(b)
+    if same_release:
+        # a proven release: the primaries must agree; one copy may know a
+        # featured artist the other's enrichment never added (3mo with or
+        # without its feature). the merge keeps every credit of both
+        primaries = ({c for c in one if c[1] == "primary"}, {c for c in two if c[1] == "primary"})
+        rest = (one - primaries[0], two - primaries[1])
+        credits_ok = primaries[0] == primaries[1] and (rest[0] <= rest[1] or rest[1] <= rest[0])
+    else:
+        credits_ok = one == two
+    if not credits_ok or _normalized_title(a["title"]) != _normalized_title(b["title"]):
         return False
     if not durations_compatible(a.get("duration"), b.get("duration")) or conflicting_recording_id(a, b):
         return False
-    return any(a.get(k) and str(a[k]).casefold() == str(b.get(k) or "").casefold()
-               for k in ("isrc", "musicbrainz_id", "spotify_id"))
+    if any(a.get(k) and str(a[k]).casefold() == str(b.get(k) or "").casefold()
+           for k in ("isrc", "musicbrainz_id", "spotify_id")):
+        return True
+    return same_release
 
 
 def _blockers(conn, albums, refs):
@@ -224,6 +279,10 @@ def _blockers(conn, albums, refs):
             reasons.append("A file has a manually selected primary.")
         if al.get("canonical_locked") or al.get("art_locked"):
             reasons.append("A release has a manual pin or artwork selection.")
+    if (all(al.get("genres_locked") for al in albums)
+            and _genre_set(albums[0].get("genres")) != _genre_set(albums[1].get("genres"))):
+        reasons.append("Both releases have locked genres that differ.")
+    for al in albums:
         if _table(conn, "lib2_metadata_overrides"):
             if conn.execute("""SELECT 1 FROM lib2_metadata_overrides
                 WHERE (entity_type='release_group' AND entity_id=?)
@@ -243,7 +302,11 @@ def _blockers(conn, albums, refs):
         if (a.get("server_source") == b.get("server_source") and a.get("server_id")
                 and b.get("server_id") and a["server_id"] != b["server_id"]):
             reasons.append("Different media-server identities must stay separate.")
-        if a.get("canonical_track_id") or b.get("canonical_track_id"):
+        # a single linked to its album track (the link v2 keeps) is not a
+        # conflict when both copies agree or only one knows it: only two
+        # different targets, or one copy pointing at the other, need a person
+        ca, cb = a.get("canonical_track_id"), b.get("canonical_track_id")
+        if (ca and cb and ca != cb) or (ca and ca == b.get("id")) or (cb and cb == a.get("id")):
             reasons.append("An existing canonical relationship needs separate review.")
     album_ids = [a["id"] for a in albums]
     track_ids = [t["id"] for a in albums for t in a["tracks"]]
@@ -251,7 +314,12 @@ def _blockers(conn, albums, refs):
         for pair in pairs:
             states, mappings = defaultdict(set), defaultdict(set)
             for rule in refs[kind].get("lib2_monitor_rules", []):
-                if rule["entity_id"] in pair:
+                # only choices someone made can conflict. an upgrade or a scan
+                # wrote "legacy_import" / "file_import" rules for each server's
+                # copy, monitored on one and not the other, and that alone
+                # held every such pair back (the deeper check below already
+                # lets derived rules unite)
+                if rule["entity_id"] in pair and rule.get("provenance") in _DELIBERATE:
                     states[rule["profile_id"]].add(rule["monitored"])
             for mapping in refs[kind].get("lib2_media_server_mappings", []):
                 if mapping["entity_id"] in pair:
@@ -311,7 +379,7 @@ def _blockers(conn, albums, refs):
                 levels = [rules.get((kind, eid, profile), {}) for kind, eid in (
                     ("track", track["id"]), ("album", al["id"]), ("artist", al["primary_artist_id"]))]
                 effective, _reason = _decide(*[v for row in levels for v in (row.get("monitored"), row.get("provenance"))])
-                deliberate = any(row.get("provenance") in {"user_explicit", "wishlist_import", "cascade", "new_release"} for row in levels)
+                deliberate = any(row.get("provenance") in _DELIBERATE for row in levels)
                 decisions.append((effective, deliberate))
             if decisions[0][0] != decisions[1][0] and all(d[1] for d in decisions):
                 reasons.append("Conflicting effective monitoring decisions.")
@@ -325,13 +393,48 @@ def _blockers(conn, albums, refs):
     return sorted(set(reasons))
 
 
+def _keeper(albums):
+    """most files; on a tie the active server's copy (the one the user
+    sees and curates), then a genre-locked one, then the older row"""
+    from core.library2.dedup_repair import _active_server
+    try:
+        active = _active_server() or ""
+    except Exception:  # noqa: BLE001 - no config: file count and age decide
+        active = ""
+    return min(albums, key=lambda al: (
+        -al["file_count"],
+        0 if active and (al.get("server_source") or "") == active else 1,
+        0 if al.get("genres_locked") else 1,
+        al["id"]))
+
+
+def _explicit_conflict(one, two) -> bool:
+    """both rows know their explicit flag and they disagree"""
+    flags = [x.get("explicit") if isinstance(x, dict) else None for x in (one, two)]
+    known = [bool(int(f)) for f in flags if f is not None and str(f).strip() != ""]
+    return len(known) == 2 and known[0] != known[1]
+
+
 def _candidate(conn, a, b):
     albums = [a, b]
     refs = {"album": _related(conn, "album", [a["id"], b["id"]]),
             "track": _related(conn, "track", [t["id"] for al in albums for t in al["tracks"]])}
     reasons = _blockers(conn, albums, refs)
+    ids_a, ids_b = _release_ids(a), _release_ids(b)
+    # soul_id is a hash of artist + title, so every same-titled pair shares
+    # it: it proves nothing about the release and never counts as evidence
+    shared = (ids_a.keys() & ids_b.keys()) - {"soul_id"}
+    # a clean and an explicit copy are two releases, whatever ids a name
+    # match handed both
+    clean_vs_explicit = _explicit_conflict(a, b) or any(
+        _explicit_conflict(one, two) for one, two in zip(a["tracks"], b["tracks"]))
+    identical_release = (len(shared) >= 2 and all(ids_a[k] == ids_b[k] for k in shared)
+                         and not clean_vs_explicit)
+    # a proven release needs its full tracklist on both rows, not the
+    # provider's "fetched" flag: two servers' copies of an album often never
+    # fetched one, though each row holds every track
     complete = all(al["tracks"] and len(al["tracks"]) == (al.get("expected_track_count") or al.get("track_count"))
-                   and al.get("tracklist_status") == "ready" for al in albums)
+                   and (identical_release or al.get("tracklist_status") == "ready") for al in albums)
     if not complete:
         reasons.append("A complete release tracklist is unavailable.")
     for album in albums:
@@ -343,12 +446,9 @@ def _candidate(conn, a, b):
         reasons.append("Release track counts differ.")
     else:
         for one, two in zip(a["tracks"], b["tracks"], strict=True):
-            if (one.get("disc_number") or 1, one.get("track_number")) != (two.get("disc_number") or 1, two.get("track_number")) or not one.get("track_number") or not _track_match(one, two):
+            if (one.get("disc_number") or 1, one.get("track_number")) != (two.get("disc_number") or 1, two.get("track_number")) or not one.get("track_number") or not _track_match(one, two, same_release=identical_release):
                 reasons.append("Track positions, versions or recording identities are not confirmed identical.")
             mapping.append([one["id"], two["id"]])
-    ids_a, ids_b = _release_ids(a), _release_ids(b)
-    shared = ids_a.keys() & ids_b.keys()
-    identical_release = len(shared) >= 2 and all(ids_a[k] == ids_b[k] for k in shared)
     facts = {"albums": [{**_pick("album", [al])[0], "tracks": _pick("track", al["tracks"]),
                          "files": _pick("file", al["files"])} for al in albums],
              **{f"{kind}:{table}": _pick(table, rows) for kind, related in refs.items() for table, rows in related.items()}}
@@ -357,7 +457,7 @@ def _candidate(conn, a, b):
             "count": 2, "merge_eligible": not reasons,
             "auto_merge_eligible": not reasons and identical_release,
             "blocked_reasons": sorted(set(reasons)), "snapshot": snapshot,
-            "recommended_album_id": min(albums, key=lambda al: (-al["file_count"], al["id"]))["id"],
+            "recommended_album_id": _keeper(albums)["id"],
             "library_v2_native": True,
             "library_v2": {"album_ids": [a["id"], b["id"]],
                           "track_ids": [t["id"] for al in albums for t in al["tracks"]]}}
@@ -384,6 +484,13 @@ def _move_references(conn, kind, source_id, target_id):
     if _table(conn, "lib2_monitor_rules"):
         from core.library2.monitor_rules import merge_rules_into
         merge_rules_into(conn, kind, source_id, target_id)
+    if _table(conn, "repair_findings") and {"entity_type", "entity_id"} <= {
+            r[1] for r in conn.execute("PRAGMA table_info(repair_findings)")}:
+        # P2A-6, for releases and tracks too: a finding (or a dismissal) on
+        # the twin follows the survivor instead of naming a deleted row
+        conn.execute("UPDATE repair_findings SET entity_id=?,updated_at=CURRENT_TIMESTAMP "
+                     "WHERE entity_type=? AND entity_id=?",
+                     (f"lib2:{target_id}", kind, f"lib2:{source_id}"))
     if _table(conn, "lib2_media_server_mappings"):
         conn.execute("UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? WHERE entity_type=? AND entity_id=?",
                      (target_id, kind, source_id))
@@ -429,18 +536,50 @@ def _adopt_gaps(conn, table, source, target):
     fill = ["legacy_album_id", "legacy_track_id", "legacy_import_run_id", "server_source", "server_id",
             "stable_id", "image_url", "release_date", "year", "quality_profile_id"]
     if table == "lib2_tracks":
+        # the single -> album-track link survives when only the duplicate had it
+        if source.get("canonical_track_id") and source["canonical_track_id"] != target["id"]:
+            fill.append("canonical_track_id")
         from core.library2.importer import _merge_external_ids
         fill += ["spotify_id", "musicbrainz_id", "soul_id"]
         known = _ids(target)
         # isrc/mbid/spotify keep their own columns, never external_ids.
         _merge_external_ids(conn.cursor(), table, target["id"], {k: v for k, v in provider_only(_ids(source)).items()
                                                                  if k not in known and k not in {"spotify", "musicbrainz"}})
+    # what a curator or a provider filled on the duplicate fills the
+    # survivor's gaps too ("[]" and 0 are gaps)
+    fill += ["genres", "style", "mood", "label", "copyright"]
+    if table == "lib2_tracks":
+        fill += ["bpm", "genius_lyrics"]
     columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
     for column in fill:
-        if column in columns and not target.get(column) and source.get(column):
+        if column in columns and _empty(target.get(column)) and not _empty(source.get(column)):
             conn.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (source[column], target["id"]))
+            target[column] = source[column]
+    # explicit 0 is "clean", a real answer: only an unknown flag is a gap
+    if "explicit" in columns and target.get("explicit") is None and source.get("explicit") is not None:
+        conn.execute(f"UPDATE {table} SET explicit=? WHERE id=?", (source["explicit"], target["id"]))
+    # a genre lock is the user's cleaned genres: an unlocked survivor takes
+    # them and the lock (two locked rows that disagree never get here)
+    if ("genres_locked" in columns and source.get("genres_locked")
+            and not target.get("genres_locked")):
+        conn.execute(f"UPDATE {table} SET genres=?, genres_locked=1 WHERE id=?",
+                     (source.get("genres"), target["id"]))
     conn.execute(f"UPDATE {table} SET quality_profile_explicit=MAX(quality_profile_explicit,?),updated_at=CURRENT_TIMESTAMP WHERE id=?",
                  (source.get("quality_profile_explicit") or 0, target["id"]))
+
+
+def _genre_set(value) -> frozenset:
+    try:
+        items = json.loads(value) if isinstance(value, str) else (value or [])
+    except (TypeError, ValueError):
+        items = [part for part in str(value).split(",")]
+    if not isinstance(items, list):
+        items = [items]
+    return frozenset(str(g).strip().casefold() for g in items if str(g).strip())
+
+
+def _empty(value) -> bool:
+    return value is None or (isinstance(value, str) and value.strip() in ("", "[]", "{}")) or value == 0
 
 
 def _merge_monitored(conn, kind, source, target):
@@ -575,6 +714,82 @@ def merge_catalogue_duplicate(database, candidate, keep_album_id, *, automatic=F
                 "merged_album_id": duplicate["id"], "message": "Release groups merged; editions and files preserved."}
     except (ValueError, KeyError, TypeError, sqlite3.Error) as exc:
         return {"success": False, "error": str(exc)}
+
+def auto_merge_proven(database, *, scope=None, check_stop=None, candidates=None):
+    """merge every proven twin pair (auto_merge_eligible) that wasn't dismissed.
+
+    returns {"merged": n, "candidates": what's left for review}. a merge only
+    changes its own group, so that group is re-read before going on."""
+    if candidates is None:
+        candidates = find_catalogue_duplicates(database, scope=scope, check_stop=check_stop)
+
+    def pair(candidate):
+        return frozenset(a["id"] for a in candidate["albums"])
+
+    skip = dismissed_catalogue_pairs(database)
+    merged = 0
+    while candidate := next((c for c in candidates
+                             if c["auto_merge_eligible"] and pair(c) not in skip), None):
+        if check_stop and check_stop():
+            break
+        applied = merge_catalogue_duplicate(
+            database, candidate, candidate["recommended_album_id"], automatic=True)
+        if not applied["success"]:
+            skip.add(pair(candidate))
+            continue
+        merged += 1
+        group = {i for c in candidates if pair(c) & pair(candidate) for i in pair(c)}
+        candidates = [c for c in candidates if not pair(c) & group] + find_catalogue_duplicates(
+            database, scope=scope, check_stop=check_stop,
+            album_ids=sorted(group - {applied["merged_album_id"]}))
+    return {"merged": merged, "candidates": candidates}
+
+
+_IMPORT_TWINS_MARKER = "_lib2_import_twins_merged"
+
+
+def merge_import_twins(database):
+    """once, after the 3.6.1 upgrade import: one release row per release.
+
+    3.6.1 kept a row set per media server, so an install that ever switched
+    servers imports each release once per server. the proven pairs merge here
+    (the other server's copy stays as a mapping on the kept row); anything
+    not proven is left for the Duplicate Detector. waits for the import to be
+    done, so the pass that runs before it can't use up the marker. never raises."""
+    stats = {"merged": 0, "left_for_review": 0}
+    try:
+        with closing(database._get_connection()) as conn:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                            (_IMPORT_TWINS_MARKER,)).fetchone():
+                return stats
+            if not _table(conn, "lib2_albums"):
+                return stats
+        from core.library2.bootstrap import get_state
+        if get_state(database).get("status") != "done":
+            return stats
+        result = auto_merge_proven(database)
+        stats["merged"] = result["merged"]
+        stats["left_for_review"] = len(result["candidates"])
+        with closing(database._get_connection()) as conn:
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {_IMPORT_TWINS_MARKER} "
+                         "(applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, merged INTEGER)")
+            conn.execute(f"INSERT INTO {_IMPORT_TWINS_MARKER}(merged) VALUES(?)", (stats["merged"],))
+            conn.commit()
+        if stats["merged"]:
+            logger.info("upgrade: merged %d duplicate releases from older media servers "
+                        "(%d left for review)", stats["merged"], stats["left_for_review"])
+            try:
+                from core.runtime_state import add_activity_item
+                add_activity_item(
+                    "🧹", "Duplicate releases merged",
+                    f"{stats['merged']} releases your older media servers listed twice are one "
+                    "release now. Tools → Duplicate Detector has any left to review.")
+            except Exception:  # noqa: BLE001 - the note is a courtesy
+                pass
+    except Exception as exc:  # noqa: BLE001 - a duplicate row is never a blocker
+        logger.warning("upgrade twin merge skipped (retries next start): %s", exc)
+    return stats
+
 
 def dismissed_catalogue_pairs(database):
     """Release pairs whose review was dismissed; auto merge never overrides them."""

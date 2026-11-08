@@ -553,6 +553,9 @@ def _normalize_album_type(raw: Any, track_count: Optional[int], actual_tracks: i
     the one-track heuristic for old rows that have no release-type metadata at all.
     """
     value = str(raw or "").strip().lower()
+    # Deezer's own word: 3.6.1 stored its raw record_type and read 'compile'
+    # as a compilation (the enrichment workers map it the same way)
+    value = {"compile": "compilation", "compilations": "compilation"}.get(value, value)
     if value in {"album", "single", "ep", "compilation", "live"}:
         return value
     if value in {"appears_on", "appears-on"}:
@@ -1627,7 +1630,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
     if reset:
         resume = None
     with closing(database._get_connection()) as conn:
-        ensure_library_v2_schema(conn)
+        # third #1062 review P2C-8: not the whole-library backfills. they ran
+        # uncommitted inside this transaction, holding the write lock for
+        # seconds on work a reset throws away; the deferred runner converges
+        # after the import (as startup does since iss32-M03)
+        ensure_library_v2_schema(conn, run_backfills=False)
         # a rebuild after the upgrade reads the renamed legacy tables
         from core.library2.source_snapshot import expose_retired_tables
         expose_retired_tables(conn)
@@ -1946,6 +1953,10 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 actual,
             )
             year = _pick(row, "year")
+            # G02-3: 3.6.1 stored an unknown year as 0 and read 0 as unknown
+            # in three places; lib2 says unknown with NULL
+            if (_legacy_number(year) or 0) <= 0:
+                year = None
             # Expected total = the metadata track count (api_track_count) when known,
             # else the stored track_count, else the number of tracks we actually have.
             expected = _pick(row, "api_track_count") or track_count or actual
@@ -2603,8 +2614,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                 " WHERE lib2_track_id IS NULL AND db_track_id IS NOT NULL"
                 "   AND EXISTS (SELECT 1 FROM lib2_tracks t"
                 "                WHERE t.legacy_track_id = listening_history.db_track_id)")
-            if legacy_owners:
-                # a play of another library's copy: the track its file joined
+            # a play of a copy whose row joined another track as a file
+            # (another library's copy, or a playlist-folder copy on any
+            # install): the track its file joined. not only with own
+            # libraries: playlist copies join without them
+            if True:
                 joined_files = {_legacy_key(r[1]): int(r[0]) for r in cursor.execute(
                     "SELECT f.track_id, f.legacy_track_id FROM lib2_track_files f"
                     " JOIN lib2_tracks t ON t.id=f.track_id"
@@ -3188,8 +3202,13 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver,
             name = _artist_name_from_payload(artist_payload)
             if not name:
                 continue
-            spotify_id = _artist_spotify_from_payload(artist_payload)
-            aid = resolver.get_or_create_by_name(name, spotify_id=spotify_id)
+            # P2A-5: the payload's artist id is the PROVIDER's (a deezer or
+            # itunes id on those payloads), namespaced like the primary above;
+            # filed as spotify it minted twins and wrong spotify ids
+            payload_artist_id = _artist_spotify_from_payload(artist_payload)
+            aid = resolver.get_or_create_by_name(
+                name, provider_ids=({provider: payload_artist_id} if payload_artist_id else None))
+            spotify_id = payload_artist_id if provider == "spotify" else None
             if aid in linked_artists:
                 continue
             linked_artists.add(aid)

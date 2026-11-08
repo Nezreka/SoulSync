@@ -163,3 +163,40 @@ it('a profile without write rights gets no picker', () => {
   );
   expect(screen.queryByLabelText('Upgrade to')).toBeNull();
 });
+
+it('a failed profile check says so instead of "everything meets it"', async () => {
+  // third #1062 review G15-6
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('quality-profiles'))
+        return new Response(
+          JSON.stringify({
+            success: true,
+            profiles: [{ id: 7, name: 'Hi-Res', upgrade_policy: 'acceptable' }],
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        );
+      return new Response(JSON.stringify({ success: false, error: 'boom' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }),
+  );
+  render(
+    <EnhanceQualityModal
+      title="Muse"
+      tracks={[track(1, 'Origin')]}
+      scope={{ entity: 'artists', id: 3 }}
+      canChooseTarget
+      onEnhance={vi.fn()}
+      onClose={vi.fn()}
+    />,
+  );
+  fireEvent.change(await screen.findByLabelText('Upgrade to'), { target: { value: '7' } });
+  expect(await screen.findByText('Couldn’t check that profile.')).toBeInTheDocument();
+  expect(screen.queryByText(/already meets/)).toBeNull();
+  expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^Enhance \(/ })).toBeDisabled();
+});

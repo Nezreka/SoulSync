@@ -438,7 +438,9 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
         stats AS (
             SELECT t.album_id,
                    COUNT(DISTINCT CASE
-                       WHEN COALESCE(w.wanted, {track_monitored})=1 OR tf.id IS NOT NULL
+                       WHEN COALESCE(w.wanted, {track_monitored})=1
+                         -- a file the user deleted is no longer part of the total
+                         OR (tf.id IS NOT NULL AND COALESCE(tf.file_state, 'active') <> 'deleted')
                        THEN t.id END) AS track_count,
                    COUNT(DISTINCT CASE
                        WHEN tf.id IS NOT NULL
@@ -766,6 +768,9 @@ def song_rows(conn, track_ids: List[int], *, per_file: bool = False) -> List[Dic
             "id": f"{r['id']}:{r['file_id']}" if per_file else r["id"],
             "track_id": r["id"],
             "file_ids": [r["file_id"]] if per_file else _json_list(r["file_ids"]),
+            # the file this row shows (a list row: the track's best file); a
+            # row's delete acts on it alone, as 3.6.1's one-row-one-file did
+            "file_id": r["file_id"],
             "title": r["title"] or "",
             # a compilation's row names its own artist; the album artist is the fallback
             "artist_name": r["track_artist"] or r["artist_name"] or "",

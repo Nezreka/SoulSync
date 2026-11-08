@@ -49,6 +49,14 @@ def _present_track_files(conn, album_id: int) -> List[Tuple[int, int, str, str]]
     return out
 
 
+def _target_lufs(config_manager: Any) -> float:
+    """the loudness gains are written against (#1060). every other gain
+    writer (import, repair fix) honoured the Target Loudness setting; these
+    hard-coded -18, so a -14 library came out inconsistent"""
+    from core.replaygain import get_target_lufs
+    return get_target_lufs(config_manager)
+
+
 def analyze_album_replaygain(
     conn,
     album_id: int,
@@ -65,7 +73,6 @@ def analyze_album_replaygain(
     for a single-file failure — those are collected in ``errors``.
     """
     from core.replaygain import (
-        RG_REFERENCE_LUFS,
         analyze_track as _default_analyze,
         write_replaygain_tags as _default_write,
     )
@@ -114,12 +121,12 @@ def analyze_album_replaygain(
             continue
         lufs_values.append(lufs)
         peak_values.append(peak_dbfs)
-        analyzed.append((file_id, resolved, RG_REFERENCE_LUFS - lufs, peak_dbfs))
+        analyzed.append((file_id, resolved, _target_lufs(config_manager) - lufs, peak_dbfs))
 
     album_gain_db: Optional[float] = None
     album_peak_dbfs: Optional[float] = None
     if lufs_values:
-        album_gain_db = RG_REFERENCE_LUFS - (sum(lufs_values) / len(lufs_values))
+        album_gain_db = _target_lufs(config_manager) - (sum(lufs_values) / len(lufs_values))
         album_peak_dbfs = max(peak_values)
     stats["album_gain_db"] = album_gain_db
 
@@ -129,7 +136,14 @@ def analyze_album_replaygain(
     for file_id, path, track_gain_db, peak_dbfs in analyzed:
         try:
             with get_file_lock(path):
-                write(path, track_gain_db, peak_dbfs, album_gain_db, album_peak_dbfs)
+                written = write(path, track_gain_db, peak_dbfs, album_gain_db, album_peak_dbfs)
+            if written is False:
+                # G08-2: write_replaygain_tags says False, never raises (a
+                # format it can't tag, a file mutagen can't open, a save the
+                # integrity check aborted); 3.6.1 reported it as a failure
+                stats["failed"] += 1
+                stats["errors"].append({"track": path, "error": "Failed to write tags to file"})
+                continue
             stats["analyzed"] += 1
 
             # Rescan tags into database cache
@@ -171,7 +185,7 @@ def analyze_track_replaygain(
     No album gain is computed (single track). Returns
     ``{analyzed: bool, track_gain_db: float|None, error: str|None}``.
     """
-    from core.replaygain import RG_REFERENCE_LUFS, analyze_track as _default_analyze
+    from core.replaygain import analyze_track as _default_analyze
     from core.replaygain import write_replaygain_tags as _default_write
 
     analyze = analyze_fn or _default_analyze
@@ -208,9 +222,11 @@ def analyze_track_replaygain(
         else:
             try:
                 lufs, peak_dbfs = analyze(resolved)
-                track_gain_db = RG_REFERENCE_LUFS - lufs
+                track_gain_db = _target_lufs(config_manager) - lufs
                 with get_file_lock(resolved):
-                    write(resolved, track_gain_db, peak_dbfs, None, None)
+                    written = write(resolved, track_gain_db, peak_dbfs, None, None)
+                if written is False:  # G08-2, as above
+                    raise RuntimeError("Failed to write tags to file")
                 try:
                     from core.library2.tag_cache import read_and_persist_tag_cache
                     read_and_persist_tag_cache(conn, file_row["id"], resolved)

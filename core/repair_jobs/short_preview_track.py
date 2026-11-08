@@ -148,14 +148,19 @@ class ShortPreviewTrackJob(RepairJob):
         except Exception:  # noqa: BLE001 - unreadable: the decode path decides
             length = None
         if length is not None:
-            conn = context.db._get_connection()
+            # G12-7: remembering it is a nicety. a locked db here ended the
+            # whole enumeration and every later file went unchecked
             try:
-                conn.execute("UPDATE lib2_track_files SET tags_json=json_set(CASE WHEN json_valid(tags_json) "
-                             "THEN tags_json ELSE '{}' END,'$.duration_ms',?) WHERE id=?",
-                             (length, subject["file_id"]))
-                conn.commit()
-            finally:
-                conn.close()
+                conn = context.db._get_connection()
+                try:
+                    conn.execute("UPDATE lib2_track_files SET tags_json=json_set(CASE WHEN json_valid(tags_json) "
+                                 "THEN tags_json ELSE '{}' END,'$.duration_ms',?) WHERE id=?",
+                                 (length, subject["file_id"]))
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[Short Preview] length for file %s not cached: %s", subject.get("file_id"), exc)
         return length or 0
 
     def _setting_int(self, context: JobContext, key: str, default: int) -> int:

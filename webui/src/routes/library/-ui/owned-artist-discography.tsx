@@ -125,6 +125,10 @@ export function useReadOnlyProviderDiscography(input: {
           image_url: (r.image_url as string | undefined) ?? null,
           owned: (r.owned as boolean | undefined) ?? false,
           musicbrainz_release_id: (r.musicbrainz_release_id as string | undefined) ?? null,
+          // MusicBrainz's own word on live / soundtrack / remix (the filter's)
+          secondary_types: Array.isArray(r.secondary_types)
+            ? (r.secondary_types as unknown[]).map(String)
+            : null,
           track_completion: { total_tracks: Number(r.track_count) || 0, owned_tracks: 0 },
         }));
     },

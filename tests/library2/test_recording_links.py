@@ -387,3 +387,37 @@ def test_the_identity_reconcile_runs_with_the_edition_backfill(imported_conn):
     stats = backfill_editions(conn.cursor(), connection=conn)
 
     assert stats["identity"]["merged"] == 1
+
+
+def test_a_file_moved_back_to_its_single_stays_there_after_a_restart(catalogue):
+    """third #1062 review P2C-1: the pass runs on every start. once a file has
+    been placed (by it or by the user), moving it back is a decision"""
+    from core.library2.recording_links import prefer_album_home
+    conn, ids = catalogue
+    assert prefer_album_home(conn)["rehomed"] == 1
+    # the user moves it back onto the single
+    mine = "path LIKE '%Vogel Im Kafig.flac'"
+    conn.execute(f"UPDATE lib2_track_files SET track_id=? WHERE {mine}", (ids["single_track"],))
+    conn.commit()
+
+    assert prefer_album_home(conn)["rehomed"] == 0
+    assert conn.execute(f"SELECT track_id FROM lib2_track_files WHERE {mine}").fetchone()[0] \
+        == ids["single_track"]
+
+
+def test_an_album_track_the_user_unmonitored_never_takes_the_file(catalogue):
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    from core.library2.recording_links import prefer_album_home
+    conn, ids = catalogue
+    record_rule(conn, "track", ids["ost_track"], False, PROVENANCE_USER, profile_id=1)
+    conn.commit()
+    assert prefer_album_home(conn)["rehomed"] == 0
+
+
+def test_an_album_copy_the_user_deleted_keeps_the_single_as_home(catalogue):
+    """a dedup "keep single" leaves the album's file as a deleted tombstone"""
+    from core.library2.recording_links import prefer_album_home
+    conn, ids = catalogue
+    _file(conn, ids["ost_track"], "Sawano Hiroyuki/OST/07 - Vogel Im Kafig.flac", file_state="deleted")
+    conn.commit()
+    assert prefer_album_home(conn)["rehomed"] == 0

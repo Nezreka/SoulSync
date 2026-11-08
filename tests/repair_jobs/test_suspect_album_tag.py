@@ -739,3 +739,18 @@ def test_1567_r4_signal4_counts_track_artist_not_batch_artist_id():
     assert f["details"]["artist_id"] == 1
     assert f["details"]["distinct_artists"] == 9
     assert any("duplicate track numbers" in r for r in f["details"]["reasons"])
+
+
+def test_a_hand_tagged_track_anywhere_protects_its_album():
+    """third #1062 review G12-4: only the album's first file was checked, so a
+    mix the user assembled and hand-tagged on track 07 was flagged as a
+    poisoned batch and sent to Re-identify"""
+    from database.music_database import MusicDatabase
+    paths = [f"/music/Mix/Music/{n:02d} - Song.flac" for n in range(1, 12)]
+    ctx, findings = _context([], multi_rows=[_multi_row(rep_path=paths[0],
+                                                        all_paths="\x1f".join(paths))])
+    ctx.db.manual_path_keys = lambda: {MusicDatabase.manual_path_key(paths[6])}
+
+    result = SuspectAlbumTagDetector().scan(ctx)
+
+    assert result.findings_created == 0 and findings == []

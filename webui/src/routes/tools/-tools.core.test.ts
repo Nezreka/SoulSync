@@ -203,7 +203,8 @@ describe('finding labels', () => {
     expect(FINDING_FIXABLE_TYPES.quality_format_not_targeted).toBe('Leave As-is');
     expect(FINDING_FIXABLE_TYPES.quality_unknown).toBe('Leave As-is');
     expect(Object.keys(FINDING_TYPE_LABELS)).toHaveLength(31);
-    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(30);
+    // 29: 3.6.1's duplicate_tracks lost its fixer to the native detector (G16-3)
+    expect(Object.keys(FINDING_FIXABLE_TYPES)).toHaveLength(29);
     // 17 music + obsolete + the 10 video fix actions + the scan retirement
     expect(Object.keys(FINDING_ACTION_LABELS)).toHaveLength(29);
   });
@@ -221,7 +222,9 @@ describe('finding labels', () => {
   });
 
   it('gives fixable types their button label and others none', () => {
-    expect(findingFixLabel('duplicate_tracks')).toBe('Keep Best');
+    // 3.6.1's duplicate findings have no fixer since the native detector (G16-3)
+    expect(findingFixLabel('duplicate_tracks')).toBeNull();
+    expect(findingFixLabel('native_duplicate_tracks')).toBe('Keep Best');
     expect(findingFixLabel('genre_enrichment')).toBe('Apply Genres');
     expect(findingFixLabel('comma_artist_split')).toBe('Split Artists');
     expect(findingFixLabel('fake_lossless')).toBe('Re-download');

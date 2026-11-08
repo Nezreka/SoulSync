@@ -455,7 +455,7 @@ export interface LibraryV2QueueStatusResponse {
 export interface LibraryV2MatchService {
   service: string;
   label: string;
-  /** 'matched' | 'not_found' | 'pending' (kept as string for forward-compat). */
+  /** 'matched' | 'not_found' | 'error' | 'cleared' | 'pending' (kept as string for forward-compat). */
   status: string;
   external_id: string | null;
   last_attempted: string | null;

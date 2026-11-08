@@ -213,6 +213,26 @@ def _album_row(conn, album_id: int):
     ).fetchone()
 
 
+def _position_by_title(conn, album_id: int, title: str):
+    """(track, disc) the album's editions give a recording of this title, when
+    exactly one numbered position does; None otherwise"""
+    from core.library2.recording_links import normalize_title
+    key = normalize_title(title or "")
+    if not key:
+        return None
+    found = set()
+    for row in conn.execute(
+            """SELECT COALESCE(rt.title_override, r.title) AS title, rt.track_number, rt.disc_number
+                 FROM lib2_release_tracks rt
+                 JOIN lib2_release_editions e ON e.id = rt.release_edition_id
+                 JOIN lib2_recordings r ON r.id = rt.recording_id
+                WHERE e.release_group_id = ? AND COALESCE(rt.track_number, 0) > 0""",
+            (int(album_id),)):
+        if normalize_title(row["title"] or "") == key:
+            found.add((int(row["track_number"]), int(row["disc_number"] or 1)))
+    return found.pop() if len(found) == 1 else None
+
+
 def _track_rows(conn, album_id: int) -> List[Any]:
     """The album's tracks with their primary file, catalogue order.
 
@@ -444,10 +464,24 @@ def plan_album_reorganize(
         if not item["matched"]:
             planned.append(item)
             continue
-        if track.get('edition_status') == 'unknown' or not track.get('track_number'):
-            item.update(matched=False, reason='Unknown release position; select the release edition in Re-identify')
+        if track.get('edition_status') == 'unknown' and conn.execute(
+                "SELECT COUNT(DISTINCT release_edition_id) FROM lib2_release_tracks WHERE track_id=?",
+                (track['id'],)).fetchone()[0] > 1:
+            # two editions put this recording at different slots: a real
+            # choice for the user, never a guess (a track bound to no edition
+            # at all is also 'unknown': that one is placed by its title below)
+            item.update(matched=False, reason='Two editions place this track at different '
+                                              'positions; select the release edition in Re-identify')
             planned.append(item)
             continue
+        if not track.get('track_number'):
+            # no number (a 3.6.1 row that had none, kept as 0): 3.6.1 matched
+            # the title against the release's tracklist and fell back to 1, and
+            # moved the file. same here, from the album's own editions
+            position = _position_by_title(conn, album_id, title)
+            track = {**track, 'track_number': position[0] if position else 1,
+                     'disc_number': (position[1] if position else track.get('disc_number')) or 1}
+            item.update(track_number=track['track_number'], disc_number=int(track['disc_number']))
 
         # A matching basename is not evidence that neighbouring audio belongs
         # to this recording. Carry only catalogue versions of this track in

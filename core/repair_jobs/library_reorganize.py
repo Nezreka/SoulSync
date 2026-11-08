@@ -13,6 +13,32 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_jobs.library_reorganize")
 
 
+def _preview_every_library(context, album_id: int) -> dict:
+    """The album's plan in every library that holds its files, each into its
+    own root (what the queued reorganize itself does). Planned once into the
+    shared root, an own library's album showed false "would move" findings,
+    and one library's copy in place settled the album while another's was
+    not."""
+    from types import SimpleNamespace
+    from core.library2 import reorganize_bridge as bridge
+    from core.reorganize_runner import _libraries_for
+    libraries = _libraries_for(context.db, SimpleNamespace(library=None, album_id=album_id))
+    if libraries is None:
+        return bridge.preview_album_reorganize(context.db, context.config_manager, album_id)
+    from core.library_scope import library_scope
+    merged = None
+    for scope, root in libraries:
+        with library_scope(scope):
+            preview = bridge.preview_album_reorganize(context.db, context.config_manager,
+                                                      album_id, transfer_dir=root)
+        if merged is None:
+            merged = dict(preview)
+            merged["tracks"] = list(preview.get("tracks") or [])
+        else:
+            merged["tracks"].extend(preview.get("tracks") or [])
+    return merged or {"tracks": []}
+
+
 @register_job
 class LibraryReorganizeJob(RepairJob):
     scan_key_fields = ('dry run', 'recheck placed', 'naming settings')
@@ -159,7 +185,7 @@ class LibraryReorganizeJob(RepairJob):
             # The bridge validates the album id itself; nothing downstream
             # consults the legacy back-reference.
             try:
-                preview = preview_album_reorganize(context.db, context.config_manager, album_id)
+                preview = _preview_every_library(context, album_id)
             except ReorganizeBridgeError as exc:
                 if getattr(exc, "status", None) == 404:
                     # deleted (or emptied) while the scan ran: nothing to do,

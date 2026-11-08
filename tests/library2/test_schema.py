@@ -18,6 +18,9 @@ _EXPECTED_TABLES = {
     "lib2_entity_history", "lib2_metadata_overrides",
     "lib2_file_delete_operations", "lib2_file_delete_items",
     "lib2_ui_preferences", "lib2_maintenance_events", "lib2_bootstrap_state",
+    # third #1062 review: P2C-1 settled album homes, and the run-once markers
+    # (P2C-5) the schema now keeps itself
+    "lib2_home_settled_files", "lib2_upgrade_repairs",
     "lib2_provider_attempts", "lib2_media_server_mappings", "lib2_library_roots",
     # Cached artist counts used only as the artist list's ORDER BY key.
     "lib2_artist_rollup",

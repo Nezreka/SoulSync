@@ -1422,7 +1422,8 @@ class AutoImportWorker:
             try:
                 cursor = conn.cursor()
                 removed = delete_replaced_track(cursor, hint.replace_track_id,
-                                                resolve_fn=_resolve_old, new_paths=new_paths)
+                                                resolve_fn=_resolve_old, new_paths=new_paths,
+                                                id_space=hint.replace_id_space)
                 consume_hint(cursor, hint.id)
                 conn.commit()
             finally:

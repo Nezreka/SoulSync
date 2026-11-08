@@ -6,6 +6,7 @@ before falling back to MusicBrainz and AudioDB to resolve the correct tracklist
 and repair each file.
 """
 
+import json
 import os
 import re
 from core.library2.provider_ids import parse_external_ids
@@ -100,6 +101,19 @@ class TrackNumberRepairJob(RepairJob):
         for subject in subjects:
             by_album.setdefault(int(subject["album_id"]), []).append(subject)
         total = len(subjects)
+
+        # 3.6.1's anomaly gate: only an album where `anomaly_threshold` files
+        # share one (disc, track) number (the all-tracks-say-01 bug this job
+        # exists for) is looked at. Everything else is left alone: no
+        # tracklist fetch, no renumbering against a catalogue edition the
+        # user's files were never meant to match.
+        threshold = max(2, int(settings.get("anomaly_threshold", 3) or 3))
+        for album_id in list(by_album):
+            if context.check_stop():
+                return result
+            if not _album_has_number_anomaly(by_album[album_id], threshold,
+                                             context.config_manager):
+                result.scanned += len(by_album.pop(album_id))
 
         # Files are the mutation subjects, never the canonical tracklist.
         # Materialize/cache the complete edition list first, then read every
@@ -608,6 +622,57 @@ class TrackNumberRepairJob(RepairJob):
 # ======================================================================
 # Module-level helper functions (extracted from old RepairWorker methods)
 # ======================================================================
+
+def _leading_int(value: Any) -> Optional[int]:
+    """5, "5", "5/12" -> 5; anything else -> None."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    match = re.match(r"\s*(\d+)", str(value or ""))
+    return int(match.group(1)) if match else None
+
+
+def _subject_numbers(subject: Dict[str, Any], config_manager: Any) -> Tuple[Optional[int], Optional[int]]:
+    """(track, disc) as the file's tags say: the tag cache first, then a
+    plain read of the file (nothing written)."""
+    try:
+        tags = json.loads(subject.get("tags_json") or "{}") or {}
+    except (TypeError, ValueError):
+        tags = {}
+    track = _leading_int(tags.get("track_number"))
+    if track is not None:
+        return track, _leading_int(tags.get("disc_number"))
+    from core.library2.paths import resolve_lib2_path
+    raw = str(subject.get("path") or "")
+    path = raw if os.path.isfile(raw) else resolve_lib2_path(raw, config_manager=config_manager)
+    if not path or not os.path.isfile(path):
+        return None, None
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(path)
+        if audio is None:
+            return None, None
+        return _read_track_number_tag(audio)[0], _read_disc_number_tag(audio)[0]
+    except Exception:  # noqa: BLE001 - an unreadable file adds no number
+        return None, None
+
+
+def _album_has_number_anomaly(subjects: List[Dict[str, Any]], threshold: int,
+                              config_manager: Any) -> bool:
+    """Keyed on (disc, track), like 3.6.1 (#1009): a flat multi-disc album
+    repeats each number once per disc and is not anomalous."""
+    counts: Dict[Tuple[int, int], int] = {}
+    for subject in subjects:
+        track, disc = _subject_numbers(subject, config_manager)
+        if track is None:
+            continue
+        key = (disc or 1, track)
+        counts[key] = counts.get(key, 0) + 1
+        if counts[key] >= threshold:
+            return True
+    return False
+
 
 def _read_track_number_tag(audio) -> Tuple[Optional[int], Optional[int]]:
     from core.tag_writer import read_number_pair
@@ -1175,7 +1240,7 @@ def _update_db_file_path(db, old_path: str, new_path: str):
             conn.close()
 
 
-def _album_row_for_files(conn, file_track_data) -> Any:
+def _album_row_for_files(conn, file_track_data, *, suffix_parts: int = 3) -> Any:
     """The lib2 album a folder's files belong to, or None.
 
     Tries every file path exactly, then falls back to a suffix match on the first
@@ -1200,10 +1265,16 @@ def _album_row_for_files(conn, file_track_data) -> Any:
         if row:
             return row
     if file_track_data:
+        # third #1062 review G12-9: the suffix decides which tracklist a
+        # post-download folder is renumbered against, so it must name the
+        # artist folder too ("Greatest Hits/01 - Intro.flac" is many albums),
+        # and a _ or % in a name is a character, not a wildcard. the art
+        # lookup alone keeps 3.6.1's two parts
         parts = str(file_track_data[0][0]).replace('\\', '/').split('/')
-        if len(parts) >= 2:
-            suffix = '/'.join(parts[-2:])
-            row = conn.execute(sql % "LIKE ?", (f'%{suffix}',)).fetchone()
+        if len(parts) >= suffix_parts:
+            suffix = '/'.join(parts[-suffix_parts:])
+            escaped = suffix.replace('^', '^^').replace('%', '^%').replace('_', '^_')
+            row = conn.execute(sql % "LIKE ? ESCAPE '^'", ('%/' + escaped,)).fetchone()
             if row:
                 return row
     return None
@@ -1299,7 +1370,7 @@ def _lookup_album_artist_art(file_track_data: List[Tuple[str, str, Any, Any]],
     conn = None
     try:
         conn = context.db._get_connection()
-        album = _album_row_for_files(conn, file_track_data)
+        album = _album_row_for_files(conn, file_track_data, suffix_parts=2)
         if album is not None:
             result['album_thumb_url'] = album["image_url"] or None
             result['artist_thumb_url'] = album["artist_image"] or None

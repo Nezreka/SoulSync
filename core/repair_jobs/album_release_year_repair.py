@@ -355,9 +355,26 @@ def rename_album_folder(
                     JOIN lib2_tracks t ON t.id = f.track_id
                     WHERE t.album_id = ? AND COALESCE(f.file_state, 'active') <> 'deleted'
                 """, (album_id,)).fetchall()
+                from core.library2.paths import resolve_lib2_path
+                renamed_root = os.path.normcase(os.path.realpath(new_folder))
                 for file_id, old_fp in rows:
                     new_fp = _renamed_path(old_fp, old_folder, new_folder, new_folder_name)
-                    if new_fp and new_fp != old_fp:
+                    if not new_fp or new_fp == old_fp:
+                        continue
+                    # only a file the rename really moved: another library's
+                    # copy of the album in a same-named folder elsewhere stays
+                    # where it is (repointed, it read as missing and was
+                    # re-downloaded)
+                    real = os.path.normcase(os.path.realpath(resolve_lib2_path(new_fp) or new_fp))
+                    moved_here = os.path.exists(real) and (
+                        real == renamed_root or real.startswith(renamed_root + os.sep))
+                    if not moved_here:
+                        still = resolve_lib2_path(old_fp) or old_fp
+                        if os.path.exists(still):
+                            continue        # a copy the rename never touched
+                        # neither path is readable from here (a media
+                        # server's view): the folder-name fallback, as 3.6.1
+                    if new_fp:
                         conn.execute(
                             "UPDATE lib2_track_files SET path = ?, updated_at = CURRENT_TIMESTAMP "
                             "WHERE id = ?", (new_fp, file_id))

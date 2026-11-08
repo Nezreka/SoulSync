@@ -190,3 +190,16 @@ def test_without_a_stop_callback_the_budget_is_spent_as_before(conn):
         conn, services=["musicbrainz"], limit=50, enricher=enrich)
 
     assert stats["scanned"] >= 1
+
+
+def test_a_spotify_lookup_answered_by_itunes_is_asked_again(conn):
+    """third #1062 review P2B-5: a Spotify search that fell back to iTunes
+    stored the iTunes id but recorded Spotify as matched (settled), so
+    Spotify was never asked again once it worked"""
+    conn.execute("UPDATE lib2_artists SET spotify_id=NULL")
+    conn.commit()
+    enrich = _enricher({"spotify": {"success": True, "source": "itunes", "provider_id": "it-1"}})
+
+    backfill_missing_provider_ids(conn, services=["spotify"], limit=3, enricher=enrich)
+
+    assert _attempts(conn, "spotify")[("artist", 1)] != "matched"

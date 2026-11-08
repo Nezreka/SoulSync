@@ -667,7 +667,10 @@ class ExpiredDownloadCleanerJob(RepairJob):
                         job_id=self.job_id,
                         finding_type='expired_download',
                         severity='info',
-                        entity_type='track',
+                        # G08-3: a download-history id, not a track. as
+                        # 'track' the annotation read it as a 3.6.1 track id
+                        # and named an unrelated song; the path names the file
+                        entity_type='download',
                         entity_id=str(entry.get('id')),
                         file_path=entry.get('file_path'),
                         title=f'Expired: {entry.get("title") or "Unknown"}',

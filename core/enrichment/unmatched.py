@@ -99,6 +99,23 @@ def _validate(service: str, entity_type: str) -> None:
         raise UnmatchedQueryError(f"No table mapping for entity type {entity_type!r}")
 
 
+def _universe(service: str, entity_type: str) -> List[str]:
+    """the rows the worker for ``service`` actually enriches (third #1062
+    review G06-2): the owned library, credits resolved, and for similar
+    artists a provider id. 3.6.1's tables held only library rows; v2 keeps a
+    watched artist's discography and the wishlist in the same tables, so
+    without this the list and the breakdown counted pending rows the worker
+    never hands out and the modal never reached the worker's own 100%.
+    The same predicates as core/library2/worker_queue.status_counts."""
+    from core.library2.artist_credit_gate import worker_credit_ready_sql
+    from core.library2.sql_util import ANY_OWNER, owned_sql
+    out = [owned_sql(entity_type, 'e', scope=ANY_OWNER), worker_credit_ready_sql(entity_type)]
+    if service == 'similar_artists':
+        from core.library2.worker_queue import _HAS_PROVIDER_ID
+        out.append(f"({_HAS_PROVIDER_ID})")
+    return out
+
+
 def _status_predicate(service: str, status: str, qualifier: str) -> str:
     """SQL predicate selecting rows in the requested match state.
 
@@ -134,7 +151,7 @@ def build_unmatched_query(
     table, name_col, image_expr, join = (
         meta['table'], meta['name'], meta['image'], meta['join'],
     )
-    where = [_status_predicate(service, status, 'pa')]
+    where = [_status_predicate(service, status, 'pa'), *_universe(service, entity_type)]
     params: List = [entity_type, service]
     if query:
         where.append(f"e.{name_col} LIKE ?")
@@ -172,7 +189,7 @@ def build_count_query(
     meta = _ENTITY_TABLE[entity_type]
     table, name_col = meta['table'], meta['name']
 
-    where = [_status_predicate(service, status, 'pa')]
+    where = [_status_predicate(service, status, 'pa'), *_universe(service, entity_type)]
     params: List = [entity_type, service]
     if query:
         where.append(f"e.{name_col} LIKE ?")
@@ -212,7 +229,8 @@ def build_reset_query(
     # 'failed' — re-queue everything this source explicitly gave up on.
     return (f"SELECT e.id FROM {table} e JOIN lib2_provider_attempts pa "
             "ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=? "
-            "WHERE pa.status='not_found'", [entity_type, service])
+            "WHERE pa.status='not_found' AND "
+            + " AND ".join(_universe(service, entity_type)), [entity_type, service])
 
 
 # ── Verify matches — targeted repair of the pre-fix corruption classes ──────
@@ -334,7 +352,8 @@ def build_breakdown_query(service: str, entity_type: str) -> Tuple[str, List]:
         f"SUM(CASE WHEN {ms} IS NULL THEN 1 ELSE 0 END) AS pending, "
         f"COUNT(*) AS total "
         f"FROM {table} e LEFT JOIN lib2_provider_attempts pa "
-        f"ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=?"
+        f"ON pa.entity_type=? AND pa.entity_id=e.id AND pa.service=? "
+        f"WHERE {' AND '.join(_universe(service, entity_type))}"
     )
     return sql, [entity_type, service]
 

@@ -88,7 +88,7 @@ def test_a_name_that_does_not_match_is_never_guessed(imported_conn):
 def test_the_deferred_convergence_runs_it():
     import inspect
     from core.library2 import bootstrap
-    assert "carry_legacy_issue_ids(conn)" in inspect.getsource(bootstrap.run_deferred_backfills)
+    assert "carry_legacy_issue_ids(conn)" in inspect.getsource(bootstrap._carry_upgrade_state)
 
 
 def test_every_lookup_uses_an_index(imported_conn):

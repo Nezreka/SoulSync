@@ -1063,6 +1063,35 @@ def fetch_artist_discography(
     )
 
 
+def _caa_has_front(scope: str, mbid: str) -> bool:
+    """the artwork walk's question (tests answer it themselves)"""
+    return _caa_front_answer(scope, mbid)
+
+
+def _caa_front_answer(scope: str, mbid: str) -> bool:
+    """whether the Cover Art Archive holds a front image for this release
+    (group). only the archive's own answer is a no: a 404, or an index with
+    no front image. a timeout or no network says nothing about the art, so
+    the link is used as before; dropping it there lost real covers on a blip"""
+    import json
+    import urllib.error
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            f"https://coverartarchive.org/{scope}/{mbid}",
+            headers={"User-Agent": "SoulSync/1.0 (artwork lookup)"})
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 (trusted host)
+            index = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        logger.debug("CAA index %s/%s: HTTP %s", scope, mbid, exc.code)
+        return exc.code not in (400, 404)  # the archive's "no such art"
+    except Exception as exc:  # noqa: BLE001 - unreachable: no answer either way
+        logger.debug("CAA index %s/%s unreachable, using the link: %s", scope, mbid, exc)
+        return True
+    return any(isinstance(image, dict) and image.get("front")
+               for image in (index or {}).get("images") or [])
+
+
 def fetch_artwork_url(
     kind: str,
     *,
@@ -1155,12 +1184,17 @@ def fetch_artwork_url(
         if _out_of_budget():
             return None
         if source == "musicbrainz":
-            return ArtworkProviderResult(
-                kind="album",
-                source="caa",
-                provider_entity_id=provider_id,
-                url=f"https://coverartarchive.org/release/{provider_id}/front-1200",
-            )
+            # only a release the Cover Art Archive really has a front for: an
+            # unchecked link stopped the walk on a 404 that the fix then saved
+            # as the cover (3.6.1 never used CAA blind)
+            if _caa_has_front("release", provider_id):
+                return ArtworkProviderResult(
+                    kind="album",
+                    source="caa",
+                    provider_entity_id=provider_id,
+                    url=f"https://coverartarchive.org/release/{provider_id}/front-1200",
+                )
+            continue
         try:
             client = get_client_for_source(source)
             getter = getattr(client, "get_album", None) if client else None
@@ -1214,12 +1248,13 @@ def fetch_artwork_url(
     if group_id:
         if _out_of_budget():
             return None
-        return ArtworkProviderResult(
-            kind="album",
-            source="caa",
-            provider_entity_id=group_id,
-            url=f"https://coverartarchive.org/release-group/{group_id}/front-1200",
-        )
+        if _caa_has_front("release-group", group_id):
+            return ArtworkProviderResult(
+                kind="album",
+                source="caa",
+                provider_entity_id=group_id,
+                url=f"https://coverartarchive.org/release-group/{group_id}/front-1200",
+            )
     from core.metadata.art_lookup import (
         available_art_sources,
         select_preferred_art,

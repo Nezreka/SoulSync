@@ -844,9 +844,11 @@ def test_get_album_preserves_unknown_present_file_quality(imported_conn):
 
     assert track["file_status"] == "present"
     assert track["meets_profile"] is None
-    # Fresh installs default to upgrades disabled, so unknown quality remains
-    # visible without becoming an automatic replacement candidate.
-    assert track["upgrade_candidate"] is False
+    # The default profile upgrades what's below it ("acceptable", 3.6.1's
+    # default), so a file of unknown quality is "unknown", not "never". It is
+    # still not queued on its own: mirror_outbox.upgrade_opted_in keeps the
+    # import's baseline from asking for any upgrade.
+    assert track["upgrade_candidate"] is None
 
 
 def test_get_album_evaluates_explicit_track_profile_not_album_profile(imported_conn):
@@ -1286,3 +1288,37 @@ def test_library_index_membership_searches_each_ownership_branch_by_index(import
     assert "SCAN owned_al" not in plan, plan
     assert "INDEX idx_lib2_albums_artist (primary_artist_id=?)" in plan, plan
     assert "INDEX idx_lib2_album_artists_artist (artist_id=?)" in plan, plan
+
+
+def test_an_artists_counts_are_their_own_releases_and_live_files(imported_conn):
+    """second v2 review (L1, L2): the library table counted every album an
+    artist was credited on (a compilation feature made "23 albums" beside "3
+    albums" on their page), and a file the user deleted stayed in the track
+    total ("40/52" as if 12 were missing). 3.6.1 counted album-artist albums,
+    and a delete took the track out"""
+    conn = imported_conn
+    drake = conn.execute("SELECT id FROM lib2_artists WHERE name='Drake'").fetchone()[0]
+    other = conn.execute("INSERT INTO lib2_artists(name, sort_name) VALUES('DJ Comp', 'DJ Comp')").lastrowid
+    comp = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title, album_type, origin)"
+                        " VALUES(?, 'Summer Hits', 'compilation', 'library')", (other,)).lastrowid
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')", (comp, other))
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'featured')", (comp, drake))
+    guest = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Guest Verse', 1)",
+                         (comp,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) VALUES(?, ?, 'featured', 1)",
+                 (guest, drake))
+    conn.execute("UPDATE lib2_tracks SET monitored=0")
+    conn.execute("UPDATE lib2_wanted_tracks SET wanted=0")
+    conn.commit()
+    before = {a["name"]: a for a in Q.list_artists(conn)[0]}["Drake"]
+    assert before["album_count"] == 1
+
+    # delete one of his present files: the total drops with it
+    file_id = conn.execute("""SELECT f.id FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id
+                              JOIN lib2_albums al ON al.id=t.album_id WHERE al.primary_artist_id=?
+                              ORDER BY f.id LIMIT 1""", (drake,)).fetchone()[0]
+    conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE id=?", (file_id,))
+    conn.commit()
+    after = {a["name"]: a for a in Q.list_artists(conn)[0]}["Drake"]
+    assert after["track_count"] == before["track_count"] - 1
+    assert after["tracks_missing"] == 0

@@ -133,6 +133,17 @@ def test_another_librarys_artist_is_not_found_for_a_profile(world):
     assert world.client.get(f"/api/library/v2/artists/{world.ids['k']}").status_code == 200
 
 
+def test_a_broken_visibility_check_hides_instead_of_showing(world, monkeypatch):
+    """third #1062 review G03-7: an exception in the scope check answered
+    "visible", so any bug there opened every own library to every profile"""
+    def _boom(*_a, **_k):
+        raise NameError("dropped import")
+
+    monkeypatch.setattr("core.library2.sql_util.entity_visible", _boom)
+    world.as_profile(world.sam)
+    assert world.client.get(f"/api/library/v2/artists/{world.ids['k']}").status_code == 404
+
+
 def test_the_rest_of_her_artists_discography_is_hers_to_browse(world):
     with world.db._get_connection() as conn:
         missing = seed_album(conn, server_id="al-k-missing", title="Unreleased",
@@ -201,12 +212,58 @@ def test_kim_may_not_change_files(world):
     assert world.client.delete(f"/api/library/v2/artists/{world.ids['k']}").status_code == 403
 
 
-def test_a_shared_profile_may_not_wish(world):
+def _rules(world, artist_id):
+    with world.db._get_connection() as conn:
+        return {int(r[0]): int(r[1]) for r in conn.execute(
+            "SELECT profile_id, monitored FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=?",
+            (artist_id,))}
+
+
+def _column(world, artist_id):
+    with world.db._get_connection() as conn:
+        return int(conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()[0] or 0)
+
+
+def test_a_household_member_watches_on_their_own_watchlist(world):
+    """X1: in the shared library a member watched with the admin's state
+    (every card showed what the admin watched) and could not watch at all.
+    their watch is their own now, as in 3.6.1 and plex: the admin's state
+    and the shared column are untouched"""
     world.as_profile(world.sam)
-    assert world.client.get("/api/library/v2/enabled").get_json()["can_wish"] is False
-    r = world.client.post(f"/api/library/v2/artists/{world.ids['h']}/monitor",
-                          json={"monitored": True})
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_wish"] is True
+    house = world.ids['h']
+    r = world.client.post(f"/api/library/v2/artists/{house}/monitor", json={"monitored": True})
+    assert r.status_code == 200, r.get_json()
+    assert _rules(world, house).get(world.sam) == 1
+    assert _rules(world, house).get(1) in (None, 0)
+    assert _column(world, house) == 0
+
+    def watched(pid):
+        world.as_profile(pid)
+        rows = world.client.get("/api/library/v2/artists?limit=50").get_json()["artists"]
+        return {a["name"]: a["monitored"] for a in rows}
+
+    assert watched(world.sam)["House Band"] is True
+    assert watched(1)["House Band"] is False
+
+
+def test_a_member_who_asks_first_wishes_but_never_starts_a_download(world):
+    with world.db._get_connection() as conn:
+        conn.execute("UPDATE profiles SET can_download=0 WHERE id=?", (world.sam,))
+        conn.commit()
+    world.as_profile(world.sam)
+    body = world.client.get("/api/library/v2/enabled").get_json()
+    assert body["can_wish"] is True and body["can_download"] is False
+    house = world.ids['h']
+    assert world.client.post(f"/api/library/v2/artists/{house}/monitor",
+                             json={"monitored": True}).status_code == 200
+    r = world.client.post(f"/api/library/v2/artists/{house}/search", json={})
     assert r.status_code == 403
+
+
+def test_a_member_still_may_not_change_shared_files(world):
+    world.as_profile(world.sam)
+    assert world.client.delete(f"/api/library/v2/artists/{world.ids['h']}").status_code == 403
 
 
 def test_the_admin_monitoring_in_kims_library_writes_kims_intent(world):
@@ -327,3 +384,39 @@ def test_kim_may_not_fill_catalogue_metadata(world):
     world.as_profile(world.kim)
     mine = _track_of(world, "k")
     assert world.client.post(f"/api/library/v2/tracks/{mine}/fill-tag-gaps").status_code == 403
+
+
+def test_only_a_profile_the_grab_route_allows_is_offered_the_library_search_grab(world):
+    """third #1062 review G16-1: a household member's wishlist Search opened
+    the library search, and its grab answered 403. /enabled says who may grab
+    (the same rule as the server), so the rest get the inspector"""
+    world.as_profile(1)
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_grab"] is True
+    world.as_profile(world.kim)   # a library of her own
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_grab"] is True
+    world.as_profile(world.sam)   # the shared library
+    assert world.client.get("/api/library/v2/enabled").get_json()["can_grab"] is False
+
+
+def test_a_member_edits_their_own_artist_watchlist_settings(world):
+    """third #1062 review G03-5: Artist Settings read and wrote the admin's
+    watchlist row whoever acted. 3.6.1's watchlist config was the caller's
+    own; the shared monitor_new_items column stays the admin's"""
+    house = world.ids['h']
+    with world.db._get_connection() as conn:
+        name = conn.execute("SELECT name FROM lib2_artists WHERE id=?", (house,)).fetchone()[0]
+        for pid in (1, world.sam):
+            conn.execute("INSERT INTO watchlist_artists(artist_name, profile_id, lookback_days) "
+                         "VALUES(?, ?, 30)", (name, pid))
+        conn.commit()
+    world.as_profile(world.sam)
+    r = world.client.put(f"/api/library/v2/artists/{house}/settings",
+                         json={"lookback_days": 90, "monitor_new_items": "none"})
+    assert r.status_code == 200, r.get_json()
+    with world.db._get_connection() as conn:
+        rows = dict(conn.execute("SELECT profile_id, lookback_days FROM watchlist_artists "
+                                 "WHERE artist_name=?", (name,)).fetchall())
+        monitor_new = conn.execute("SELECT monitor_new_items FROM lib2_artists WHERE id=?",
+                                   (house,)).fetchone()[0]
+    assert rows == {1: 30, world.sam: 90}
+    assert monitor_new != "none"

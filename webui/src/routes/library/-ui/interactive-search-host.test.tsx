@@ -31,17 +31,37 @@ afterEach(() => {
 
 const wish = { id: 'sp1', track: 'Kernkraft 400', artist: 'Topic', album: 'Kernkraft 400' };
 
+function canGrab(value: boolean) {
+  server.use(
+    http.get('*/api/library/v2/enabled', () =>
+      HttpResponse.json({ success: true, can_grab: value }),
+    ),
+  );
+}
+
 describe('Interactive Search outside the library', () => {
-  it('opens the library search for a wish linked to a library track', () => {
+  it('opens the library search for a wish linked to a library track', async () => {
+    canGrab(true);
     render(<LibrarySearchHost />);
-    act(() => openWishlistSearch({ ...wish, lib2TrackId: 1726 }));
-    expect(screen.getByText('library search for track 1726')).toBeInTheDocument();
+    await act(() => openWishlistSearch({ ...wish, lib2TrackId: 1726 }));
+    await waitFor(() =>
+      expect(screen.getByText('library search for track 1726')).toBeInTheDocument(),
+    );
     expect(openWishlistInspector).not.toHaveBeenCalled();
   });
 
-  it('falls back to the candidate inspector for a wish without one', () => {
+  it('gives a profile that may not grab from it the inspector instead', async () => {
+    // a household member in the shared library: the library grab answers 403,
+    // the inspector only needs download permission (3.6.1)
+    canGrab(false);
     render(<LibrarySearchHost />);
-    act(() => openWishlistSearch(wish));
+    await act(() => openWishlistSearch({ ...wish, lib2TrackId: 1726 }));
+    expect(openWishlistInspector).toHaveBeenCalled();
+  });
+
+  it('falls back to the candidate inspector for a wish without one', async () => {
+    render(<LibrarySearchHost />);
+    await act(() => openWishlistSearch(wish));
     expect(openWishlistInspector).toHaveBeenCalledWith({
       id: 'sp1',
       name: 'Kernkraft 400',
@@ -50,28 +70,15 @@ describe('Interactive Search outside the library', () => {
     });
   });
 
-  it('opens the library search for a failed download of a library track', async () => {
+  it('a failed download always opens its own task inspector, to retry it in its batch', async () => {
+    // even a task for a library track
     server.use(
       http.get('*/api/downloads/task/t1/library-track', () =>
         HttpResponse.json({ success: true, track_id: 1105 }),
       ),
     );
-    render(<LibrarySearchHost />);
-    await act(() => openDownloadTaskSearch('t1', { name: 'Lost Forever', artist: 'Sergio' }));
-    await waitFor(() =>
-      expect(screen.getByText('library search for track 1105')).toBeInTheDocument(),
-    );
-    expect(openDownloadTaskInspector).not.toHaveBeenCalled();
-  });
-
-  it('keeps the inspector for a download that is for no library track', async () => {
-    server.use(
-      http.get('*/api/downloads/task/t2/library-track', () =>
-        HttpResponse.json({ success: true, track_id: null }),
-      ),
-    );
-    const track = { name: 'Song', artist: 'Someone' };
-    await openDownloadTaskSearch('t2', track);
-    expect(openDownloadTaskInspector).toHaveBeenCalledWith('t2', track);
+    const track = { name: 'Lost Forever', artist: 'Sergio' };
+    await openDownloadTaskSearch('t1', track);
+    expect(openDownloadTaskInspector).toHaveBeenCalledWith('t1', track);
   });
 });

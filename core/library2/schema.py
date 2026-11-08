@@ -876,6 +876,19 @@ def _install_quality_profile_triggers(cursor: Any, table: str) -> None:
     """)
 
 
+def _done_once(cursor: Any, name: str) -> bool:
+    """whether a one-shot data migration already converged on this db.
+    third #1062 review P2C-5: these scanned whole tables under the init lock
+    on every start, finding nothing after the first"""
+    cursor.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+                   "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    return cursor.execute("SELECT 1 FROM lib2_upgrade_repairs WHERE name=?", (name,)).fetchone() is not None
+
+
+def _mark_done(cursor: Any, name: str) -> None:
+    cursor.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) VALUES(?)", (name,))
+
+
 def _migrate_quality_profile_constraints(cursor: Any) -> None:
     """Remove numeric defaults and attach Lib2 rows to app-wide profiles.
 
@@ -898,6 +911,9 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
     if default_row is None:
         raise RuntimeError("Library v2 requires at least one quality profile")
     default_id = int(default_row[0])
+    # the repoint below finds nothing once converged: the insert triggers
+    # default new rows and a referenced profile can't be deleted
+    ids_valid = _done_once(cursor, "quality_profile_ids_valid_v1")
 
     for table in _QUALITY_PROFILE_TABLES:
         info = {
@@ -935,7 +951,7 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
                 cursor.execute(
                     f"ALTER TABLE {table} RENAME COLUMN quality_profile_id_v2 "
                     "TO quality_profile_id")
-            else:
+            elif not ids_valid:
                 cursor.execute(f"""
                     UPDATE {table}
                        SET quality_profile_id=?
@@ -951,6 +967,7 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
             cursor.execute(f"RELEASE SAVEPOINT {savepoint}")
             raise
 
+    _mark_done(cursor, "quality_profile_ids_valid_v1")
     cursor.execute("DROP TRIGGER IF EXISTS trg_quality_profiles_lib2_restrict")
     cursor.execute("""
         CREATE TRIGGER trg_quality_profiles_lib2_restrict
@@ -971,20 +988,30 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
         "trg_quality_profiles_lib2_default_update",
     ):
         cursor.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+    # third #1062 review P2C-7: only the rows whose value changes. "set as
+    # default" rewrote every inherited row of a 300k library in the request
+    # transaction, holding the write lock and filling the WAL
     propagation_sql = """
         UPDATE lib2_artists
            SET quality_profile_id=NEW.id
-         WHERE COALESCE(quality_profile_explicit, 0)=0;
+         WHERE COALESCE(quality_profile_explicit, 0)=0
+           AND quality_profile_id IS NOT NEW.id;
         UPDATE lib2_albums
            SET quality_profile_id=(
                SELECT a.quality_profile_id FROM lib2_artists a
                 WHERE a.id=lib2_albums.primary_artist_id)
-         WHERE COALESCE(quality_profile_explicit, 0)=0;
+         WHERE COALESCE(quality_profile_explicit, 0)=0
+           AND quality_profile_id IS NOT (
+               SELECT a.quality_profile_id FROM lib2_artists a
+                WHERE a.id=lib2_albums.primary_artist_id);
         UPDATE lib2_tracks
            SET quality_profile_id=(
                SELECT al.quality_profile_id FROM lib2_albums al
                 WHERE al.id=lib2_tracks.album_id)
-         WHERE COALESCE(quality_profile_explicit, 0)=0;
+         WHERE COALESCE(quality_profile_explicit, 0)=0
+           AND quality_profile_id IS NOT (
+               SELECT al.quality_profile_id FROM lib2_albums al
+                WHERE al.id=lib2_tracks.album_id);
     """
     cursor.execute(f"""
         CREATE TRIGGER trg_quality_profiles_lib2_default_insert
@@ -1016,6 +1043,8 @@ def _backfill_quality_profile_provenance(cursor: Any) -> None:
     cannot be reconstructed from the old schema, but retaining the cascade is
     the least surprising and least destructive migration.
     """
+    if _done_once(cursor, "quality_profile_provenance_v1"):
+        return  # P2C-5: rows are born with DEFAULT 0; NULL only ever came from old installs
     default_row = cursor.execute(
         "SELECT id FROM quality_profiles ORDER BY is_default DESC, id LIMIT 1"
     ).fetchone()
@@ -1045,6 +1074,7 @@ def _backfill_quality_profile_provenance(cursor: Any) -> None:
                     ) THEN 1 ELSE 0 END
             WHERE quality_profile_explicit IS NULL"""
     )
+    _mark_done(cursor, "quality_profile_provenance_v1")
 
 
 def _migrate_artist_monitored_default(cursor: Any) -> None:
@@ -1242,6 +1272,16 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("idx_lib2_track_files_owner create skipped: %s", e)
+    # a v1 API track id (3.6.1's) and the user-reference remap look a file up
+    # by its legacy id; without this each lookup read all of the file table.
+    # partial: only imported files carry one
+    try:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_legacy "
+            "ON lib2_track_files(legacy_track_id) WHERE legacy_track_id IS NOT NULL"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("idx_lib2_track_files_legacy create skipped: %s", e)
     # Owning by path (E-15): the folder table and the triggers that derive a
     # file's owner from where it is. The folders themselves are configuration
     # and are synced at start (core.library2.library_roots.sync_library_roots).
@@ -1642,6 +1682,11 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
         # retag wrote BPM 0 into files, and a length of 0 switched off the
         # import's duration check while COALESCE kept it over real lengths.
         try:
+            # P2C-5: every start scanned every track for this under the
+            # write lock. a partial index holds just the zero rows (none,
+            # normally), so the sweep is a seek and still heals a late writer
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_zero_metadata "
+                           "ON lib2_tracks(id) WHERE bpm=0 OR duration=0")
             stats["zero_track_metadata"] = cursor.execute(
                 "UPDATE lib2_tracks SET bpm=NULLIF(bpm, 0), duration=NULLIF(duration, 0)"
                 " WHERE bpm=0 OR duration=0").rowcount

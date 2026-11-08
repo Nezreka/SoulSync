@@ -38,6 +38,7 @@ import {
   genericDetailRows,
   incompleteAlbumCompletion,
   libraryRetagDetail,
+  nativeRetagChanges,
   pickDuplicateToKeep,
   scoreBar,
 } from '../-tools.core';
@@ -718,18 +719,39 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
       );
 
     case 'library_retag': {
-      if (d.validation && typeof d.validation === 'object' && 'checks' in d.validation) {
-        const checks = d.validation.checks;
-        if (checks && typeof checks === 'object')
-          return (
-            <DetailGrid
-              rows={Object.entries(checks).map(([key, value]) => [
-                key,
-                checkWithValues(text(value), retagDiffFor(d.diff, key)),
-              ])}
-            />
-          );
-      }
+      const checks =
+        d.validation && typeof d.validation === 'object' && 'checks' in d.validation
+          ? d.validation.checks
+          : null;
+      const checksGrid =
+        checks && typeof checks === 'object' ? (
+          <DetailGrid
+            rows={Object.entries(checks).map(([key, value]) => [
+              key,
+              checkWithValues(text(value), retagDiffFor(d.diff, key)),
+            ])}
+          />
+        ) : null;
+      // G16-2: what Apply Tags writes comes first, every field of it
+      const changes = nativeRetagChanges(d.diff);
+      if (changes.length)
+        return (
+          <>
+            <div className="repair-finding-meta" style={{ marginBottom: '8px' }}>
+              Apply Tags will write
+            </div>
+            <DetailGrid rows={changes} />
+            {checksGrid ? (
+              <>
+                <div className="repair-finding-meta" style={{ margin: '12px 0 8px' }}>
+                  Tag checks
+                </div>
+                {checksGrid}
+              </>
+            ) : null}
+          </>
+        );
+      if (checksGrid) return checksGrid;
       const retag = libraryRetagDetail(d);
       if (!retag.meta && !retag.coverOnly && !retag.tracks.length && !retag.unmatched.length) {
         return <div className="repair-finding-desc">No changes.</div>;
@@ -875,14 +897,14 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
               const trackId = track.track_id ?? track.id;
               const isBest = track.id === best?.id;
               return (
+                // G16-3: read-only. 3.6.1's fixer for these is gone (the
+                // native Duplicate Detector replaced it), so a click asked for
+                // a destructive choice the server could only refuse
                 <div
                   className={`repair-detail-subitem ${isBest ? 'best' : 'removable'}${
                     track.file_path ? ' playable' : ''
                   }`}
-                  style={{ cursor: 'pointer' }}
-                  title="Click to keep this version"
                   key={`${trackId ?? index}`}
-                  onClick={() => onKeepDuplicate(finding.id, String(trackId))}
                 >
                   <div className="repair-subitem-body">
                     <strong>
@@ -918,8 +940,9 @@ export function FindingDetail({ finding, onKeepDuplicate, onApplyCoverArt }: Fin
             })}
           </div>
           <div style={{ color: 'var(--white-a30)', fontSize: '11px', padding: '4px 0' }}>
-            Play to compare, click a version to keep it, or use &quot;Keep Best&quot; for
-            auto-selection. Keep Best keeps a copy that&apos;s in a playlist.
+            Found before the library upgrade. Run the Duplicate Detector on this page to review
+            these copies with today&apos;s checks (it moves extras to quarantine, never deletes);
+            then dismiss this one.
           </div>
         </>
       );

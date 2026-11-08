@@ -87,6 +87,8 @@ def test_every_guarded_job_is_wired(module):
 def test_track_number_repair_leaves_an_album_with_one_hand_tagged_file_alone(tmp_path, monkeypatch):
     """3.6.1 skipped the whole album folder: renumbering the other files of a
     release the user typed against the service's tracklist splits it"""
+    # this test is about what an inspected album does; the anomaly gate has its own tests
+    monkeypatch.setattr("core.repair_jobs.track_number_repair._album_has_number_anomaly", lambda *_a, **_k: True)
     from core.repair_jobs.base import JobContext
     db = _db(tmp_path)
     db.record_manual_metadata_file(LIVE)
@@ -139,3 +141,38 @@ def test_library_retag_leaves_an_album_with_one_hand_tagged_file_alone(tmp_path)
                           settings={})
     paths = {str(s['path']) for s in library_retag.LibraryRetagJob()._subjects(ctx)}
     assert paths == {STUDIO}
+
+
+def test_metadata_gap_filler_and_cover_art_leave_a_hand_tagged_album_alone(tmp_path, monkeypatch):
+    """third #1062 review G11-5: both lost 3.6.1's album lock. one hand-tagged
+    file kept the album's other tracks from getting the studio release's ids
+    and the album from a studio cover"""
+    from core.repair_jobs.base import JobContext
+    db = _db(tmp_path)
+    db.record_manual_metadata_file(LIVE)
+    live_other = LIVE.replace('01 - Of the Girl', '02 - Corduroy')
+    files = [
+        {'album_id': 1, 'path': LIVE, 'artist_name': 'Pearl Jam', 'file_id': 1, 'track_id': 1},
+        {'album_id': 1, 'path': live_other, 'artist_name': 'Pearl Jam', 'file_id': 2, 'track_id': 2},
+        {'album_id': 2, 'path': STUDIO, 'artist_name': 'Pearl Jam', 'file_id': 3, 'track_id': 3},
+    ]
+    monkeypatch.setattr(metadata_gap_filler, 'active_file_subjects', lambda *_a, **_k: list(files))
+    monkeypatch.setattr('core.library2.maintenance_subjects.active_file_subjects',
+                        lambda *_a, **_k: list(files))
+    ctx = JobContext(db=db, transfer_folder=str(tmp_path), config_manager=None)
+
+    from core.repair_jobs.base import artist_scoped_subjects
+    kept = metadata_gap_filler.drop_hand_tagged_albums(ctx, artist_scoped_subjects(ctx, files), files)
+    assert [s['track_id'] for s in kept] == [3]
+
+    albums = [{'album_id': 1, 'rep_path': live_other}, {'album_id': 2, 'rep_path': STUDIO}]
+    assert [a['album_id'] for a in missing_cover_art._drop_hand_tagged_albums(ctx, albums)] == [2]
+
+
+@pytest.mark.parametrize("module,needle", [
+    (metadata_gap_filler, 'drop_hand_tagged_albums('),
+    (missing_cover_art, '_drop_hand_tagged_albums('),
+])
+def test_the_gap_and_cover_jobs_lock_whole_albums(module, needle):
+    assert needle in inspect.getsource(module.__dict__[
+        'MetadataGapFillerJob' if module is metadata_gap_filler else 'MissingCoverArtJob'].scan)

@@ -137,7 +137,12 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
         native_id = resolve_native_id(conn, "track", native_id)
     track = conn.execute('SELECT * FROM lib2_tracks WHERE id=?', (native_id,)).fetchone() if native_id else None
     if track is None and str(data.get('id') or '').startswith('lib2-track:'):
-        track = conn.execute('SELECT * FROM lib2_tracks WHERE stable_id=?', (data['id'].removeprefix('lib2-track:'),)).fetchone()
+        # G09-4: an id two rows share names neither
+        shared = conn.execute('SELECT * FROM lib2_tracks WHERE stable_id=? LIMIT 2',
+                              (data['id'].removeprefix('lib2-track:'),)).fetchall()
+        if len(shared) > 1:
+            raise ValueError('Wishlist identity matches multiple Library tracks; select the release edition')
+        track = shared[0] if shared else None
     if track is None:
         album = data.get('album') or {}
         album_id = album.get('id') if isinstance(album, dict) else None
@@ -279,8 +284,14 @@ def materialize_wishlist_intent(
             if result is not None:
                 conn.commit()
             return result
+    except ValueError as e:
+        # a payload this can't place: the expected miss
+        logger.debug("wishlist materialization skipped: %s", e)
+        return None
     except Exception as e:  # noqa: BLE001
-        logger.debug("wishlist materialization failed: %s", e)
+        # P2B-10: anything else made every album-modal add answer
+        # lib2_album_id null ("Monitor" did nothing) with no trace
+        logger.warning("wishlist materialization failed: %s", e, exc_info=True)
         return None
 
 

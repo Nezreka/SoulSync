@@ -134,7 +134,11 @@ class ReplayGainFillerJob(RepairJob):
                     subject["artist_name"], file_path,
                 ))
         except Exception as e:
-            logger.warning("[ReplayGain Filler] V2 subject enumeration failed: %s", e)
+            # G12-6: a run that checked nothing isn't a clean run (3.6.1
+            # counted it and stopped)
+            logger.error("[ReplayGain Filler] V2 subject enumeration failed: %s", e, exc_info=True)
+            result.errors += 1
+            return result
         # library tracks only, as in 3.6.1: v2 also tagged every audio file
         # on disk the library never imported
 

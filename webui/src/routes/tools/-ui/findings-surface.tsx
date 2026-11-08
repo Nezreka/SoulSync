@@ -31,6 +31,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
+
 import type { FindingAlbumGroup } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
@@ -490,6 +492,14 @@ export function FindingsSurface({
       clearTimeout(timer);
     };
   }, [loadCounts, loadGroups, loadFindings]);
+
+  // G16-4: another library picked in the header. every count, group and row
+  // was the old library's, and Fix All acted on what was on screen; a
+  // selection from the old library is dropped, never carried over
+  useEffect(() => {
+    window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, refreshAll);
+    return () => window.removeEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, refreshAll);
+  }, [refreshAll]);
 
   // a job finished: its findings only showed after a page refresh (#1386).
   // any change after the first render counts, even from no runs at all (a

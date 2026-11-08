@@ -195,6 +195,16 @@ describe('library route (live)', () => {
     await waitFor(() => expect(router.state.location.pathname).not.toBe('/library'));
   });
 
+  it("opens Search's In Your Library artist for a profile allowed Search alone", async () => {
+    // third #1062 review G15-2: the card links /library?artist=<id> straight;
+    // only the discovery form redirected, so the profile landed home
+    window.SoulSyncWebShellBridge = createShellBridge({
+      isPageAllowed: vi.fn((pageId) => pageId !== 'library'),
+    });
+    const { router } = renderRoute(['/library?artist=42&releases=all&releaseView=cards']);
+    await waitFor(() => expect(router.state.location.pathname).toBe('/artist-detail/library/42'));
+  });
+
   it('does not bounce a denied profile back into /library (iss29-B10)', async () => {
     // Home page resolves to `library` (directly, or via the legacy `library-v2`
     // page id the shell normalizes to it) while allowed_pages excludes it. The

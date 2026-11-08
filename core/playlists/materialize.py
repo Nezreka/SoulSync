@@ -338,6 +338,37 @@ def _adoptable(real: str, dest: str, mode: str) -> bool:
     return _copy_is_current(real, dest)
 
 
+def _adopt_legacy_folder(pdir: str, owned: dict, wanted: dict, mode: str) -> None:
+    """A folder 3.6.1 built has no manifest. 3.6.1 relinked a broken link,
+    re-copied a stale copy and pruned what left the playlist; v2 only manages
+    what its manifest owns, so those entries failed every rebuild or stayed for
+    good. Once, the first time v2 sees such a folder: every symlink is adopted
+    (a link is never an original; 3.6.1 only wrote links and copies here), and
+    in copy mode a regular file that is byte for byte the member it is named
+    for, which proves it is a copy. A same-named file with other bytes may be
+    the user's only copy: it is never adopted, so never overwritten."""
+    try:
+        names = os.listdir(pdir)
+    except OSError:
+        return
+    for name in names:
+        full = os.path.join(pdir, name)
+        if name in owned:
+            continue
+        try:
+            if os.path.islink(full):
+                owned[name] = {"source": os.path.realpath(full),
+                               "fingerprint": artifact_fingerprint(full)}
+            elif mode == "copy" and full in wanted and os.path.isfile(full):
+                import filecmp
+                source = wanted[full]
+                if (os.path.isfile(source) and os.path.getsize(source) == os.path.getsize(full)
+                        and filecmp.cmp(source, full, shallow=False)):
+                    owned[name] = {"source": source, "fingerprint": artifact_fingerprint(full)}
+        except OSError:
+            continue
+
+
 def _rebuild_playlist_folder(
     playlists_root, playlist_name, real_paths, mode, *, dest_names, prune_stale,
     symlink_fn, copy_fn, playlist_identity,
@@ -354,6 +385,9 @@ def _rebuild_playlist_folder(
     entries = _desired_entries(pdir, real_paths, dest_names)
     keep = {dest for _real, dest in entries}
     sources = {real for real, _dest in entries}
+    if not owned and not manifest.get("legacy_adopted") and os.path.isdir(pdir):
+        _adopt_legacy_folder(pdir, owned, {dest: real for real, dest in entries}, mode)
+        manifest["legacy_adopted"] = True
 
     for real, dest in entries:
         name = os.path.basename(dest)

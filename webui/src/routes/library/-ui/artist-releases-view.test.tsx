@@ -1234,7 +1234,8 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(
       await screen.findByRole('button', { name: /Watching/ }, { timeout: 5000 }),
     ).toBeInTheDocument();
-    expect(checks).toEqual([{ artist_id: 'sp-1' }]);
+    // G02-4: the provider the id is from, so the server never reads it as a library row
+    expect(checks).toEqual([{ artist_id: 'sp-1', source: 'spotify' }]);
   });
 
   it('lets a read-only profile browse the full provider discography without writing', async () => {

@@ -537,3 +537,36 @@ def test_a_named_different_artist_twin_is_still_not_paired(library):
     _named(library, a, "Intro.flac")
     _named(library, b, "Intro_638662543210987654.flac")
     assert review(library) == []
+
+
+@pytest.mark.parametrize("version", ["Smells Like Teen Spirit (Live)",
+                                     "Smells Like Teen Spirit - Radio Edit",
+                                     "Smells Like Teen Spirit (Acoustic)"])
+def test_a_live_or_edit_take_is_not_the_studio_cut(library, version):
+    """third #1062 review G12-5: 3.6.1's Single/Album Dedup never paired a
+    version with the studio recording; a title score of 0.90 is not proof"""
+    copy(library, title="Smells Like Teen Spirit", isrc=None)
+    copy(library, title=version, isrc=None, album="Other")
+    assert review(library) == []
+
+
+def test_a_shared_isrc_still_pairs_whatever_the_title_says(library):
+    copy(library, title="Song", isrc="SAME")
+    copy(library, title="Song (Remastered)", isrc="SAME", album="Other")
+    assert len(review(library)) == 1
+
+
+def test_one_file_at_two_mount_roots_is_not_a_duplicate(library):
+    """third #1062 review P2D-7: plex's /media/Music/A/B/01.flac and
+    SoulSync's /app/Transfer/A/B/01.flac are one file. 3.6.1 never paired
+    them; v2 filed a finding Keep Best could do nothing with"""
+    _db, _config, root, _transfer = library
+    rows = [copy(library, album="Album"), copy(library, album="Single")]
+    with closing(library[0]._get_connection()) as conn:
+        for mount, (_tid, fid, path) in zip(("plex-media", "soulsync-transfer"), rows):
+            alias = root / mount / "Artist" / "Album" / "01.flac"
+            alias.parent.mkdir(parents=True)
+            os.replace(path, alias)
+            conn.execute("UPDATE lib2_track_files SET path=? WHERE id=?", (str(alias), fid))
+        conn.commit()
+    assert review(library) == []

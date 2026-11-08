@@ -37,7 +37,7 @@ def _seed(db, *, spotify=None, deezer=None, n_files=11, artist_image=None,
     for i in range(n_files):
         seed_track(conn, server_id=f"t{i}", title=f"Song {i+1}", album_id=album,
                    artist_id=artist, track_number=i + 1,
-                   duration=180_000 + i * 10_000)
+                   duration=180_000 + i * 10_000, file_path=f"/m/Evolve/{i+1:02d}.flac")
     conn.commit()
     conn.close()
     return album
@@ -250,3 +250,22 @@ def test_default_fetcher_handles_failure(monkeypatch):
         lambda s, a: (_ for _ in ()).throw(RuntimeError("boom")), raising=False,
     )
     assert default_fetch_tracklist("spotify", "x") is None
+
+
+
+def test_fileless_bonus_slots_never_re_elect_the_deluxe(tmp_path):
+    """third #1062 review G10-2: an earlier deluxe pin added its bonus tracks
+    as fileless wanted rows; scoring them made the deluxe win again forever
+    and the owned standard edition stayed "incomplete". 3.6.1 scored files"""
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    album_id = _seed(db, spotify="sp_deluxe", deezer="dz_std")
+    with db._get_connection() as conn:
+        for i in range(6):
+            conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, duration) "
+                         "VALUES(?, ?, ?, ?)", (album_id, f"Bonus {i+1}", 12 + i, 320_000 + i * 10_000))
+        conn.commit()
+    table = {("spotify", "sp_deluxe"): DLX, ("deezer", "dz_std"): STD}
+    out = resolve_and_store_canonical_for_album(
+        db, album_id, fetch_tracklist=lambda s, a: table.get((s, a)),
+        source_priority=["spotify", "deezer"], mode="best_fit")
+    assert out["source"] == "deezer" and out["album_id"] == "dz_std"

@@ -1069,3 +1069,35 @@ def test_an_artist_page_albums_locked_type_survives_the_wishlist_add():
     assert locked["album"]["album_type_locked"] is True
     plain = _build_track_data({"id": "t2", "name": "Track"}, {"id": "x", "name": "X"})
     assert plain["album"]["album_type_locked"] is False
+
+
+# ── removals drop the wish too (second v2 review, W2) ───────────────────────
+# every wishlist add records a lib2 "wanted" rule and the hourly reconcile
+# re-adds a wanted track that isn't on the wishlist. a removal that left the
+# rule behind came back once the #874 ignore aged out.
+
+def _capture_release(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "core.library2.monitor_sync.sync_wishlist_removal",
+        lambda sync_db, _cfg, descriptors, profile_id=1: calls.append(
+            ([d["spotify_track_id"] for d in descriptors], profile_id)))
+    return calls
+
+
+def test_remove_artist_releases_the_removed_wishes(monkeypatch):
+    from core.wishlist.routes import remove_artist_from_wishlist
+    calls = _capture_release(monkeypatch)
+    runtime, service, db, _logger, _a = _build_runtime(tracks=_artist_tracks())
+    service.database = db
+    remove_artist_from_wishlist(runtime, artist_name="Big Discography")
+    assert calls == [(["qt-1", "qt-2"], 1)]
+
+
+def test_bulk_skip_releases_the_skipped_wishes(monkeypatch):
+    calls = _capture_release(monkeypatch)
+    runtime, service, db, _logger, _a = _build_runtime()
+    service.database = db
+    service.remove_fail_ids = {"gone"}
+    bulk_wishlist_action(runtime, "skip", ["t1", "gone", "t2"])
+    assert calls == [(["t1", "t2"], 1)]

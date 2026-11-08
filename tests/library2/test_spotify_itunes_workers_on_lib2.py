@@ -249,8 +249,11 @@ class TestWriting:
         assert row['release_date'] is None
 
     def test_the_album_type_goes_to_the_payload_not_the_column(self, spotify):
-        """``lib2_albums.album_type`` always carries a classification the importer
-        and MB reconcile own, so there is no empty state for a provider to fill."""
+        """a kind the importer or MB reconcile already knows is theirs: the
+        provider's word goes in the payload instead of overwriting it."""
+        with closing(spotify.db._get_connection()) as conn:
+            conn.execute("UPDATE lib2_albums SET album_type_known=1 WHERE id=1")
+            conn.commit()
         spotify._update_album(1, SimpleNamespace(
             id='sp-album', name='T', image_url=None, album_type='single',
             release_date=None, total_tracks=0))

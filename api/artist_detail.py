@@ -707,18 +707,7 @@ def get_artist_top_tracks_endpoint(artist_id):
             _conn = _db._get_connection()
             try:
                 _cur = _conn.cursor()
-                _cur.execute("""
-                    SELECT spotify_id AS spotify_artist_id,
-                           json_extract(external_ids, '$.deezer') AS deezer_id
-                    FROM lib2_artists
-                    WHERE id = ?
-                       OR spotify_id = ?
-                       OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
-                       OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
-                       OR musicbrainz_id = ?
-                    LIMIT 1
-                """, (artist_id, artist_id, artist_id, artist_id, artist_id))
-                _row = _cur.fetchone()
+                _row = _library_artist_for_id(_cur, artist_id)
                 if _row:
                     if primary_source == 'spotify' and _row['spotify_artist_id']:
                         resolved_id = str(_row['spotify_artist_id'])
@@ -770,6 +759,46 @@ def get_artist_top_tracks_endpoint(artist_id):
         return jsonify({"success": False, "error": str(e), "tracks": []}), 500
 
 
+_ARTIST_ID_COLUMNS = """SELECT a.spotify_id AS spotify_artist_id,
+           json_extract(a.external_ids, '$.itunes') AS itunes_artist_id,
+           json_extract(a.external_ids, '$.deezer') AS deezer_id,
+           a.musicbrainz_id
+      FROM lib2_artists a"""
+
+
+def _library_artist_for_id(cursor, artist_id):
+    """The library artist a URL id names: a provider id (spotify, itunes,
+    deezer, musicbrainz), never a bare catalogue row id. 3.6.1's ``artists.id``
+    was the media server's own id; ``lib2_artists.id`` is 1..N, so a Deezer id
+    like 13 used to hit catalogue row 13 (a stranger). A catalogue id is only
+    taken spelled ``lib2:<n>``. Among rows sharing a provider id, the
+    canonical row with files wins."""
+    raw = str(artist_id or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("lib2:") and raw[5:].isdigit():
+        cursor.execute(f"{_ARTIST_ID_COLUMNS} WHERE a.id = ?", (int(raw[5:]),))
+        return cursor.fetchone()
+    from core.library2.provider_ids import indexed_provider_id_sql
+    for source in ("spotify", "itunes", "deezer", "musicbrainz"):
+        expression = indexed_provider_id_sql(source, alias="a")
+        if not expression:
+            continue
+        cursor.execute(
+            f"""{_ARTIST_ID_COLUMNS} WHERE {expression} = ?
+                ORDER BY (a.canonical_artist_id IS NOT NULL),
+                         NOT EXISTS (SELECT 1 FROM lib2_album_artists aa
+                                       JOIN lib2_tracks t ON t.album_id = aa.album_id
+                                       JOIN lib2_track_files f ON f.track_id = t.id
+                                      WHERE aa.artist_id = a.id LIMIT 1),
+                         a.id
+                LIMIT 1""", (raw,))
+        row = cursor.fetchone()
+        if row:
+            return row
+    return None
+
+
 def _resolve_artist_source_ids(artist_id) -> dict:
     """Per-source artist ids from the enriched library row, keyed by source.
 
@@ -784,20 +813,7 @@ def _resolve_artist_source_ids(artist_id) -> dict:
         _conn = _db._get_connection()
         try:
             _cur = _conn.cursor()
-            _cur.execute("""
-                SELECT spotify_id AS spotify_artist_id,
-                       json_extract(external_ids, '$.itunes') AS itunes_artist_id,
-                       json_extract(external_ids, '$.deezer') AS deezer_id,
-                       musicbrainz_id
-                FROM lib2_artists
-                WHERE id = ?
-                   OR spotify_id = ?
-                   OR TRIM(CAST(json_extract(external_ids,'$.itunes') AS TEXT)) = ?
-                   OR TRIM(CAST(json_extract(external_ids,'$.deezer') AS TEXT)) = ?
-                   OR musicbrainz_id = ?
-                LIMIT 1
-            """, (artist_id, artist_id, artist_id, artist_id, artist_id))
-            _row = _cur.fetchone()
+            _row = _library_artist_for_id(_cur, artist_id)
             if _row:
                 if _row['spotify_artist_id']:
                     artist_source_ids['spotify'] = str(_row['spotify_artist_id'])
@@ -1508,6 +1524,79 @@ def _artist_track_paths_on_disk(db, albums, limit=None):
                 found += 1
                 if limit is not None and found >= limit:
                     return
+
+
+def push_album_art_outbound(album_id, image_bytes) -> dict:
+    """a picked cover beyond SoulSync, as 3.6.1 did: the active server's
+    poster, and cover.jpg in every folder of the album (Navidrome reads cover.*
+    before embedded art). best effort; says what happened."""
+    out = {"server_updated": False, "cover_written": False}
+    if not image_bytes:
+        return out
+    out["server_updated"] = _push_album_poster(album_id, image_bytes)
+    try:
+        from contextlib import closing
+        from core.library2.artwork import _album_folders
+        db = get_database()
+        with closing(db._get_connection()) as conn:
+            folders = _album_folders(conn, config_manager, int(album_id))
+        for folder in folders or []:
+            try:
+                if folder and os.path.isdir(folder) and _write_cover_jpg(image_bytes, folder):
+                    out["cover_written"] = True
+            except Exception as exc:  # noqa: BLE001 - one folder, not the rest
+                logger.warning("[set-art] cover.jpg write failed in %s: %s", folder, exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[set-art] cover.jpg for album %s skipped: %s", album_id, exc)
+    return out
+
+
+def push_artist_art_outbound(artist_id, image_bytes) -> dict:
+    """a picked artist photo beyond SoulSync, as 3.6.1 did: the active
+    server's poster, artist.jpg in the artist's folder, and a Navidrome scan
+    nudge. best effort; says what happened."""
+    out = {"server_updated": False, "disk_written": False, "disk_skipped": None}
+    if not image_bytes:
+        return out
+    db = get_database()
+    artist_row = db.get_artist(str(artist_id))
+    artist_name = getattr(artist_row, 'name', '') or '' if artist_row is not None else ''
+    if media_server_engine:
+        try:
+            active = config_manager.get_active_media_server()
+            client = media_server_engine.client(active)
+            if client and hasattr(client, 'update_artist_poster'):
+                server_artist = None
+                if hasattr(client, '_search_artists_by_name'):        # Plex
+                    matches = client._search_artists_by_name(title=artist_name, limit=1)
+                    server_artist = matches[0] if matches else None
+                elif hasattr(client, 'get_artist_by_id'):             # Jellyfin
+                    server_artist = client.get_artist_by_id(str(artist_id))
+                if server_artist is not None:
+                    out["server_updated"] = bool(client.update_artist_poster(server_artist, image_bytes))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[set-artist-art] server poster update failed: %s", exc)
+    try:
+        from core.library.artist_image import find_artist_folder, write_artist_jpg
+        albums = db.get_albums_by_artist(str(artist_id)) or []
+        artist_folder = find_artist_folder(_artist_track_paths_on_disk(db, albums), artist_name)
+        if not artist_folder and next(iter(_artist_track_paths_on_disk(db, albums, limit=1)), None):
+            out["disk_skipped"] = _NO_ARTIST_FOLDER
+        if artist_folder:
+            ok, detail = write_artist_jpg(artist_folder, image_bytes, overwrite=True)
+            out["disk_written"] = bool(ok)
+            if not ok:
+                logger.warning("[set-artist-art] artist.jpg write failed: %s", detail)
+            elif media_server_engine and config_manager.get_active_media_server() == 'navidrome':
+                nav = media_server_engine.client('navidrome')
+                if nav:
+                    try:
+                        nav.trigger_library_scan()
+                    except Exception:  # noqa: BLE001
+                        logger.debug("[set-artist-art] navidrome scan nudge failed", exc_info=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[set-artist-art] disk write failed: %s", exc)
+    return out
 
 
 @bp.route('/api/artist/<artist_id>/art', methods=['POST'])
@@ -2437,5 +2526,9 @@ def check_artist_discography_completion_stream(artist_id):
 def get_artist_appears_on(artist_id):
     from contextlib import closing
     from core.library2.artist_page import appears_on_payload
-    with closing(get_database()._get_connection()) as conn:
-        return jsonify(appears_on_payload(conn, artist_id))
+    try:
+        with closing(get_database()._get_connection()) as conn:
+            return jsonify(appears_on_payload(conn, artist_id))
+    except Exception as e:  # noqa: BLE001 - the section answers JSON, never an HTML 500
+        logger.error("appears-on for artist %s failed: %s", artist_id, e, exc_info=True)
+        return jsonify({"success": False, "error": str(e), "albums": [], "tracks": []}), 500

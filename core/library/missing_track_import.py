@@ -215,7 +215,28 @@ def _load_album_and_source_track(database, album_id: str, source_track_id: str) 
         if not source_row:
             raise MissingTrackImportError("Selected library track not found", 404)
 
-    return dict(album_row), dict(source_row)
+    return _album_fields(dict(album_row)), dict(source_row)
+
+
+def _album_fields(album: dict) -> dict:
+    """the lib2 album row under the names this import reads (3.6.1's albums
+    table had them as columns): the release's true track total, its cover and
+    each provider's album id. without them the file was tagged 11/10, got no
+    cover and carried the catalogue's own row id as its album identity."""
+    from core.library2.provider_ids import parse_external_ids
+    ids = parse_external_ids(album.get("external_ids"))
+    album.setdefault("api_track_count", album.get("expected_track_count") or album.get("track_count"))
+    if not album.get("thumb_url"):
+        from core.metadata.artwork import usable_remote_image_url
+        album["thumb_url"] = (usable_remote_image_url(album.get("image_url"))
+                              or (f"/api/library/v2/artwork/album/{int(album['id'])}"
+                                  if album.get("id") is not None else ""))
+    album.setdefault("spotify_album_id", album.get("spotify_id") or ids.get("spotify"))
+    album.setdefault("musicbrainz_release_id", album.get("musicbrainz_id") or ids.get("musicbrainz"))
+    for key, source in (("deezer_id", "deezer"), ("itunes_album_id", "itunes"),
+                        ("discogs_id", "discogs"), ("tidal_id", "tidal"), ("qobuz_id", "qobuz")):
+        album.setdefault(key, ids.get(source))
+    return album
 
 
 def _copy_source_to_staging(source_path: str, album_id: str, expected: dict, deps: MissingTrackImportDeps) -> str:

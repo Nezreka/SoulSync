@@ -648,3 +648,25 @@ def test_the_findings_ui_carries_the_contract():
     assert "comma_artist_split: 'Split Artists'" in core     # fix button
     assert "artists_split: 'Artists Split'" in core          # resolved badge
     assert "case 'comma_artist_split':" in detail            # detail renderer
+
+
+def test_an_auto_applied_split_resolves_only_its_own_combined_credit(tmp_path):
+    """third #1062 review G11-6: "A, B" and "A, C" are both filed on artist
+    A's id. recording "A, B" as applied resolved the pending "A, C" review"""
+    import json
+    db = _db(tmp_path)
+    conn = db._get_connection()
+    for name in ("A, B", "A, C"):
+        conn.execute(
+            "INSERT INTO repair_findings(job_id, finding_type, severity, status, entity_type,"
+            " entity_id, title, description, details_json) VALUES"
+            " ('comma_artist_splitter','comma_artist_split','info','pending','artist','lib2:1',?, '', ?)",
+            (name, json.dumps({"combined_name": name})))
+    conn.commit()
+    conn.close()
+    CommaArtistSplitterJob()._record_resolved_finding(
+        _ctx(db, []), "A, B", {}, {"combined_name": "A, B"}, 3, "artist", "lib2:1")
+    conn = db._get_connection()
+    rows = dict(conn.execute("SELECT title, status FROM repair_findings").fetchall())
+    conn.close()
+    assert rows == {"A, B": "resolved", "A, C": "pending"}

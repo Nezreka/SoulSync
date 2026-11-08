@@ -104,7 +104,7 @@ def _watchlist_row(conn, artist, profile_id: int):
     for row in rows:
         if str(row["artist_name"] or "").casefold() == name:
             return row, columns
-    raise ArtistSettingsError("Artist is not on the admin watchlist", 409)
+    raise ArtistSettingsError("Artist is not on this profile's watchlist", 409)
 
 
 def _artist_row(conn, artist_id: int):

@@ -8,6 +8,7 @@ progress, speed, ETA and byte counters remain owned by SABnzbd/NZBGet.
 from __future__ import annotations
 
 import threading
+import time
 import unicodedata
 from contextlib import closing
 from dataclasses import dataclass
@@ -182,7 +183,7 @@ async def collect_usenet_snapshot(
 # save_path and calls record_download_completed on a path that was already
 # imported or deleted — a phantom completion with no error anywhere. Adoption
 # is about attaching to work still in flight, so only non-terminal jobs
-# qualify. This also un-breaks the `unique_category_job` fallback (dd28-44),
+# qualify. This also keeps the one-to-one `near_title` pairing (dd28-44) working,
 # which practically never fired because history flooded `remaining_jobs`.
 _TERMINAL_CLIENT_STATES = frozenset({
     "completed", "complete", "failed", "error", "cancelled", "canceled",
@@ -224,14 +225,31 @@ def _adoption_pairs(
         else:
             ambiguous.extend(str(grab["download_id"]) for grab in grabs)
 
-    if len(remaining_grabs) == 1 and len(remaining_jobs) == 1:
-        pairs.append((remaining_grabs[0], remaining_jobs[0], "unique_category_job"))
+    # never title-blind: the category is shared (the wishlist's usenet
+    # plugin, the video side), and "one grab, one leftover job" bound a stuck
+    # grab to someone else's download and imported the wrong release. one of
+    # each still pairs when the client only reworded the title (dots for
+    # spaces, a release tag), never when it names something else
+    if (len(remaining_grabs) == 1 and len(remaining_jobs) == 1
+            and _near_title(remaining_grabs[0].get("title"), remaining_jobs[0].name)):
+        pairs.append((remaining_grabs[0], remaining_jobs[0], "near_title"))
         remaining_grabs.clear()
         remaining_jobs.clear()
     elif remaining_grabs and remaining_jobs:
         ambiguous.extend(str(grab["download_id"]) for grab in remaining_grabs)
 
     return pairs, sorted(set(ambiguous))
+
+
+def _near_title(grab_title: Any, job_name: Any) -> bool:
+    """the same release, reworded: one title's words all in the other's"""
+    import re
+    a = set(re.findall(r"\w+", _title_key(grab_title)))
+    b = set(re.findall(r"\w+", _title_key(job_name)))
+    if not a or not b:
+        return False
+    small, big = (a, b) if len(a) <= len(b) else (b, a)
+    return len(small) >= 2 and small <= big
 
 
 def _isolated(conn: Any, download_id: str, apply: Any, *args: Any, **kwargs: Any) -> bool:
@@ -270,7 +288,10 @@ def reconcile_usenet_snapshot(
         if job_id:
             attached.setdefault(str(job_id), []).append(grab)
 
-    known_ids = set(attached)
+    # every job SoulSync already follows, whichever feature submitted it
+    known_ids = set(attached) | {
+        str(grab["external_job_id"]) for grab in open_grabs(conn, "usenet")
+        if grab.get("external_job_id")}
     unknown_jobs = [
         job for job in snapshot.jobs
         if job.id not in known_ids
@@ -500,6 +521,8 @@ class UsenetAcquisitionMonitor:
         self._last_error: Optional[str] = None
         self._last_logged_error: Optional[str] = None
         self._cancel_missing_counts: Dict[str, int] = {}
+        # G04-4: the journal's retention sweep, once a day (0 = not yet)
+        self._last_retention_at = 0.0
 
     @staticmethod
     def _default_adapter() -> Optional[UsenetClientAdapter]:
@@ -509,6 +532,25 @@ class UsenetAcquisitionMonitor:
     def _default_import_pipeline(self) -> Any:
         from core.acquisition.import_pipeline import advance_open_imports
         return advance_open_imports(self._connection_factory)
+
+    RETENTION_INTERVAL_S = 24 * 3600
+
+    def _run_retention(self) -> None:
+        """settled acquisition rows past their retention, once a day; never
+        stops the cycle"""
+        now = time.monotonic()
+        if self._last_retention_at and now - self._last_retention_at < self.RETENTION_INTERVAL_S:
+            return
+        self._last_retention_at = now
+        try:
+            from core.acquisition.retention import prune_acquisition_journal, retention_days
+            conn = self._connection_factory()
+            try:
+                prune_acquisition_journal(conn, days=retention_days())
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 - monitor must stay alive
+            logger.warning("Acquisition journal retention skipped: %s", redact_sensitive_text(exc))
 
     def _run_import_pipeline(self) -> Any:
         try:
@@ -543,6 +585,33 @@ class UsenetAcquisitionMonitor:
             return max(0.05, float(self._interval_getter()))
         except (TypeError, ValueError):
             return 15.0
+
+    def _has_live_work(self) -> bool:
+        """one cheap read: an open grab, a request still grabbing, an import
+        or a recovery under way. unreadable means yes (never skip real work)"""
+        conn = self._connection_factory()
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                "('acquisition_grabs','acquisition_requests','acquisition_imports',"
+                "'acquisition_quarantine_recoveries')")}
+            checks = []
+            if "acquisition_grabs" in tables:
+                checks.append("SELECT 1 FROM acquisition_grabs "
+                              "WHERE status NOT IN ('completed','failed','cancelled')")
+            if "acquisition_requests" in tables:
+                checks.append("SELECT 1 FROM acquisition_requests WHERE status='grabbing'")
+            if "acquisition_imports" in tables:
+                checks.append("SELECT 1 FROM acquisition_imports "
+                              "WHERE status IN ('pending','matching','importing')")
+            if "acquisition_quarantine_recoveries" in tables:
+                checks.append("SELECT 1 FROM acquisition_quarantine_recoveries "
+                              "WHERE status IN ('recovered','reimporting')")
+            return any(conn.execute(q + " LIMIT 1").fetchone() for q in checks)
+        except Exception:  # noqa: BLE001
+            return True
+        finally:
+            conn.close()
 
     def _read_open_grabs(self) -> Tuple[Tuple[dict, ...], Tuple[str, ...]]:
         conn = self._connection_factory()
@@ -658,11 +727,16 @@ class UsenetAcquisitionMonitor:
                 skipped_reason="cycle_in_progress",
             )
         try:
-            persistent_result = self._run_persistent_reconciler()
+            # the reconciler polls every download client, copies every task
+            # and reads every quarantine sidecar: only when something is
+            # actually in flight (an idle install did all that every 15 s)
+            persistent_result = (self._run_persistent_reconciler()
+                                 if self._has_live_work() else None)
             # Evidence reconciliation must precede the import coordinator's
             # legacy seven-day fallback sweep.  That preserves a real indexed
             # completion or quarantine sidecar instead of aging it out first.
             imports_result = self._run_import_pipeline()
+            self._run_retention()
             grabs, stale = self._read_open_grabs()
             if not grabs:
                 result = MonitorRunResult(

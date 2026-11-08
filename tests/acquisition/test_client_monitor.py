@@ -258,23 +258,45 @@ def test_reconcile_adopts_a_grab_whose_submission_had_only_started(conn):
     assert grab["adopted"] == 1
 
 
-def test_reconcile_adopts_only_remaining_one_to_one_category_job(conn):
+def test_reconcile_adopts_a_one_to_one_job_the_client_only_reworded(conn):
     _linked_grab(
         conn,
         "dl-one",
-        title="Original title",
+        title="Artist - Album Title",
         last_client_state="submission_unknown",
     )
     snapshot = UsenetClientSnapshot(
         client="FakeUsenetAdapter",
         category="soulsync",
-        jobs=(_job("job-one", name="Client renamed title"),),
+        jobs=(_job("job-one", name="Artist.Album.Title.2024.FLAC"),),
     )
 
     result = reconcile_usenet_snapshot(conn, snapshot)
 
     assert result.adopted == ("dl-one",)
     assert get_grab(conn, "dl-one")["external_job_id"] == "job-one"
+
+
+def test_reconcile_never_adopts_someone_elses_job_in_the_shared_category(conn):
+    """third #1062 review G04-1: the wishlist's usenet plugin and the video
+    side use the same category; a title-blind one-to-one pairing bound a stuck
+    grab to their download and imported the wrong release"""
+    _linked_grab(
+        conn,
+        "dl-one",
+        title="Artist - Album Title",
+        last_client_state="submission_unknown",
+    )
+    snapshot = UsenetClientSnapshot(
+        client="FakeUsenetAdapter",
+        category="soulsync",
+        jobs=(_job("job-movie", name="Some.Movie.2023.1080p"),),
+    )
+
+    result = reconcile_usenet_snapshot(conn, snapshot)
+
+    assert result.adopted == ()
+    assert get_grab(conn, "dl-one")["external_job_id"] is None
 
 
 def test_reconcile_refuses_ambiguous_category_adoption(conn):
@@ -710,6 +732,7 @@ def test_runtime_runs_persistent_reconciliation_without_open_usenet_grabs(tmp_pa
             lambda: calls.append("reconcile") or {"observed": 2, "applied": 1}
         ),
     )
+    monitor._has_live_work = lambda: True   # a soulseek / torrent grab in flight
 
     result = monitor.run_once()
 
@@ -728,7 +751,29 @@ def test_runtime_reconciles_evidence_before_legacy_import_sweep(tmp_path):
         persistent_reconciler_runner=lambda: calls.append("reconcile"),
         import_pipeline_runner=lambda: calls.append("imports"),
     )
+    monitor._has_live_work = lambda: True
 
     monitor.run_once()
 
     assert calls == ["reconcile", "imports"]
+
+
+
+def test_an_idle_install_never_polls_the_clients(tmp_path):
+    """third #1062 review G04-3: with nothing in flight the reconciler still
+    polled every download client, copied every task and read every
+    quarantine sidecar, every 15 seconds"""
+    seed, factory = _runtime_database(tmp_path)
+    seed.close()
+    calls = []
+    monitor = UsenetAcquisitionMonitor(
+        factory, adapter_getter=lambda: None,
+        persistent_reconciler_runner=lambda: calls.append("reconcile"))
+    monitor.run_once()
+    assert calls == []
+    seed = factory()
+    _linked_grab(seed, "dl-live", external_job_id="job-live")
+    seed.commit()
+    seed.close()
+    monitor.run_once()
+    assert calls == ["reconcile"]

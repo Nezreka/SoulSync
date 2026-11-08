@@ -921,20 +921,6 @@ def _run_sync_task(
         except Exception as e:
             logger.warning(f"Failed to record sync history completion: {e}")
 
-        if sync_errors:
-            # A returned error is just as terminal as a raised exception. Do
-            # not persist a successful fingerprint or trigger sync follow-ups.
-            logger.error("SYNC FAILED for %s: %s", playlist_id, sync_error)
-            if automation_id:
-                deps.update_automation_progress(
-                    automation_id, status='error', progress=100, phase='Error',
-                    log_line=f'Sync failed: {sync_error}', log_type='error',
-                )
-            if deps.invalidate_sync_fingerprint:
-                deps.invalidate_sync_fingerprint(
-                    _fingerprint_sync_id(playlist_id, _resync_entry_id))
-            return
-
         if curation_snapshot:
             # A decision can change after matching or even while a server call
             # is returning. The service verifies before its write; this final
@@ -986,6 +972,19 @@ def _run_sync_task(
                 organize_by_playlist=organize_by_playlist,
                 result=result,
             )
+
+        if sync_errors:
+            # The server playlist write failed. The library membership above
+            # and the automation's downloads still ran: the sync service keeps
+            # going on purpose ("still wishlist what is missing"), and 3.6.1
+            # started those downloads too. What a failed write must not do is
+            # look like a success: no fingerprint, no playlist_synced event,
+            # no saved sync status.
+            logger.error("SYNC FAILED for %s: %s", playlist_id, sync_error)
+            if deps.invalidate_sync_fingerprint:
+                deps.invalidate_sync_fingerprint(
+                    _fingerprint_sync_id(playlist_id, _resync_entry_id))
+            return
 
         # Emit playlist_synced event for automation engine
         try:

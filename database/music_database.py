@@ -2000,6 +2000,9 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_staged_path ON rematch_hints (staged_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_content_hash ON rematch_hints (content_hash)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_status ON rematch_hints (status)")
+            # which id space replace_track_id names; NULL on a hint from 3.6.1
+            if 'replace_id_space' not in {r[1] for r in cursor.execute("PRAGMA table_info(rematch_hints)")}:
+                cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_id_space TEXT")
 
             # Sync history table — tracks the last 100 sync operations with cached context for re-trigger
             cursor.execute("""
@@ -3823,6 +3826,12 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_track_id ON track_downloads (track_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_file_path ON track_downloads (file_path)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_source ON track_downloads (source_username, source_filename)")
+            # which id space track_id holds: 'lib2' (a catalogue track) or
+            # 'legacy' (a 3.6.1 tracks.id the upgrade could not map). NULL on
+            # rows written before this column; the upgrade carry settles them
+            cursor.execute("PRAGMA table_info(track_downloads)")
+            if 'track_id_kind' not in {c[1] for c in cursor.fetchall()}:
+                cursor.execute("ALTER TABLE track_downloads ADD COLUMN track_id_kind TEXT")
 
             # Migration: Add audio detail columns to track_downloads
             cursor.execute("PRAGMA table_info(track_downloads)")
@@ -6846,6 +6855,25 @@ class MusicDatabase:
                        AND db_track_id IS NOT NULL
                        AND EXISTS (SELECT 1 FROM lib2_tracks t
                                     WHERE t.legacy_track_id = listening_history.db_track_id)
+                """)
+                # a play of a 3.6.1 copy whose row joined another track as a
+                # file (a playlist-folder copy, another library's copy): its
+                # legacy id lives on the file only. the index first: without
+                # it each unlinked play read the whole file table
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_legacy "
+                    "ON lib2_track_files(legacy_track_id) WHERE legacy_track_id IS NOT NULL")
+                cursor.execute("""
+                    UPDATE listening_history
+                       SET lib2_track_id = (
+                           SELECT f.track_id FROM lib2_track_files f
+                            WHERE f.legacy_track_id = listening_history.db_track_id
+                              AND f.track_id IS NOT NULL LIMIT 1)
+                     WHERE lib2_track_id IS NULL
+                       AND db_track_id IS NOT NULL
+                       AND EXISTS (SELECT 1 FROM lib2_track_files f
+                                    WHERE f.legacy_track_id = listening_history.db_track_id
+                                      AND f.track_id IS NOT NULL)
                 """)
             except Exception as e:
                 logger.debug("listening_history catalogue backfill skipped: %s", e)
@@ -17975,7 +18003,7 @@ class MusicDatabase:
             return False
 
     def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1,
-                                     raise_on_error: bool = False) -> bool:
+                                     raise_on_error: bool = False, source: str = None) -> bool:
         """Remove an artist from the watchlist (checks cross-provider artist IDs)"""
         try:
             with self._get_connection() as conn:
@@ -18000,7 +18028,7 @@ class MusicDatabase:
                 if cursor.rowcount == 0:
                     # a library artist row id: remove by the provider ids it
                     # carries, the ones add stored (#1308)
-                    for provider_id in library_artist_provider_ids(cursor, artist_id):
+                    for provider_id in library_artist_provider_ids(cursor, artist_id, source):
                         cursor.execute(
                             "DELETE FROM watchlist_artists WHERE "
                             + artist_id_match_sql() + " AND profile_id = ?",
@@ -18064,7 +18092,8 @@ class MusicDatabase:
             logger.debug(f"get_watchlist_artist_descriptor failed (ID: {artist_id}): {e}")
             return None
 
-    def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1, artist_name: str = None) -> bool:
+    def is_artist_in_watchlist(self, artist_id: str, profile_id: int = 1, artist_name: str = None,
+                               source: str = None) -> bool:
         """Check if an artist is currently in the watchlist (checks cross-provider IDs and name)"""
         try:
             with self._get_connection() as conn:
@@ -18093,7 +18122,7 @@ class MusicDatabase:
                 # a library artist row id: check the provider ids it carries,
                 # the ones add actually stored (#1308)
                 from core.watchlist_sources import library_artist_provider_ids
-                for provider_id in library_artist_provider_ids(cursor, artist_id):
+                for provider_id in library_artist_provider_ids(cursor, artist_id, source):
                     cursor.execute(
                         "SELECT 1 FROM watchlist_artists WHERE "
                         + artist_id_match_sql() + " AND profile_id = ? LIMIT 1",
@@ -22513,15 +22542,17 @@ class MusicDatabase:
                  spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
                  qobuz_track_id, musicbrainz_recording_id, recording_disambiguation,
                  audiodb_id, soul_id, isrc,
-                 acquired_quality_json, retention_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 acquired_quality_json, retention_json, track_id_kind)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (track_id, file_path, source_service, source_username, source_filename,
                   source_size, audio_quality, track_title, track_artist, track_album, status,
                   bit_depth, sample_rate, bitrate,
                   spotify_track_id, itunes_track_id, deezer_track_id, tidal_track_id,
                   qobuz_track_id, musicbrainz_recording_id, recording_disambiguation,
                   audiodb_id, soul_id, isrc,
-                  acquired_quality_json, retention_json))
+                  acquired_quality_json, retention_json,
+                  # a catalogue track: the path lookup above, or the caller's
+                  'lib2' if track_id else None))
             conn.commit()
             return cursor.lastrowid
         except Exception as e:
@@ -22718,7 +22749,8 @@ class MusicDatabase:
             if row and link_track_id:
                 # Back-link this record so future track_id lookups work directly
                 cursor.execute(
-                    "UPDATE track_downloads SET track_id = ? WHERE id = ? AND track_id IS NULL",
+                    "UPDATE track_downloads SET track_id = ?, track_id_kind = 'lib2' "
+                    "WHERE id = ? AND track_id IS NULL",
                     (str(link_track_id), row['id'])
                 )
                 conn.commit()
@@ -24281,13 +24313,22 @@ class MusicDatabase:
             cursor = conn.cursor()
             from core.library2.track_files import set_file_state
             rows = cursor.execute(
-                "SELECT id, track_id FROM lib2_track_files WHERE path=? AND track_id IS NOT NULL "
+                "SELECT id, track_id, COALESCE(owner_profile_id, 1) FROM lib2_track_files "
+                "WHERE path=? AND track_id IS NOT NULL "
                 "AND COALESCE(file_state,'active')<>'deleted'", (file_path,)).fetchall()
             for row in rows:
                 set_file_state(conn, row[0], 'deleted')
             conn.commit()
             if release_wish and rows:
-                self._release_deleted_tracks(conn, [row[1] for row in rows], profile_id)
+                # the wish to release is the file's owner's (an own library's
+                # download was wanted by that profile, and released under
+                # profile 1 alone it came straight back), and the asker's
+                by_profile = {}
+                for _file_id, track_id, owner in rows:
+                    for pid in {int(owner), int(profile_id or 1)}:
+                        by_profile.setdefault(pid, []).append(track_id)
+                for pid, track_ids in sorted(by_profile.items()):
+                    self._release_deleted_tracks(conn, track_ids, pid)
             return len(rows)
         except Exception as e:
             logger.debug(f"Error deleting track by path: {e}")

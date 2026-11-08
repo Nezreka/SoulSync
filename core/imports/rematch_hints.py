@@ -48,6 +48,7 @@ _FIELDS = (
     "disc_number",
     "replace_track_id",
     "exempt_dedup",
+    "replace_id_space",
 )
 
 
@@ -69,6 +70,10 @@ class RematchHint:
     disc_number: Optional[int] = None
     replace_track_id: Optional[int] = None
     exempt_dedup: bool = True
+    # which id space ``replace_track_id`` lives in. 'lib2' is the only one
+    # a delete acts on: a 3.6.1 hint held a media-server/legacy id, and read
+    # as a lib2 id it named an unrelated track and deleted its file
+    replace_id_space: Optional[str] = "lib2"
     id: Optional[int] = None
     status: str = "pending"
 
@@ -89,6 +94,7 @@ class RematchHint:
             self.disc_number,
             self.replace_track_id,
             1 if self.exempt_dedup else 0,
+            self.replace_id_space,
         )
 
 
@@ -116,12 +122,24 @@ def _row_to_hint(row: Any) -> RematchHint:
         disc_number=g("disc_number"),
         replace_track_id=g("replace_track_id"),
         exempt_dedup=bool(g("exempt_dedup", 1)),
+        replace_id_space=g("replace_id_space"),
         status=g("status") or "pending",
     )
 
 
+def ensure_replace_id_space_column(cursor: Any) -> None:
+    """the column a 3.6.1 database lacks; added where it is missing"""
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(rematch_hints)").fetchall()}
+    if cols and "replace_id_space" not in cols:
+        cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_id_space TEXT")
+
+
 def create_hint(cursor: Any, hint: RematchHint) -> int:
     """Insert a pending hint; return its new id. Caller owns commit."""
+    if hint.replace_track_id and not hint.replace_id_space:
+        # every writer today names the library v2 track it replaces
+        hint.replace_id_space = "lib2"
+    ensure_replace_id_space_column(cursor)
     placeholders = ", ".join("?" for _ in _FIELDS)
     cursor.execute(
         f"INSERT INTO rematch_hints ({', '.join(_FIELDS)}) VALUES ({placeholders})",
@@ -239,6 +257,7 @@ def delete_replaced_track(
     unlink=os.remove,
     resolve_fn: Optional[Callable[[str], Optional[str]]] = None,
     new_paths: Optional[list] = None,
+    id_space: Optional[str] = "lib2",
 ) -> Optional[str]:
     """Remove the OLD library row a re-identify replaces, and its file.
 
@@ -258,6 +277,11 @@ def delete_replaced_track(
     on-disk location (the stored path may be a Docker/media-server view this process
     can't read literally — without it we'd delete the row but orphan the file)."""
     if not replace_track_id:
+        return None
+    if id_space != "lib2":
+        # an id from another space (a hint left from 3.6.1 that nothing
+        # mapped) would name an unrelated lib2 track: keep the import, delete
+        # nothing
         return None
     cursor.execute(
         "SELECT id, path FROM lib2_track_files WHERE track_id=? "
@@ -336,3 +360,33 @@ __all__ = [
     "delete_replaced_track",
     "quick_file_signature",
 ]
+
+
+def carry_legacy_rematch_hints(conn: Any) -> int:
+    """once, after the upgrade import: a hint still pending from 3.6.1 named
+    the track to replace by its legacy (media-server) id. map it onto the
+    lib2 track through legacy_track_id; a hint nothing maps keeps its import
+    and loses only the replace. returns how many were mapped."""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(rematch_hints)")}
+    except Exception:  # noqa: BLE001 - no table: nothing to carry
+        return 0
+    if "replace_id_space" not in cols:
+        return 0
+    rows = conn.execute(
+        "SELECT id, replace_track_id FROM rematch_hints WHERE status='pending' "
+        "AND replace_track_id IS NOT NULL AND replace_id_space IS NULL").fetchall()
+    mapped = 0
+    for hint_id, legacy_id in rows:
+        hit = conn.execute(
+            "SELECT track_id FROM lib2_track_files WHERE legacy_track_id=? "
+            "UNION SELECT id FROM lib2_tracks WHERE legacy_track_id=? LIMIT 2",
+            (str(legacy_id), str(legacy_id))).fetchall()
+        if len(hit) == 1:
+            conn.execute("UPDATE rematch_hints SET replace_track_id=?, replace_id_space='lib2' "
+                         "WHERE id=?", (int(hit[0][0]), hint_id))
+            mapped += 1
+        else:
+            conn.execute("UPDATE rematch_hints SET replace_track_id=NULL WHERE id=?", (hint_id,))
+    conn.commit()
+    return mapped

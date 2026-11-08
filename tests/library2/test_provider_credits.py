@@ -112,3 +112,35 @@ def test_a_new_match_replaces_the_credit_snapshot(tmp_path):
         "SELECT source_artist_id FROM lib2_provider_credits WHERE entity_id=? ORDER BY position",
         (track,))]
     assert stored == ["sp-jay", "sp-new"]
+
+
+def test_a_borrowed_id_that_goes_takes_its_guest_credits_with_it(tmp_path):
+    """third #1062 review P2C-3: credits materialized through an artist's id
+    stayed after the id was cleared (the borrowed-identity healer, Dedupe
+    Source IDs, a re-match). 3.6.1 linked them through the current ids"""
+    from core.library2.match_status import set_library_v2_match
+
+    db, conn, jay, _kanye, album, track = _world(tmp_path)
+    credits = [{"id": "sp-jay", "name": "Jay-Z"}, {"id": "sp-frank", "name": "Frank Ocean"}]
+    link_credited_artists(conn, "track", track, "spotify", credits)
+    link_credited_artists(conn, "album", album, "spotify", credits)
+    guest = seed_artist(conn, server_id="guest", name="Someone Else", server_source="soulsync")
+    set_library_v2_match(conn, "artist", guest, "spotify", "sp-frank")   # the borrowed id
+    assert (guest, "featured") in _credits(conn, "lib2_track_artists", "track_id", track)
+
+    # the healer (a plain column write) clears it
+    conn.execute("UPDATE lib2_artists SET spotify_id=NULL WHERE id=?", (guest,))
+
+    assert (guest, "featured") not in _credits(conn, "lib2_track_artists", "track_id", track)
+    assert (guest, "featured") not in _credits(conn, "lib2_album_artists", "album_id", album)
+
+
+def test_an_id_two_artists_hold_materializes_nothing(tmp_path):
+    from core.library2.provider_credits import materialize_artist_credits
+    db, conn, jay, kanye, album, track = _world(tmp_path)
+    link_credited_artists(conn, "track", track, "spotify",
+                          [{"id": "sp-jay", "name": "Jay-Z"}, {"id": "sp-dup", "name": "Dup"}])
+    one = seed_artist(conn, server_id="d1", name="Dup One", server_source="soulsync")
+    two = seed_artist(conn, server_id="d2", name="Dup Two", server_source="soulsync")
+    conn.execute("UPDATE lib2_artists SET spotify_id='sp-dup' WHERE id IN (?, ?)", (one, two))
+    assert materialize_artist_credits(conn, one) == 0

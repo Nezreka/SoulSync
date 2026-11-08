@@ -141,3 +141,22 @@ def test_appears_on_route_includes_collaborative_album_and_manual_projection(tmp
     assert body['albums'][0]['id'] == album
     assert body['albums'][0]['tracks'][0]['title'] == 'My title'
     assert body['albums'][0]['tracks'][0]['lib2_track_id'] == tid
+
+
+def test_appears_on_never_loads_the_artists_own_releases(tmp_path, monkeypatch):
+    """third #1062 review G03-4: every own release was loaded in full (tracks,
+    files, quality) on each artist page open, only to be thrown away"""
+    from core.library2 import artist_page
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    with db._get_connection() as conn:
+        for n in range(5):
+            lib2_seed.track(conn, 'Host', f'Own Album {n}', 'Song', credit='Host')
+        host = conn.execute("SELECT id FROM lib2_artists WHERE name='Host'").fetchone()[0]
+        conn.commit()
+        loaded = []
+        from core.library2 import queries
+        real = queries.get_album
+        monkeypatch.setattr(queries, 'get_album',
+                            lambda c, album_id, *a, **k: loaded.append(album_id) or real(c, album_id, *a, **k))
+        result = artist_page.appears_on_payload(conn, host)
+    assert result['albums'] == [] and loaded == []

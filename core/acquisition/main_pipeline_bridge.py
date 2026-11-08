@@ -108,6 +108,19 @@ def _pipeline_context(
     if row is None:
         raise ValueError("matched Library-v2 track or acquisition request disappeared")
     data = dict(row)
+    # the TRACK's performers, in credit order (what the wishlist mirror
+    # sends): the album's primary artist tagged every song of a compilation
+    # "Various Artists" and dropped every feature
+    try:
+        performers = [r[0] for r in conn.execute(
+            """SELECT ar.name FROM lib2_track_artists ta
+                 JOIN lib2_artists ar ON ar.id = ta.artist_id
+                WHERE ta.track_id = ?
+                ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END, ta.position, ar.id""",
+            (track_id,)) if r[0]]
+    except Exception:  # noqa: BLE001 - no credits table: the album artist
+        performers = []
+    performers = performers or [data["artist_name"]]
     relative = str(match.get("relative_path") or "").replace("\\", "/")
     lib2_entity = {
         "track_id": track_id,
@@ -119,7 +132,7 @@ def _pipeline_context(
         "provider": "spotify" if data.get("track_spotify_id") else "library_v2",
         "name": data["title"],
         "title": data["title"],
-        "artists": [{"name": data["artist_name"]}],
+        "artists": [{"name": name} for name in performers],
         "album": {
             "id": data.get("album_spotify_id") or f"lib2-album:{data['album_id']}",
             "name": data["album_title"],
@@ -165,10 +178,11 @@ def _pipeline_context(
             "username": source,
             "filename": relative,
             "title": data["title"],
-            "artist": data["artist_name"],
+            "artist": performers[0],
+            "artists": list(performers),
             "spotify_clean_title": data["title"],
             "spotify_clean_album": data["album_title"],
-            "spotify_clean_artist": data["artist_name"],
+            "spotify_clean_artist": performers[0],
             "track_number": track_info["track_number"],
             "disc_number": track_info["disc_number"],
         },

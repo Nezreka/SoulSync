@@ -95,7 +95,14 @@ _OWN_LIBRARY_WISH_ENDPOINTS = frozenset({
     # "All Releases" of an artist in the library: browsable, unmonitored
     # catalogue rows -- what a wish is made from, no file touched
     "lib2_discography_refresh",
+    # an artist's watchlist settings: the caller's own watchlist row (3.6.1's
+    # /api/watchlist/artist/<id>/config); the shared monitor_new_items column
+    # stays the admin's (the route drops it for anyone else)
+    "lib2_artist_settings",
 })
+# Wishes that start a download right away, not just a wishlist entry.
+_DOWNLOADING_ENDPOINTS = frozenset({"lib2_scoped_search", "lib2_enhance_quality"})
+
 # Writes that touch files and nothing every library shares: a profile with a
 # library of its own may run them on files that are all its own (3.6.1 let
 # every profile tag and loudness-tag). Catalogue rows (matches, metadata
@@ -333,8 +340,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # the admin's. Everything that changes files or shared metadata
             # stays with the admin.
             if request.endpoint in _OWN_LIBRARY_WISH_ENDPOINTS and _can_wish():
+                # a search downloads: a household member who asks first
+                # wishes (their wishlist becomes requests) but never grabs
+                if request.endpoint in _DOWNLOADING_ENDPOINTS and not _may_download():
+                    return _fail("Your profile asks before downloading: add it to your "
+                                 "Wishlist and an admin approves the request", 403)
                 return _named_row_hidden()
-            if (request.endpoint in _OWN_LIBRARY_FILE_ENDPOINTS and _can_wish()
+            if (request.endpoint in _OWN_LIBRARY_FILE_ENDPOINTS and _wishes_in_own()
                     and _touches_only_own_files()):
                 return _named_row_hidden()
             if request.endpoint == "lib2_update_ui_preferences" and _own_preferences_only():
@@ -402,9 +414,13 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             from core.library2.sql_util import entity_visible
             return not entity_visible(conn, entity, entity_id)
-        except Exception as exc:  # noqa: BLE001 - an unanswerable check hides nothing
-            logger.debug("scope visibility check failed for %s %s: %s", entity, entity_id, exc)
-            return False
+        except Exception as exc:  # noqa: BLE001
+            # third #1062 review G03-7: fail closed. answering "visible" opened
+            # every own library's pages to every profile on any bug here
+            # (3.6.1's scope lived in the SQL, so a failure was a 500)
+            logger.warning("scope visibility check failed for %s %s: %s", entity, entity_id, exc,
+                           exc_info=True)
+            return True
 
     def _touches_only_own_files() -> bool:
         """Every live file this file-write would touch belongs to the caller.
@@ -434,13 +450,31 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         total, own = int(row[0] or 0), int(row[1] or 0)
         return total > 0 and own == total
 
-    def _can_wish() -> bool:
-        """May the caller monitor and search in the library it is looking at?
-        The admin anywhere; any other profile only in a library of its own."""
-        if _is_admin():
-            return True
+    def _wishes_in_own() -> bool:
+        """E-13: a non-admin wishing in a library of its own"""
         from core.library_scope import wishes_in_own_library
         return wishes_in_own_library(_profile(), get_database())
+
+    def _can_wish() -> bool:
+        """May the caller monitor (watch, wishlist) in the library it reads?
+        The admin anywhere; a profile in a library of its own; and a
+        household member in the shared library, on their own watchlist and
+        wishlist (``intent_profile_id``), as 3.6.1 had it."""
+        if _is_admin():
+            return True
+        if _wishes_in_own():
+            return True
+        from core.library2.sql_util import shared_library_member
+        return shared_library_member() is not None
+
+    def _may_download() -> bool:
+        """may the caller start a download (not just a request)?"""
+        if _is_admin():
+            return True
+        try:
+            return bool((get_database().get_profile(_profile()) or {}).get("can_download", 1))
+        except Exception:  # noqa: BLE001 - unreadable profile: a request, never a grab
+            return False
 
     def _conn():
         return get_database()._get_connection()
@@ -499,8 +533,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
     def _profile() -> int:
         try:
             return int(profile_id_getter()) if profile_id_getter else 1
-        except Exception:
-            return 1
+        except Exception as exc:  # noqa: BLE001
+            # G03-7: an unreadable profile is nobody, never the admin
+            logger.warning("Library v2: could not read the calling profile: %s", exc)
+            return 0
 
     def _intent_profile() -> int:
         """The profile whose intent a mutation on this page writes.
@@ -696,6 +732,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "can_write": _is_admin(),
             # E-13: monitor/search in a library of one's own
             "can_wish": _can_wish(),
+            # a wish that downloads right away (Automatic Search) needs this
+            "can_download": _may_download(),
+            # a grab for a library track straight from its Interactive Search
+            # (the server's profile_may_grab: the admin, or a profile in a
+            # library of its own); everyone else grabs through the inspector
+            "can_grab": _is_admin() or _wishes_in_own(),
         })
 
     # -- acquisition requests / decisions (Phase 4) -------------------------
@@ -3045,6 +3087,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "success": True,
             "album_id": album_id,
             "image_url": _artwork_url("album", album_id),
+            **_outbound_art("album", album_id),
         }
         if embed_error:
             payload["embed_warning"] = (
@@ -3164,7 +3207,23 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         return jsonify({
             "success": True, "artist_id": artist_id,
             "image_url": _artwork_url("artist", artist_id),
+            **_outbound_art("artist", artist_id),
         })
+
+    def _outbound_art(kind: str, entity_id: int) -> dict:
+        """the picked image beyond SoulSync (the media server's poster,
+        cover.jpg / artist.jpg on disk), as 3.6.1's picker did. from the bytes
+        the artwork cache just stored; best effort, never fails the pick"""
+        try:
+            from core.library2.artwork import artwork_file
+            path = artwork_file(get_database(), kind, int(entity_id))
+            data = path.read_bytes() if path.is_file() else None
+            from api import artist_detail
+            return (artist_detail.push_album_art_outbound(entity_id, data) if kind == "album"
+                    else artist_detail.push_artist_art_outbound(entity_id, data))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("outbound %s art for %s skipped: %s", kind, entity_id, exc)
+            return {}
 
     # -- monitoring (mirrors watchlist / wishlist) ----------------------------
 
@@ -3837,12 +3896,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             db = get_database()
             try:
                 with closing(db._get_connection()) as conn:
-                    from core.library2.artist_aliases import artist_album_scope_ids
+                    from core.library2.artist_aliases import artist_fronted_album_ids
 
                     albums = []
                     if album_allowlist is None or album_allowlist:
                         allowlist_sql = ""
-                        scoped_album_ids = artist_album_scope_ids(conn, artist_id)
+                        # the releases the artist fronts, never the ones it
+                        # only guests on (another artist's album, a compilation)
+                        scoped_album_ids = artist_fronted_album_ids(conn, artist_id)
                         if not scoped_album_ids:
                             scoped_album_ids = [-1]
                         scope_marks = ",".join("?" for _ in scoped_album_ids)
@@ -4002,19 +4063,26 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         conn = _conn()
         sources = _watchlist_metadata_sources()
         try:
+            # the acting profile's own watchlist row: the admin working in
+            # profile 3's library edits profile 3's, a member edits their own
+            # (both read and wrote the admin's before)
+            acting = _intent_profile()
             if request.method == "PUT":
                 body = request.get_json(silent=True)
+                if isinstance(body, dict) and not _is_admin():
+                    # one artist row serves every library
+                    body = {k: v for k, v in body.items() if k != "monitor_new_items"}
                 settings = update_artist_settings(
                     conn,
                     artist_id,
                     body,
-                    profile_id=ADMIN_PROFILE_ID,
+                    profile_id=acting,
                     allowed_metadata_sources=sources,
                 )
                 conn.commit()
             else:
                 settings = get_artist_settings(
-                    conn, artist_id, profile_id=ADMIN_PROFILE_ID
+                    conn, artist_id, profile_id=acting
                 )
             try:
                 from core.metadata.registry import get_primary_source
@@ -5265,7 +5333,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         """Diff of file tags vs lib2 metadata for an album's or artist's tracks."""
         if entity not in ("artists", "albums"):
             return _fail("Unsupported entity")
-        from core.library2 import retag
+        from core.library2 import retag, server_tag_sync
         try:
             options = retag.retag_options(request.args)
         except ValueError as exc:
@@ -5294,13 +5362,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "refresh": refresh_result,
             "changed_count": sum(1 for p in preview if p.get("has_changes")),
             "truncated": truncated,
+            # G15-5: Write Tags offers "Sync to Plex/Jellyfin" from this
+            "server_type": server_tag_sync.active_server_type(),
         })
 
     @_route("/api/library/v2/tags/write", methods=["POST"])
     def lib2_write_tags():
         """Write lib2 metadata into the given tracks' file tags (background job).
 
-        Body: ``{"track_ids": [...], "embed_cover": true}``. Poll
+        Body: ``{"track_ids": [...], "embed_cover": true, "sync_to_server": false}``. Poll
         ``/api/library/v2/jobs/status`` for progress/result.
         """
         body = request.get_json(silent=True) or {}
@@ -5324,6 +5394,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return _fail(str(exc))
         track_ids = list(dict.fromkeys(raw_track_ids))
         embed_cover = bool(body.get("embed_cover", True))
+        sync_to_server = body.get("sync_to_server") is True
         # Fields a person set by hand win by default. `overwrite_manual` is how
         # the user hands one back to the catalogue: `true` for the bulk "apply
         # everything" choice, or [[track_id, field], ...] for the per-field
@@ -5383,6 +5454,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                          protect_hand_tagged=True,
                                          options=options,
                                          progress=_progress)
+                if sync_to_server:
+                    # G15-5: 3.6.1's "Sync to Plex/Jellyfin"; every track
+                    # that didn't fail (an already-correct file can still be
+                    # stale on the server)
+                    from core.library2.server_tag_sync import sync_tracks_to_server
+                    failed = {e.get("track_id") for e in stats.get("errors") or []}
+                    stats["server_sync"] = sync_tracks_to_server(
+                        db, [t for t in track_ids if t not in failed])
                 _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 retag failed: %s", e, exc_info=True)
@@ -5771,6 +5850,15 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 # continue independently so the UI can browse immediately.
                 _import_state.update(stage="done", current=0, total=0)
                 _start_artwork_cache(get_database, config_manager)
+                # P2C-8: the whole-library convergence the import no longer
+                # runs inside its own transaction, on the rebuilt rows now
+                # rather than at the next start (startup's own pass)
+                def _converge():
+                    try:
+                        lib2_bootstrap.run_deferred_backfills(get_database())
+                    except Exception as conv_err:  # noqa: BLE001 - retries next start
+                        logger.warning("Library v2 convergence after import failed: %s", conv_err)
+                threading.Thread(target=_converge, name="lib2-converge", daemon=True).start()
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)
                 _import_state.update(error=str(e), stage="failed")

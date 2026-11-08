@@ -132,11 +132,31 @@ def test_a_song_credited_to_several_artists_resolves_by_any_of_them(credited):
 
 
 def test_a_playlist_rows_stored_link_plays_that_file(credited):
-    """the library check stamps the media server's id; play used to ignore it"""
+    """the library check stamps the media server's id; play used to ignore it.
+    the link wins even when the row credits someone else"""
     result = resolve_playable_tracks(credited, [
-        {'artist': 'Somebody Else', 'title': 'Renamed Upstream', 'library_track_id': '591381'}])
+        {'artist': 'Somebody Else', 'title': 'Don’t Chart (from GTAVI: The Album)',
+         'library_track_id': '591381'}])
     assert result['matched'] == 1
     assert result['tracks'][0]['file_path'] == '/m/cardi/dont-chart.mp3'
+
+
+def test_a_link_that_names_another_song_never_plays_it(credited):
+    """a catalogue id read as a plex key (or the reverse) lands on whatever
+    song has that number: the wrong song played. its title must agree"""
+    conn = credited._get_connection()
+    conn.execute("INSERT INTO lib2_media_server_mappings (entity_type, entity_id, server_source, server_id)"
+                 " VALUES ('track', 300, 'plex', '100')")   # plex key 100 is Don't Chart
+    conn.commit()
+    conn.close()
+    # the row means catalogue track 100 (One More Time); plex's 100 is another song
+    result = resolve_playable_tracks(credited, [
+        {'artist': 'Daft Punk', 'title': 'One More Time', 'library_track_id': '100'}])
+    assert result['tracks'][0]['file_path'] == '/m/omt.flac'
+    # a link that agrees with nothing falls back to title + artist
+    miss = resolve_playable_tracks(credited, [
+        {'artist': 'Daft Punk', 'title': 'Aerodynamic', 'library_track_id': '300'}])
+    assert miss['tracks'][0]['file_path'] == '/m/aero.flac'
 
 
 def test_a_link_through_the_server_mapping_plays_that_file(credited):
@@ -146,7 +166,7 @@ def test_a_link_through_the_server_mapping_plays_that_file(credited):
     conn.commit()
     conn.close()
     result = resolve_playable_tracks(credited, [
-        {'artist': 'x', 'title': 'y', 'library_track_id': 'jf-aero'}])
+        {'artist': 'someone', 'title': 'Aerodynamic (Remastered)', 'library_track_id': 'jf-aero'}])
     assert result['tracks'][0]['file_path'] == '/m/aero.flac'
 
 
@@ -158,3 +178,11 @@ def test_a_bare_catalogue_id_needs_its_title_to_agree(credited):
     wrong = resolve_playable_tracks(credited, [
         {'artist': 'Nobody', 'title': 'Something Else', 'library_track_id': '101'}])
     assert wrong['matched'] == 0
+
+
+def test_a_resolved_row_names_its_catalogue_ids(credited):
+    """the player sends a bare `id` as the media server's song id and counts
+    plays only against lib2_track_id: a playlist on navidrome without a mount
+    streamed nothing and its plays never counted"""
+    track = resolve_playable_tracks(credited, [{'artist': 'Cardi B', 'title': 'Don’t Chart'}])['tracks'][0]
+    assert track['lib2_track_id'] == 300 and track['lib2_artist_id'] == 3

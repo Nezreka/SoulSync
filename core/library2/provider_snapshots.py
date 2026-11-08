@@ -98,10 +98,13 @@ def ensure_provider_snapshot_schema(cursor: Any) -> None:
         ).fetchone()
         if not exists:
             continue
+        # third #1062 review P2C-6: IF NOT EXISTS, never drop and recreate.
+        # this runs on every snapshot write (every album tracklist resolve),
+        # and each DDL bumped the schema cookie so every pooled connection
+        # re-parsed the whole schema on its next statement
         trigger = f"trg_{table}_provider_snapshots_delete"
-        cursor.execute(f"DROP TRIGGER IF EXISTS {trigger}")
         cursor.execute(f"""
-            CREATE TRIGGER {trigger}
+            CREATE TRIGGER IF NOT EXISTS {trigger}
             AFTER DELETE ON {table}
             FOR EACH ROW
             BEGIN

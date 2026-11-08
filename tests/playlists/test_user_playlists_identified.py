@@ -101,6 +101,19 @@ def test_library_ids_folds_non_ascii_titles(mdb):
     assert library_ids(mdb, "élan vital", "björk") == {"spotify": "sp-elan", "deezer": "42"}
 
 
+def test_library_ids_folds_accents_both_ways(mdb):
+    """third #1062 review G13-3: 3.6.1 compared unidecoded names and titles.
+    v2's name_key only casefolds, so a playlist's "Beyonce" missed the
+    library's "Beyoncé" and the song went back to a name search"""
+    from core.playlists import track_origin
+    if hasattr(track_origin, "_fold_cache"):  # a fresh fold map for this db
+        track_origin._fold_cache.update(at=0.0, db=None, map={})
+    _library_track(mdb, "Café del Mar", "Beyoncé", spotify_track_id="sp-cafe", deezer_id="7")
+    _library_track(mdb, "Joga", "Bjork", spotify_track_id="sp-joga", deezer_id="8")
+    assert library_ids(mdb, "Cafe del Mar", "Beyonce") == {"spotify": "sp-cafe", "deezer": "7"}
+    assert library_ids(mdb, "Jóga", "Björk") == {"spotify": "sp-joga", "deezer": "8"}
+
+
 def test_origin_ids_prefers_what_the_page_knew_then_fills_from_the_library(mdb):
     _library_track(mdb, "Not Like Us", "Kendrick Lamar",
                    spotify_track_id="lib-spotify", deezer_id="lib-deezer")

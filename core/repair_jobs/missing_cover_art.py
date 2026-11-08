@@ -10,7 +10,7 @@ from core.lookup_failures import LookupFailures, watch_lookup_failures
 from core.repair_jobs import register_job
 from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
 from core.repair_jobs.base import (
-    JobContext, JobResult, RepairJob, drop_hand_tagged, whole_library_run,
+    JobContext, JobResult, RepairJob, whole_library_run,
 )
 from utils.logging_config import get_logger
 
@@ -66,6 +66,18 @@ def _artist_art_by_name(artist_name, source_order=None):
     return None, None
 
 
+def _drop_hand_tagged_albums(context, albums):
+    from core.library2.maintenance_subjects import active_file_subjects
+    from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+    keys = hand_tagged_path_keys(getattr(context, 'db', None))
+    if not keys:
+        return list(albums)
+    locked = {s.get('album_id') for s in active_file_subjects(context.db, context.config_manager)
+              if is_hand_tagged_path(s.get('path'), keys)}
+    return [a for a in albums if a.get('album_id') not in locked
+            and not is_hand_tagged_path(a.get('rep_path'), keys)]
+
+
 @register_job
 class MissingCoverArtJob(RepairJob):
     job_id = 'missing_cover_art'
@@ -109,8 +121,10 @@ class MissingCoverArtJob(RepairJob):
             source_order = (prefer_source, *remaining)
         # hand-tagged: the user typed this release, a name search would give a
         # bootleg the studio cover
-        albums = drop_hand_tagged(
-            context, active_album_subjects(context.db, context.config_manager), path_key="rep_path")
+        # any hand-tagged file protects its album, not only the one the album
+        # row happens to show (3.6.1's album lock)
+        albums = _drop_hand_tagged_albums(
+            context, active_album_subjects(context.db, context.config_manager))
         total = len(albums)
         # Opt-in (#1708): an album no source had art for is not searched again
         # until what is asked changes or the recheck time passes.

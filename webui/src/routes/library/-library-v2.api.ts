@@ -529,6 +529,8 @@ export interface ProviderRelease {
   explicit?: boolean;
   owned?: boolean | null;
   musicbrainz_release_id?: string | null;
+  /** MusicBrainz release-group secondary types ('live', 'soundtrack', ...) */
+  secondary_types?: string[] | null;
   track_completion?: {
     owned_tracks?: number;
     total_tracks?: number;
@@ -1361,6 +1363,8 @@ export async function fetchLibraryV2TagPreview(
   changed_count: number;
   truncated: boolean;
   refresh?: { refreshed: number; unavailable?: number; errors: unknown[] } | null;
+  /** the active media server, for Write Tags' "Sync to Plex/Jellyfin" */
+  server_type: string | null;
 }> {
   const payload = await lib2Json<
     Ok & {
@@ -1368,6 +1372,7 @@ export async function fetchLibraryV2TagPreview(
       changed_count?: number;
       truncated?: boolean;
       refresh?: { refreshed: number; unavailable?: number; errors: unknown[] } | null;
+      server_type?: string | null;
     }
   >(
     apiClient.get(
@@ -1381,6 +1386,7 @@ export async function fetchLibraryV2TagPreview(
     changed_count: payload.changed_count ?? 0,
     truncated: payload.truncated ?? false,
     refresh: payload.refresh,
+    server_type: payload.server_type ?? null,
   };
 }
 
@@ -1392,12 +1398,15 @@ export async function writeLibraryV2Tags(
    *  the rule everywhere else in Library v2. */
   overwriteManual: [number, string][] = [],
   policy?: LibraryV2RetagPolicy,
+  /** G15-5: push the written values to Plex / scan Jellyfin, as 3.6.1 did */
+  syncToServer = false,
 ): Promise<string> {
   const payload = await lib2Json<Ok & { job_id?: string }>(
     apiClient.post('library/v2/tags/write', {
       json: {
         track_ids: trackIds,
         embed_cover: embedCover,
+        ...(syncToServer ? { sync_to_server: true } : {}),
         ...policy,
         ...(overwriteManual.length ? { overwrite_manual: overwriteManual } : {}),
       },
@@ -1812,8 +1821,23 @@ export async function fetchLibraryV2AlbumArtOptions(
 
 /** Apply a cover chosen in the picker (docs §49). Pins the choice so a later
  *  refresh won't clobber it; returns the local artwork URL to re-render. */
-export async function applyLibraryV2AlbumArt(albumId: number, url: string): Promise<string> {
-  const payload = await readJson<{ success: boolean; image_url?: string; error?: string }>(
+/** What an applied cover or photo reached beyond SoulSync (3.6.1 said so). */
+export interface ArtApplyOutcome {
+  image_url: string;
+  server_updated?: boolean;
+  cover_written?: boolean;
+  disk_written?: boolean;
+  disk_skipped?: string | null;
+  embed_warning?: string;
+}
+
+type ArtApplyPayload = Partial<ArtApplyOutcome> & { success: boolean; error?: string };
+
+export async function applyLibraryV2AlbumArt(
+  albumId: number,
+  url: string,
+): Promise<ArtApplyOutcome> {
+  const payload = await readJson<ArtApplyPayload>(
     apiClient.post(`library/v2/albums/${albumId}/art`, {
       json: { url },
       // dd28-01: the apply path is strictly slower than the art-options GET it
@@ -1828,7 +1852,7 @@ export async function applyLibraryV2AlbumArt(albumId: number, url: string): Prom
   if (!payload.success || !payload.image_url) {
     throw new Error(payload.error || 'Failed to apply cover art');
   }
-  return payload.image_url;
+  return { ...payload, image_url: payload.image_url };
 }
 
 /** Stop overriding an album cover. The current image remains until the next
@@ -1860,8 +1884,11 @@ export async function fetchLibraryV2ArtistArtOptions(
 
 /** Apply a photo chosen in the picker (deep-dive A9). Pins the choice so a
  *  later refresh won't clobber it; returns the local artwork URL to re-render. */
-export async function applyLibraryV2ArtistArt(artistId: number, url: string): Promise<string> {
-  const payload = await readJson<{ success: boolean; image_url?: string; error?: string }>(
+export async function applyLibraryV2ArtistArt(
+  artistId: number,
+  url: string,
+): Promise<ArtApplyOutcome> {
+  const payload = await readJson<ArtApplyPayload>(
     apiClient.post(`library/v2/artists/${artistId}/art`, {
       json: { url },
       // dd28-01: see the matching comment on applyLibraryV2AlbumArt.
@@ -1871,7 +1898,7 @@ export async function applyLibraryV2ArtistArt(artistId: number, url: string): Pr
   if (!payload.success || !payload.image_url) {
     throw new Error(payload.error || 'Failed to apply photo');
   }
-  return payload.image_url;
+  return { ...payload, image_url: payload.image_url };
 }
 
 /** Stop overriding an artist photo and follow automatic/server artwork again. */

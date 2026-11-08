@@ -271,7 +271,7 @@ function SheetTrack({
         title="Interactive Search — pick a source yourself"
         aria-label={`Interactive Search for ${track.track}`}
         // the library's Interactive Search for a library track, else the inspector
-        onClick={() => openWishlistSearch(track)}
+        onClick={() => void openWishlistSearch(track)}
       >
         Search
       </button>

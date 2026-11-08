@@ -206,8 +206,10 @@ import { ArtistPageLibraryProvider, ReleaseMonitorButton } from './artist-page-r
 import { parseArtworkTarget, watchPendingArtwork } from './artwork-pending';
 import { cardFadeIn } from './card-fade';
 import {
+  applyMusicBrainzDeclutter,
   classifyReleaseContent,
   DEFAULT_DISCOGRAPHY_FILTERS,
+  liveToggleLabel,
   passesDiscographyFilters,
   type DiscographyFilterState,
   type DiscographyOwnership,
@@ -1172,8 +1174,17 @@ function ModalShell({
 
 function matchChipClass(status: string): string {
   if (status === 'matched') return styles.matchMatched;
-  if (status === 'not_found') return styles.matchNotFound;
+  if (status === 'not_found' || status === 'cleared') return styles.matchNotFound;
   return styles.matchPending;
+}
+
+/** P2B-3: what the workers last heard, in words (3.6.1 said "not found") */
+export function matchStatusText(status: string): string {
+  if (status === 'not_found') return 'not found';
+  if (status === 'cleared') return 'cleared, match it by hand';
+  if (status === 'error') return 'lookup failed, will retry';
+  if (status === 'pending') return 'not tried yet';
+  return status;
 }
 
 /** §52.5/§56.2: only Spotify/Deezer artist search results and the live
@@ -1347,7 +1358,7 @@ export function MatchChips({
         ]
           .filter(Boolean)
           .join(' · ');
-        const tip = `${s.label}: ${s.status} (${details})`;
+        const tip = `${s.label}: ${matchStatusText(s.status)} (${details})`;
         return (
           <button
             key={s.service}
@@ -2247,6 +2258,9 @@ export function ArtistSettingsModal({
 }) {
   const queryClient = useQueryClient();
   const canWrite = useLibraryV2CanWrite();
+  // the watchlist part is the profile's own row: anyone who may wish here
+  // saves it (3.6.1's watchlist config); the rest of the sheet is the admin's
+  const canSaveWatchlist = useLibraryV2CanWish() === true;
   const settingsQuery = useQuery({
     queryKey: [...LIBRARY_V2_QUERY_KEY, 'artist-settings', artist.id],
     queryFn: () => fetchLibraryV2ArtistSettings(artist.id),
@@ -2265,7 +2279,7 @@ export function ArtistSettingsModal({
 
   const save = useMutation({
     mutationFn: (value: LibraryV2ArtistSettings) => {
-      if (!canWrite) throw new Error('Library changes require the admin profile');
+      if (!canSaveWatchlist) throw new Error('Library changes require the admin profile');
       return updateLibraryV2ArtistSettings(artist.id, value);
     },
     onSuccess: async (response) => {
@@ -2338,10 +2352,9 @@ export function ArtistSettingsModal({
             <button
               type="button"
               className={styles.btnPrimary}
-              data-requires-write=""
-              disabled={save.isPending || !canWrite}
+              disabled={save.isPending || !canSaveWatchlist}
               onClick={() => {
-                if (canWrite) save.mutate(watchlist);
+                if (canSaveWatchlist) save.mutate(watchlist);
               }}
             >
               {save.isPending ? 'Saving…' : 'Save future-release settings'}
@@ -2483,6 +2496,7 @@ export function ArtistSettingsModal({
                     <span>Library-v2 discography rule</span>
                     <select
                       className={styles.select}
+                      disabled={!canWrite}
                       value={watchlist.monitor_new_items}
                       onChange={(event) =>
                         setDraft((current) =>
@@ -5670,7 +5684,9 @@ export function librarySectionSearch<T extends Record<string, unknown>>(
     ...previous,
     ...songOnly,
     section,
-    q: '',
+    // G15-8: "beatles" on Artists, then Songs, finds the Beatles' songs, as
+    // 3.6.1's switchView did. Wanted has no search of its own
+    q: section === 'wanted' ? '' : typeof previous.q === 'string' ? previous.q : '',
     artist: undefined,
     album: undefined,
     page: 1,
@@ -7109,7 +7125,7 @@ function DiscographyFilterBar({
               })
             }
           >
-            {CONTENT_LABELS[key]}
+            {key === 'live' ? liveToggleLabel(state) : CONTENT_LABELS[key]}
           </button>
         ))}
       </div>
@@ -7711,8 +7727,11 @@ function useOtherSources(input: {
 
 /** Everything the two "All Releases" render modes share: one filter bar, one
  *  set of visible releases (ldp-03/ldp-04 both apply in either mode). */
-function useDiscographyFilters() {
-  const [filters, setFilters] = useState<DiscographyFilterState>(DEFAULT_DISCOGRAPHY_FILTERS);
+function useDiscographyFilters(source?: string | null) {
+  // a MusicBrainz discography starts with the non-studio releases hidden
+  const [filters, setFilters] = useState<DiscographyFilterState>(() =>
+    applyMusicBrainzDeclutter(DEFAULT_DISCOGRAPHY_FILTERS, source),
+  );
   return { filters, setFilters };
 }
 
@@ -8043,7 +8062,7 @@ function ProviderArtistView({
   const heroHeader =
     search.header ??
     (prefs.isSuccess ? (prefs.data?.artist_page?.header_elsewhere ?? 'rich') : undefined);
-  const { filters, setFilters } = useDiscographyFilters();
+  const { filters, setFilters } = useDiscographyFilters(source);
   const providerIds = { [source]: providerId };
   const discography = useReadOnlyProviderDiscography({
     enabled: true,
@@ -8101,7 +8120,11 @@ function ProviderArtistView({
       .filter((release) =>
         filters.categories[bucket]
           ? passesDiscographyFilters(
-              { title: release.title, album_type: release.album_type },
+              {
+                title: release.title,
+                album_type: release.album_type,
+                secondary_types: release.secondary_types,
+              },
               filters,
               release.owned === true,
             )
@@ -8293,17 +8316,18 @@ function ProfileWatchlistButton({
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState(false);
   const watchlistId = watchlist?.id ?? null;
+  const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
     if (!watchlistId) return;
     let cancelled = false;
-    void checkWatchlistRequest(watchlistId).then((state) => {
+    void checkWatchlistRequest(watchlistId, watchlistSource).then((state) => {
       if (!cancelled) setWatching(state);
     });
     return () => {
       cancelled = true;
     };
-  }, [watchlistId]);
+  }, [watchlistId, watchlistSource]);
   if (!watchlist) return null;
   const toggle = async () => {
     if (busy) return;
@@ -8360,17 +8384,18 @@ function ProviderArtistActions({
   const [adding, setAdding] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const watchlistId = watchlist?.id ?? null;
+  const watchlistSource = watchlist?.source;
   useEffect(() => {
     setWatching(null);
     if (!watchlistId) return;
     let cancelled = false;
-    void checkWatchlistRequest(watchlistId).then((state) => {
+    void checkWatchlistRequest(watchlistId, watchlistSource).then((state) => {
       if (!cancelled) setWatching(state);
     });
     return () => {
       cancelled = true;
     };
-  }, [watchlistId]);
+  }, [watchlistId, watchlistSource]);
   const artist = payload.artist ?? {};
   const image = String(artist.image_url || '');
   const toggle = async () => {
@@ -8868,6 +8893,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                         icon="settings"
                         label="Artist Settings"
                         title="Quality profile, Watchlist, new releases and audiobook filing"
+                        requiresWrite={false}
                         onClick={() => setShowArtistSettings(true)}
                       />,
                     ],
@@ -14493,6 +14519,9 @@ export function GlobalAutomaticSearchButton() {
  *  each, instead of four equal buttons a new user had to decode. */
 export function LibraryMoreMenu() {
   const search = useGlobalAutomaticSearch();
+  // Watch All adds to the caller's own watchlist: anyone who may wish, not
+  // only the admin (a household member watches in the shared library)
+  const canWatch = useLibraryV2CanWish();
   const [exporting, setExporting] = useState(false);
   const [watching, setWatching] = useState(false);
   const item = (key: string, name: string, desc: string) => (
@@ -14550,7 +14579,7 @@ export function LibraryMoreMenu() {
               'Watch All',
               'Add every artist in your library to your Watchlist.',
             ),
-            disabled: !search.canWrite,
+            disabled: !canWatch,
             onSelect: () => setWatching(true),
           },
           {

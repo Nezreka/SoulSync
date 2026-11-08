@@ -189,16 +189,29 @@ def _row_release_id(db: Any, album_id: Any) -> str:
 
 
 def _row_album_type(db: Any, album_id: Any) -> str:
-    """The album row's stored album_type, "" when unknown/unreadable. A
-    ``lib2_albums`` id, like :func:`_row_release_id`'s."""
+    """The album row's KNOWN release kind, "" when unknown/unreadable. A
+    ``lib2_albums`` id, like :func:`_row_release_id`'s.
+
+    ``album_type`` is NOT NULL with the default 'album', and the 3.6.1 import
+    turned a NULL record_type into it: a bare 'album' is no evidence, as
+    completion reads it (one rule, shared). 3.6.1 saw NULL here and reused
+    the folder; reading the default as a real album split a not-yet-enriched
+    EP's next track into a new folder.
+    """
+    if album_id is None:
+        return ""
+    # full suite: the bare-'album' rule alone broke the #829 guard ("Ocean
+    # Avenue" the single must not land in "Ocean Avenue" the album's folder).
+    # lib2 says which 'album' is real: album_type_known, set by a provider
+    # or a classified import. known 'album' is evidence; the default isn't
     conn = None
     try:
         conn = db._get_connection()
-        row = conn.execute(
-            "SELECT album_type FROM lib2_albums WHERE id = ?", (int(album_id),),
-        ).fetchone()
-        return str((row[0] if row else "") or "").strip()
-    except Exception as e:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(lib2_albums)")}
+        known_sql = "album_type_known" if "album_type_known" in cols else "1"
+        row = conn.execute(f"SELECT album_type, {known_sql} FROM lib2_albums WHERE id = ?",
+                           (int(album_id),)).fetchone()
+    except Exception as e:  # noqa: BLE001
         logger.debug("album_type lookup for album %s failed: %s", album_id, e)
         return ""
     finally:
@@ -207,6 +220,14 @@ def _row_album_type(db: Any, album_id: Any) -> str:
                 conn.close()
             except Exception:  # noqa: S110 - cleanup only
                 pass
+    if not row:
+        return ""
+    kind = str(row[0] or "").strip().lower()
+    if kind and (kind != "album" or row[1]):
+        return kind
+    # an untyped row: a download's recorded filing still counts
+    from core.metadata.completion import _stored_release_kind
+    return _stored_release_kind(db, album_id)
 
 
 def _same_release(db: Any, album: Any, sample_file: Optional[str],

@@ -7,12 +7,17 @@
  */
 
 /** Current status; null when the check fails (the vanilla just warned). */
-export async function checkWatchlistRequest(artistId: unknown): Promise<boolean | null> {
+export async function checkWatchlistRequest(
+  artistId: unknown,
+  /** the provider the id is from. without it a small deezer/itunes id was
+   *  also read as a library row id (G02-4) */
+  source?: string,
+): Promise<boolean | null> {
   try {
     const response = await fetch('/api/watchlist/check', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ artist_id: artistId }),
+      body: JSON.stringify({ artist_id: artistId, ...(source ? { source } : {}) }),
     });
     const data = await response.json();
     if (!data.success) return null;
@@ -60,7 +65,7 @@ export async function toggleWatchlistRequest(
   const checkResponse = await fetch('/api/watchlist/check', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ artist_id: artistId }),
+    body: JSON.stringify({ artist_id: artistId, ...(source ? { source } : {}) }),
   });
   const checkData = await checkResponse.json();
   if (!checkData.success) {
@@ -73,7 +78,7 @@ export async function toggleWatchlistRequest(
     const response = await fetch('/api/watchlist/remove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ artist_id: artistId }),
+      body: JSON.stringify({ artist_id: artistId, ...(source ? { source } : {}) }),
     });
     const data = await response.json();
     if (!data.success) throw new Error(data.error || 'Failed to update watchlist');

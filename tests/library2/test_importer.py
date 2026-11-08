@@ -1132,6 +1132,18 @@ def test_text_in_any_legacy_number_column_stays_out_of_lib2(legacy_db):
     assert tuple(row) == (None, 1, None, 0)
 
 
+def test_a_legacy_year_of_zero_imports_as_unknown(legacy_db):
+    """third #1062 review G02-3: 3.6.1's 0 meant unknown; lib2 says NULL, so
+    the workers fill it and nothing shows year 0"""
+    with closing(sqlite3.connect(legacy_db.path)) as conn:
+        conn.execute("UPDATE albums SET year=0")
+        conn.commit()
+    import_legacy_library(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        years = {r[0] for r in conn.execute("SELECT year FROM lib2_albums")}
+    assert years == {None}
+
+
 def test_text_numbers_in_a_wishlist_payload_do_not_stop_the_import(legacy_db):
     """``int(total_tracks)`` stopped the migration the same way as #1989, out of
     the json this time."""
@@ -1157,6 +1169,51 @@ def test_text_numbers_in_a_wishlist_payload_do_not_stop_the_import(legacy_db):
         row = conn.execute("SELECT track_number, disc_number, duration FROM lib2_tracks "
                            "WHERE title='Wished'").fetchone()
     assert tuple(row) == (None, 1, None)
+
+
+def test_a_deezer_wishlist_rows_featured_artist_id_is_not_a_spotify_id(legacy_db):
+    """third #1062 review P2A-5: every credited artist's payload id went in
+    as spotify_id whatever the provider said; only the primary was namespaced"""
+    _on_legacy(legacy_db.path, """
+        CREATE TABLE wishlist_tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT UNIQUE NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT,
+            source_info TEXT,
+            date_added TIMESTAMP
+        )""", ("INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_info) VALUES(?,?,?)", (
+        "dz-track-1",
+        json.dumps({"id": "dz-track-1", "name": "Feature Song", "source": "deezer",
+                    "artists": [{"name": "Deezer Lead", "id": "111"}, {"name": "Deezer Guest", "id": "222"}],
+                    "album": {"id": "dz-album", "name": "Deezer LP", "total_tracks": 10,
+                              "album_type": "album", "artists": [{"name": "Deezer Lead", "id": "111"}]}}),
+        json.dumps({"metadata_source": "deezer"}))))
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        guest = conn.execute("SELECT spotify_id, external_ids FROM lib2_artists WHERE name='Deezer Guest'").fetchone()
+    assert guest is not None
+    assert guest["spotify_id"] in (None, "")
+    assert json.loads(guest["external_ids"] or "{}").get("deezer") == "222"
+
+
+def test_a_manual_import_does_not_run_the_whole_library_backfills_first(legacy_db, monkeypatch):
+    """third #1062 review P2C-8: the import's schema call ran every backfill
+    uncommitted inside its own transaction, right before a reset threw the
+    work away; the deferred runner converges after the import"""
+    from core.library2 import importer, schema
+    calls = []
+    real = schema.ensure_library_v2_schema
+
+    def spy(conn, **kw):
+        calls.append(kw)
+        return real(conn, **kw)
+
+    monkeypatch.setattr(importer, "ensure_library_v2_schema", spy)
+    import_legacy_library(legacy_db)
+    assert calls and all(kw.get("run_backfills") is False for kw in calls)
 
 
 def test_multi_artist_split(imported_conn):

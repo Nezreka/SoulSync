@@ -81,6 +81,21 @@ def test_a_raw_provider_id_wins_over_a_library_row_with_the_same_number(db):
     assert db.is_artist_in_watchlist("999", profile_id=1)          # the other one is untouched
 
 
+def test_a_provider_page_id_is_never_read_as_a_library_row(db):
+    """third #1062 review G02-4: an unwatched deezer artist 13 whose number is
+    also the library row of an artist you watch. the page says the id is
+    deezer's; reading it as row 13 said "Watching", and the remove deleted
+    the other artist's watch"""
+    _library_artist(db, 13, spotify_artist_id="sp-watched")
+    _watch(db, spotify_artist_id="sp-watched")
+    assert not db.is_artist_in_watchlist("13", profile_id=1, source="deezer")
+    assert not db.remove_artist_from_watchlist("13", profile_id=1, source="deezer")
+    assert db.is_artist_in_watchlist("sp-watched", profile_id=1)
+    # a library page still finds it by its row id, bare or prefixed
+    assert db.is_artist_in_watchlist("13", profile_id=1)
+    assert db.is_artist_in_watchlist("lib2:13", profile_id=1, source="library")
+
+
 # ── #1309 ────────────────────────────────────────────────────────────────────
 
 def test_incremental_cutoff_overlaps_the_last_scan():

@@ -830,9 +830,11 @@ def enrich_native_entity_for_service(
         ProviderIdentityConflict, set_library_v2_match,
     )
     try:
+        # a search's pick, not the user's: labelled automatic, and never
+        # relabels a match the user made by hand
         set_library_v2_match(
             conn, canonical, int(entity_id), actual_source, provider_id,
-            actor="native_enrichment",
+            actor="native_enrichment", origin="automatic",
         )
     except ProviderIdentityConflict as conflict:
         # Another entity already IS this provider release. Leaving this one
@@ -1017,11 +1019,33 @@ def _get_or_create_component_artist(
     still-unmapped* row is enriched too. A legacy-backed match is left untouched
     (it keeps the authoritative legacy path).
     """
+    from core.library2.importer import normalize_name
+
+    source = str(identity["source"]).strip().lower()
+    provider_id = str(identity["artist_id"]).strip()
+    columns = "id, legacy_artist_id, spotify_id, musicbrainz_id, external_ids"
+    # third #1062 review P2B-7: the name the way autolink keys it (name_key,
+    # through its index), then whoever already holds the resolver's id ("Ian
+    # Asher & Beyonce" splits to "Beyonce"; the library's "Beyoncé" holds the
+    # spotify id). a NOCASE name match missed the accent and minted a second
+    # row carrying the same id
     existing = conn.execute(
-        "SELECT id, legacy_artist_id, spotify_id, musicbrainz_id, external_ids "
-        "FROM lib2_artists WHERE name=? COLLATE NOCASE ORDER BY id LIMIT 1",
+        f"SELECT {columns} FROM lib2_artists WHERE name_key=? ORDER BY id LIMIT 1",
+        (normalize_name(name),),
+    ).fetchone() or conn.execute(
+        # a row written without a name_key
+        f"SELECT {columns} FROM lib2_artists WHERE name=? COLLATE NOCASE ORDER BY id LIMIT 1",
         (name,),
     ).fetchone()
+    if existing is None and source and provider_id:
+        from core.library2.match_status import provider_id_owner
+        try:
+            holder = provider_id_owner(conn, "artist", source, provider_id)
+        except Exception:  # noqa: BLE001 - a provider the owner check doesn't know
+            holder = None
+        if holder is not None:
+            existing = conn.execute(f"SELECT {columns} FROM lib2_artists WHERE id=?",
+                                    (holder,)).fetchone()
     if existing is not None:
         cid = int(existing["id"])
         unmapped = (
@@ -1030,7 +1054,7 @@ def _get_or_create_component_artist(
             and not existing["musicbrainz_id"]
             and (existing["external_ids"] or "{}") in ("", "{}")
         )
-        if unmapped:
+        if unmapped and identity_is_free(conn, cid, source, provider_id):
             _persist_identity(
                 conn, cid,
                 source=str(identity["source"]).strip().lower(),
@@ -1041,13 +1065,15 @@ def _get_or_create_component_artist(
             )
         return cid
 
-    from core.library2.importer import normalize_name
-
     cur = conn.execute(
         "INSERT INTO lib2_artists(name, name_key, sort_name, monitored) VALUES(?, ?, ?, ?)",
         (name, normalize_name(name), name, monitored),
     )
     cid = int(cur.lastrowid)
+    if not identity_is_free(conn, cid, source, provider_id):
+        # never a second holder of one provider identity (the single-artist
+        # path's rule); the component stays a plain name row
+        return cid
     _persist_identity(
         conn, cid,
         source=str(identity["source"]).strip().lower(),
@@ -1114,14 +1140,35 @@ def _rehome_and_delete_combined(
             )
     conn.execute("DELETE FROM lib2_track_artists WHERE artist_id=?", (combined_id,))
 
-    # 4) Drop the ghost's monitor rules so they don't linger.
+    # 4) Every profile's watch on the ghost goes to the artists it became
+    #    (3.6.1's watchlist rows survived an artist merge or split; dropping
+    #    them showed the artist unwatched and recomputed its wants away). A
+    #    component's own rule for that profile wins. Then the ghost's go.
     try:
+        ghost = conn.execute("SELECT COALESCE(monitored,0) FROM lib2_artists WHERE id=?",
+                             (combined_id,)).fetchone()
+        if ghost and int(ghost[0]) == 1:
+            for cid in component_ids:
+                conn.execute("UPDATE lib2_artists SET monitored=1, updated_at=CURRENT_TIMESTAMP "
+                             "WHERE id=?", (cid,))
+        rules = conn.execute(
+            "SELECT profile_id, monitored, provenance FROM lib2_monitor_rules "
+            "WHERE entity_type='artist' AND entity_id=?", (combined_id,)).fetchall()
+        for profile_id, monitored, provenance in rules:
+            for cid in component_ids:
+                if conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='artist' "
+                                "AND entity_id=? AND profile_id=?", (cid, profile_id)).fetchone():
+                    continue
+                conn.execute(
+                    "INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, "
+                    "monitored, provenance) VALUES('artist', ?, ?, ?, ?)",
+                    (cid, profile_id, monitored, provenance))
         conn.execute(
             "DELETE FROM lib2_monitor_rules WHERE entity_type='artist' AND entity_id=?",
             (combined_id,),
         )
     except Exception as exc:  # noqa: BLE001 — table optional/absent on minimal DBs
-        logger.debug("ghost monitor-rule cleanup skipped (%s): %s", combined_id, exc)
+        logger.debug("ghost monitor-rule carry skipped (%s): %s", combined_id, exc)
 
     # 5) The ghost is now unreferenced by any primary or junction.
     # If it is legacy-backed, keep it as an alias so future legacy imports
@@ -1489,6 +1536,33 @@ def prune_browse_only_artists(conn) -> Dict[str, Any]:
                   WHERE ta2.artist_id = a.id
                     AND (al3.origin <> 'discography' OR al3.monitored = 1
                          OR COALESCE(t2.monitored, 0) = 1))
+           -- every profile's intent, not only the admin's columns: a
+           -- household member's watch (a rule; the column stays 0) or their
+           -- wanted tracks keep the artist, or the prune took their wishes
+           AND NOT EXISTS (
+                 SELECT 1 FROM lib2_monitor_rules r
+                  WHERE r.entity_type = 'artist' AND r.entity_id = a.id AND r.monitored = 1)
+           AND NOT EXISTS (
+                 SELECT 1 FROM lib2_track_artists ta4
+                   JOIN lib2_monitor_rules r2 ON r2.monitored = 1 AND (
+                        (r2.entity_type = 'track' AND r2.entity_id = ta4.track_id)
+                     OR (r2.entity_type = 'album' AND r2.entity_id =
+                            (SELECT t4.album_id FROM lib2_tracks t4 WHERE t4.id = ta4.track_id)))
+                  WHERE ta4.artist_id = a.id)
+           AND NOT EXISTS (
+                 SELECT 1 FROM lib2_track_artists ta5
+                   JOIN lib2_wanted_tracks w ON w.track_id = ta5.track_id AND w.wanted = 1
+                  WHERE ta5.artist_id = a.id)
+           AND NOT EXISTS (
+                 SELECT 1 FROM lib2_album_artists aa5
+                   JOIN lib2_monitor_rules r3 ON r3.entity_type = 'album'
+                        AND r3.entity_id = aa5.album_id AND r3.monitored = 1
+                  WHERE aa5.artist_id = a.id)
+           AND NOT EXISTS (
+                 SELECT 1 FROM lib2_album_artists aa6
+                   JOIN lib2_tracks t6 ON t6.album_id = aa6.album_id
+                   JOIN lib2_wanted_tracks w2 ON w2.track_id = t6.id AND w2.wanted = 1
+                  WHERE aa6.artist_id = a.id)
            AND (
                  EXISTS (SELECT 1 FROM lib2_album_artists aa3 WHERE aa3.artist_id = a.id)
               OR EXISTS (SELECT 1 FROM lib2_track_artists ta3 WHERE ta3.artist_id = a.id)
@@ -1584,7 +1658,8 @@ def _clear_wrong_id_collab_artists(conn, split_artist_credits, normalize_name) -
             track_ids = [int(r[0]) for r in conn.execute(
                 f"SELECT id FROM lib2_tracks WHERE album_id IN ({marks})", albums)]
             for table, album_kinds, track_kinds in (
-                    ("lib2_metadata_overrides", ("album", "albums"), ("track", "tracks")),
+                    # an album's hand edits are stored as 'release_group'
+                    ("lib2_metadata_overrides", ("release_group", "album"), ("track", "tracks")),
                     ("lib2_media_server_mappings", ("album", "album"), ("track", "track"))):
                 try:
                     hit = conn.execute(
@@ -1927,7 +2002,15 @@ def backfill_missing_provider_ids(
             entity_id = int(item.get("id"))
             try:
                 result = enricher(conn, entity_type, entity_id, service) or {}
-                status = "matched" if result.get("success") else "not_found"
+                answered = str(result.get("source") or service).strip().lower()
+                if result.get("success") and answered != service:
+                    # the service fell back to another provider (Spotify
+                    # Free / rate-limited -> iTunes): that one's id is stored,
+                    # but this service never answered. 'matched' settled the
+                    # pair for good; an error is asked again
+                    status = "error"
+                else:
+                    status = "matched" if result.get("success") else "not_found"
             except Exception as exc:  # noqa: BLE001 — one entity, not the run
                 logger.debug("provider backfill: %s %s via %s failed: %s",
                              entity_type, entity_id, service, exc)

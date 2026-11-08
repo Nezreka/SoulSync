@@ -1416,3 +1416,32 @@ def test_curated_unverifiable_run_never_records_fingerprint(monkeypatch, patched
 
     assert status_calls == []
     assert states['auto_mirror_7']['status'] == 'error'
+
+
+def test_a_failed_playlist_write_still_downloads_what_is_missing(patched_db):
+    """third #1062 review G05-2: the sync service keeps going past a failed
+    server playlist write ("still wishlist what is missing") and 3.6.1 then
+    started the automation's downloads; the early return skipped them"""
+    wishlist_calls = []
+    automation_calls = []
+    deps = _build_deps(
+        sync_service=_FakeSyncService(
+            media_client=_FakeMediaClient(),
+            sync_result=_FakeSyncResult(
+                total_tracks=3, matched_tracks=1, failed_tracks=2,
+                errors=['Navidrome playlist write failed'],
+                wishlist_added_count=2,
+            ),
+        ),
+        process_wishlist_automatically=lambda **kw: wishlist_calls.append(kw),
+        is_wishlist_actually_processing=lambda: False,
+        update_automation_progress=lambda *a, **kw: automation_calls.append(kw),
+    )
+
+    ds.run_sync_task('auto_mirror_9', 'Playlist', [_track()],
+                     automation_id='auto-1', deps=deps)
+
+    assert len(wishlist_calls) == 1
+    assert any('1/3 in library' in (c.get('log_line') or '') and c.get('status') == 'error'
+               for c in automation_calls)
+    assert deps.sync_states['auto_mirror_9']['status'] == 'error'

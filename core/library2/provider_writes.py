@@ -162,7 +162,9 @@ def write_provider_enrichment(
             (entity_id,)).fetchone()
         if row is not None:
             for column, value in backfill.items():
-                if value not in (None, "") and _is_empty(row[column]):
+                # G02-3: a year of 0 is 3.6.1's "unknown"; its workers filled it
+                unknown_year = column == "year" and str(row[column]).strip() in ("0", "0.0")
+                if value not in (None, "") and (_is_empty(row[column]) or unknown_year):
                     conn.execute(
                         f"UPDATE {table} SET {column}=? WHERE id=?",
                         (value, entity_id))

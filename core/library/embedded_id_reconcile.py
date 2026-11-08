@@ -32,6 +32,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("library.embedded_id_reconcile")
+
 # Each entry: (embedded-tag key from read_embedded_tags, entity, id column,
 # match-status column). Only the tag, the entity and the service (the status
 # column's prefix) are read now that every write goes through lib2.
@@ -103,6 +107,8 @@ class ReconcileTotals:
     entities_updated: int = 0
     conflicts: int = 0
     unreadable: int = 0
+    # a fault in SoulSync (a locked db, a bad provider name), not the file
+    errors: int = 0
 
 
 def reconcile_library(
@@ -235,8 +241,12 @@ def reconcile_library(
                                    service=service, status='matched')
                     totals.ids_filled += 1
                     touched.add((entity, entity_id))
-            except Exception:
-                totals.unreadable += 1
+            except Exception as exc:  # noqa: BLE001
+                # third #1062 review G10-5: this was counted as an unreadable
+                # file and logged nothing, so a db fault sent people to their
+                # files. 3.6.1 logged each one
+                totals.errors += 1
+                logger.debug("reconcile: skipped track %s: %s", row['id'], exc, exc_info=True)
             finally:
                 totals.processed += 1
                 if on_progress:

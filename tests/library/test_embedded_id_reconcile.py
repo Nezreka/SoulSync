@@ -284,3 +284,30 @@ def test_recording_id_is_lowercased_and_junk_is_not_filled():
         "SELECT musicbrainz_id FROM lib2_tracks WHERE id=1").fetchone()[0] == REC
     assert cur.execute(
         "SELECT musicbrainz_id FROM lib2_tracks WHERE id=2").fetchone()[0] is None
+
+
+def test_a_fault_in_soulsync_is_an_error_not_an_unreadable_file():
+    """third #1062 review G10-5: every exception in the loop was counted as
+    an unreadable file with no log, so a locked db sent people to their files"""
+    conn, _cur = _make_library_db()
+
+    def _broken(_fp):
+        raise RuntimeError("database is locked")
+
+    totals = reconcile_library(conn, _broken, track_ids=[1, 2])
+    assert totals.errors == 2 and totals.unreadable == 0
+
+
+def test_wishlist_artist_photos_use_indexed_lookups():
+    """third #1062 review G13-5: OR over LOWER(name) and COALESCE(name_key,'')
+    scanned every artist per 400 names"""
+    from core.wishlist.routes import _lib2_artists_by_name
+    conn, _cur = _make_library_db()
+    conn.execute("UPDATE lib2_artists SET name_key='artist', image_url='u' WHERE id=1")
+    seen = []
+    conn.set_trace_callback(seen.append)
+    assert _lib2_artists_by_name(conn, ["artist"])["artist"][0] == 1
+    conn.set_trace_callback(None)
+    for sql in (q for q in seen if "FROM lib2_artists" in q and "IN (" in q):
+        plan = " ".join(str(tuple(r)) for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
+        assert "SEARCH" in plan, plan

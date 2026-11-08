@@ -408,6 +408,49 @@ def test_a_file_imported_under_two_servers_keeps_one_track(repair_db, monkeypatc
                         ).fetchone()[0] == 1
 
 
+def _shared_file_pair(conn, live_artist, stale_artist, stale_title):
+    live = _album(conn, live_artist, "Same Album")
+    stale = _album(conn, stale_artist, stale_title)
+    for album, server in ((live, "plex"), (stale, "jellyfin")):
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, server_source) "
+            "VALUES(?, 'Song', 1, ?)", (album, server)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/song.flac')",
+                     (track,))
+    conn.commit()
+    return live, stale
+
+
+def test_a_server_twin_under_another_artist_row_still_folds(repair_db, monkeypatch):
+    """the other server's copy can be filed under its own artist row (an alias
+    twin). its emptied release still folds into the live one."""
+    from core.library2.dedup_repair import fold_shared_file_tracks
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    live, stale = _shared_file_pair(conn, _artist(conn, "Live Row"),
+                                    _artist(conn, "Stale Row"), "Same Album")
+
+    stats = fold_shared_file_tracks(conn)
+
+    assert (stats["shared_files_folded"], stats["server_albums_folded"]) == (1, 1)
+    assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id=?",
+                        (stale,)).fetchone()[0] == 0
+
+
+def test_a_differently_titled_release_under_another_artist_is_left_alone(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_shared_file_tracks
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    live, stale = _shared_file_pair(conn, _artist(conn, "Live Row"),
+                                    _artist(conn, "Stale Row"), "Other Album")
+
+    stats = fold_shared_file_tracks(conn)
+
+    assert stats["server_albums_folded"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE id=?",
+                        (stale,)).fetchone()[0] == 1
+
+
 def test_startup_heals_a_fallback_id_and_lets_spotify_ask_again(repair_db):
     """Bad 25th Anniversary: Spotify's fallback handed over the iTunes id as
     Spotify's, and a "matched" Spotify attempt meant nothing looked again."""
@@ -427,3 +470,62 @@ def test_startup_heals_a_fallback_id_and_lets_spotify_ask_again(repair_db):
     assert json.loads(row["external_ids"]) == {"itunes": "551515699"}
     assert conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts WHERE entity_id=? "
                         "AND service='spotify'", (album,)).fetchone()[0] == 0
+
+
+def test_a_folded_server_twin_hands_over_its_plays_edits_and_wishes(repair_db, monkeypatch):
+    """the twin track the other server held is deleted by the fold: its play
+    count, a hand edit and a wishlist link move to the track that keeps the
+    file instead of dying with it"""
+    from core.library2.dedup_repair import fold_shared_file_tracks
+    from core.library2.metadata_overrides import ensure_metadata_overrides_schema
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Two Servers")
+    live, stale = _album(conn, artist, "Same Album"), _album(conn, artist, "Same Album")
+    ids = {}
+    for album, server, plays in ((live, "plex", 2), (stale, "jellyfin", 5)):
+        ids[server] = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, server_source, play_count) "
+            "VALUES(?, 'Song', 1, ?, ?)", (album, server, plays)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, '/m/song.flac')",
+                     (ids[server],))
+    ensure_metadata_overrides_schema(conn.cursor())
+    conn.execute("INSERT INTO lib2_metadata_overrides(entity_type, entity_id, field_name, value_json) "
+                 "VALUES('track', ?, 'title', '\"Song (fixed)\"')", (ids["jellyfin"],))
+    conn.execute("CREATE TABLE IF NOT EXISTS wishlist_tracks (id INTEGER PRIMARY KEY, "
+                 "spotify_track_id TEXT, spotify_data TEXT, source_info TEXT, source_type TEXT, "
+                 "profile_id INTEGER DEFAULT 1, quality_profile_id INTEGER, request_status TEXT)")
+    wished = conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_info, profile_id) "
+        "VALUES('sp-song', '{}', json_object('lib2_track_id', ?), 1)", (ids["jellyfin"],)).lastrowid
+    conn.commit()
+
+    fold_shared_file_tracks(conn)
+    conn.commit()
+
+    keep = ids["plex"]
+    assert conn.execute("SELECT play_count FROM lib2_tracks WHERE id=?", (keep,)).fetchone()[0] == 7
+    assert conn.execute("SELECT entity_id FROM lib2_metadata_overrides").fetchone()[0] == keep
+    info = conn.execute("SELECT source_info FROM wishlist_tracks WHERE id=?", (wished,)).fetchone()
+    assert json.loads(info[0])["lib2_track_id"] == keep
+
+
+def test_a_finding_on_the_merged_twin_follows_the_survivor(repair_db):
+    """third #1062 review P2A-6: a dismissal carried onto the jellyfin copy
+    of an artist named a deleted id after the merge, and the next scan
+    raised the finding again on the survivor"""
+    legacy_db, conn = repair_db
+    bare = _artist(conn, "Hiroyuki Sawano")
+    rich = _artist(conn, "Hiroyuki Sawano", spotify_id="0Riv2KnFcLZA3JSVryRg4y",
+                   legacy_artist_id=730596583)
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS repair_findings (id INTEGER PRIMARY KEY, job_id TEXT,"
+        " finding_type TEXT, entity_type TEXT, entity_id TEXT, status TEXT, updated_at TEXT)")
+    conn.execute("INSERT INTO repair_findings(job_id, finding_type, entity_type, entity_id, status)"
+                 " VALUES('genre_enrichment', 'genre_enrichment', 'artist', ?, 'dismissed')",
+                 (f"lib2:{bare}",))
+    conn.commit()
+
+    repair_duplicate_artists(legacy_db)
+
+    assert conn.execute("SELECT entity_id FROM repair_findings").fetchone()[0] == f"lib2:{rich}"

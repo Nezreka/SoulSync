@@ -115,6 +115,13 @@ def repair_field_protection(database, file_path, fields, *, track_id=None, file_
     keys = hand_tagged_path_keys(database)
     if is_hand_tagged_path(file_path, keys) or is_hand_tagged_path(resolve_lib2_path(file_path), keys):
         return {}
+    if track_id is not None:
+        # another file of the album is hand-tagged: the album is the user's
+        # (3.6.1's album lock), so a finding filed earlier writes nothing
+        from core.library2.validation import album_is_hand_tagged
+        with closing(database._get_connection()) as conn:
+            if album_is_hand_tagged(conn, int(track_id)):
+                return {}
     if track_id is None:
         return dict(fields)
     from core.library2.track_files import writable_file_rows
@@ -357,6 +364,14 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
         # The import's order (artist genres, then album, core/metadata/source.py):
         # an album with none fills an EMPTY tag from its artist (build_tag_diff).
         data.update(genres=_genres_list(row["album_artist_genres"])[:2], genres_from_artist=True)
+    if data.get("genres") and "genres" not in manual:
+        # #1057: the strict whitelist applies at the tag write too, so Write
+        # Tags cleans genres stored before it was on (media-server genres, the
+        # artist fallback). 3.6.1 filtered here; v2 wrote them unfiltered.
+        # strict off is a no-op; a genre the user set by hand is theirs
+        from core.genre_filter import filter_genres
+        from core.metadata.common import get_config_manager
+        data["genres"] = filter_genres(list(data["genres"]), get_config_manager())
     data["_manual_fields"] = manual
     # ``build_tag_diff`` renders its Cover Art row from ``thumb_url``. Without
     # it the preview claimed "Cover Art: None → None, unchanged" for every lib2
@@ -692,6 +707,41 @@ def _release_manual_fields(db_data: Dict[str, Any], track_id: Any,
         db_data[key] = manual[key]
 
 
+# the tags a library write may add beyond 3.6.1's core set, and the settings
+# that let the download path write each one
+_EXTRA_TAG_SETTINGS = {
+    "style": ("audiodb.tags.style",),
+    "mood": ("audiodb.tags.mood",),
+    "isrc": ("musicbrainz.tags.isrc", "deezer.tags.isrc", "tidal.tags.isrc",
+             "hifi.tags.isrc", "qobuz.tags.isrc"),
+    "copyright": ("tidal.tags.copyright", "qobuz.tags.copyright", "hifi.tags.copyright"),
+}
+
+
+def _gate_extra_tags(data: Dict[str, Any], policy: Dict[str, Any], legacy: bool) -> Dict[str, Any]:
+    """What a library write may put in a file beyond the core tags.
+
+    Write Tags (and the retag a new album cover starts) wrote the catalogue's
+    Genius plain-text lyrics over a file's synced lyrics, plus style, mood,
+    copyright and ISRC with their tag settings off. 3.6.1's Write Tags wrote
+    none of those. The plain write keeps to that; the Retag modal writes them
+    only where their setting allows, and lyrics only when it fetched them.
+    """
+    data = dict(data)
+    if legacy:
+        for key in ("style", "mood", "copyright", "isrc", "lyrics"):
+            data.pop(key, None)
+        return data
+    if policy.get('lyrics') != 'fetch':
+        data.pop('lyrics', None)
+    from core.metadata.common import get_config_manager
+    cfg = get_config_manager()
+    for key, settings in _EXTRA_TAG_SETTINGS.items():
+        if not any(cfg.get(setting, True) is not False for setting in settings):
+            data.pop(key, None)
+    return data
+
+
 def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
                        protect_hand_tagged=False, overwrite_manual=None,
                        progress=None, lyrics_value=None, legacy=False):
@@ -723,6 +773,7 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
                         raise ValueError('Track no longer exists')
                     data = _db_data_for_row(conn, fresh[0])
             _release_manual_fields(data, row['id'], overwrite_manual)
+            data = _gate_extra_tags(data, policy, legacy)
             if policy['lyrics'] == 'fetch' and ('fields' not in policy or 'lyrics' in policy['fields']):
                 data['lyrics'] = lyrics_value if lyrics_value is not None else _lyrics_for_row({**row, 'db_data': data})
             for index, file in enumerate(files):

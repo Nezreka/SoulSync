@@ -103,19 +103,24 @@ def find_library_artist_for_source(
 
             if artist_name and active_server:
                 from core.library2.importer import normalize_name
+                from core.library2.sql_util import scope_visibility_sql
 
                 # `name_key` is the stored casefold. SQLite's LOWER() only
                 # folds A-Z, so a searched "björk" never met a stored "Björk".
+                # the caller's library is filtered before LIMIT 1, as 3.6.1
+                # did: another library's same-named artist must not take the
+                # one slot and hide this profile's own
+                visible = scope_visibility_sql("artist", "a")
                 cursor.execute(
-                    "SELECT id FROM lib2_artists "
-                    "WHERE name_key = ? AND (server_source = ? OR EXISTS ("
+                    "SELECT a.id FROM lib2_artists a "
+                    "WHERE a.name_key = ? AND (a.server_source = ? OR EXISTS ("
                     "SELECT 1 FROM lib2_media_server_mappings m "
-                    "WHERE m.entity_type='artist' AND m.entity_id=lib2_artists.id "
-                    "AND m.server_source=?)) LIMIT 1",
+                    "WHERE m.entity_type='artist' AND m.entity_id=a.id "
+                    f"AND m.server_source=?)){(' AND ' + visible) if visible else ''} LIMIT 1",
                     (normalize_name(artist_name), active_server, active_server),
                 )
                 row = cursor.fetchone()
-                if row and entity_visible(conn, "artist", row[0]):
+                if row:
                     return row[0]
     except Exception as e:
         logger.debug(
