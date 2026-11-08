@@ -304,3 +304,25 @@ def test_web_server_template_copy_sanitizes_the_listed_primary(db, monkeypatch):
          "track_number": 1, "disc_number": 1,
          "_artists_list": [{"name": "L.A.B."}, {"name": "AC/DC"}]})
     assert out.startswith("L.A.B (NZ)/B")
+
+
+def test_the_name_lookup_rides_the_lowercase_name_index(db):
+    """review 5 R5-D-4: name = ? COLLATE NOCASE had no index and range-scanned
+    every artist with an mbid"""
+    conn = db._get_connection()
+    try:
+        plan = []
+        real = conn.cursor()
+
+        class _Explain:
+            def execute(self, sql, params=()):
+                plan.extend(r[3] for r in real.execute("EXPLAIN QUERY PLAN " + sql, params))
+                return real.execute(sql, params)
+
+            def fetchall(self):
+                return real.fetchall()
+
+        assert sorted(facts_mod._mbids_named(_Explain(), "nIrVaNa")) == [UK, US]
+    finally:
+        conn.close()
+    assert any("idx_lib2_artists_name_lower" in step for step in plan), plan
