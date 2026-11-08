@@ -716,6 +716,37 @@ def _carry_upgrade_state(conn: Any) -> Dict[str, Any]:
     return stats
 
 
+_SHARED_FILES_MARKER = "_lib2_shared_files_folded"
+
+
+def _fold_shared_files_once(database: Any, conn: Any) -> Dict[str, int]:
+    """fold the 3.6.1 per-server twins once per finished import.
+
+    the shared-path query walks every file path with a temp b-tree (about
+    4.4 s on a big library) and ran on every start while the enrichment
+    workers stood aside, finding nothing on a converged library. twins come
+    from an import (which folds at its own end, repair_duplicate_artists),
+    so this catch-up for installs imported before one-file-one-track runs
+    once per finished import (a reimport gets a new finished_at). the
+    maintenance repair-duplicates action still folds anything later.
+    review 5 R5-E-6. does not commit."""
+    state = get_state(database)
+    if state.get("status") != "done":
+        return {}
+    finished = str(state.get("finished_at") or "")
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
+                 "(import_finished_at TEXT PRIMARY KEY, "
+                 "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
+    if conn.execute(f"SELECT 1 FROM {_SHARED_FILES_MARKER} WHERE import_finished_at=?",
+                    (finished,)).fetchone():
+        return {}
+    from core.library2.dedup_repair import fold_shared_file_tracks
+    stats = fold_shared_file_tracks(conn)
+    conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
+                 "VALUES(?, ?)", (finished, int(stats.get("shared_files_folded") or 0)))
+    return stats
+
+
 def run_deferred_backfills(database: Any, *,
                            should_stop: Optional[Callable[[], bool]] = None,
                            batch_size: int = 500) -> Dict[str, Any]:
@@ -750,8 +781,7 @@ def run_deferred_backfills(database: Any, *,
                 should_stop=should_stop,
             )
             # Installs migrated before one-file-one-track also converge here.
-            from core.library2.dedup_repair import fold_shared_file_tracks
-            stats["shared_files"] = fold_shared_file_tracks(conn)
+            stats["shared_files"] = _fold_shared_files_once(database, conn)
             conn.commit()
             # 3.6.1 logged a scan import on every refresh; once, in batches
             from core.maintenance.library_history_dedupe import dedupe_scan_import_history
