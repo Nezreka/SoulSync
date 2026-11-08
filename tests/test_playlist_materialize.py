@@ -234,6 +234,28 @@ def test_a_3_6_1_folder_is_relinked_and_pruned_on_its_first_rebuild(tmp_path: Pa
     assert (folder / "notes.txt").read_text() == "mine"   # never the user's own file
 
 
+@requires_symlinks
+def test_a_users_own_link_in_a_3_6_1_folder_is_never_adopted(tmp_path: Path):
+    """review 4 R4-D-8: every symlink was adopted and pruned, the user's own
+    link to a cover or another folder included"""
+    real = _library(tmp_path)
+    root = str(tmp_path / "Playlists")
+    folder = Path(root) / "Old Mix"
+    folder.mkdir(parents=True)
+    cover = tmp_path / "art" / "cover.jpg"
+    cover.parent.mkdir()
+    cover.write_bytes(b"jpg")
+    os.symlink(str(cover), folder / "cover.jpg")
+    os.symlink(str(tmp_path / "art"), folder / "Artwork")
+    os.symlink(real[1], folder / "dropped.flac")      # 3.6.1's, still pruned
+
+    s = rebuild_playlist_folder(root, "Old Mix", [real[0]], mode="symlink")
+
+    assert s.failed == 0, s.errors
+    assert os.path.islink(folder / "cover.jpg") and os.path.islink(folder / "Artwork")
+    assert not os.path.lexists(folder / "dropped.flac")
+
+
 def test_a_3_6_1_copy_is_adopted_only_when_its_bytes_are_the_members(tmp_path: Path):
     """G13-1 safety: in copy mode a same-named file is adopted (and so may be
     replaced or pruned later) only when it is byte for byte the member. a file

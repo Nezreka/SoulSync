@@ -338,15 +338,27 @@ def _adoptable(real: str, dest: str, mode: str) -> bool:
     return _copy_is_current(real, dest)
 
 
+_LEGACY_TRACK_EXTS = frozenset({
+    ".flac", ".mp3", ".m4a", ".mp4", ".aac", ".ogg", ".oga", ".opus", ".wav",
+    ".wma", ".aiff", ".aif", ".ape", ".alac", ".dsf", ".dff", ".wv"})
+
+
 def _adopt_legacy_folder(pdir: str, owned: dict, wanted: dict, mode: str) -> None:
     """A folder 3.6.1 built has no manifest. 3.6.1 relinked a broken link,
     re-copied a stale copy and pruned what left the playlist; v2 only manages
     what its manifest owns, so those entries failed every rebuild or stayed for
-    good. Once, the first time v2 sees such a folder: every symlink is adopted
-    (a link is never an original; 3.6.1 only wrote links and copies here), and
+    good. Once, the first time v2 sees such a folder: a symlink to an audio
+    file is adopted (3.6.1 only wrote links to tracks and copies here), and
     in copy mode a regular file that is byte for byte the member it is named
     for, which proves it is a copy. A same-named file with other bytes may be
-    the user's only copy: it is never adopted, so never overwritten."""
+    the user's only copy: it is never adopted, so never overwritten.
+
+    review 4 R4-D-8: every symlink used to be adopted, whatever it pointed at,
+    so a link the user put there (a cover, another folder) was pruned. one
+    that points at no audio file isn't 3.6.1's and stays. (two profiles'
+    same-named playlists share a 3.6.1 folder; 3.6.1 pruned each other's
+    links too, and v2 moves the second into its own folder.)"""
+    wanted_sources = {os.path.realpath(src) for src in wanted.values()}
     try:
         names = os.listdir(pdir)
     except OSError:
@@ -357,8 +369,12 @@ def _adopt_legacy_folder(pdir: str, owned: dict, wanted: dict, mode: str) -> Non
             continue
         try:
             if os.path.islink(full):
-                owned[name] = {"source": os.path.realpath(full),
-                               "fingerprint": artifact_fingerprint(full)}
+                target = os.path.realpath(full)
+                is_track = os.path.splitext(target)[1].lower() in _LEGACY_TRACK_EXTS
+                if full in wanted or target in wanted_sources or (
+                        is_track and not os.path.isdir(target)):
+                    owned[name] = {"source": target,
+                                   "fingerprint": artifact_fingerprint(full)}
             elif mode == "copy" and full in wanted and os.path.isfile(full):
                 import filecmp
                 source = wanted[full]
