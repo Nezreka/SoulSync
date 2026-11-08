@@ -22,15 +22,16 @@ def _native_target(target: str, deps):
     (never read as a coincident native id), or None."""
     if target.startswith('lib2:') and target[5:].isdigit():
         return target
-    if not target.isdigit():
-        return None
     get_db = getattr(deps, 'get_database', None)
     if not callable(get_db):
         return None
     try:
         with closing(get_db()._get_connection()) as conn:
+            # review 5 R5-C-2: a navidrome or jellyfin 3.6.1 album id is a hash
+            # or guid, kept as TEXT in legacy_album_id. look it up as given;
+            # only an all-digit id is an int
             row = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=? LIMIT 1",
-                               (int(target),)).fetchone()
+                               (int(target) if target.isdigit() else target,)).fetchone()
     except Exception:  # noqa: BLE001 - an unreadable mapping selects nothing
         return None
     return f"lib2:{row[0]}" if row else None

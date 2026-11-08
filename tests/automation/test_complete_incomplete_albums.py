@@ -90,6 +90,28 @@ def test_a_saved_361_album_id_still_targets_its_album(tmp_path):
     assert result['applied'] == 1 and fixed == [[3]]  # legacy album 311 is lib2 album 7
 
 
+def test_a_saved_361_hash_album_id_still_targets_its_album(tmp_path):
+    """review 5 R5-C-2: on navidrome and jellyfin a 3.6.1 album id is a hash,
+    kept as TEXT in legacy_album_id. only all-digit ids were mapped, so a
+    saved automation aimed at one skipped every run"""
+    import sqlite3
+    fixed = []
+    db = _Db(str(tmp_path / 'm.db'))
+    conn = sqlite3.connect(db.path)
+    conn.execute("INSERT INTO lib2_albums VALUES (6, '0a407eeace67cdeef8eb7899dd190f0c')")
+    conn.commit()
+    conn.close()
+    deps = SimpleNamespace(
+        get_database=lambda: db,
+        bulk_fix_repair_findings=lambda ids: fixed.append(ids) or {'fixed': len(ids)})
+    result = auto_complete_incomplete_albums(
+        {'_event_data': _DONE, 'target_album_id': '0a407eeace67cdeef8eb7899dd190f0c'}, deps)
+    assert result['applied'] == 1 and fixed == [[2]]
+    missing = auto_complete_incomplete_albums(
+        {'_event_data': _DONE, 'target_album_id': 'ffffffffffffffffffffffffffffffff'}, deps)
+    assert missing['status'] == 'skipped'
+
+
 
 def test_findings_it_cannot_apply_never_hold_every_slot(tmp_path):
     """third #1062 review G05-1: guest-only findings (only other artists'
