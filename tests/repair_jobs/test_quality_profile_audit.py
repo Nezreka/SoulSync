@@ -348,3 +348,15 @@ def test_a_scheduled_upgrade_of_an_imported_track_queues_and_stays_queued(audit)
         conn.commit()
     drain(audit.db)
     assert audit.db.get_wishlist_count(profile_id=1) == 1
+
+
+@pytest.mark.parametrize("profile_id", [1, 2])
+def test_any_profiles_manual_quality_override_protects_the_file(audit, profile_id):
+    """review 5 R5-I-2: a shared file's owner is 1, but profile 2 can force it
+    past the quality check; that override protects the file too"""
+    from core.library2.manual_skips import attach_manual_skip_file, record_manual_skip
+    record_manual_skip(audit.db, content_key="u::song.wav", title="Song", artist="Artist",
+                       skipped_checks=["quality"], profile_id=profile_id)
+    attach_manual_skip_file(audit.db, content_key="u::song.wav", file_path=str(audit.path))
+    result = _scan(audit)
+    assert result.findings_created == 0 and _findings(audit) == []

@@ -274,7 +274,9 @@ class AcoustIDScannerJob(RepairJob):
                         conn,
                         (file_path, resolved),
                         ("acoustid",),
-                        profile_id=1,
+                        # any profile's manual "skip acoustid" covers the
+                        # file, not only the admin's (review 5 R5-I-2)
+                        profile_id=None,
                     )
                 finally:
                     conn.close()

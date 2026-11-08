@@ -261,6 +261,15 @@ def hint_fields_for(
 
 
 
+def _remove_staged(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as cleanup_exc:
+        logger.warning("Could not remove orphaned staged copy %s: %s", path, cleanup_exc)
+
+
 def apply_album_reassign(
     plan: ReassignPlan,
     *,
@@ -276,9 +285,12 @@ def apply_album_reassign(
 ) -> Dict[str, Any]:
     """Stage every mapped file and write its hint. Returns a per-file summary.
 
-    Ordering is deliberate: stage the COPY first, then write the hint. A hint
-    without its file is a row that can never be consumed and sits pending
-    forever.
+    Ordering is deliberate (review 5 R5-D-3): copy to a hidden ``.part`` name
+    first, then write and COMMIT the hint, then rename the copy into place.
+    The copy never runs inside an open write transaction (a 12-track FLAC
+    album held every other writer off for the whole copy), and auto-import
+    never sees a staged file whose hint it can't read yet. A hint whose file
+    could not be put in place is deleted again.
 
     If the hint cannot be written the staged copy is REMOVED again. Leaving it
     is not harmless: auto-import would pick it up as an ordinary file and match
@@ -295,10 +307,20 @@ def apply_album_reassign(
     staged: List[Dict[str, Any]] = []
     failed: List[Dict[str, Any]] = []
 
+    conn = getattr(cursor, 'connection', None)
+
+    def _commit():
+        if conn is not None:
+            conn.commit()
+
+    def _rollback():
+        if conn is not None:
+            conn.rollback()
+
     for pairing in plan.mapped:
         try:
             staging = stage_file_for_reidentify(
-                pairing.local_path, staging_dir, pairing.local_id)
+                pairing.local_path, staging_dir, pairing.local_id, hidden=True)
         except FileNotFoundError:
             failed.append({'title': pairing.local_title,
                            'error': 'file is no longer on disk'})
@@ -318,17 +340,34 @@ def apply_album_reassign(
                 staging.get('content_hash'),
                 replace=replace,
             )
-            create_hint(cursor, hint)
+            hint_id = create_hint(cursor, hint)
+            _commit()
         except Exception as exc:                        # noqa: BLE001
             # Take the staged copy back out, or auto-import will treat it as a
             # new file and duplicate the track.
             try:
-                os.remove(staging['staged_path'])
-            except OSError as cleanup_exc:
-                logger.warning("Could not remove orphaned staged copy %s: %s",
-                               staging['staged_path'], cleanup_exc)
+                _rollback()
+            except Exception as rollback_exc:           # noqa: BLE001
+                logger.debug("reassign hint rollback failed: %s", rollback_exc)
+            _remove_staged(staging.get('temp_path') or staging['staged_path'])
             failed.append({'title': pairing.local_title, 'error': f'could not record hint: {exc}'})
             continue
+
+        temp = staging.get('temp_path')
+        if temp:
+            try:
+                os.replace(temp, staging['staged_path'])
+            except OSError as exc:
+                # a hint with no file never gets consumed: take it back out
+                try:
+                    cursor.execute("DELETE FROM rematch_hints WHERE id = ?", (hint_id,))
+                    _commit()
+                except Exception as hint_exc:           # noqa: BLE001
+                    logger.warning("Could not remove hint %s for unstaged file: %s",
+                                   hint_id, hint_exc)
+                _remove_staged(temp)
+                failed.append({'title': pairing.local_title, 'error': f'could not stage file: {exc}'})
+                continue
 
         staged.append({'title': pairing.local_title,
                        'target_title': pairing.target_title,

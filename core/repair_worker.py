@@ -3748,7 +3748,8 @@ class RepairWorker:
                                                'fix this finding on its own to add them'}
         if album_id is None or not track_ids:
             return {'success': False, 'error': 'Nothing to fill on this finding; rerun Album Completeness'}
-        from core.library2.monitor_rules import PROVENANCE_USER, record_rules
+        from core.library2.monitor_rules import (
+            PROVENANCE_USER, explicitly_unmonitored_track_ids, record_rules)
         from core.library2.mirror_outbox import drain, enqueue_projected_tracks
         from core.library2.wanted import recompute_wanted
         conn = self.db._get_connection()
@@ -3757,6 +3758,10 @@ class RepairWorker:
             live = [int(r[0]) for r in conn.execute(
                 f"SELECT id FROM lib2_tracks WHERE album_id=? AND id IN ({marks})",
                 (album_id, *track_ids))]
+            # a track unmonitored by hand since the scan keeps the user's no
+            # (review 5 R5-I-1)
+            vetoed = explicitly_unmonitored_track_ids(conn, live, profile_id=profile_id)
+            live = [t for t in live if t not in vetoed]
             if not live:
                 return {'success': False, 'error': 'Those tracks are no longer on this album; rerun Album Completeness'}
             record_rules(conn, 'track', live, True, PROVENANCE_USER, profile_id=profile_id)
@@ -3835,7 +3840,8 @@ class RepairWorker:
                     return {'success': False, 'error': 'The primary file changed; rerun the audit'}
                 from core.library2.manual_skips import active_skip_paths
                 from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
-                if (row['path'] in active_skip_paths(conn, ('quality', 'bit_depth'), profile_id=owner)
+                # any profile's override, as the audit itself (review 5 R5-I-2)
+                if (row['path'] in active_skip_paths(conn, ('quality', 'bit_depth'), profile_id=None)
                         or is_hand_tagged_path(row['path'], hand_tagged_path_keys(self.db))):
                     return {'success': True, 'action': 'ignored', 'message': 'A manual quality choice protects this file'}
                 profile = effective_track_profile(conn, tid)

@@ -101,8 +101,11 @@ def _match_online(name: str, album: str) -> str:
 
 
 def _mbids_named(cursor, name: str) -> list:
+    # LOWER(name) rides idx_lib2_artists_name_lower; NOCASE had no index and
+    # range-scanned every artist with an mbid, ~0.7s a lookup on a big library
+    # (review 5 R5-D-4). both fold ascii only, so the match is the same.
     cursor.execute(
-        "SELECT DISTINCT musicbrainz_id FROM lib2_artists WHERE name = ? COLLATE NOCASE "
+        "SELECT DISTINCT musicbrainz_id FROM lib2_artists WHERE LOWER(name) = LOWER(?) "
         "AND musicbrainz_id IS NOT NULL AND musicbrainz_id != ''", (name,))
     return [str(r[0]) for r in cursor.fetchall()]
 

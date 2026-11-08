@@ -13,6 +13,14 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_jobs.library_reorganize")
 
 
+def _track_in_scope(track: dict, allowed) -> bool:
+    """A preview track is in a scoped run when its stored path (or the
+    resolved one) is on the run's allowlist."""
+    return any(file_path_in_scope(track.get(key), allowed)
+               for key in ("source_db_path", "current_path_abs", "current_path")
+               if track.get(key))
+
+
 def _preview_every_library(context, album_id: int) -> dict:
     """The album's plan in every library that holds its files, each into its
     own root (what the queued reorganize itself does). Planned once into the
@@ -145,7 +153,8 @@ class LibraryReorganizeJob(RepairJob):
         # #1716: a library-wide scan resumes right after the last album a run
         # finished under the same mode and naming; a scoped run never touches
         # that checkpoint.
-        library_wide = get_scope_file_paths(context) is None
+        allowed = get_scope_file_paths(context)
+        library_wide = allowed is None
         scan_key = f"{'dry' if dry_run else 'live'}|{int(recheck)}|{naming_fingerprint()}"
         start = self.resume_index(context, [a["id"] for a in albums], scan_key) if library_wide else 0
         if start:
@@ -213,7 +222,16 @@ class LibraryReorganizeJob(RepairJob):
                             and not t.get("collision") for t in tracks)):
                 from core.library_reorganize import mark_album_placed
                 mark_album_placed(context.db, album_id)
-            if dry_run:
+            # a scoped run moves only the files it was given: an artist's one
+            # guest track keeps the rest of a compilation where it is. an album
+            # only partly in scope gets per-track findings even in live mode,
+            # since the queue moves whole albums (review 5 R5-I-5)
+            partial = False
+            if not library_wide:
+                in_scope = [t for t in mismatched if _track_in_scope(t, allowed)]
+                partial = len(in_scope) < len(mismatched)
+                mismatched = in_scope
+            if dry_run or partial:
                 for track in mismatched:
                     # `track_id` is ALREADY the lib2 id: the preview is built
                     # from `SELECT t.* FROM lib2_tracks t` (core/library_

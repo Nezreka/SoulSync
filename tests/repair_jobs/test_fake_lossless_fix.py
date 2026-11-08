@@ -187,3 +187,30 @@ def test_an_uncatalogued_file_is_only_removed_when_asked(tmp_path: Path):
     removed = worker._fix_fake_lossless("file", None, str(stray), {"_fix_action": "delete"})
     assert removed["success"] is True and not stray.exists()
     assert [e["source"] for e in list_entries(str(transfer))["entries"]] == ["fake_lossless"]
+
+
+def test_the_detector_reads_the_volumedetect_report(monkeypatch):
+    """review 5 R5-I-6: volumedetect logs at info level. run with '-v quiet'
+    its report never reached stderr, so no file could ever be flagged. the
+    fake ffmpeg here behaves like the real one: quiet means silent."""
+    import json
+    import subprocess
+    from types import SimpleNamespace
+    import core.repair_jobs.fake_lossless_detector as fld
+
+    def run(cmd, **_kw):
+        if cmd[0] == 'ffprobe':
+            return SimpleNamespace(returncode=0, stderr='', stdout=json.dumps(
+                {'streams': [{'sample_rate': '44100', 'bits_per_raw_sample': '16'}]}))
+        level = cmd[cmd.index('-v') + 1]
+        report = ('[Parsed_volumedetect_1 @ 0x1] n_samples: 2646000\n'
+                  '[Parsed_volumedetect_1 @ 0x1] mean_volume: -79.5 dB\n'
+                  '[Parsed_volumedetect_1 @ 0x1] max_volume: -60.1 dB\n')
+        return SimpleNamespace(returncode=0, stdout='',
+                               stderr=report if level in ('info', 'verbose', 'debug') else '')
+    monkeypatch.setattr(subprocess, 'run', run)
+
+    analysis = fld._analyze_file('/music/lowpassed.flac')
+
+    assert analysis['detected_cutoff_khz'] == 44100 * 0.35 / 1000
+    assert analysis['detected_cutoff_khz'] < fld.FakeLosslessDetectorJob.default_settings['spectral_cutoff_khz']

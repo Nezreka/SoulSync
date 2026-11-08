@@ -359,6 +359,38 @@ def test_library_v2_wanted_tracks_without_files_are_not_owned(tmp_path):
     assert findings == []
 
 
+def test_library_v2_singles_never_crowd_out_real_candidates(tmp_path):
+    """review 5 R5-I-3: the lone-track query took the first 2000 by title and
+    then skipped singles, so 2000 singles that sort first hid every album"""
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists (name, name_key) VALUES ('Solo', 'solo')").lastrowid
+        for n in range(2001):
+            album_id = conn.execute(
+                "INSERT INTO lib2_albums (primary_artist_id, title, album_type, image_url, origin) "
+                "VALUES (?, ?, 'single', 'http://art.jpg', 'library')",
+                (artist_id, f"A Single {n:04d}")).lastrowid
+            track_id = conn.execute(
+                "INSERT INTO lib2_tracks (album_id, title, track_number) VALUES (?, ?, 1)",
+                (album_id, f"A Single {n:04d}")).lastrowid
+            conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                         (track_id, f"/music/Solo/{n}.flac"))
+        conn.commit()
+    lone = _lib2_album(db, "Various Artists", "Zz Hitzone 43", owned_tracks=1,
+                       catalogue_tracks=20, image="http://art.jpg", track_count=20,
+                       credit="Daughtry")
+    findings = []
+    ctx = JobContext(db=db, transfer_folder="/music", config_manager=None,
+                     create_finding=lambda **kw: findings.append(kw) or True)
+
+    SuspectAlbumTagDetector().scan(ctx)
+
+    assert [f["entity_id"] for f in findings] == [f"lib2:{lone[0]}"]
+
+
 # ---------------------------------------------------------------------------
 # Signal 4 (#1567): multi-track poisoned batches.
 

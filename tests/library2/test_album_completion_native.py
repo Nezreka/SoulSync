@@ -391,3 +391,51 @@ def test_an_album_missing_only_guest_songs_still_files_a_finding(catalogue):
     explicit = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None,
                                                  {**finding['details'], '_explicit_single_fix': True})
     assert explicit['success'] is True and [r[0] for r in rules(db)] == [guest]
+
+
+def _veto(db, track_id):
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    with db._get_connection() as conn:
+        record_rule(conn, 'track', track_id, False, PROVENANCE_USER, profile_id=1)
+        conn.commit()
+
+
+def _user_rule(db, track_id):
+    with db._get_connection() as conn:
+        return tuple(conn.execute(
+            "SELECT monitored, provenance FROM lib2_monitor_rules WHERE entity_type='track' "
+            'AND entity_id=? AND profile_id=1', (track_id,)).fetchone())
+
+
+@pytest.mark.parametrize('scoped', [False, True])
+def test_a_track_the_user_unmonitored_stays_unmonitored(catalogue, scoped):
+    """review 5 R5-I-1: the user's explicit no is a veto, in automatic mode
+    and in a one-album run (the album page, the automation)"""
+    db, aid, _owned, missing, _loads = catalogue
+    _veto(db, missing)
+    result = run(db, scope={'target_album_id': f'lib2:{aid}'} if scoped else None)
+    assert result.auto_fixed == 0
+    assert _user_rule(db, missing) == (0, 'user_explicit')
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT monitored FROM lib2_tracks WHERE id=?', (missing,)).fetchone()[0] == 0
+
+
+def test_a_finding_never_offers_a_track_the_user_unmonitored(catalogue):
+    db = catalogue[0]
+    aid, gap = _three_owned_one_missing(db)
+    _veto(db, gap)
+    found, create = _collector()
+    run(db, as_shipped=True, create_finding=create)
+    assert [f for f in found if f['entity_id'] == f'lib2:{aid}'] == []
+
+
+def test_approving_after_the_user_unmonitored_keeps_the_no(catalogue):
+    db = catalogue[0]
+    aid, gap = _three_owned_one_missing(db)
+    found, create = _collector()
+    run(db, as_shipped=True, create_finding=create)
+    finding, = [f for f in found if f['entity_id'] == f'lib2:{aid}']
+    _veto(db, gap)
+    fixed = _worker(db)._fix_incomplete_album('album', finding['entity_id'], None, finding['details'])
+    assert fixed['success'] is False
+    assert _user_rule(db, gap) == (0, 'user_explicit')

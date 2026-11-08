@@ -129,6 +129,7 @@ class SuspectAlbumTagDetector(RepairJob):
                         FROM lib2_albums al
                         JOIN lib2_tracks t ON t.album_id = al.id
                         WHERE {_owned_track_sql('t')}
+                          AND LOWER(COALESCE(al.album_type, '')) <> 'single'
                         GROUP BY al.id
                         HAVING COUNT(t.id) = 1
                     )
@@ -186,11 +187,15 @@ class SuspectAlbumTagDetector(RepairJob):
                      LIMIT 1)
                 WHERE {_owned_track_sql('t')}
                   AND f.path IS NOT NULL AND f.path != ''
+                  AND LOWER(COALESCE(al.album_type, '')) <> 'single'
                 GROUP BY al.id
                 HAVING COUNT(t.id) = 1
                 ORDER BY al.title
-                LIMIT 2000
             """)
+            # singles are never suspects, so they stay out in sql, and there is
+            # no cap: a LIMIT 2000 filled with singles left 157 of 2,731 real
+            # candidates checked, the same ones every run (review 5 R5-I-3).
+            # the per-row check is cheap and offline.
             rows = [dict(r) for r in cur.fetchall()]
         finally:
             conn.close()

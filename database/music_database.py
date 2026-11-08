@@ -2748,24 +2748,15 @@ class MusicDatabase:
         last_attempted}]}``. Raises ``UnmatchedQueryError`` for an unknown
         service / unsupported entity type / bad status (the caller maps that to
         an HTTP 400)."""
-        from core.enrichment.unmatched import (
-            build_count_query,
-            build_unmatched_query,
-        )
+        from core.enrichment.unmatched import page_unmatched, unmatched_snapshot, validate_request
 
-        sql, params = build_unmatched_query(
-            service, entity_type, status, query, limit, offset
-        )
-        count_sql, count_params = build_count_query(service, entity_type, status, query)
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor()
-            total = cursor.execute(count_sql, count_params).fetchone()[0]
-            rows = cursor.execute(sql, params).fetchall()
-            items = [dict(row) for row in rows]
-            return {'total': total or 0, 'items': items}
-        finally:
-            conn.close()
+        # one kept pass over the universe serves every page, search and the
+        # breakdown; a fresh scan per page took ~20s on a big library
+        # (review 5 R5-D-1)
+        validate_request(service, entity_type, status)
+        snapshot = unmatched_snapshot(self._get_connection, self.database_path,
+                                      service, entity_type)
+        return page_unmatched(snapshot, status, query, limit, offset)
 
     def get_enrichment_breakdown(self, service: str, entity_type: str) -> dict:
         """Return ``{matched, not_found, pending, total}`` for a source/entity.
@@ -2773,22 +2764,12 @@ class MusicDatabase:
         The per-worker ``get_stats().progress`` lumps matched + not_found into a
         single 'processed' count; this splits them so the modal can show the
         real match rate. Raises ``UnmatchedQueryError`` on bad input."""
-        from core.enrichment.unmatched import build_breakdown_query
+        from core.enrichment.unmatched import unmatched_snapshot
 
-        sql, params = build_breakdown_query(service, entity_type)
-        conn = self._get_connection()
-        try:
-            row = conn.cursor().execute(sql, params).fetchone()
-            if not row:
-                return {'matched': 0, 'not_found': 0, 'pending': 0, 'total': 0}
-            return {
-                'matched': row[0] or 0,
-                'not_found': row[1] or 0,
-                'pending': row[2] or 0,
-                'total': row[3] or 0,
-            }
-        finally:
-            conn.close()
+        # the same kept pass as the unmatched list (review 5 R5-D-1)
+        snapshot = unmatched_snapshot(self._get_connection, self.database_path,
+                                      service, entity_type)
+        return dict(snapshot['counts'])
 
     def reset_enrichment(self, service: str, entity_type: str, scope: str = 'item', entity_id=None) -> int:
         """Re-queue item(s) for a source by clearing match_status back to NULL.
@@ -2811,6 +2792,8 @@ class MusicDatabase:
                     "DELETE FROM lib2_provider_attempts WHERE entity_type=? "
                     "AND entity_id=? AND service=?", (entity_type, item_id, service))
             conn.commit()
+            from core.enrichment.unmatched import invalidate_unmatched_snapshots
+            invalidate_unmatched_snapshots()
             return len(ids)
         finally:
             conn.close()
