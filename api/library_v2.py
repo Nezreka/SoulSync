@@ -3905,6 +3905,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # _profile() degrades to 1 without one, which would mirror into the
         # wrong user's wishlist on multi-profile installs.
         active_profile = _intent_profile()
+        # same for the shared intent (review 5 R5-B-2): the thread has no
+        # request, so a member read as the admin there and wrote the shared
+        # monitored columns
+        shared_intent = _shared_intent()
 
         def _run():
             db = get_database()
@@ -3947,7 +3951,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                 except Exception as e:  # noqa: BLE001
                                     logger.debug("bulk tracklist resolve failed (%s): %s",
                                                  album_id, e)
-                        if _shared_intent():
+                        if shared_intent:
                             conn.execute("UPDATE lib2_albums SET monitored=? WHERE id=?",
                                          (1 if monitored else 0, album_id))
                         from core.library2.monitor_rules import (
@@ -3977,7 +3981,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                             track_ids = _bulk_track_ids_for_albums(conn, [album_id])
                         if track_ids:
                             marks = ",".join("?" for _ in track_ids)
-                            if _shared_intent():
+                            if shared_intent:
                                 conn.execute(
                                     f"UPDATE lib2_tracks SET monitored=? WHERE id IN ({marks})",
                                     [1 if monitored else 0, *track_ids])
