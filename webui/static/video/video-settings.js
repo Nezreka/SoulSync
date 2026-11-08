@@ -378,6 +378,19 @@
           .catch(function () { /* ignore */ });
     }
 
+    // Monitor Specials lives in Library > Video Preferences but is stored with
+    // the video downloads config (the server saves only the keys sent), so it
+    // posts on its own and the Usenet panel's save never re-posts it.
+    function saveMonitorSpecials() {
+        var el = document.getElementById('video-monitor-specials');
+        if (!el) return Promise.resolve();
+        return fetch(DOWNLOADS_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ monitor_specials: !!el.checked })
+        }).then(function () { toast(el.checked ? 'Specials monitored' : 'Specials unmonitored', 'success'); })
+          .catch(function () { toast('Could not save Monitor Specials', 'error'); });
+    }
+
     // ── Downloads tab: folders + source mode + hybrid chain ──
     var VIDEO_SOURCES = ['soulseek', 'torrent', 'usenet'];
     var SRC_DL_LABEL = { soulseek: 'Soulseek', torrent: 'Torrent', usenet: 'Usenet' };
@@ -713,6 +726,8 @@
                 if (urc) urc.value = d.usenet_remove_completed || 'off';
                 var rdf = document.getElementById('video-redownload-failed');
                 if (rdf) rdf.checked = d.redownload_failed !== false;
+                var msp = document.getElementById('video-monitor-specials');
+                if (msp) msp.checked = d.monitor_specials !== false;
                 _videoSeedRules = d.seed_overrides || {};
                 renderSeedIndexers();
                 wireSeedIndexers();
@@ -2589,6 +2604,8 @@
         if (autoplay) autoplay.addEventListener('change', function () { savePrefs(); });
         var region = document.getElementById('video-watch-region');
         if (region) region.addEventListener('change', function () { savePrefs(); });
+        var specials = document.getElementById('video-monitor-specials');
+        if (specials) specials.addEventListener('change', function () { saveMonitorSpecials(); });
         // Server toggle (Plex/Jellyfin) — select + reveal that server's config.
         var toggles = document.querySelectorAll('[data-video-server-toggle]');
         for (var t = 0; t < toggles.length; t++) {

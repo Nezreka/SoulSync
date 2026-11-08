@@ -109,7 +109,8 @@ def latest_season_numbers(detail: Dict[str, Any], keep: int = 2) -> List[int]:
 
 
 def episodes_airing_between(engine: Any, tmdb_id: int, start: str, end: str,
-                            seasons_to_check: int = 2) -> Dict[str, Any]:
+                            seasons_to_check: int = 2,
+                            include_specials: bool = True) -> Dict[str, Any]:
     """A show's episodes airing in [start, end], straight from TMDB, plus the
     show poster to file them under: ``{"poster_url": str|None, "episodes": []}``.
 
@@ -126,6 +127,9 @@ def episodes_airing_between(engine: Any, tmdb_id: int, start: str, end: str,
     Bounded to the newest couple of seasons, so at most one detail call plus
     two season calls per show, all engine-cached. Failures degrade to empty
     because a metadata hiccup must never stop the rest of the run.
+
+    ``include_specials=False`` (the 'Monitor Specials' setting off) drops
+    season 0, unless season 0 is all the show has.
     """
     empty: Dict[str, Any] = {"poster_url": None, "episodes": []}
     try:
@@ -134,7 +138,10 @@ def episodes_airing_between(engine: Any, tmdb_id: int, start: str, end: str,
         logger.warning("airing lookup: show detail failed for %s", tmdb_id)
         return empty
     out: List[Dict[str, Any]] = []
-    for sn in latest_season_numbers(detail, seasons_to_check):
+    seasons = latest_season_numbers(detail, seasons_to_check)
+    if not include_specials and any(n >= 1 for n in seasons):
+        seasons = [n for n in seasons if n != 0]
+    for sn in seasons:
         try:
             season = engine.tmdb_season(tmdb_id, sn) or {}
         except Exception:   # noqa: BLE001
