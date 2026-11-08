@@ -31,6 +31,13 @@ def _fresh_throttle():
     ca._reset_throttle()
 
 
+@pytest.fixture(autouse=True)
+def _no_active_media_server(monkeypatch):
+    """the vibe reads ids through the active server's mapping (G13-2); another
+    test's engine left behind made these jellyfin rows invisible"""
+    monkeypatch.setattr(ca, "_active_server_source", lambda: None)
+
+
 def _png(size=(300, 300)):
     # noise, not a flat color: a flat png squeezes under the "is this really
     # an image" size floor
