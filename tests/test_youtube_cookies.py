@@ -358,3 +358,13 @@ def test_the_connection_test_asks_before_it_probes():
     branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
     assert "cookie_setup_problem" in branch
     assert branch.index("cookie_setup_problem") < branch.index("check_connection()")
+
+
+def test_private_playlists_skip_the_auth_check_only_with_cookies():
+    """#2013: the webpage skip (#908) broke yt-dlp's private-playlist auth
+    check, so Liked Music failed with good cookies. signed in, the check is
+    skipped; anonymous, it stays (a private list can't work then anyway)"""
+    from core.youtube_cookies import youtube_tab_skips
+    assert youtube_tab_skips({}) == ['webpage']
+    assert youtube_tab_skips({'cookiefile': '/config/cookies.txt'}) == ['webpage', 'authcheck']
+    assert youtube_tab_skips({'cookiesfrombrowser': ('firefox',)}) == ['webpage', 'authcheck']

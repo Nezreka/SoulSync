@@ -282,3 +282,16 @@ __all__ = [
     "ytmusic_auth_from_cookiefile",
     "ytmusic_auth_from_config",
 ]
+
+
+def youtube_tab_skips(cookie_opts) -> list:
+    """what yt-dlp's playlist tab extractor skips. the webpage, always (#908).
+    #2013: yt-dlp's private-playlist auth check needs that webpage, so with
+    the webpage skipped, Liked Music (list=LM) failed with "playlists that
+    require authentication may not extract correctly" even with good cookies.
+    with cookies the API calls are signed in, so the check is skipped too;
+    without them a private list can't work anyway and the check stays"""
+    skips = ['webpage']
+    if cookie_opts and (cookie_opts.get('cookiefile') or cookie_opts.get('cookiesfrombrowser')):
+        skips.append('authcheck')
+    return skips

@@ -13704,7 +13704,10 @@ def parse_youtube_playlist(url):
             # 100 -> 200+ on a large playlist. Remove once the upstream fix (PR #16948) ships.
             'extractor_args': {'youtubetab': {'skip': ['webpage']}},
         }
-        ydl_opts.update(_youtube_cookie_opts())
+        cookie_opts = _youtube_cookie_opts()
+        ydl_opts.update(cookie_opts)
+        from core.youtube_cookies import youtube_tab_skips
+        ydl_opts['extractor_args']['youtubetab']['skip'] = youtube_tab_skips(cookie_opts)
 
         tracks = []
 
