@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
@@ -1534,6 +1535,48 @@ def _file_playlists_many(conn, file_ids) -> Dict[int, List[str]]:
     return found
 
 
+def _active_media_server() -> str:
+    try:
+        from core.settings import config_manager
+        return str(config_manager.get_active_media_server() or "").strip().lower()
+    except Exception:  # noqa: BLE001 - no server known: the 3.6.1 id still answers
+        return ""
+
+
+def _server_stream_ids_many(conn, tracks: List[Any]) -> Dict[int, Any]:
+    """The id the ACTIVE media server knows each track by: its mapping on
+    that server, then the row's own server id when it came from that
+    server, then the 3.6.1 id (core/search/library_check's order).
+
+    the 3.6.1 id is whatever server the old row came from, frozen at the
+    upgrade: a plex ratingKey after a move to navidrome, or a pre-rekey
+    navidrome id. handed out as the stream id it played a dead or foreign
+    id although the mapping held the right one. review 5 R5-X3-3."""
+    active = _active_media_server()
+    mapped: Dict[int, Any] = {}
+    ids = sorted({int(t["id"]) for t in tracks})
+    if active and ids:
+        try:
+            for row in conn.execute(
+                    "SELECT entity_id, server_id FROM lib2_media_server_mappings "
+                    "WHERE entity_type='track' AND server_source=? "
+                    "AND entity_id IN (SELECT value FROM json_each(?)) "
+                    "ORDER BY entity_id, server_library_id",
+                    (active, json.dumps(ids))).fetchall():
+                if row[1]:
+                    mapped.setdefault(int(row[0]), row[1])
+        except sqlite3.OperationalError:  # a schema without mappings
+            pass
+    result: Dict[int, Any] = {}
+    for t in tracks:
+        keys = set(t.keys())
+        own = (t["server_id"] if active and "server_id" in keys and "server_source" in keys
+               and str(t["server_source"] or "").strip().lower() == active else None)
+        legacy = t["legacy_track_id"] if "legacy_track_id" in keys else None
+        result[int(t["id"])] = mapped.get(int(t["id"])) or own or legacy
+    return result
+
+
 def _serialize_track(
     conn,
     t,
@@ -1547,8 +1590,11 @@ def _serialize_track(
     linked_from: Any = _NOT_LOADED,
     findings: Any = None,
     playlists: Optional[Dict[int, List[str]]] = None,
+    server_track_id: Any = _NOT_LOADED,
 ) -> Dict[str, Any]:
     """Build a track dict with linked artists, primary file, and computed status."""
+    if server_track_id is _NOT_LOADED:
+        server_track_id = _server_stream_ids_many(conn, [t]).get(int(t["id"]))
     if file_row is _NOT_LOADED:
         from core.library2.track_files import primary_file_row
         file_row = primary_file_row(conn, t["id"])
@@ -1677,9 +1723,8 @@ def _serialize_track(
         "id": t["id"],
         "lib2_track_id": t["id"],
         "legacy_track_id": t["legacy_track_id"] if "legacy_track_id" in keys else None,
-        # Legacy ids originate from the media-server-backed tracks table and
-        # are therefore also the only safe server stream id available here.
-        "server_track_id": t["legacy_track_id"] if "legacy_track_id" in keys else None,
+        # the active server's own id for it, see _server_stream_ids_many
+        "server_track_id": server_track_id,
         **pick(effective, "title", "track_number", "disc_number", "duration", "bpm"),
         "explicit": (bool(effective["explicit"]) if effective["explicit"] is not None else None),
         "style": effective["style"],
@@ -1765,6 +1810,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
         artists,
     )
     media_sources = _media_server_sources_many(conn, "track", track_ids)
+    stream_ids = _server_stream_ids_many(conn, tracks)
     from core.library2.validation import linked_findings_many
     findings_by_file = linked_findings_many(conn, [*files.values(), *borrowed_files.values()])
     playlists_by_file = _file_playlists_many(
@@ -1784,6 +1830,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
             media_server_sources=media_sources.get(int(track["id"]), []),
             findings=findings_by_file.get((files.get(int(track['id'])) or _borrowed_row(links, borrowed_files, int(track['id'])) or {}).get('id'), []),
             playlists=playlists_by_file,
+            server_track_id=stream_ids.get(int(track["id"])),
         )
         for track in tracks
     ]
@@ -2109,8 +2156,9 @@ def track_versions(conn, track_id: int) -> Optional[List[Dict[str, Any]]]:
         (int(track_id),),
     ).fetchall()
     playlists_by_file = _file_playlists_many(conn, [row["id"] for row in rows])
+    stream_id = _server_stream_ids_many(conn, [t]).get(int(t["id"]))
     versions = [_serialize_track(conn, t, album, file_row=dict(row), linked_from=None,
-                                 playlists=playlists_by_file)
+                                 playlists=playlists_by_file, server_track_id=stream_id)
                 for row in rows]
     _apply_quality_verdicts(conn, versions)
     return versions
