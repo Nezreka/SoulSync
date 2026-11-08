@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS seasons (
     overview      TEXT,
     poster_url    TEXT,
     monitored     INTEGER NOT NULL DEFAULT 1,
+    monitor_locked INTEGER NOT NULL DEFAULT 0,  -- 1 = set by the user's season toggle
     UNIQUE (show_id, season_number)
 );
 CREATE INDEX IF NOT EXISTS idx_seasons_show ON seasons(show_id);

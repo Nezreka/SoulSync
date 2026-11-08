@@ -515,6 +515,9 @@ _COLUMN_MIGRATIONS = [
     # failed, kept on the row; why a job run failed, kept on the run.
     ("video_repair_findings", "last_error", "TEXT"),
     ("video_repair_job_runs", "error_text", "TEXT"),
+    # a season's monitored flag was set by the user (the season toggle), so
+    # nothing automatic may move it. 0 = never set by hand.
+    ("seasons", "monitor_locked", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -1049,6 +1052,28 @@ class VideoDatabase:
                 "  WHERE t2.tvdb_id = s.tvdb_id AND t2.season_number > e.season_number "
                 "  AND ABS(julianday(json_extract(k.value, '$[1]')) "
                 "          - julianday(substr(e.air_date, 1, 10))) <= 1))")
+
+        # season monitoring: the season toggle used to write only the episodes
+        # while the Your library tab read seasons.monitored, which nothing
+        # wrote, so every season read back as monitored. carry what was
+        # already chosen over once: a season whose episodes are ALL
+        # unmonitored was turned off by hand. gated on a marker key, not on
+        # user_version, so it can't collide with another change taking the
+        # next schema number.
+        if conn.execute("SELECT 1 FROM video_settings WHERE key = ?",
+                        (VideoDatabase._SEASON_MONITOR_MARKER,)).fetchone() is None:
+            moved = conn.execute(
+                "UPDATE seasons SET monitored = 0, monitor_locked = 1 "
+                "WHERE monitored = 1 AND (show_id, season_number) IN ("
+                "SELECT show_id, season_number FROM episodes "
+                "GROUP BY show_id, season_number HAVING MAX(monitored) = 0)").rowcount
+            conn.execute("INSERT INTO video_settings (key, value) VALUES (?, '1') "
+                         "ON CONFLICT(key) DO UPDATE SET value = '1'",
+                         (VideoDatabase._SEASON_MONITOR_MARKER,))
+            if moved:
+                logger.info("season monitoring: %d unmonitored season(s) carried over", moved)
+
+    _SEASON_MONITOR_MARKER = "season_monitor_backfill_done"
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
     def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:
@@ -2747,13 +2772,18 @@ class VideoDatabase:
                         conn.execute(f"UPDATE episodes SET {', '.join(sets)} WHERE id=?", params)
                         touched += 1
                 else:
+                    # a new episode takes its season's flag: one added to a
+                    # season you unmonitored stays unmonitored
                     conn.execute(
                         "INSERT INTO episodes (show_id, season_id, season_number, episode_number, title, "
-                        "overview, air_date, runtime_minutes, still_url, rating, has_file) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                        "overview, air_date, runtime_minutes, still_url, rating, has_file, monitored) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, "
+                        "COALESCE((SELECT monitored FROM seasons WHERE id=?), 1))",
                         (show_id, season_id, season_number, en, e.get("title"), e.get("overview"),
-                         e.get("air_date"), e.get("runtime_minutes"), e.get("still_url"), e.get("rating")))
+                         e.get("air_date"), e.get("runtime_minutes"), e.get("still_url"), e.get("rating"),
+                         season_id))
                     touched += 1
+            self._apply_specials_policy(conn, show_id)
             conn.commit()
             return touched
         finally:
@@ -5346,8 +5376,11 @@ class VideoDatabase:
                         "INSERT INTO episodes (show_id, season_id, server_source, server_id, "
                         "season_number, episode_number, title, overview, air_date, "
                         "runtime_minutes, still_url, rating, tvdb_id, has_file, added_at, "
-                        "play_count, last_viewed_at, view_offset_ms) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "play_count, last_viewed_at, view_offset_ms, monitored) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        # a NEW row takes its season's flag; the update below
+                        # never touches monitored, so an existing row keeps its own
+                        "COALESCE((SELECT monitored FROM seasons WHERE id=?), 1)) "
                         "ON CONFLICT(show_id, season_number, episode_number) DO UPDATE SET "
                         "season_id=excluded.season_id, server_source=excluded.server_source, "
                         "server_id=excluded.server_id, title=excluded.title, "
@@ -5365,7 +5398,8 @@ class VideoDatabase:
                          ep.get("runtime_minutes"), ep.get("still_url"), ep.get("rating"),
                          ep.get("tvdb_id"), 1 if (ep.get("files") or ep.get("file")) else 0,
                          ep.get("added_at"),
-                         ep.get("play_count"), ep.get("last_viewed_at"), ep.get("view_offset_ms")),
+                         ep.get("play_count"), ep.get("last_viewed_at"), ep.get("view_offset_ms"),
+                         season_id),
                     )
                     ep_id = conn.execute(
                         "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
@@ -5409,6 +5443,7 @@ class VideoDatabase:
                 if row["season_number"] not in seen_seasons:
                     conn.execute("DELETE FROM seasons WHERE show_id=? AND season_number=?",
                                  (show_id, row["season_number"]))
+            self._apply_specials_policy(conn, show_id)
             conn.commit()
             return show_id
         finally:
@@ -7275,11 +7310,15 @@ class VideoDatabase:
             conn.close()
 
     def set_season_monitored(self, show_id: int, season_number: int, monitored: bool) -> int:
-        """Flip 'monitored' on every episode of one season. Returns how many rows
-        moved. Season monitoring is per-EPISODE in this schema (there is no
-        seasons.monitored), so the season is just the set of its episodes."""
+        """Monitor or unmonitor one season: the season row (what the Your
+        library tab shows, and what episodes added later inherit) and every
+        episode in it (what the hunts read). The season is marked as set by
+        hand. Returns how many episode rows moved."""
         conn = self._get_connection()
         try:
+            conn.execute(
+                "UPDATE seasons SET monitored=?, monitor_locked=1 WHERE show_id=? AND season_number=?",
+                (1 if monitored else 0, int(show_id), int(season_number)))
             cur = conn.execute(
                 "UPDATE episodes SET monitored=? WHERE show_id=? AND season_number=?",
                 (1 if monitored else 0, int(show_id), int(season_number)))
@@ -7287,6 +7326,55 @@ class VideoDatabase:
             return int(cur.rowcount or 0)
         except sqlite3.Error:
             logger.exception("set_season_monitored failed")
+            return 0
+        finally:
+            conn.close()
+
+    _MONITOR_SPECIALS_KEY = "monitor_specials"
+
+    @classmethod
+    def _apply_specials_policy(cls, conn, show_id=None) -> int:
+        """Bring Specials (season 0) in line with the 'Monitor Specials'
+        setting, for one show or (None) every show. Off: season 0 is
+        unmonitored, its episodes too. On: the ones this setting turned off
+        are monitored again. Left alone either way: a Specials season the user
+        set by hand (monitor_locked), and a show with nothing but specials
+        (Critical Role-style shows, where season 0 IS the show). Runs inside
+        the caller's transaction; returns how many seasons moved."""
+        row = conn.execute("SELECT value FROM video_settings WHERE key = ?",
+                           (cls._MONITOR_SPECIALS_KEY,)).fetchone()
+        want = 0 if (row is not None and str(row[0]) == "0") else 1
+        where = ("season_number = 0 AND monitor_locked = 0 AND monitored != ? "
+                 "AND EXISTS (SELECT 1 FROM seasons r WHERE r.show_id = seasons.show_id "
+                 "AND r.season_number > 0)")
+        params = [want]
+        if show_id is not None:
+            where += " AND show_id = ?"
+            params.append(int(show_id))
+        shows = [r[0] for r in conn.execute(
+            f"SELECT show_id FROM seasons WHERE {where}", params).fetchall()]
+        if not shows:
+            return 0
+        marks = ",".join("?" * len(shows))
+        conn.execute(f"UPDATE seasons SET monitored = ? WHERE season_number = 0 "
+                     f"AND show_id IN ({marks})", [want, *shows])
+        conn.execute(f"UPDATE episodes SET monitored = ? WHERE season_number = 0 "
+                     f"AND show_id IN ({marks})", [want, *shows])
+        return len(shows)
+
+    def apply_specials_policy(self, show_id=None) -> int:
+        """Public wrapper: own connection + commit (the setting's save runs it
+        for every show)."""
+        conn = self._get_connection()
+        try:
+            n = self._apply_specials_policy(conn, show_id)
+            conn.commit()
+            if n:
+                logger.info("monitor specials: %d show(s) changed", n)
+            return n
+        except sqlite3.Error:
+            conn.rollback()
+            logger.exception("apply_specials_policy failed")
             return 0
         finally:
             conn.close()
@@ -9247,7 +9335,15 @@ class VideoDatabase:
             srv=" AND s2.server_source = ?" if server_source else "")
 
     # owned/total episode counts — joined off s.id in both queries below.
-    _EPS_COLS = ("(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
+    # A show card's owned/total: the total is what you have plus what you still
+    # want -- an episode with a file, or one that is monitored and has aired.
+    # Unaired episodes and unmonitored ones (an unmonitored Specials season,
+    # say) are not gaps, so they no longer drag the bar down. Same aired rule
+    # as missing_episode_rows. Shared by the Library grid and Watchlist cards.
+    _SHOW_EPS_WANTED = ("e.has_file=1 OR (e.monitored=1 AND e.air_date IS NOT NULL "
+                        "AND substr(e.air_date, 1, 10) <= date('now'))")
+    _EPS_COLS = ("(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND ("
+                 + _SHOW_EPS_WANTED + ")) AS episode_count, "
                  "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count")
 
     def _effective_shows(self, conn, server_source, profile_id: int = 1,
@@ -12408,8 +12504,7 @@ class VideoDatabase:
             select = ("SELECT s.id, s.title, s.year, s.tmdb_id, s.status, "
                       f"{rating_key} AS rating, {s_watched} AS watched_episodes, "
                       "(s.poster_url IS NOT NULL AND s.poster_url <> '') AS has_poster, "
-                      "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
-                      "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count, "
+                      + self._EPS_COLS + ", "
                       f"{size_sub} AS size_bytes "
                       f"FROM {src}")
         else:

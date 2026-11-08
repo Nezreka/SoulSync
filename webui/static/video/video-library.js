@@ -11,6 +11,10 @@
 
     var PAGE_ID = 'video-library';
     var LIBRARY_URL = '/api/video/library';
+    // Grid posters ask the server for a right-sized copy (Plex/Jellyfin resize
+    // it, the image cache keeps it), the same 342 px the watchlist and detail
+    // grids use. Without it every tile pulled the full original (~1.3 MB each).
+    var GRID_POSTER_W = 342;
     var LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('');
 
     var state = { tab: 'movies', search: '', letter: 'all', sort: 'title',
@@ -99,7 +103,7 @@
         var fallback = kind === 'movie' ? '🎬' : '📺';
         var img = it.has_poster
             ? '<div class="library-artist-image"><img src="/api/video/poster/' + kind + '/' + it.id +
-              '" alt="" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>' +
+              '?w=' + GRID_POSTER_W + '" alt="" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>' +
               fallback + '</div>\'"></div>'
             : '<div class="library-artist-image"><div class="library-artist-image-fallback">' + fallback + '</div></div>';
 
