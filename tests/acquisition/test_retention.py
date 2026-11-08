@@ -112,3 +112,55 @@ def test_the_retention_setting_is_read_from_the_app_config(monkeypatch):
     monkeypatch.setattr(settings.config_manager, "get",
                         lambda key, default=None: 30 if key == "acquisition.history_retention_days" else default)
     assert retention_days() == 30
+
+
+def test_old_history_goes_in_short_batches(conn, monkeypatch):
+    """review 4 R4-C-7: the first sweep deleted years of history in one
+    transaction, holding the write lock while every other writer waited"""
+    from core.acquisition import retention
+    monkeypatch.setattr(retention, "HISTORY_BATCH", 2)
+    for n in range(5):
+        _history(conn, f"h{n}", "request_created")
+    _history(conn, "h-recent", "request_created", when="2999-01-01 00:00:00")
+    conn.commit()
+    commits = []
+    real = retention._prune_history
+
+    class Spy:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def execute(self, *a):
+            return self.inner.execute(*a)
+
+        def commit(self):
+            commits.append(1)
+            self.inner.commit()
+
+        def rollback(self):
+            self.inner.rollback()
+
+    monkeypatch.setattr(retention, "_prune_history",
+                        lambda c, cutoff, grabs: real(Spy(c), cutoff, grabs))
+    stats = prune_acquisition_journal(conn, days=90)
+    assert stats["history"] == 5
+    assert _ids(conn, "acquisition_history") == {"h-recent"}
+    assert len(commits) == 3  # 2 + 2 + 1, each its own transaction
+    assert _ids(conn, "acquisition_history_prune_gate", "open") == set()
+
+
+def test_the_first_sweep_waits_an_hour_after_start():
+    """review 4 R4-C-7: the first sweep ran on the first monitor cycle, in the
+    busiest minute of startup"""
+    import time
+    from core.acquisition import client_monitor
+    calls = []
+    monitor = client_monitor.UsenetAcquisitionMonitor(lambda: calls.append(1))
+    monitor._run_retention()
+    assert calls == []
+    monitor._last_retention_at = time.monotonic() - monitor.RETENTION_INTERVAL_S - 1
+    try:
+        monitor._run_retention()
+    except Exception:  # noqa: BLE001
+        pass
+    assert calls == [1]

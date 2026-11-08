@@ -62,6 +62,10 @@ def _title_key(value: Any) -> str:
     return " ".join(text.split()).casefold()
 
 
+# R4-C-7: the first journal retention sweep runs this long after start
+FIRST_RETENTION_DELAY_S = 3600
+
+
 @dataclass(frozen=True)
 class UsenetJobSnapshot:
     id: str
@@ -521,8 +525,10 @@ class UsenetAcquisitionMonitor:
         self._last_error: Optional[str] = None
         self._last_logged_error: Optional[str] = None
         self._cancel_missing_counts: Dict[str, int] = {}
-        # G04-4: the journal's retention sweep, once a day (0 = not yet)
-        self._last_retention_at = 0.0
+        # G04-4: the journal's retention sweep, once a day. R4-C-7: the first
+        # one waits an hour after start, not the first cycle, when startup
+        # is busiest and a long journal makes the first sweep the biggest
+        self._last_retention_at = time.monotonic() - self.RETENTION_INTERVAL_S + FIRST_RETENTION_DELAY_S
 
     @staticmethod
     def _default_adapter() -> Optional[UsenetClientAdapter]:
@@ -539,7 +545,7 @@ class UsenetAcquisitionMonitor:
         """settled acquisition rows past their retention, once a day; never
         stops the cycle"""
         now = time.monotonic()
-        if self._last_retention_at and now - self._last_retention_at < self.RETENTION_INTERVAL_S:
+        if now - self._last_retention_at < self.RETENTION_INTERVAL_S:
             return
         self._last_retention_at = now
         try:

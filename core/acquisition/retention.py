@@ -73,10 +73,45 @@ def _marks(values) -> str:
     return ",".join("?" for _ in values)
 
 
+HISTORY_BATCH = 5000
+
+
+def _prune_history(conn, cutoff: str, has_grabs: bool) -> int:
+    """old history rows of nothing kept, a batch per transaction. review 4
+    R4-C-7: the first sweep after years of journal deleted it all in one
+    transaction, holding the write lock while other writers waited"""
+    kept_request = "request_id IN (SELECT id FROM acquisition_requests)"
+    kept_grab = "download_id IN (SELECT download_id FROM acquisition_grabs)" if has_grabs else "0"
+    removed = 0
+    while True:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            conn.execute("INSERT INTO acquisition_history_prune_gate(open) VALUES (1)")
+            cur = conn.execute(
+                f"""DELETE FROM acquisition_history WHERE rowid IN (
+                        SELECT rowid FROM acquisition_history
+                         WHERE created_at < ?
+                           AND event_type NOT IN ({_marks(_KEEP_EVENTS)})
+                           AND NOT (request_id IS NOT NULL AND {kept_request})
+                           AND NOT (download_id IS NOT NULL AND {kept_grab})
+                         LIMIT ?)""",
+                (cutoff, *_KEEP_EVENTS, HISTORY_BATCH))
+            batch = max(cur.rowcount, 0)
+            conn.execute("DELETE FROM acquisition_history_prune_gate")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        removed += batch
+        if batch < HISTORY_BATCH:
+            return removed
+
+
 def prune_acquisition_journal(conn, *, days: int = DEFAULT_RETENTION_DAYS,
                               now: Optional[float] = None) -> Dict[str, int]:
-    """Delete what has been settled for longer than ``days``. One transaction;
-    a failure rolls it all back and the next run tries again."""
+    """Delete what has been settled for longer than ``days``. Requests, grabs
+    and decisions in one transaction, then old history in short batches; a
+    failure rolls back the open one and the next run tries again."""
     stats = {"candidates": 0, "requests": 0, "grabs": 0, "imports": 0,
              "decision_runs": 0, "history": 0}
     if days <= 0:
@@ -180,22 +215,9 @@ def prune_acquisition_journal(conn, *, days: int = DEFAULT_RETENTION_DAYS,
 
         if has("acquisition_history"):
             _gate_history_trigger(conn)
-            kept_request = "request_id IN (SELECT id FROM acquisition_requests)"
-            kept_grab = ("download_id IN (SELECT download_id FROM acquisition_grabs)"
-                         if has("acquisition_grabs") else "0")
-            conn.execute("INSERT INTO acquisition_history_prune_gate(open) VALUES (1)")
-            try:
-                cur = conn.execute(
-                    f"""DELETE FROM acquisition_history
-                         WHERE created_at < ?
-                           AND event_type NOT IN ({_marks(_KEEP_EVENTS)})
-                           AND NOT (request_id IS NOT NULL AND {kept_request})
-                           AND NOT (download_id IS NOT NULL AND {kept_grab})""",
-                    (cutoff, *_KEEP_EVENTS))
-                stats["history"] = max(cur.rowcount, 0)
-            finally:
-                conn.execute("DELETE FROM acquisition_history_prune_gate")
         conn.commit()
+        if has("acquisition_history"):
+            stats["history"] = _prune_history(conn, cutoff, has("acquisition_grabs"))
     except Exception:
         try:
             conn.rollback()
