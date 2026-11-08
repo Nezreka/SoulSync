@@ -155,3 +155,16 @@ def test_old_history_rows_find_their_catalogue_row(db):
     with closing(db._get_connection()) as conn:
         assert conn.execute(
             "SELECT lib2_track_id FROM listening_history").fetchone()[0] == track_id
+
+
+def test_the_history_resolver_matches_a_non_ascii_capital_title(db):
+    """review 5 R5-A-1: the key was python lower(), the catalogue side
+    sqlite's ascii-only LOWER(), so 98 live plex plays of titles like
+    'LO QUE LE PASÓ A HAWAii' never linked"""
+    track_id = _track(db, title='LO QUE LE PASÓ A HAWAii', artist='Bad Bunny')
+
+    resolved = _worker(db)._resolve_db_track_ids_batch(
+        [{'title': 'LO QUE LE PASÓ A HAWAii', 'artist': 'Bad Bunny'},
+         {'title': 'Éblouie par la nuit', 'artist': 'Bad Bunny'}])
+
+    assert resolved == {('lo que le pasó a hawaii', 'bad bunny'): track_id}
