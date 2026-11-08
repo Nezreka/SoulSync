@@ -66,11 +66,17 @@ def carry_legacy_columns(conn: Any) -> Dict[str, int]:
                             WHERE COALESCE(musicbrainz_release_group_id, '') <> '')""")
             stats["release_groups"] = max(int(cur.rowcount or 0), 0)
         if "record_type" in album_cols:
+            # review 4 R4-A-9: never over a release type the user set
+            overridden = ("AND NOT EXISTS (SELECT 1 FROM lib2_metadata_overrides o "
+                          "WHERE o.entity_type='release_group' AND o.entity_id=lib2_albums.id "
+                          "AND o.field_name='album_type')"
+                          if "lib2_metadata_overrides" in tables else "")
             cur = conn.execute(
                 f"""UPDATE lib2_albums SET album_type='compilation', updated_at=CURRENT_TIMESTAMP
                      WHERE album_type IN ('album','single') AND legacy_album_id IN (
                            SELECT id FROM "{albums}"
-                            WHERE LOWER(TRIM(record_type)) IN ('compile','compilations'))""")
+                            WHERE LOWER(TRIM(record_type)) IN ('compile','compilations'))
+                       {overridden}""")
             stats["compilations"] = max(int(cur.rowcount or 0), 0)
         conn.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) VALUES(?)", (MARKER,))
         conn.commit()

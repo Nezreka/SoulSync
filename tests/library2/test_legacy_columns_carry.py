@@ -128,3 +128,20 @@ def test_the_carry_finds_3_6_1_rows_through_their_text_key(imported_conn):
     for sql in updates:
         plan = " | ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
         assert "SCAN lt" not in plan and "SCAN la" not in plan, plan
+
+
+def test_the_compilation_carry_keeps_a_release_type_the_user_set(imported_conn):
+    """review 4 R4-A-9: on an install that upgraded before the carry, a user
+    who set a 'compile' release to album got it flipped back"""
+    conn = imported_conn
+    conn.execute("ALTER TABLE albums ADD COLUMN record_type TEXT")
+    conn.execute("UPDATE albums SET record_type='compile' WHERE id=10")
+    album = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=10").fetchone()[0]
+    conn.execute("UPDATE lib2_albums SET album_type='album' WHERE id=?", (album,))
+    from core.library2.metadata_overrides import ensure_metadata_overrides_schema
+    ensure_metadata_overrides_schema(conn.cursor())
+    conn.execute("INSERT INTO lib2_metadata_overrides(entity_type, entity_id, field_name, value_json) "
+                 "VALUES('release_group', ?, 'album_type', ?)", (album, '"album"'))
+    conn.commit()
+    carry_legacy_columns(conn)
+    assert conn.execute("SELECT album_type FROM lib2_albums WHERE id=?", (album,)).fetchone()[0] == "album"
