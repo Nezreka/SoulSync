@@ -1566,7 +1566,9 @@ def _artist_server_id(artist_id, server_source):
                 "      AND m.server_source=? LIMIT 1),"
                 "  CASE WHEN a.server_source=? THEN a.server_id END)"
                 " FROM lib2_artists a WHERE a.id=?",
-                (str(server_source), str(server_source), int(artist_id))).fetchone()
+                # no int(): the key's integer affinity matches a digit string,
+                # and a text id must never 400 the picker (#1069)
+                (str(server_source), str(server_source), artist_id)).fetchone()
         return str(row[0]) if row and row[0] else None
     except Exception as exc:  # noqa: BLE001
         logger.debug("[set-artist-art] server id lookup failed for artist %s: %s", artist_id, exc)
