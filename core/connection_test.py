@@ -162,7 +162,7 @@ def run_service_test(service, test_config):
                     't': token,
                     's': salt,
                     'v': '1.16.1',
-                    'c': 'soulsync',
+                    'c': 'SoulSync',  # one player in navidrome, not two (#2005)
                     'f': 'json'
                 }, timeout=5)
 
