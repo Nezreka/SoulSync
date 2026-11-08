@@ -1288,9 +1288,13 @@ def _mark_reconcile_attempted(conn, artist_id: int) -> None:
 
 def _pending_unmapped_artists(
     conn, limit: Optional[int], *, cooldown_hours: Optional[float] = None,
-    combined_only: bool = False,
+    combined_only: bool = False, oldest_attempt_first: bool = False,
 ) -> List[Dict[str, Any]]:
     """Artists (both native and legacy) that still carry no catalog provider id.
+
+    ``oldest_attempt_first`` puts never-tried artists first, then the ones
+    tried longest ago, so a capped batch rotates instead of retrying the same
+    unresolvable names forever (review 5 R5-I-7).
 
     ``cooldown_hours`` skips rows attempted inside that window — the backoff an
     automated (post-import) run needs so a permanently unresolvable name does
@@ -1316,7 +1320,11 @@ def _pending_unmapped_artists(
         # name is theirs: every worker matches it by name on its own cadence
         from core.library2.artist_credit_gate import unresolved_credit_sql
         sql += f"  AND {unresolved_credit_sql('lib2_artists')} "
-    sql += "ORDER BY id"
+    if oldest_attempt_first and _has_attempt_column(conn):
+        sql += ("ORDER BY unmapped_last_attempted_at IS NOT NULL, "
+                "unmapped_last_attempted_at, id")
+    else:
+        sql += "ORDER BY id"
     rows = conn.execute(sql, params).fetchall()
 
     from core.library2.artist_credit_gate import CATALOG_PROVIDERS
