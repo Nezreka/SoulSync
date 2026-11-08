@@ -55,14 +55,24 @@ def stage_file_for_reidentify(
     *,
     copy_fn: Callable[[str, str], object] = shutil.copy2,
     signature_fn: Callable[[str], Optional[str]] = quick_file_signature,
+    hidden: bool = False,
 ) -> Dict[str, Any]:
     """Copy the library file into staging and fingerprint the copy. Returns
     ``{staged_path, content_hash}``. Raises ``FileNotFoundError`` if the source is
-    gone (caller surfaces a clear error rather than writing a dangling hint)."""
+    gone (caller surfaces a clear error rather than writing a dangling hint).
+
+    ``hidden`` copies to ``<staged_path>.part`` instead (auto-import only picks
+    up audio extensions) and adds ``temp_path``: the caller commits the hint
+    first, then renames the copy into place, so auto-import never sees the
+    file without its hint."""
     if not real_path or not os.path.isfile(real_path):
         raise FileNotFoundError(real_path or "(empty path)")
     os.makedirs(staging_dir, exist_ok=True)
     dest = staged_destination(staging_dir, real_path, library_track_id)
+    if hidden:
+        temp = dest + ".part"
+        copy_fn(real_path, temp)
+        return {"staged_path": dest, "temp_path": temp, "content_hash": signature_fn(temp)}
     copy_fn(real_path, dest)
     return {"staged_path": dest, "content_hash": signature_fn(dest)}
 

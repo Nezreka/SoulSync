@@ -369,9 +369,9 @@ def apply_reassign(
         )
         conn.commit()
     except Exception as exc:
-        # The files are already staged but their hints were never committed.
-        # Left there, auto-import would pick each one up as an ordinary new
-        # file and duplicate the whole album. Take them back out.
+        # each hint is committed before its file lands (review 5 R5-D-3), so
+        # this is a last guard: a failure after that takes the staged copies
+        # back out rather than risk auto-import filing them as new files.
         _discard_staged(result.get("staged") or [])
         logger.error("reassign apply failed: %s", exc)
         return {"success": False, "error": str(exc)}

@@ -386,3 +386,76 @@ def test_an_album_with_no_stored_source_id_is_not_blocked(monkeypatch, db):
     _use(monkeypatch, _Client(tracks=[{'id': 'T1', 'name': 'One', 'track_number': 1}]))
 
     assert svc.preview_reassign(db, 'spotify', 'lib2:7', 'AL9')['success'] is True
+
+
+# review 5 R5-D-3 ────────────────────────────────────────────────────────────
+
+import os
+
+import core.imports.rematch_apply as ra
+from core.imports.rematch_hints import find_hint_for_file
+
+_HINTS_SCHEMA = """CREATE TABLE rematch_hints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, staged_path TEXT, content_hash TEXT,
+  source TEXT, isrc TEXT, track_id TEXT, album_id TEXT, artist_id TEXT,
+  track_title TEXT, album_name TEXT, artist_name TEXT, album_type TEXT,
+  track_number INTEGER, disc_number INTEGER, replace_track_id INTEGER,
+  exempt_dedup INTEGER DEFAULT 1, replace_id_space TEXT,
+  status TEXT DEFAULT 'pending', created_at TIMESTAMP, consumed_at TIMESTAMP)"""
+
+
+def test_no_copy_runs_inside_an_open_hint_transaction(tmp_path, monkeypatch):
+    """review 5 R5-D-3: the first hint's INSERT held the write lock through
+    every later file copy, and a staged file had no hint anyone could read"""
+    dbfile = str(tmp_path / "lib.db")
+    con = sqlite3.connect(dbfile)
+    con.execute(_HINTS_SCHEMA)
+    con.commit()
+    con.close()
+    database = SimpleNamespace(_get_connection=lambda: sqlite3.connect(dbfile))
+
+    src = tmp_path / "lib"
+    src.mkdir()
+    locals_ = []
+    for n in (1, 2, 3):
+        p = src / f"{n:02d} Song {n}.flac"
+        p.write_bytes(b"x" * 100)
+        locals_.append({"id": n, "title": f"Song {n}", "track_number": n, "file_path": str(p)})
+    targets = [{"id": f"sp{n}", "name": f"Song {n}", "track_number": n, "disc_number": 1}
+               for n in (1, 2, 3)]
+    monkeypatch.setattr(svc, "local_album_tracks", lambda db, a: locals_)
+    monkeypatch.setattr(svc, "target_tracks", lambda s, a: targets)
+    monkeypatch.setattr(svc, "is_same_release", lambda *a, **k: False)
+
+    staging = tmp_path / "staging"
+    seen = []
+    real_stage = ra.stage_file_for_reidentify
+
+    def stage(real_path, staging_dir, track_id, **kw):
+        if seen:  # a file is already staged: what does the rest of the app see?
+            other = sqlite3.connect(dbfile, timeout=0.2)
+            visible = find_hint_for_file(other.cursor(), seen[0])
+            try:
+                other.execute("CREATE TABLE probe_write (x)")
+                other.execute("DROP TABLE probe_write")
+                other.commit()
+                locked = False
+            except sqlite3.OperationalError as e:
+                locked = "locked" in str(e)
+            other.close()
+            seen.append((visible is not None, locked))
+        out = real_stage(real_path, staging_dir, track_id, **kw)
+        if not seen:
+            seen.append(out["staged_path"])
+        return out
+
+    monkeypatch.setattr(ra, "stage_file_for_reidentify", stage)
+    res = svc.apply_reassign(database, source="spotify", local_album_id="lib2:7",
+                            album_id="alb", album_name="Album", artist_id="ar",
+                            artist_name="Artist", album_type="album",
+                            staging_dir=str(staging))
+    assert res["success"], res
+    assert os.path.exists(seen[0])
+    # each later copy: the first staged file's hint must be readable, and
+    # nobody else may be locked out while audio files are being copied
+    assert seen[1:] == [(True, False), (True, False)]
