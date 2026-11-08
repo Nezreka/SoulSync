@@ -2506,4 +2506,28 @@ describe('switching library in the header (third #1062 review G16-4)', () => {
     expect(groupCalls()).toBeGreaterThan(groupsBefore);
     expect(countCalls()).toBeGreaterThan(countsBefore);
   });
+
+  it('reloads the album grid too (review 4 R4-E-1)', async () => {
+    routes({ [GROUPS]: [], [COUNTS]: {}, [TYPES]: [], '/api/repair/findings/albums': [] }, []);
+    const albumCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/api/repair/findings/albums'))
+        .length;
+    render(
+      <FindingsSurface
+        jobs={JOBS}
+        runs={[]}
+        trackCount={4}
+        onStatusChanged={vi.fn()}
+        defaultView="albums"
+      />,
+    );
+    await flush();
+    const before = albumCalls();
+    expect(before).toBeGreaterThan(0);
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('ss:webui-library-scope-changed'));
+    });
+    await flush();
+    expect(albumCalls()).toBeGreaterThan(before);
+  });
 });

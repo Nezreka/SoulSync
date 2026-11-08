@@ -452,6 +452,7 @@ export function OperationsStudio({
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [bulkStatus, setBulkStatus] = useState<BulkFixStatus | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<FindingAlbumGroup | null>(null);
+  const [albumGridToken, setAlbumGridToken] = useState(0);
   const [redownloadFinding, setRedownloadFinding] = useState<RepairFinding | null>(null);
   const redownloadTrackId = redownloadFinding ? findingRedownloadTrackId(redownloadFinding) : null;
   const bulkTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -483,6 +484,8 @@ export function OperationsStudio({
   useEffect(() => {
     const switched = () => {
       setSelectedAlbum(null);
+      // review 4 R4-E-1: the album grid loads on its own token
+      setAlbumGridToken((token) => token + 1);
       void loadData();
     };
     window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
@@ -1119,6 +1122,7 @@ export function OperationsStudio({
           ) : null}
 
           <FindingsAlbumGrid
+            refreshToken={albumGridToken}
             groupBy="album"
             status="pending"
             selectedGroupKey={selectedAlbum?.key}

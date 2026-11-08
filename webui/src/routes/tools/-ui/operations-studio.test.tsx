@@ -150,6 +150,26 @@ afterEach(() => {
 });
 
 describe('OperationsStudio (Simple Mode)', () => {
+  it('a header library switch reloads the album grid too (review 4 R4-E-1)', async () => {
+    routes({ '/api/repair/findings/albums': { albums: [] } });
+    const albumCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/findings/albums')).length;
+    render(
+      <OperationsStudio
+        jobs={testJobs}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(albumCalls()).toBeGreaterThan(0));
+    const before = albumCalls();
+    window.dispatchEvent(new CustomEvent('ss:webui-library-scope-changed'));
+    await waitFor(() => expect(albumCalls()).toBeGreaterThan(before));
+  });
+
   it('renders all 4 Strategic Pillars and their titles', () => {
     const onShowFindings = vi.fn();
     const onSwitchToAdvanced = vi.fn();

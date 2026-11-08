@@ -496,9 +496,16 @@ export function FindingsSurface({
   // G16-4: another library picked in the header. every count, group and row
   // was the old library's, and Fix All acted on what was on screen; a
   // selection from the old library is dropped, never carried over
+  // review 4 R4-E-1: the album grids load on their own token, and an open
+  // album tray is a selection too
   useEffect(() => {
-    window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, refreshAll);
-    return () => window.removeEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, refreshAll);
+    const switched = () => {
+      setSelectedAlbum(null);
+      setRefreshToken((token) => token + 1);
+      refreshAll();
+    };
+    window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
+    return () => window.removeEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
   }, [refreshAll]);
 
   // a job finished: its findings only showed after a page refresh (#1386).
