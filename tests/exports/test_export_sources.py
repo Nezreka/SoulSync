@@ -153,9 +153,12 @@ def test_mbid_flagged_by_repair_finding_real_sql(tmp_path, monkeypatch):
     con.executescript(
         "CREATE TABLE repair_findings (finding_type TEXT, status TEXT, "
         "entity_type TEXT, entity_id TEXT, file_path TEXT);"
+        # the detector files a track as 'lib2:<id>' (review 5 R5-D-2: the old
+        # bare 't1' shape is one it never writes, so this passed for the
+        # wrong reason)
         "INSERT INTO repair_findings VALUES "
-        "('mbid_mismatch','pending','track','t1','/music/track1.mp3'),"
-        "('mbid_mismatch','resolved','track','t2','/music/track2.mp3');"
+        "('mbid_mismatch','pending','track','lib2:1','/music/track1.mp3'),"
+        "('mbid_mismatch','resolved','track','lib2:2','/music/track2.mp3');"
     )
     con.commit()
     con.close()
@@ -163,13 +166,17 @@ def test_mbid_flagged_by_repair_finding_real_sql(tmp_path, monkeypatch):
     fake_db = types.SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(dbfile)))
     monkeypatch.setattr("database.music_database.get_database", lambda: fake_db)
 
-    assert es.mbid_flagged_by_repair_finding("t1", "/music/track1.mp3") is True
-    assert es.mbid_flagged_by_repair_finding("t1", None) is True          # matches by id alone
+    assert es.mbid_flagged_by_repair_finding("1", "/music/track1.mp3") is True
+    assert es.mbid_flagged_by_repair_finding("1", None) is True          # matches by id alone
+    # the flagged copy is not the primary file the export picked
+    assert es.mbid_flagged_by_repair_finding("1", "/music/track1.flac") is True
     assert es.mbid_flagged_by_repair_finding(None, "/music/track1.mp3") is True  # matches by path alone
     # resolved (not pending) finding -> not flagged
-    assert es.mbid_flagged_by_repair_finding("t2", "/music/track2.mp3") is False
+    assert es.mbid_flagged_by_repair_finding("2", "/music/track2.mp3") is False
     # no matching track at all -> not flagged
-    assert es.mbid_flagged_by_repair_finding("t3", "/music/unknown.mp3") is False
+    assert es.mbid_flagged_by_repair_finding("3", "/music/unknown.mp3") is False
+    # 'lib2:1' never matches a bare 11
+    assert es.mbid_flagged_by_repair_finding("11", None) is False
     assert es.mbid_flagged_by_repair_finding(None, None) is False
 
 
@@ -593,3 +600,26 @@ def test_waterfall_resolve_fn_still_callable_with_two_args():
     )
     mbid, label = fn('Artist', 'Title')
     assert (mbid, label) == (MBID_B, SRC_MUSICBRAINZ)   # ISRC rung skipped, no track given
+
+
+def test_mbid_gate_finds_the_detectors_own_finding_by_track_id(tmp_path, monkeypatch):
+    """review 5 R5-D-2: built with the detector's own identity, for a second
+    copy of the track, then asked the way _db_match asks"""
+    import sqlite3
+    import types
+    import core.exports.export_sources as es
+    from core.repair_jobs.mbid_mismatch_detector import MbidMismatchDetectorJob
+
+    entity_id, file_path, *_ = MbidMismatchDetectorJob._finding_identity(
+        {"track_id": 5, "path": "/m/a.mp3"}, None)
+    dbfile = tmp_path / "lib.db"
+    con = sqlite3.connect(str(dbfile))
+    con.execute("CREATE TABLE repair_findings (finding_type TEXT, status TEXT, "
+                "entity_type TEXT, entity_id TEXT, file_path TEXT)")
+    con.execute("INSERT INTO repair_findings VALUES ('mbid_mismatch','pending','track',?,?)",
+                (entity_id, file_path))
+    con.commit()
+    con.close()
+    monkeypatch.setattr("database.music_database.get_database",
+                        lambda: types.SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(dbfile))))
+    assert es.mbid_flagged_by_repair_finding("5", "/m/a.flac") is True
