@@ -3720,6 +3720,11 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_lookup ON sync_match_cache (spotify_track_id, server_source)")
+            # review 4 R4-A-4: a media-server re-key repoints the cache by the
+            # server's id, once per re-keyed track inside the scan's write
+            # transaction; without this each one scanned the whole cache
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_cache_server_track "
+                           "ON sync_match_cache (server_source, server_track_id)")
 
             # pairings a user unmatched on the server playlist compare view.
             # the auto matcher may never pair this source track with this
