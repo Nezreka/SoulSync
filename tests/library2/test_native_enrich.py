@@ -1580,6 +1580,25 @@ def test_a_split_ghosts_watches_go_to_the_artists_it_became(imported_conn):
                                  (alpha,)).fetchone()[0] == 1
 
 
+def test_a_split_ghosts_watch_never_wants_the_other_components(imported_conn):
+    """review 4 R4-B-5: a watch on "Alpha & Gamma" went onto every component,
+    and an artist rule wants a whole discography. only the primary inherits"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    ghost = _insert_native_artist(imported_conn, "Alpha & Gamma")
+    alpha = _insert_native_artist(imported_conn, "Alpha")
+    gamma = _insert_native_artist(imported_conn, "Gamma")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    record_rule(imported_conn, "artist", ghost, True, PROVENANCE_USER, profile_id=2)
+
+    NE._rehome_and_delete_combined(imported_conn, ghost, alpha, [alpha, gamma])
+
+    rules = {(r[0], r[1]) for r in imported_conn.execute(
+        "SELECT entity_id, profile_id FROM lib2_monitor_rules WHERE entity_type='artist'")}
+    assert (alpha, 2) in rules and (gamma, 2) not in rules
+    assert imported_conn.execute("SELECT COALESCE(monitored,0) FROM lib2_artists WHERE id=?",
+                                 (gamma,)).fetchone()[0] == 0
+
+
 def test_smart_split_reuses_the_artist_holding_the_resolved_id(imported_conn):
     """third #1062 review P2B-7: "Ian Asher & Beyonce" splits to "Beyonce";
     the library's "Beyoncé" holds that spotify id. a NOCASE name match missed

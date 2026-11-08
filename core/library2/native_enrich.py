@@ -1140,22 +1140,26 @@ def _rehome_and_delete_combined(
             )
     conn.execute("DELETE FROM lib2_track_artists WHERE artist_id=?", (combined_id,))
 
-    # 4) Every profile's watch on the ghost goes to the artists it became
+    # 4) Every profile's watch on the ghost goes to the artist it became
     #    (3.6.1's watchlist rows survived an artist merge or split; dropping
     #    them showed the artist unwatched and recomputed its wants away). A
     #    component's own rule for that profile wins. Then the ghost's go.
+    #    review 4 R4-B-5: only the primary component. a watch on "Ian Asher
+    #    & Beyonce" put every component's whole discography on the wanted
+    #    list (an artist rule wants all of it); nobody chose Beyonce.
+    watch_targets = [int(primary_id)]
     try:
         ghost = conn.execute("SELECT COALESCE(monitored,0) FROM lib2_artists WHERE id=?",
                              (combined_id,)).fetchone()
         if ghost and int(ghost[0]) == 1:
-            for cid in component_ids:
+            for cid in watch_targets:
                 conn.execute("UPDATE lib2_artists SET monitored=1, updated_at=CURRENT_TIMESTAMP "
                              "WHERE id=?", (cid,))
         rules = conn.execute(
             "SELECT profile_id, monitored, provenance FROM lib2_monitor_rules "
             "WHERE entity_type='artist' AND entity_id=?", (combined_id,)).fetchall()
         for profile_id, monitored, provenance in rules:
-            for cid in component_ids:
+            for cid in watch_targets:
                 if conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='artist' "
                                 "AND entity_id=? AND profile_id=?", (cid, profile_id)).fetchone():
                     continue
