@@ -324,3 +324,22 @@ def _listens_payload(*, ts_values: list[int], is_last: bool = False):
             "listens": listens,
         }
     }
+
+
+def test_a_listen_with_a_non_ascii_capital_links_its_track(tmp_path):
+    """review 5 R5-H-5: python lower() against sqlite's ascii-only LOWER()
+    left 'BIONICA MALÉFICA' with no catalogue link"""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    conn = db._get_connection()
+    aid = conn.execute("INSERT INTO lib2_artists(name, name_key) VALUES('Artist', 'artist')").lastrowid
+    alid = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'LP')",
+                        (aid,)).lastrowid
+    tid = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                       "VALUES(?, 'BIONICA MALÉFICA', 1)", (alid,)).lastrowid
+    conn.commit()
+    conn.close()
+    worker = ListenBrainzListeningImportWorker(db, _Config())
+    for played in ("BIONICA MALÉFICA", "Bionica Maléfica"):
+        events = [{"title": played, "artist": "Artist", "lib2_track_id": None}]
+        worker._resolve_db_track_ids(events)
+        assert events[0]["lib2_track_id"] == tid

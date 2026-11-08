@@ -54,8 +54,17 @@ def _norm(name: str) -> str:
     import unicodedata
     from core.worker_utils import normalize_artist_name
     folded = unicodedata.normalize('NFKD', name or '')
-    folded = ''.join(ch for ch in folded if not unicodedata.combining(ch))
-    return normalize_artist_name(folded).replace(' ', '')
+    # review 5 R5-H-4: modifier letters (the okina, U+02BB) count as word
+    # characters, so one name spelled with an okina and with an apostrophe
+    # read as two artists and both lost a correct id. drop them
+    folded = ''.join(ch for ch in folded if not unicodedata.combining(ch)
+                     and unicodedata.category(ch) != 'Lm')
+    words = normalize_artist_name(folded).split()
+    # "The Notorious B.I.G." and "Notorious B.I.G." are one artist, and
+    # "&" is already gone, so "and" can't tell two names apart either
+    if len(words) > 1 and words[0] == 'the':
+        words = words[1:]
+    return ''.join(w for w in words if w != 'and')
 
 
 def find_corrupt_clusters(database: Any) -> list[dict]:
@@ -79,7 +88,9 @@ def find_corrupt_clusters(database: Any) -> list[dict]:
             for sid, aid, name in rows:
                 by_id.setdefault(str(sid), []).append((aid, name))
             for sid, members in by_id.items():
-                if len(members) > 1 and len({_norm(n) for _, n in members}) > 1:
+                keys = {_norm(n) for _, n in members}
+                # a name that folds to nothing can't be compared: keep the id
+                if len(members) > 1 and len(keys) > 1 and '' not in keys:
                     clusters.append({
                         'source': source,
                         'id_column': id_col,

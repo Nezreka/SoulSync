@@ -453,3 +453,31 @@ class TestVibePoolTracksSourceIds:
         assert sv.seasonal_track_id_column('deezer') == 'deezer_track_id'
         # unknown sources keep the legacy fallback
         assert sv.seasonal_track_id_column('bogus') == 'itunes_track_id'
+
+
+class TestNonAsciiArtists:
+    """review 5 R5-A-1: sqlite's LOWER() folds only A-Z, so 'Ólafur Arnalds'
+    never met the python-lowered play key: no library art, no duration, and
+    the played album never reached the vibe shelf"""
+
+    def test_rewind_finds_the_library_track(self, db, monkeypatch):
+        monkeypatch.setattr(sv, '_normalize_art', lambda u: u)
+        _seed_artist(db, 1, 'Ólafur Arnalds')
+        with db._get_connection() as conn:
+            conn.execute("INSERT INTO lib2_albums (id, primary_artist_id, title,"
+                         " image_url) VALUES (10, 1, 'Re:member', 'https://art/re.jpg')")
+            conn.execute("INSERT INTO lib2_tracks (id, album_id, title, duration)"
+                         " VALUES (100, 10, 'Ýr', 200000)")
+            _own(conn, 100)
+            conn.commit()
+        _seed_plays(db, 'Ólafur Arnalds', 'ÝR', 'Re:member', month=7, count=3)
+        row = sv.rewind_tracks(db, [7])[0]
+        assert row['duration_ms'] == 200000
+        assert row['album_cover_url'] == 'https://art/re.jpg'
+
+    def test_vibe_shelf_finds_the_played_album(self, db):
+        _seed_artist(db, 1, 'Ólafur Arnalds')
+        _owned_release(db, 1, 10, 'Re:member', spotify_id='sp10')
+        _seed_plays(db, 'Ólafur Arnalds', 'Ýr', 'Re:member', month=7, count=3)
+        albums = sv.vibe_library_albums(db, 'summer', [6, 7, 8], 'spotify')
+        assert [a['spotify_album_id'] for a in albums] == ['sp10']

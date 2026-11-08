@@ -454,15 +454,37 @@ def write_embedded_tag(file_path: str, tag_key: str, value: str | None) -> Dict[
                     audio.tags.add(USLT(encoding=3, lang='eng', desc='', text=value))
             elif tag_key in friendly_to_id3:
                 frame_code = friendly_to_id3[tag_key]
+                # review 5 R5-H-2: the trimmed symbols namespace has no TMOO or
+                # TLAN, so a mood or language edit deleted the frame, wrote
+                # nothing and said success. take the class from mutagen.id3,
+                # and never delete before a replacement exists
+                frame_class = getattr(symbols, frame_code, None)
+                if frame_class is None:
+                    import mutagen.id3
+                    frame_class = getattr(mutagen.id3, frame_code, None)
+                if value and frame_class is None:
+                    return {"success": False,
+                            "error": f"Can't write {tag_key} to this file type."}
                 audio.tags.delall(frame_code)
                 if value:
-                    frame_class = getattr(symbols, frame_code, None)
-                    if frame_class:
-                        audio.tags.add(frame_class(encoding=3, text=[value]))
+                    audio.tags.add(frame_class(encoding=3, text=[value]))
             else:
-                to_remove = [k for k in audio.tags if k.startswith("TXXX:") and desc.lower() in k.lower()]
-                for k in to_remove:
-                    del audio.tags[k]
+                # review 5 R5-H-3: this was a substring match, so editing
+                # 'work' also deleted 'MusicBrainz Work Id'. only the frames
+                # the reader shows under this key go, and an existing frame's
+                # own desc is kept so a picard desc keeps its case
+                def _reader_key(frame_desc):
+                    return (_KNOWN_TXXX_DESCS.get(frame_desc)
+                            or frame_desc.lower().replace(" ", "_"))
+
+                matches = [f for f in audio.tags.getall("TXXX")
+                           if getattr(f, "desc", "")
+                           and (f.desc.casefold() == desc.casefold()
+                                or _reader_key(f.desc) == tag_key)]
+                if matches and tag_key not in txxx_friendly_to_desc:
+                    desc = matches[0].desc
+                for frame in matches:
+                    audio.tags.pop(frame.HashKey, None)
                 if value:
                     audio.tags.add(symbols.TXXX(encoding=3, desc=desc, text=[value]))
 

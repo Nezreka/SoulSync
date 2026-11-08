@@ -465,3 +465,28 @@ def test_failed_corrected_account_does_not_keep_old_pending_cursor(tmp_path, mon
     assert state["username"] == "corrected"
     assert not state.get("last_imported_ts")
     assert not state.get("pending_last_imported_ts")
+
+
+def _seed_one_track(db, title, artist="Artist"):
+    conn = db._get_connection()
+    aid = conn.execute("INSERT INTO lib2_artists(name, name_key) VALUES(?, ?)",
+                       (artist, artist.casefold())).lastrowid
+    alid = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'LP')",
+                        (aid,)).lastrowid
+    tid = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, ?, 1)",
+                       (alid, title)).lastrowid
+    conn.commit()
+    conn.close()
+    return tid
+
+
+def test_a_scrobble_with_a_non_ascii_capital_links_its_track(tmp_path):
+    """review 5 R5-H-5: python lower() against sqlite's ascii-only LOWER()
+    left 'WÖRLDENDER' (464 such titles live) with no catalogue link"""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    tid = _seed_one_track(db, "WÖRLDENDER")
+    worker = LastFMListeningImportWorker(db, _Config())
+    for played in ("WÖRLDENDER", "Wörldender"):
+        events = [{"title": played, "artist": "Artist", "lib2_track_id": None}]
+        worker._resolve_db_track_ids(events)
+        assert events[0]["lib2_track_id"] == tid
