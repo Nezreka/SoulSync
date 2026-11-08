@@ -420,3 +420,15 @@ def test_a_member_edits_their_own_artist_watchlist_settings(world):
                                    (house,)).fetchone()[0]
     assert rows == {1: 30, world.sam: 90}
     assert monitor_new != "none"
+
+
+def test_a_deleted_profiles_session_may_not_start_a_download(world):
+    """review 4 R4-D-6: get_profile None read as can_download 1, so a stale
+    session of a deleted profile could run Automatic Search"""
+    world.as_profile(world.sam)
+    with world.db._get_connection() as conn:
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("DELETE FROM profiles WHERE id=?", (world.sam,))
+        conn.commit()
+    body = world.client.get("/api/library/v2/enabled").get_json()
+    assert body["can_download"] is False

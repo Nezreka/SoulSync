@@ -472,7 +472,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         if _is_admin():
             return True
         try:
-            return bool((get_database().get_profile(_profile()) or {}).get("can_download", 1))
+            # review 4 R4-D-6: a profile that no longer exists (a stale
+            # session) is no profile, not one allowed to download
+            profile = get_database().get_profile(_profile())
+            return bool(profile and profile.get("can_download", 1))
         except Exception:  # noqa: BLE001 - unreadable profile: a request, never a grab
             return False
 
