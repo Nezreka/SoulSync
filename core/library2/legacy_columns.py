@@ -59,7 +59,7 @@ def carry_legacy_columns(conn: Any) -> Dict[str, int]:
             cur = conn.execute(
                 f"""UPDATE lib2_albums SET musicbrainz_release_group_id = (
                         SELECT la.musicbrainz_release_group_id FROM "{albums}" la
-                         WHERE la.id = lib2_albums.legacy_album_id)
+                         WHERE la.id = CAST(lib2_albums.legacy_album_id AS TEXT))
                      WHERE COALESCE(musicbrainz_release_group_id, '') = ''
                        AND legacy_album_id IN (
                            SELECT id FROM "{albums}"
@@ -116,6 +116,13 @@ def _carry_known_album_kinds(conn) -> int:
     return changed
 
 
+# the legacy ids are TEXT keys and lib2's legacy_*_id columns are INTEGER.
+# compared bare, SQLite gives the TEXT side numeric affinity and can't use
+# its key, so every lib2 row scanned the whole legacy table (316k x 310k on a
+# real library; the upgrade held the write lock for minutes per batch and
+# never finished). the lib2 side is cast instead, and the legacy key serves.
+
+
 def _batches(conn, table: str):
     top = conn.execute(f"SELECT COALESCE(MAX(id), 0) FROM {table}").fetchone()[0]
     for start in range(0, int(top) + 1, _BATCH):
@@ -130,7 +137,7 @@ def _carry_track_artists(conn, legacy: str) -> int:
         cur = conn.execute(
             f"""UPDATE lib2_tracks AS t
                    SET track_artist = (SELECT TRIM(lt.track_artist) FROM "{legacy}" lt
-                                        WHERE lt.id = t.legacy_track_id)
+                                        WHERE lt.id = CAST(t.legacy_track_id AS TEXT))
                  WHERE t.id > ? AND t.id <= ?
                    AND t.legacy_track_id IS NOT NULL
                    AND COALESCE(t.track_artist, '') = ''
@@ -138,7 +145,7 @@ def _carry_track_artists(conn, legacy: str) -> int:
                        SELECT 1 FROM "{legacy}" lt
                          JOIN lib2_albums al ON al.id = t.album_id
                          LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                        WHERE lt.id = t.legacy_track_id
+                        WHERE lt.id = CAST(t.legacy_track_id AS TEXT)
                           AND COALESCE(TRIM(lt.track_artist), '') <> ''
                           AND LOWER(TRIM(lt.track_artist)) <> LOWER(COALESCE(ar.name, '')))""",
             (low, high))
@@ -155,14 +162,14 @@ def _carry_server_paths(conn, legacy: str) -> int:
             f"""UPDATE lib2_media_server_mappings AS m
                    SET server_path = (
                        SELECT lt.server_path FROM lib2_tracks t
-                         JOIN "{legacy}" lt ON lt.id = t.legacy_track_id
+                         JOIN "{legacy}" lt ON lt.id = CAST(t.legacy_track_id AS TEXT)
                         WHERE t.id = m.entity_id AND lt.server_source = m.server_source
                           AND COALESCE(lt.server_path, '') <> '' LIMIT 1)
                  WHERE m.id > ? AND m.id <= ? AND m.entity_type = 'track'
                    AND COALESCE(m.server_path, '') = ''
                    AND EXISTS (
                        SELECT 1 FROM lib2_tracks t
-                         JOIN "{legacy}" lt ON lt.id = t.legacy_track_id
+                         JOIN "{legacy}" lt ON lt.id = CAST(t.legacy_track_id AS TEXT)
                         WHERE t.id = m.entity_id AND lt.server_source = m.server_source
                           AND COALESCE(lt.server_path, '') <> '')""",
             (low, high))

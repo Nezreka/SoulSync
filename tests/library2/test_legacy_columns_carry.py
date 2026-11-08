@@ -99,3 +99,32 @@ def test_an_install_that_already_upgraded_gets_its_known_kinds(imported_conn):
     carry_legacy_columns(conn)
     assert conn.execute("SELECT album_type_known FROM lib2_albums WHERE legacy_album_id=10"
                         ).fetchone()[0] == 0
+
+
+def test_the_carry_finds_3_6_1_rows_through_their_text_key(imported_conn):
+    """Boulder's live upgrade: 3.6.1's ids are TEXT keys and lib2's legacy ids
+    are INTEGER. compared bare, the legacy key couldn't serve, so each lib2 row
+    scanned the whole legacy table (316k x 310k) and the carry never finished,
+    holding the write lock"""
+    conn = imported_conn
+    conn.execute("ALTER TABLE tracks RENAME TO tracks_int")
+    conn.execute("CREATE TABLE tracks (id TEXT PRIMARY KEY, track_artist TEXT, "
+                 "server_path TEXT, server_source TEXT)")
+    conn.execute("INSERT INTO tracks(id, track_artist) SELECT CAST(id AS TEXT), track_artist FROM tracks_int")
+    conn.execute("ALTER TABLE albums RENAME TO albums_int")
+    conn.execute("CREATE TABLE albums (id TEXT PRIMARY KEY, musicbrainz_release_group_id TEXT)")
+    conn.execute("INSERT INTO albums(id) SELECT CAST(id AS TEXT) FROM albums_int")
+    conn.execute("UPDATE albums SET musicbrainz_release_group_id='rg-views' WHERE id='10'")
+    conn.execute("UPDATE lib2_tracks SET track_artist=NULL")
+    conn.commit()
+    updates = []
+    conn.set_trace_callback(lambda sql: updates.append(sql) if sql.lstrip().startswith("UPDATE") else None)
+    carry_legacy_columns(conn)
+    conn.set_trace_callback(None)
+
+    assert _lib2_track(conn, 100)["track_artist"] == "Drake feat. Wizkid"
+    assert conn.execute("SELECT musicbrainz_release_group_id FROM lib2_albums WHERE legacy_album_id=10"
+                        ).fetchone()[0] == "rg-views"
+    for sql in updates:
+        plan = " | ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
+        assert "SCAN lt" not in plan and "SCAN la" not in plan, plan
