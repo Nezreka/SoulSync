@@ -791,8 +791,14 @@ def remove_album_from_wishlist(
     *,
     album_id: str | None = None,
     album_name_filter: str | None = None,
+    artist_name_filter: str | None = None,
 ) -> tuple[Dict[str, Any], int]:
-    """Remove every wishlist track that belongs to the selected album."""
+    """Remove every wishlist track that belongs to the selected album.
+
+    artist_name_filter scopes a name match to one artist. the page files an
+    album card under its artist, and a bare name took every artist's
+    "Greatest Hits" and ignore-listed their tracks too (review 5 R5-X1-2).
+    """
     try:
         if not album_id and not album_name_filter:
             return {"success": False, "error": "No album_id or album_name provided"}, 400
@@ -814,6 +820,10 @@ def remove_album_from_wishlist(
                     track_album_name = spotify_data["album"]
                 if track_album_name and track_album_name.lower().strip() == album_name_filter.lower().strip():
                     matched = True
+                # same default the page groups an artist-less row under
+                if matched and artist_name_filter is not None:
+                    track_artist = _primary_artist_name(spotify_data) or "Unknown Artist"
+                    matched = track_artist.lower().strip() == artist_name_filter.lower().strip()
 
             if matched:
                 spotify_track_id = track.get("track_id") or track.get("spotify_track_id") or track.get("id")

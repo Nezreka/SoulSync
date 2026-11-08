@@ -330,8 +330,9 @@ function MusicWishlistPage() {
   }, [currentCycle, nextRunSeconds]);
 
   const removeAlbum = useMutation({
-    mutationFn: (albumName: string) => removeWishlistAlbum(albumName),
-    onSuccess: async (_data, albumName) => {
+    mutationFn: ({ albumName, artistName }: { albumName: string; artistName: string }) =>
+      removeWishlistAlbum(albumName, artistName),
+    onSuccess: async (_data, { albumName }) => {
       window.showToast?.(`Removed "${albumName}"`, 'success');
       await refresh();
       window.updateWishlistCount?.();
@@ -386,15 +387,15 @@ function MusicWishlistPage() {
     onError: (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error'),
   });
 
-  const onRemoveAlbum = async (albumName: string) => {
+  const onRemoveAlbum = async (albumName: string, artistName: string) => {
     const confirmed = await window.showConfirmDialog?.({
       title: 'Remove Album',
-      message: `Remove all tracks from "${albumName}"?`,
+      message: `Remove all tracks from "${albumName}" by ${artistName}?`,
       confirmText: 'Remove',
       destructive: true,
     });
     if (confirmed === false) return;
-    removeAlbum.mutate(albumName);
+    removeAlbum.mutate({ albumName, artistName });
   };
 
   /** New: one grab queues every wanted track by the artist, right now. */
@@ -541,7 +542,7 @@ function MusicWishlistPage() {
                 groups={visibleRoutedGroups}
                 artistImages={artistImages}
                 filterActive={Boolean(abQuery.trim()) || search.failing}
-                onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
+                onRemoveAlbum={(albumName, artistName) => void onRemoveAlbum(albumName, artistName)}
                 onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
                 onGrabArtist={onGrabArtist}
                 onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
@@ -898,7 +899,9 @@ function MusicWishlistPage() {
                   groups={visibleGroups}
                   artistImages={artistImages}
                   filterActive={Boolean(search.q?.trim()) || search.failing}
-                  onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
+                  onRemoveAlbum={(albumName, artistName) =>
+                    void onRemoveAlbum(albumName, artistName)
+                  }
                   onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
                   onGrabArtist={onGrabArtist}
                   onBulkAction={(action, ids) => bulkAction.mutateAsync({ action, ids })}
@@ -972,7 +975,9 @@ function MusicWishlistPage() {
                         onGrabArtist={() => onGrabArtist(sheetGroup)}
                         onGrabAlbum={onGrabAlbum}
                         onRetry={onRetryIds}
-                        onRemoveAlbum={(albumName) => void onRemoveAlbum(albumName)}
+                        onRemoveAlbum={(albumName, artistName) =>
+                          void onRemoveAlbum(albumName, artistName)
+                        }
                         onRemoveTrack={(trackId) => removeTrack.mutate(trackId)}
                         onRemoveArtist={() => void onRemoveArtist(sheetGroup)}
                         actionBusy={bulkAction.isPending}

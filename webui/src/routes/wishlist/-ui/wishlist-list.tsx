@@ -62,7 +62,7 @@ function TrackRow({
   track: ParsedWishlistTrack;
   onRemoveTrack: (trackId: string) => void;
   /** Present only on album rows — the ✕ on the album cell removes the set. */
-  onRemoveAlbum?: (albumName: string) => void;
+  onRemoveAlbum?: (albumName: string, artistName: string) => void;
   /** When present, renders the bulk-selection checkbox column. The boolean is
       shiftKey: shift-click selects the whole visible range, like every mail
       client and file manager. */
@@ -123,7 +123,7 @@ function TrackRow({
               type="button"
               className="wl-list-album-x"
               title={`Remove all tracks from "${track.album}"`}
-              onClick={() => onRemoveAlbum(track.album)}
+              onClick={() => onRemoveAlbum(track.album, track.artist)}
             >
               ✕
             </button>
@@ -185,7 +185,7 @@ export function WishlistList({
   /** Keyed by LOWERCASED artist name — buildArtistImageMap's contract. */
   artistImages: Map<string, string>;
   groups: WishlistArtistGroup[];
-  onRemoveAlbum: (albumName: string) => void;
+  onRemoveAlbum: (albumName: string, artistName: string) => void;
   onRemoveTrack: (trackId: string) => void;
   /** A live text filter auto-expands matches — collapsed search hits confuse. */
   filterActive?: boolean;
