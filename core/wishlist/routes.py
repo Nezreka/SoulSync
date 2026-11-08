@@ -933,15 +933,10 @@ def remove_batch_from_wishlist(
         from core.wishlist.ignore import ignore_wishlist_track, REASON_REMOVED
         service = get_wishlist_service()
         _db = getattr(service, "database", None)
-        descriptors_by_id = {
-            _bare_wishlist_track_id(
-                descriptor.get("spotify_track_id")
-                or descriptor.get("track_id")
-                or descriptor.get("id")
-            ): descriptor
-            for descriptor in _load_wishlist_descriptors(service, runtime.profile_id)
-            if isinstance(descriptor, dict)
-        }
+        # matched per requested id, exactly for a composite track::album key:
+        # a map keyed by the bare id let a sibling release's row win, and the
+        # reverse sync released the release still wanted (review 5 R5-J-4)
+        loaded = _load_wishlist_descriptors(service, runtime.profile_id)
         removed = 0
         removed_descriptors = []
         pid = runtime.profile_id
@@ -955,11 +950,11 @@ def remove_batch_from_wishlist(
                 _data = None
             if service.remove_track_from_wishlist(track_id, profile_id=pid):
                 removed += 1
-                removed_descriptors.append(
-                    descriptors_by_id.get(_bare_wishlist_track_id(track_id)) or {
+                removed_descriptors.extend(
+                    _wishlist_descriptors_for_ids(loaded, [track_id]) or [{
                         "spotify_track_id": track_id,
                         "spotify_data": _data or {},
-                    }
+                    }]
                 )
                 ignore_wishlist_track(_db, pid, track_id, REASON_REMOVED, spotify_data=_data)
 

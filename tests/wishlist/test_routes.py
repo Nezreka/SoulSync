@@ -584,6 +584,34 @@ def test_remove_batch_from_wishlist_returns_removed_count():
     assert service.removed == [("track-1", 1), ("track-2", 1)]
 
 
+def test_remove_batch_hands_the_reverse_sync_the_removed_release(monkeypatch):
+    """review 5 R5-J-4: descriptors were keyed by the bare track id, so with
+    two releases of one recording (t::a1, t::a2) removing t::a1 handed the
+    reverse sync t::a2's row and Library v2 released the still-wanted one"""
+    rows = [
+        {"spotify_track_id": "t::a1", "spotify_data": {"id": "t", "album": {"id": "a1"}},
+         "source_info": {"lib2_track_id": 101}},
+        {"spotify_track_id": "t::a2", "spotify_data": {"id": "t", "album": {"id": "a2"}},
+         "source_info": {"lib2_track_id": 202}},
+    ]
+    service = SimpleNamespace(
+        database=SimpleNamespace(get_wishlist_spotify_data=lambda tid, profile_id=1: None),
+        get_wishlist_tracks_for_download=lambda profile_id=1: [dict(r) for r in rows],
+        remove_track_from_wishlist=lambda tid, profile_id=1: tid == "t::a1",
+    )
+    monkeypatch.setattr(routes_module, "get_wishlist_service", lambda: service)
+    monkeypatch.setattr("core.wishlist.ignore.ignore_wishlist_track", lambda *a, **k: None)
+    synced = []
+    monkeypatch.setattr(routes_module, "_sync_user_wishlist_removal",
+                        lambda runtime, svc, descriptors: synced.extend(descriptors))
+    runtime = SimpleNamespace(profile_id=1, logger=_FakeLogger())
+
+    payload, status = remove_batch_from_wishlist(runtime, ["t::a1"])
+
+    assert (status, payload["removed"]) == (200, 1)
+    assert [d["source_info"]["lib2_track_id"] for d in synced] == [101]
+
+
 def test_set_wishlist_cycle_updates_metadata():
     runtime, _service, db, _logger, _activity_calls = _build_runtime(cycle_value="albums")
 
