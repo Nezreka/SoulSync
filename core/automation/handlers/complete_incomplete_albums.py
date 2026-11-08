@@ -67,24 +67,32 @@ def _apply_pending_findings(deps, limit, target):
     if target:
         sql += " AND entity_id=?"
         args.append(target)
-    sql += " ORDER BY id"
     try:
         with closing(get_db()._get_connection()) as conn:
+            # review 4 R4-C-6: ones that never failed first; a stuck finding
+            # no longer holds the front of the queue on every run
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(repair_findings)")}
+            sql += (" ORDER BY (COALESCE(last_error, '') <> ''), id" if "last_error" in cols
+                    else " ORDER BY id")
             ids = [int(row[0]) for row in conn.execute(sql, args)]
     except Exception:  # noqa: BLE001
         return {'status': 'skipped', 'reason': 'Album Completeness findings are unavailable'}
     if not ids:
         return {'status': 'completed', 'applied': 0, 'reason': 'No incomplete albums to complete'}
-    applied = failed = 0
-    for finding_id in ids:
+    applied = failed = skipped = 0
+    # review 4 R4-C-6: a bounded number of tries per run, so stuck findings
+    # can't make a run's cost grow with how many there are
+    for finding_id in ids[:limit * 3]:
         if applied >= limit:
             break
         result = fix_one([finding_id]) or {}
         if int(result.get('fixed') or 0):
             applied += 1
+        elif int(result.get('skipped') or 0):
+            skipped += 1      # held back by design, not a failure
         else:
             failed += 1
-    return {'status': 'completed', 'applied': applied, 'failed': failed,
+    return {'status': 'completed', 'applied': applied, 'failed': failed, 'skipped': skipped,
             'reason': 'Missing tracks went on the Wishlist'}
 
 

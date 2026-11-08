@@ -125,3 +125,30 @@ def test_another_profiles_own_library_is_never_completed_for_them(tmp_path):
                            bulk_fix_repair_findings=lambda ids: fixed.append(ids) or {'fixed': 1})
     auto_complete_incomplete_albums({'_event_data': _DONE, 'max_albums': 5}, deps)
     assert fixed == [[3], [4]]
+
+
+def test_stuck_findings_never_hold_the_queue_and_a_held_back_one_is_no_failure(tmp_path):
+    """review 4 R4-C-6: every run retried the stuck findings first, and a run
+    tried as many as there were; a held-back finding counted as failed"""
+    import sqlite3
+    db = _Db(str(tmp_path / 'm.db'))
+    conn = sqlite3.connect(db.path)
+    conn.execute("ALTER TABLE repair_findings ADD COLUMN last_error TEXT")
+    conn.execute("UPDATE repair_findings SET last_error='provider down' WHERE id IN (1, 2)")
+    for i in range(10, 30):
+        conn.execute("INSERT INTO repair_findings VALUES (?, 'album_completeness', 'incomplete_album', "
+                     "'pending', ?, '{\"track_ids\": [1], \"profile_id\": 1}', 'stuck')", (i, f"lib2:{i}"))
+    conn.commit()
+    conn.close()
+    tried = []
+
+    def fix(ids):
+        tried.append(ids[0])
+        return {'fixed': 0, 'skipped': 1} if ids[0] == 3 else {'fixed': 0}
+
+    deps = SimpleNamespace(get_database=lambda: db, bulk_fix_repair_findings=fix,
+                           run_repair_job_now=lambda *a, **kw: None)
+    result = auto_complete_incomplete_albums({'_event_data': _DONE, 'max_albums': 2}, deps)
+    assert tried[:2] == [3, 4]          # never failed before: first
+    assert len(tried) == 6              # limit * 3, not all 24
+    assert result['skipped'] == 1 and result['failed'] == 5
