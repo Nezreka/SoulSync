@@ -1546,26 +1546,33 @@ def prune_browse_only_artists(conn) -> Dict[str, Any]:
            AND NOT EXISTS (
                  SELECT 1 FROM lib2_monitor_rules r
                   WHERE r.entity_type = 'artist' AND r.entity_id = a.id AND r.monitored = 1)
+           -- review 4 R4-B-6: two lookups, no OR, the artist's tracks
+           -- first (CROSS JOIN keeps that order). otherwise SQLite walked
+           -- every track rule per artist when it had no stats
            AND NOT EXISTS (
                  SELECT 1 FROM lib2_track_artists ta4
-                   JOIN lib2_monitor_rules r2 ON r2.monitored = 1 AND (
-                        (r2.entity_type = 'track' AND r2.entity_id = ta4.track_id)
-                     OR (r2.entity_type = 'album' AND r2.entity_id =
-                            (SELECT t4.album_id FROM lib2_tracks t4 WHERE t4.id = ta4.track_id)))
+                   CROSS JOIN lib2_monitor_rules r2 ON r2.entity_type = 'track'
+                        AND r2.entity_id = ta4.track_id AND r2.monitored = 1
                   WHERE ta4.artist_id = a.id)
            AND NOT EXISTS (
+                 SELECT 1 FROM lib2_track_artists ta6
+                   CROSS JOIN lib2_tracks t6 ON t6.id = ta6.track_id
+                   CROSS JOIN lib2_monitor_rules r4 ON r4.entity_type = 'album'
+                        AND r4.entity_id = t6.album_id AND r4.monitored = 1
+                  WHERE ta6.artist_id = a.id)
+           AND NOT EXISTS (
                  SELECT 1 FROM lib2_track_artists ta5
-                   JOIN lib2_wanted_tracks w ON w.track_id = ta5.track_id AND w.wanted = 1
+                   CROSS JOIN lib2_wanted_tracks w ON w.track_id = ta5.track_id AND w.wanted = 1
                   WHERE ta5.artist_id = a.id)
            AND NOT EXISTS (
                  SELECT 1 FROM lib2_album_artists aa5
-                   JOIN lib2_monitor_rules r3 ON r3.entity_type = 'album'
+                   CROSS JOIN lib2_monitor_rules r3 ON r3.entity_type = 'album'
                         AND r3.entity_id = aa5.album_id AND r3.monitored = 1
                   WHERE aa5.artist_id = a.id)
            AND NOT EXISTS (
                  SELECT 1 FROM lib2_album_artists aa6
-                   JOIN lib2_tracks t6 ON t6.album_id = aa6.album_id
-                   JOIN lib2_wanted_tracks w2 ON w2.track_id = t6.id AND w2.wanted = 1
+                   CROSS JOIN lib2_tracks t6 ON t6.album_id = aa6.album_id
+                   CROSS JOIN lib2_wanted_tracks w2 ON w2.track_id = t6.id AND w2.wanted = 1
                   WHERE aa6.artist_id = a.id)
            AND (
                  EXISTS (SELECT 1 FROM lib2_album_artists aa3 WHERE aa3.artist_id = a.id)

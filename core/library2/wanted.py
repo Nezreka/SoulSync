@@ -79,6 +79,11 @@ def ensure_wanted_schema(cursor: Any) -> None:
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_lib2_wanted_tracks_wanted "
         "ON lib2_wanted_tracks(profile_id, wanted)")
+    # review 4 R4-B-6: "is this track wanted by anyone" (the browse prune,
+    # once per artist) had no index on track_id alone; wanted rows only
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lib2_wanted_tracks_track "
+        "ON lib2_wanted_tracks(track_id) WHERE wanted = 1")
 
 
 def _decide(trk_mon: Optional[int], trk_prov: Optional[str],

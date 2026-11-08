@@ -1616,3 +1616,17 @@ def test_smart_split_reuses_the_artist_holding_the_resolved_id(imported_conn):
     credited = {r["artist_id"] for r in imported_conn.execute(
         "SELECT artist_id FROM lib2_album_artists WHERE album_id=?", (album_id,))}
     assert beyonce in credited
+
+
+def test_the_browse_prune_reads_rules_per_track_without_planner_stats(imported_conn):
+    """review 4 R4-B-6: an OR in the rule join made SQLite walk every track
+    rule per artist when it had no stats (minutes on a big library)"""
+    seen = []
+    imported_conn.set_trace_callback(lambda sql: seen.append(sql) if "ta4" in sql else None)
+    NE.prune_browse_only_artists(imported_conn)
+    imported_conn.set_trace_callback(None)
+    assert seen
+    plan = " | ".join(r[3] for r in imported_conn.execute("EXPLAIN QUERY PLAN " + seen[0]))
+    for alias in ("r2", "r3", "r4"):
+        assert f"SEARCH {alias} USING INDEX idx_lib2_monitor_rules_entity (entity_type=? AND entity_id=?)" in plan, plan
+    assert "SCAN w" not in plan and "AUTOMATIC" not in plan, plan
