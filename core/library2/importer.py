@@ -563,6 +563,16 @@ def _normalize_album_type(raw: Any, track_count: Optional[int], actual_tracks: i
     return "single" if _detect_single(track_count, actual_tracks) else "album"
 
 
+_EXPLICIT_ALBUM_TYPES = frozenset({"album", "single", "ep", "compilation", "live", "compile",
+                                   "compilations", "appears_on", "appears-on"})
+
+
+def _album_type_is_explicit(raw: Any) -> bool:
+    """a release type the legacy row actually stored (the heuristic fallback
+    in _normalize_album_type is a guess, not a kind)"""
+    return str(raw or "").strip().lower() in _EXPLICIT_ALBUM_TYPES
+
+
 def _merge_external_ids(cursor, table: str, entity_id: int, ids: Dict[str, Any]) -> None:
     """Merge {source: id} into an entity's ``external_ids`` JSON column (never
     overwrites an existing source, so a discography-claimed row keeps its
@@ -1945,13 +1955,15 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
             # actual track rows for single-detection
             actual = actual_track_counts.get(_legacy_key(row["id"]), 0)
             track_count = _pick(row, "track_count")
-            album_type = _normalize_album_type(
-                # `record_type` is what the legacy schema calls it; the other
-                # three are shapes older imports produced.
-                _pick(row, "album_type", "record_type", "release_type", "type"),
-                track_count,
-                actual,
-            )
+            # `record_type` is what the legacy schema calls it; the other
+            # three are shapes older imports produced.
+            raw_type = _pick(row, "album_type", "record_type", "release_type", "type")
+            album_type = _normalize_album_type(raw_type, track_count, actual)
+            # review 4 R4-B-2: a type 3.6.1 stored is a known kind (a provider
+            # said so), not the column default. without it the #829 guard
+            # read every carried 'album' as unknown and let a same-named
+            # single into the album's folder
+            type_known = 1 if _album_type_is_explicit(raw_type) else 0
             year = _pick(row, "year")
             # G02-3: 3.6.1 stored an unknown year as 0 and read 0 as unknown
             # in three places; lib2 says unknown with NULL
@@ -2053,10 +2065,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "server_id=COALESCE(?, server_id), "
                     "added_at=COALESCE(?, added_at), "
                     "origin='library', legacy_album_id=?, legacy_import_run_id=?, "
+                    "album_type_known=MAX(COALESCE(album_type_known,0), ?), "
                     "updated_at=CURRENT_TIMESTAMP WHERE id=?",
                     (*fields, _pick(row, "created_at"),
                      row["id"] if copy_of is None else album_copies[legacy_key],
-                     run_id, refresh),
+                     run_id, type_known, refresh),
                 )
                 if refresh in made_by_a_copy:
                     # Kim's row made it moments ago, and the house's (freshly
@@ -2087,11 +2100,11 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "canonical_resolved_at, canonical_locked, "
                     "server_source, server_id, "
                     "legacy_album_id, quality_profile_id, monitored, legacy_import_run_id, "
-                    "added_at) "
+                    "added_at, album_type_known) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,"
-                    "       COALESCE(?, CURRENT_TIMESTAMP))",
+                    "       COALESCE(?, CURRENT_TIMESTAMP), ?)",
                     (*fields, row["id"], default_profile_id, album_monitored, run_id,
-                     _pick(row, "created_at")),
+                     _pick(row, "created_at"), type_known),
                 )
                 album_id = cursor.lastrowid
                 album_map[_legacy_key(row["id"])] = album_id

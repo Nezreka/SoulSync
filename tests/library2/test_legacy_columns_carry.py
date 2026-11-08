@@ -60,3 +60,42 @@ def test_the_release_group_id_comes_over(imported_conn):
     carry_legacy_columns(conn)
     assert conn.execute("SELECT musicbrainz_release_group_id FROM lib2_albums WHERE legacy_album_id=10"
                         ).fetchone()[0] == "rg-views"
+
+
+def test_a_release_type_3_6_1_stored_is_a_known_kind(legacy_db):
+    """review 4 R4-B-2: the import never set album_type_known, so every album
+    3.6.1 had typed read as the bare default, and the #829 guard let the
+    "Ocean Avenue" single into "Ocean Avenue" the album's folder"""
+    from core.library2.importer import import_legacy_library
+    from tests.lib2_seed import row_conn
+    conn = row_conn(legacy_db.path)
+    conn.execute("ALTER TABLE albums ADD COLUMN record_type TEXT")
+    conn.execute("UPDATE albums SET record_type='album' WHERE id=10")
+    conn.commit()
+    conn.close()
+    import_legacy_library(legacy_db)
+    conn = row_conn(legacy_db.path)
+    known = dict(conn.execute("SELECT legacy_album_id, album_type_known FROM lib2_albums "
+                              "WHERE album_type='album'").fetchall())
+    assert known.pop("10", known.pop(10, None)) == 1
+    # an untyped legacy row stays unknown, the same as 3.6.1 read NULL
+    assert set(known.values()) <= {0}
+    conn.close()
+
+
+def test_an_install_that_already_upgraded_gets_its_known_kinds(imported_conn):
+    conn = imported_conn
+    conn.execute("ALTER TABLE albums ADD COLUMN record_type TEXT")
+    conn.execute("UPDATE albums SET record_type='album' WHERE id=10")
+    conn.execute("UPDATE lib2_albums SET album_type_known=0")
+    conn.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) VALUES('legacy_columns_v1')")
+    conn.commit()
+    carry_legacy_columns(conn)
+    assert conn.execute("SELECT album_type_known FROM lib2_albums WHERE legacy_album_id=10"
+                        ).fetchone()[0] == 1
+    # once: a later change is never undone
+    conn.execute("UPDATE lib2_albums SET album_type_known=0 WHERE legacy_album_id=10")
+    conn.commit()
+    carry_legacy_columns(conn)
+    assert conn.execute("SELECT album_type_known FROM lib2_albums WHERE legacy_album_id=10"
+                        ).fetchone()[0] == 0

@@ -29,6 +29,8 @@ from utils.logging_config import get_logger
 logger = get_logger("library2.legacy_columns")
 
 MARKER = "legacy_columns_v1"
+# review 4 R4-B-2, its own marker: installs that already ran v1 need it too
+KIND_MARKER = "legacy_album_kind_known_v1"
 _BATCH = 2000
 
 
@@ -37,6 +39,7 @@ def carry_legacy_columns(conn: Any) -> Dict[str, int]:
     try:
         conn.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
                      "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        _carry_known_album_kinds(conn)
         if conn.execute("SELECT 1 FROM lib2_upgrade_repairs WHERE name=?", (MARKER,)).fetchone():
             return stats
         from core.library2.source_snapshot import source_table
@@ -80,6 +83,37 @@ def carry_legacy_columns(conn: Any) -> Dict[str, int]:
             pass
         logger.warning("3.6.1 columns not carried yet: %s", exc)
     return stats
+
+
+def _carry_known_album_kinds(conn) -> int:
+    """review 4 R4-B-2: the import never set album_type_known, so a release
+    type 3.6.1 stored read as the column default, and the #829 folder guard
+    let a same-named single into the album's folder. a type the legacy row
+    stored is a known kind. once (own marker); raises to the caller's retry"""
+    if conn.execute("SELECT 1 FROM lib2_upgrade_repairs WHERE name=?", (KIND_MARKER,)).fetchone():
+        return 0
+    from core.library2.source_snapshot import source_table
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    albums = source_table(tables, "albums")
+    lib2_cols = {r[1] for r in conn.execute("PRAGMA table_info(lib2_albums)")}
+    album_cols = ({r[1] for r in conn.execute(f'PRAGMA table_info("{albums}")')}
+                  if albums else set())
+    changed = 0
+    if "album_type_known" in lib2_cols and "record_type" in album_cols:
+        from core.library2.importer import _EXPLICIT_ALBUM_TYPES
+        kinds = sorted(_EXPLICIT_ALBUM_TYPES)
+        marks = ",".join("?" for _ in kinds)
+        cur = conn.execute(
+            f"""UPDATE lib2_albums SET album_type_known=1
+                 WHERE album_type_known=0 AND legacy_album_id IN (
+                       SELECT id FROM "{albums}" WHERE LOWER(TRIM(record_type)) IN ({marks}))""",
+            kinds)
+        changed = max(int(cur.rowcount or 0), 0)
+    conn.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) VALUES(?)", (KIND_MARKER,))
+    conn.commit()
+    if changed:
+        logger.info("3.6.1 release kinds marked known: %s", changed)
+    return changed
 
 
 def _batches(conn, table: str):
