@@ -4963,3 +4963,20 @@ def test_discovery_resolves_a_provider_album_link_to_the_catalogue_release(api):
 
     assert hit["album_id"] == ids["views"]
     assert miss["album_id"] is None
+
+
+def test_an_import_waits_for_the_last_ones_convergence(api):
+    """review 4 R4-D-4: the convergence after an import folds and merges rows;
+    a second import started meanwhile wrote the same rows alongside it"""
+    import threading
+    client, _db, _ids = api
+    release = threading.Event()
+    t = threading.Thread(target=release.wait, name="lib2-converge", daemon=True)
+    t.start()
+    try:
+        r = client.post("/api/library/v2/import", json={})
+        assert r.status_code == 409
+        assert "settling" in r.get_json()["error"]
+    finally:
+        release.set()
+        t.join(2)

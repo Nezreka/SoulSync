@@ -5788,6 +5788,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return _fail("Import already running", 409)
             if _artwork_cache_snapshot()["running"]:
                 return _fail("Artwork caching is still running; retry when it finishes", 409)
+            # review 4 R4-D-4: the convergence after an import folds and
+            # merges the rows a second import would be writing
+            if any(t.name == "lib2-converge" and t.is_alive() for t in threading.enumerate()):
+                return _fail("The last import is still settling; retry when it finishes", 409)
             # Ordered AFTER the in-progress checks on purpose: "a run is
             # already happening" is the more specific answer, and the existing
             # contract tests read it back.
