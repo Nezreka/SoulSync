@@ -207,3 +207,29 @@ def test_failed_download_still_locks_the_pick(client, seeded, monkeypatch):
     assert body['server_updated'] is False and body['cover_written'] is False
     assert fake.pushed == []
     assert _row(seeded, ALBUM_ID['album'])['art_locked'] == 1
+
+
+def test_a_picked_artist_photo_reaches_jellyfin_through_its_server_id(seeded, monkeypatch):
+    """review 4 R4-D-5: the push asked Jellyfin for the lib2 row id, so the
+    artist was never found and the poster never changed"""
+    class _ServerArtist:
+        ratingKey = 'art-9'
+
+    class _JellyfinArtists:
+        def __init__(self):
+            self.asked, self.pushed = [], []
+
+        def get_artist_by_id(self, artist_id):
+            self.asked.append(artist_id)
+            return _ServerArtist() if artist_id == 'art-9' else None
+
+        def update_artist_poster(self, artist, image_data):
+            self.pushed.append(artist.ratingKey)
+            return True
+
+    fake = _JellyfinArtists()
+    monkeypatch.setattr(_artist_detail, 'media_server_engine', _Engine(fake))
+    monkeypatch.setattr(_artist_detail, 'config_manager', _Config())
+    out = _artist_detail.push_artist_art_outbound(ALBUM_ID['artist'], JPEG)
+    assert fake.asked == ['art-9']
+    assert out['server_updated'] is True and fake.pushed == ['art-9']

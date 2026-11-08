@@ -1551,6 +1551,28 @@ def push_album_art_outbound(album_id, image_bytes) -> dict:
     return out
 
 
+def _artist_server_id(artist_id, server_source):
+    """the active server's own id for a catalogue artist, or None. the same
+    two places _album_server_id reads (review 4 R4-D-5: the push asked
+    Jellyfin for a lib2 row id and never found the artist)"""
+    if not server_source:
+        return None
+    try:
+        with get_database()._get_connection() as conn:
+            row = conn.execute(
+                "SELECT COALESCE("
+                "  (SELECT m.server_id FROM lib2_media_server_mappings m"
+                "    WHERE m.entity_type='artist' AND m.entity_id=a.id"
+                "      AND m.server_source=? LIMIT 1),"
+                "  CASE WHEN a.server_source=? THEN a.server_id END)"
+                " FROM lib2_artists a WHERE a.id=?",
+                (str(server_source), str(server_source), int(artist_id))).fetchone()
+        return str(row[0]) if row and row[0] else None
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[set-artist-art] server id lookup failed for artist %s: %s", artist_id, exc)
+        return None
+
+
 def push_artist_art_outbound(artist_id, image_bytes) -> dict:
     """a picked artist photo beyond SoulSync, as 3.6.1 did: the active
     server's poster, artist.jpg in the artist's folder, and a Navidrome scan
@@ -1567,11 +1589,20 @@ def push_artist_art_outbound(artist_id, image_bytes) -> dict:
             client = media_server_engine.client(active)
             if client and hasattr(client, 'update_artist_poster'):
                 server_artist = None
+                server_id = _artist_server_id(artist_id, active)
                 if hasattr(client, '_search_artists_by_name'):        # Plex
-                    matches = client._search_artists_by_name(title=artist_name, limit=1)
-                    server_artist = matches[0] if matches else None
-                elif hasattr(client, 'get_artist_by_id'):             # Jellyfin
-                    server_artist = client.get_artist_by_id(str(artist_id))
+                    server = getattr(client, 'server', None)
+                    if server_id and server is not None and hasattr(server, 'fetchItem'):
+                        try:
+                            server_artist = server.fetchItem(f'/library/metadata/{server_id}')
+                        except Exception:  # noqa: BLE001 - gone on the server: by name
+                            server_artist = None
+                    if server_artist is None:
+                        # 3.6.1's way, for an artist with no mapping yet
+                        matches = client._search_artists_by_name(title=artist_name, limit=1)
+                        server_artist = matches[0] if matches else None
+                elif hasattr(client, 'get_artist_by_id') and server_id:  # Jellyfin
+                    server_artist = client.get_artist_by_id(server_id)
                 if server_artist is not None:
                     out["server_updated"] = bool(client.update_artist_poster(server_artist, image_bytes))
         except Exception as exc:  # noqa: BLE001
