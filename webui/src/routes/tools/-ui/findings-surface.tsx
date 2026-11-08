@@ -1956,6 +1956,7 @@ export function FindingsSurface({
           groups={shown}
           typeInfo={typeInfo}
           status={statusFilter}
+          severity={severityFilter}
           openType={openType}
           onToggleOpen={toggleOpenGroup}
           onFixGroup={(group, info) => void fixGroup(group, info)}

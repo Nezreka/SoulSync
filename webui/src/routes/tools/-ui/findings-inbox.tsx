@@ -25,6 +25,8 @@ export interface FindingsInboxProps {
   typeInfo: (findingType: string) => FindingTypeInfo | undefined;
   /** Which count each row shows — follows the status segmented control. */
   status: string;
+  /** the severity filter, so a row counts and colours only those rows */
+  severity?: string;
   openType: string;
   onToggleOpen: (findingType: string) => void;
   onFixGroup: (group: FindingGroup, info: FindingTypeInfo | undefined) => void;
@@ -40,6 +42,7 @@ export function FindingsInbox({
   groups,
   typeInfo,
   status,
+  severity: severityFilter = '',
   openType,
   onToggleOpen,
   onFixGroup,
@@ -69,9 +72,10 @@ export function FindingsInbox({
       {ordered.map((group) => {
         const info = typeInfo(group.finding_type);
         const label = info?.label || group.finding_type.replace(/_/g, ' ');
-        const count = groupCountForStatus(group, status);
+        const count = groupCountForStatus(group, status, severityFilter);
         const open = openType === group.finding_type;
-        const severity = group.severity_max || 'info';
+        // filtered to one severity, every row shown has rows of it (review 5 R5-L-3)
+        const severity = severityFilter || group.severity_max || 'info';
         const destructive = Boolean(info?.destructive);
         // A type with no handler gets NO button. The client used to guess at
         // fixability and offered two types a button that could only ever fail.
