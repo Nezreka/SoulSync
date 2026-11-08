@@ -183,6 +183,10 @@ def write_tag(audio, tag, value, symbols):
     if tag == 'LYRICS':
         if isinstance(audio.tags, symbols.ID3):
             from mutagen.id3 import USLT
+            # review 5 R5-A-3: a USLT is keyed by lang and desc, so adding
+            # one beside an old 'XXX' frame stacked a second set of lyrics
+            # and the reader still saw the old. replace, as mp4 and vorbis do
+            audio.tags.delall('USLT')
             audio.tags.add(USLT(encoding=3, lang='eng', desc='', text=values[0]))
         elif isinstance(audio, symbols.MP4):
             audio['\xa9lyr'] = values
