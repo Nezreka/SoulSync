@@ -503,6 +503,8 @@ def test_the_more_menu_item_is_admin_only_and_both_steps_say_torrents_keep_seedi
     assert "Torrents are left seeding." in js
     assert "confirm_title: input.value" in two                 # the server checks it again
     assert "input.value.trim() !== want" in two                # the button only arms on a match
+    # sizes in the Library card's units (10^9), not the 2^30 'GB' of the file list
+    assert "_deleteSize(p.size_bytes)" in js and "fmtBytes(p.size_bytes)" not in js
 
 
 def test_an_unstamped_folder_in_the_bin_is_never_treated_as_an_entry(db, tmp_path):

@@ -19,6 +19,7 @@ import {
   unblockVideoRelease,
 } from '../-vdl.api';
 import {
+  vdlBinCountLabel,
   vdlBinDisplayName,
   vdlBlockSxe,
   vdlBlockWhat,
@@ -113,6 +114,7 @@ function RecycleRows({
       <BinStrip
         size={vdlFmtBytes(total) || '0 B'}
         count={items.length}
+        countLabel={vdlBinCountLabel(items)}
         line={`Files removed by upgrades, retention and dismissed imports, and titles deleted from their page, land here first. Restore puts one back where it was; anything older than the tracker restores into _restored. Kept for ${bin.keep_days ?? 7} days.`}
         warn={
           bin.recycle_enabled === false

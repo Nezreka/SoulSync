@@ -1438,6 +1438,15 @@
 
     function _plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
 
+    // the same units the Library card shows for this title (1 GB = 10^9 bytes), so
+    // the dialog and the card don't disagree about the same files
+    function _deleteSize(bytes) {
+        bytes = +bytes || 0; if (!bytes) return '';
+        if (bytes >= 1e12) return (Math.round(bytes / 1e11) / 10) + ' TB';
+        if (bytes >= 1e9) return (Math.round(bytes / 1e8) / 10) + ' GB';
+        return Math.max(1, Math.round(bytes / 1e6)) + ' MB';
+    }
+
     // the lines both steps repeat: where the files go, and that torrents keep seeding
     function _deleteFate(p) {
         var gone = p.recycling
@@ -1488,7 +1497,7 @@
         var paths = p.folders.map(function (f) { return f.path; })
             .concat(p.loose_files.map(function (f) { return f.path; }));
         if (p.files) {
-            items.push('<li>' + _plural(p.files, 'file') + (p.size_bytes ? ', ' + fmtBytes(p.size_bytes) : '') +
+            items.push('<li>' + _plural(p.files, 'file') + (p.size_bytes ? ', ' + _deleteSize(p.size_bytes) : '') +
                 (p.folders.length ? ' (the whole folder, artwork and subtitles too)' : '') + '. ' + esc(fate.gone) +
                 paths.map(function (x) { return '<span class="vdt-path">' + esc(x) + '</span>'; }).join('') + '</li>');
         } else {
