@@ -677,6 +677,26 @@ def test_reorganize_files_explicit_and_artist_identity_like_the_download(importe
     assert context["spotify_artist"]["musicbrainz_id"] == "mb-drake"
 
 
+def test_reorganize_uses_an_explicit_flag_set_by_hand(imported_conn):
+    """#2009: the explicit flag a user set on the track or album page was
+    ignored; reorganize read the raw column, so $explicit rendered nothing"""
+    from core.library2.metadata_overrides import set_field_override
+    conn = imported_conn
+    _artist_id, album_id, track_ids = _seed(conn)
+    conn.execute("UPDATE lib2_tracks SET explicit=NULL WHERE id=?", (track_ids[0],))
+    conn.execute("UPDATE lib2_albums SET explicit=NULL WHERE id=?", (album_id,))
+    set_field_override(conn, entity_type="track", entity_id=track_ids[0], field_name="explicit", value=True)
+    set_field_override(conn, entity_type="release_group", entity_id=album_id, field_name="explicit", value=True)
+    conn.commit()
+    build, seen = _recorder()
+
+    _plan(conn, album_id, build)
+
+    context = seen[0]["context"]
+    assert context["track_info"]["explicit"] is True
+    assert context["spotify_album"]["explicit"] is True
+
+
 def test_reorganize_refuses_an_unknown_artist_album(imported_conn):
     """3.6.1 refused placeholder metadata and pointed at Fix Unknown Artists.
     planning it moved a hand-sorted folder into 'Unknown Artist/'."""

@@ -370,6 +370,8 @@ def plan_album_reorganize(
         "album_type": album_row["album_type"],
         "secondary_types": album_row["secondary_types"],
         "image_url": album_row["image_url"],
+        # #2009: an explicit flag set by hand names the folder too
+        "explicit": album_row["explicit"],
     })
     album["spotify_id"] = album_row["spotify_id"]
     album_title = album.get("title") or "Unknown Album"
@@ -398,8 +400,12 @@ def plan_album_reorganize(
     all_rows = _track_rows(conn, album_id)
     from core.library2.retag import track_contexts
     references = {r['id']: r['db_data'] for r in track_contexts(conn, [r['id'] for r in all_rows])}
+    # #2009: the track's explicit flag as the page shows it (a hand-set value
+    # wins), so $explicit renders what the user sees; the raw column ignored it
     all_tracks = [{**references[r['id']], 'id': r['id'], 'file_path': r['file_path'],
-                   'file_id': r['file_id'], 'explicit': r['explicit']} for r in all_rows]
+                   'file_id': r['file_id'],
+                   'explicit': _effective(conn, "track", r['id'], {"explicit": r['explicit']})["explicit"]}
+                  for r in all_rows]
     tracks = [t for t in all_tracks if t["file_path"]]
     common = {
         "source": None,
@@ -537,7 +543,7 @@ def plan_album_reorganize(
             # mbid for $albumartistinfo a download filed it with, so a
             # reorganize never strips [E] off a folder the next download adds
             local_explicit=_flag(track.get("explicit")),
-            local_album_explicit=_flag(album_row["explicit"]),
+            local_album_explicit=_flag(album.get("explicit")),
             local_artist_mbid=(album_row["artist_musicbrainz_id"] or None),
             record_type=filing["type"],
             type_source=filing["source"],
