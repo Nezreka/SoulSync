@@ -311,3 +311,27 @@ def test_wishlist_artist_photos_use_indexed_lookups():
     for sql in (q for q in seen if "FROM lib2_artists" in q and "IN (" in q):
         plan = " ".join(str(tuple(r)) for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
         assert "SEARCH" in plan, plan
+
+
+def test_the_post_scan_page_reads_only_its_rows_through_indexes():
+    """review 5 R5-H-1: the server-id page filter was EXISTS ... OR ..., which
+    sqlite can't drive from an index, so every page walked every album and
+    track. the page must be picked through the server-id indexes"""
+    conn, _cur = _make_library_db()
+    conn.execute("UPDATE lib2_tracks SET server_source='plex', server_id='p-1' WHERE id=1")
+    conn.execute(
+        "INSERT INTO lib2_media_server_mappings "
+        "(entity_type,entity_id,server_source,server_id) VALUES('track',2,'plex','p-2')")
+    seen = []
+    conn.set_trace_callback(seen.append)
+    totals = reconcile_library(
+        conn, _reader({'/a.flac': {'spotify_track_id': 'x'},
+                       '/b.flac': {'spotify_track_id': 'y'}}),
+        track_ids=['p-1', 'p-2'], server_source='plex')
+    conn.set_trace_callback(None)
+    assert totals.processed == 2 and totals.ids_filled == 2
+    page_sql = [q for q in seen if "FROM lib2_tracks t JOIN lib2_albums al" in q]
+    assert page_sql
+    for sql in page_sql:
+        plan = [str(r[3]) for r in conn.execute("EXPLAIN QUERY PLAN " + sql)]
+        assert not any(p.startswith("SCAN") for p in plan), plan

@@ -166,11 +166,15 @@ def reconcile_library(
             break
         page = ids[start:start + page_size]
         marks = ','.join('?' * len(page))
+        # review 5 R5-H-1: an EXISTS ... OR ... filter walked every track per
+        # page of 500 ids (seconds each on a big library). pick the ids from
+        # the two server-id indexes first, then read just those rows
         where = (
-            f"(EXISTS (SELECT 1 FROM lib2_media_server_mappings m "
-            f"WHERE m.entity_type='track' AND m.entity_id=t.id "
-            f"AND m.server_source=? AND m.server_id IN ({marks})) "
-            f"OR (t.server_source=? AND t.server_id IN ({marks})))"
+            f"t.id IN (SELECT m.entity_id FROM lib2_media_server_mappings m "
+            f"WHERE m.entity_type='track' AND m.server_source=? "
+            f"AND m.server_id IN ({marks}) "
+            f"UNION SELECT t2.id FROM lib2_tracks t2 "
+            f"WHERE t2.server_source=? AND t2.server_id IN ({marks}))"
             if by_server else f"t.id IN ({marks})"
         )
         params = (
