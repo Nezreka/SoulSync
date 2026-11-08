@@ -139,7 +139,8 @@ describe('Library V2 artist detail — All Releases views', () => {
     },
   );
 
-  // the whole artist page and the whole View Settings: slow on a loaded run
+  // the whole artist page and the whole View Settings: about 30s on a dev
+  // machine before the v2 review too, so a 30s limit failed on its own
   it('hides the toolbar buttons this profile switched off and opens View Settings from Tools', async () => {
     const saved: unknown[] = [];
     server.use(
@@ -186,7 +187,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(
       await screen.findByRole('button', { name: 'History' }, { timeout: 5000 }),
     ).toBeInTheDocument();
-  }, 30_000);
+  }, 60_000);
 
   it.each(['cards', 'table'])(
     'reads the discography of an artist the library does not hold, writing nothing (%s)',
