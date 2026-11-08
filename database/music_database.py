@@ -6784,18 +6784,27 @@ class MusicDatabase:
             # number (a startup of an older build already ran it), so it is
             # idempotent and touches nothing else. It runs FIRST: the backfill
             # below must never read this namespace as a legacy id.
+            # once: the importer writes lib2_track_id now, so after the first
+            # pass this scanned every play on every start, under the init
+            # lock, finding nothing (review 5 R5-X2-2)
             try:
-                cursor.execute("""
-                    UPDATE listening_history
-                       SET lib2_track_id = db_track_id, db_track_id = NULL
-                     WHERE server_source = 'lastfm'
-                       AND db_track_id IS NOT NULL
-                       AND EXISTS (SELECT 1 FROM lib2_tracks t
-                                    WHERE t.id = listening_history.db_track_id)
-                       AND (lib2_track_id IS NULL
-                            OR lib2_track_id = (SELECT t.id FROM lib2_tracks t
-                                                 WHERE t.legacy_track_id = listening_history.db_track_id))
-                """)
+                cursor.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+                               "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+                if not cursor.execute("SELECT 1 FROM lib2_upgrade_repairs WHERE name="
+                                      "'lastfm_listening_id_repair_v1'").fetchone():
+                    cursor.execute("""
+                        UPDATE listening_history
+                           SET lib2_track_id = db_track_id, db_track_id = NULL
+                         WHERE server_source = 'lastfm'
+                           AND db_track_id IS NOT NULL
+                           AND EXISTS (SELECT 1 FROM lib2_tracks t
+                                        WHERE t.id = listening_history.db_track_id)
+                           AND (lib2_track_id IS NULL
+                                OR lib2_track_id = (SELECT t.id FROM lib2_tracks t
+                                                     WHERE t.legacy_track_id = listening_history.db_track_id))
+                    """)
+                    cursor.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) "
+                                   "VALUES('lastfm_listening_id_repair_v1')")
             except Exception as e:
                 logger.debug("last.fm listening id repair skipped: %s", e)
             try:

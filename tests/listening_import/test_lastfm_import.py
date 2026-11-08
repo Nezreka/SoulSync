@@ -20,6 +20,9 @@ def test_lastfm_native_history_id_wins_over_different_legacy_numeric_collision()
         conn.execute("INSERT INTO listening_history(track_id,title,played_at,server_source,db_track_id) VALUES('plex1','Wrong song','2026-01-01 02:00:00','plex',1)")
         # A prior startup may already have made the generic legacy backfill.
         conn.execute("INSERT INTO listening_history(track_id,title,played_at,server_source,db_track_id,lib2_track_id) VALUES('fm2','Chosen','2026-01-01 03:00:00','lastfm',1,2)")
+        # rows like these come from an older build, whose db never ran the
+        # repair. review 5 R5-X2-2: it is once now, and the call above did it
+        conn.execute("DELETE FROM lib2_upgrade_repairs WHERE name='lastfm_listening_id_repair_v1'")
         db._add_listening_history_table(conn.cursor())
         db._add_listening_history_table(conn.cursor())
         assert conn.execute('SELECT db_track_id,lib2_track_id FROM listening_history ORDER BY id').fetchall() == [(None, 1), (1, 2), (None, 1)]
@@ -405,6 +408,9 @@ def test_existing_misfiled_lastfm_rows_are_repaired(tmp_path):
         " duration_ms, server_source, db_track_id)"
         " VALUES('plex-1','Ceremony','New Order','Substance',"
         "        '2023-11-15 22:13:20', 180000, 'plex', ?)", (track_id,))
+    # rows like these come from an older build, whose db never ran the repair.
+    # review 5 R5-X2-2: the repair is once now, and this db's init already did it
+    conn.execute("DELETE FROM lib2_upgrade_repairs WHERE name='lastfm_listening_id_repair_v1'")
     conn.commit()
     conn.close()
 
@@ -423,6 +429,21 @@ def test_existing_misfiled_lastfm_rows_are_repaired(tmp_path):
     conn.close()
     assert rows["lastfm"] == (None, track_id)
     assert rows["plex"][0] == track_id
+def test_the_misfiled_lastfm_repair_runs_once(tmp_path):
+    """review 5 R5-X2-2: the repair had no done-marker, so every start
+    scanned every play under the init lock to find nothing"""
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    conn = db._get_connection()
+    db._add_listening_history_table(conn.cursor())
+    conn.commit()
+    seen = []
+    conn.set_trace_callback(seen.append)
+    db._add_listening_history_table(conn.cursor())
+    conn.set_trace_callback(None)
+    conn.close()
+    assert not [q for q in seen if "server_source = 'lastfm'" in q], "the repair ran again"
+
+
 def test_corrected_username_does_not_reuse_old_accounts_cursor(tmp_path, monkeypatch):
     import json
     import core.listening_import.lastfm as module

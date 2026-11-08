@@ -1440,12 +1440,15 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_lib2_monitor_rules_entity "
             "ON lib2_monitor_rules(entity_type, entity_id)")
-        from core.library2.monitor_rules import prune_orphaned_rules, seed_legacy_rules
+        from core.library2.monitor_rules import seed_legacy_rules
         if rules_table_is_fresh:
             seeded = seed_legacy_rules(cursor)
             if seeded:
                 logger.info("Seeded %d legacy_import monitor rules", seeded)
-        prune_orphaned_rules(cursor)
+        # the orphan prune runs with the deferred backfills: here it scanned
+        # ~880k rules inside the init transaction on every start, about 1.5 s
+        # every first get_database() waited out (review 5 R5-X2-2). entity
+        # ids are AUTOINCREMENT, so an orphan rule can't attach to a new row
     except Exception as e:  # noqa: BLE001
         logger.error("monitor-rules migration failed (will retry next start): %s", e)
     # Materialized wanted projection (audit §11.2 / ADR-02 Stufe 2): the
@@ -1681,6 +1684,14 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("primary-file backfill failed (will retry next start): %s", e)
+
+    if not _stopped():
+        try:
+            from core.library2.monitor_rules import prune_orphaned_rules
+            stats["orphaned_monitor_rules"] = prune_orphaned_rules(cursor)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("monitor-rule orphan prune failed (will retry next start): %s", e)
 
     if not _stopped():
         # review 5 R5-G-1: downloads recorded before their file was in the

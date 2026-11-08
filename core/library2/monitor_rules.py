@@ -320,15 +320,23 @@ def merge_rules_into(conn, entity_type: str, source_id: int, target_id: int) -> 
 
 def prune_orphaned_rules(cursor) -> int:
     """Drop rules whose entity no longer exists (entity deletes don't cascade
-    into this table). Idempotent; called from the schema-ensure step."""
+    into this table). Idempotent; run by the deferred backfills and the
+    importer. reads first and deletes only what it found: a DELETE ... NOT IN
+    holds the write lock for its whole scan even when nothing is orphaned
+    (review 5 R5-X2-2)."""
     pruned = 0
     for entity_type, table in _ENTITY_TABLES.items():
-        cursor.execute(
-            f"""DELETE FROM lib2_monitor_rules
+        ids = [int(r[0]) for r in cursor.execute(
+            f"""SELECT id FROM lib2_monitor_rules
                  WHERE entity_type=?
                    AND entity_id NOT IN (SELECT id FROM {table})""",
-            (entity_type,))
-        pruned += cursor.rowcount
+            (entity_type,)).fetchall()]
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            cursor.execute(
+                f"DELETE FROM lib2_monitor_rules WHERE id IN ({','.join('?' * len(chunk))})",
+                chunk)
+            pruned += cursor.rowcount
     return pruned
 
 

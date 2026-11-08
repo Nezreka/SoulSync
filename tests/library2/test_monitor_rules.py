@@ -87,3 +87,46 @@ def test_prune_drops_rules_of_deleted_entities(imported_conn):
     pruned = prune_orphaned_rules(conn.cursor())
     assert pruned >= 1
     assert _rule(conn, "track", track_id) is None
+
+
+def test_the_init_step_leaves_the_orphan_prune_to_the_deferred_backfills(tmp_path):
+    """review 5 R5-X2-2: the prune scanned every rule (~880k live) inside the
+    init transaction on every start; it runs with the deferred backfills,
+    and reads before it deletes"""
+    import sqlite3
+    from core.library2.schema import ensure_library_v2_schema, run_library_v2_backfills
+    path = str(tmp_path / "r.db")
+    conn = sqlite3.connect(path)
+    ensure_library_v2_schema(conn, run_backfills=False)
+    conn.execute("INSERT INTO lib2_monitor_rules(entity_type, entity_id, monitored, provenance) "
+                 "VALUES('track', 424242, 1, 'user_explicit')")
+    conn.commit()
+
+    seen = []
+    conn.set_trace_callback(seen.append)
+    ensure_library_v2_schema(conn, run_backfills=False)
+    conn.set_trace_callback(None)
+    conn.commit()
+    assert not [q for q in seen if "lib2_monitor_rules" in q and "NOT IN" in q]
+    assert conn.execute("SELECT COUNT(*) FROM lib2_monitor_rules").fetchone()[0] == 1
+
+    stats = run_library_v2_backfills(conn, commit=True)
+    assert stats["orphaned_monitor_rules"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM lib2_monitor_rules").fetchone()[0] == 0
+
+
+def test_a_no_op_orphan_prune_leaves_the_write_lock_free(imported_conn, tmp_path):
+    import sqlite3
+    from core.library2.schema import ensure_library_v2_schema
+    path = str(tmp_path / "l.db")
+    conn = sqlite3.connect(path)
+    ensure_library_v2_schema(conn, run_backfills=False)
+    conn.commit()
+    conn.execute("PRAGMA journal_mode=WAL")
+    assert prune_orphaned_rules(conn.cursor()) == 0
+    other = sqlite3.connect(path, timeout=0)
+    try:
+        other.execute("BEGIN IMMEDIATE")
+        other.rollback()
+    finally:
+        other.close()
