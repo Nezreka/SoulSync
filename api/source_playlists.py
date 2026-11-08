@@ -2609,6 +2609,29 @@ def get_deezer_editorial_playlists():
         return jsonify({"success": True, "playlists": [], "count": 0, "error": str(e)})
 
 
+@bp.route('/api/search/browse/deezer', methods=['GET'])
+def get_search_browse_deezer():
+    """What's charting on Deezer for one search-page browse tile (#1984).
+
+    core/search/deezer_browse.py shipped with its tests and the page's fetch,
+    but no route, so every tile 404'd and quietly read the cache (review 5
+    R5-X1-3). ?tile= is the page's tile id. answers {available: false} when
+    the tile has no Deezer genre, the client is off, or Deezer is down: the
+    page then keeps its cache. public endpoints, never a token.
+    """
+    tile = (request.args.get('tile') or '').strip()
+    try:
+        from core.search.deezer_browse import browse_tile
+        client = _get_deezer_client()
+        result = browse_tile(client, tile) if client is not None and tile else None
+    except Exception as e:
+        logger.warning(f"Deezer browse tile {tile!r} unavailable: {e}")
+        result = None
+    if result is None:
+        return jsonify({"available": False, "tile": tile})
+    return jsonify({**result, "available": True, "tile": tile})
+
+
 @bp.route('/api/discover/deezer/genres', methods=['GET'])
 def get_deezer_editorial_genres():
     """The genre chips the editorial shelf offers."""

@@ -36,6 +36,9 @@ export interface AutoSyncSeamPlaylist {
   source_playlist_id?: string;
   total_count?: number;
   in_library_count?: number;
+  /** how many tracks the sync matcher has checked against the library; 0
+   *  means nobody looked, not that none are owned */
+  library_checked_count?: number;
   wishlisted_count?: number;
   pipeline_state?: AutoSyncSeamPipelineState | null;
   [key: string]: unknown;
@@ -252,6 +255,9 @@ export function coverageFor(
   if (!playlist) return null;
   const total = Number(playlist.total_count) || 0;
   if (total <= 0) return null;
+  // unknown until every track was checked, a 0 from an unchecked mirror is not
+  // "own none of it" (same rule as the sync page's libraryOwnedKnown, review 5 R5-K-1)
+  if ((Number(playlist.library_checked_count) || 0) < total) return null;
   const inLibrary = Math.max(0, Math.min(total, Number(playlist.in_library_count) || 0));
   return { inLibrary, total, pct: Math.round((inLibrary / total) * 100) };
 }

@@ -189,6 +189,19 @@ def test_a_handled_critical_no_longer_colours_its_group(client):
     assert g["pending"] == 0 and g["severity_max"] == "info"
 
 
+def test_groups_count_severities_per_status(client):
+    # review 5 R5-L-3: severity_max alone hid a handled critical under
+    # Resolved + Critical, and pending warnings under one pending critical
+    c, db = client
+    _seed(db, "youtube_ghosts", "youtube_mass_missing", 2, severity="critical")
+    _seed(db, "youtube_ghosts", "youtube_mass_missing", 3, severity="warning", title="W")
+    fid = db.repair_get_findings(severity="critical")["items"][0]["id"]
+    db.repair_set_finding_status(fid, "resolved", action="flagged")
+    g = c.get("/api/video/repair/findings/groups").get_json()["groups"][0]
+    assert g["severities"] == {"pending": {"error": 1, "warning": 3},
+                               "resolved": {"error": 1}}
+
+
 # ── the type catalog ─────────────────────────────────────────────────────────
 
 def test_every_type_a_real_job_emits_is_described():

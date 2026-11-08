@@ -298,7 +298,15 @@ describe('the split sync buttons (#1455)', () => {
         return {
           ok: true,
           json: async () => [
-            { id: 7, name: 'Test List', source: 'spotify', total_count: 10, in_library_count: 4 },
+            // fully checked: coverage needs library_checked_count since review 5 R5-K-1
+            {
+              id: 7,
+              name: 'Test List',
+              source: 'spotify',
+              total_count: 10,
+              in_library_count: 4,
+              library_checked_count: 10,
+            },
           ],
         };
       if (u === '/api/automations')
@@ -383,6 +391,8 @@ describe('the split sync buttons (#1455)', () => {
                 source: 'spotify',
                 total_count: 414,
                 in_library_count: 65,
+                // fully checked: coverage needs library_checked_count since review 5 R5-K-1
+                library_checked_count: 414,
               },
             ],
           };

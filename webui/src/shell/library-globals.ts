@@ -362,9 +362,15 @@ export async function playLibraryTrack(
   // still exists) as `legacy_track_id`. `track.id` is then a v2 id, which
   // resolve-track cannot look up - running it would overwrite good metadata
   // with a miss, so a v2-only row skips the refresh entirely.
+  //
+  // a v2 row that also carries a legacy id (every 3.6.1-migrated track) skips it
+  // too: the caller holds that row's own file, and a title+artist lookup hands
+  // back whichever copy wins LIMIT 1, so Play on the single played the album's
+  // file (review 5 R5-L-1)
   if (
     !track.exact_path &&
-    (track.legacy_track_id || (track.id && !track.lib2_track_id)) &&
+    !track.lib2_track_id &&
+    (track.legacy_track_id || track.id) &&
     (track.title || track.name) &&
     (artistName || track.artist_name)
   ) {

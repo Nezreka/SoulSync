@@ -5028,8 +5028,15 @@ function ArtistIndexView() {
   // render "Your library is empty — Import library" to a user with 900 artists
   // and offer them a full re-import. `AlbumDetailView` already reads `isError`;
   // this was the inconsistency, not the house style.
+  // review 5 R5-L-2: empty means the library has no artists at all. a filter
+  // (watched, letter, source, could be better) with no hits, or a page past
+  // the end, is "no artists match", not "import your library"
   const isEmpty =
-    !artistsQuery.isLoading && !artistsQuery.isError && artists.length === 0 && !search.q;
+    !artistsQuery.isLoading &&
+    !artistsQuery.isError &&
+    artists.length === 0 &&
+    !hasActiveArtistFilters &&
+    (pagination?.total_count ?? 0) === 0;
 
   // showLibraryDownloadsSection (shared-helpers.js) renders the per-artist
   // download bubbles on the library page. It is bound to `artistDownloadBubbles`
@@ -11796,6 +11803,7 @@ export function AlbumTrackTable({
               key={track.id ?? `missing-${i}`}
               track={track}
               albumTitle={album.title}
+              albumImageUrl={album.image_url}
               entityBase={{
                 albumId: album.id,
                 qualityProfileId: album.quality_profile?.id,
@@ -12041,6 +12049,8 @@ export function TrackMetadataGapsCell({
 type TrackRowProps = {
   track: LibraryV2Track;
   albumTitle: string;
+  /** the album's cover, for Now Playing */
+  albumImageUrl?: string | null;
   entityBase: Lib2EntityRef;
   matchServices: LibraryV2MatchService[];
   profileName: string | null;
@@ -12138,6 +12148,7 @@ function TrackRow(props: TrackRowProps) {
   const {
     track,
     albumTitle,
+    albumImageUrl,
     entityBase,
     matchServices,
     profileName,
@@ -12482,6 +12493,7 @@ function TrackRow(props: TrackRowProps) {
             <TrackPlayButton
               track={track}
               albumTitle={albumTitle}
+              albumImageUrl={albumImageUrl}
               artistName={track.artists.map((a) => a.name).join(', ')}
             />
           </td>
@@ -12679,10 +12691,12 @@ function TrackVersionLabel({ track }: { track: LibraryV2Track }) {
 export function TrackPlayButton({
   track,
   albumTitle,
+  albumImageUrl,
   artistName,
 }: {
   track: LibraryV2Track;
   albumTitle: string;
+  albumImageUrl?: string | null;
   artistName: string;
 }) {
   const trackId = track.id;
@@ -12715,6 +12729,9 @@ export function TrackPlayButton({
             // album id into a legacy slot is the H-14 confusion; the player
             // gets the display strings below instead.
             album_id: null,
+            // the player used to take its cover from the title+artist
+            // re-resolve, which this v2 row no longer runs (review 5 R5-L-1)
+            _stats_image: albumImageUrl ?? null,
           },
           albumTitle,
           artistName,

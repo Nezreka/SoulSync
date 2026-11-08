@@ -2392,6 +2392,7 @@ class RepairWorker:
                 'pending': 0, 'resolved': 0, 'dismissed': 0, 'auto_fixed': 0,
                 'total': 0, 'manual_conflicts': 0,
                 'severity_max': 'info', 'last_seen': None, 'job_ids': [],
+                'severities': {},
             })
             # auto_fixed is its own STATUS, not a flavour of resolved — leaving
             # it out of the buckets made the inbox render an empty group for
@@ -2399,6 +2400,13 @@ class RepairWorker:
             if status in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
                 group[status] += count
             group['total'] += count
+            # rows per status per severity, so the inbox's severity filter can
+            # ask "does this type have warnings in this status". severity_max
+            # alone hid resolved errors and pending warnings under an error
+            # (review 5 R5-L-3)
+            by_sev = group['severities'].setdefault(status or 'pending', {})
+            sev_key = severity or 'info'
+            by_sev[sev_key] = by_sev.get(sev_key, 0) + count
             # Severity of the group = the worst PENDING row in it. A cleared
             # error must not keep a group flagged red forever.
             if status == 'pending' and rank.get(severity, 2) < rank.get(group['severity_max'], 2):

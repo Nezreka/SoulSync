@@ -118,6 +118,21 @@ def test_severity_takes_the_worst_of_several_pending_rows(worker):
     assert _by_type(worker.get_finding_groups())['corrupt_audio']['severity_max'] == 'error'
 
 
+def test_counts_rows_per_status_per_severity(worker):
+    # review 5 R5-L-3: severity_max is the worst PENDING row only, so the
+    # severity filter lost resolved errors (always "info") and the pending
+    # warnings of a type that also had one pending error
+    for _ in range(5):
+        _insert(worker, 'corrupt_audio', status='resolved', severity='error')
+    for _ in range(3):
+        _insert(worker, 'metadata_gap', severity='warning')
+    _insert(worker, 'metadata_gap', severity='error')
+
+    by = _by_type(worker.get_finding_groups())
+    assert by['corrupt_audio']['severities'] == {'resolved': {'error': 5}}
+    assert by['metadata_gap']['severities'] == {'pending': {'warning': 3, 'error': 1}}
+
+
 def test_orders_worst_first_then_biggest(worker):
     _insert(worker, 'missing_cover_art', severity='info')
     _insert(worker, 'missing_cover_art', severity='info')

@@ -539,7 +539,7 @@ export function Row({
             <span
               className="syncband-owned-bar"
               title={
-                row.last && !row.schedule?.coverage
+                (row.coverageFromRun ?? (row.last && !row.schedule?.coverage))
                   ? `${row.coverage.inLibrary} of ${row.coverage.total} tracks matched at the last sync`
                   : `${row.coverage.inLibrary} of ${row.coverage.total} tracks in your library`
               }

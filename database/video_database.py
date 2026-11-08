@@ -7895,11 +7895,15 @@ class VideoDatabase:
             g = groups.setdefault(r["finding_type"], {
                 "finding_type": r["finding_type"], "pending": 0, "resolved": 0,
                 "dismissed": 0, "auto_fixed": 0, "total": 0, "severity_max": "info",
-                "last_seen": None, "job_ids": []})
+                "last_seen": None, "job_ids": [], "severities": {}})
             if r["status"] in ("pending", "resolved", "dismissed", "auto_fixed"):
                 g[r["status"]] += r["n"]
             g["total"] += r["n"]
             sev = "error" if r["severity"] in ("critical", "error") else (r["severity"] or "info")
+            # rows per status per severity, for the inbox's severity filter
+            # (review 5 R5-L-3, same shape as the music groups)
+            by_sev = g["severities"].setdefault(r["status"] or "pending", {})
+            by_sev[sev] = by_sev.get(sev, 0) + r["n"]
             # the worst PENDING row decides the colour. a cleared critical
             # must not keep the group red forever.
             if r["status"] == "pending" and rank.get(sev, 2) < rank.get(g["severity_max"], 2):

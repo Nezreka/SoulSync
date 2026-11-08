@@ -27,7 +27,7 @@ interface Props {
   onGrabAlbum: (album: WishlistAlbumGroup) => void;
   /** clear the backoff on these track ids and try them now. */
   onRetry: (ids: string[]) => void;
-  onRemoveAlbum: (albumName: string) => void;
+  onRemoveAlbum: (albumName: string, artistName: string) => void;
   onRemoveTrack: (trackId: string) => void;
   onRemoveArtist: () => void;
   /** a bulk action is in flight, the queue buttons stand down. */
@@ -168,7 +168,7 @@ export function WishlistArtistSheet({
               className="wlp-sheet-x"
               title="Remove album from the wishlist"
               aria-label={`Remove album ${album.name}`}
-              onClick={() => onRemoveAlbum(album.name)}
+              onClick={() => onRemoveAlbum(album.name, group.name)}
             >
               ✕
             </button>

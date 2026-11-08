@@ -96,9 +96,13 @@ function assertSuccess(payload: SuccessResponse, fallback: string): void {
   if (payload.success === false) throw new Error(payload.error || fallback);
 }
 
-export async function removeWishlistAlbum(albumName: string): Promise<void> {
+/** the artist scopes the album: two artists' "Greatest Hits" are two cards,
+ *  and a bare name removed and ignore-listed both (review 5 R5-X1-2) */
+export async function removeWishlistAlbum(albumName: string, artistName: string): Promise<void> {
   const payload = await readJson<SuccessResponse>(
-    apiClient.post('wishlist/remove-album', { json: { album_name: albumName } }),
+    apiClient.post('wishlist/remove-album', {
+      json: { album_name: albumName, artist_name: artistName },
+    }),
   );
   assertSuccess(payload, 'Failed');
 }

@@ -570,6 +570,45 @@ def test_remove_album_from_wishlist_matches_album_name():
     assert service.removed == [("track-1", 1)]
 
 
+def test_remove_album_from_wishlist_keeps_another_artists_album_of_that_name():
+    # review 5 R5-X1-2: the page files an album card under its artist. a bare
+    # name took every artist's "Greatest Hits" and ignore-listed their tracks
+    tracks = [
+        {
+            "wishlist_id": 1,
+            "spotify_track_id": "a1",
+            "id": "a1",
+            "spotify_data": {"album": {"name": "Greatest Hits"}, "artists": [{"name": "Artist A"}]},
+        },
+        {
+            "wishlist_id": 2,
+            "spotify_track_id": "b1",
+            "id": "b1",
+            "spotify_data": {"album": {"name": "Greatest Hits"}, "artists": [{"name": "Artist B"}]},
+        },
+        {
+            "wishlist_id": 3,
+            "spotify_track_id": "u1",
+            "id": "u1",
+            "spotify_data": {"album": {"name": "Greatest Hits"}, "artists": []},
+        },
+    ]
+    runtime, service, _db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+
+    payload, status = remove_album_from_wishlist(
+        runtime, album_name_filter="Greatest Hits", artist_name_filter="artist a")
+
+    assert status == 200
+    assert payload["removed_count"] == 1
+    assert service.removed == [("a1", 1)]
+
+    # an artist-less row sits under the page's "Unknown Artist" orb
+    payload, status = remove_album_from_wishlist(
+        runtime, album_name_filter="Greatest Hits", artist_name_filter="Unknown Artist")
+    assert status == 200
+    assert service.removed == [("a1", 1), ("u1", 1)]
+
+
 def test_remove_batch_from_wishlist_returns_removed_count():
     runtime, service, _db, _logger, _activity_calls = _build_runtime()
 
