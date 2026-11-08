@@ -250,3 +250,14 @@ def test_a_kids_play_is_never_matched_onto_the_admins_lastfm_row(db):
     }])
     _worker(db, _Plex([_play('Hot N Cold', 'Katy Perry', '2026-10-06 17:00:00', KIDS_PLEX)]))._poll()
     assert _pile(db, kids) == ['Katy Perry']
+
+
+def test_two_profiles_on_one_account_the_lowest_id_gets_its_plays(db):
+    """review 5 R5-A-2: the comment promised the lowest id, ORDER BY id DESC
+    with setdefault gave the highest"""
+    first = db.create_profile(name='First')
+    second = db.create_profile(name='Second')
+    db.set_profile_plex_account(first, KIDS_PLEX)
+    db.set_profile_plex_account(second, KIDS_PLEX)
+    assert first < second
+    assert media_account_owners(db, 'plex')[KIDS_PLEX] == first
