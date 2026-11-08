@@ -1064,10 +1064,17 @@ def fetch_artist_discography(
 
 
 def _caa_has_front(scope: str, mbid: str) -> bool:
-    """the Cover Art Archive holds a front image for this release (group).
-    one read of its index; any failure is a no (the walk carries on to the
-    other sources, it never returns a link it couldn't vouch for)"""
+    """the artwork walk's question (tests answer it themselves)"""
+    return _caa_front_answer(scope, mbid)
+
+
+def _caa_front_answer(scope: str, mbid: str) -> bool:
+    """whether the Cover Art Archive holds a front image for this release
+    (group). only the archive's own answer is a no: a 404, or an index with
+    no front image. a timeout or no network says nothing about the art, so
+    the link is used as before; dropping it there lost real covers on a blip"""
     import json
+    import urllib.error
     import urllib.request
     try:
         req = urllib.request.Request(
@@ -1075,11 +1082,14 @@ def _caa_has_front(scope: str, mbid: str) -> bool:
             headers={"User-Agent": "SoulSync/1.0 (artwork lookup)"})
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 (trusted host)
             index = json.loads(resp.read().decode("utf-8"))
-        return any(isinstance(image, dict) and image.get("front")
-                   for image in (index or {}).get("images") or [])
-    except Exception as exc:  # noqa: BLE001 - 404 means no art
-        logger.debug("CAA index %s/%s: %s", scope, mbid, exc)
-        return False
+    except urllib.error.HTTPError as exc:
+        logger.debug("CAA index %s/%s: HTTP %s", scope, mbid, exc.code)
+        return exc.code not in (400, 404)  # the archive's "no such art"
+    except Exception as exc:  # noqa: BLE001 - unreachable: no answer either way
+        logger.debug("CAA index %s/%s unreachable, using the link: %s", scope, mbid, exc)
+        return True
+    return any(isinstance(image, dict) and image.get("front")
+               for image in (index or {}).get("images") or [])
 
 
 def fetch_artwork_url(

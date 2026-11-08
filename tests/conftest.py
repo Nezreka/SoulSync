@@ -1108,6 +1108,15 @@ def _quality_profile_refresh_inline(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_cover_art_archive_probe(monkeypatch):
+    """the artwork lookup asks the Cover Art Archive whether a release has a
+    front cover (P2C-2). no test asks the real archive; the ones about that
+    check set their own answer"""
+    from core.library2 import provider_adapters
+    monkeypatch.setattr(provider_adapters, "_caa_has_front", lambda scope, mbid: True)
+
+
+@pytest.fixture(autouse=True)
 def _no_match_credit_fetch(monkeypatch):
     """a manual match fetches the new release's credits on a thread. in tests
     no provider is asked; the tests for that turn it back on."""

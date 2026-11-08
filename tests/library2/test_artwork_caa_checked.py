@@ -31,3 +31,29 @@ def test_a_release_that_has_caa_art_still_uses_it(monkeypatch):
         "album", artist_name="A", album_title="B",
         source_ids={"musicbrainz": "mb-rel"}, source_order=("musicbrainz",), allow_search=False)
     assert result.source == "caa" and "mb-rel" in result.url
+
+
+def test_only_the_archives_own_no_drops_the_link(monkeypatch):
+    """full suite follow-up: a timeout or no network says nothing about the
+    art; dropping the link then lost real covers on a blip"""
+    import io
+    import urllib.error
+    import urllib.request
+
+    def answer(exc=None, body=b'{"images": []}'):
+        def _open(*_a, **_k):
+            if exc is not None:
+                raise exc
+            return io.BytesIO(body)
+        return _open
+
+    probe = pa._caa_front_answer
+    monkeypatch.setattr(urllib.request, "urlopen",
+                        answer(urllib.error.HTTPError("u", 404, "nf", {}, None)))
+    assert probe("release", "x") is False
+    monkeypatch.setattr(urllib.request, "urlopen", answer(urllib.error.URLError("offline")))
+    assert probe("release", "x") is True
+    monkeypatch.setattr(urllib.request, "urlopen", answer(body=b'{"images": [{"front": false}]}'))
+    assert probe("release", "x") is False
+    monkeypatch.setattr(urllib.request, "urlopen", answer(body=b'{"images": [{"front": true}]}'))
+    assert probe("release", "x") is True
