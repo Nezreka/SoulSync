@@ -173,7 +173,11 @@ def register_routes(bp):
             if db.channel_watch_state([ch["youtube_id"]], profile_id=_profile()):
                 return False          # → counted as 'skipped'
             db.add_channel_to_watchlist(ch, profile_id=_profile())
-            db.add_videos_to_wishlist(ch, (ch.get("videos") or [])[:count], server_source=_server(),
+            # review 4 R4-D-7: the same rule as the follow route; a channel set
+            # to not download new uploads gets none through an import either
+            recent = ([] if auto_download_off(db, ch.get("youtube_id"))
+                      else (ch.get("videos") or [])[:count])
+            db.add_videos_to_wishlist(ch, recent, server_source=_server(),
                                     profile_id=_profile(), auto=True)
             try:
                 from core.video.youtube_enrichment import get_youtube_date_enricher

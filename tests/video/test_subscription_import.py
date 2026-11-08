@@ -316,3 +316,32 @@ def test_ui_is_wired():
     # otherwise beat the [hidden] attribute — the health-strip trap)
     css = (root / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
     assert ".vwlp-import-btn[hidden] { display: none; }" in css
+
+
+def test_an_import_respects_a_channels_no_new_uploads_setting(client, monkeypatch):
+    """review 4 R4-D-7: the follow route checks "don't download new uploads"
+    (#2008) and the subscriptions import didn't, so the channel's recent
+    uploads were wished and downloaded anyway"""
+    import sqlite3
+    import core.video.youtube as yt
+    c, db = client
+    videos = [{"youtube_id": "v%d" % n, "title": "Video %d" % n} for n in range(3)]
+    monkeypatch.setattr(yt, "resolve_channel",
+                        lambda u, **k: {"youtube_id": "UC" + u[-5:], "title": "T", "videos": videos})
+    off, on = "UC" + "https://youtube.com/@off"[-5:], "UC" + "https://youtube.com/@onn"[-5:]
+    db.set_channel_settings(off, {"auto_download": False})
+    c.post("/api/video/youtube/subscriptions/import", json={
+        "text": "a:\n  overrides:\n    url: https://youtube.com/@off\n"
+                "b:\n  overrides:\n    url: https://youtube.com/@onn"})
+    for _ in range(200):
+        st = c.get("/api/video/youtube/subscriptions/import/status").get_json()
+        if st["finished"]:
+            break
+        time.sleep(0.02)
+    assert st["followed"] == 2
+    conn = sqlite3.connect(db.database_path)
+    wished = {r[0]: r[1] for r in conn.execute(
+        "SELECT parent_source_id, COUNT(*) FROM video_wishlist WHERE kind='video' GROUP BY 1")}
+    conn.close()
+    assert off not in wished
+    assert wished.get(on, 0) > 0
