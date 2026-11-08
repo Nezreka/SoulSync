@@ -274,3 +274,46 @@ def test_payload_album_images_reject_a_media_server_cover(imported_conn):
 
     images = track_wishlist_payload(conn, track_id)["album"]["images"]
     assert images[0]["url"] == f"/api/library/v2/artwork/album/{album_id}"
+
+
+def test_upgrade_candidates_read_each_profile_once(imported_conn, monkeypatch):
+    """review 5 R5-G-5: each wanted track's profile was resolved with its own
+    queries (a 3-table join, a default lookup and a profile read per track);
+    the hourly reconcile paid that for every wanted track in the library"""
+    import core.library2.quality_eval as quality_eval
+    conn = imported_conn
+    first = _seed(conn, policy="until_top")
+    album, profile = conn.execute(
+        "SELECT album_id, quality_profile_id FROM lib2_tracks WHERE id=?", (first,)).fetchone()
+    seeded = [first]
+    for n in range(9):
+        t = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, monitored, quality_profile_id, "
+            "quality_profile_explicit) VALUES(?, ?, 1, ?, 1)", (album, f"T{n}", profile)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, format, bitrate) "
+                     "VALUES(?, ?, 'mp3', 320)", (t, f"/m/s-{t}.mp3"))
+        record_rule(conn, "track", t, True, PROVENANCE_LEGACY)
+        seeded.append(t)
+    recompute_wanted(conn, track_ids=seeded)
+    conn.commit()
+    live = []
+    real = quality_eval.effective_track_profile
+    monkeypatch.setattr(quality_eval, "effective_track_profile",
+                        lambda c, t: live.append(t) or real(c, t))
+    seen = []
+    conn.set_trace_callback(seen.append)
+    ids = set(upgrade_candidate_track_ids(conn))
+    conn.set_trace_callback(None)
+
+    assert set(seeded) <= ids
+    assert live == [], f"resolved {len(live)} profiles live"
+    lookups = [s for s in seen if f"FROM quality_profiles WHERE id={profile}" in s]
+    assert len(lookups) == 1, lookups
+
+
+def test_upgrade_candidates_by_id_still_resolve_an_unwanted_track(imported_conn):
+    """explicit ids (Enhance Quality) may name a track the projection does not
+    want; its profile still comes from the cascade"""
+    conn = imported_conn
+    track = _seed(conn, policy="until_top", monitored=0)
+    assert upgrade_candidate_track_ids(conn, track_ids=[track]) == [track]
