@@ -186,3 +186,13 @@ def test_a_resolved_row_names_its_catalogue_ids(credited):
     streamed nothing and its plays never counted"""
     track = resolve_playable_tracks(credited, [{'artist': 'Cardi B', 'title': 'Don’t Chart'}])['tracks'][0]
     assert track['lib2_track_id'] == 300 and track['lib2_artist_id'] == 3
+
+
+def test_a_linked_songs_title_vote_folds_accents():
+    """review 4 R4-C-2: the library check matched "Déjà Vu" to the library's
+    "Deja Vu" and stamped the link, then the title vote (case and brackets
+    only) rejected it and the song played nothing"""
+    from core.discovery.playable import _titles_agree
+    assert _titles_agree("Deja Vu", "Déjà Vu")
+    assert _titles_agree("Björk Song (Remastered)", "Bjork Song")
+    assert not _titles_agree("Deja Vu", "Something Else")

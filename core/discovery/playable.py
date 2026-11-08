@@ -80,7 +80,11 @@ def _candidate_sql(extra: str, where: str, link: str = "NULL") -> str:
 def _loose_title(text: Any) -> str:
     """a title for "is this the same song": case, (brackets), feat. and a
     trailing " - ..." version note folded away"""
-    t = _norm(str(text or ""))
+    # review 4 R4-C-2: accents and scripts folded the way the library check
+    # that stamped the link matched ("Déjà Vu" is "Deja Vu"); a link it
+    # found must not fail this vote and play nothing
+    from core.text.normalize import normalize_for_comparison
+    t = normalize_for_comparison(str(text or ""))
     t = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", t)
     t = re.sub(r"\s+-\s+.*$", "", t)
     t = re.sub(r"\s+(?:feat|ft|featuring)\b\.?.*$", "", t)
