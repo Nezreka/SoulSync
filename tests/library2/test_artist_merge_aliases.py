@@ -107,3 +107,18 @@ def test_merging_rules_keeps_the_stronger_choice_and_its_value(imported_conn):
         "SELECT profile_id, monitored, provenance FROM lib2_monitor_rules WHERE entity_id=10")}
     assert got == {1: (1, "user_explicit"), 2: (1, "user_explicit"), 3: (1, "cascade")}
     assert conn.execute("SELECT COUNT(*) FROM lib2_monitor_rules WHERE entity_id=20").fetchone()[0] == 0
+
+
+def test_two_imported_rules_that_disagree_keep_the_track_wanted(imported_conn):
+    """review 4 R4-A-8: each server's copy carried its own legacy_import rule.
+    an equal rank kept the survivor's value, and which row survives is
+    arbitrary, so a wanted track could leave the wanted list"""
+    from core.library2.monitor_rules import merge_rules_into
+    conn = imported_conn
+    conn.executemany("INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id,"
+                     " monitored, provenance) VALUES(?,?,?,?,?)",
+                     [("track", 10, 1, 0, "legacy_import"), ("track", 20, 1, 1, "legacy_import"),
+                      ("track", 10, 2, 1, "legacy_import"), ("track", 20, 2, 0, "legacy_import")])
+    merge_rules_into(conn, "track", 20, 10)
+    got = dict(conn.execute("SELECT profile_id, monitored FROM lib2_monitor_rules WHERE entity_id=10"))
+    assert got == {1: 1, 2: 1}

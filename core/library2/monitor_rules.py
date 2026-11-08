@@ -292,7 +292,7 @@ def merge_rules_into(conn, entity_type: str, source_id: int, target_id: int) -> 
             " WHERE entity_type=? AND entity_id=?", (entity_type, int(source_id))).fetchall():
         rule_id, profile_id, monitored, provenance = row[0], row[1], row[2], row[3]
         existing = conn.execute(
-            "SELECT id, provenance FROM lib2_monitor_rules"
+            "SELECT id, provenance, monitored FROM lib2_monitor_rules"
             " WHERE entity_type=? AND entity_id=? AND profile_id=?",
             (entity_type, int(target_id), profile_id)).fetchone()
         if existing is None:
@@ -300,10 +300,19 @@ def merge_rules_into(conn, entity_type: str, source_id: int, target_id: int) -> 
                          (int(target_id), rule_id))
             taken += 1
             continue
-        if _PROVENANCE_RANK.get(provenance, 1) > _PROVENANCE_RANK.get(existing[1], 1):
+        rank, their_rank = _PROVENANCE_RANK.get(provenance, 1), _PROVENANCE_RANK.get(existing[1], 1)
+        if rank > their_rank:
             conn.execute(
                 "UPDATE lib2_monitor_rules SET monitored=?, provenance=?,"
                 " updated_at=CURRENT_TIMESTAMP WHERE id=?", (monitored, provenance, existing[0]))
+            taken += 1
+        elif (rank == their_rank and rank < _PROVENANCE_RANK[PROVENANCE_USER]
+              and monitored and not existing[2]):
+            # review 4 R4-A-8: two derived rules that disagree (each server's
+            # copy imported its own). which row survives the merge is
+            # arbitrary, so it must not decide: wanted stays wanted
+            conn.execute("UPDATE lib2_monitor_rules SET monitored=1,"
+                         " updated_at=CURRENT_TIMESTAMP WHERE id=?", (existing[0],))
             taken += 1
         conn.execute("DELETE FROM lib2_monitor_rules WHERE id=?", (rule_id,))
     return taken
