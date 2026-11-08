@@ -352,3 +352,33 @@ class TestStringify:
     def test_whitespace_stripped(self):
         from core.library.file_tags import _stringify
         assert _stringify('  spaced  ') == 'spaced'
+
+
+# ---------------------------------------------------------------------------
+# write_embedded_tag on a real mp3
+# ---------------------------------------------------------------------------
+
+
+def _real_mp3(path):
+    from mutagen.id3 import ID3, TLAN, TMOO, TXXX
+    path.write_bytes((b"\xff\xfb\x90\x00" + bytes(413)) * 40)
+    tags = ID3()
+    tags.add(TMOO(encoding=3, text=["Calm"]))
+    tags.add(TLAN(encoding=3, text=["eng"]))
+    tags.add(TXXX(encoding=3, desc="WORK", text=["Symphony 5"]))
+    tags.add(TXXX(encoding=3, desc="MusicBrainz Work Id",
+                  text=["11111111-2222-3333-4444-555555555555"]))
+    tags.save(str(path))
+    return str(path)
+
+
+@pytest.mark.parametrize("key,old,new", [("mood", "Calm", "Happy"),
+                                         ("language", "eng", "fra")])
+def test_mp3_mood_and_language_edits_are_written(tmp_path, key, old, new):
+    """review 5 R5-H-2: the symbols namespace had no TMOO or TLAN, so the
+    edit deleted the frame, wrote nothing and reported success"""
+    from core.library.file_tags import read_embedded_tags, write_embedded_tag
+    p = _real_mp3(tmp_path / "a.mp3")
+    assert read_embedded_tags(p)["tags"][key] == old
+    assert write_embedded_tag(p, key, new) == {"success": True}
+    assert read_embedded_tags(p)["tags"].get(key) == new
