@@ -34,6 +34,9 @@ export interface SyncBandRow {
    *  matches only back rows without current coverage; a failed or old run
    *  cannot override what the library owns now. */
   coverage: { inLibrary: number; total: number; pct: number } | null;
+  /** true when coverage is the last run's matches, not current library
+   *  ownership, so the bar can say which one it shows */
+  coverageFromRun?: boolean;
   /** Art preference: the mirrored playlist's own cover, else the run's thumb. */
   thumbUrl: string | null;
   logo: string | null;
@@ -138,6 +141,9 @@ export function syncBandRows(
         const rowKey = scheduled?.rowKey ?? `p-${id}`;
         if (historyIndex >= 0) recency.set(rowKey, historyIndex);
         const sourceKey = playlist.source || '';
+        // an unchecked mirror's 0 is unknown, so the claimed run speaks
+        // instead (review 5 R5-K-1)
+        const owned = coverageFor(playlist);
         return {
           rowKey,
           kind: scheduled ? 'scheduled' : 'manual',
@@ -145,7 +151,8 @@ export function syncBandRows(
           last,
           name,
           mirrorId: playlist.id,
-          coverage: coverageFor(playlist),
+          coverage: owned ?? coverageOf(last, null),
+          coverageFromRun: !owned && Boolean(last),
           thumbUrl: playlist.image_url || last?.thumbUrl || null,
           logo: AUTOSYNC_SOURCE_LOGOS[sourceKey] || null,
           sourceKey,
