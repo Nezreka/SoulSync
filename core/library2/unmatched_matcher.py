@@ -57,10 +57,13 @@ class UnmatchedMatcher:
         if not self._sweeping.acquire(blocking=False):
             return 0
         try:
+            from core.library_scope import library_scope
             from .unmatched_identify import identify_file, stale_entries
             from .unmatched_review import list_unmatched
             identify = self._identify or identify_file
-            with closing(self._connect()) as conn:
+            # every library's files: the list is scoped to whoever asks
+            # (review 5 R5-B-4), and the sweep asks for all of them
+            with closing(self._connect()) as conn, library_scope(None):
                 entries = [e for e in list_unmatched(conn) if not e.get("filing")]
                 todo = stale_entries(conn, entries, acoustid_ready=self._acoustid_ready())
             if not todo:
@@ -71,7 +74,7 @@ class UnmatchedMatcher:
 
             def one(entry):
                 try:
-                    with closing(self._connect()) as conn:
+                    with closing(self._connect()) as conn, library_scope(None):
                         identify(conn, int(entry["file_id"]), refresh=True)
                 except Exception as exc:  # noqa: BLE001 - the rest still run
                     logger.warning("background match of file %s failed: %s", entry["file_id"], exc)

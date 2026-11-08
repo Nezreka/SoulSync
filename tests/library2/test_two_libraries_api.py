@@ -454,3 +454,49 @@ def test_a_members_refresh_never_files_the_admins_new_releases_as_their_wishes(w
     assert world.client.post(f"/api/library/v2/artists/{artist}/discography/refresh").status_code == 200
     assert done.wait(5)
     assert seen["auto"] is auto
+
+
+def _seed_unknown_files(world, tmp_root):
+    paths = {}
+    with world.db._get_connection() as conn:
+        for root, key in ((tmp_root / "Transfer", "h"), (tmp_root / "kim", "k")):
+            artist = seed_artist(conn, server_id=f"ar-u{key}", name="Unknown Artist", server_source="soulsync")
+            album = seed_album(conn, server_id=f"al-u{key}", title=f"Unknown {key}",
+                               artist_id=artist, server_source="soulsync")
+            paths[key] = os.path.join(str(root), "Unknown", f"loose-{key}.mp3")
+            seed_track(conn, server_id=f"t-u{key}", title=f"Loose {key}", album_id=album,
+                       artist_id=artist, server_source="soulsync", file_path=paths[key])
+        conn.commit()
+    return paths
+
+
+def test_unmatched_files_are_listed_for_their_own_library_only(world, tmp_path):
+    """review 5 R5-B-4: kim read the shared library's unmatched files, full
+    paths included. the background matcher still walks every library"""
+    paths = _seed_unknown_files(world, tmp_path)
+
+    def listed(pid):
+        world.as_profile(pid)
+        r = world.client.get("/api/library/v2/unmatched")
+        assert r.status_code == 200, r.get_json()
+        return {t["file_path"] for t in r.get_json()["tracks"]}
+
+    assert listed(world.kim) == {paths["k"]}
+    assert listed(world.sam) == {paths["h"]}
+    assert listed(1) == {paths["h"]}
+    # the banner counts what the list shows
+    with library_scope.library_scope(world.kim):
+        assert world.db.get_unmatched_import_summary()["count"] == 1
+    with library_scope.library_scope(None):
+        assert world.db.get_unmatched_import_summary()["count"] == 2
+
+    from core.library2.unmatched_matcher import UnmatchedMatcher
+    seen = []
+    matcher = UnmatchedMatcher(world.db._get_connection, workers=1,
+                               identify=lambda conn, file_id, refresh: seen.append(file_id),
+                               acoustid_ready=lambda: True)
+    matcher.sweep()
+    with world.db._get_connection() as conn:
+        ids = {r[0] for r in conn.execute("SELECT id FROM lib2_track_files WHERE path IN (?, ?)",
+                                          (paths["h"], paths["k"]))}
+    assert set(seen) == ids

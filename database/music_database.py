@@ -20950,9 +20950,13 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                # the caller's library only, like the review list the banner
+                # opens (review 5 R5-B-4)
+                from core.library2.sql_util import owner_clause
+                owner = owner_clause(column="f.owner_profile_id")
                 # the Unknown Artist rows first, then out from them: left to
                 # itself the planner scanned every album (2s per library load)
-                cursor.execute("""
+                cursor.execute(f"""
                     WITH unknown AS MATERIALIZED (
                         SELECT id FROM lib2_artists
                          WHERE LOWER(TRIM(name)) = 'unknown artist')
@@ -20962,7 +20966,7 @@ class MusicDatabase:
                     JOIN lib2_tracks t ON t.album_id = al.id
                     JOIN lib2_track_files f ON f.track_id = t.id
                     WHERE f.path IS NOT NULL AND TRIM(f.path) <> ''
-                      AND COALESCE(f.file_state, 'active') = 'active'
+                      AND COALESCE(f.file_state, 'active') = 'active'{owner}
                     GROUP BY u.id
                 """)
                 rows = cursor.fetchall()
