@@ -9247,7 +9247,15 @@ class VideoDatabase:
             srv=" AND s2.server_source = ?" if server_source else "")
 
     # owned/total episode counts — joined off s.id in both queries below.
-    _EPS_COLS = ("(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
+    # A show card's owned/total: the total is what you have plus what you still
+    # want -- an episode with a file, or one that is monitored and has aired.
+    # Unaired episodes and unmonitored ones (an unmonitored Specials season,
+    # say) are not gaps, so they no longer drag the bar down. Same aired rule
+    # as missing_episode_rows. Shared by the Library grid and Watchlist cards.
+    _SHOW_EPS_WANTED = ("e.has_file=1 OR (e.monitored=1 AND e.air_date IS NOT NULL "
+                        "AND substr(e.air_date, 1, 10) <= date('now'))")
+    _EPS_COLS = ("(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND ("
+                 + _SHOW_EPS_WANTED + ")) AS episode_count, "
                  "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count")
 
     def _effective_shows(self, conn, server_source, profile_id: int = 1,
@@ -12408,8 +12416,7 @@ class VideoDatabase:
             select = ("SELECT s.id, s.title, s.year, s.tmdb_id, s.status, "
                       f"{rating_key} AS rating, {s_watched} AS watched_episodes, "
                       "(s.poster_url IS NOT NULL AND s.poster_url <> '') AS has_poster, "
-                      "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
-                      "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count, "
+                      + self._EPS_COLS + ", "
                       f"{size_sub} AS size_bytes "
                       f"FROM {src}")
         else:
