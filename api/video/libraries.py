@@ -41,6 +41,9 @@ def register_routes(bp):
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
         logger.info("video library folders saved: %d reached", len(saved))
+        # a newly reached folder can put titles in a video library (#2029)
+        from core.video.libraries import attribute_files
+        attribute_files(get_video_db())
         return jsonify({"success": True, "map": saved,
                         "folders": drive_map.server_folders(get_video_db())})
 
@@ -54,6 +57,71 @@ def register_routes(bp):
         except Exception:
             logger.exception("Drive check failed")
             return jsonify({"ok": False, "message": "The check failed"}), 500
+
+    # ── video libraries (#2029): named movie / TV libraries with their own
+    # folders. under /libraries so the admin-only guard covers them.
+    @bp.route("/libraries/folders", methods=["GET"])
+    def video_library_folders():
+        from . import get_video_db
+        from core.video.libraries import list_libraries
+        db = get_video_db()
+        try:
+            conn = db.connect()
+            try:
+                genres = [r[0] for r in conn.execute(
+                    "SELECT name FROM genres ORDER BY name COLLATE NOCASE").fetchall()]
+            finally:
+                conn.close()
+            return jsonify({"libraries": list_libraries(db), "genres": genres})
+        except Exception:
+            logger.exception("Failed to list the video libraries")
+            return jsonify({"error": "Failed to list the video libraries"}), 500
+
+    @bp.route("/libraries/folders", methods=["POST"])
+    def video_library_folder_create():
+        from . import get_video_db
+        from core.video.libraries import create_library
+        try:
+            lib = create_library(get_video_db(), request.get_json(silent=True) or {})
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        logger.info("video library added: %s (%s) at %s", lib["name"], lib["kind"], lib["path"])
+        return jsonify({"success": True, "library": lib})
+
+    @bp.route("/libraries/folders/<int:library_id>", methods=["PUT"])
+    def video_library_folder_update(library_id):
+        from . import get_video_db
+        from core.video.libraries import update_library
+        try:
+            lib = update_library(get_video_db(), library_id, request.get_json(silent=True) or {})
+        except LookupError as e:
+            return jsonify({"success": False, "error": str(e)}), 404
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        return jsonify({"success": True, "library": lib})
+
+    @bp.route("/libraries/folders/<int:library_id>", methods=["DELETE"])
+    def video_library_folder_delete(library_id):
+        from . import get_video_db
+        from core.video.libraries import delete_library
+        try:
+            if not delete_library(get_video_db(), library_id):
+                return jsonify({"success": False, "error": "No such library"}), 404
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        return jsonify({"success": True})
+
+    @bp.route("/libraries/folders/<int:library_id>/default", methods=["POST"])
+    def video_library_folder_default(library_id):
+        from . import get_video_db
+        from core.video.libraries import set_default
+        try:
+            lib = set_default(get_video_db(), library_id)
+        except LookupError as e:
+            return jsonify({"success": False, "error": str(e)}), 404
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        return jsonify({"success": True, "library": lib})
 
     @bp.route("/libraries", methods=["GET"])
     def video_libraries():

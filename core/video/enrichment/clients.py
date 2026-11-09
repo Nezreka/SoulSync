@@ -66,10 +66,22 @@ def parse_title_identity(kind, d):
             seen.add(t.lower())
             aliases.append(t)
     year = str(date or "")[:4]
-    return {"name": str(name or "").strip() or None,
-            "original_name": str(original or "").strip() or None,
-            "year": int(year) if year.isdigit() else None,
-            "aliases": aliases[:30]}
+    out = {"name": str(name or "").strip() or None,
+           "original_name": str(original or "").strip() or None,
+           "year": int(year) if year.isdigit() else None,
+           "aliases": aliases[:30]}
+    # genres and keywords, for the library rules (#2029): only when tmdb sent
+    # them, so a response without them reads exactly as before
+    genres = [str(g.get("name")).strip() for g in (d.get("genres") or [])
+              if isinstance(g, dict) and g.get("name")]
+    kw = d.get("keywords") if isinstance(d.get("keywords"), dict) else {}
+    keywords = [str(k.get("name")).strip() for k in (kw.get("keywords") or kw.get("results") or [])
+                if isinstance(k, dict) and k.get("name")]
+    if genres:
+        out["genres"] = genres
+    if keywords:
+        out["keywords"] = keywords[:60]
+    return out
 
 
 class TMDBClient:
@@ -558,7 +570,7 @@ class TMDBClient:
         try:
             r = requests.get(self.BASE + path + str(int(tmdb_id)),
                              params={"api_key": self.api_key,
-                                     "append_to_response": "alternative_titles"}, timeout=12)
+                                     "append_to_response": "alternative_titles,keywords"}, timeout=12)
             r.raise_for_status()
             d = r.json() or {}
         except Exception:

@@ -692,6 +692,252 @@
         if (e.target && e.target.id === 'video-drive-map-save') saveDriveMap();
     });
 
+    // ── more libraries (#2029): named movie / TV libraries, each with its own
+    // folder, rules and default. the main and 4K ones are listed too; their
+    // folders are the settings above, so here they only take a name, rules and
+    // the default.
+    var LIBS_URL = '/api/video/libraries/folders';
+    // esc for attribute values too (a library named with a quote)
+    function escA(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+    var LIB_KIND = { movie: 'Movies', show: 'TV' };
+    var _libProfiles = [];   // named quality profiles, for each library's default
+    var LIB_SOURCES = [['soulseek', 'Soulseek'], ['usenet', 'Usenet'], ['torrent', 'Torrent'], ['extto', 'EXT.to']];
+    // a library's own source order: each picked source numbered in order,
+    // none picked = the global order (Settings > Downloads)
+    // a library's Prowlarr indexers (#2029 step 4): none ticked = every one.
+    // the list is asked from Prowlarr the first time a library's box opens
+    var _libIndexers = null;
+    function libIndexersHtml(ids) {
+        ids = ids || [];
+        var list = _libIndexers === null ? '<em class="video-library-hint">Loading…</em>'
+            : !_libIndexers.length ? '<em class="video-library-hint">No Prowlarr indexers (Settings → Indexers &amp; Downloaders).</em>'
+            : _libIndexers.map(function (i) {
+                return '<label class="checkbox-label"><input type="checkbox" class="video-library-idx" value="' + escA(i.id) + '"' +
+                    (ids.indexOf(i.id) >= 0 ? ' checked' : '') + '> ' + escA(i.name) +
+                    (i.protocol ? ' <span class="video-library-hint">' + escA(i.protocol) + '</span>' : '') + '</label>';
+            }).join('');
+        return '<details class="video-library-indexers" data-library-idx-ids="' + escA(ids.join(',')) + '">' +
+            '<summary>Indexers: ' + (ids.length ? ids.length + ' picked' : 'every one') + '</summary>' +
+            '<div class="video-library-idx-list">' + list + '</div></details>';
+    }
+    document.addEventListener('toggle', function (e) {
+        var box = e.target;
+        if (!box || !box.classList || !box.classList.contains('video-library-indexers') || !box.open) return;
+        if (_libIndexers !== null) return;
+        _libIndexers = [];
+        fetch('/api/prowlarr/indexers', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                _libIndexers = ((d && d.success && d.indexers) || []).map(function (i) {
+                    return { id: Number(i.id), name: i.name || ('Indexer ' + i.id), protocol: i.protocol || '' };
+                });
+                Array.from(document.querySelectorAll('.video-library-indexers')).forEach(function (b) {
+                    var list = b.querySelector('.video-library-idx-list');
+                    var ids = String(b.getAttribute('data-library-idx-ids') || '').split(',').filter(Boolean).map(Number);
+                    var tmp = document.createElement('div');
+                    tmp.innerHTML = libIndexersHtml(ids);
+                    list.innerHTML = tmp.querySelector('.video-library-idx-list').innerHTML;
+                });
+            })
+            .catch(function () { _libIndexers = []; });
+    }, true);
+    function libSourcesHtml(order) {
+        order = order || [];
+        return '<div class="video-library-field video-library-sources" role="group" aria-label="Download from, in order">' +
+            'Download from ' +
+            LIB_SOURCES.map(function (s) {
+                var at = order.indexOf(s[0]);
+                return '<button type="button" class="video-library-src' + (at >= 0 ? ' is-on' : '') + '" ' +
+                    'data-library-src="' + s[0] + '" aria-pressed="' + (at >= 0 ? 'true' : 'false') + '">' +
+                    (at >= 0 ? (at + 1) + ' ' : '') + s[1] + '</button>';
+            }).join('') +
+            '<span class="video-library-hint">' + (order.length ? '' : 'the global order') + '</span></div>';
+    }
+    function libTerms(list) { return (list || []).join(', '); }
+    function libraryRowHtml(lib) {
+        var isNew = !lib.id;
+        var builtin = lib.builtin;
+        var rules = lib.rules || {};
+        var head = isNew
+            ? '<select class="video-library-kind-pick" aria-label="What the library holds">' +
+                '<option value="movie">Movies</option><option value="show">TV</option></select>'
+            : '<span class="video-library-kind">' + escA(LIB_KIND[lib.kind] || lib.kind) + '</span>';
+        var state = builtin === '4k' && !lib.enabled ? 'Off: switch it on above'
+            : !lib.usable ? (lib.enabled ? 'No folder yet' : 'Switched off')
+            : lib.is_default ? 'Default for new ' + (lib.kind === 'movie' ? 'movies' : 'shows') : '';
+        var folder = builtin
+            ? '<div class="video-library-known">' + escA(lib.path || 'No folder set') + ' <span>(set above)</span></div>'
+            : '<input type="text" class="video-library-path" value="' + escA(lib.path || '') + '" ' +
+                'placeholder="/media/stand-up" aria-label="Library folder" data-folder-check="video" ' +
+                'data-folder-label="' + escA((lib.name || 'New') + ' library') + '">';
+        return '<div class="video-library-row" data-library-id="' + escA(lib.id || '') + '" data-kind="' + escA(lib.kind || 'movie') + '"' +
+            (builtin ? ' data-builtin="' + escA(builtin) + '"' : '') + '>' +
+            '<div class="video-library-head">' +
+                '<input type="text" class="video-library-name" value="' + escA(lib.name || '') + '" ' +
+                    'placeholder="Library name, e.g. Stand-Up" aria-label="Library name" maxlength="80">' +
+                head +
+                (state ? '<span class="video-library-state' + (lib.is_default && lib.usable ? ' is-default' : '') + '">' + escA(state) + '</span>' : '') +
+            '</div>' +
+            folder +
+            '<div class="video-library-rules">' +
+                '<input type="text" class="video-library-genres" list="video-library-genre-list" value="' + escA(libTerms(rules.genres)) + '" ' +
+                    'placeholder="Genres, e.g. Documentary, Family" aria-label="Genres that send a title here">' +
+                '<input type="text" class="video-library-keywords" value="' + escA(libTerms(rules.keywords)) + '" ' +
+                    'placeholder="Keywords, e.g. stand-up" aria-label="Keywords that send a title here">' +
+            '</div>' +
+            '<label class="video-library-field">Quality profile ' +
+                '<select class="video-library-profile" aria-label="Quality profile for titles in this library">' +
+                '<option value="0">' + (lib.kind === 'show' ? 'Default for new shows' : 'Default for new movies') + '</option>' +
+                _libProfiles.filter(function (p) { return p.id; }).map(function (p) {
+                    return '<option value="' + escA(p.id) + '"' + (p.id === lib.quality_profile_id ? ' selected' : '') +
+                        '>' + escA(p.name) + '</option>';
+                }).join('') + '</select></label>' +
+            libSourcesHtml((lib.options || {}).sources) +
+            libIndexersHtml((lib.options || {}).indexer_ids) +
+            '<div class="video-library-rules">' +
+                '<input type="text" class="video-library-tcat" value="' + escA((lib.options || {}).torrent_category || '') + '" ' +
+                    'placeholder="Torrent category / label" aria-label="Torrent client category or label" maxlength="64">' +
+                '<input type="text" class="video-library-ucat" value="' + escA((lib.options || {}).usenet_category || '') + '" ' +
+                    'placeholder="Usenet category" aria-label="Usenet client category" maxlength="64">' +
+            '</div>' +
+            '<div class="video-library-field">' +
+                '<label class="checkbox-label" title="The wishlist and RSS sync hunt its titles; off = only when you search">' +
+                    '<input type="checkbox" class="video-library-auto"' + ((lib.options || {}).auto_search === false ? '' : ' checked') +
+                    '> Search automatically</label>' +
+                '<label class="checkbox-label" title="Titles you have keep upgrading toward their profile\'s cutoff">' +
+                    '<input type="checkbox" class="video-library-upgrades"' + ((lib.options || {}).upgrades === false ? '' : ' checked') +
+                    '> Upgrade what you have</label>' +
+            '</div>' +
+            '<div class="video-library-actions">' +
+                (builtin ? '' : '<label class="checkbox-label"><input type="checkbox" class="video-library-enabled"' +
+                    (lib.enabled !== false ? ' checked' : '') + '> Switched on</label>') +
+                '<button type="button" class="test-button" data-library-action="save">' + (isNew ? 'Add' : 'Save') + '</button>' +
+                (!isNew && lib.usable && !lib.is_default
+                    ? '<button type="button" class="test-button" data-library-action="default">Make default</button>' : '') +
+                (isNew || !builtin ? '<button type="button" class="test-button" data-library-action="remove">' +
+                    (isNew ? 'Cancel' : 'Remove') + '</button>' : '') +
+            '</div></div>';
+    }
+    function renderLibraries(list, genres) {
+        var host = document.getElementById('video-libraries-list');
+        if (!host) return;
+        host.innerHTML = (list || []).map(libraryRowHtml).join('');
+        var dl = document.getElementById('video-library-genre-list');
+        if (dl && genres) dl.innerHTML = genres.map(function (g) { return '<option value="' + escA(g) + '">'; }).join('');
+        if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('video');
+    }
+    function loadLibraries() {
+        var get = function (url) {
+            return fetch(url, { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; });
+        };
+        return Promise.all([get(LIBS_URL), get('/api/video/downloads/quality/profiles')])
+            .then(function (res) {
+                _libProfiles = (res[1] && res[1].profiles) || [];
+                var d = res[0];
+                if (d && d.libraries) renderLibraries(d.libraries, d.genres || []);
+            });
+    }
+    function libSourceOrder(row) {
+        var box = row.querySelector('.video-library-sources');
+        return box && box._order ? box._order.slice()
+            : Array.from(row.querySelectorAll('.video-library-src.is-on')).sort(function (a, b) {
+                return parseInt(a.textContent, 10) - parseInt(b.textContent, 10);
+            }).map(function (b) { return b.getAttribute('data-library-src'); });
+    }
+    function libraryBody(row) {
+        var val = function (sel) { var el = row.querySelector(sel); return el ? el.value.trim() : ''; };
+        var split = function (v) { return v.split(',').map(function (x) { return x.trim(); }).filter(Boolean); };
+        var body = { name: val('.video-library-name'),
+            rules: { genres: split(val('.video-library-genres')), keywords: split(val('.video-library-keywords')) },
+            quality_profile_id: parseInt(val('.video-library-profile'), 10) || 0,
+            sources: libSourceOrder(row),
+            torrent_category: val('.video-library-tcat'), usenet_category: val('.video-library-ucat') };
+        var auto = row.querySelector('.video-library-auto');
+        var upg = row.querySelector('.video-library-upgrades');
+        if (auto) body.auto_search = auto.checked;
+        if (upg) body.upgrades = upg.checked;
+        // the indexers: what's ticked once the list loaded, else what it had
+        var idxBox = row.querySelector('.video-library-indexers');
+        if (idxBox) {
+            body.indexer_ids = row.querySelector('.video-library-idx')
+                ? Array.from(row.querySelectorAll('.video-library-idx:checked')).map(function (c) { return Number(c.value); })
+                : String(idxBox.getAttribute('data-library-idx-ids') || '').split(',').filter(Boolean).map(Number);
+        }
+        if (!row.getAttribute('data-builtin')) {
+            body.path = val('.video-library-path');
+            var on = row.querySelector('.video-library-enabled');
+            body.enabled = on ? on.checked : true;
+        }
+        var pick = row.querySelector('.video-library-kind-pick');
+        if (pick) body.kind = pick.value;
+        return body;
+    }
+    function libraryRequest(url, method, body, done) {
+        return fetch(url, {
+            method: method, headers: { 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined,
+        }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+                if (!res.ok || res.j.success === false) {
+                    toast((res.j && res.j.error) || 'Could not save the library', 'error');
+                    return;
+                }
+                toast(done, 'success');
+                loadLibraries();
+            }).catch(function () { toast('Could not save the library', 'error'); });
+    }
+    function onLibraryAction(btn) {
+        var row = btn.closest('.video-library-row');
+        if (!row) return;
+        var id = row.getAttribute('data-library-id');
+        var action = btn.getAttribute('data-library-action');
+        if (action === 'save') {
+            var body = libraryBody(row);
+            if (id) libraryRequest(LIBS_URL + '/' + id, 'PUT', body, 'Library saved');
+            else libraryRequest(LIBS_URL, 'POST', body, 'Library added');
+        } else if (action === 'default') {
+            libraryRequest(LIBS_URL + '/' + id + '/default', 'POST', null, 'Default library changed');
+        } else if (action === 'remove') {
+            if (!id) { row.remove(); return; }
+            var name = (row.querySelector('.video-library-name') || {}).value || 'this library';
+            var go = function () { libraryRequest(LIBS_URL + '/' + id, 'DELETE', null, 'Library removed'); };
+            var msg = 'Titles picked for ' + name + ' go back to the rules and the default. ' +
+                'Its folder and files stay where they are.';
+            // the house yes/no modal; without the shell (never in the app) the
+            // folder and files stay anyway, so it just goes
+            if (typeof showConfirmDialog !== 'function') { go(); return; }
+            showConfirmDialog({ title: 'Remove ' + name + '?', message: msg, confirmText: 'Remove',
+                cancelText: 'Keep it', destructive: true }).then(function (ok) { if (ok) go(); });
+        }
+    }
+    document.addEventListener('click', function (e) {
+        var t = e.target;
+        if (!t || !t.closest) return;
+        if (t.id === 'video-library-add') {
+            var host = document.getElementById('video-libraries-list');
+            if (!host || host.querySelector('.video-library-row[data-library-id=""]')) return;
+            host.insertAdjacentHTML('beforeend', libraryRowHtml({ kind: 'movie', enabled: true }));
+            var name = host.querySelector('.video-library-row[data-library-id=""] .video-library-name');
+            if (name) name.focus();
+            if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('video');
+            return;
+        }
+        var src = t.closest('[data-library-src]');
+        if (src && src.closest('#video-libraries-list')) {
+            var box = src.closest('.video-library-sources');
+            var order = libSourceOrder(src.closest('.video-library-row'));
+            var key = src.getAttribute('data-library-src');
+            var at = order.indexOf(key);
+            if (at >= 0) order.splice(at, 1); else order.push(key);
+            box.outerHTML = libSourcesHtml(order);
+            return;
+        }
+        var btn = t.closest('[data-library-action]');
+        if (btn && btn.closest('#video-libraries-list')) onLibraryAction(btn);
+    });
+
     function loadDownloads() {
         return fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -712,6 +958,7 @@
                 setP('video-tv-4k-path', d.tv_4k_path);
                 refreshVideoFolders();
                 loadDriveMap();
+                loadLibraries();
                 _videoMode = d.download_mode || 'soulseek';
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
                 var ms = document.getElementById('video-download-mode');
@@ -1468,6 +1715,12 @@
         if (lab) lab.textContent = v ? (v + ' GB') : 'No limit';
     }
 
+    // preferred size (#2033): a tie-break only, closer ranks higher
+    function _vqPrefLabel(id, v) {
+        var lab = document.getElementById(id);
+        if (lab) lab.textContent = v ? ('Around ' + v + ' GB') : 'Off';
+    }
+
     function _vqSeg(id, attr, value) {
         var seg = document.getElementById(id);
         if (!seg) return;
@@ -1538,6 +1791,10 @@
         var ep = document.getElementById('vq-episode-size'); if (ep) ep.value = p.max_episode_gb || 0;
         _vqSizeLabel('vq-movie-label', p.max_movie_gb || 0);
         _vqSizeLabel('vq-episode-label', p.max_episode_gb || 0);
+        var pm = document.getElementById('vq-movie-pref'); if (pm) pm.value = p.preferred_movie_gb || 0;
+        var pe = document.getElementById('vq-episode-pref'); if (pe) pe.value = p.preferred_episode_gb || 0;
+        _vqPrefLabel('vq-movie-pref-label', p.preferred_movie_gb || 0);
+        _vqPrefLabel('vq-episode-pref-label', p.preferred_episode_gb || 0);
 
         // Swarm health floor. Absent from a profile stored before the gate existed
         // means "use the default", not "no floor" — same rule the normalizer applies,
@@ -1649,10 +1906,14 @@
             if (e.target.id === 'vq-movie-size') { _videoQuality.max_movie_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
             if (e.target.id === 'vq-episode-size') { _videoQuality.max_episode_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
             if (e.target.id === 'vq-min-seeders') { _videoQuality.min_seeders = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
+            if (e.target.id === 'vq-movie-pref') { _videoQuality.preferred_movie_gb = parseFloat(e.target.value) || 0; saveQuality(true); return; }
+            if (e.target.id === 'vq-episode-pref') { _videoQuality.preferred_episode_gb = parseFloat(e.target.value) || 0; saveQuality(true); return; }
         });
         card.addEventListener('input', function (e) {
             if (e.target.id === 'vq-movie-size') { _vqSizeLabel('vq-movie-label', parseInt(e.target.value, 10) || 0); return; }
             if (e.target.id === 'vq-episode-size') { _vqSizeLabel('vq-episode-label', parseInt(e.target.value, 10) || 0); return; }
+            if (e.target.id === 'vq-movie-pref') { _vqPrefLabel('vq-movie-pref-label', parseFloat(e.target.value) || 0); return; }
+            if (e.target.id === 'vq-episode-pref') { _vqPrefLabel('vq-episode-pref-label', parseFloat(e.target.value) || 0); return; }
             if (e.target.id === 'vq-min-seeders') { _vqSeedersLabel(e.target.value); return; }
         });
     }

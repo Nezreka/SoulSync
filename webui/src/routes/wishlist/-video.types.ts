@@ -70,6 +70,9 @@ export interface VideoMovieItem extends VideoWishRowBase {
   poster_url?: string | null;
   year?: number | string | null;
   library_id?: number | null;
+  /** #2029: a second copy wanted in another library (null = the title's own row). */
+  video_library_id?: number | null;
+  video_library_name?: string | null;
 }
 
 export interface VideoEpisode extends VideoWishRowBase {

@@ -234,7 +234,8 @@ def test_js_status_pill_tells_the_truth():
 
 def test_js_search_now_buttons_on_all_three_levels():
     # movie, season and episode each have their own Search, aimed at that scope
-    assert "const target: VideoActionTarget = { scope: 'movie', tmdb_id: movie.tmdb_id };" in _SHEETS
+    # #2029: the movie target names its library's row (movieTarget), else as before
+    assert "const target = movieTarget(movie);" in _SHEETS
     assert "scope: 'season'," in _SHEETS and "scope: 'episode'," in _SHEETS
     assert _SHEETS.count("actions.searchNow(") >= 4      # movie, show, season, episode
     assert "apiClient.post('video/wishlist/search', { json: target })" in _API

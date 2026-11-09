@@ -59,6 +59,50 @@ const switcher = () => screen.getByRole('tablist', { name: 'Downloads media' });
 const musicTab = () => screen.getByRole('tab', { name: 'Music' });
 const videoTab = () => screen.getByRole('tab', { name: 'Video' });
 
+describe('the video downloads library filter (#2029)', () => {
+  const row = (id: number, title: string, lib: string | null) => ({
+    id,
+    kind: 'movie',
+    title,
+    status: 'downloading',
+    progress: 10,
+    video_library_name: lib,
+  });
+
+  it('filters by library once two libraries show up', async () => {
+    server.use(
+      http.get('/api/video/downloads/active', () =>
+        HttpResponse.json({
+          downloads: [row(1, 'Heat', 'Movies'), row(2, 'Heat 4K', 'Movies 4K'), row(3, 'Up', null)],
+        }),
+      ),
+    );
+    renderRoute('/active-downloads?media=video');
+    const sel = (await screen.findByRole('combobox', {
+      name: "Show one library's downloads",
+    })) as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.textContent)).toEqual(['All', 'Movies', 'Movies 4K']);
+    const titles = () => [...document.querySelectorAll('.dlc-title')].map((t) => t.textContent);
+    await waitFor(() => expect(titles()).toContain('Heat'));
+    act(() => {
+      sel.value = 'Movies 4K';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await waitFor(() => expect(titles()).toEqual(['Heat 4K']));
+  });
+
+  it('has no filter with one library', async () => {
+    server.use(
+      http.get('/api/video/downloads/active', () =>
+        HttpResponse.json({ downloads: [row(1, 'Heat', 'Movies')] }),
+      ),
+    );
+    renderRoute('/active-downloads?media=video');
+    await waitFor(() => expect(document.querySelectorAll('.dlc-title')).toHaveLength(1));
+    expect(screen.queryByRole('combobox', { name: "Show one library's downloads" })).toBeNull();
+  });
+});
+
 describe('the unified downloads page', () => {
   it('shows the Music | Video switcher with Music active by default', async () => {
     renderRoute('/active-downloads');

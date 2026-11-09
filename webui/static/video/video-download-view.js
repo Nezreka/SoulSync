@@ -148,10 +148,9 @@
             for (var i = 0; i < rows.length; i++) {
                 var r = rows[i];
                 if (!(r.accepted && r.username)) continue;   // grabbable (Soulseek) + meets profile
-                var avail = r.peers || r.seeders || 0;
-                var bAvail = best ? (best.peers || best.seeders || 0) : -1;
-                if (!best || (r.score || 0) > (best.score || 0) ||
-                    ((r.score || 0) === (best.score || 0) && avail > bAvail)) {
+                // the server's rank, so the cross-source pick agrees with the
+                // drain and every other picker (#2033)
+                if (!best || rankCompare(r, best) > 0) {
                     best = r; bestPanel = panel; bestIdx = i;
                 }
             }
@@ -318,6 +317,44 @@
             '<span class="vdl-prof-lab">Profile</span>' +
             '<select class="vdl-prof-sel" data-vdl-profile>' + opts + '</select></label>';
     }
+    // the title's video library (#2029): where a grab of it files. only shown
+    // with more than one library of its kind; "Auto" is the rules / default
+    function libraryPickerHTML(info) {
+        if (!info || !info.libraries || info.libraries.length < 2) return '';
+        var cur = info.library_assigned || 0;
+        var auto = 'Auto' + (info.library && !cur ? ' (' + info.library.name + ')' : '');
+        var opts = '<option value="0"' + (cur ? '' : ' selected') + '>' + esc(auto) + '</option>' +
+            info.libraries.map(function (l) {
+                return '<option value="' + l.id + '"' + (l.id === cur ? ' selected' : '') + '>' + esc(l.name) + '</option>';
+            }).join('');
+        return '<label class="vdl-prof" title="The library this title is filed in">' +
+            '<span class="vdl-prof-lab">Library</span>' +
+            '<select class="vdl-prof-sel" data-vdl-library>' + opts + '</select></label>';
+    }
+    // a movie's second copies in other libraries (#2029): the same film in
+    // Movies and Movies 4K, neither replacing the other. each copy is its own
+    // wishlist entry, judged by its library's default profile
+    function copiesHTML(info) {
+        if (!info || !Array.isArray(info.copies) || !info.libraries || info.libraries.length < 2) return '';
+        var taken = {};
+        info.copies.forEach(function (c) { taken[c.library_id] = true; });
+        if (info.library) taken[info.library.id] = true;
+        var chips = info.copies.map(function (c) {
+            var state = c.owned ? 'in library' : c.wished ? 'wanted' : 'kept';
+            return '<span class="vdl-chip vdl-copy">' + esc(c.name) + ' · ' + esc(state) +
+                ' <button type="button" class="vdl-copy-x" data-vdl-copy-remove="' + c.library_id + '" ' +
+                'aria-label="Stop wanting a copy in ' + esc(c.name) + '" title="Stop wanting this copy">×</button></span>';
+        }).join('');
+        var free = info.libraries.filter(function (l) { return !taken[l.id]; });
+        var pick = free.length
+            ? '<select class="vdl-prof-sel" data-vdl-copy-add aria-label="Want a copy in another library">' +
+                '<option value="">Also want a copy in…</option>' +
+                free.map(function (l) { return '<option value="' + l.id + '">' + esc(l.name) + '</option>'; }).join('') +
+              '</select>'
+            : '';
+        if (!chips && !pick) return '';
+        return '<span class="vdl-copies" data-vdl-copies>' + chips + pick + '</span>';
+    }
     // fetch the title's profile, render it, and keep the picker's change wired.
     // onChanged runs after a pick is saved (the overlay re-runs its searches)
     function loadTitleProfile(host, getIdent, kind, render, onChanged) {
@@ -330,7 +367,54 @@
         });
         if (host._vdlProfWired) return;
         host._vdlProfWired = true;
+        function copyCall(method, libraryId) {
+            var o = getIdent() || {};
+            var body = titleBody(o, 'movie', null);
+            delete body.profile_id;
+            body.library_id = libraryId;
+            body.title = o.title || ''; body.year = o.year || null; body.poster_url = o.poster || null;
+            return fetch('/api/video/downloads/quality/copies', {
+                method: method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify(body) })
+                .then(function (r) { return r.json().catch(function () { return null; }); })
+                .then(function (res) {
+                    if (!res || res.success === false) toast((res && res.error) || 'Could not change the copy', 'error');
+                    else toast(method === 'POST' ? 'A copy is on the wishlist for that library' : 'Copy no longer wanted', 'success');
+                    loadTitleProfile(host, getIdent, kind, render, onChanged);
+                    document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+                })
+                .catch(function () { toast('Could not change the copy', 'error'); });
+        }
+        host.addEventListener('click', function (e) {
+            var x = e.target.closest && e.target.closest('[data-vdl-copy-remove]');
+            if (!x) return;
+            x.disabled = true;
+            copyCall('DELETE', parseInt(x.getAttribute('data-vdl-copy-remove'), 10));
+        });
         host.addEventListener('change', function (e) {
+            var add = e.target.closest && e.target.closest('[data-vdl-copy-add]');
+            if (add) {
+                var id = parseInt(add.value, 10);
+                if (id) { add.disabled = true; copyCall('POST', id); }
+                return;
+            }
+            var lib = e.target.closest && e.target.closest('[data-vdl-library]');
+            if (lib) {
+                var body = titleBody(getIdent(), kind, null);
+                delete body.profile_id;
+                body.library_id = parseInt(lib.value, 10) || 0;
+                lib.disabled = true;
+                postJSON('/api/video/downloads/quality/library', body).then(function (res) {
+                    lib.disabled = false;
+                    if (!res || res.success === false) {
+                        toast((res && res.error) || 'Could not change the library', 'error');
+                    } else {
+                        toast(res.library ? 'Files into ' + res.library.name : 'Library saved for this title', 'success');
+                    }
+                    loadTitleProfile(host, getIdent, kind, render, onChanged);
+                });
+                return;
+            }
             var sel = e.target.closest && e.target.closest('[data-vdl-profile]');
             if (!sel) return;
             var pid = parseInt(sel.value, 10) || 0;
@@ -367,7 +451,8 @@
             if (p.max_movie_gb) chips.push(chip('Movie ≤ ' + p.max_movie_gb + ' GB'));
             if (p.max_episode_gb) chips.push(chip('Episode ≤ ' + p.max_episode_gb + ' GB'));
         }
-        box.innerHTML = (isYt ? '' : profilePickerHTML(info)) + chips.join('');
+        box.innerHTML = (isYt ? '' : profilePickerHTML(info) + libraryPickerHTML(info) + copiesHTML(info)) +
+            chips.join('');
     }
 
     // Owned copy → "In your library · 720p · BluRay · X265" + a verdict against the
@@ -908,8 +993,9 @@
     }
 
     // Auto-pick: after an auto-search settles, grab the BEST grabbable release.
-    // Results arrive already ranked best-first (server sorts by accepted → score →
-    // availability), so the first accepted hit with an uploader is the best pick.
+    // Results arrive already ranked best-first (core/video/release_rank: quality,
+    // custom formats, tie-breaks, availability), so the first accepted hit with an
+    // uploader is the best pick.
     function _autoPick(panel, statusRow) {
         if (!panel || !panel.isConnected) return;
         var rows = panel._rows || [];
@@ -1002,7 +1088,7 @@
                 '<span class="vdl-pack-meta">' + r.file_count + ' ep' + (r.file_count === 1 ? '' : 's') + ' · ' + _gb(r.folder_size_bytes) + '</span>' +
                 getBtn +
             '</div>' +
-            '<div class="vdl-pack-list">' + rows + '</div>' +
+            '<div class="vdl-pack-list">' + rankWhyHTML(r) + rows + '</div>' +
         '</div>';
     }
 
@@ -1019,6 +1105,47 @@
         // The season token must start a word: bare /S\d/ also matches the '5' in an
         // audio tag like 'DTS5.1', which would file a MOVIE as a season pack.
         return /[Ss]eason[\s._-]*\d{1,2}|(?:^|[\s._\-[(])[Ss]\d{1,2}(?![\dEe])/.test(t);
+    }
+
+    // Which of two ranked releases is better (#2033): the server's rank values
+    // compared in order (accepted, quality, custom formats, tie-breaks, size
+    // fit, availability, size), the same order every automatic pick uses.
+    // > 0 means a ranks higher. A row without rank falls back to the score.
+    function rankCompare(a, b) {
+        var ra = (a && a.rank) || [a && a.accepted ? 1 : 0, (a && a.score) || 0];
+        var rb = (b && b.rank) || [b && b.accepted ? 1 : 0, (b && b.score) || 0];
+        for (var k = 0; k < Math.max(ra.length, rb.length); k++) {
+            var d = (Number(ra[k]) || 0) - (Number(rb[k]) || 0);
+            if (d) return d;
+        }
+        return 0;
+    }
+
+    var WHY_GROUPS = [['quality', 'Quality'], ['formats', 'Custom formats'], ['tiebreak', 'Tie-breaks']];
+
+    // "Why this rank": every factor and its points, grouped in the order they
+    // are compared. A group only counts when everything above it ties.
+    function rankWhyHTML(r) {
+        var lines = Array.isArray(r && r.breakdown) ? r.breakdown : [];
+        if (!lines.length) return '';
+        function pts(n) { return n > 0 ? '+' + n : String(n); }
+        var groups = WHY_GROUPS.map(function (g) {
+            var rows = lines.filter(function (b) { return b && b.group === g[0]; });
+            if (!rows.length) return '';
+            var total = rows.reduce(function (t, b) { return t + (Number(b.points) || 0); }, 0);
+            return '<div class="vdl-why-group"><div class="vdl-why-head"><span>' + esc(g[1]) + '</span>' +
+                '<b>' + esc(pts(total)) + '</b></div>' +
+                rows.map(function (b) {
+                    return '<div class="vdl-why-row"><span>' + esc(b.label) + '</span>' +
+                        '<em>' + (Number(b.points) ? esc(pts(Number(b.points))) : 'closer wins') + '</em></div>';
+                }).join('') + '</div>';
+        }).join('');
+        var avail = r.username ? 'free slots and queue' : 'seeders';
+        return '<details class="vdl-why">' +
+            '<summary>Why this rank</summary>' + groups +
+            '<div class="vdl-why-foot">Compared in this order: quality, then custom formats, then tie-breaks, ' +
+                'then ' + esc(avail) + ', then the bigger file.</div>' +
+            '</details>';
     }
 
     function resultCardHTML(r, i) {
@@ -1070,6 +1197,7 @@
                 formatNote +
                 '<div class="vdl-r-l3">' + verdict + grab + '</div>' +
                 note +
+                rankWhyHTML(r) +
             '</div>' +
         '</div>';
     }

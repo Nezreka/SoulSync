@@ -123,6 +123,34 @@ To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch o
 - Switch a 4K folder off and it's ignored everywhere (routing, scans, health checks). Its path is kept for next time.
 
 In Docker, map each 4K folder in your compose file (the default compose has commented \`/media/movies-4k\` and \`/media/tv-4k\` lines) and add it to a library on your media server. See [Video: Downloads](#video-downloads) for the full pipeline.
+
+## More libraries
+
+Add your own movie and TV libraries, like a **Stand-Up**, **Documentaries** or **Kids** library in Plex, under Settings > Folders > Video > More libraries. Each has a name, its own folder and optional rules. The main and 4K libraries are listed there too (their folders are the ones set above), so an install with no extra library works exactly as before.
+
+A new title files into, first match wins:
+
+1. the library picked for it: the **Library** picker in **Get** / **Manual search** (shown once a kind has two libraries), which sticks to the title
+2. the 4K library, when its quality profile saves to 4K
+3. the first library whose **rules** match: a **genre** (TMDB's, like Documentary or Family) or a **keyword** (found inside one of the title's TMDB keywords, like stand-up comedy, or in its name)
+4. the **default** library for its kind (**Make default** on a library)
+
+- Anime shows keep the anime folder unless a library was picked for them.
+- Titles you already have stay where they are, and their upgrades land beside the copy you have.
+- A library that's switched off or has no folder is skipped everywhere; **Remove** keeps its folder and files, and titles picked for it go back to the rules and the default.
+- A library's folder is a library folder like the main ones: scans, health checks and the download monitor know it. Map it in Docker and add it to a library on your media server.
+
+**Quality profile per library.** Each library can set the quality profile its titles are grabbed and upgraded by (**Quality profile** on its card). A title's own profile still wins; a library left on the default uses the kind's default as before.
+
+**The same movie in two libraries.** In a movie's **Get** window, **Also want a copy in…** adds a second copy in another library: the film in Movies (1080p) and in Movies 4K, neither replacing the other. Each copy is its own wishlist card (named with its library), hunted, grabbed and upgraded by its library's profile, and filed in its library. A copy is owned only by a file in its own library's folder (scans note which library each file sits in; on Docker, the server's folders need to be reached, see Your library's folders), so the 4K file never satisfies the 1080p wish or the other way round. Remove the copy with its **×**, or its wishlist card. Second copies are for movies; TV shows keep one copy.
+
+**Where a library downloads from.** **Download from** on a library's card picks the sources its automatic searches use (the wishlist, Search now, retries), in the order you click them: Usenet first then Torrent, say. None picked follows the global order in Settings > Downloads. RSS sync still runs on the global order's indexer sources, and keeps only releases from the library's own sources. **Torrent category / label** and **Usenet category** give that library's downloads their own category in the client (qBittorrent / SABnzbd / NZBGet category, Deluge / Transmission label); empty uses the client's own. Make the category in the client first: SABnzbd files an unknown one under its default. SoulSync talks to one torrent client and one usenet client (Settings > Downloads), so a library picks between those; two instances of the same client aren't supported.
+
+**Which indexers a library searches.** Open **Indexers** on a library's card to tick the Prowlarr indexers its searches use: private 4K trackers for Movies 4K, say. None ticked searches every indexer (within Settings > Indexers' own allowlist), as before. The wishlist, Search now, retries, manual search in Get, and RSS sync all follow it (an EXT.to release has no indexer and is kept).
+
+**Searching and upgrading per library.** **Search automatically** off: the wishlist drain and RSS sync leave that library's titles alone, and they're only searched when you click Search now (or Search all missing). **Upgrade what you have** off: titles you already have in that library stop being upgraded toward their profile's cutoff; missing ones are still hunted.
+
+**Filtering by library.** Once a kind has two libraries, the Movies / TV list has a **Library** filter (the library its files sit in, as the last scan saw them), the wishlist has one (a copy's library, else the library picked for the title, else where its last search filed it), and so does the video Downloads list (the library a download files into).
 `
         },
         {
@@ -678,9 +706,22 @@ A **quality profile** is an ordered ladder of allowed qualities — for example,
 For dubbed or MULTI copies, pick one or more **audio languages** on the profile and a mode:
 
 - **Prefer**: releases tagged with one of your languages (FRENCH, VFF, TRUEFRENCH, GERMAN, iTA, LATINO and so on) or with MULTI / Dual Audio rank first, even over a higher resolution.
-- **Require**: anything without one of those tags is skipped.
+- **Require**: a release tagged only with other languages is skipped.
 
-A release with no language tag is the original audio, so Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
+The scene only tags audio that isn't English, so a release with no language tag reads as English. With English on your list it counts as a match and is never ranked below one that spells out ENGLISH. With only other languages on your list it's the English original, so Prefer ranks it below a dub and Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
+
+## How releases are ranked
+
+Every search ranks releases the same way: the title's search modal, Auto, the wishlist's Search now, the hourly wishlist run, RSS sync, upgrades and the retry after a failed download. Among releases that meet the profile it compares, in order:
+
+1. **Quality**: the tier's place on your ladder (move a tier up and it ranks higher), plus the profile's preferences: codec, HDR, audio, repack and audio language.
+2. **Custom formats**: the summed format score.
+3. **Tie-breaks**: lossless or Atmos audio, then how close the size is to your **preferred size**.
+4. Then free slots or seeders, then the bigger file.
+
+A later step only matters when everything above it ties, so a +100 format beats a release that only differs by an ENGLISH tag, Atmos or size, and never beats a better quality tier. Each result in a search has **Why this rank**, which lists every factor and its points.
+
+**Preferred size** (per movie and per episode, off by default) sits beside the max size: releases closest to it win a tie. It never rejects anything, and it can't be set past the max size.
 
 ## Save to
 
@@ -688,7 +729,7 @@ A release with no language tag is the original audio, so Require skips it. Subti
 
 ## Custom formats
 
-**Custom formats** are scored release matchers layered on top of the profile. They nudge the ranker toward releases you like (a preferred release group, a specific HDR flavor, TrueHD audio) and away from ones you don't (extras, mislabeled scene tags). Positive scores boost a release; negative scores penalize it.
+**Custom formats** are scored release matchers layered on top of the profile. They nudge the ranker toward releases you like (a preferred release group, a specific HDR flavor, TrueHD audio) and away from ones you don't (extras, mislabeled scene tags). Positive scores boost a release; negative scores penalize it. Formats rank right after quality, so a modest score like +100 for a preferred group is enough: it doesn't need inflating to outweigh a language tag or a bigger file.
 
 ## Per-title overrides
 

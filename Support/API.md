@@ -2420,6 +2420,38 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 
 #### `GET /api/v1/video/downloads/history`
 
+#### Release ranking (web UI session API)
+
+The video search the web UI runs (`POST /api/video/downloads/search`, `/downloads/search/start` and `GET /downloads/search/poll`) returns each result with:
+
+- `breakdown`: every factor that scored it, `[{group, label, points}]`. `group` is `quality`, `formats` or `tiebreak`.
+- `rank`: the values it's compared on, best first: `[accepted, quality, formats, tiebreak, size_fit, availability, size_bytes]`. Results come back sorted by it, and the wishlist, RSS sync, upgrades and download retries sort by the same values.
+- `score` is still the total of the three groups, and `format_score` / `formats` are unchanged.
+
+The quality profile (`GET/POST /api/video/downloads/quality` and the named profiles) adds `preferred_movie_gb` and `preferred_episode_gb`: a tie-break, closer ranks higher, in tenths of a GB, `0` = off (the default), clamped to the max size.
+
+#### Video libraries (web UI session API, admin)
+
+Named movie and TV libraries, each with its own folder (#2029). The main and 4K folders are libraries too (`builtin` `main` / `4k`); their folders stay in the folder settings (`movies_path`, `movies_4k_path` + `movies_4k_enabled`, ...).
+
+- `GET /api/video/libraries/folders`: `{libraries: [...], genres: [...]}`. Each library: `id`, `kind` (`movie` / `show`), `name`, `path`, `builtin` (`main`, `4k` or null), `enabled`, `usable` (on and has a folder), `is_default`, `rules` (`{genres: [], keywords: []}`) and `options`. `genres` are the genre names your library knows, for the rule picker.
+- `POST /api/video/libraries/folders`: add one. Body: `{kind, name, path, rules?, enabled?, is_default?}`. `400` with a message for a missing name or folder, or a folder another library (or the anime / YouTube folder) already uses.
+- `PUT /api/video/libraries/folders/<id>`: change `name`, `rules`, `options`, and for a custom library `path` and `enabled`. A builtin's folder is changed in its own setting (`400`). `is_default: true` makes it the default.
+- `POST /api/video/libraries/folders/<id>/default`: the default for its kind (needs a folder and to be on).
+- `DELETE /api/video/libraries/folders/<id>`: remove a custom library. Its files stay; titles picked for it go back to the rules and the default; a removed default hands the kind to the main library. The builtins can't be removed (`400`).
+
+Which library a new title files into: a library picked for the grab (`video_library_id` on `POST /api/video/downloads/grab` and the manual import), else one picked for the title, else the 4K library when its quality profile saves to 4K, else the first library whose rules match its genres or TMDB keywords (a keyword also matches inside its name), else the kind's default. The anime folder still takes anime shows unless a library was picked for the title.
+
+- `GET /api/video/downloads/quality/for` adds `libraries` (`[{id, name, builtin}]`, the usable ones of the title's kind), `library` (`{id, name, why}`, where it files now; `why` is `picked`, `assigned`, `profile`, `rule: ...` or `default`) and `library_assigned` (the title's own pick, `0` = none).
+- A library's `sources` (ordered, any of `soulseek`, `usenet`, `torrent`, `extto`; `[]` = the global order), `torrent_category` and `usenet_category` (`''` = the client's own; letters, digits, space, `.`, `_`, `-`, up to 64) set where its automatic searches look and the category its client jobs get.
+- A library's `indexer_ids` (Prowlarr indexer ids, `[]` = every one) limit its searches: the wishlist, search now, retries, manual search and RSS sync.
+- A library's `quality_profile_id` (on create / `PUT`, `0` = none) is the profile titles in it are judged by when they have none of their own, before the kind's default.
+- `POST /api/video/downloads/quality/copies` (admin): want a second copy of a movie in another library. Body: `{media_id, media_source, tmdb_id, library_id, title, year?, poster_url?, quality_profile_id?}`. Adds its own wishlist row there, judged by that library's default profile. `400` for the library the title already files into. `DELETE` with `{media_id, media_source, tmdb_id, library_id}` stops wanting it (`404` when there's no such copy). `GET /downloads/quality/for` lists a movie's `copies` as `[{library_id, name, wished, owned}]`.
+- Wishlist movie rows (`GET /api/video/wishlist?kind=movie`) carry `video_library_id` (null = the title's own row) and `video_library_name`. `POST /api/video/wishlist/remove`, `/wishlist/search` and `/wishlist/retry` take an optional `video_library_id` for a movie (`0` = the title's own row only); removing a copy's row stops wanting that copy. Left out, they act on every row as before.
+- A library's `auto_search` (default `true`; `false` = the drain and RSS sync skip its titles) and `upgrades` (default `true`; `false` = owned titles there aren't upgraded).
+- `GET /api/video/library/video-libraries`: `{libraries: [{id, name, kind}]}`, the usable ones, readable by any profile with video access (for the filters). `GET /api/video/library?kind=movies|shows&video_library=<id>` lists only titles whose files sit in that library. `GET /api/video/wishlist?kind=movie|show&video_library=<id>` lists only wishes that file there (a copy's library, else the title's pick, else where its last search filed it). `GET /api/video/downloads/active` rows carry `video_library_id` / `video_library_name` (by target folder).
+- `POST /api/video/downloads/quality/library` (admin): pick a title's library. Body: `{kind, media_id, media_source, tmdb_id, library_id}`, `library_id: 0` clears the pick. Answers with the same three fields.
+
 #### `GET /api/v1/video/calendar`
 
 Upcoming and recent episodes and releases. `start` and `end` as ISO dates.

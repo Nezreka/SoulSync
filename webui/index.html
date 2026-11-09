@@ -1002,6 +1002,9 @@
                                         <option value="watched">Watched</option>
                                         <option value="unwatched">Unwatched</option>
                                     </select>
+                                    <select class="library-source-filter-select" data-video-lib-vlib title="Library" hidden>
+                                        <option value="">All Libraries</option>
+                                    </select>
                                     <select class="library-source-filter-select" data-video-lib-res title="Quality">
                                         <option value="">Any Quality</option>
                                     </select>
@@ -3889,6 +3892,26 @@
                                                 </div>
                                             </div>
                                             <div class="vq-block">
+                                                <div class="vq-label">Preferred size <span class="vq-hint">a
+                                                        tie-break only: among releases equal on quality and custom
+                                                        formats, the one closest to this size ranks first. off at 0,
+                                                        never past the max size</span></div>
+                                                <div class="vq-grid">
+                                                    <div class="vq-block" style="margin:0;">
+                                                        <div class="vq-label">Movie <span class="vq-hint"
+                                                                id="vq-movie-pref-label">Off</span></div>
+                                                        <input type="range" id="vq-movie-pref" class="vq-slider" min="0"
+                                                            max="100" step="0.5" value="0">
+                                                    </div>
+                                                    <div class="vq-block" style="margin:0;">
+                                                        <div class="vq-label">TV episode <span class="vq-hint"
+                                                                id="vq-episode-pref-label">Off</span></div>
+                                                        <input type="range" id="vq-episode-pref" class="vq-slider"
+                                                            min="0" max="10" step="0.1" value="0">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="vq-block">
                                                 <div class="vq-label">Minimum seeders <span class="vq-hint"
                                                         id="vq-seeders-label">At least 1 seeder</span></div>
                                                 <input type="range" id="vq-min-seeders" class="vq-slider" min="0"
@@ -6581,6 +6604,24 @@
                                                     <div class="setting-help-text">Anime keeps its own folder when one
                                                         is set, whatever the profile.</div>
                                                 </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>More libraries</h3>
+                                                <div class="setting-help-text">
+                                                    Your own movie and TV libraries, each with its own folder, like a
+                                                    Stand-Up, Documentaries or Kids library in Plex. A new title files
+                                                    into the library picked for it (in its Get or Manual search window),
+                                                    else the 4K one when its quality profile says so, else the first
+                                                    library whose rules match its genres or TMDB keywords, else the
+                                                    default library for its kind. Titles you already have stay where
+                                                    they are. The main and 4K libraries are here too: their folders are
+                                                    the ones above.
+                                                </div>
+                                                <div id="video-libraries-list" class="video-libraries"></div>
+                                                <datalist id="video-library-genre-list"></datalist>
+                                                <button type="button" class="test-button" id="video-library-add">+ Add
+                                                    library</button>
                                             </div>
 
                                             <div class="settings-group" data-stg="library">

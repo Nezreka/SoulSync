@@ -248,18 +248,23 @@ def _rss_pass_inner(*, fetch, log, extto=None) -> Dict[str, Any]:
         if not target:
             continue
         # each item's own folder, the way the wishlist drain files it: the
-        # anime folder by show type, the 4K one by quality profile (RSS used to
+        # anime folder by show type, its library (#2029: picked, the 4K one by
+        # quality profile, the rules, the default) (RSS used to
         # send every episode to the TV folder, anime included)
         anime_root = vpw._default_anime_dir() if media_type == "episode" else ""
         four_k_root = vpw._default_four_k_dir(media_type)
         for item in items:
             if vpw.item_key(item, media_type) in active:
                 continue
+            # a library with automatic search (or upgrades) off (#2029)
+            if not vpw.library_allows(item, media_type, vpw._default_pick_library,
+                                      vpw._default_profile_library):
+                continue
             titles = [item.get("title") or item.get("show_title")]
             pool = _prescreen(hits, titles)
             if not pool:
                 continue
-            cands = _rank(pool, item, media_type)
+            cands = _library_sources_only(_rank(pool, item, media_type), item, media_type)
             if not cands:
                 continue
             matched += 1
@@ -272,7 +277,8 @@ def _rss_pass_inner(*, fetch, log, extto=None) -> Dict[str, Any]:
                                            _skip_reason(cands, min_rank, item)))
                 continue
             folder = vpw.item_target_dir(item, media_type, target, anime_root, four_k_root,
-                                         vpw._default_route_type, vpw._default_profile_library)
+                                         vpw._default_route_type, vpw._default_profile_library,
+                                         vpw._default_pick_library)
             if vpw._default_enqueue(item, best, cands, media_type, folder):
                 grabbed += 1
                 active.add(vpw.item_key(item, media_type))
@@ -319,6 +325,24 @@ def _skip_reason(cands: List[Dict[str, Any]], min_rank: int, item: Dict[str, Any
         base = why or "didn't pass the quality/scope filter"
         return "%d release(s) matched by name but none accepted (%s)" % (n, base)
     return "no release qualified"
+
+
+def _library_sources_only(cands: List[Dict[str, Any]], item: Dict[str, Any],
+                          media_type: str) -> List[Dict[str, Any]]:
+    """Releases from the sources (and Prowlarr indexers) the item's video
+    library searches (#2029), when it sets its own; every one otherwise. RSS itself still only runs
+    for the indexer sources in the global order."""
+    from core.automation.handlers import video_process_wishlist as vpw
+    from core.video.libraries import indexer_ids_for, source_chain
+    lib = vpw.item_library(item, media_type)
+    own = source_chain(lib, [])
+    if own:
+        cands = [c for c in cands or [] if str(c.get("source") or c.get("protocol") or "torrent").lower() in own]
+    # and its Prowlarr indexers (#2029 step 4); EXT.to has no indexer id
+    ids = indexer_ids_for(lib)
+    if ids:
+        cands = [c for c in cands or [] if c.get("indexer_id") is None or int(c["indexer_id"]) in ids]
+    return cands
 
 
 def _rank(pool: List[Dict[str, Any]], item: Dict[str, Any], media_type: str) -> List[Dict[str, Any]]:

@@ -295,11 +295,13 @@ def _library_roots() -> set:
             v = db.get_setting(key)
             if v:
                 roots.add(os.path.abspath(str(v)))
-        from core.video.library_roots import four_k_path
+        from core.video.library_roots import custom_library_paths, four_k_path
         for kind in ("movie", "episode"):
             v = four_k_path(db, kind)
             if v:
                 roots.add(os.path.abspath(v))
+        for v in custom_library_paths(db):
+            roots.add(os.path.abspath(v))
     except Exception:   # noqa: BLE001
         pass
     return roots
@@ -331,11 +333,13 @@ def _sweep_import_temps(db) -> int:
         if v:
             roots.add(os.path.abspath(str(v)))
     try:
-        from core.video.library_roots import four_k_path
+        from core.video.library_roots import custom_library_paths, four_k_path
         for kind in ("movie", "episode"):
             v = four_k_path(db, kind)
             if v:
                 roots.add(os.path.abspath(v))
+        for v in custom_library_paths(db):
+            roots.add(os.path.abspath(v))
     except Exception:   # noqa: BLE001 - the sweep is best-effort
         pass
     try:
@@ -1242,7 +1246,8 @@ def _search_again_now(db, dl, *, wait: bool = False) -> bool:
     scope = "movie" if kind == "movie" else ("episode" if en is not None else "show")
     try:
         profiles = db.wishlist_profiles_for_media(
-            kind, int(tmdb_id), season_number=sn, episode_number=en)
+            kind, int(tmdb_id), season_number=sn, episode_number=en,
+            **_wishlist_scope(db, dl, kind, tmdb_id))
     except Exception:  # noqa: BLE001 - fall back to the default profile
         profiles = []
     # the in-flight key is per item, not per profile, so a second profile's
@@ -1253,6 +1258,10 @@ def _search_again_now(db, dl, *, wait: bool = False) -> bool:
     # wishlist row often has none (a profile picked in the search modal for a
     # show not in the library yet), and the replacement fell back to Default
     keep = {"quality_profile_id": dl["quality_profile_id"]} if dl.get("quality_profile_id") else {}
+    copy_scope = _wishlist_scope(db, dl, kind, tmdb_id)
+    if copy_scope:
+        # the retry is for this copy's row (#2029): 0 = the title's own
+        keep["video_library_id"] = int(copy_scope["video_library_id"] or 0)
     handled = False
     for pid in profiles or [1]:
         res = manual_search(scope, int(tmdb_id), season_number=sn, episode_number=en,
@@ -1305,6 +1314,31 @@ def _wishlist_ids(db, dl):
             ctx.get("season"), ctx.get("episode"), ctx)
 
 
+def _copy_scope(db, dl, kind, tmdb_id) -> dict:
+    """Which owned copy a movie download lands beside (#2029): a second
+    copy's download only the file in its library, the title's own download
+    any file but those in its copies' libraries. {} (every file, as before)
+    for a title with no copy wanted anywhere."""
+    if kind != "movie":
+        return {}
+    vlib = dl.get("video_library_id")
+    if not vlib:
+        try:
+            from core.video.libraries import title_copies
+            if not title_copies(db, "movie", tmdb_id):
+                return {}
+        except Exception:   # noqa: BLE001 - no libraries: every file, as before
+            return {}
+    return {"video_library_id": vlib or None}
+
+
+def _wishlist_scope(db, dl, kind, tmdb_id) -> dict:
+    """The wishlist rows a movie download stands for (#2029): its copy's, or
+    the title's own when the title has a copy wanted elsewhere. {} (every
+    row, as before) otherwise and for episodes."""
+    return _copy_scope(db, dl, kind, tmdb_id)
+
+
 def _owned_library_dir(db, dl, settings=None):
     """The REAL local folder of the copy the library already owns for this
     download's target, or None for brand-new items. The DB stores the SERVER's
@@ -1329,7 +1363,8 @@ def _owned_library_dir(db, dl, settings=None):
         if kind == "youtube" or not tmdb_id:
             return None
         stored = db.video_stored_file_path("movie" if kind == "movie" else "episode",
-                                           tmdb_id=int(tmdb_id), season=sn, episode=en)
+                                           tmdb_id=int(tmdb_id), season=sn, episode=en,
+                                           **_copy_scope(db, dl, kind, tmdb_id))
         base_dirs = video_base_dirs(db)
         if stored:
             resolved = resolve_video_file_path(stored["path"], base_dirs,
@@ -1424,13 +1459,18 @@ def _wishlist_failed(db, dl) -> None:
         poster, year = dl.get("poster_url"), dl.get("year")
         try:
             profiles = db.wishlist_profiles_for_media(
-                kind, int(tmdb_id), season_number=sn, episode_number=en)
+                kind, int(tmdb_id), season_number=sn, episode_number=en,
+                **_wishlist_scope(db, dl, kind, tmdb_id))
         except Exception:  # noqa: BLE001 - safety net must never fail
             profiles = []
         for pid in profiles or [1]:
             if kind == "movie":
+                # a copy's row comes back as that copy (#2029)
+                copy = ({"video_library_id": dl["video_library_id"],
+                         "quality_profile_id": dl.get("quality_profile_id")}
+                        if dl.get("video_library_id") else {})
                 db.add_movie_to_wishlist(int(tmdb_id), title, year=year, poster_url=poster,
-                                         library_id=lib_id, profile_id=pid)
+                                         library_id=lib_id, profile_id=pid, **copy)
             elif sn is not None and en is not None:
                 db.add_episodes_to_wishlist(int(tmdb_id), title,
                     [{"season_number": sn, "episode_number": en}], poster_url=poster,
@@ -1439,27 +1479,32 @@ def _wishlist_failed(db, dl) -> None:
         logger.exception("video download %s: wishlist-on-fail failed", dl.get("id"))
 
 
-def _remove_satisfied_movie_wishes(db, tmdb_id: int, label: str, user_initiated: bool) -> None:
-    """Remove movie wishlist rows only for profiles whose cutoff the landed file meets."""
+def _remove_satisfied_movie_wishes(db, tmdb_id: int, label: str, user_initiated: bool,
+                                   scope=None) -> None:
+    """Remove movie wishlist rows only for profiles whose cutoff the landed file
+    meets, and only the rows of the library it landed for (#2029): the 1080p
+    copy landing never clears the 4K copy's wish, nor the other way round.
+    ``scope`` is _wishlist_scope's: {} = every row (a title with no copy)."""
+    scope = scope or {}
     try:
         from core.video.quality_eval import meets_cutoff, resolution_rank
         from core.video.quality_profile import profile_by_id
         if not resolution_rank(label):
             # unparseable quality → classic remove-on-obtain; never wedge a row
             # open on a label we can't judge (matches the old behavior)
-            db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=None)
+            db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=None, **scope)
             return
-        rows = db.get_movie_wishlist_profiles(tmdb_id)
+        rows = db.get_movie_wishlist_profiles(tmdb_id, **scope)
         for profile_id, quality_profile_id in rows:
             profile = profile_by_id(db, quality_profile_id, kind="movie")
             if user_initiated or meets_cutoff(label, profile):
-                db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=profile_id)
+                db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=profile_id, **scope)
             else:
                 logger.info("movie %s: landed '%s' below profile %s cutoff - wish kept",
                             tmdb_id, label, profile_id)
     except Exception:   # noqa: BLE001 - judgment failure → classic remove-on-obtain
         logger.debug("per-profile movie cutoff judgment failed; removing all", exc_info=True)
-        db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=None)
+        db.remove_from_wishlist("movie", tmdb_id=tmdb_id, profile_id=None, **scope)
 
 
 def _remove_satisfied_episode_wishes(db, tmdb_id: int, sn: int, en: int,
@@ -1528,7 +1573,8 @@ def _wishlist_obtained(db, dl, upd=None) -> None:
         if kind == "youtube":
             db.remove_youtube_from_wishlist("video", str(tmdb_id), profile_id=None)
         elif kind == "movie":
-            _remove_satisfied_movie_wishes(db, int(tmdb_id), label, user_initiated)
+            _remove_satisfied_movie_wishes(db, int(tmdb_id), label, user_initiated,
+                                           _wishlist_scope(db, dl, kind, tmdb_id))
         elif sn is not None and en is not None:
             _remove_satisfied_episode_wishes(db, int(tmdb_id), sn, en, label, user_initiated)
     except Exception:
@@ -1817,9 +1863,10 @@ def _search_for_retry(query, max_seconds=55):
 
 
 def _requery_worker(dl_id) -> None:
-    from core.video.quality_eval import evaluate_release
+    from core.video.custom_formats import load_formats
     from core.video.quality_profile import profile_by_id
     from core.video.release_parse import parse_release
+    from core.video.release_rank import judge, sort_ranked
     from core.video.retry import exhausted_reason, merge_candidates, plan_retry
     try:
         db = _db_provider() if _db_provider else None
@@ -1858,20 +1905,32 @@ def _requery_worker(dl_id) -> None:
             accepted = []
             blocked_users = db.blocked_usernames()
             from api.video.downloads import _parse_text
+            try:
+                formats = load_formats(db)
+            except Exception:   # noqa: BLE001 - no formats, never a failed retry
+                formats = []
             for hit in (polled.get("hits") or []):
                 if hit.get("username") in blocked_users:
                     continue                                  # source-wide blocked uploader
-                v = evaluate_release(parse_release(_parse_text(hit)), profile,
-                                     scope=ctx.get("scope") or "movie",
-                                     want_season=ctx.get("season"), want_episode=ctx.get("episode"),
-                                     want_year=ctx.get("year"),
-                                     want_title=ctx.get("titles") or ctx.get("title"),
-                                     want_date=ctx.get("air_date"),
-                                     want_absolute=ctx.get("absolute"),
-                                     want_alt=_scene_alt(ctx),
-                                     size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
+                # the same judge + rank as every other picker (#2033): custom
+                # formats and their minimum count here too, and the retry takes
+                # the best release, not whatever slskd listed first
+                name = _parse_text(hit)
+                avail = hit.get("availability")
+                if avail is None:
+                    avail = hit.get("peers") or 0
+                v = judge(parse_release(name), name, profile, formats,
+                          avail=avail, size_bytes=hit.get("size_bytes") or 0,
+                          scope=ctx.get("scope") or "movie",
+                          want_season=ctx.get("season"), want_episode=ctx.get("episode"),
+                          want_year=ctx.get("year"),
+                          want_title=ctx.get("titles") or ctx.get("title"),
+                          want_date=ctx.get("air_date"),
+                          want_absolute=ctx.get("absolute"),
+                          want_alt=_scene_alt(ctx),
+                          size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
                 if v["accepted"]:
-                    accepted.append(hit)
+                    accepted.append({**hit, "rank": v["rank"]})
                     seen["accepted"] += 1
                 else:
                     # Every refusal, so the summary counts the same population it
@@ -1886,6 +1945,7 @@ def _requery_worker(dl_id) -> None:
                 tried_files = json.loads(row2.get("tried_files") or "[]")
             except (ValueError, TypeError):
                 tried_files = []
+            accepted = sort_ranked(accepted)
             fresh = merge_candidates(accepted, tried_files, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db))
             if fresh and _apply_candidate(db, dl_id, row2, fresh[0], fresh[1:]):
                 return

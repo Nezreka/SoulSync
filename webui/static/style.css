@@ -75981,9 +75981,46 @@ body.src-modal-open { overflow: hidden; }
     text-overflow: ellipsis; white-space: nowrap;
 }
 #settings-page .video-extra-heading { margin: 18px 0 4px; font-size: 14px; }
+/* more libraries (#2029): one card per library, its folder, rules and actions */
+#settings-page .video-libraries { display: flex; flex-direction: column; gap: 10px; margin: 10px 0 12px; }
+#settings-page .video-library-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border: 1px solid var(--white-a08);
+    border-radius: 10px;
+    background: var(--white-a03);
+}
+#settings-page .video-library-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#settings-page .video-library-name { flex: 1 1 200px; min-width: 0; }
+#settings-page .video-library-kind,
+#settings-page .video-library-state { color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-library-state.is-default { color: var(--success); }
+#settings-page .video-library-known {
+    overflow: hidden; color: var(--text-secondary); font-size: 13px;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+#settings-page .video-library-rules { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+#settings-page .video-library-rules input { min-width: 0; }
+#settings-page .video-library-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#settings-page .video-library-src {
+    padding: 4px 10px; border: 1px solid var(--white-a08); border-radius: var(--radius-pill);
+    background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+}
+#settings-page .video-library-src.is-on { border-color: var(--accent); color: var(--text-primary); }
+#settings-page .video-library-hint { color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-library-indexers summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+#settings-page .video-library-idx-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+#settings-page .video-library-field {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    color: var(--text-secondary); font-size: 13px;
+}
+#settings-page .video-library-actions .checkbox-label { margin-right: auto; }
 @media (max-width: 600px) {
     #settings-page .video-drive-row { grid-template-columns: minmax(0, 1fr); }
     #settings-page .video-drive-status { grid-column: 1; }
+    #settings-page .video-library-rules { grid-template-columns: minmax(0, 1fr); }
 }
 
 

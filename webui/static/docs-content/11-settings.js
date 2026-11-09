@@ -102,7 +102,7 @@ Every folder on the Folders card is checked as you type, with one line under it:
 - **Inside your download folder** (or the other way round): keep downloads and libraries side by side, not nested, or half-finished files get scanned.
 - **Not on a mapped volume** (Docker): files there live inside the container and are lost when it's recreated.
 
-The Video tab adds optional **4K libraries** (see [Video: 4K libraries](#vid-sources)) and, in Docker, the compose volume lines for every folder you've set, ready to copy.
+The Video tab adds optional **4K libraries** and **More libraries** for your own movie and TV libraries (see [Video: 4K libraries](#vid-sources)) and, in Docker, the compose volume lines for every folder you've set, ready to copy.
 
 ## Behavior
 

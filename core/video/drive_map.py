@@ -185,6 +185,12 @@ def _configured_roles(db) -> List[tuple]:
                        ("tv_additional_paths", "an extra TV folder")):
         for v in additional_paths(db, key):
             roles.append((v, label))
+    try:
+        from core.video.libraries import list_libraries
+        roles += [(lib["path"], "your %s library" % lib["name"])
+                  for lib in list_libraries(db) if not lib["builtin"] and lib["usable"]]
+    except Exception:   # noqa: BLE001 - a bad row never hides the configured folders
+        pass
     return roles
 
 

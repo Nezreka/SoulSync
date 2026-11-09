@@ -10,6 +10,8 @@
 
 /** One row from GET /api/video/downloads/active. */
 export interface VdlDownload {
+  /** #2029: the video library it files into (by its target folder). */
+  video_library_name?: string | null;
   id: number;
   kind?: string | null;
   title?: string | null;
