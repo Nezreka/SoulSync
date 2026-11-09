@@ -358,7 +358,9 @@ def _resolve_track_path(db, track_id):
     try:
         from core.library2.track_files import primary_file_row
         conn = db._get_connection()
-        row = primary_file_row(conn, int(track_id))
+        # only this library's copy: another profile's own library is not
+        # theirs to share (review 5 W3-TB-2)
+        row = primary_file_row(conn, int(track_id), scoped=True)
     except Exception:
         return None
     finally:
@@ -1081,6 +1083,7 @@ def create_blueprint() -> Blueprint:
         try:
             from core.library2.track_files import primary_order
             from core.library2 import song_search
+            from core.library2.sql_util import owner_clause
             conn = db._get_connection()
             # the Songs tab's search index reads the matches, not the library:
             # the folded LIKE over every track ran per keystroke. without the
@@ -1094,6 +1097,8 @@ def create_blueprint() -> Blueprint:
                          " OR unidecode_lower(COALESCE(credited.name, '')) LIKE :like ESCAPE '\\'"
                          " OR unidecode_lower(COALESCE(album_artist.name, '')) LIKE :like ESCAPE '\\'")
                 params = {"like": _library_like(query)}
+            # the file must be in the caller's library, like resolve-share:
+            # offering another profile's own copy shares it out (review 5 W3-TB-2)
             rows = conn.execute(
                 f"""SELECT t.id, t.title, tf.path, tf.size,
                           COALESCE(credited.name, album_artist.name, '') AS artist,
@@ -1105,6 +1110,7 @@ def create_blueprint() -> Blueprint:
                          WHERE f.track_id = t.id
                            AND COALESCE(f.file_state, 'active') <> 'deleted'
                            AND COALESCE(f.path, '') <> ''
+                           {owner_clause(column='f.owner_profile_id')}
                          ORDER BY {primary_order('f')} LIMIT 1)
                    LEFT JOIN lib2_artists album_artist
                           ON album_artist.id = al.primary_artist_id
