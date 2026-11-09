@@ -42,7 +42,7 @@ const FALLBACK_DESTRUCTIVE = new Set(['corrupt_audio', 'fake_lossless', 'orphan_
  *  the tray asks for exactly these rows and never searches by title: a
  *  short title like "FM" matched 100 other albums' findings, and the tray
  *  showed, fixed and dismissed those (review 5 W3-TU-1). */
-function groupIdentity(group: FindingAlbumGroup) {
+export function groupIdentity(group: FindingAlbumGroup) {
   const groupBy = group.group_by === 'artist' ? 'artist' : 'album';
   const artist = group.artist == null ? '' : String(group.artist);
   const album = group.album == null ? '' : String(group.album);

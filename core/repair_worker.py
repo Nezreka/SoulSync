@@ -7385,13 +7385,17 @@ class RepairWorker:
 
     def clear_findings(self, job_id: str = None, status: str = None,
                        severity: str = None, finding_type: str = None,
-                       q: str = None) -> int:
+                       q: str = None, group_by: str = None,
+                       group_artist=None, group_album=None) -> int:
         """Delete findings matching the SAME filters the list view applies.
 
         Every argument here must be forwarded from the UI's current filter
         state. This deletes rows outright, so a filter the caller drops widens
         the blast radius silently — which is exactly how #1142 destroyed
         findings the user had filtered away.
+
+        ``group_by`` / ``group_artist`` / ``group_album`` are a drilled-in
+        album or artist card, by the grid's own key (review 5 W3-TT-2).
         """
         conn = None
         try:
@@ -7399,7 +7403,8 @@ class RepairWorker:
             cursor = conn.cursor()
             where, params = self._findings_filter(
                 job_id=job_id, status=status, severity=severity,
-                finding_type=finding_type, q=q)
+                finding_type=finding_type, q=q, group_by=group_by,
+                group_artist=group_artist, group_album=group_album)
             cursor.execute(f"SELECT COUNT(*) FROM repair_findings {where}", params)
             count = cursor.fetchone()[0]
             cursor.execute(f"DELETE FROM repair_findings {where}", params)

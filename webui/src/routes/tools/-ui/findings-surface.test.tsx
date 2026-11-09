@@ -895,6 +895,116 @@ describe('a filtered inbox row acts on the rows it counts', () => {
   });
 });
 
+// ── Drilling into an album or artist card (review 5 W3-TT-2) ─────────────────
+
+describe('drilling into a card inside an open type', () => {
+  const albumCard = {
+    group_by: 'album',
+    key: 'adetola|beacon',
+    artist: 'Adetola',
+    album: 'Beacon',
+    count: 1,
+    worst_score: null,
+    best_score: null,
+    worst_quality: '',
+    best_quality: '',
+    album_thumb_url: null,
+    artist_thumb_url: null,
+    artist_id: null,
+    first_seen: null,
+    last_seen: null,
+  };
+
+  async function drillIn() {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'missing_lyrics', pending: 4 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'missing_lyrics',
+            label: 'Missing Lyrics',
+            verb: 'Fetch',
+            destructive: false,
+          }),
+        ],
+      },
+      '/api/repair/findings/albums': { groups: [albumCard] },
+      [FINDINGS]: page([finding({ id: 7, finding_type: 'missing_lyrics', title: 'Beacon track' })]),
+      '/api/repair/findings/7/fix': { success: true },
+      '/api/repair/findings/clear': { success: true, deleted: 1 },
+    });
+    renderSurface();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-inbox-head') as HTMLElement);
+    await flush();
+    fireEvent.click(screen.getByText('Albums'));
+    await flush();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-album-card') as HTMLElement);
+    await flush();
+    await flush();
+  }
+
+  const lastListUrl = () =>
+    fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.startsWith('/api/repair/findings?'))
+      .at(-1) ?? '';
+
+  it('keeps the type and asks for that album by its key, not a search', async () => {
+    await drillIn();
+    const params = new URL(lastListUrl(), 'http://x').searchParams;
+    expect(params.get('finding_type')).toBe('missing_lyrics');
+    expect(params.get('group_by')).toBe('album');
+    expect(params.get('group_artist')).toBe('Adetola');
+    expect(params.get('group_album')).toBe('Beacon');
+    expect(params.get('q')).toBeNull();
+    // the search box stays empty, so the inbox is not swapped for an
+    // every-type search
+    expect((document.getElementById('repair-findings-search') as HTMLInputElement).value).toBe('');
+    expect(screen.getByTestId('repair-drill-chip').textContent).toContain('Beacon');
+  });
+
+  it('Fix Selected and Delete matching carry the type and the album', async () => {
+    await drillIn();
+    fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
+    await flush();
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+    await flush();
+    expect(bodyOf('/7/fix')).toEqual({
+      bulk: true,
+      scope: {
+        status: 'pending',
+        finding_type: 'missing_lyrics',
+        group_by: 'album',
+        group_artist: 'Adetola',
+        group_album: 'Beacon',
+      },
+    });
+
+    fireEvent.click(screen.getByText('Delete matching…'));
+    await flush();
+    expect(bodyOf('/findings/clear')).toEqual({
+      status: 'pending',
+      finding_type: 'missing_lyrics',
+      group_by: 'album',
+      group_artist: 'Adetola',
+      group_album: 'Beacon',
+    });
+  });
+
+  it('the chip goes back to every finding of the type', async () => {
+    await drillIn();
+    fireEvent.click(screen.getByLabelText('Show every finding of this type again'));
+    await flush();
+    const params = new URL(lastListUrl(), 'http://x').searchParams;
+    expect(params.get('finding_type')).toBe('missing_lyrics');
+    expect(params.get('group_by')).toBeNull();
+    expect(screen.queryByTestId('repair-drill-chip')).toBeNull();
+  });
+});
+
 // ── The list ─────────────────────────────────────────────────────────────────
 
 describe('the finding list', () => {

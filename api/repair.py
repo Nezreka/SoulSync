@@ -637,9 +637,15 @@ def repair_findings_clear():
         finding_type = data.get('finding_type')
         q = data.get('q')
 
+        # a drilled-in album or artist card is a filter too (review 5 W3-TT-2)
+        group = {}
+        if data.get('group_by'):
+            group = {'group_by': data.get('group_by'),
+                     'group_artist': data.get('group_artist'),
+                     'group_album': data.get('group_album')}
         count = _repair_worker().clear_findings(
             job_id=job_id, status=status, severity=severity,
-            finding_type=finding_type, q=q)
+            finding_type=finding_type, q=q, **group)
         return jsonify({'success': True, 'deleted': count}), 200
     except Exception as e:
         logger.error(f"Error clearing findings: {e}")

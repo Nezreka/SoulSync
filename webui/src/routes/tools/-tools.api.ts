@@ -520,7 +520,7 @@ export interface ClearFindingsResult {
  * narrows the list has to be threaded through here too.
  */
 export async function clearFindings(
-  filters: Pick<FindingsQuery, 'jobId' | 'status' | 'severity' | 'findingType' | 'q'>,
+  filters: Pick<FindingsQuery, 'jobId' | 'status' | 'severity' | 'findingType' | 'q' | 'group'>,
 ): Promise<ClearFindingsResult> {
   const body: Record<string, string> = {};
   if (filters.jobId) body.job_id = filters.jobId;
@@ -528,6 +528,12 @@ export async function clearFindings(
   if (filters.severity) body.severity = filters.severity;
   if (filters.findingType) body.finding_type = filters.findingType;
   if (filters.q?.trim()) body.q = filters.q.trim();
+  // a drilled-in album or artist card (review 5 W3-TT-2)
+  if (filters.group) {
+    body.group_by = filters.group.groupBy;
+    body.group_artist = filters.group.artist;
+    if (filters.group.album !== null) body.group_album = filters.group.album;
+  }
   const response = await postJson(repairUrl('/findings/clear'), body);
   return (await response.json()) as ClearFindingsResult;
 }

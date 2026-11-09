@@ -384,3 +384,33 @@ def test_album_action_route_scopes_to_the_group(worker):
     body = res.get_json()
     assert res.status_code == 200 and body['updated'] == 1
     assert len(_ids(worker)) == len(everything) - 1
+
+
+# ── a drilled-in card in the grouped list (review 5 W3-TT-2) ─────────────────
+def test_clear_with_a_drilled_in_card_deletes_only_that_album(worker):
+    """Delete matching with an album card open deleted every finding whose
+    text held the album's name, of every type"""
+    from flask import Flask
+
+    import api.repair as repair_api
+
+    _short_title_library(worker)
+    everything = _ids(worker)
+    repair_api.configure(worker_getter=lambda: worker,
+                         image_url_fixer=lambda url: url, metadata_cache=None)
+    app = Flask(__name__)
+    app.register_blueprint(repair_api.create_blueprint())
+    res = app.test_client().post('/api/repair/findings/clear', json={
+        'status': 'pending', 'finding_type': 'quality_upgrade', 'group_by': 'album',
+        'group_artist': 'Makeup And Vanity Set', 'group_album': 'FM'}).get_json()
+    assert res['deleted'] == 1
+    assert len(_ids(worker)) == len(everything) - 1
+    assert _ids(worker, group_by='album', group_artist='Someone Else', group_album='FM')
+
+
+def test_selected_rows_outside_the_drilled_card_are_refused(worker):
+    _short_title_library(worker)
+    own = _ids(worker, group_by='album', group_artist='Makeup And Vanity Set', group_album='FM')
+    assert worker.ids_in_view(_ids(worker), status='pending', finding_type='quality_upgrade',
+                              group_by='album', group_artist='Makeup And Vanity Set',
+                              group_album='FM') == own

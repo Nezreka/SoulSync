@@ -33,7 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
 
-import type { FindingAlbumGroup, FindingsViewScope } from '../-tools.api';
+import type { FindingAlbumGroup, FindingsQuery, FindingsViewScope } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
   BulkFixStatus,
@@ -85,7 +85,7 @@ import { safeFixablePending, visibleGroups } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
-import { AlbumInspectionTray } from './album-inspection-tray';
+import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
 import { FindingDetail } from './finding-detail';
 import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
@@ -322,6 +322,12 @@ export function FindingsSurface({
   // list | album | artist. Resets whenever a different type is opened, because
   // a grouping that made sense for upgrades rarely does for the next type.
   const [groupView, setGroupView] = useState<'list' | 'album' | 'artist'>('list');
+  /** an album or artist card drilled into from the grouped view: the open
+   *  type's rows of that one group, by the grid's own key. it used to put the
+   *  name in the search box, which escaped the type and listed every type's
+   *  rows whose text held the name, for select all and Fix Selected to act
+   *  on (review 5 W3-TT-2). */
+  const [drill, setDrill] = useState<NonNullable<FindingsQuery['group']> | null>(null);
 
   const [groups, setGroups] = useState<FindingGroup[]>([]);
   /** the inbox rows: `groups` again, unless a job or severity filter is set,
@@ -401,6 +407,8 @@ export function FindingsSurface({
    *  the failure the inbox is supposed to remove. */
   const searching = query.trim().length > 0;
   const listType = searching ? '' : openType;
+  /** a drill-in only narrows the open type's list; a search leaves both */
+  const activeDrill = !searching && openType ? drill : null;
 
   /** what the list shows, sent with Fix Selected / Dismiss Selected so the
    *  server can refuse a row the view no longer lists (review 5 W3-TT) */
@@ -411,8 +419,9 @@ export function FindingsSurface({
       severity: severityFilter,
       findingType: listType,
       q: query.trim(),
+      group: activeDrill ?? undefined,
     }),
-    [jobFilter, listType, query, severityFilter, statusFilter],
+    [activeDrill, jobFilter, listType, query, severityFilter, statusFilter],
   );
   /** the inbox's filters, for the group-row bulk buttons */
   const groupFilters = useMemo(
@@ -475,6 +484,7 @@ export function FindingsSurface({
         findingType: listType,
         sort,
         q: query.trim(),
+        group: activeDrill ?? undefined,
         page,
         limit: pageSize,
       });
@@ -489,6 +499,7 @@ export function FindingsSurface({
       setLoadError(error instanceof Error ? error.message : String(error));
     }
   }, [
+    activeDrill,
     jobFilter,
     listType,
     openType,
@@ -1422,9 +1433,18 @@ export function FindingsSurface({
     // and its old message named only the job and status — so a user who had
     // narrowed by severity or search read a prompt describing a far wider
     // delete than they expected, and got one (#1142).
+    // a drilled-in card is a filter too: its type and its album or artist
+    // (review 5 W3-TT-2)
+    const drillType = activeDrill ? typeInfo(listType)?.label || listType.replace(/_/g, ' ') : '';
     const extra = [
       severityFilter ? `severity ${severityFilter}` : '',
       needle ? `matching "${needle}"` : '',
+      activeDrill ? `${drillType} only` : '',
+      activeDrill
+        ? activeDrill.groupBy === 'album'
+          ? `on "${activeDrill.album}" by ${activeDrill.artist}`
+          : `by ${activeDrill.artist}`
+        : '',
     ].filter(Boolean);
     const extraLabel = extra.length ? `, ${extra.join(', ')}` : '';
     const confirmed = await window.showConfirmDialog?.({
@@ -1440,6 +1460,8 @@ export function FindingsSurface({
         status: statusFilter,
         severity: severityFilter,
         q: needle,
+        findingType: activeDrill ? listType : undefined,
+        group: activeDrill ?? undefined,
       });
       toast(
         result.success
@@ -1451,7 +1473,17 @@ export function FindingsSurface({
     } catch {
       toast('Error clearing findings', 'error');
     }
-  }, [jobFilter, jobLabel, query, refreshAll, severityFilter, statusFilter]);
+  }, [
+    activeDrill,
+    jobFilter,
+    jobLabel,
+    listType,
+    query,
+    refreshAll,
+    severityFilter,
+    statusFilter,
+    typeInfo,
+  ]);
 
   // ── Keyboard triage ────────────────────────────────────────────────────────
   //
@@ -1602,6 +1634,7 @@ export function FindingsSurface({
      upgrade backlog and rarely does for the next type along. */
   useEffect(() => {
     setGroupView('list');
+    setDrill(null);
   }, [openType]);
 
   /* The list/album/artist switch. Only offered inside an opened type - grouping
@@ -1620,8 +1653,12 @@ export function FindingsSurface({
           <button
             type="button"
             key={value}
-            aria-pressed={groupView === value}
-            onClick={() => setGroupView(value)}
+            aria-pressed={groupView === value && !(value === 'list' && activeDrill)}
+            onClick={() => {
+              setGroupView(value);
+              setDrill(null);
+              setPage(0);
+            }}
           >
             {label}
           </button>
@@ -1629,28 +1666,71 @@ export function FindingsSurface({
       </div>
     ) : null;
 
-  /* Drilling into a card reuses the search box, which already matches
-     details_json - so the album name filters straight to that album's rows and
-     every existing control (select all, bulk fix, sort) keeps working on it. */
+  /* Drilling into a card lists the open type's rows of that one album (or
+     artist) by the grid's own key, and every existing control (select all,
+     bulk fix, sort) keeps working on exactly those rows. It used to put the
+     name in the search box, which dropped the type and listed any finding
+     whose text held the name (review 5 W3-TT-2). */
   const groupedView =
     openType && groupView !== 'list' ? (
       <FindingsAlbumGrid
         groupBy={groupView}
+        jobId={jobFilter || undefined}
         status={statusFilter}
         findingType={openType}
         refreshToken={refreshToken}
         onOpen={(group) => {
-          const needle = groupView === 'artist' ? group.artist : group.album;
-          if (needle) setQuery(needle);
+          const identity = groupIdentity(group);
+          if (!identity) {
+            toast(
+              'This card has no artist or album name, so its findings can’t be listed alone',
+              'info',
+            );
+            return;
+          }
+          setDrill(identity);
           setGroupView('list');
           setPage(0);
         }}
       />
     ) : null;
 
+  const drillChip = activeDrill ? (
+    <span className="repair-drill-chip" data-testid="repair-drill-chip">
+      <span className="repair-drill-chip-label">
+        {activeDrill.groupBy === 'album' ? (
+          <>
+            <b>{activeDrill.album}</b> by {activeDrill.artist}
+          </>
+        ) : (
+          <>
+            by <b>{activeDrill.artist}</b>
+          </>
+        )}
+      </span>
+      <button
+        type="button"
+        className="repair-drill-chip-clear"
+        aria-label="Show every finding of this type again"
+        title="Show every finding of this type again"
+        onClick={() => {
+          setDrill(null);
+          setPage(0);
+        }}
+      >
+        &times;
+      </button>
+    </span>
+  ) : null;
+
   const findingList = (
     <>
-      {viewSwitch ? <div className="repair-findings-toolbar">{viewSwitch}</div> : null}
+      {viewSwitch ? (
+        <div className="repair-findings-toolbar">
+          {viewSwitch}
+          {groupView === 'list' ? drillChip : null}
+        </div>
+      ) : null}
       {groupedView}
       {groupedView ? null : (
         <>

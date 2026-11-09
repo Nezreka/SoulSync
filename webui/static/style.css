@@ -77723,3 +77723,37 @@ body.src-modal-open { overflow: hidden; }
     font-size: 11px;
     color: var(--text-secondary);
 }
+
+/* a drilled-in album or artist card inside an open finding type, shown as a
+   removable chip instead of text in the search box (review 5 W3-TT-2) */
+.repair-drill-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 10px;
+    padding: 4px 6px 4px 12px;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    border-radius: 999px;
+    background: rgba(var(--accent-rgb), 0.14);
+    color: var(--white-a80);
+    font-size: 12px;
+    max-width: 100%;
+    min-width: 0;
+}
+.repair-drill-chip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.repair-drill-chip-clear {
+    background: transparent;
+    border: 0;
+    color: var(--white-a60);
+    font-size: 15px;
+    line-height: 1;
+    padding: 0 4px;
+    cursor: pointer;
+}
+.repair-drill-chip-clear:hover {
+    color: #fff;
+}
