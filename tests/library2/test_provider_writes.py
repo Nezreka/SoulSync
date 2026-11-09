@@ -214,3 +214,20 @@ def test_a_year_of_zero_is_unknown_and_gets_filled(conn):
                                   payload={}, backfill={"year": 2014})
     assert _row(conn, "lib2_albums")["year"] == 2014
     assert _row(conn, "lib2_albums", 12)["year"] == 1999
+
+
+# review 5 W2-WF-1: the genre cleanup's lock holds against provider workers too.
+# a row cleaned down to [] reads as a gap, and lastfm/deezer/... backfilled it
+@pytest.mark.parametrize("mode", ["backfill", "columns"])
+@pytest.mark.parametrize("entity_type, table", [("artist", "lib2_artists"),
+                                                ("album", "lib2_albums")])
+def test_a_provider_write_keeps_locked_genres(conn, mode, entity_type, table):
+    conn.execute(f"UPDATE {table} SET genres='[]', genres_locked=1 WHERE id=1")
+    write_provider_enrichment(conn, entity_type=entity_type, entity_id=1,
+                              service="lastfm", **{mode: {"genres": '["seen live"]'}})
+    assert conn.execute(f"SELECT genres FROM {table} WHERE id=1").fetchone()[0] == "[]"
+    # unlocked, the same write lands
+    conn.execute(f"UPDATE {table} SET genres_locked=0 WHERE id=1")
+    write_provider_enrichment(conn, entity_type=entity_type, entity_id=1,
+                              service="lastfm", **{mode: {"genres": '["seen live"]'}})
+    assert conn.execute(f"SELECT genres FROM {table} WHERE id=1").fetchone()[0] == '["seen live"]'
