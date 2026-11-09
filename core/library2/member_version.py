@@ -14,7 +14,7 @@ extra recompute, never a wrong page.
 from __future__ import annotations
 
 import threading
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 from utils.logging_config import get_logger
 
@@ -89,9 +89,11 @@ def current_version(conn: Any) -> Optional[int]:
     return int(row[0]) if row else None
 
 
+T = TypeVar("T")
+
 _cache_lock = threading.Lock()
-# (database file, membership sql) -> (counter it was computed at, member ids)
-_cache: Dict[Tuple[str, str], Tuple[int, List[int]]] = {}  # (file identity, sql)
+# (file identity, key) -> (counter it was computed at, answer)
+_cache: Dict[Tuple[str, Any], Tuple[int, Any]] = {}
 
 
 def _db_file(conn: Any) -> str:
@@ -104,33 +106,48 @@ def _db_file(conn: Any) -> str:
     return ""
 
 
-def cached_member_ids(conn: Any, member_sql: str) -> Optional[List[int]]:
-    """The ids ``member_sql`` selects, reused while the counter stands still,
-    or None when there is no counter (or no file to key it by): the caller
-    then runs the SQL itself. The counter is read BEFORE computing, so a write
-    landing mid-compute leaves an older number behind and the next read
-    recomputes."""
-    version = current_version(conn)
+def _file_ident(conn: Any) -> Optional[str]:
+    """The database file's identity, or None (no file: never shared). A
+    restored or replaced database restarts the counter, and must not match
+    answers cached from the old file."""
     db_file = _db_file(conn)
-    if version is None or not db_file:
+    if not db_file:
         return None
-    # the file's identity too: a restored or replaced database restarts the
-    # counter, and must not match ids cached from the old file
     try:
         import os
         st = os.stat(db_file)
-        ident = f"{db_file}|{st.st_dev}|{st.st_ino}"  # as the connection pool tells files apart
     except OSError:
         return None
-    key = (ident, member_sql)
+    return f"{db_file}|{st.st_dev}|{st.st_ino}"  # as the connection pool tells files apart
+
+
+def cached(conn: Any, key: Any, compute: Callable[[Any], T]) -> Optional[T]:
+    """``compute(conn)``, reused while the counter stands still, or None when
+    there is no counter (or no file to key it by): the caller then works it out
+    itself. ``key`` must name everything else the answer depends on. The
+    counter is read BEFORE computing, so a write landing mid-compute leaves an
+    older number behind and the next read recomputes."""
+    version = current_version(conn)
+    ident = _file_ident(conn) if version is not None else None
+    if ident is None:
+        return None
+    full_key = (ident, key)
     with _cache_lock:
-        hit = _cache.get(key)
+        hit = _cache.get(full_key)
         if hit and hit[0] == version:
             return hit[1]
-    ids = [int(row[0]) for row in conn.execute(member_sql) if row[0] is not None]
+    value = compute(conn)
     with _cache_lock:
-        _cache[key] = (version, ids)
-    return ids
+        _cache[full_key] = (version, value)
+    return value
+
+
+def cached_member_ids(conn: Any, member_sql: str) -> Optional[List[int]]:
+    """The ids ``member_sql`` selects, reused while the counter stands still,
+    or None when there is no counter (or no file to key it by): the caller
+    then runs the SQL itself."""
+    return cached(conn, member_sql, lambda c: [
+        int(row[0]) for row in c.execute(member_sql) if row[0] is not None])
 
 
 def clear() -> None:
@@ -138,4 +155,4 @@ def clear() -> None:
         _cache.clear()
 
 
-__all__ = ["STATE", "cached_member_ids", "clear", "current_version", "ensure_schema"]
+__all__ = ["STATE", "cached", "cached_member_ids", "clear", "current_version", "ensure_schema"]
