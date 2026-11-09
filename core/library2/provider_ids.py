@@ -32,6 +32,15 @@ def external_id_sql(column: str, service: str) -> str:
     return f"TRIM(CAST(json_extract({column},'$.{service}') AS TEXT))"
 
 
+# the providers lib2_albums has an external_ids expression index for
+# (idx_lib2_albums_ext_*). a lookup by any other name walks every album, so
+# the import's album grouping only asks for these. hydrabase is one: an
+# import from it stamps external_ids.hydrabase and groups by it (review 5
+# W3-TD-4)
+ALBUM_EXTERNAL_ID_INDEXED = ('deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'discogs',
+                             'amazon', 'jiosaavn', 'bandcamp', 'hydrabase')
+
+
 def bandcamp_enrichment_id_sql(column: str = "enrichment") -> str:
     """the bandcamp id kept in a row's enrichment bucket, as SQL. one text for
     the lookup and its index, like external_id_sql (review 5 W2-WJ-5)."""

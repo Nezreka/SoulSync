@@ -1365,8 +1365,9 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         # provider id, and without these each miss parsed all 72k albums
         # audiodb onwards: the public api's lookup by external id, which read
         # every album for those (review 5 W2-WJ-5)
-        for service in ('deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'discogs', 'amazon',
-                        'jiosaavn', 'bandcamp'):
+        # hydrabase: an import from it groups by its id (review 5 W3-TD-4)
+        from core.library2.provider_ids import ALBUM_EXTERNAL_ID_INDEXED
+        for service in ALBUM_EXTERNAL_ID_INDEXED:
             expression = external_id_sql('external_ids', service)
             cursor.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_lib2_albums_ext_{service} "
