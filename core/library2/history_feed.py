@@ -70,6 +70,7 @@ EVENT_CATEGORY = {
     "candidates_evaluated": ("info", "Candidates evaluated"),
     "no_candidate": ("failed", "No candidate found"),
     "grab_prepared": ("grabbed", "Grab prepared"),
+    "grab_submission_started": ("info", "Sending to client"),
     "grab_submitted": ("grabbed", "Grabbed"),
     "grab_submission_uncertain": ("grabbed", "Grab uncertain"),
     "manual_grab_correlated": ("grabbed", "Grabbed (manual)"),

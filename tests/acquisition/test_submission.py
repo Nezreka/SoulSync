@@ -23,6 +23,7 @@ from core.acquisition.submission import (
     SubmissionError,
     UsenetSubmissionAdapter,
     record_external_submission,
+    record_submission_started,
     record_uncertain_submission,
 )
 from core.acquisition.workflow import (
@@ -170,6 +171,27 @@ def test_client_exception_is_uncertain_and_does_not_mark_failed(conn):
     assert list_history_events(
         conn, download_id=prepared.download_id)[-1].event_type == (
         "grab_submission_uncertain")
+
+
+def test_submission_started_marker_is_written_and_journaled(conn):
+    # review 5 W2-WC-1: the marker's history event was not an allowed event,
+    # so the route rolled the marker back and every grab went out unmarked
+    prepared = _prepared(conn, CandidateStore())
+    grab = record_submission_started(conn, prepared)
+    assert grab["status"] == "submitting"
+    assert grab["last_client_state"] == "submission_started"
+    assert get_grab(conn, prepared.download_id)["last_client_state"] == (
+        "submission_started")
+    assert list_history_events(
+        conn, download_id=prepared.download_id)[-1].event_type == (
+        "grab_submission_started")
+
+
+def test_every_history_event_has_a_feed_label():
+    # an event the feed does not know shows its raw name in the history page
+    from core.acquisition.history import EVENT_TYPES
+    from core.library2.history_feed import EVENT_CATEGORY
+    assert sorted(EVENT_TYPES - set(EVENT_CATEGORY)) == []
 
 
 def test_usenet_plugin_attaches_exactly_one_poller(conn):
