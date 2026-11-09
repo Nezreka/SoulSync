@@ -11,9 +11,9 @@
  * endpoints. Kept separate for now so wiring the detail page can't regress the
  * working modal — a later cleanup could fold the modal onto this core.
  *
- *   VideoGrab.episode({ title, source, season, episode, mediaId, mediaSource, year, poster })
+ *   VideoGrab.episode({ title, source, season, episode, mediaId, mediaSource, tmdbId, year, poster })
  *       → Promise<{ ok:boolean, id?:string, error?:string }>
- *   VideoGrab.season({ title, source, season, episodes:[num...], mediaId, mediaSource, year, poster }, onEp)
+ *   VideoGrab.season({ title, source, season, episodes:[num...], mediaId, mediaSource, tmdbId, year, poster }, onEp)
  *       // onEp(episodeNumber, 'searching' | 'grabbing' | 'none') fired per episode
  *       → Promise<{ grabbed:number, total:number }>
  *   VideoGrab.wishlistEpisodes(show, episodes) → Promise<boolean>
@@ -53,6 +53,26 @@
         return allSources().then(function (l) { return l[0] || 'soulseek'; });
     }
 
+    // the show this search is for, so the server judges every release by ITS
+    // year and names. these searches sent the title alone, so the year gate
+    // never ran and 'The.Office.2024.S01E01' was grabbed for The Office (2005)
+    // (#2027)
+    function identityParams(opts) {
+        var out = {};
+        if (opts.mediaId != null && opts.mediaSource && opts.mediaSource !== 'tmdb') {
+            out.media_id = opts.mediaId; out.media_source = opts.mediaSource;
+        }
+        if (opts.tmdbId != null) out.tmdb_id = opts.tmdbId;
+        if (opts.year) out.year = opts.year;
+        return out;
+    }
+    function identityQS(params) {
+        return (params.media_id != null ? '&media_id=' + encodeURIComponent(params.media_id) +
+                '&media_source=' + encodeURIComponent(params.media_source || '') : '') +
+            (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '') +
+            (params.year ? '&year=' + encodeURIComponent(params.year) : '');
+    }
+
     // search/start → poll (until the results plateau) → return the accepted rows.
     // Mirrors the modal's _pollSearch heuristic, minus the DOM streaming.
     function runSearch(params) {
@@ -76,7 +96,7 @@
                 var qs = '?id=' + encodeURIComponent(id) + '&scope=' + encodeURIComponent(params.scope || 'episode') +
                     '&title=' + encodeURIComponent(params.title || '') +
                     (params.season != null ? '&season=' + params.season : '') +
-                    (params.episode != null ? '&episode=' + params.episode : '');
+                    (params.episode != null ? '&episode=' + params.episode : '') + identityQS(params);
                 getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
                     var rows = (d && d.results) || [];
                     if (rows.length === lastN) { stable++; } else { stable = 0; lastN = rows.length; }
@@ -101,8 +121,8 @@
     function episode(opts) {
         opts = opts || {};
         var src = opts.source || 'soulseek';
-        var params = { scope: 'episode', title: opts.title, season: opts.season,
-            episode: opts.episode, source: src };
+        var params = Object.assign({ scope: 'episode', title: opts.title, season: opts.season,
+            episode: opts.episode, source: src }, identityParams(opts));
         return runSearch(params).then(function (rows) {
             var best = bestRow(rows);
             if (!best) return { ok: false, error: rows.error || 'no release found', errored: !!rows.error };
@@ -165,7 +185,8 @@
                 // Round-robin the sources so one dead indexer can't sink a season.
                 episode({ title: opts.title, source: sources[n++ % sources.length],
                     season: opts.season, episode: en,
-                    mediaId: opts.mediaId, mediaSource: opts.mediaSource, year: opts.year, poster: opts.poster })
+                    mediaId: opts.mediaId, mediaSource: opts.mediaSource, year: opts.year,
+                    tmdbId: opts.tmdbId, poster: opts.poster })
                     .then(function (r) {
                         active--;
                         if (r.ok) { grabbed++; if (onEp) onEp(en, 'grabbing'); }

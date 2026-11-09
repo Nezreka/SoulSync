@@ -92,12 +92,49 @@ class VideoEnrichmentEngine:
             return hit
         out = []
         w = self.workers.get("tmdb")
-        if w and getattr(w, "enabled", False) and hasattr(w.client, "alternative_titles"):
+        if w and getattr(w, "enabled", False) and hasattr(w.client, "title_identity"):
+            # TMDB's own name and the original-language name lead the list: a
+            # library title in another language (#2021) still matches a
+            # release named in english or in the original
+            ident = self.title_identity(kind, tmdb_id)
+            seen = set()
+            for t in [ident.get("name"), ident.get("original_name"), *(ident.get("aliases") or [])]:
+                t = str(t or "").strip()
+                if t and t.lower() not in seen:
+                    seen.add(t.lower())
+                    out.append(t)
+            if not ident:
+                self._cache_put(key, out, ttl=600)
+                return out
+        elif w and getattr(w, "enabled", False) and hasattr(w.client, "alternative_titles"):
             try:
                 out = w.client.alternative_titles(kind, tmdb_id) or []
             except Exception:   # noqa: BLE001 - a matching assist must never break a grab
                 logger.debug("alt_titles_for failed for %s %s", kind, tmdb_id, exc_info=True)
         self._cache_put(key, out, ttl=86400)
+        return out
+
+    def title_identity(self, kind, tmdb_id) -> dict:
+        """TMDB's {name, original_name, year, aliases} for a movie/show, cached
+        hard like the aliases (one TMDB call a day per title). {} when TMDB
+        isn't configured or can't say; never raises."""
+        if not tmdb_id:
+            return {}
+        key = ("title_identity", kind, str(tmdb_id))
+        hit = self._cache_get(key)
+        if hit is not None:
+            return hit
+        out = {}
+        w = self.workers.get("tmdb")
+        if w and getattr(w, "enabled", False) and hasattr(w.client, "title_identity"):
+            try:
+                out = w.client.title_identity(kind, tmdb_id) or {}
+            except Exception:   # noqa: BLE001 - a matching assist must never break a grab
+                logger.debug("title_identity failed for %s %s", kind, tmdb_id, exc_info=True)
+                out = {}
+        # a miss (TMDB down, a timeout) is retried soon, not held for a day:
+        # without it a grab has no year to check the release against
+        self._cache_put(key, out, ttl=86400 if out else 600)
         return out
 
     def _omdb_blocked_now(self) -> bool:
