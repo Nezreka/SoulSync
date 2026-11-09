@@ -49,16 +49,26 @@ export function SongCopiesDialog({
     const others = copies.filter((c) => String(c.id) !== String(keep.id));
     const mode = choice === 'delete_file' ? 'delete_file' : 'db_only';
     let failed = 0;
+    let reason = '';
     for (const other of others) {
       try {
-        await deleteLibraryTrackRequest(other, mode);
-      } catch {
+        // review 5 W2-WL-1: a file the disk wouldn't let go comes back as a
+        // warning, not a throw, and that copy is still in the library
+        const result = await deleteLibraryTrackRequest(other, mode);
+        if (result.tone !== 'success') {
+          failed += 1;
+          reason ||= result.extra || result.message;
+        }
+      } catch (error) {
         failed += 1;
+        reason ||= error instanceof Error ? error.message : '';
       }
     }
     window.showToast?.(
       failed
-        ? `Removed ${others.length - failed} of ${others.length} copies; ${failed} couldn't be`
+        ? `Removed ${others.length - failed} of ${others.length} copies; ${failed} couldn't be${
+            reason ? ` (${reason})` : ''
+          }`
         : `Kept the ${keep.album_title || 'chosen'} copy, removed ${others.length}`,
       failed ? 'warning' : 'success',
     );
