@@ -14,7 +14,7 @@ const body = ['_audiobookActiveSources', 'testAllSources']
 let status: Record<string, string>;
 let probed: string[];
 
-function run(musicMode: string, bookMode: string, bookChain: string[]) {
+function run(musicMode: string, bookMode: string, bookChain: string[], videoChain: string[] = []) {
   document.body.innerHTML = `
     <select id="download-source-mode"><option value="${musicMode}" selected></option></select>
     <select id="audiobook-download-mode"><option value="${bookMode}" selected></option></select>`;
@@ -35,6 +35,9 @@ function run(musicMode: string, bookMode: string, bookChain: string[]) {
     'buildHybridSourceList',
     '_audiobookHybrid',
     'AUDIOBOOK_SOURCES',
+    // the video chain is probed too now (#2026)
+    '_videoChainOrder',
+    '_loadVideoChainForTiles',
     `${body}; return testAllSources;`,
   )(
     document,
@@ -56,6 +59,8 @@ function run(musicMode: string, bookMode: string, bookChain: string[]) {
     vi.fn(),
     bookChain,
     ['torrent', 'usenet', 'soulseek'],
+    videoChain,
+    vi.fn(),
   );
   return testAllSources({ silent: true });
 }
@@ -83,4 +88,11 @@ it('leaves torrent alone when neither chain uses it', async () => {
   expect(probed).not.toContain('torrent');
   expect(probed).not.toContain('prowlarr');
   expect(status.torrent).toBeUndefined();
+});
+
+it('probes the video chain too, so a usenet-only video setup gets a dot (#2026)', async () => {
+  await run('hybrid', 'soulseek', ['soulseek'], ['usenet', 'extto']);
+  expect(status.usenet).toBe('ok');
+  expect(status.prowlarr).toBe('ok');
+  expect(status.extto).toBeUndefined();
 });

@@ -402,7 +402,8 @@ def test_the_tiles_are_grouped_not_one_ragged_wrap(js):
     """Eleven tiles in a single auto-fill grid wrapped 7-then-4 and read as an
     accident. Two labelled groups make the same wrap look deliberate."""
     fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
-    assert "In your chain" in fn and "Available" in fn
+    # "in use" now, not "in your chain": it covers the video and audiobook chains too (#2026)
+    assert "In use" in fn and "Available" in fn
     assert "src-group" in fn
 
 
@@ -410,7 +411,9 @@ def test_the_chain_group_is_in_chain_order(js):
     """Registry order put #4 before #2, which makes the numbers on the chips
     look wrong even though they are right."""
     fn = js.split("function buildSourceTiles(", 1)[1].split("\nwindow.", 1)[0]
-    assert "order.indexOf(a.id) - order.indexOf(b.id)" in fn
+    # ranked by chain then position, since a tile can be in more than one chain (#2026)
+    assert "rank(a) - rank(b)" in fn
+    assert "* 1000 + u.pos" in fn
 
 
 def test_a_small_group_does_not_stretch_across_the_page():
