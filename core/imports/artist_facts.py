@@ -74,13 +74,18 @@ def _resolve_mbid(cursor, name: str, mbid: str, source: str, source_id: str) -> 
     return ids[0] if len(ids) == 1 else ""
 
 
-def _match_online(name: str, album: str) -> str:
+def _match_online(name: str, album: str, source: str = "", source_id: str = "") -> str:
     """the musicbrainz id enrichment would give this artist, asked now.
     match_artist caches the search result (disambiguation and country
     included) under that id, which is what _lookup reads next."""
     if not ONLINE_LOOKUP or not album:
         return ""
-    key = name.casefold()
+    # keyed by name alone, the second of two same-named artists got the first
+    # one's id (review 5 W3-TD-5). the source's artist id says which artist
+    # it is, so one artist across a bulk import is still asked once; without
+    # one, the album is what picks the artist
+    key = ((name.casefold(), "id", source, source_id) if source and source_id
+           else (name.casefold(), "album", album.casefold()))
     now = time.monotonic()
     with _cache_lock:
         asked = _online.get(key)
@@ -146,7 +151,7 @@ def _lookup(name: str, mbid: str, source: str, source_id: str, album: str = "") 
         if not mbid:
             conn.close()  # not held across a network call
             conn = None
-            mbid = _match_online(name, album)
+            mbid = _match_online(name, album, source, source_id)
             if not mbid:
                 return dict(_EMPTY)
             conn = db._get_connection()
@@ -182,7 +187,10 @@ def artist_facts(name, *, mbid=None, source=None, source_id=None, album=None) ->
     name = str(name or "").strip()
     if not name:
         return dict(_EMPTY)
-    key = (name.casefold(), str(mbid or ""), str(source or ""), str(source_id or ""))
+    # the album is part of the key: it picks between same-named artists when
+    # musicbrainz is asked (review 5 W3-TD-5)
+    key = (name.casefold(), str(mbid or ""), str(source or ""), str(source_id or ""),
+           str(album or "").strip().casefold())
     now = time.monotonic()
     with _cache_lock:
         hit = _cache.get(key)
