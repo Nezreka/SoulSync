@@ -415,9 +415,16 @@ def season_pack_requests(items: List[Dict[str, Any]], active: Iterable,
 
 
 def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any, season: Any = None) -> List[str]:
-    """[primary title, *TMDB aliases, *your own] — deduped, primary first. The alias
-    set the release-title gate matches against (so a release named by a known aka still
-    matches). Best-effort: just the primary when TMDB is unavailable.
+    """[primary title, *your own, *anime names, *TMDB aliases] — deduped, primary
+    first. The alias set the release-title gate matches against (so a release named
+    by a known aka still matches), AND the order the wishlist search tries the
+    names in when the primary finds nothing usable (#2021): the gate treats the
+    set as unordered, but search order is a budget — a name you added by hand
+    because TMDB's names failed, and the scene's own anime names, must not sit
+    behind TMDB's up-to-30 alternative titles. The Soulseek retry ladder
+    (``core/video/retry.py``) walks this same list in order, so manual and
+    anime names are also retried before TMDB's there. Best-effort: just the
+    primary when TMDB is unavailable.
 
     Manual aliases are the arr answer to the case TMDB does not cover. Its list
     carries "Big Brother US" for "Big Brother (US)" and nothing at all for
@@ -426,27 +433,30 @@ def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any, season: Any = None
     reason is exactly what inference costs here: stripping a title's bracket
     collides "Avatar: The Last Airbender (2024)" with the 2005 series.
     """
-    aliases: List[str] = []
+    tmdb_aliases: List[str] = []
     if tmdb_id:
         try:
             from core.video.enrichment.engine import get_video_enrichment_engine
-            aliases = get_video_enrichment_engine().alt_titles_for(kind, tmdb_id) or []
+            tmdb_aliases = get_video_enrichment_engine().alt_titles_for(kind, tmdb_id) or []
         except Exception:   # noqa: BLE001 - a matching assist must never break a grab
-            aliases = []
+            tmdb_aliases = []
+    manual_aliases: List[str] = []
     try:
         from api.video import get_video_db
-        aliases = list(aliases) + list(
+        manual_aliases = list(
             get_video_db().title_overrides_for(kind, tmdb_id=tmdb_id).get("manual_aliases") or [])
     except Exception:   # noqa: BLE001 - same: an assist never blocks a grab
         logger.debug("manual aliases unavailable for %s %s", kind, tmdb_id, exc_info=True)
     # an anime's AniList names (romaji, english, that season's synonyms): the
     # scene names anime releases those ways ("Shingeki no Kyojin"). per season,
     # so season 2's "JJK2" never accepts a release for season 1
+    anime_aliases: List[str] = []
     try:
         from api.video import get_video_db
-        aliases = list(aliases) + list(get_video_db().anime_titles_for(kind, tmdb_id, season))
+        anime_aliases = list(get_video_db().anime_titles_for(kind, tmdb_id, season))
     except Exception:   # noqa: BLE001 - same: an assist never blocks a grab
         logger.debug("anime titles unavailable for %s %s", kind, tmdb_id, exc_info=True)
+    aliases = manual_aliases + anime_aliases + tmdb_aliases
     out, seen = [], set()
     for t in [primary, *aliases]:
         t = str(t or "").strip()
@@ -738,10 +748,10 @@ def grab_target_dir(item: Dict[str, Any], media_type: str, root: str) -> str:
                            _routing_type_for, _default_profile_library)
 
 
-def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:
+def _extto_hits_for_context(ctx: Dict[str, Any], title: Any = None) -> tuple:
     from core.video.extto_search import extto_search
     from core.video.slskd_search import build_query
-    query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
+    query = build_query(ctx["scope"], title or ctx["title"], year=ctx.get("year"),
                         season=ctx.get("alt_season", ctx.get("season")),
                         episode=ctx.get("alt_episode", ctx.get("episode")),
                         air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
@@ -755,52 +765,166 @@ def _extto_hits_for_context(ctx: Dict[str, Any]) -> tuple:
     return eres.get("hits") or [], None
 
 
+# How many of a title's OTHER names one source search will try after the
+# primary name finds nothing. TMDB hands back up to 30 alternative titles;
+# searching every one for every wishlist row would multiply indexer and
+# Soulseek traffic for titles that are simply not posted anywhere. Four
+# covers the common shapes (original-language name, English name, a
+# manual alias the user added by hand) while keeping the worst case bounded.
+# The names are tried manual first, then anime, then TMDB's in TMDB's own
+# order, so for an anime the scene's own names spend the slots before
+# TMDB's localised titles are reached.
+ALIAS_TITLE_SEARCH_LIMIT = 4
+
+# Cap on the merged candidate list the alias fallback returns when no name
+# yields a usable release (and on a winning name's list plus the earlier
+# names' evidence merged behind it). A single busy search already returns
+# ~180 hits; five names must not turn one wishlist row's evidence into an
+# unbounded blob, but the cap should rarely bind below that scale.
+ALIAS_EVIDENCE_LIMIT = 250
+
+
+def _search_titles(ctx: Dict[str, Any]) -> List[str]:
+    """Every name this item may be searched under, primary first, deduped.
+
+    ``ctx['titles']`` is the alias set ``search_context`` already built for
+    the release-title gate (the user's own manual aliases + per-season
+    anime names + TMDB alternative titles, in that try order); the primary title leads it when it
+    came from there, but be defensive for contexts built by hand. Deduped
+    on a punctuation/whitespace-normalised key: "Big Brother (US)" and
+    "Big Brother US" tokenise identically at every indexer, so searching
+    both would burn an alias attempt on the same query."""
+    out, seen = [], set()
+    for t in [ctx.get("title"), *(ctx.get("titles") or [])]:
+        t = str(t or "").strip()
+        # Normalise only pure-ASCII names: the regex strips every non-ASCII
+        # character, so a Japanese title would collapse to its digits alone
+        # ("呪術廻戦 2" → "2") and collide with unrelated names. Non-ASCII
+        # titles dedupe on their exact lowercased form instead.
+        key = (re.sub(r"[^a-z0-9]+", " ", t.lower()).strip() or t.lower()) if t.isascii() else t.lower()
+        if t and key not in seen:
+            seen.add(key)
+            out.append(t)
+    return out
+
+
+def _cand_key(c: Dict[str, Any]) -> tuple:
+    """Identity of one evaluated candidate for cross-name dedupe. The URL
+    carrier is part of the key: two distinct uploads can share an indexer
+    and a release title, and merging them would undercount the evidence.
+    Soulseek candidates carry no URL — there the (user, file path) pair
+    already identifies the file."""
+    return (c.get("username"), c.get("filename") or c.get("title"),
+            c.get("download_url") or c.get("magnet_uri") or c.get("info_url") or "")
+
+
 def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
     """Search ONE configured source → (ranked candidates tagged with source, error).
 
     ``torrent`` is the torrent discovery lane: Prowlarr torrent indexers plus EXT.to
     when FlareSolverr is configured. EXT.to can still be listed explicitly in a
-    hybrid chain, but normal torrent users should get it automatically."""
+    hybrid chain, but normal torrent users should get it automatically.
+
+    A title is searched under its primary name first. Only when that search
+    RUNS and yields no usable release does the search fall back to the
+    title's other known names (``_search_titles`` — the same alias set
+    releases are matched against), one at a time, stopping at the first name
+    that yields a usable release and capped at ``ALIAS_TITLE_SEARCH_LIMIT``
+    extra names. "Usable" is judged AFTER this title's release-group
+    overrides are applied, so a primary-name hit from a group this title
+    blocks does not stop the ladder. ``_default_search`` re-applies the
+    same ``apply_group_overrides`` to the result (idempotent — it only
+    flips accepted/rejected by group); the manual all-sources search
+    never applied them, so on that path this is the only application and
+    its results are now group-gated too — blocked releases stay visible
+    as rejected, just marked unusable, honouring the user's own lists.
+    When no name yields a usable release, the candidates from every name
+    tried are returned
+    merged (deduped, capped at ``ALIAS_EVIDENCE_LIMIT``), so the caller's
+    'hits but rejected' evidence covers the alias searches too instead of
+    only the primary's rejects. A release posted under another language's
+    title (the wishlist row's name is a localised TMDB title, the scene
+    posts the original/English one) was previously unfindable: the aliases
+    were carried for the acceptance gate and the Soulseek retry ladder,
+    but no initial search ever queried them.
+
+    Failure semantics match the single-search behaviour they extend:
+    - a search that could not RUN at all (slskd down, Prowlarr not
+      configured) reports its error exactly as before and does not burn
+      the alias names;
+    - in the torrent lane, a leg that fails to run (Prowlarr erroring,
+      EXT.to unreachable) is not retried under the remaining names — it
+      is dead for this item's search, however many names are left;
+    - if a later name's search cannot run (or raises) after an earlier
+      name already searched fine, that earlier verdict stands: the ladder
+      stops, the failure rides back as a note, and downstream never sees
+      a working source rewritten as "search didn't run". A both-legs
+      torrent failure mid-ladder stops it for the same reason — both
+      transports just failed together, and any leg that failed ALONE is
+      already excluded by the rule above;
+    - an exception from the primary attempt propagates exactly as it did
+      for a single search; exceptions from alias attempts are logged and
+      stop the ladder with the earlier verdict intact.
+    The cap is per source: a hybrid chain can therefore run up to
+    (1 + cap) searches per source for one item — the same order of cost
+    the Soulseek retry ladder already spends on one failed download, and
+    only for items no name has satisfied yet."""
     from api.video import get_video_db
     from api.video.downloads import _evaluate_hits
     from core.video.numbering import ctx_alt
     from core.video.quality_profile import load_for_item
+    if source not in ("soulseek", "torrent", "usenet", "extto"):
+        return None, "unsupported source %r" % source
     ctx = search_context(item, media_type)
     profile = load_for_item(get_video_db(), item)   # per-title profile (P2)
-    source_notes: List[str] = []
-    if source == "soulseek":
-        from core.video.download_monitor import _search_for_retry
-        from core.video.slskd_search import build_query
-        # one query: the scene's own numbering when it differs (what files
-        # and share folders are named by)
-        query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                            season=ctx.get("alt_season", ctx.get("season")),
-                            episode=ctx.get("alt_episode", ctx.get("episode")),
-                            air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
-                            series_type=ctx.get("series_type"))
-        res = _search_for_retry(query) or {}
-        if res.get("started") is False:
-            return None, res.get("error")
-        hits = res.get("hits") or []
-    elif source in ("torrent", "usenet"):
-        from core.video.prowlarr_search import prowlarr_search
-        pres = prowlarr_search(ctx["scope"], ctx["title"], year=ctx.get("year"),
-                               season=ctx.get("season"), episode=ctx.get("episode"), source=source,
-                               air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
-                               series_type=ctx.get("series_type"),
-                               imdb_id=ctx.get("imdb_id"), tmdb_id=ctx.get("tmdb_id"),
-                               tvdb_id=ctx.get("tvdb_id"), alt=ctx_alt(ctx))
-        prowlarr_err = None
-        if not pres.get("configured"):
-            prowlarr_err = "Prowlarr not configured"
-        elif pres.get("error"):
-            prowlarr_err = pres["error"]
-        hits = [] if prowlarr_err else list(pres.get("hits") or [])
-        if source != "torrent":
-            # usenet is Prowlarr-only; EXT.to is torrents.
-            if prowlarr_err:
-                return None, prowlarr_err
-        else:
+    overrides = title_overrides_for_item(item, media_type)
+    # Torrent-lane legs that already failed to run for this item: name → error.
+    # A dead leg is never re-queried under another alias.
+    dead_legs: Dict[str, str] = {}
+
+    def _attempt(title: str):
+        """One name, one source → (hits, fatal_error, notes). ``hits`` is
+        None only when the lane could not run at all, with ``fatal_error``
+        saying why; otherwise it is the (possibly empty) hit list."""
+        notes: List[str] = []
+        if source == "soulseek":
+            from core.video.download_monitor import _search_for_retry
+            from core.video.slskd_search import build_query
+            # one query: the scene's own numbering when it differs (what files
+            # and share folders are named by)
+            query = build_query(ctx["scope"], title, year=ctx.get("year"),
+                                season=ctx.get("alt_season", ctx.get("season")),
+                                episode=ctx.get("alt_episode", ctx.get("episode")),
+                                air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
+                                series_type=ctx.get("series_type"))
+            res = _search_for_retry(query) or {}
+            if res.get("started") is False:
+                return None, res.get("error"), notes
+            return res.get("hits") or [], None, notes
+        if source in ("torrent", "usenet"):
+            from core.video.prowlarr_search import prowlarr_search
+            prowlarr_err = dead_legs.get("prowlarr")
+            hits: List[Any] = []
+            if prowlarr_err is None:
+                pres = prowlarr_search(ctx["scope"], title, year=ctx.get("year"),
+                                       season=ctx.get("season"), episode=ctx.get("episode"), source=source,
+                                       air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
+                                       series_type=ctx.get("series_type"),
+                                       imdb_id=ctx.get("imdb_id"), tmdb_id=ctx.get("tmdb_id"),
+                                       tvdb_id=ctx.get("tvdb_id"), alt=ctx_alt(ctx))
+                if not pres.get("configured"):
+                    prowlarr_err = "Prowlarr not configured"
+                elif pres.get("error"):
+                    prowlarr_err = pres["error"]
+                if prowlarr_err:
+                    dead_legs["prowlarr"] = prowlarr_err
+                else:
+                    hits = list(pres.get("hits") or [])
+            if source != "torrent":
+                # usenet is Prowlarr-only; EXT.to is torrents.
+                if prowlarr_err:
+                    return None, prowlarr_err, notes
+                return hits, None, notes
             # EXT.to is the OTHER HALF of the torrent lane, so a Prowlarr that
             # can't run must not take it down with it. Returning early on
             # "not configured" meant a user running FlareSolverr without Prowlarr
@@ -808,35 +932,114 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
             # answer — the opposite of "normal torrent users get it
             # automatically". The lane has only genuinely failed to search when
             # NEITHER half could run.
-            ehits, eerr = _extto_hits_for_context(ctx)
+            if "extto" in dead_legs:
+                ehits, eerr = None, dead_legs["extto"]
+            else:
+                ehits, eerr = _extto_hits_for_context(ctx, title)
+                if ehits is None:
+                    dead_legs["extto"] = eerr or "EXT.to search didn't run"
             if ehits is None:
                 if prowlarr_err:
                     return None, "; ".join(
-                        x for x in (prowlarr_err, eerr or "EXT.to search didn't run") if x)
-                source_notes.append("EXT.to skipped — %s" % (eerr or "search didn't run"))
+                        x for x in (prowlarr_err, eerr or "EXT.to search didn't run") if x), notes
+                notes.append("EXT.to skipped — %s" % (eerr or "search didn't run"))
             else:
                 if prowlarr_err:
                     # It ran on one leg — say so, same as any other degradation.
-                    source_notes.append("Prowlarr skipped — %s" % prowlarr_err)
+                    notes.append("Prowlarr skipped — %s" % prowlarr_err)
                 hits = hits + list(ehits or [])
-    elif source == "extto":
-        hits, err = _extto_hits_for_context(ctx)
+            return hits, None, notes
+        # extto
+        hits, err = _extto_hits_for_context(ctx, title)
         if hits is None:
-            return None, err
-    else:
-        return None, "unsupported source %r" % source
-    alt = ctx_alt(ctx)
-    cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
-                           want_year=ctx.get("year"),
-                           want_title=ctx.get("titles") or ctx.get("title"),
-                           want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"),
-                           want_alt=alt)
-    for c in cands:
-        if source == "torrent" and str(c.get("indexer_id") or "").lower() == "extto":
-            c["source"] = "extto"
-        else:
-            c["source"] = source
-    return cands, "; ".join(source_notes) or None
+            return None, err, notes
+        return hits, None, notes
+
+    def _evaluate(hits: List[Any]) -> List[Dict[str, Any]]:
+        cands = _evaluate_hits(hits, profile, ctx["scope"], ctx.get("season"), ctx.get("episode"),
+                               want_year=ctx.get("year"),
+                               want_title=ctx.get("titles") or ctx.get("title"),
+                               want_date=ctx.get("air_date"), want_absolute=ctx.get("absolute"),
+                               want_alt=ctx_alt(ctx))
+        for c in cands:
+            if source == "torrent" and str(c.get("indexer_id") or "").lower() == "extto":
+                c["source"] = "extto"
+            else:
+                c["source"] = source
+        # This title's group allow/block decides usability HERE, not only in
+        # the caller: a blocked-group hit must not stop the alias ladder.
+        # The callers re-apply the same overrides to the returned list —
+        # the function only flips accepted/rejected by group, so that is
+        # idempotent.
+        return apply_group_overrides(cands, overrides)
+
+    titles = _search_titles(ctx)[:1 + ALIAS_TITLE_SEARCH_LIMIT] or [ctx.get("title")]
+    all_notes: List[str] = []
+    merged: List[Dict[str, Any]] = []          # every name's candidates, deduped
+    merged_keys = set()
+    first_cands: Optional[List[Dict[str, Any]]] = None   # the primary attempt's, untouched
+    evaluated = 0                              # attempts that produced candidates
+    ran = False                                # some attempt's search actually ran
+
+    def _merge(cands: List[Dict[str, Any]]) -> None:
+        for c in cands or []:
+            key = _cand_key(c)
+            if key in merged_keys:
+                continue
+            merged_keys.add(key)
+            if len(merged) < ALIAS_EVIDENCE_LIMIT:
+                merged.append(c)
+
+    for i, title in enumerate(titles):
+        try:
+            hits, fatal, notes = _attempt(title)
+            for n in notes:
+                if n not in all_notes:
+                    all_notes.append(n)
+            if hits is None:
+                if not ran:
+                    # Nothing ran at all — the original single-search verdict,
+                    # with any notes gathered on the way kept alongside it.
+                    err = "; ".join([x for x in (*all_notes, fatal) if x]) or None
+                    return None, err
+                # An earlier name already proved this source runs; a later
+                # name's failure must not rewrite that into "search didn't
+                # run" downstream. Keep the evidence and say what stopped.
+                if fatal:
+                    all_notes.append("alias search stopped — %s" % fatal)
+                break
+            ran = True
+            cands = _evaluate(hits)
+            evaluated += 1
+            if i == 0:
+                first_cands = cands
+        except Exception:
+            if i == 0:
+                raise          # the primary attempt: exactly as a single search
+            logger.exception("video search: alias %r errored on %s for %r; "
+                             "keeping the earlier verdict", title, source, ctx.get("title"))
+            all_notes.append("alias search stopped — %s errored" % (title,))
+            break
+        if any(c.get("accepted") for c in cands):
+            if i:
+                logger.info("video search: %r yielded no usable release on %s; "
+                            "alias %r yielded %d candidate(s)",
+                            ctx.get("title"), source, title, len(cands))
+            winner_keys = {_cand_key(c) for c in cands}
+            rest = [c for c in merged if _cand_key(c) not in winner_keys]
+            # the cap bounds the merged EVIDENCE behind the winner, never the
+            # winner's own candidates — a single search returned all of those
+            return (list(cands) + rest)[:max(ALIAS_EVIDENCE_LIMIT, len(cands))], \
+                "; ".join(all_notes) or None
+        _merge(cands)
+    if evaluated <= 1 and first_cands is not None:
+        # Only the primary name was ever evaluated: return its candidates
+        # untouched, exactly as a single search did. The merge (dedupe +
+        # cap) exists to combine MULTIPLE names' evidence; applying it to
+        # one name would shrink counts a lone search used to report whole.
+        return first_cands, "; ".join(all_notes) or None
+    return merged, "; ".join(all_notes) or None
+
 
 
 # How many individual releases a snapshot keeps per source. Enough to answer
@@ -884,7 +1087,7 @@ def source_outcome(cands, err=None) -> Dict[str, Any]:
     of the rest. Pure."""
     if cands is None:
         return {"ran": False, "results": 0, "accepted": 0, "rejected": 0,
-                "reason": err or "search didn't run", "samples": []}
+                "reason": err or "search didn't run", "note": None, "samples": []}
     accepted = sum(1 for c in cands if c.get("accepted"))
     rejected = [c for c in cands if not c.get("accepted")]
     reason = None
@@ -896,6 +1099,11 @@ def source_outcome(cands, err=None) -> Dict[str, Any]:
             reason = None
     return {"ran": True, "results": len(cands), "accepted": accepted,
             "rejected": len(rejected), "reason": reason,
+            # Degradations that rode in the error slot ("Prowlarr skipped — …",
+            # the alias ladder stopping early) are a fact about this search too;
+            # dropping them here made a degraded search indistinguishable from
+            # a clean one in the stored snapshot.
+            "note": err or None,
             "samples": audit_samples(cands)}
 
 

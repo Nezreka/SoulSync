@@ -338,7 +338,7 @@ def _lane(monkeypatch, *, prowlarr, extto):
                         lambda item, mt: {"scope": "movie", "title": "X", "titles": ["X"]})
     monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search",
                         lambda *a, **k: prowlarr)
-    monkeypatch.setattr(w, "_extto_hits_for_context", lambda ctx: extto)
+    monkeypatch.setattr(w, "_extto_hits_for_context", lambda ctx, title=None: extto)
     monkeypatch.setattr("api.video.downloads._evaluate_hits",
                         lambda hits, *a, **k: [dict(h) for h in hits])
     return w._search_one_source("torrent", {"title": "X"}, "movie")
@@ -405,7 +405,7 @@ def test_usenet_is_prowlarr_only(monkeypatch):
     monkeypatch.setattr("core.video.prowlarr_search.prowlarr_search",
                         lambda *a, **k: {"configured": False})
     monkeypatch.setattr(w, "_extto_hits_for_context",
-                        lambda ctx: (_ for _ in ()).throw(AssertionError("EXT.to ran for usenet")))
+                        lambda ctx, title=None: (_ for _ in ()).throw(AssertionError("EXT.to ran for usenet")))
     cands, err = w._search_one_source("usenet", {"title": "X"}, "movie")
     assert cands is None and "Prowlarr" in err
 
