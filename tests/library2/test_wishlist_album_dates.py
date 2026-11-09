@@ -49,25 +49,36 @@ def test_queued_rows_get_their_albums_date_once(tmp_path):
     db = MusicDatabase(str(tmp_path / "m.db"))
     conn = lib2_seed.row_conn(str(tmp_path / "m.db"))
     album_id = lib2_seed.album(conn, "Priscilla Block", "Different Route", year=2017)
+    # review 5 W2-WJ-3: the first row used to carry _source_info inside
+    # spotify_data, a shape the mirror never writes. it moves it into the
+    # source_info column (mirror_outbox), which is what the rows look like
+    info = json.dumps({"source": "library_v2", "lib2_album_id": album_id})
     rows = [
-        # the mirror's shape: no date, its library album in _source_info
-        {"name": "Thick Thighs", "album": {"name": "Different Route"},
-         "_source_info": {"source": "library_v2", "lib2_album_id": album_id}},
+        # the mirror's shape: no date, its library album in the source_info column
+        ({"name": "Thick Thighs", "album": {"name": "Different Route"}}, info),
         # a provider row with its own date is left alone
-        {"name": "Other", "album": {"name": "X", "release_date": "2020-01-01"}},
+        ({"name": "Other", "album": {"name": "X", "release_date": "2020-01-01"}}, info),
+        # an older shape that kept it inside the payload still works
+        ({"name": "Old", "album": {"name": "Different Route"},
+          "_source_info": {"source": "library_v2", "lib2_album_id": album_id}}, None),
     ]
-    for i, data in enumerate(rows):
+    for i, (data, source_info) in enumerate(rows):
         conn.execute(
-            "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, profile_id) "
-            "VALUES (?, ?, 1)", (f"t{i}", json.dumps(data)))
-    conn.execute("DROP TABLE IF EXISTS _wishlist_lib2_album_dates")
+            "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_info, profile_id) "
+            "VALUES (?, ?, ?, 1)", (f"t{i}", json.dumps(data), source_info))
+    # an install that ran the broken first pass still gets the corrected one
+    conn.execute("DROP TABLE IF EXISTS _wishlist_lib2_album_dates_v2")
+    conn.execute("CREATE TABLE IF NOT EXISTS _wishlist_lib2_album_dates (applied_at TIMESTAMP)")
     conn.commit()
     db._wishlist_lib2_album_dates(conn.cursor())
     conn.commit()
     got = [json.loads(r[0])["album"].get("release_date")
            for r in conn.execute("SELECT spotify_data FROM wishlist_tracks ORDER BY id")]
+    marker = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE name='_wishlist_lib2_album_dates_v2'").fetchone()
     conn.close()
-    assert got == ["2017", "2020-01-01"]
+    assert got == ["2017", "2020-01-01", "2017"]
+    assert marker
 
 
 def test_the_mirrored_album_names_its_own_artists(imported_conn):

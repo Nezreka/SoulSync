@@ -2342,6 +2342,7 @@ class MusicDatabase:
         'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
         'similar_artist_images_durable': ('table', '_similar_artist_images_durable'),
         'wishlist_lib2_album_dates': ('table', '_wishlist_lib2_album_dates'),
+        'wishlist_lib2_album_dates_v2': ('table', '_wishlist_lib2_album_dates_v2'),
         'beatport_positional_purged': ('table', '_beatport_positional_purged'),
         'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
     }
@@ -4564,10 +4565,15 @@ class MusicDatabase:
         """one-time: wishlist rows the Library v2 mirror wrote carried an album
         with no release date, so they downloaded into a yearless twin of the
         album's [year] folder (SeadogsBooty, Nov 5). give the queued ones their
-        album's date. new rows get it from the mirror itself."""
+        album's date. new rows get it from the mirror itself.
+
+        review 5 W2-WJ-3: the first pass read lib2_album_id from
+        spotify_data['_source_info'], but the mirror moves that into the
+        source_info column, so it matched nothing. the corrected pass has its
+        own marker so installs that already ran the broken one get it."""
         try:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' "
-                           "AND name='_wishlist_lib2_album_dates'")
+                           "AND name='_wishlist_lib2_album_dates_v2'")
             if cursor.fetchone():
                 return
             tables = {r[0] for r in cursor.execute(
@@ -4575,19 +4581,29 @@ class MusicDatabase:
             fixed = 0
             if {'wishlist_tracks', 'lib2_albums'} <= tables:
                 from core.library2.release_dates import album_release_date
+                has_info = any(r[1] == 'source_info' for r in cursor.execute(
+                    "PRAGMA table_info(wishlist_tracks)").fetchall())
+                info_col = 'source_info' if has_info else 'NULL'
                 dates = {}
                 updates = []
-                for row_id, raw in cursor.execute(
-                        "SELECT id, spotify_data FROM wishlist_tracks").fetchall():
+                for row_id, raw, raw_info in cursor.execute(
+                        f"SELECT id, spotify_data, {info_col} FROM wishlist_tracks").fetchall():
                     try:
                         data = json.loads(raw or '{}')
                     except (TypeError, ValueError):
                         continue
                     album = data.get('album') if isinstance(data, dict) else None
-                    info = data.get('_source_info') if isinstance(data, dict) else None
                     if not isinstance(album, dict) or album.get('release_date'):
                         continue
+                    try:
+                        info = json.loads(raw_info or '{}')
+                    except (TypeError, ValueError):
+                        info = None
                     album_id = info.get('lib2_album_id') if isinstance(info, dict) else None
+                    if not album_id:
+                        # an older shape kept it inside the payload
+                        legacy = data.get('_source_info')
+                        album_id = legacy.get('lib2_album_id') if isinstance(legacy, dict) else None
                     if not album_id:
                         continue
                     if album_id not in dates:
@@ -4603,9 +4619,9 @@ class MusicDatabase:
                     cursor.executemany(
                         "UPDATE wishlist_tracks SET spotify_data = ? WHERE id = ?", updates)
                 fixed = len(updates)
-            cursor.execute("CREATE TABLE _wishlist_lib2_album_dates "
+            cursor.execute("CREATE TABLE _wishlist_lib2_album_dates_v2 "
                            "(applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-            self._record_migration(cursor, 'wishlist_lib2_album_dates')
+            self._record_migration(cursor, 'wishlist_lib2_album_dates_v2')
             if fixed:
                 logger.info("wishlist: gave %d library album rows their release date", fixed)
         except Exception as e:
