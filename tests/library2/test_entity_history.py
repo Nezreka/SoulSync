@@ -186,3 +186,27 @@ def test_entity_history_is_immutable_and_rejects_self_merge(imported_conn):
             target_type="track",
             target_id=1,
         )
+
+
+def test_a_journal_row_does_not_rebuild_the_history_schema(imported_conn, monkeypatch):
+    """review 5 W2-WE-4: every merge journal row dropped and recreated the
+    history triggers and re-ran the canonical backfill inside the merge's
+    write lock. the schema is the startup's; a row only inserts"""
+    import core.library2.entity_history as entity_history
+
+    calls = []
+    monkeypatch.setattr(entity_history, "ensure_entity_history_schema",
+                        lambda cursor: calls.append(cursor))
+    record_entity_merge(imported_conn, source_type="track", source_id=11,
+                        target_type="track", target_id=22)
+    assert calls == []
+
+
+def test_a_db_without_the_history_table_still_journals():
+    """the fallback the per-row check keeps: a db that never ran the startup
+    schema gets it on its first journal row"""
+    conn = row_conn(":memory:")
+    merge_id = record_entity_merge(conn, source_type="track", source_id=1,
+                                   target_type="track", target_id=2)
+    assert conn.execute("SELECT event_type FROM lib2_entity_history WHERE id=?",
+                        (merge_id,)).fetchone()[0] == "entity_merged"

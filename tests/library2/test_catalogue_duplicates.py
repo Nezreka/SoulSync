@@ -1109,3 +1109,51 @@ def test_a_merge_settles_the_twins_open_findings_and_moves_its_downloads(library
             "SELECT finding_type, status, entity_id FROM repair_findings")}
     assert found["bad_tag"] == ("dismissed", f"lib2:{keeper}")       # a dismissal follows
     assert found["missing_file"][0] == "resolved"                    # the twin's own gap is settled
+
+
+def _guest_on_the_twin(library, albums):
+    with closing(library[0]._get_connection()) as conn:
+        guest = conn.execute("INSERT INTO lib2_artists(name) VALUES('Guest')").lastrowid
+        conn.execute("INSERT INTO lib2_album_artists(album_id,artist_id,role) VALUES(?,?,'featured')",
+                     (albums[1], guest))
+        conn.commit()
+    return guest
+
+
+def test_a_merge_keeps_the_twins_album_only_guest(library):
+    """review 5 W2-WE-1: the twin's album credits were deleted, never moved, so
+    a guest credited only on the album (no track credit) left the guest's page"""
+    from core.library2.artist_aliases import artist_album_scope_ids
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate
+    artist, albums, _tracks = ark_pair(library)
+    guest = _guest_on_the_twin(library, albums)
+    result = merge_catalogue_duplicate(library[0], scan(library)[1][0]["details"], albums[0])
+    assert result["success"] is True, result
+    with closing(library[0]._get_connection()) as conn:
+        credits = {tuple(r) for r in conn.execute(
+            "SELECT artist_id, role FROM lib2_album_artists WHERE album_id=?", (albums[0],))}
+        assert artist_album_scope_ids(conn, guest) == [albums[0]]
+    # the keeper keeps its own primary, once
+    assert credits == {(artist, "primary"), (guest, "featured")}
+
+
+def test_an_older_merge_gets_its_dropped_guest_back_once(library):
+    """review 5 W2-WE-1: installs the upgrade's twin merge already ran on get
+    the dropped guest back from the merge's own redirect record, once"""
+    from core.library2.catalogue_duplicates import merge_catalogue_duplicate, restore_merged_album_credits
+    artist, albums, _tracks = ark_pair(library)
+    guest = _guest_on_the_twin(library, albums)
+    assert merge_catalogue_duplicate(library[0], scan(library)[1][0]["details"], albums[0])["success"]
+    with closing(library[0]._get_connection()) as conn:
+        # what an older merge left behind: the guest's credit gone
+        conn.execute("DELETE FROM lib2_album_artists WHERE album_id=? AND artist_id=?", (albums[0], guest))
+        conn.commit()
+        assert restore_merged_album_credits(conn) == 1
+        conn.commit()
+        credits = {tuple(r) for r in conn.execute(
+            "SELECT artist_id, role FROM lib2_album_artists WHERE album_id=?", (albums[0],))}
+        assert credits == {(artist, "primary"), (guest, "featured")}
+        # once: a credit removed after the repair stays removed
+        conn.execute("DELETE FROM lib2_album_artists WHERE album_id=? AND artist_id=?", (albums[0], guest))
+        assert restore_merged_album_credits(conn) == 0
+        assert conn.execute("SELECT COUNT(*) FROM lib2_album_artists WHERE artist_id=?", (guest,)).fetchone()[0] == 0

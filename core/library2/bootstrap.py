@@ -782,6 +782,13 @@ def run_deferred_backfills(database: Any, *,
             )
             # Installs migrated before one-file-one-track also converge here.
             stats["shared_files"] = _fold_shared_files_once(database, conn)
+            # guests an older twin merge dropped from the kept album, once
+            # (review 5 W2-WE-1)
+            try:
+                from core.library2.catalogue_duplicates import restore_merged_album_credits
+                stats["merged_credits_restored"] = restore_merged_album_credits(conn)
+            except sqlite3.Error as exc:
+                logger.warning("merged album credits not restored yet: %s", exc)
             conn.commit()
             # 3.6.1 logged a scan import on every refresh; once, in batches
             from core.maintenance.library_history_dedupe import dedupe_scan_import_history
@@ -951,8 +958,15 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
             return {"success": False, "error": str(exc)}
 
         if source_row_count(current_watermark):
-            from core.maintenance.dedupe_source_ids import repair_imported_state
-            repair_imported_state(database)
+            # the import is committed: a failing repair must not leave the
+            # claim "running" (workers paused, autostart refused) until the
+            # stale window, then fail the same way on every reclaim. it also
+            # runs from the maintenance import. review 5 W2-WE-3
+            try:
+                from core.maintenance.dedupe_source_ids import repair_imported_state
+                repair_imported_state(database)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Library v2 post-import repair failed: %s", exc, exc_info=True)
 
         if post_import is not None:
             try:

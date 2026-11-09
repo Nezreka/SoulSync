@@ -390,6 +390,108 @@ def test_a_refused_fill_is_not_reported_as_filled_every_start(imported_conn):
     assert again["filled"] == 0
 
 
+def _whole_walks(conn, run):
+    """how many times ``run`` read the whole release-track table"""
+    seen = []
+    conn.set_trace_callback(seen.append)
+    try:
+        run()
+    finally:
+        conn.set_trace_callback(None)
+    return sum(1 for sql in seen if "FROM lib2_release_tracks rt" in sql
+               and "COALESCE(rec.spotify_id,'')" in sql and "rt.id IN" not in sql)
+
+
+def _recording_of(conn, track_id):
+    return conn.execute("SELECT recording_id FROM lib2_release_tracks WHERE track_id=?",
+                        (track_id,)).fetchone()[0]
+
+
+def test_a_conflict_that_can_never_settle_is_not_re_read_every_start(imported_conn):
+    """review 5 W2-WE-2: a track whose spotify id another recording owns stays
+    selected forever (the fill is refused), and finding it again walked all
+    316k release tracks on every start. after one full pass it reads only
+    what changed"""
+    from core.library2.editions import reconcile_recording_identity
+
+    conn = imported_conn
+    artist = _artist(conn)
+    a = _track(conn, _album(conn, artist, "One"), "Song", track_number=1)
+    b = _track(conn, _album(conn, artist, "Two"), "Song", track_number=1, isrc="ISRC-B")
+    backfill_editions(conn.cursor(), connection=conn)
+    conn.execute("UPDATE lib2_recordings SET spotify_id='SP-1' WHERE id=?", (_recording_of(conn, a),))
+    conn.execute("UPDATE lib2_tracks SET spotify_id='SP-1' WHERE id=?", (b,))
+    conn.commit()
+
+    first = reconcile_recording_identity(conn.cursor())
+    conn.commit()
+    assert first == {"filled": 0, "merged": 0, "pruned": 0}
+    # the next start: nothing changed, nothing re-walked, nothing written
+    cursor = conn.cursor()
+    assert _whole_walks(conn, lambda: reconcile_recording_identity(cursor)) == 0
+    assert not conn.in_transaction
+
+
+def test_the_identity_pass_reads_the_id_history_by_its_range(imported_conn):
+    """review 5 W2-WE-2: through the entity index the window read every track
+    history row (2.27M live, 2 s) to find nothing on a quiet start"""
+    from core.library2.editions import _HISTORY_SINCE
+
+    plan = " ".join(str(r[-1]) for r in imported_conn.execute(
+        f"EXPLAIN QUERY PLAN {_HISTORY_SINCE}", (1, 2)))
+    assert "INTEGER PRIMARY KEY" in plan, plan
+
+
+def test_an_id_a_recording_gives_up_reaches_the_track_still_holding_it(imported_conn):
+    """review 5 W2-WE-2: the stuck row settles once the other recording lets
+    the id go, though nothing about the row itself changed"""
+    from core.library2.editions import reconcile_recording_identity
+
+    conn = imported_conn
+    artist = _artist(conn)
+    a = _track(conn, _album(conn, artist, "One"), "Song", track_number=1)
+    b = _track(conn, _album(conn, artist, "Two"), "Song", track_number=1, isrc="ISRC-B")
+    backfill_editions(conn.cursor(), connection=conn)
+    conn.execute("UPDATE lib2_recordings SET spotify_id='SP-1' WHERE id=?", (_recording_of(conn, a),))
+    conn.execute("UPDATE lib2_tracks SET spotify_id='SP-1' WHERE id=?", (b,))
+    conn.commit()
+    reconcile_recording_identity(conn.cursor())
+    conn.commit()
+    conn.execute("UPDATE lib2_recordings SET spotify_id=NULL WHERE id=?", (_recording_of(conn, a),))
+    conn.commit()
+
+    assert reconcile_recording_identity(conn.cursor())["filled"] == 1
+    conn.commit()
+    assert conn.execute("SELECT spotify_id FROM lib2_recordings WHERE id=?",
+                        (_recording_of(conn, b),)).fetchone()[0] == "SP-1"
+
+
+def test_a_release_track_moved_onto_another_track_is_reconciled(imported_conn):
+    """review 5 W2-WE-2: a merge re-points a release track and writes no id
+    history; the move itself puts the row up for the next pass"""
+    from core.library2.editions import reconcile_recording_identity
+
+    conn = imported_conn
+    artist = _artist(conn)
+    album = _album(conn, artist, "One")
+    x = _track(conn, album, "Song", track_number=1)
+    backfill_editions(conn.cursor(), connection=conn)
+    conn.commit()
+    # a track with an id, but no release track of its own
+    z = _track(conn, _album(conn, artist, "Two"), "Song", track_number=1, isrc="ISRC-Z")
+    conn.commit()
+    reconcile_recording_identity(conn.cursor())
+    conn.commit()
+    rt = conn.execute("SELECT id FROM lib2_release_tracks WHERE track_id=?", (x,)).fetchone()[0]
+    conn.execute("UPDATE lib2_release_tracks SET track_id=? WHERE id=?", (z, rt))
+    conn.commit()
+
+    assert reconcile_recording_identity(conn.cursor())["filled"] == 1
+    conn.commit()
+    assert conn.execute("SELECT rec.isrc FROM lib2_release_tracks rt JOIN lib2_recordings rec"
+                        " ON rec.id=rt.recording_id WHERE rt.id=?", (rt,)).fetchone()[0] == "ISRC-Z"
+
+
 def test_the_identity_reconcile_runs_with_the_edition_backfill(imported_conn):
     """It has to converge on its own — 94 stale recordings will not fix
     themselves on a screen nobody opens."""

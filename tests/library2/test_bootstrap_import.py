@@ -447,3 +447,27 @@ def test_keepalive_stops_once_the_run_is_over(legacy_db, monkeypatch):
     ), "keepalive thread outlived the run"
     settled = lib2_bootstrap.get_state(legacy_db)
     assert settled["status"] == "done"
+
+
+def test_a_failing_post_import_repair_still_releases_the_claim(legacy_db, monkeypatch):
+    """review 5 W2-WE-3: the repair after the import raised past mark_done, so
+    the claim stayed "running" with a fresh heartbeat: the workers stayed
+    paused and the next autostart was refused until the stale window"""
+    from unittest.mock import MagicMock
+
+    import core.maintenance.dedupe_source_ids as dedupe
+
+    monkeypatch.setattr(lib2_bootstrap, "_import_legacy_library", lambda *a, **k: {"artists": 1})
+
+    def boom(_database):
+        raise RuntimeError("repair failed")
+    monkeypatch.setattr(dedupe, "repair_imported_state", boom)
+    log = MagicMock()
+    monkeypatch.setattr(lib2_bootstrap, "logger", log)
+
+    result = lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)
+
+    assert result == {"success": True, "stats": {"artists": 1}}
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "done"
+    assert lib2_bootstrap.bootstrap_is_active(legacy_db) is False
+    assert any("repair failed" in str(c) for c in log.error.call_args_list)

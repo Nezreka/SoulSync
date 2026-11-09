@@ -706,6 +706,12 @@ def merge_catalogue_duplicate(database, candidate, keep_album_id, *, automatic=F
                 conn.execute("DELETE FROM lib2_tracks WHERE id=?", (source["id"],))
                 for profile in affected_profiles:
                     recompute_wanted_for_entity(conn, "track", target["id"], profile_id=profile)
+            # a guest credited only on the album (a provider's album artist
+            # list) has no track credit to carry it: move its album credit,
+            # the keeper keeps its own primaries. review 5 W2-WE-1
+            conn.execute("""INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role)
+                SELECT ?, artist_id, role FROM lib2_album_artists
+                 WHERE album_id=? AND role<>'primary'""", (keep_album_id, duplicate["id"]))
             conn.execute("DELETE FROM lib2_album_artists WHERE album_id=?", (duplicate["id"],))
             conn.execute("DELETE FROM lib2_albums WHERE id=?", (duplicate["id"],))
             conn.execute("UPDATE lib2_albums SET track_count=?,expected_track_count=? WHERE id=?",
@@ -731,7 +737,9 @@ def merge_catalogue_duplicate(database, candidate, keep_album_id, *, automatic=F
                                          (json.dumps(details), finding["id"]))
             if _table(conn, "lib2_artist_rollup"):
                 # Let its normal lazy reader refresh this cache after commit.
-                conn.executemany("UPDATE lib2_artist_rollup SET computed_at=0 WHERE artist_id=?", [(i,) for i in keeper["artist_ids"]])
+                # the duplicate's guests count the kept album now
+                conn.executemany("UPDATE lib2_artist_rollup SET computed_at=0 WHERE artist_id=?",
+                                 [(i,) for i in sorted(set(keeper["artist_ids"]) | set(duplicate["artist_ids"]))])
             conn.commit()
         from core.library2.validation import notify_changes
         notify_changes([f["id"] for a in fresh["albums"] for f in a["files"]])
@@ -739,6 +747,63 @@ def merge_catalogue_duplicate(database, candidate, keep_album_id, *, automatic=F
                 "merged_album_id": duplicate["id"], "message": "Release groups merged; editions and files preserved."}
     except (ValueError, KeyError, TypeError, sqlite3.Error) as exc:
         return {"success": False, "error": str(exc)}
+
+
+_MERGED_CREDITS_MARKER = "_lib2_merged_album_credits_restored"
+
+
+def restore_merged_album_credits(conn):
+    """once: put back the album-only credits an older twin merge dropped.
+
+    a merge deleted the duplicate's album credits instead of moving them, so
+    a guest credited only on the album lost it (the upgrade's twin merge ran
+    that unreviewed). each album redirect keeps the reviewed pair: every
+    artist the duplicate credited (artist_ids) and who it was by
+    (group_artist_ids), so the lost guest credits come back as they were.
+    review 5 W2-WE-1. returns the credits restored; does not commit."""
+    if _table(conn, _MERGED_CREDITS_MARKER) or not _table(conn, "lib2_catalogue_redirects"):
+        return 0
+    restored = 0
+    touched = set()
+    rows = conn.execute("SELECT old_id, target_id, payload_json FROM lib2_catalogue_redirects"
+                        " WHERE entity_type='album'").fetchall()
+    for old_id, target_id, payload in rows:
+        try:
+            albums = (json.loads(payload or "{}") or {}).get("albums") or []
+        except (TypeError, ValueError):
+            continue
+        duplicate = next((a for a in albums if isinstance(a, dict)
+                          and str(a.get("id")) == str(old_id)), None)
+        if not duplicate or not duplicate.get("artist_ids"):
+            continue
+        if not conn.execute("SELECT 1 FROM lib2_albums WHERE id=?", (int(target_id),)).fetchone():
+            continue
+        # who the release was by stays the keeper's own primaries
+        by = {int(i) for i in duplicate.get("group_artist_ids") or []}
+        primary = duplicate.get("primary_artist_id")
+        for artist_id in duplicate["artist_ids"]:
+            artist_id = int(artist_id)
+            if primary is not None and artist_id == int(primary):
+                continue
+            row = conn.execute("SELECT COALESCE(canonical_artist_id, id) FROM lib2_artists WHERE id=?",
+                               (artist_id,)).fetchone()
+            if not row or int(row[0]) in by:
+                continue
+            cur = conn.execute("INSERT OR IGNORE INTO lib2_album_artists(album_id, artist_id, role)"
+                               " VALUES(?, ?, 'featured')", (int(target_id), artist_id))
+            if cur.rowcount and cur.rowcount > 0:
+                restored += 1
+                touched.add(artist_id)
+    if touched and _table(conn, "lib2_artist_rollup"):
+        conn.executemany("UPDATE lib2_artist_rollup SET computed_at=0 WHERE artist_id=?",
+                         [(i,) for i in sorted(touched)])
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_MERGED_CREDITS_MARKER}"
+                 " (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, restored INTEGER)")
+    conn.execute(f"INSERT INTO {_MERGED_CREDITS_MARKER}(restored) VALUES(?)", (restored,))
+    if restored:
+        logger.info("restored %d album credits an earlier twin merge dropped", restored)
+    return restored
+
 
 def auto_merge_proven(database, *, scope=None, check_stop=None, candidates=None, accept=None):
     """merge every proven twin pair (auto_merge_eligible) that wasn't dismissed.

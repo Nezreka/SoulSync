@@ -272,6 +272,24 @@ CREATE TABLE IF NOT EXISTS lib2_file_origins (
 )
 """
 
+# the "could be better" counts' fingerprint indexes (review 5 W2-WE-5),
+# created after the additive migration; the quality-profile column rebuild
+# drops them first, since an index over a column blocks DROP COLUMN
+_PROFILE_FINGERPRINT_INDEX_SQL = (
+    ("lib2_tracks", "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_profile_explicit "
+                    "ON lib2_tracks(quality_profile_id) WHERE quality_profile_explicit=1"),
+    ("lib2_albums", "CREATE INDEX IF NOT EXISTS idx_lib2_albums_profile_explicit "
+                    "ON lib2_albums(quality_profile_id) WHERE quality_profile_explicit=1"),
+    ("lib2_artists", "CREATE INDEX IF NOT EXISTS idx_lib2_artists_profile_state "
+                     "ON lib2_artists(quality_profile_id, quality_profile_explicit, "
+                     "canonical_artist_id)"),
+)
+_PROFILE_FINGERPRINT_INDEXES = {
+    "lib2_tracks": ("idx_lib2_tracks_profile_explicit",),
+    "lib2_albums": ("idx_lib2_albums_profile_explicit",),
+    "lib2_artists": ("idx_lib2_artists_profile_state",),
+}
+
 _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_name ON lib2_artists(name)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_spotify ON lib2_artists(spotify_id)",
@@ -946,6 +964,10 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
                            WHEN quality_profile_id IN (SELECT id FROM quality_profiles)
                            THEN quality_profile_id ELSE ? END
                 """, (default_id,))
+                # an index over the column blocks the drop; the fingerprint
+                # indexes are recreated further down this same ensure
+                for index_name in _PROFILE_FINGERPRINT_INDEXES.get(table, ()):
+                    cursor.execute(f"DROP INDEX IF EXISTS {index_name}")
                 cursor.execute(
                     f"ALTER TABLE {table} DROP COLUMN quality_profile_id")
                 cursor.execute(
@@ -1386,6 +1408,17 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                        "ON lib2_tracks(album_soul_id)")
     except Exception as e:  # noqa: BLE001
         logger.error("soul_id index failed (will retry next start): %s", e)
+    # the "could be better" counts' fingerprint, read every 30 s while the
+    # artist list is open: without these it scanned all of lib2_tracks and
+    # lib2_albums for a few hundred explicit rows, and every wide artist row
+    # (2.9 s live). partial + covering, so each is a seek over the explicit
+    # rows; the artists' one is a narrow covering scan. columns arrive in the
+    # additive migration, so not in ``_INDEXES``. review 5 W2-WE-5
+    try:
+        for _table, index_sql in _PROFILE_FINGERPRINT_INDEX_SQL:
+            cursor.execute(index_sql)
+    except Exception as e:  # noqa: BLE001
+        logger.error("quality-profile fingerprint index failed (will retry next start): %s", e)
     # Release-group MBID. Same placement rule: the column arrives in the
     # additive migration above, so it cannot be declared in ``_INDEXES``.
     # mb_reconcile groups an artist's albums by this value on every run.
