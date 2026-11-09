@@ -2059,7 +2059,8 @@ class RepairWorker:
     @staticmethod
     def _findings_filter(job_id: str = None, status: str = None,
                          severity: str = None, finding_type: str = None,
-                         q: str = None):
+                         q: str = None, group_by: str = None,
+                         group_artist=None, group_album=None):
         """Build the WHERE clause shared by listing and clearing findings.
 
         This is ONE function on purpose. "Clear findings matching current
@@ -2095,6 +2096,11 @@ class RepairWorker:
             # search box could not see them
             where_parts.append("(title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)")
             params.extend([needle, needle, needle])
+        if group_by:
+            group_sql, group_params = RepairWorker._group_member_clause(
+                group_by, group_artist, group_album)
+            where_parts.append(group_sql)
+            params.extend(group_params)
         library = _findings_library_clause()
         if library:
             where_parts.append(library)
@@ -2105,7 +2111,8 @@ class RepairWorker:
     def get_findings(self, job_id: str = None, status: str = None,
                      severity: str = None, page: int = 0, limit: int = 50,
                      finding_type: str = None, sort: str = None,
-                     q: str = None) -> dict:
+                     q: str = None, group_by: str = None,
+                     group_artist=None, group_album=None) -> dict:
         """Get paginated findings with optional filters.
 
         ``finding_type`` is what the grouped inbox pages through: one type at
@@ -2121,7 +2128,8 @@ class RepairWorker:
 
             where, params = self._findings_filter(
                 job_id=job_id, status=status, severity=severity,
-                finding_type=finding_type, q=q)
+                finding_type=finding_type, q=q, group_by=group_by,
+                group_artist=group_artist, group_album=group_album)
             order_by = self._FINDING_SORTS.get(sort or 'newest',
                                                self._FINDING_SORTS['newest'])
 
@@ -2216,6 +2224,84 @@ class RepairWorker:
         'album': (_ARTIST_KEY, _ALBUM_KEY),
         'artist': (_ARTIST_KEY, "NULL"),
     }
+
+    @classmethod
+    def _group_member_clause(cls, group_by, artist, album):
+        """The rows of ONE album (or artist) group, by the grid's own key.
+
+        the album tray used to search the group's title as a substring and,
+        when its own rows were not in the first 100 hits, showed and fixed
+        the unrelated ones (review 5 W3-TU-1). this is the same expression
+        the grid groups by, so the tray and the grid agree by construction.
+        a group that can't be named exactly matches nothing.
+        """
+        artist = '' if artist is None else str(artist)
+        album = '' if album is None else str(album)
+        if group_by not in cls._GROUP_KEYS or not artist or (
+                group_by == 'album' and not album):
+            return "0", []
+        artist_expr, album_expr = cls._GROUP_KEYS[group_by]
+        # cast the json side: a numeric title ("1989") comes back as a number
+        # and must still equal the string the client sends
+        sql = f"CAST({artist_expr} AS TEXT) = ?"
+        params = [artist]
+        if group_by == 'album':
+            sql += f" AND CAST({album_expr} AS TEXT) = ?"
+            params.append(album)
+        return f"({sql})", params
+
+    def album_group_action(self, action: str, group_by: str, artist, album,
+                           finding_ids: List[int] = None, job_id: str = None,
+                           finding_type: str = None) -> dict:
+        """Fix or dismiss the pending findings of one album (or artist) group.
+
+        the server guard behind the tray's Resolve Album / Dismiss All: an id
+        the client sends that is not in this group is refused here, whatever
+        the client listed (review 5 W3-TU-1). ``finding_ids`` narrows to the
+        rows the tray showed; None means the whole group.
+        """
+        if action not in ('fix', 'dismiss'):
+            raise ValueError(f"unknown album action {action!r}")
+        where, params = self._findings_filter(
+            job_id=job_id, status='pending', finding_type=finding_type,
+            group_by=group_by, group_artist=artist, group_album=album)
+        requested = None
+        if finding_ids is not None:
+            requested = {int(i) for i in finding_ids}
+            where += f" AND id IN ({_JSON_IDS})"
+            params = params + [_json_ids(requested)]
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            ids = [row[0] for row in conn.execute(
+                f"SELECT id FROM repair_findings {where} ORDER BY id", params)]
+        finally:
+            if conn:
+                conn.close()
+        refused = len(requested - set(ids)) if requested is not None else 0
+        if refused:
+            logger.warning("Album action %s on %r / %r refused %d finding(s) "
+                           "outside the group", action, artist, album, refused)
+        result = {'action': action, 'total': len(ids), 'refused': refused}
+        # never hand an empty list on: bulk_fix_findings reads that as "no
+        # id filter" and would fix every pending finding
+        if not ids:
+            if action == 'fix':
+                result.update({'fixed': 0, 'failed': 0, 'skipped': 0,
+                               'other_artist_skipped': 0, 'errors': []})
+            else:
+                result['updated'] = 0
+            return result
+        if action == 'dismiss':
+            result['updated'] = self.bulk_update_findings(ids, 'dismiss')
+            return result
+        fixed = self.bulk_fix_findings(finding_ids=ids)
+        result.update({k: fixed.get(k, 0) for k in
+                       ('fixed', 'failed', 'skipped', 'other_artist_skipped')})
+        result['errors'] = fixed.get('errors', [])
+        if fixed.get('error'):
+            result['error'] = fixed['error']
+        return result
 
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
                            status: str = 'pending', finding_type: str = None,

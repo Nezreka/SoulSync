@@ -295,3 +295,92 @@ def test_get_finding_albums_returns_finding_types_and_error_count(worker):
     assert g['count'] == 2
     assert set(g['finding_types']) == {'quality_upgrade', 'corrupt_audio'}
     assert g['error_count'] == 0
+
+
+# ── the album tray acts on its own album only (review 5 W3-TU-1) ─────────────
+def _short_title_library(worker):
+    """'FM' by one artist, older than a page of other albums whose paths and
+    details hold 'FM' too, the way the live re-tag backlog does."""
+    _add(worker, artist='Makeup And Vanity Set', album='FM', fmt='mp3',
+         bitrate=128, created='2026-01-01')
+    for n in range(120):
+        _add(worker, artist=f'Other {n}', album=f'FM Radio {n}', fmt='mp3',
+             bitrate=192, created=f'2026-02-{1 + n % 28:02d}')
+    _add(worker, artist='Someone Else', album='FM', fmt='mp3', bitrate=128,
+         created='2026-03-01')
+
+
+def _ids(worker, **kw):
+    return [i['id'] for i in worker.get_findings(status='pending', limit=500, **kw)['items']]
+
+
+def test_album_rows_come_by_the_group_key_not_a_title_search(worker):
+    _short_title_library(worker)
+    got = worker.get_findings(status='pending', limit=100, group_by='album',
+                              group_artist='Makeup And Vanity Set', group_album='FM')
+    assert got['total'] == 1
+    assert [i['details']['expected_artist'] for i in got['items']] == ['Makeup And Vanity Set']
+    # an album that can't be named exactly matches nothing, never everything
+    assert worker.get_findings(status='pending', group_by='album',
+                               group_artist='Makeup And Vanity Set', group_album='')['total'] == 0
+
+
+def test_dismiss_all_refuses_ids_from_other_albums(worker):
+    _short_title_library(worker)
+    own = _ids(worker, group_by='album', group_artist='Makeup And Vanity Set', group_album='FM')
+    everything = _ids(worker)
+    result = worker.album_group_action('dismiss', 'album', 'Makeup And Vanity Set', 'FM',
+                                       finding_ids=everything)
+    assert result['updated'] == 1
+    assert result['refused'] == len(everything) - 1
+    left = set(_ids(worker))
+    assert left == set(everything) - set(own)
+
+
+def test_resolve_album_fixes_only_the_groups_ids(worker, monkeypatch):
+    _short_title_library(worker)
+    own = _ids(worker, group_by='album', group_artist='Makeup And Vanity Set', group_album='FM')
+    seen = []
+
+    def fake_bulk_fix(finding_ids=None, **_kw):
+        seen.append(list(finding_ids or []))
+        return {'fixed': len(finding_ids or []), 'failed': 0, 'skipped': 0, 'errors': []}
+
+    monkeypatch.setattr(worker, 'bulk_fix_findings', fake_bulk_fix)
+    result = worker.album_group_action('fix', 'album', 'Makeup And Vanity Set', 'FM',
+                                       finding_ids=_ids(worker))
+    assert seen == [own]
+    assert result['fixed'] == 1
+    # nothing of the group's in the request: no fix runs at all, not an
+    # unscoped one
+    seen.clear()
+    other = [i for i in _ids(worker) if i not in own]
+    result = worker.album_group_action('fix', 'album', 'Makeup And Vanity Set', 'FM',
+                                       finding_ids=other[:5])
+    assert seen == [] and result['fixed'] == 0 and result['refused'] == 5
+
+
+def test_album_action_route_scopes_to_the_group(worker):
+    from flask import Flask
+
+    import api.repair as repair_api
+
+    _short_title_library(worker)
+    everything = _ids(worker)
+    repair_api.configure(worker_getter=lambda: worker,
+                         image_url_fixer=lambda url: url, metadata_cache=None)
+    app = Flask(__name__)
+    app.register_blueprint(repair_api.create_blueprint())
+    client = app.test_client()
+
+    listed = client.get('/api/repair/findings', query_string={
+        'status': 'pending', 'limit': 100, 'group_by': 'album',
+        'group_artist': 'Makeup And Vanity Set', 'group_album': 'FM'}).get_json()
+    assert listed['total'] == 1
+
+    res = client.post('/api/repair/findings/album-action', json={
+        'action': 'dismiss', 'group_by': 'album', 'artist': 'Makeup And Vanity Set',
+        'album': 'FM', 'ids': everything})
+    body = res.get_json()
+    assert res.status_code == 200 and body['updated'] == 1
+    assert len(_ids(worker)) == len(everything) - 1

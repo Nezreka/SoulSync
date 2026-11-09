@@ -157,6 +157,9 @@ export interface FindingsQuery {
   sort?: string;
   /** Title + path search. Non-empty search escapes the grouping entirely. */
   q?: string;
+  /** One album (or artist) group's rows by the grid's own key, never a title
+   *  search (review 5 W3-TU-1). */
+  group?: { groupBy: 'album' | 'artist'; artist: string; album: string | null };
   page?: number;
   limit?: number;
 }
@@ -173,6 +176,11 @@ export async function fetchRepairFindings(query: FindingsQuery): Promise<RepairF
   if (query.findingType) params.set('finding_type', query.findingType);
   if (query.sort) params.set('sort', query.sort);
   if (query.q) params.set('q', query.q);
+  if (query.group) {
+    params.set('group_by', query.group.groupBy);
+    params.set('group_artist', query.group.artist);
+    if (query.group.album !== null) params.set('group_album', query.group.album);
+  }
   params.set('page', String(query.page ?? 0));
   params.set('limit', String(query.limit ?? 30));
 
@@ -382,6 +390,44 @@ export async function dismissFinding(id: number): Promise<void> {
 export async function dismissFindingChecked(id: number): Promise<boolean> {
   const response = await postJson(repairUrl(`/findings/${id}/dismiss`));
   return response.ok;
+}
+
+export interface AlbumActionResult {
+  success?: boolean;
+  total?: number;
+  /** ids the server would not touch because they are not this group's */
+  refused?: number;
+  updated?: number;
+  fixed?: number;
+  failed?: number;
+  skipped?: number;
+  other_artist_skipped?: number;
+  error?: string;
+}
+
+/**
+ * Resolve Album / Dismiss All. The server picks the group's pending findings
+ * by its own key and refuses any id outside it, so the tray can never act on
+ * another album's rows (review 5 W3-TU-1).
+ */
+export async function albumFindingAction(
+  action: 'fix' | 'dismiss',
+  group: { groupBy: 'album' | 'artist'; artist: string; album: string | null },
+  ids: number[],
+  scope?: { jobId?: string; findingType?: string },
+): Promise<AlbumActionResult> {
+  const response = await postJson(repairUrl('/findings/album-action'), {
+    action,
+    group_by: group.groupBy,
+    artist: group.artist,
+    album: group.album,
+    ids,
+    job_id: scope?.jobId || undefined,
+    finding_type: scope?.findingType || undefined,
+  });
+  const data = (await response.json()) as AlbumActionResult;
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return data;
 }
 
 /** `bulkRepairAction`. Response ignored; the toast fires regardless. */

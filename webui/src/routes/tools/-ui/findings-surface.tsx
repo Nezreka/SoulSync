@@ -1905,6 +1905,8 @@ export function FindingsSurface({
             <AlbumInspectionTray
               group={selectedAlbum}
               status={statusFilter}
+              jobId={jobFilter || undefined}
+              findingType={listType || undefined}
               onClose={() => setSelectedAlbum(null)}
               onFixFinding={fixOne}
               onDismissFinding={dismissOne}

@@ -50560,6 +50560,17 @@ tr.tag-diff-same {
     gap: 8px;
 }
 
+/* a group bigger than the tray loads says so (review 5 W3-TU-1) */
+.album-tray-alert.note {
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: var(--white-a05);
+    border: 1px solid var(--white-a10);
+    border-radius: var(--radius-md);
+    color: var(--white-a60);
+    font-size: 12.5px;
+}
+
 .album-tray-body {
     margin-top: 18px;
 }

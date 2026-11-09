@@ -1,11 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { FindingAlbumGroup } from '../-tools.api';
+import type { FindingTypeInfo } from '../-tools.groups';
 import type { RepairFinding } from '../-tools.types';
 
-import { fetchRepairFindings, fixFinding, dismissFinding, reopenFinding } from '../-tools.api';
 import {
-  findingFixLabel,
+  albumFindingAction,
+  fetchFindingTypes,
+  fetchRepairFindings,
+  reopenFinding,
+} from '../-tools.api';
+import {
   findingRedownloadTrackId,
   findingRowFixLabel,
   findingSeverityIcon,
@@ -16,6 +21,9 @@ import { VinylCoverFallback } from './album-cover-fallback';
 export interface AlbumInspectionTrayProps {
   group: FindingAlbumGroup;
   status: string;
+  /** the grid's own filters, so the tray lists what the card counted */
+  jobId?: string;
+  findingType?: string;
   onClose: () => void;
   onFixFinding: (finding: RepairFinding) => Promise<void>;
   onDismissFinding: (id: number) => Promise<void>;
@@ -24,9 +32,29 @@ export interface AlbumInspectionTrayProps {
   onReopenFinding?: (id: number) => Promise<void>;
 }
 
+/** what the tray loads at most; the header says when a group holds more */
+const TRAY_LIMIT = 100;
+
+// before the served catalog loads, the client list is the only guess
+const FALLBACK_DESTRUCTIVE = new Set(['corrupt_audio', 'fake_lossless', 'orphan_file']);
+
+/** the group's identity as the server keys it, or null when it has none.
+ *  the tray asks for exactly these rows and never searches by title: a
+ *  short title like "FM" matched 100 other albums' findings, and the tray
+ *  showed, fixed and dismissed those (review 5 W3-TU-1). */
+function groupIdentity(group: FindingAlbumGroup) {
+  const groupBy = group.group_by === 'artist' ? 'artist' : 'album';
+  const artist = group.artist == null ? '' : String(group.artist);
+  const album = group.album == null ? '' : String(group.album);
+  if (!artist || (groupBy === 'album' && !album)) return null;
+  return { groupBy, artist, album: groupBy === 'album' ? album : null } as const;
+}
+
 export function AlbumInspectionTray({
   group,
   status,
+  jobId,
+  findingType,
   onClose,
   onFixFinding,
   onDismissFinding,
@@ -35,42 +63,71 @@ export function AlbumInspectionTray({
   onReopenFinding,
 }: AlbumInspectionTrayProps) {
   const [findings, setFindings] = useState<RepairFinding[] | null>(null);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
   const [actionError, setActionError] = useState<string | null>(null);
+  const [types, setTypes] = useState<FindingTypeInfo[]>([]);
 
   const albumName = group.album || 'Unknown Album';
   const artistName = group.artist || 'Unknown Artist';
   const coverArt = group.album_thumb_url || group.artist_thumb_url;
+  const identity = groupIdentity(group);
+
+  useEffect(() => {
+    let live = true;
+    void fetchFindingTypes().then((rows) => {
+      if (live) setTypes(rows);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const typeMap = useMemo(() => new Map(types.map((info) => [info.type, info])), [types]);
+
+  /** the row's fix label. the served catalog decides, like the findings list
+   *  does: the client list misses types the server can fix (corrupt audio
+   *  with a track, mbid mismatch, path mismatch...), so those had no button
+   *  here (review 5 W3-TU-1). the client list only covers the first load. */
+  const rowFixLabel = (finding: RepairFinding): string | null => {
+    const special = findingRowFixLabel(finding);
+    if (special === 'Open album' || special === 'Delete File') return special;
+    const info = typeMap.get(finding.finding_type);
+    if (info) return info.fixable ? info.verb || 'Fix' : null;
+    return special;
+  };
+  const isDestructive = (type: string) => {
+    const info = typeMap.get(type);
+    return info ? info.destructive : FALLBACK_DESTRUCTIVE.has(type);
+  };
 
   const loadAlbumFindings = async () => {
     setLoading(true);
     setActionError(null);
+    if (!identity) {
+      // no exact identity, no rows: a guess is how another album's findings
+      // got fixed from this tray
+      setFindings([]);
+      setTotal(0);
+      setActionError('This group has no artist or album name, so its issues can’t be matched.');
+      setLoading(false);
+      return;
+    }
     try {
-      const query = group.album || group.artist || '';
       const result = await fetchRepairFindings({
-        q: query,
+        group: identity,
+        jobId,
+        findingType,
         status: status || 'pending',
         page: 0,
-        limit: 100,
+        limit: TRAY_LIMIT,
       });
-
-      // Filter findings strictly for this album/artist if query returned related rows
-      const filtered = (result.items || []).filter((item) => {
-        const d = item.details || {};
-        const matchAlbum = d.album_title === group.album || d.album === group.album;
-        const matchArtist =
-          d.artist_name === group.artist ||
-          d.artist === group.artist ||
-          d.expected_artist === group.artist;
-        if (group.group_by === 'artist') return matchArtist;
-        return (
-          matchAlbum || (matchArtist && String(item.file_path || '').includes(group.album || ''))
-        );
-      });
-
-      setFindings(filtered.length > 0 ? filtered : result.items || []);
+      setFindings(result.items || []);
+      setTotal(result.total || 0);
     } catch (err) {
+      setFindings([]);
+      setTotal(0);
       setActionError((err as Error).message || 'Failed to load album issues');
     } finally {
       setLoading(false);
@@ -80,7 +137,7 @@ export function AlbumInspectionTray({
   useEffect(() => {
     void loadAlbumFindings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group.key, status]);
+  }, [group.key, group.group_by, status, jobId, findingType]);
 
   const handleFixOne = async (finding: RepairFinding) => {
     setBusyIds((prev) => new Set(prev).add(finding.id));
@@ -132,21 +189,16 @@ export function AlbumInspectionTray({
     }
   };
 
+  const markBusy = (ids: number[]) => setBusyIds(new Set(ids));
+
   const handleFixAllOnAlbum = async () => {
-    if (!findings || findings.length === 0) return;
-    // only what has a fix: the rest would be marked resolved without one
-    const fixable = findings.filter(
-      (f) => f.status === 'pending' && Boolean(findingFixLabel(f.finding_type)),
-    );
+    if (!identity || !findings || findings.length === 0) return;
+    const pending = findings.filter((f) => f.status === 'pending');
+    // only what has a fix: the server skips the rest anyway
+    const fixable = pending.filter((f) => Boolean(rowFixLabel(f)));
     if (fixable.length === 0) return;
 
-    const hasDestructive = fixable.some(
-      (f) =>
-        f.finding_type === 'corrupt_audio' ||
-        f.finding_type === 'fake_lossless' ||
-        f.finding_type === 'orphan_file',
-    );
-    if (hasDestructive) {
+    if (fixable.some((f) => isDestructive(f.finding_type))) {
       const confirmed = await window.showConfirmDialog?.({
         title: 'Resolve Album Issues',
         message: `This album has ${fixable.length} issues, including files that will be moved to quarantine and re-downloaded. Proceed?`,
@@ -156,37 +208,60 @@ export function AlbumInspectionTray({
       if (!confirmed) return;
     }
 
-    for (const f of fixable) {
-      setBusyIds((prev) => new Set(prev).add(f.id));
-      try {
-        // bulk: true — this loop is not a fix of one finding. The tray's
-        // list can span an artist's whole catalogue, every album sharing
-        // a title, or (when the filter matches nothing) up to 100 search
-        // rows, so each call must not count as an explicit single fix:
-        // that is what would let the album completeness gate wishlist
-        // other artists across all of them from one click.
-        await fixFinding(f.id, null, { bulk: true });
-      } catch {}
+    markBusy(fixable.map((f) => f.id));
+    let message = '';
+    let tone = 'success';
+    try {
+      // one call, scoped on the server: it fixes only this group's pending
+      // rows among these ids, in bulk (never an explicit single fix, so the
+      // album completeness gate can't wishlist other artists from here)
+      const result = await albumFindingAction(
+        'fix',
+        identity,
+        fixable.map((f) => f.id),
+        { jobId, findingType },
+      );
+      const fixed = result.fixed ?? 0;
+      const failed = result.failed ?? 0;
+      message =
+        failed > 0
+          ? `Fixed ${fixed} of ${result.total ?? fixable.length} issues on "${albumName}", ${failed} failed`
+          : `Resolved ${fixed} issue${fixed === 1 ? '' : 's'} on "${albumName}"`;
+      if (failed > 0) tone = 'warning';
+    } catch (err) {
+      message = (err as Error).message || 'Failed to resolve album issues';
+      tone = 'error';
     }
     setBusyIds(new Set());
     await loadAlbumFindings();
     onRefresh();
-    window.showToast?.(`Resolved all issues on "${albumName}"`, 'success');
+    window.showToast?.(message, tone);
   };
 
   const handleDismissAllOnAlbum = async () => {
-    if (!findings || findings.length === 0) return;
+    if (!identity || !findings || findings.length === 0) return;
     const pending = findings.filter((f) => f.status === 'pending');
-    for (const f of pending) {
-      setBusyIds((prev) => new Set(prev).add(f.id));
-      try {
-        await dismissFinding(f.id);
-      } catch {}
+    if (pending.length === 0) return;
+    markBusy(pending.map((f) => f.id));
+    let message = '';
+    let tone = 'info';
+    try {
+      const result = await albumFindingAction(
+        'dismiss',
+        identity,
+        pending.map((f) => f.id),
+        { jobId, findingType },
+      );
+      const updated = result.updated ?? 0;
+      message = `Dismissed ${updated} issue${updated === 1 ? '' : 's'} on "${albumName}"`;
+    } catch (err) {
+      message = (err as Error).message || 'Failed to dismiss album issues';
+      tone = 'error';
     }
     setBusyIds(new Set());
     await loadAlbumFindings();
     onRefresh();
-    window.showToast?.(`Dismissed issues on "${albumName}"`, 'info');
+    window.showToast?.(message, tone);
   };
 
   const handleReopenAllOnAlbum = async () => {
@@ -346,6 +421,15 @@ export function AlbumInspectionTray({
         </div>
       ) : null}
 
+      {!loading && findings && total > findings.length ? (
+        <div className="album-tray-alert note" role="note">
+          <span>
+            Showing the first {findings.length} of {total.toLocaleString()} issues. Album actions
+            cover the ones shown.
+          </span>
+        </div>
+      ) : null}
+
       <div className="album-tray-body">
         {loading ? (
           <div className="album-tray-loading">
@@ -360,7 +444,7 @@ export function AlbumInspectionTray({
           <div className="album-tray-tracks-list">
             {findings.map((f, idx) => {
               const details = (f.details as Record<string, any>) || {};
-              const fixLabel = findingRowFixLabel(f);
+              const fixLabel = rowFixLabel(f);
               const busy = busyIds.has(f.id);
               // Only a finding with a catalogue track behind it can open the
               // redownload search; the rest fall back to their row fix.

@@ -237,10 +237,18 @@ def repair_findings_list():
         page = _safe_int(request.args.get('page'), 0)
         limit = _safe_int(request.args.get('limit'), 50)
 
+        # one album's (or artist's) rows by the grid's own key, for the
+        # album tray (review 5 W3-TU-1); only sent when asked for
+        group = {}
+        if request.args.get('group_by'):
+            group = {'group_by': request.args.get('group_by'),
+                     'group_artist': request.args.get('group_artist'),
+                     'group_album': request.args.get('group_album')}
+
         result = _repair_worker().get_findings(
             job_id=job_id, status=status, severity=severity,
             page=page, limit=limit, finding_type=finding_type,
-            sort=sort, q=q
+            sort=sort, q=q, **group
         )
 
         # Fix Plex/Jellyfin relative thumb URLs in finding details
@@ -316,6 +324,41 @@ def repair_findings_albums():
         return jsonify({'groups': groups}), 200
     except Exception as e:
         logger.error(f"Error grouping repair findings by album: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@bp.route('/api/repair/findings/album-action', methods=['POST'])
+def repair_findings_album_action():
+    """Resolve Album / Dismiss All for one album (or artist) group.
+
+    the server decides which findings belong to the group, so an id the
+    client sends from another album is refused, not acted on (review 5
+    W3-TU-1).
+    """
+    try:
+        if _repair_worker() is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+        data = request.get_json(silent=True) or {}
+        action = data.get('action')
+        group_by = data.get('group_by') or 'album'
+        if action not in ('fix', 'dismiss'):
+            return jsonify({'error': 'action must be fix or dismiss'}), 400
+        if group_by not in ('album', 'artist'):
+            return jsonify({'error': 'group_by must be album or artist'}), 400
+        ids = data.get('ids')
+        if ids is not None:
+            if not isinstance(ids, list):
+                return jsonify({'error': 'ids must be a list'}), 400
+            try:
+                ids = [int(i) for i in ids]
+            except (TypeError, ValueError):
+                return jsonify({'error': 'ids must be numbers'}), 400
+        result = _repair_worker().album_group_action(
+            action, group_by, data.get('artist'), data.get('album'),
+            finding_ids=ids, job_id=data.get('job_id') or None,
+            finding_type=data.get('finding_type') or None)
+        return jsonify({'success': not result.get('error'), **result}), 200
+    except Exception as e:
+        logger.error(f"Error running album action: {e}")
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
