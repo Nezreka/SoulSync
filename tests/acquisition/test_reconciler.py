@@ -303,3 +303,64 @@ def test_an_unindexed_grab_is_not_name_searched_every_tick(conn, tmp_path, monke
     conn.commit()
     assert normalized in reconciler._IndexedPaths(_Spy())
 
+
+
+def _windows_normcase(monkeypatch):
+    from core.acquisition import reconciler
+
+    # what ntpath.normcase does: lowercase, backslashes
+    monkeypatch.setattr(reconciler.os.path, "normcase",
+                        lambda p: p.lower().replace("/", "\\"))
+
+
+def test_a_windows_cased_path_takes_the_index_probe(conn, tmp_path, monkeypatch):
+    """review 5 W2-WC-4: the exact probe used the normcased (lowercased on
+    Windows) path, stored paths keep their case, so every check fell to a
+    LIKE scan of every file row"""
+    from core.acquisition import reconciler
+
+    conn.execute("CREATE INDEX idx_test_files_path ON lib2_track_files(path)")
+    final = tmp_path / "Artist" / "01 - Song.flac"
+    final.parent.mkdir()
+    final.write_bytes(b"audio")
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(1, ?)", (str(final),))
+    for i in range(50):
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)",
+                     (i + 2, f"/music/other/{i}.flac"))
+    _windows_normcase(monkeypatch)
+    seen = []
+    real_execute = conn.execute
+
+    class _Spy:
+        def __getattr__(self, name):
+            return getattr(conn, name)
+
+        def execute(self, sql, *args):
+            seen.append((sql, args))
+            return real_execute(sql, *args)
+
+    assert reconciler._path_is_indexed(str(final), reconciler._IndexedPaths(_Spy()))
+    assert not [sql for sql, _ in seen if "LIKE" in sql]
+    probe_sql, probe_args = next((sql, args) for sql, args in seen if "path IN" in sql)
+    plan = " ".join(str(row[-1]) for row in real_execute(
+        "EXPLAIN QUERY PLAN " + probe_sql, *probe_args).fetchall())
+    assert "idx_test_files_path" in plan and "SCAN" not in plan, plan
+
+
+def test_a_non_ascii_capital_name_is_found_by_the_name_search(conn, tmp_path, monkeypatch):
+    """review 5 W2-WC-4: the name search used the lowercased name and LIKE
+    folds ASCII only, so "maléfica.flac" never matched "MALÉFICA.flac" and an
+    imported file read as unindexed"""
+    from core.acquisition import reconciler
+
+    final = tmp_path / "01 - BIONICA MALÉFICA.flac"
+    final.write_bytes(b"audio")
+    stored = "/media-server/$YANIC/01 - BIONICA MALÉFICA.flac"
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(1, ?)", (stored,))
+    monkeypatch.setattr(
+        "core.library2.paths.resolve_lib2_path",
+        lambda path, config_manager=None: str(final) if path == stored else None,
+    )
+    _windows_normcase(monkeypatch)
+
+    assert reconciler._path_is_indexed(str(final), reconciler._IndexedPaths(conn))
