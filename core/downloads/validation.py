@@ -530,13 +530,26 @@ _TITLE_FEATURE_RE = re.compile(
     r'[(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^)\]]+)[)\]]', re.IGNORECASE)
 
 
-def _credited_in_title(expected_artists, candidate_title) -> bool:
+def _credited_in_title(expected_artists, candidate_artist, candidate_title) -> bool:
     """A hit whose artist field names only the lead ("Topic") still credits
-    the wanted second artist when its title says "(feat. A7S)"."""
+    the wanted second artist when its title says "(feat. A7S)".
+
+    every wanted artist has to be named, in the artist field or in the title.
+    a title credit for the guest alone used to vouch for any act, so
+    "Robbe, Kuokka, ropsu" with "(feat. A7S)" passed as Topic's song
+    (review 5 W3-TD-1). a library that credits only the guest has no lead to
+    check, so there the title credit is still enough.
+    """
     from core.matching.artist_aliases import split_artist_credit
-    return any(_release_artist_matches(expected_artists, name)
-               for group in _TITLE_FEATURE_RE.findall(candidate_title or '')
-               for name in split_artist_credit(group))
+    titled = [name for group in _TITLE_FEATURE_RE.findall(candidate_title or '')
+              for name in split_artist_credit(group)]
+    if not titled:
+        return False
+    wanted = [artist for artist in expected_artists if artist]
+    return bool(wanted) and all(
+        _release_artist_matches([artist], candidate_artist or '')
+        or any(_release_artist_matches([artist], name) for name in titled)
+        for artist in wanted)
 
 
 def _release_artist_matches(expected_artists, candidate_artist):
@@ -723,7 +736,8 @@ def _score_streaming_candidates(results, spotify_track, why=None):
                     break
                 else:
                     _best_artist = max(_best_artist, _fuzzy_artist_similarity(_ea_norm, _cand_artist))
-            if _best_artist < 0.5 and _credited_in_title(expected_artists, r.title):
+            if _best_artist < 0.5 and _credited_in_title(
+                    expected_artists, _cand_artist_raw, r.title):
                 _best_artist = 1.0
             # Raised from 0.4 → 0.5 to close a fencepost bug: SequenceMatcher
             # returns exactly 0.400 for "maduk" vs "tom walker" (5 chars vs
