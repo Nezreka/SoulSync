@@ -16,6 +16,7 @@ or a narrower query), not a new entry.
 from __future__ import annotations
 
 import re
+import threading
 from collections import Counter
 
 import pytest
@@ -118,16 +119,27 @@ def test_no_library_request_scans_a_big_table(world, monkeypatch):
 
     statements: list = []
     real_get = type(db)._get_connection
+    # the test client serves a request on this thread. a background worker an
+    # earlier test left running (the enrichment backlog walks, say) opens its
+    # own connections on its own thread; its queries are no request's cost.
+    request_thread = threading.get_ident()
 
     def traced(self, *a, **k):
         conn = real_get(self, *a, **k)
-        try:
-            conn.set_trace_callback(statements.append)
-        except Exception:  # noqa: BLE001
-            pass
+        if threading.get_ident() == request_thread:
+            try:
+                conn.set_trace_callback(statements.append)
+            except Exception:  # noqa: BLE001
+                pass
         return conn
 
     monkeypatch.setattr(type(db), "_get_connection", traced)
+    # the art pickers ask cover art archive, deezer and itunes; the sweep
+    # checks queries, never the network
+    import core.metadata.art_lookup as art_lookup
+    import core.metadata.artist_image as artist_image
+    monkeypatch.setattr(art_lookup, "gather_album_art_candidates", lambda *a, **k: [])
+    monkeypatch.setattr(artist_image, "gather_artist_image_candidates", lambda *a, **k: [])
     app = world.client.application
     found: Counter = Counter()
     for profile in (1, world.sam, world.kim):
