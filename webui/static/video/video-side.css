@@ -4351,7 +4351,7 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
     text-transform: uppercase; letter-spacing: 0.04em; font-size: 9.5px; font-weight: 900; }
 .vdl-r-formats b { color: #6cd391; font-weight: 900; }
 /* why this rank (#2033): each factor and its points, in compare order */
-.vdl-why { margin-top: 2px; font-size: 10.5px; line-height: 1.4; color: rgba(255, 255, 255, 0.72); }
+.vdl-why { margin-top: 2px; font-size: 10.5px; line-height: 1.4; color: var(--white-a70); }
 .vdl-why summary { cursor: pointer; width: max-content; font-size: 9.5px; font-weight: 900; letter-spacing: 0.04em;
     text-transform: uppercase; color: rgba(var(--accent-light-rgb), 0.92); list-style: none; }
 .vdl-why summary::-webkit-details-marker { display: none; }
@@ -4360,11 +4360,11 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdl-why summary:focus-visible { outline: 1px solid rgb(var(--accent-rgb)); outline-offset: 2px; }
 .vdl-why-group { margin-top: 6px; padding-left: 8px; border-left: 2px solid rgba(var(--accent-rgb), 0.35); }
 .vdl-why-head, .vdl-why-row { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
-.vdl-why-head span { font-weight: 800; color: rgba(255, 255, 255, 0.86); }
-.vdl-why-head b { color: #6cd391; font-weight: 900; font-variant-numeric: tabular-nums; }
+.vdl-why-head span { font-weight: 800; color: var(--white-a85); }
+.vdl-why-head b { color: var(--success); font-weight: 900; font-variant-numeric: tabular-nums; }
 .vdl-why-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vdl-why-row em { flex-shrink: 0; font-style: normal; font-variant-numeric: tabular-nums; color: rgba(255, 255, 255, 0.6); }
-.vdl-why-foot { margin-top: 6px; color: rgba(255, 255, 255, 0.5); }
+.vdl-why-row em { flex-shrink: 0; font-style: normal; font-variant-numeric: tabular-nums; color: var(--white-a60); }
+.vdl-why-foot { margin-top: 6px; color: var(--white-a50); }
 .vdl-r-l3 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .vdl-r-verdict { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; min-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
