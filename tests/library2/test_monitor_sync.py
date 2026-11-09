@@ -774,6 +774,112 @@ def test_watchlist_provider_ids_are_compared_with_their_namespace(imported_conn)
     ) is False
 
 
+def _two_nirvanas(conn):
+    _ensure_watchlist_table(conn)
+    us = _add_artist(conn, "Nirvana", monitored=1, spotify_id="sp-us")
+    uk = _add_artist(conn, "Nirvana", monitored=0,
+                     external_ids='{"musicbrainz":"mb-uk-1967"}')
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1)")
+    conn.commit()
+    return us, uk
+
+
+def test_reconcile_does_not_watch_a_namesake_of_the_watched_artist(imported_conn):
+    """review 5 W2-WF-2: R5-F-2's rule on the hourly reconcile. the watched
+    US Nirvana holds the entry's id, so the UK one is not it by name"""
+    conn = imported_conn
+    us, uk = _two_nirvanas(conn)
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    reconcile_artist_watchlist(db, profile_id=1)
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)",
+                               (us, uk)).fetchall())
+    assert states == {us: 1, uk: 0}
+    rule = conn.execute("SELECT monitored FROM lib2_monitor_rules WHERE entity_type='artist' "
+                        "AND entity_id=? AND profile_id=1", (uk,)).fetchone()
+    assert rule is None or rule[0] == 0
+
+
+def test_reconcile_name_fallback_needs_one_artist_of_that_name(imported_conn):
+    """two lib2 artists of the watched name and neither holds its id: a name
+    cannot say which one, so neither is watched by it"""
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    a = _add_artist(conn, "Nirvana", monitored=0, external_ids='{"musicbrainz":"mb-a"}')
+    b = _add_artist(conn, "Nirvana", monitored=0, external_ids='{"deezer":"dz-b"}')
+    alone = _add_artist(conn, "Mudhoney", monitored=0, external_ids='{"deezer":"dz-m"}')
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1), ('sp-mud', 'Mudhoney', 1)")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    reconcile_artist_watchlist(db, profile_id=1)
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?,?)",
+                               (a, b, alone)).fetchall())
+    # the only artist of a watched name still matches it across namespaces
+    assert states == {a: 0, b: 0, alone: 1}
+
+
+def test_reconcile_name_fallback_still_watches_an_alias_of_the_artist(imported_conn):
+    """an alias row (§40) is the same artist, not a namesake"""
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    main = _add_artist(conn, "Nirvana", monitored=0, external_ids='{"musicbrainz":"mb-a"}')
+    alias = _add_artist(conn, "Nirvana", monitored=0, external_ids='{"deezer":"dz-b"}')
+    conn.execute("UPDATE lib2_artists SET canonical_artist_id=? WHERE id=?", (main, alias))
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1)")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    reconcile_artist_watchlist(db, profile_id=1)
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)",
+                               (main, alias)).fetchall())
+    assert states == {main: 1, alias: 1}
+
+
+def test_a_new_namesake_is_not_born_watched(imported_conn):
+    """review 5 W2-WF-2 at insert time (autolink)"""
+    from core.library2.monitor_sync import artist_is_watchlisted
+
+    conn = imported_conn
+    _two_nirvanas(conn)
+    assert artist_is_watchlisted(
+        conn, "Nirvana", {"musicbrainz": "mb-uk-1967"}, profile_id=1) is False
+    # the watched artist itself, by id, still is
+    assert artist_is_watchlisted(conn, "Nirvana", {"spotify": "sp-us"}, profile_id=1) is True
+
+
+def test_a_new_artist_is_not_watched_by_name_when_another_holds_the_id(imported_conn):
+    from core.library2.monitor_sync import artist_is_watchlisted
+
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    _add_artist(conn, "Nirvana (US)", monitored=1, spotify_id="sp-us")
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1)")
+    conn.commit()
+    assert artist_is_watchlisted(
+        conn, "Nirvana", {"musicbrainz": "mb-uk-1967"}, profile_id=1) is False
+
+
+def test_a_watched_artists_first_row_is_still_born_watched_by_name(imported_conn):
+    """the watchlist knows a spotify id, the first download came from deezer:
+    no lib2 artist of that name or id yet, so the name still says it"""
+    from core.library2.monitor_sync import artist_is_watchlisted
+
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1)")
+    conn.commit()
+    assert artist_is_watchlisted(conn, "Nirvana", {"deezer": "dz-1"}, profile_id=1) is True
+
+
 def _stale_wishlist_row(conn, track_id: int, provider_id: str) -> None:
     conn.execute(
         """CREATE TABLE IF NOT EXISTS wishlist_tracks(

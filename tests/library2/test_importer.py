@@ -1931,6 +1931,30 @@ def test_title_feature_list_splits_when_track_credit_supplies_a_known_anchor(leg
     assert "Wizkid & Kyla" not in names
 
 
+def test_watchlist_import_does_not_watch_a_namesake(imported_conn):
+    """review 5 W2-WF-2: the import's watchlist adoption takes the reconcile's
+    narrowed name fallback, so the UK Nirvana is not watched because the US
+    one (which holds the entry's spotify id) is"""
+    from core.library2.importer import apply_monitoring_from_watchlist_wishlist
+
+    conn = imported_conn
+    conn.execute("DROP TABLE IF EXISTS watchlist_artists")
+    conn.execute("CREATE TABLE watchlist_artists(id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                 "artist_name TEXT NOT NULL, spotify_artist_id TEXT, musicbrainz_artist_id TEXT)")
+    conn.execute("INSERT INTO watchlist_artists(artist_name, spotify_artist_id) "
+                 "VALUES('Nirvana', 'sp-us')")
+    us = conn.execute("INSERT INTO lib2_artists(name, spotify_id) "
+                      "VALUES('Nirvana', 'sp-us')").lastrowid
+    uk = conn.execute("INSERT INTO lib2_artists(name, external_ids) "
+                      "VALUES('Nirvana', '{\"musicbrainz\":\"mb-uk\"}')").lastrowid
+
+    apply_monitoring_from_watchlist_wishlist(conn.cursor())
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)",
+                               (us, uk)).fetchall())
+    assert states == {us: 1, uk: 0}
+
+
 def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("""

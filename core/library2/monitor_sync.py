@@ -102,34 +102,62 @@ class _WatchlistIndex:
     The reconcile asked it once per (artist, entry) pair while holding the
     write lock: 20k artists times 2k watchlist rows is 40M comparisons an
     hour. Same answer, through two lookups: a shared provider id, or the same
-    normalized name with no contradicting id in a shared namespace."""
+    normalized name with no contradicting id in a shared namespace.
 
-    def __init__(self, entries) -> None:
+    ``artists`` (identity, name, ids) narrows the name fallback the way
+    R5-F-2 narrowed the removal: a name stands in for an entry only when no
+    other lib2 artist already holds the entry's id and only one artist carries
+    that name. the watched US Nirvana (spotify id) otherwise also watched a
+    UK Nirvana that carries only a MusicBrainz id (review 5 W2-WF-2). an
+    identity is the canonical row, so an alias of the watched artist is not
+    a namesake of it."""
+
+    def __init__(self, entries, artists=None) -> None:
         from core.library2.importer import normalize_name
 
         self._normalize = normalize_name
-        self._by_id: Dict[tuple, int] = {}
-        self._by_name: Dict[str, List[Dict[str, str]]] = {}
-        for entry in entries or ():
+        self._by_id: Dict[tuple, List[int]] = {}
+        self._by_name: Dict[str, List[tuple]] = {}
+        for index, entry in enumerate(entries or ()):
             ids = _clean_ids(entry.get("provider_ids") or {})
             for pair in ids.items():
-                self._by_id[pair] = 1
+                self._by_id.setdefault(pair, []).append(index)
             key = normalize_name(entry.get("name"))
             if key:
-                self._by_name.setdefault(key, []).append(ids)
+                self._by_name.setdefault(key, []).append((index, ids))
+        self._claimed: Dict[int, set] = {}
+        self._namesakes: Dict[str, set] = {}
+        for identity, name, ids in artists or ():
+            key = normalize_name(name)
+            if key:
+                self._namesakes.setdefault(key, set()).add(identity)
+            for pair in _clean_ids(ids).items():
+                for index in self._by_id.get(pair, ()):
+                    self._claimed.setdefault(index, set()).add(identity)
 
-    def matches(self, name: Optional[str], ids: Mapping[str, Any]) -> bool:
+    def matching_entries(self, name: Optional[str], ids: Mapping[str, Any],
+                         identity: Any = None) -> List[int]:
+        """Indexes of the entries this artist is. ``identity`` turns on the
+        narrowed name fallback (needs ``artists``)."""
         candidate = _clean_ids(ids)
-        if any(pair in self._by_id for pair in candidate.items()):
-            return True
+        found = {index for pair in candidate.items()
+                 for index in self._by_id.get(pair, ())}
         key = self._normalize(name)
-        if not key:
-            return False
-        for watched in self._by_name.get(key, ()):
-            if not any(candidate[source] != watched[source]
-                       for source in set(candidate) & set(watched)):
-                return True
-        return False
+        if key and not (identity is not None
+                        and len(self._namesakes.get(key, ())) > 1):
+            for index, watched in self._by_name.get(key, ()):
+                if index in found or any(
+                        candidate[source] != watched[source]
+                        for source in set(candidate) & set(watched)):
+                    continue
+                if identity is not None and self._claimed.get(index, set()) - {identity}:
+                    continue
+                found.add(index)
+        return sorted(found)
+
+    def matches(self, name: Optional[str], ids: Mapping[str, Any],
+                identity: Any = None) -> bool:
+        return bool(self.matching_entries(name, ids, identity))
 
 
 def _match_lib2_artists(
@@ -861,11 +889,52 @@ def artist_is_watchlisted(
     )
     if not available:
         return False
-    return any(
-        _artist_identity_matches(
-            name, provider_ids or {}, entry["name"], entry["provider_ids"])
-        for entry in watchlist_entries
-    )
+    candidate = _clean_ids(provider_ids or {})
+    if any(_artist_identity_matches(None, candidate, None, entry["provider_ids"])
+           for entry in watchlist_entries):
+        return True
+    named = [entry for entry in watchlist_entries
+             if _artist_identity_matches(name, candidate, entry["name"], entry["provider_ids"])]
+    if not named:
+        return False
+    # review 5 W2-WF-2: R5-F-2's rule at insert time. a name is not enough
+    # when a lib2 artist of that name already exists (autolink only mints a
+    # second one for a different artist), or when another artist already
+    # holds the watched entry's id: that one is the watched artist
+    if _name_is_taken(conn, name):
+        return False
+    return any(not any(_provider_id_is_held(conn, source, value)
+                       for source, value in _clean_ids(entry["provider_ids"]).items())
+               for entry in named)
+
+
+def _name_is_taken(conn: Any, name: Optional[str]) -> bool:
+    from core.library2.importer import normalize_name
+
+    key = normalize_name(name)
+    if not key:
+        return False
+    if conn.execute("SELECT 1 FROM lib2_artists WHERE name_key=? LIMIT 1", (key,)).fetchone():
+        return True
+    # rows no keyed write produced (the startup backfill keys them)
+    return any(normalize_name(row[0]) == key for row in conn.execute(
+        "SELECT name FROM lib2_artists WHERE name_key IS NULL"))
+
+
+def _provider_id_is_held(conn: Any, source: str, value: str) -> bool:
+    from core.library2.provider_ids import external_id_sql
+
+    if source == "spotify":
+        where = "spotify_id = ?"
+    elif source == "musicbrainz":
+        where = "musicbrainz_id = ?"
+    else:
+        try:
+            where = f"{external_id_sql('external_ids', source)} = ?"
+        except ValueError:
+            return False
+    return conn.execute(
+        f"SELECT 1 FROM lib2_artists WHERE {where} LIMIT 1", (value,)).fetchone() is not None
 
 
 def reconcile_artist_watchlist(
@@ -901,7 +970,7 @@ def reconcile_artist_watchlist(
             }
         rows = conn.execute(
             """SELECT ar.id, ar.name, ar.monitored, ar.spotify_id,
-                      ar.musicbrainz_id, ar.external_ids,
+                      ar.musicbrainz_id, ar.external_ids, ar.canonical_artist_id,
                       rule.monitored AS rule_monitored,
                       rule.provenance AS rule_provenance
                  FROM lib2_artists ar
@@ -925,15 +994,19 @@ def reconcile_artist_watchlist(
         affected_tracks: set[int] = set()
         outbox_ids: List[int] = []
         shared_intent = int(profile_id) == 1
-        watchlist_index = _WatchlistIndex(watchlist_entries)
-        for row in rows:
-            artist_id = int(row["id"])
-            ids = source_ids_from_values(
+        artists = [(
+            int(row["canonical_artist_id"] or row["id"]),
+            row["name"],
+            source_ids_from_values(
                 spotify_id=row["spotify_id"],
                 musicbrainz_id=row["musicbrainz_id"],
                 external_ids=row["external_ids"],
-            )
-            on_watchlist = watchlist_index.matches(row["name"], ids)
+            ),
+        ) for row in rows]
+        watchlist_index = _WatchlistIndex(watchlist_entries, artists)
+        for row, (identity, _name, ids) in zip(rows, artists, strict=True):
+            artist_id = int(row["id"])
+            on_watchlist = watchlist_index.matches(row["name"], ids, identity)
             explicit = row["rule_provenance"] == PROVENANCE_USER
             desired = bool(row["rule_monitored"]) if explicit else on_watchlist
 

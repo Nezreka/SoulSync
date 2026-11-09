@@ -3560,24 +3560,29 @@ def apply_monitoring_from_watchlist_wishlist(cursor, profile_id: Optional[int] =
             ),
         } for row in wl]
         known_profiles = _known_quality_profiles(cursor)
-        from core.library2.monitor_sync import _artist_identity_matches
+        from core.library2.monitor_sync import _WatchlistIndex
         from core.library2.profile_lookup import assign_quality_profile
         from core.library2.provider_ids import source_ids_from_values
-        for artist in cursor.execute(
-            "SELECT id, name, spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
-        ).fetchall():
-            artist_ids = source_ids_from_values(
+        canonical = (", canonical_artist_id"
+                     if "canonical_artist_id" in _existing_columns(cursor, "lib2_artists") else "")
+        rows = cursor.execute(
+            f"SELECT id, name, spotify_id, musicbrainz_id, external_ids{canonical} FROM lib2_artists"
+        ).fetchall()
+        artists = [(
+            int((canonical and artist["canonical_artist_id"]) or artist["id"]),
+            artist["name"],
+            source_ids_from_values(
                 spotify_id=artist["spotify_id"],
                 musicbrainz_id=artist["musicbrainz_id"],
                 external_ids=artist["external_ids"],
-            )
-            matches = [
-                entry for entry in watchlist_entries
-                if _artist_identity_matches(
-                    artist["name"], artist_ids,
-                    entry["name"], entry["provider_ids"],
-                )
-            ]
+            ),
+        ) for artist in rows]
+        # review 5 W2-WF-2: the reconcile's narrowed name fallback, so the
+        # import does not watch a namesake the reconcile then unwatches
+        index = _WatchlistIndex(watchlist_entries, artists)
+        for artist, (identity, _name, artist_ids) in zip(rows, artists, strict=True):
+            matches = [watchlist_entries[i] for i in
+                       index.matching_entries(artist["name"], artist_ids, identity)]
             if not matches:
                 continue
             cursor.execute(
