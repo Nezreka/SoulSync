@@ -1366,6 +1366,14 @@ def _track_artists_many(
     return result
 
 
+# a download's file name: what follows the last slash or backslash of its
+# path (rtrim drops every trailing character that is not one). indexed as
+# idx_td_file_name, so it must stay this exact expression
+TRACK_DOWNLOAD_FILE_NAME_SQL = (
+    "substr(file_path, length(rtrim(file_path,"
+    " replace(replace(file_path, '/', ''), '\\', ''))) + 1)")
+
+
 def _download_provenance_for_path(conn, path: Optional[str], *,
                                   track: Any = None,
                                   album: Optional[Dict[str, Any]] = None,
@@ -1492,9 +1500,10 @@ def _download_provenance_many(
         params.extend(value.lower() if lower else value for value in values)
 
     _in("file_path", paths)
-    for filename in filenames:
-        predicates.append("(file_path LIKE ? OR file_path LIKE ?)")
-        params.extend((f"%/{filename}", f"%\\{filename}"))
+    # the file name, through its index. one "LIKE '%/name'" pair per track
+    # read the whole history once per track (0.96 s for a 468-track album on
+    # the 300k copy, review 5 perf); the match below wants the exact name
+    _in(TRACK_DOWNLOAD_FILE_NAME_SQL, filenames)
     _in("spotify_track_id", _values("spotify_id"))
     _in("musicbrainz_recording_id", _values("musicbrainz_id"))
     _in("isrc", _values("isrc"))
