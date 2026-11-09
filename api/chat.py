@@ -333,19 +333,6 @@ def _gif_fetch(url: str, params: dict) -> dict:
     return r.json()
 
 
-def _library_like(text) -> str:
-    """A ``LIKE ... ESCAPE '\\'`` needle for a typed search box.
-
-    Accents fold (``unidecode_lower`` on the column side), and the LIKE
-    metacharacters are escaped: in a search box ``%`` and ``_`` are letters
-    someone typed, not a request to match everything.
-    """
-    from core.text.normalize import normalize_for_comparison
-    folded = normalize_for_comparison(str(text or ''))
-    escaped = folded.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-    return f"%{escaped}%"
-
-
 # the radio's library artist, folded across accents. unidecode_lower(name)
 # ran python over every artist (1 s on 30k, review 5 W3-TB-4); the indexed
 # name_key answers every plain spelling, and only the accented keys, read off
@@ -358,6 +345,117 @@ _RADIO_ARTIST_SQL = (
     " WHERE id IN (SELECT id FROM lib2_artists"
     "               WHERE name_key GLOB '*[^ -~]*' AND name_key <> :key"
     "                 AND unidecode_lower(name_key) = :folded)")
+
+
+# the share-from-library search (review 5 W3-TB-1). it ran two correlated
+# subqueries and three python folds per track over the whole library before
+# its LIMIT: 13.8 s for two letters, 3.5 s for "the". now it picks the 20
+# ids first, from the Songs search index, and only those 20 are decorated
+_SHARE_ROWS = 20
+# a match list this short is ordered in one go
+_SHARE_SORT_CAP = 2000
+# a broader one walks A to Z this many tracks at a time and stops at 20
+_SHARE_WALK_CHUNK = 2000
+_SHARE_WALK_CHUNKS = 10
+
+
+def _share_live_file_sql(alias):
+    """A non-deleted file with a path, in the caller's library: another
+    profile's own copy is not theirs to share (review 5 W3-TB-2)."""
+    from core.library2.sql_util import owner_clause
+    return (f"EXISTS (SELECT 1 FROM lib2_track_files lf WHERE lf.track_id = {alias}.id"
+            " AND COALESCE(lf.file_state, 'active') <> 'deleted'"
+            " AND COALESCE(lf.path, '') <> ''"
+            f"{owner_clause(column='lf.owner_profile_id')})")
+
+
+def _share_search_ids(conn, query):
+    """Up to 20 matching track ids with a live file here, A to Z (the Songs
+    tab's A-Z key, read off its index). Matches title, track artist or album
+    artist, folded the way the Songs search folds them."""
+    from core.library2 import song_search
+    from core.library2.queries import _fold_sql
+    from database.music_database import _library_sort_key_sql
+
+    folded = song_search.fold(query)
+    like = song_search.like_pattern(folded)
+    live = _share_live_file_sql("t")
+    key = _library_sort_key_sql("t.title")
+
+    def ordered(ids):
+        return [r[0] for r in conn.execute(
+            f"SELECT t.id FROM json_each(:ids) j CROSS JOIN lib2_tracks t ON t.id = j.value"
+            f" WHERE {live} ORDER BY {key}, t.id LIMIT {_SHARE_ROWS}",
+            {"ids": json.dumps(sorted(set(ids)))})]
+
+    hits = song_search.indexed_ids(conn, folded, limit=_SHARE_SORT_CAP + 1)
+    if hits is None:
+        # the index is not built yet: fold every track live, ascii in C
+        song_search.register_fold(conn)
+        return [r[0] for r in conn.execute(
+            f"""SELECT t.id FROM lib2_tracks t
+                  JOIN lib2_albums al ON al.id = t.album_id
+                  LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+                 WHERE ({_fold_sql('t.title')} LIKE :like ESCAPE '\\'
+                        OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'
+                        OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\')
+                   AND {live}
+                 ORDER BY {key}, t.id LIMIT {_SHARE_ROWS}""",
+            {"like": like})]
+    dirty = song_search.dirty_matches(conn, like)
+    if len(hits) <= _SHARE_SORT_CAP:
+        return ordered(hits + dirty)
+
+    # a broad query: its first 20 sit near the top of A to Z, so walk the
+    # alpha index a chunk at a time instead of sorting every match
+    found = []
+    match = song_search.indexed_match_sql("t.id")
+    for step in range(_SHARE_WALK_CHUNKS):
+        chunk = [r[0] for r in conn.execute(
+            f"SELECT t.id FROM lib2_tracks t ORDER BY {key}, t.id LIMIT ? OFFSET ?",
+            (_SHARE_WALK_CHUNK, step * _SHARE_WALK_CHUNK))]
+        found += [r[0] for r in conn.execute(
+            f"""SELECT t.id FROM json_each(:chunk) j
+                  CROSS JOIN lib2_tracks t ON t.id = j.value
+                 WHERE (t.id IN (SELECT value FROM json_each(:dirty)) OR {match})
+                   AND {live}
+                 ORDER BY j.key LIMIT {_SHARE_ROWS - len(found)}""",
+            {"chunk": json.dumps(chunk), "dirty": json.dumps(dirty), "like": like})]
+        if len(found) >= _SHARE_ROWS or len(chunk) < _SHARE_WALK_CHUNK:
+            return found
+    # many matches but few with a file here (a small own library): sort them all
+    return ordered(song_search.indexed_ids(conn, folded) + dirty)
+
+
+def _share_search_rows(conn, ids):
+    """The picked tracks with their file size, credit and album, in order."""
+    if not ids:
+        return []
+    from core.library2.sql_util import owner_clause
+    from core.library2.track_files import primary_order
+    return conn.execute(
+        f"""SELECT t.id, t.title, tf.size,
+                  COALESCE(credited.name, album_artist.name, '') AS artist,
+                  COALESCE(al.title, '') AS album
+             FROM json_each(:ids) j
+             CROSS JOIN lib2_tracks t ON t.id = j.value
+             LEFT JOIN lib2_albums al ON al.id = t.album_id
+             JOIN lib2_track_files tf ON tf.id = (
+                  SELECT f.id FROM lib2_track_files f
+                   WHERE f.track_id = t.id
+                     AND COALESCE(f.file_state, 'active') <> 'deleted'
+                     AND COALESCE(f.path, '') <> ''
+                     {owner_clause(column='f.owner_profile_id')}
+                   ORDER BY {primary_order('f')} LIMIT 1)
+             LEFT JOIN lib2_artists album_artist
+                    ON album_artist.id = al.primary_artist_id
+             LEFT JOIN lib2_artists credited ON credited.id = (
+                  SELECT ta.artist_id FROM lib2_track_artists ta
+                   WHERE ta.track_id = t.id
+                   ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
+                            ta.position, ta.artist_id LIMIT 1)
+            ORDER BY j.key""",
+        {"ids": json.dumps(list(ids))}).fetchall()
 
 
 def _resolve_track_path(db, track_id):
@@ -1086,7 +1184,8 @@ def create_blueprint() -> Blueprint:
     @bp.route("/api/chat/files/library-search", methods=["GET"])
     def chat_files_library_search():
         """Pick-a-track-from-your-library search for the share flow: title or
-        artist match, only tracks with a stored file path, 20 max."""
+        artist match, only tracks with a stored file path in the caller's
+        library, 20 max, A to Z."""
         db = _db()
         if db is None:
             return jsonify({"tracks": []})
@@ -1095,47 +1194,10 @@ def create_blueprint() -> Blueprint:
             return jsonify({"tracks": []})
         conn = None
         try:
-            from core.library2.track_files import primary_order
             from core.library2 import song_search
-            from core.library2.sql_util import owner_clause
             conn = db._get_connection()
-            # the Songs tab's search index reads the matches, not the library:
-            # the folded LIKE over every track ran per keystroke. without the
-            # index (not built yet, under three letters) the query below runs
-            hits = song_search.matching_ids(conn, song_search.fold(query))
-            if hits is not None:
-                where = "t.id IN (SELECT value FROM json_each(:ids))"
-                params = {"ids": json.dumps(hits)}
-            else:
-                where = ("unidecode_lower(t.title) LIKE :like ESCAPE '\\'"
-                         " OR unidecode_lower(COALESCE(credited.name, '')) LIKE :like ESCAPE '\\'"
-                         " OR unidecode_lower(COALESCE(album_artist.name, '')) LIKE :like ESCAPE '\\'")
-                params = {"like": _library_like(query)}
-            # the file must be in the caller's library, like resolve-share:
-            # offering another profile's own copy shares it out (review 5 W3-TB-2)
-            rows = conn.execute(
-                f"""SELECT t.id, t.title, tf.path, tf.size,
-                          COALESCE(credited.name, album_artist.name, '') AS artist,
-                          COALESCE(al.title, '') AS album
-                   FROM lib2_tracks t
-                   JOIN lib2_albums al ON al.id = t.album_id
-                   JOIN lib2_track_files tf ON tf.id = (
-                        SELECT f.id FROM lib2_track_files f
-                         WHERE f.track_id = t.id
-                           AND COALESCE(f.file_state, 'active') <> 'deleted'
-                           AND COALESCE(f.path, '') <> ''
-                           {owner_clause(column='f.owner_profile_id')}
-                         ORDER BY {primary_order('f')} LIMIT 1)
-                   LEFT JOIN lib2_artists album_artist
-                          ON album_artist.id = al.primary_artist_id
-                   LEFT JOIN lib2_artists credited ON credited.id = (
-                        SELECT ta.artist_id FROM lib2_track_artists ta
-                         WHERE ta.track_id = t.id
-                         ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END,
-                                  ta.position, ta.artist_id LIMIT 1)
-                   WHERE {where}
-                   ORDER BY t.title LIMIT 20""",
-                params).fetchall()
+            ids = _share_search_ids(conn, query)
+            rows = _share_search_rows(conn, ids)
             return jsonify({"tracks": [
                 {"id": r["id"], "title": r["title"], "artist": r["artist"],
                  "album": r["album"], "size": r["size"]}
@@ -1146,6 +1208,12 @@ def create_blueprint() -> Blueprint:
         finally:
             if conn:
                 conn.close()
+            # build the index (or catch it up) for the next keystroke, as
+            # opening the Songs tab does
+            try:
+                song_search.refresh_in_background(db)
+            except Exception:  # noqa: BLE001
+                logger.debug("chat: song index refresh failed", exc_info=True)
 
     @bp.route("/api/chat/wanted/resolve-share", methods=["POST"])
     def chat_wanted_resolve_share():

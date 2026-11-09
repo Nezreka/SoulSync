@@ -630,13 +630,14 @@ def test_library_search_reads_the_song_index_once_it_is_built(files_app, monkeyp
     http, state, client, uploads = files_app
     assert song_search.rebuild(state["db"]) is True
     used = []
-    real = song_search.matching_ids
-    def spy(conn, q):
-        hits = real(conn, q)
+    # the search reads the index through indexed_ids now, capped (review 5 W3-TB-1)
+    real = song_search.indexed_ids
+    def spy(conn, q, limit=None):
+        hits = real(conn, q, limit=limit)
         used.append((q, hits is not None))
         return hits
 
-    monkeypatch.setattr(song_search, "matching_ids", spy)
+    monkeypatch.setattr(song_search, "indexed_ids", spy)
 
     body = http.get("/api/chat/files/library-search?q=muse").get_json()
 
@@ -645,3 +646,150 @@ def test_library_search_reads_the_song_index_once_it_is_built(files_app, monkeyp
     assert [t["title"] for t in http.get(
         "/api/chat/files/library-search?q=upri").get_json()["tracks"]] == ["Uprising"]
 
+
+
+# ── review 5 W3-TB-1: the share search picks its 20 before it decorates ──────
+
+_SHARE_TITLES = ("Zebra Muse", "'Apostrophe", "alpha", "Bravo", "charlie", "Delta",
+                 "echo", "Foxtrot", "golf", "Hotel", "india", "Juliet", "kilo",
+                 "Lima", "mike", "November", "oscar", "Papa", "quebec", "Romeo",
+                 "sierra", "Tango", "uniform", "Victor", "whiskey", "X-ray",
+                 "yankee", "Zulu", "(Bracketed)", "...Dots")
+
+
+def _seed_share_library(db):
+    """thirty Muse songs with a file, inserted out of A-Z order, plus a
+    song by someone else, one with a deleted file and one with no path"""
+    with db._get_connection() as conn:
+        muse = conn.execute("SELECT id FROM lib2_artists WHERE name='Muse'").fetchone()[0]
+        album = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title, origin)"
+                             " VALUES(?,?,'library')", (muse, "Drones")).lastrowid
+        other = conn.execute("INSERT INTO lib2_artists(name, name_key) VALUES('Nobody','nobody')").lastrowid
+        other_album = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title, origin)"
+                                   " VALUES(?,?,'library')", (other, "Elsewhere")).lastrowid
+        for title in _SHARE_TITLES:
+            t = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?,?)",
+                             (album, title)).lastrowid
+            conn.execute("INSERT INTO lib2_track_files(track_id, path, size) VALUES(?,?,10)",
+                         (t, f"/m/{t}.flac"))
+        t = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_artist) VALUES(?,?,?)",
+                         (other_album, "Plain Song", "Mu Feat")).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, size) VALUES(?,?,10)",
+                     (t, f"/m/{t}.flac"))
+        t = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?,?)",
+                         (album, "Aaa Deleted")).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, size, file_state)"
+                     " VALUES(?,?,10,'deleted')", (t, f"/m/{t}.flac"))
+        t = conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?,?)",
+                         (album, "Aaa Pathless")).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, size) VALUES(?,'',10)", (t,))
+        conn.commit()
+
+
+def _expected_share_hits(db, query):
+    """the answer worked out in python: a match on title, track artist or
+    album artist, a live file with a path, A to Z by the Songs key, 20 max"""
+    from database.music_database import _LIBRARY_SORT_STRIP_CHARS
+    q = query.lower()
+    with db._get_connection() as conn:
+        rows = conn.execute(
+            """SELECT t.id, t.title, t.track_artist, ar.name,
+                      EXISTS (SELECT 1 FROM lib2_track_files f WHERE f.track_id = t.id
+                               AND COALESCE(f.file_state,'active') <> 'deleted'
+                               AND COALESCE(f.path,'') <> '') AS live
+                 FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
+                 LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id""").fetchall()
+    hits = [r for r in rows if r[4] and any(q in (v or "").lower() for v in (r[1], r[2], r[3]))]
+    hits.sort(key=lambda r: (r[1].lstrip(_LIBRARY_SORT_STRIP_CHARS).lower(), r[0]))
+    return [r[0] for r in hits[:20]]
+
+
+@pytest.mark.parametrize("mode", ["sorted", "walked", "walk_ran_out", "index_not_built"])
+@pytest.mark.parametrize("query", ["mu", "muse", "o", "ra", "zzz"])
+def test_library_search_answers_the_same_on_every_path(files_app, monkeypatch, mode, query):
+    """the short match list is sorted, a broad one walked A to Z, and a walk
+    that runs out (few files here) sorts every match; before the index exists
+    the library is folded live. all four give the same 20, in the same order"""
+    from core.library2 import song_search
+
+    http, state, client, uploads = files_app
+    db = state["db"]
+    _seed_share_library(db)
+    if mode != "index_not_built":
+        assert song_search.rebuild(db) is True
+        # a rename after the build: the index row is stale, the track is dirty
+        with db._get_connection() as conn:
+            conn.execute("UPDATE lib2_tracks SET title='Amuse Bouche' WHERE title='Plain Song'")
+            conn.commit()
+    else:
+        with db._get_connection() as conn:
+            conn.execute("UPDATE lib2_tracks SET title='Amuse Bouche' WHERE title='Plain Song'")
+            conn.commit()
+    if mode == "walked":
+        monkeypatch.setattr(chat_api, "_SHARE_SORT_CAP", 1)
+        monkeypatch.setattr(chat_api, "_SHARE_WALK_CHUNK", 4)
+    elif mode == "walk_ran_out":
+        monkeypatch.setattr(chat_api, "_SHARE_SORT_CAP", 1)
+        monkeypatch.setattr(chat_api, "_SHARE_WALK_CHUNK", 2)
+        monkeypatch.setattr(chat_api, "_SHARE_WALK_CHUNKS", 2)
+
+    body = http.get(f"/api/chat/files/library-search?q={query}").get_json()
+
+    expected = _expected_share_hits(db, query) if len(query) >= 2 else []
+    assert [t["id"] for t in body["tracks"]] == expected
+    if query == "muse":
+        assert len(expected) == 20  # the cap is exercised, not just a short list
+
+
+@pytest.mark.parametrize("query", ["mu", "muse"])
+def test_library_search_decorates_only_the_twenty_it_returns(files_app, query):
+    """the file, credit and album lookups ran for every match before the
+    LIMIT, over the whole library for two letters (13.8 s live). now no
+    statement scans the tracks or albums table and the decorating one gets
+    the 20 picked ids"""
+    import json as _json
+    import re as _re
+    from core.library2 import song_search
+
+    http, state, client, uploads = files_app
+    db = state["db"]
+    _seed_share_library(db)
+    assert song_search.rebuild(db) is True
+    seen = []
+    real = db._get_connection
+
+    def traced():
+        conn = real()
+        conn.set_trace_callback(seen.append)
+        return conn
+
+    db._get_connection = traced
+    try:
+        body = http.get(f"/api/chat/files/library-search?q={query}").get_json()
+    finally:
+        db._get_connection = real
+    assert len(body["tracks"]) == 20
+
+    scan = _re.compile(r"^SCAN (t|lib2_tracks|al|lib2_albums)( |$)")
+    statements = [s for s in seen if s.lstrip().upper().startswith("SELECT")]
+    with real() as conn:
+        for sql in statements:
+            plan = [row[3] for row in conn.execute("EXPLAIN QUERY PLAN " + sql)]
+            bad = [step for step in plan if scan.match(step) and "COVERING INDEX" not in step]
+            assert bad == [], (sql, plan)
+    decorate = [s for s in statements if "lib2_track_artists" in s]
+    assert len(decorate) == 1
+    ids = _json.loads(_re.search(r"json_each\('(\[[^']*\])'\)", decorate[0]).group(1))
+    assert len(ids) == 20
+
+
+def test_attach_search_drops_an_answer_to_an_older_query():
+    """the box asks per keystroke; an older, slower answer landing last used
+    to replace the newer list (review 5 W3-TB-1)"""
+    js = (_ROOT / "webui" / "static" / "chat.js").read_text(encoding="utf-8")
+    body = js.split("function attachLibrarySearch")[1].split("\n    function ")[0]
+    assert "var seq = ++_attachSearchSeq;" in body
+    assert "seq !== _attachSearchSeq" in body
+    # the bump comes before the short-query return, so clearing the box also
+    # retires an answer still in flight
+    assert body.index("++_attachSearchSeq") < body.index("qstr.length < 2")
