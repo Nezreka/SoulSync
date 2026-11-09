@@ -958,8 +958,15 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
             return {"success": False, "error": str(exc)}
 
         if source_row_count(current_watermark):
-            from core.maintenance.dedupe_source_ids import repair_imported_state
-            repair_imported_state(database)
+            # the import is committed: a failing repair must not leave the
+            # claim "running" (workers paused, autostart refused) until the
+            # stale window, then fail the same way on every reclaim. it also
+            # runs from the maintenance import. review 5 W2-WE-3
+            try:
+                from core.maintenance.dedupe_source_ids import repair_imported_state
+                repair_imported_state(database)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Library v2 post-import repair failed: %s", exc, exc_info=True)
 
         if post_import is not None:
             try:
