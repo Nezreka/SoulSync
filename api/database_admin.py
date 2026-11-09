@@ -735,19 +735,20 @@ def _run_soulsync_deep_scan():
 def _own_library_scan_clients(server_type):
     """(profile, client) for every profile with a library of its own (#1199):
     the media client connected as that profile, on that profile's server
-    library. plex and jellyfin only; navidrome has one music folder per
-    server, so an own library there is a second server and stays shared."""
+    library. plex, jellyfin, and navidrome 0.58+ (one navidrome library per
+    profile, read as their own navidrome user, #2031). an older navidrome
+    has one library per server, so an own library there stays shared."""
     db = get_database()
     profiles = db.get_own_library_profiles()
     if not profiles:
         return []
-    from core.media_server import specs
-    _descriptor = specs.describe(server_type)
-    if not (_descriptor and _descriptor.supports_own_libraries):
+    from core.library_scope import own_library_unsupported_reason
+    _reason = own_library_unsupported_reason(server_type)
+    if _reason:
         logger.info(
-            "[Own Library] Active media server '%s' does not support per-profile libraries; "
+            "[Own Library] Active media server '%s' does not support per-profile libraries (%s); "
             "skipping own-library scans for %d profile(s)",
-            server_type, len(profiles)
+            server_type, _reason, len(profiles)
         )
         return []
     base = media_server_engine.client(server_type) if media_server_engine else None
@@ -764,6 +765,10 @@ def _own_library_scan_clients(server_type):
                     logger.warning(f"[Own Library] profile {prof['name']} has no Jellyfin library picked; skipping its scan")
                     continue
                 client = base.as_user(libs.get('jellyfin_user_id') or base.user_id, library_id)
+            elif server_type == 'navidrome':
+                client = _navidrome_own_library_client(db, base, prof, libs)
+                if client is None:
+                    continue
             else:
                 library_name = libs.get('plex_library_id')
                 if not library_name:
@@ -789,6 +794,32 @@ def _own_library_scan_clients(server_type):
             continue
         out.append((prof, client))
     return out
+
+
+def _navidrome_own_library_client(db, base, prof, libs):
+    """the navidrome client for one own-library profile's scan (#2031): a
+    view on its picked library (musicFolderId on every listing), as its own
+    navidrome user when it saved a login, never a change to the shared
+    client. None (and why, logged) when there is nothing safe to scan."""
+    folder = libs.get('navidrome_library_id')
+    if not folder:
+        logger.warning(f"[Own Library] profile {prof['name']} has no Navidrome library picked; skipping its scan")
+        return None
+    if not base.ensure_connection():
+        return None
+    shared = str(getattr(base, 'music_folder_id', None) or '')
+    if not shared:
+        logger.warning(f"[Own Library] the shared Navidrome scan reads every library (no music folder picked "
+                       f"in settings), so {prof['name']}'s library is in it too; pick the shared folder")
+    elif shared == str(folder):
+        logger.warning(f"[Own Library] {prof['name']}'s Navidrome library is the shared one; skipping its scan")
+        return None
+    login = db.get_profile_navidrome_login(prof['id'])
+    if login:
+        return base.as_user(login[0], login[1], music_folder_id=folder)
+    logger.info(f"[Own Library] {prof['name']} has no Navidrome login of their own; "
+                f"scanning their library with the app account")
+    return base.as_user(None, None, music_folder_id=folder)
 
 
 def _run_own_library_scans(server_type, deep):

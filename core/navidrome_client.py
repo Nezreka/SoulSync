@@ -47,6 +47,91 @@ def _http() -> requests.Session:
     return _http_session
 
 
+# ── multi-library support (#2031) ──────────────────────────────────────────
+# navidrome holds more than one library, each with its own users, since
+# 0.58. before that a server had one library, so an own library per profile
+# needed a second server. the version is what ping answers (opensubsonic
+# serverVersion); it is remembered in the db so a restart with navidrome
+# still down does not flip own-library profiles back to the shared folder.
+MULTI_LIBRARY_MIN_VERSION = (0, 58)
+_SERVER_VERSION_PREF = 'navidrome_server_version'
+_server_version: Optional[str] = None
+_server_version_loaded = False
+_server_version_lock = threading.Lock()
+
+
+def parse_server_version(text) -> Optional[Tuple[int, ...]]:
+    """(major, minor, patch) from navidrome's serverVersion, e.g.
+    '0.58.0 (fc4e5a4)' or 'v0.64.2'. None when it is not a version."""
+    if not text:
+        return None
+    import re
+    m = re.search(r'(\d+)\.(\d+)(?:\.(\d+))?', str(text))
+    if not m:
+        return None
+    return tuple(int(p or 0) for p in m.groups())
+
+
+def known_server_version() -> Optional[str]:
+    """the navidrome version last seen on ping, from memory or the db."""
+    global _server_version, _server_version_loaded
+    if _server_version is not None or _server_version_loaded:
+        return _server_version
+    with _server_version_lock:
+        if not _server_version_loaded:
+            try:
+                from database.music_database import get_database
+                saved = get_database().get_preference(_SERVER_VERSION_PREF)
+                if saved and _server_version is None:
+                    _server_version = str(saved)
+            except Exception as exc:  # noqa: BLE001 - no db: unknown version
+                logger.debug("navidrome version lookup failed: %s", exc)
+            _server_version_loaded = True
+    return _server_version
+
+
+def remember_server_version(text) -> None:
+    """keep what ping said. a change that flips multi-library support drops
+    the cached library scopes so every profile re-reads its library."""
+    global _server_version, _server_version_loaded
+    if not text:
+        return
+    text = str(text)
+    before = known_server_version()
+    if before == text:
+        return
+    with _server_version_lock:
+        _server_version = text
+        _server_version_loaded = True
+    try:
+        from database.music_database import get_database
+        get_database().set_preference(_SERVER_VERSION_PREF, text)
+    except Exception as exc:  # noqa: BLE001 - memory still has it
+        logger.debug("could not save the navidrome version: %s", exc)
+    if multi_library_supported(before) != multi_library_supported(text):
+        try:
+            from core.library_scope import invalidate_library_scope_cache
+            invalidate_library_scope_cache()
+        except Exception:  # noqa: BLE001, S110 - the 30s cache runs out anyway
+            pass
+
+
+def multi_library_supported(version=None) -> bool:
+    """whether this navidrome can keep a library per profile (0.58+). with
+    no version given, the one last seen. an unknown version is not enough:
+    routing a download into a folder the server will never show is worse
+    than the shared folder."""
+    parsed = parse_server_version(version if version is not None else known_server_version())
+    return bool(parsed and parsed[:2] >= MULTI_LIBRARY_MIN_VERSION)
+
+
+def _reset_server_version_for_tests() -> None:
+    global _server_version, _server_version_loaded
+    with _server_version_lock:
+        _server_version = None
+        _server_version_loaded = False
+
+
 from core.media_server.items import MediaAlbum, MediaArtist, MediaTrack, parse_iso_date
 
 
@@ -194,10 +279,14 @@ class NavidromeClient(MediaServerBase):
         return f"{self.base_url.rstrip('/')}{path}{separator}u={self.username}&t={token}&s={salt}&v=1.16.1&c=SoulSync&f=json"
 
     def user_view(self, identity):
-        """``as_user`` under the shared hook name (see MediaServerBase)."""
+        """``as_user`` under the shared hook name (see MediaServerBase).
+        an own-library profile's identity also names its music folder
+        (#2031), and then the view reads that library only."""
         username = (identity or {}).get('username')
         password = (identity or {}).get('password')
-        return self.as_user(username, password) if username and password else None
+        if not (username and password):
+            return None
+        return self.as_user(username, password, music_folder_id=(identity or {}).get('music_folder_id'))
 
     def __init__(self):
         self.base_url: Optional[str] = None
@@ -358,8 +447,11 @@ class NavidromeClient(MediaServerBase):
             # Test connection with ping
             response = self._make_request('ping')
             if response and response.get('status') == 'ok':
-                server_version = response.get('version', 'Unknown')
+                # 'version' is the subsonic api version; navidrome's own is
+                # serverVersion, and own libraries hang on it (#2031)
+                server_version = response.get('serverVersion') or response.get('version', 'Unknown')
                 logger.info(f"Successfully connected to Navidrome server version: {server_version}")
+                remember_server_version(response.get('serverVersion'))
 
                 # Restore saved music folder preference
                 try:
@@ -1306,8 +1398,14 @@ class NavidromeClient(MediaServerBase):
             return True      # nothing to compare against: the old behaviour
         return str(playlist.owner).lower() == str(mine).lower()
 
-    def as_user(self, username: str, password: str) -> 'NavidromeUserView':
-        """this client, acting as one navidrome user (see NavidromeUserView)."""
+    def as_user(self, username: Optional[str], password: Optional[str],
+                music_folder_id=None) -> 'NavidromeUserView':
+        """this client, acting as one navidrome user (see NavidromeUserView).
+        ``music_folder_id`` binds the view to one library (an own library,
+        #2031); a view without one reads the shared client's folder pick.
+        username None keeps the app account (only useful with a folder)."""
+        if music_folder_id:
+            return NavidromeUserView(self, username, password, music_folder_id=music_folder_id)
         return NavidromeUserView(self, username, password)
 
     def verify_user_login(self, username: str, password: str) -> tuple:
@@ -2151,6 +2249,9 @@ class NavidromeClient(MediaServerBase):
             return []
 
 
+_INHERIT_FOLDER = object()
+
+
 class NavidromeUserView(NavidromeClient):
     """the shared NavidromeClient, acting as one user.
 
@@ -2165,9 +2266,22 @@ class NavidromeUserView(NavidromeClient):
     the wrapped client, and nothing on the wrapped client is ever changed.
     """
 
-    def __init__(self, client: NavidromeClient, username: str, password: str):
+    def __init__(self, client: NavidromeClient, username: Optional[str], password: Optional[str],
+                 music_folder_id=_INHERIT_FOLDER):
         object.__setattr__(self, '_base_client', client)
-        object.__setattr__(self, '_as_user', (username, password))
+        # no username = the app account (a library view, below)
+        object.__setattr__(self, '_as_user', (username, password) if username else None)
+        if music_folder_id is not _INHERIT_FOLDER:
+            # an own library (#2031): its own music folder and its own
+            # listings. the shared client's caches hold the shared library;
+            # filling them from another library would hand the shared scan
+            # someone else's albums, and the reverse
+            self.music_folder_id = str(music_folder_id) if music_folder_id else None
+            self._artist_cache = {}
+            self._album_cache = {}
+            self._track_cache = {}
+            self._album_play_cache = {}
+            self._folder_album_ids = None
 
     def __getattr__(self, name):
         # only reached when the view itself has no such attribute: read the
@@ -2175,19 +2289,29 @@ class NavidromeUserView(NavidromeClient):
         return getattr(object.__getattribute__(self, '_base_client'), name)
 
     @property
-    def acting_as(self) -> str:
-        return self._as_user[0]
+    def acting_as(self) -> Optional[str]:
+        # a library view on the app account acts as nobody of its own
+        bound = object.__getattribute__(self, '_as_user')
+        return bound[0] if bound else None
 
     # the native-api paths (playlist cover upload) log in with
     # username/password directly rather than through _make_request; on the
     # view those are the bound user's, so those calls are the user's too
     @property
     def username(self) -> str:
-        return self._as_user[0]
+        bound = object.__getattribute__(self, '_as_user')
+        return bound[0] if bound else object.__getattribute__(self, '_base_client').username
 
     @property
     def password(self) -> str:
-        return self._as_user[1]
+        bound = object.__getattribute__(self, '_as_user')
+        return bound[1] if bound else object.__getattribute__(self, '_base_client').password
+
+    def post_scan(self, database) -> bool:
+        # the identity repair reads every song on the server and merges ids it
+        # no longer sees. a user limited to their own library sees only that
+        # one, so the whole-server read stays on the app account (#2031)
+        return NavidromeClient.post_scan(object.__getattribute__(self, '_base_client'), database)
 
     def ensure_connection(self) -> bool:
         # the connection (url, app account) belongs to the shared client; a

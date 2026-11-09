@@ -187,17 +187,26 @@ def navidrome_client_for_profile(profile_id, client):
     authenticated, so this is what puts a profile's playlist on their
     navidrome user instead of the app account's (#1265). a view, never a
     change to the shared client. no saved login, no profile, or a db that
-    will not answer = the client as-is."""
+    will not answer = the client as-is. an own-library profile's view also
+    reads its own navidrome library only (#2031)."""
     if not profile_id or client is None:
         return client
     try:
         from database.music_database import MusicDatabase
-        login = MusicDatabase().get_profile_navidrome_login(profile_id)
+        db = MusicDatabase()
+        login = db.get_profile_navidrome_login(profile_id)
+        from core.library_scope import own_navidrome_folder
+        folder = own_navidrome_folder(profile_id, db)
     except Exception as e:
         logger.error(f"Per-profile: could not read navidrome login for profile {profile_id}: {e}")
         return client
-    if not login or not hasattr(client, 'as_user'):
+    if not hasattr(client, 'as_user') or not (login or folder):
         return client
+    if folder:
+        logger.info(f"Per-profile: navidrome runs as '{login[0] if login else 'the app account'}' "
+                    f"in library {folder} for profile {profile_id}")
+        return client.as_user(login[0] if login else None, login[1] if login else None,
+                              music_folder_id=folder)
     logger.info(f"Per-profile: navidrome playlist writes run as '{login[0]}' for profile {profile_id}")
     return client.as_user(*login)
 

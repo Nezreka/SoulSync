@@ -125,7 +125,9 @@ def test_profile_switch_to_own_under_navidrome_rejected(client, kim, tmp_path, m
         'library_root': root,
     })
     assert r.status_code == 400
-    assert 'require Plex or Jellyfin' in r.get_json()['error']
+    # the message now says why per server (#2031: navidrome 0.58+ can, an
+    # unknown or older version cannot)
+    assert 'Navidrome 0.58' in r.get_json()['error']
 
 
 def test_server_switch_to_navidrome_warns_when_own_profiles_exist(client, sam, monkeypatch):

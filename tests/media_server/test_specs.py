@@ -75,7 +75,9 @@ def test_describe_is_case_insensitive_and_none_safe():
 
 
 def test_flag_queries():
-    assert specs.names_where(supports_own_libraries=True) == ['plex', 'jellyfin']
+    # navidrome can from 0.58 (#2031); the running version is checked in
+    # core.library_scope.own_libraries_supported_on, not by this flag
+    assert specs.names_where(supports_own_libraries=True) == ['plex', 'jellyfin', 'navidrome']
     assert specs.names_where(per_user_accounts=True) == ['plex', 'jellyfin', 'navidrome']
     assert specs.external_names() == ['plex', 'jellyfin', 'navidrome', 'music_assistant']
 

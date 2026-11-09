@@ -1670,6 +1670,14 @@ Delete a profile and all its per-profile data (watchlist, wishlist, discovery po
 }
 ```
 
+#### Own library on Navidrome: `GET /api/profiles/me/navidrome-libraries`
+
+Session route (#2031). For the signed-in profile: `own_library` (the admin gave it a library of its own), `supported` (the active server can: Plex, Jellyfin, or Navidrome 0.58+), `message` (why not, or what is missing, e.g. no Navidrome login yet), `selected` (the picked library id) and `folders`: the Navidrome libraries the profile's own login sees (`getMusicFolders` as that user), each `{id, name, shared}`. `folders` is empty unless the profile has an own library on a supported server.
+
+The pick is saved with `POST /api/profiles/me/server-library` and `{"server_type": "navidrome", "library_id": "2"}`. The id must be one the profile's own login sees and not the shared library's folder; otherwise `400`.
+
+`GET /api/profiles` also returns `own_library_unsupported_reason` (null when own libraries work on the active server). Turning a profile to `library_mode: "own"` on Navidrome needs Navidrome 0.58+ and the shared library's music folder picked in Settings.
+
 #### What a profile shows: `GET` / `POST /api/profiles/me/features`
 
 Session routes (the signed-in browser, not an API key) behind **Customize** in the sidebar. Each profile hides the parts of SoulSync it doesn't use. This is a preference, not access: hidden pages still open from a link and their background jobs keep running. Page access stays with `allowed_pages`.

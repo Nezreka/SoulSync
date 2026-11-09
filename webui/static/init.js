@@ -2419,6 +2419,8 @@ async function loadProfileManageList() {
         librarySupported: data.own_library_supported !== false,
         libraryAvailable: data.own_library_available !== false,
         libraryHint: data.own_library_root_hint || '',
+        // why it is off on this server (#2031: navidrome before 0.58)
+        libraryReason: data.own_library_unsupported_reason || '',
     };
 
     list.innerHTML = '';
@@ -3229,6 +3231,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
     const loginMode = _pfManageState ? _pfManageState.loginMode : profileLoginMode;
     const librarySupported = _pfManageState ? _pfManageState.librarySupported : true;
     const libraryAvailable = _pfManageState ? _pfManageState.libraryAvailable !== false : true;
+    const libraryReason = _pfManageState ? _pfManageState.libraryReason || '' : '';
     const libraryHint = _pfManageState
         ? _pfManageState.libraryHint.replace('<name>', (p.name || 'profile').toLowerCase().replace(/[^a-z0-9]+/g, '-'))
         : '';
@@ -3569,7 +3572,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             folderInput.addEventListener('input', () => { st.library_root = folderInput.value; });
             const folderBox = pfEl('div', { class: 'pf-group-extra' }, [
                 folderInput,
-                pfEl('p', { class: 'pf-help', text: 'Docker: mount this folder in docker-compose.yml. Then add it as a second music library on Plex or Jellyfin and pick that library under their account.' }),
+                pfEl('p', { class: 'pf-help', text: 'Docker: mount this folder in docker-compose.yml. Then add it as a second music library on Plex, Jellyfin or Navidrome (0.58+, give their Navidrome user only that library) and pick that library under their account.' }),
             ]);
             const inactive = !librarySupported;
             // parked beats unsupported in the message: the server can be the
@@ -3579,7 +3582,7 @@ async function openProfileEditor({ mode = 'create', profile = null } = {}) {
             const ownSwitch = pfSwitch({
                 title: 'Own library',
                 desc: parked ? 'Not available in this build yet.'
-                    : inactive ? 'Needs Plex or Jellyfin. With Navidrome or standalone their downloads go to the shared folder.'
+                    : inactive ? `${libraryReason || 'Needs Plex, Jellyfin or Navidrome 0.58+.'} Until then their downloads go to the shared folder.`
                     : 'Their downloads go to their own folder and their own server library.',
                 checked: st.library_mode === 'own',
                 disabled: parked || (inactive && st.library_mode !== 'own'),

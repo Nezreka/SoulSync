@@ -410,11 +410,23 @@ def _qs_media_servers():
 
 def _own_library_supported():
     """Per-profile own libraries need a server that can hold more than
-    one music library; the descriptor says which can. Reads this module's
-    config_manager so tests can inject one."""
-    from core.media_server import specs
-    descriptor = specs.describe(config_manager.get_active_media_server())
-    return bool(descriptor and descriptor.supports_own_libraries)
+    one music library (navidrome only from 0.58, #2031). Reads this
+    module's config_manager so tests can inject one."""
+    return _own_library_unsupported_reason() is None
+
+
+def _own_library_unsupported_reason():
+    """why own libraries are off on the active server, or None."""
+    from core.library_scope import own_library_unsupported_reason
+    return own_library_unsupported_reason(config_manager.get_active_media_server())
+
+
+def _navidrome_shared_folder_id():
+    """the music folder the shared library scans on navidrome, '' for all."""
+    try:
+        return str(get_database().get_preference('navidrome_music_folder_id') or '')
+    except Exception:  # noqa: BLE001 - unreadable reads as none picked
+        return ''
 
 
 def _qs_download_chain(mode, hybrid_order):
@@ -472,6 +484,9 @@ def list_profiles():
                         # a mount under /app in docker, anywhere otherwise
                         'own_library_root_hint': _own_library_root_hint(),
                         'own_library_supported': _own_library_supported(),
+                        # what the profile settings say when it is not (#2031:
+                        # a navidrome older than 0.58 has one library)
+                        'own_library_unsupported_reason': _own_library_unsupported_reason(),
                         # supported != available: the server may be right and the
                         # feature still parked, and the UI must say which
                         'own_library_available': not _own_library_parked()})
@@ -660,14 +675,22 @@ def update_profile(profile_id):
             mode = 'own' if data.get('library_mode') == 'own' else 'shared'
             root = str(data.get('library_root') or '').strip()
             if mode == 'own':
-                if not _own_library_supported():
-                    existing_lib = database.get_profile_library(profile_id)
-                    is_already_own = (existing_lib.get('mode') == 'own' and
-                                      str(existing_lib.get('root') or '').strip() == root)
-                    if not is_already_own:
-                        return jsonify({'success': False, 'error': 'Own libraries require Plex or Jellyfin. Switch this profile to the shared library for Navidrome or Standalone.'}), 400
+                existing_lib = database.get_profile_library(profile_id)
+                is_already_own = (existing_lib.get('mode') == 'own' and
+                                  str(existing_lib.get('root') or '').strip() == root)
+                reason = _own_library_unsupported_reason()
+                if reason and not is_already_own:
+                    return jsonify({'success': False, 'error': f'{reason} Keep this profile on the shared library.'}), 400
                 if not root:
                     return jsonify({'success': False, 'error': 'An own library needs an output folder'}), 400
+                if (not reason and not is_already_own
+                        and config_manager.get_active_media_server() == 'navidrome'
+                        and not _navidrome_shared_folder_id()):
+                    # with no folder picked the shared scan reads every
+                    # navidrome library, theirs included (#2031)
+                    return jsonify({'success': False, 'error': (
+                        "Pick the shared library's music folder in Settings > Media server first, "
+                        "so the shared scan leaves their Navidrome library out")}), 400
                 shared_root = str(config_manager.get('soulseek.transfer_path', '') or '').strip().rstrip('/\\')
                 if shared_root and root.rstrip('/\\') == shared_root:
                     return jsonify({'success': False, 'error': 'That is the shared library folder; pick a different one'}), 400
@@ -1563,6 +1586,17 @@ def save_profile_server_library():
 
         profile_id = get_current_profile_id()
         db = get_database()
+        if server_type == 'navidrome' and library_id:
+            # an own library on navidrome (#2031): one of the libraries their
+            # own login can see, and never the shared one
+            library_id = str(library_id)
+            listing = _navidrome_folders_for_profile(profile_id)
+            if listing.get('error'):
+                return jsonify({'success': False, 'error': listing['error']}), 400
+            if library_id not in {f['id'] for f in listing['folders']}:
+                return jsonify({'success': False, 'error': 'Your Navidrome login has no such library'}), 400
+            if library_id == _navidrome_shared_folder_id():
+                return jsonify({'success': False, 'error': 'That is the shared library; pick your own'}), 400
         success = db.set_profile_server_library(profile_id, server_type, library_id, user_id)
 
         if success:
@@ -1663,6 +1697,47 @@ def save_profile_navidrome_login():
         if not get_database().set_profile_navidrome_login(get_current_profile_id(), username, password):
             return jsonify({'success': False, 'error': 'Failed to save login'}), 500
         return jsonify({'success': True, 'username': username})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _navidrome_folders_for_profile(profile_id):
+    """the navidrome libraries (music folders) the profile's own login can
+    see: getMusicFolders is scoped to the asking user's libraries since
+    navidrome 0.58 (#2031). {'folders': [{id, name}]} or {'error': ...}."""
+    engine = _media_server_engine()
+    client = engine.client('navidrome') if engine is not None else None
+    if client is None or not client.ensure_connection():
+        return {'folders': [], 'error': 'Navidrome is not connected'}
+    login = get_database().get_profile_navidrome_login(profile_id)
+    if not login:
+        return {'folders': [], 'error': 'Sign in with your own Navidrome user first'}
+    folders = client.as_user(*login).get_music_folders()
+    return {'folders': [{'id': str(f.get('key') or ''), 'name': f.get('title') or ''}
+                        for f in folders if f.get('key')]}
+
+
+@bp.route('/api/profiles/me/navidrome-libraries', methods=['GET'])
+def list_profile_navidrome_libraries():
+    """the own library pick on navidrome (#2031): whether this profile has
+    an own library, whether this navidrome can do it (0.58+), and the
+    libraries its own login sees, the shared one marked."""
+    try:
+        profile_id = get_current_profile_id()
+        db = get_database()
+        own = (db.get_profile_library(profile_id) or {}).get('mode') == 'own' if profile_id else False
+        reason = _own_library_unsupported_reason()
+        selected = (db.get_profile_server_library(profile_id) or {}).get('navidrome_library_id') or ''
+        out = {'success': True, 'own_library': bool(own), 'supported': reason is None,
+               'message': reason, 'selected': str(selected), 'folders': []}
+        if not own or reason:
+            return jsonify(out)
+        listing = _navidrome_folders_for_profile(profile_id)
+        shared = _navidrome_shared_folder_id()
+        out['folders'] = [dict(f, shared=(f['id'] == shared)) for f in listing['folders']]
+        if listing.get('error'):
+            out['message'] = listing['error']
+        return jsonify(out)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
