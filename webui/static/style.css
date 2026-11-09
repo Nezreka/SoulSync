@@ -74213,6 +74213,13 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     background: rgba(125, 211, 252, 0.13);
     color: #8fd8fc;
 }
+/* one chip per chain a source is in (music, video, audiobooks) */
+.src-tile-chips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+}
 .src-tile-chip--warn {
     background: rgba(var(--warning-strong-rgb), 0.15);
     color: #fbcd7a;

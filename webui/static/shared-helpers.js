@@ -1766,6 +1766,33 @@ function _isFinishedDownloadProcess(process) {
     return Boolean(process) && (process.status === 'complete' || process.status === 'cancelled');
 }
 
+// #2022: a release opened from an artist's page starts on the artist's Quality
+// Profile (library track/album, the watchlist rules, the library artist), the
+// same one Download Discography queues it on. still only a preselect: the
+// picker is right there. any failure leaves the old default.
+async function hydrateArtistAlbumQualityProfile(virtualPlaylistId, artist, album) {
+    let preselectId = null;
+    try {
+        if (artist && artist.id) {
+            const params = new URLSearchParams({ name: artist.name || '' });
+            const source = artist.source || (album && album.source) || '';
+            if (source) params.set('source', source);
+            if (album && album.id) params.set('album_id', String(album.id));
+            const res = await fetch(
+                `/api/artist/${encodeURIComponent(String(artist.id))}/quality-profile?${params}`);
+            const data = await res.json();
+            if (data && data.success && data.quality_profile_id != null) {
+                preselectId = data.quality_profile_id;
+            }
+        }
+    } catch (e) {
+        console.debug('Could not load the artist Quality Profile:', e);
+    }
+    return preselectId != null
+        ? setDownloadModalQualityProfile(virtualPlaylistId, preselectId)
+        : hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
+}
+
 async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlistName, spotifyTracks, album, artist, showLoadingOverlayParam = true, contextType = 'artist_album') {
     if (showLoadingOverlayParam) {
         showLoadingOverlay('Loading album...');
@@ -1915,10 +1942,15 @@ async function openDownloadMissingModalForArtistAlbum(virtualPlaylistId, playlis
 
     applyProgressiveTrackRendering(virtualPlaylistId, spotifyTracks.length);
     // Fill the Quality Profile selector once the markup is in the DOM. Preselects
-    // the mirror's persisted assignment for a playlist, the default otherwise
-    // (P1-01); on failure it renders disabled rather than showing a value the
-    // server never accepted (P2-05).
-    void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
+    // the mirror's persisted assignment for a playlist, the artist's own profile
+    // for an artist's release (#2022), the default otherwise (P1-01); on failure
+    // it renders disabled rather than showing a value the server never accepted
+    // (P2-05).
+    if (contextType === 'artist_album') {
+        void hydrateArtistAlbumQualityProfile(virtualPlaylistId, artist, album);
+    } else {
+        void hydrateDownloadModalQualityProfileSelect(virtualPlaylistId);
+    }
     modal.style.display = 'flex';
     hideLoadingOverlay();
 

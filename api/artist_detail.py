@@ -2123,6 +2123,34 @@ def get_artist_db_record(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@bp.route('/api/artist/<artist_id>/quality-profile', methods=['GET'])
+def get_artist_quality_profile(artist_id):
+    """The Quality Profile a download of this artist's release starts on (#2022).
+
+    The album download dialog preselects it, so a release opened from the
+    artist's discography matches what Download Discography queues. Same
+    resolver: catalogue track/album, the watchlist row, the catalogue artist.
+    ``quality_profile_id`` null means the app default.
+    """
+    try:
+        from core.quality.artist_profile import ArtistQualityProfile
+        from database.music_database import MusicDatabase
+
+        name = (request.args.get('name') or '').strip()
+        source = (request.args.get('source') or '').strip().lower() or None
+        album_id = (request.args.get('album_id') or '').strip()
+        resolver = ArtistQualityProfile(
+            MusicDatabase(), artist_id=artist_id, artist_name=name, source=source,
+            profile_id=get_current_profile_id())
+        return jsonify({
+            "success": True,
+            "quality_profile_id": resolver.profile_for(album_ids=[album_id] if album_id else []),
+        })
+    except Exception as e:
+        logger.error(f"Error resolving artist quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @bp.route('/api/artist/<artist_id>/download-discography', methods=['POST'])
 def download_discography(artist_id):
     """Add selected albums from an artist's discography to the wishlist.
@@ -2231,6 +2259,23 @@ def download_discography(artist_id):
             owned_candidate_tracks = []
             candidates_exhaustive = False
 
+        # #2022: the artist's own Quality Profile (catalogue track/album, the
+        # watchlist row, the catalogue artist), not the app default. one
+        # resolver per artist: the your-albums batch mixes artists, and the
+        # url's id only names the artist the envelope does.
+        from core.quality.artist_profile import ArtistQualityProfile
+        quality_resolvers = {}
+
+        def quality_resolver(name, source):
+            key = (str(name or '').casefold(), source)
+            if key not in quality_resolvers:
+                same_artist = str(name or '').casefold() == str(artist_name or '').casefold()
+                quality_resolvers[key] = ArtistQualityProfile(
+                    db, artist_id=artist_id if same_artist else '',
+                    artist_name=name, source=source if same_artist else None,
+                    profile_id=profile_id)
+            return quality_resolvers[key]
+
         total_added = 0
         total_skipped = 0
         total_skipped_artist = 0
@@ -2328,8 +2373,10 @@ def download_discography(artist_id):
                     )
                     ownership_candidates = (owned_candidate_tracks if release_tracks is None
                                             else release_tracks)
+                    track_profiles = quality_resolver(hint_artist, artist_source).for_release(
+                        [album_id, resolved_album_id], tracks)
 
-                    for track in tracks:
+                    for track, track_profile in zip(tracks, track_profiles, strict=True):
                         track_name = track.get('name', '')
                         if not track_name:
                             continue
@@ -2413,6 +2460,7 @@ def download_discography(artist_id):
                                     'source': resolved_source,
                                 }),
                                 profile_id=profile_id,
+                                quality_profile_id=track_profile,
                             )
                             if was_added:
                                 added += 1
