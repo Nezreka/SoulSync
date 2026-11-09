@@ -250,6 +250,35 @@ def test_duplicate_merge_preserves_structured_and_user_state(tmp_path):
         assert conn.execute("SELECT entity_id FROM library_provider_snapshots").fetchone()[0] == keeper
 
 
+def test_duplicate_artist_merge_keeps_the_genre_cleanups_lock(tmp_path):
+    """review 5 W2-WF-1: the merge unioned the donor's genres into the
+    keeper, putting back what the cleanup removed from a locked keeper"""
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        keeper = conn.execute(
+            "INSERT INTO lib2_artists(name,name_key,server_source,server_id,spotify_id,"
+            "genres,genres_locked) VALUES('Rone','rone','plex','1','sp','[\"electronic\"]',1)").lastrowid
+        conn.execute(
+            "INSERT INTO lib2_artists(name,name_key,server_source,server_id,genres) "
+            "VALUES('Rone','rone','plex','2','[\"seen live\"]')")
+        locked_donor = conn.execute(
+            "INSERT INTO lib2_artists(name,name_key,server_source,server_id,spotify_id,genres,"
+            "genres_locked) VALUES('Kiasmos','kiasmos','plex','3','sp-k','[\"ambient\"]',1)").lastrowid
+        open_keeper = conn.execute(
+            "INSERT INTO lib2_artists(name,name_key,server_source,server_id,spotify_id,genres,"
+            "external_ids) VALUES('Kiasmos','kiasmos','plex','4','sp-k','[\"seen live\"]',"
+            "'{\"deezer\":\"d\",\"itunes\":\"i\"}')").lastrowid
+
+    assert db.merge_duplicate_artists()['artists_merged'] == 2
+    with db._get_connection() as conn:
+        rows = {r[0]: (json.loads(r[1]), r[2]) for r in conn.execute(
+            "SELECT id, genres, genres_locked FROM lib2_artists")}
+    assert rows[keeper] == (["electronic"], 1)
+    # whichever kiasmos row survived carries the locked genres and the lock
+    survivor = open_keeper if open_keeper in rows else locked_donor
+    assert rows[survivor] == (["ambient"], 1)
+
+
 def test_playlist_status_does_not_count_provider_catalogue(tmp_path):
     db = _db(tmp_path)
     playlist = db.mirror_playlist(

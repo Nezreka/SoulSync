@@ -984,6 +984,25 @@ def test_a_merge_keeps_the_duplicates_locked_genres_and_fills_gaps(library):
     assert row["label"] == "Label X"
 
 
+def test_a_merge_does_not_fill_the_survivors_locked_empty_genres(library):
+    """review 5 W2-WF-1: a cleanup that removed every genre leaves a locked
+    []. the duplicate's genres must not fill it as if it were a gap"""
+    from core.library2.catalogue_duplicates import auto_merge_proven
+    db = library[0]
+    _plex, albums, _tracks = server_twins(library)
+    with closing(db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET genres='[\"seen live\"]', genres_locked=0")
+        conn.execute("UPDATE lib2_albums SET genres='[]', genres_locked=1 WHERE id=?", (albums[0],))
+        conn.commit()
+
+    assert auto_merge_proven(db)["merged"] == 1
+
+    with closing(db._get_connection()) as conn:
+        row = conn.execute("SELECT genres, genres_locked FROM lib2_albums WHERE id IN (?,?)",
+                           tuple(albums)).fetchone()
+    assert (json.loads(row["genres"]), row["genres_locked"]) == ([], 1)
+
+
 def test_two_locked_releases_with_different_genres_wait_for_review(library):
     _plex, albums, _tracks = server_twins(library)
     with closing(library[0]._get_connection()) as conn:
