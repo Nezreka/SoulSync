@@ -77762,5 +77762,5 @@ body.src-modal-open { overflow: hidden; }
     cursor: pointer;
 }
 .repair-drill-chip-clear:hover {
-    color: #fff;
+    color: var(--white-a90);
 }

@@ -1359,6 +1359,9 @@ def test_acquisition_grab_submits_once_and_returns_only_public_state(api):
         "candidates_evaluated",
         "force_grab",
         "grab_prepared",
+        # review 5 W2-WC-1: the submission-started journal entry is written
+        # now (it used to fail and roll back every time)
+        "grab_submission_started",
         "grab_submitted",
     ]
 

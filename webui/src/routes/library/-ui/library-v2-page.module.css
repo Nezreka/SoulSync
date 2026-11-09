@@ -1600,7 +1600,6 @@ button.statusWarn:disabled {
   white-space: nowrap;
 }
 
-.mutationFeedback,
 .mutationError,
 .mutationSuccess {
   display: flex;
@@ -1610,10 +1609,6 @@ button.statusWarn:disabled {
   min-height: 24px;
   margin-top: 6px;
   font-size: 12px;
-}
-
-.mutationFeedback {
-  color: var(--white-a55);
 }
 
 .mutationError {

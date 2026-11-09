@@ -76,7 +76,9 @@ def test_findings_lifecycle_over_http(client):
     assert c.post(f"/api/video/repair/findings/{ids[1]}/resolve",
                   json={"action": "manual"}).get_json()["success"]
     r = c.post("/api/video/repair/findings/bulk", json={"ids": [ids[2]], "action": "dismiss"})
-    assert r.get_json() == {"success": True, "updated": 1}
+    # review 5 W3-TT: a bulk action now says how many ids it refused
+    # (outside the view); none here
+    assert r.get_json() == {"success": True, "updated": 1, "refused": 0}
     assert c.get("/api/video/repair/findings/counts").get_json()["pending"] == 0
     r = c.post("/api/video/repair/findings/clear", json={"status": "dismissed"})
     assert r.get_json()["deleted"] == 2
