@@ -760,6 +760,9 @@
         if (id) { extra.media_id = id; extra.media_source = o.source || o.mediaSource || 'library'; }
         var tmdb = o.tmdbId || o.tvId;
         if (tmdb) extra.tmdb_id = tmdb;
+        // the title's year too, so an episode search judges a release's year
+        // against it (#2027: The.Office.2024 grabbed for The Office (2005))
+        if (o.year && params.year == null) extra.year = o.year;
         return Object.keys(extra).length ? Object.assign({}, params, extra) : params;
     }
 
@@ -812,7 +815,8 @@
                 (params.episode != null ? '&episode=' + params.episode : '') +
                 (params.media_id != null ? '&media_id=' + encodeURIComponent(params.media_id) +
                     '&media_source=' + encodeURIComponent(params.media_source || '') : '') +
-                (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '');
+                (params.tmdb_id != null ? '&tmdb_id=' + encodeURIComponent(params.tmdb_id) : '') +
+                (params.year ? '&year=' + encodeURIComponent(params.year) : '');
             getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
                 if (!resultsEl.isConnected) { _setScanning(triggerRows, false); if (onDone) onDone(); return; }
                 var rows = (d && d.results) || [];

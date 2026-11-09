@@ -198,7 +198,53 @@ def _with_title_identity(db, src) -> dict:
     for key in ("tmdb_id", "imdb_id", "tvdb_id"):
         if not body.get(key) and ident.get(key):
             body[key] = ident[key]
+    return _with_release_identity(body, scope, ident)
+
+
+def _with_release_identity(body: dict, scope: str, ident: dict) -> dict:
+    """The year and names a search judges releases by, for a title it can name.
+
+    every search the show page and the get modal run (Grab season, an
+    episode's Auto, interactive) sent the title and nothing else, so the year
+    gate never ran: 'The.Office.2024.S01E01' passed for The Office (2005), was
+    the best accepted release, and went to SABnzbd (#2027). the year is the
+    library row's, else TMDB's. ``titles`` is every name the release may carry
+    (the library's, TMDB's english and original names, aliases), and
+    ``search_titles`` the few the indexers are asked under (#2021). A title
+    with no tmdb id (Basic Search) is left as it came."""
+    tmdb = body.get("tmdb_id")
+    if not tmdb:
+        return body
+    from core.automation.handlers.video_process_wishlist import (
+        _acceptable_titles, search_titles, tmdb_identity)
+    kind = "movie" if scope == "movie" else "show"
+    if not body.get("year"):
+        year = ident.get("year") or tmdb_identity(kind, tmdb).get("year")
+        if year:
+            body["year"] = year
+    title = str(body.get("title") or "").strip()
+    if title:
+        if not body.get("titles"):
+            try:
+                season = int(body["season"]) if kind == "show" and body.get("season") not in (None, "") else None
+            except (TypeError, ValueError):
+                season = None
+            body["titles"] = _acceptable_titles(title, kind, tmdb, season)
+        if not body.get("search_titles"):
+            body["search_titles"] = search_titles(title, kind, tmdb)
     return body
+
+
+def _want_titles(body):
+    """the names a hit may carry: the identity set when there is one, else
+    the title the search was made with"""
+    return body.get("titles") or body.get("title")
+
+
+def _alt_search_titles(body) -> list:
+    """the title's other names to search under, primary excluded"""
+    names = body.get("search_titles") or []
+    return list(names[1:]) if isinstance(names, (list, tuple)) else []
 
 
 def _external_ids(body) -> dict:
@@ -241,7 +287,8 @@ def _search_queries(body, source: str, scope: str, title: str, season, episode) 
             return [_format_strategy_query(t, q, extra) for t, q, extra in build_strategies(
                 scope, title, year=body.get("year"), season=season, episode=episode,
                 air_date=body.get("air_date"), absolute=body.get("absolute"),
-                series_type=body.get("series_type"), **_external_ids(body))]
+                series_type=body.get("series_type"), alt_titles=_alt_search_titles(body),
+                **_external_ids(body))]
         except Exception:   # noqa: BLE001 - query visibility must never break search
             logger.debug("manual search query summary failed", exc_info=True)
     if source == "extto":
@@ -282,6 +329,7 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
                            season=want_season, episode=want_episode, source=source,
                            max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
                            indexer_names=_basic_indexer_names(body),
+                           alt_titles=_alt_search_titles(body),
                            **_external_ids(body))
     prowlarr_error = None
     if not pres.get("configured"):
@@ -1205,7 +1253,7 @@ def register_routes(bp):
         payload = {"scope": scope, "live": live, "queries": queries,
                    "results": _evaluate_hits(raw, profile, scope, want_season, want_episode,
                                              want_year=body.get("year"),
-                                             want_title=body.get("title"))}
+                                             want_title=_want_titles(body))}
         # One half of the lane was down but the other answered: show the results
         # AND say what is missing, rather than silently returning a short list.
         if partial_note:
@@ -1249,7 +1297,7 @@ def register_routes(bp):
             if eres.get("error"):
                 return jsonify({"queries": queries, "error": "EXT.to: " + str(eres["error"])})
             return jsonify({"id": None, "live": True, "complete": True, "queries": queries,
-                            "results": _evaluate_hits(eres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
+                            "results": _evaluate_hits(eres["hits"], profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=_want_titles(body))})
         if source in ("torrent", "usenet"):
             # Prowlarr is synchronous — like the old mock, results come back in one shot
             # (no polling id), so the client renders immediately. Shares the lane
@@ -1262,7 +1310,7 @@ def register_routes(bp):
             out = {"id": None, "live": True, "complete": True, "queries": queries,
                    "results": _evaluate_hits(hits, profile, scope, want_season, want_episode,
                                              want_year=body.get("year"),
-                                             want_title=body.get("title"))}
+                                             want_title=_want_titles(body))}
             if note:
                 out["note"] = note
             return jsonify(out)
@@ -1276,7 +1324,7 @@ def register_routes(bp):
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
                           episode=want_episode, season_end=season_end, source=source)
         return jsonify({"id": None, "live": False, "complete": True, "queries": queries,
-                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=body.get("title"))})
+                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode, want_year=body.get("year"), want_title=_want_titles(body))})
 
     @bp.route("/downloads/search/poll", methods=["GET"])
     def video_downloads_search_poll():
@@ -1289,10 +1337,13 @@ def register_routes(bp):
         want_season, want_episode, _ = _search_ints(request.args)
         if not sid:
             return jsonify({"results": [], "live": True, "total_files": 0})
-        profile, _pid = _profile_for_request(get_video_db(), request.args)
+        # the same identity the start judged by: the year and names come from
+        # the title's ids, not just from what the poll url carries (#2027)
+        args = _with_title_identity(get_video_db(), request.args.to_dict())
+        profile, _pid = _profile_for_request(get_video_db(), args)
         polled = poll_search(sid)
         return jsonify({"live": True, "total_files": polled["total_files"],
-                        "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode, want_year=request.args.get("year"), want_title=request.args.get("title"))})
+                        "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode, want_year=args.get("year"), want_title=_want_titles(args))})
 
     @bp.route("/downloads/grab", methods=["POST"])
     def video_downloads_grab():

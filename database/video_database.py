@@ -10374,8 +10374,11 @@ class VideoDatabase:
         """The library row a search names, by library id or tmdb id: its own id
         and the tmdb/imdb (and for a show tvdb) ids the indexers can search by.
         Empty when the title isn't in the library."""
-        tbl, cols = (("movies", "id, tmdb_id, imdb_id") if kind == "movie"
-                     else ("shows", "id, tmdb_id, imdb_id, tvdb_id"))
+        # the year rides along for the release identity gate (#2027): a show's
+        # first-air year when the row has no year of its own
+        tbl, cols = (("movies", "id, tmdb_id, imdb_id, year") if kind == "movie"
+                     else ("shows", "id, tmdb_id, imdb_id, tvdb_id, COALESCE(year, CAST(substr("
+                                    "NULLIF(first_air_date, ''), 1, 4) AS INTEGER)) AS year"))
         if not library_id and not tmdb_id:
             return {}
         conn = self._get_connection()

@@ -456,6 +456,48 @@ def _acceptable_titles(primary: Any, kind: str, tmdb_id: Any, season: Any = None
     return out
 
 
+def tmdb_identity(kind: str, tmdb_id: Any) -> Dict[str, Any]:
+    """TMDB's {name, original_name, year, aliases} for a title, cached by the
+    enrichment engine. {} when TMDB can't say; never raises."""
+    if not tmdb_id:
+        return {}
+    try:
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        fn = getattr(get_video_enrichment_engine(), "title_identity", None)
+        return (fn(kind, tmdb_id) or {}) if fn else {}
+    except Exception:   # noqa: BLE001 - a matching assist must never break a grab
+        logger.debug("tmdb identity unavailable for %s %s", kind, tmdb_id, exc_info=True)
+        return {}
+
+
+# how many names one search asks the indexers under: the library's title,
+# TMDB's own (english) name and the original-language one. each extra name
+# is one more text query per search, so this stays small
+MAX_SEARCH_TITLES = 3
+
+
+def search_titles(primary: Any, kind: str, tmdb_id: Any) -> List[str]:
+    """The names to SEARCH a title under, primary first, at most
+    MAX_SEARCH_TITLES, two names that fold to the same text counted once.
+
+    one name was all a search ever sent, and it was the library's, so a show
+    whose server is in french was only searched as "L'amour sous couverture"
+    and the releases named "Love in Disguise" were never found (#2021).
+    Sonarr searches a series under its scene titles the same way."""
+    from core.video.release_parse import normalize_title
+    ident = tmdb_identity(kind, tmdb_id)
+    out, seen = [], set()
+    for t in (primary, ident.get("name"), ident.get("original_name")):
+        t = str(t or "").strip()
+        key = normalize_title(t) if t else ""
+        if t and key and key not in seen:
+            seen.add(key)
+            out.append(t)
+        if len(out) >= MAX_SEARCH_TITLES:
+            break
+    return out
+
+
 _TITLE_YEAR = re.compile(r"\((\d{4})\)\s*$")
 
 
@@ -467,7 +509,12 @@ def show_year_for(item: Dict[str, Any]) -> Optional[str]:
     'Dark.Matter.2024.S02E08', was rejected as "Wrong year (2024, wanted 2026)"
     by the drain and again by the importer, and the right episode sat on the
     wishlist forever. the library's show year first, then a "(2024)" in the
-    title, else no year at all (no year means no year judgement)."""
+    title, then TMDB's first-air year, else no year at all (no year means no
+    year judgement).
+
+    the TMDB step is #2027: a show that isn't in the library has no library
+    year, so 'The.Office.2024.S01E01' passed for The Office (2005) and was
+    sent to the download client."""
     year = item.get("show_year")
     try:
         if year:
@@ -475,7 +522,10 @@ def show_year_for(item: Dict[str, Any]) -> Optional[str]:
     except (TypeError, ValueError):
         pass
     m = _TITLE_YEAR.search(str(item.get("show_title") or "").strip())
-    return m.group(1) if m else None
+    if m:
+        return m.group(1)
+    ty = tmdb_identity("show", item.get("show_tmdb_id")).get("year")
+    return str(ty) if ty else None
 
 
 def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
@@ -483,7 +533,9 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
     Carries ``titles`` — the primary title plus TMDB aliases — so both the initial pick
     and every retry gate releases against the full alias set."""
     if media_type == "movie":
-        ctx = {"scope": "movie", "title": item.get("title"), "year": item.get("year")}
+        # a movie row without a year (#2027): TMDB's, so the year gate runs
+        ctx = {"scope": "movie", "title": item.get("title"),
+               "year": item.get("year") or tmdb_identity("movie", item.get("tmdb_id")).get("year")}
         tmdb_id, kind = item.get("tmdb_id"), "movie"
     else:
         scope = "season" if item.get("episode_number") is None and item.get("season_number") is not None else "episode"
@@ -530,6 +582,11 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
     titles = _acceptable_titles(ctx["title"], kind, tmdb_id, anime_season)
     if len(titles) > 1:
         ctx["titles"] = titles
+    # the names the indexers are asked under (#2021). only when there is more
+    # than the one, so a ctx keeps its old shape otherwise
+    names = search_titles(ctx["title"], kind, tmdb_id)
+    if len(names) > 1:
+        ctx["search_titles"] = names
     # External ids for the indexer search. Prowlarr's structured tvsearch/movie
     # queries take tvdbid/imdbid/tmdbid and route each to the indexers that can
     # resolve it — the id-aware path Sonarr/Radarr rely on so they never depend on
@@ -789,7 +846,8 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
                                air_date=ctx.get("air_date"), absolute=ctx.get("absolute"),
                                series_type=ctx.get("series_type"),
                                imdb_id=ctx.get("imdb_id"), tmdb_id=ctx.get("tmdb_id"),
-                               tvdb_id=ctx.get("tvdb_id"), alt=ctx_alt(ctx))
+                               tvdb_id=ctx.get("tvdb_id"), alt=ctx_alt(ctx),
+                               alt_titles=(ctx.get("search_titles") or [])[1:])
         prowlarr_err = None
         if not pres.get("configured"):
             prowlarr_err = "Prowlarr not configured"
