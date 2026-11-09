@@ -81,6 +81,17 @@ def _is_under(child: str, parent: str) -> bool:
         return False
 
 
+def _depth_below(child: str, parent: str) -> int:
+    """how many folders ``child`` sits below ``parent`` (0 when it is it)."""
+    try:
+        rel = os.path.relpath(os.path.abspath(child), os.path.abspath(parent))
+    except ValueError:
+        return 0
+    if rel in (os.curdir, ""):
+        return 0
+    return len([p for p in rel.split(os.sep) if p and p != os.curdir])
+
+
 # Canonical release kinds for the folder-reuse type check. Anything not on
 # this map (including the empty string) is "unknown" and stays lenient.
 _RELEASE_KIND_MAP = {
@@ -263,6 +274,7 @@ def resolve_existing_album_folder(
     disambiguation: Optional[str] = None,
     read_identity=read_release_identity,
     incoming_album_type: Optional[str] = None,
+    min_depth: int = 0,
 ) -> Optional[str]:
     """Return the on-disk folder an existing album lives in (so a new track joins
     it) or None to fall back to the templated path. See module docstring.
@@ -271,6 +283,11 @@ def resolve_existing_album_folder(
     ("single" / "ep" / "album" / "compilation", "" when unknown). When it and
     the stored album row's type are both known and differ, the folder is NOT
     reused — a single must never be filed into its same-named album's folder.
+
+    ``min_depth`` is how many folders below the transfer dir the album has to
+    sit. a template that files albums under an artist folder passes 2, so an
+    album that sits loose at the library root is never reused: every later
+    track joined it there instead of going under the artist (#2023).
     """
     if not transfer_dir or not os.path.isdir(transfer_dir):
         return None
@@ -325,6 +342,11 @@ def resolve_existing_album_folder(
     # or many (disc subfolders) → let the template decide.
     if len(folders) == 1:
         reuse = next(iter(folders))
+        if min_depth and _depth_below(reuse, transfer_dir) < min_depth:
+            logger.info(
+                "[Existing Album Folder] '%s' sits outside an artist folder, "
+                "not reusing it (#2023)", reuse)
+            return None
         # A smaller release never completes a bigger edition's folder. The
         # incoming release's own track total is authoritative: when the
         # existing album roster is LARGER, it is a different edition — a

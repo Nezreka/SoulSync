@@ -661,6 +661,21 @@ def get_album_type_display(raw_type, track_count, source: str = "", locked: bool
     return "Album"
 
 
+def _named_artist(*values) -> str:
+    """the first real artist name among ``values`` (names, artist dicts or
+    lists of them), '' when none names one."""
+    for value in values:
+        if isinstance(value, (list, tuple)):
+            name = _named_artist(*value)
+        elif isinstance(value, dict):
+            name = str(value.get("name") or "").strip()
+        else:
+            name = str(value or "").strip()
+        if name and name.casefold() not in ("unknown artist", "unknown"):
+            return name
+    return ""
+
+
 def _first_album_artist_id(album_ctx) -> str:
     artists = album_ctx.get("artists") if isinstance(album_ctx, dict) else None
     first = artists[0] if isinstance(artists, list) and artists else None
@@ -771,7 +786,10 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = apply_content_rating(template, context.get("explicit"), context.get("album_explicit"))
     template = result
 
-    album_artist_value = clean_context.get("albumartist", clean_context.get("artist", "Unknown Artist"))
+    # an empty name is no name: it rendered an empty folder and put the album
+    # at the library root (#2023)
+    artist_value = clean_context.get("artist") or "Unknown Artist"
+    album_artist_value = clean_context.get("albumartist") or artist_value
     collab_mode = _get_config_manager().get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and album_artist_value:
         artists_list = context.get("_artists_list")
@@ -842,7 +860,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
         "atypes": clean_context.get("atypes", ""),
         "playlist": clean_context.get("playlist_name", ""),
         "artistletter": artist_letter_value,
-        "artist": clean_context.get("artist", "Unknown Artist"),
+        "artist": artist_value,
         "album": clean_context.get("album", "Unknown Album"),
         "title": clean_context.get("title", "Unknown Track"),
         "track": track_value,
@@ -878,7 +896,7 @@ def _replace_template_variables(template: str, context: dict) -> str:
     result = result.replace("$atypes", clean_context.get("atypes", ""))
     result = result.replace("$playlist", clean_context.get("playlist_name", ""))
     result = result.replace("$artistletter", artist_letter_value)
-    result = result.replace("$artist", clean_context.get("artist", "Unknown Artist"))
+    result = result.replace("$artist", artist_value)
     result = result.replace("$album", clean_context.get("album", "Unknown Album"))
     result = result.replace("$title", clean_context.get("title", "Unknown Track"))
     # $track_disambiguation must replace before $track: it starts with $track,
@@ -1625,6 +1643,16 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         elif (raw_album_type in ("compilation", "compile", "compilations") or is_explicit_comp) \
                 and track_info.get("artist"):
             _artist_name = track_info["artist"]
+        if not _artist_name:
+            _artist_name = _named_artist(original_search.get("artist"), track_info.get("artist"))
+
+        # #2023: an album whose download named no artist anywhere above (an
+        # empty artist context and album credit) rendered an empty
+        # $albumartist, and the album folder landed at the library root next
+        # to the artist's real folder. the track's own artist is the next best
+        # answer, the one #989 gives an itunes single
+        if not _album_artist_name or _album_artist_name == "Unknown Artist":
+            _album_artist_name = _named_artist(_artist_name) or _album_artist_name
 
         template_context = {
             "artist": _artist_name,
@@ -1758,6 +1786,11 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
                     # A single/EP sharing the album's title is a different
                     # release — never let it reuse the album's folder.
                     incoming_album_type=raw_album_type,
+                    # #2023: a layout with an artist folder never reuses an
+                    # album folder that sits at the library root. no template
+                    # (None) means the Artist/Artist - Album fallback below
+                    min_depth=2 if folder_path is None else min(
+                        2, len([p for p in folder_path.replace("\\", "/").split("/") if p])),
                 )
             except Exception as _reuse_err:
                 logger.debug("[Existing Album Folder] lookup failed: %s", _reuse_err)
@@ -1828,6 +1861,10 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     # the download's artist is the track's, so a single credited to
     # "Creed, 3 Doors Down & Finger Eleven" went under whichever of them sang
     # this track (#2028)
+    if not _named_artist(artist_name):
+        # #2023: same as the album branch, never an empty artist folder
+        artist_name = _named_artist(
+            _artists, original_search.get("artist"), track_info.get("artist")) or artist_name
     _single_album_artist = artist_name
     _single_artists_list = _artists
     if _single_template_override and _album_ctx:
