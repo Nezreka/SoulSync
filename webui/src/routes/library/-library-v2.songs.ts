@@ -307,7 +307,9 @@ export async function deleteLibraryTrackRequest(
   const failed = operation.items.find((item) => item.status === 'failed');
   if (failed) {
     return {
-      message: 'Track removed from library but file could not be deleted',
+      // the delete stopped at the disk, so the file's row stays and the
+      // track is still in the library: say that, not that it was removed
+      message: "Couldn't delete the file, so the track is still in your library",
       tone: 'warning',
       extra: failed.error || undefined,
     };
