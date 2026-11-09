@@ -33,7 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
 
-import type { FindingAlbumGroup } from '../-tools.api';
+import type { FindingAlbumGroup, FindingsViewScope } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
   BulkFixStatus,
@@ -47,7 +47,6 @@ import {
   bulkFindingAction,
   clearFindings,
   dismissFinding,
-  dismissFindingChecked,
   dismissFindingType,
   fetchBulkFixStatus,
   findExactArtist,
@@ -325,6 +324,12 @@ export function FindingsSurface({
   const [groupView, setGroupView] = useState<'list' | 'album' | 'artist'>('list');
 
   const [groups, setGroups] = useState<FindingGroup[]>([]);
+  /** the inbox rows: `groups` again, unless a job or severity filter is set,
+   *  then counted by the server for those filters. a row's count is what its
+   *  Fix all / Dismiss all / Reopen all act on, and only the server knows how
+   *  many of a type's rows came from one job (review 5 W3-TT). the hero
+   *  keeps the whole library. */
+  const [inboxGroups, setInboxGroups] = useState<FindingGroup[]>([]);
   const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [types, setTypes] = useState<FindingTypeInfo[]>([]);
   const [items, setItems] = useState<RepairFinding[] | null>(null);
@@ -397,6 +402,24 @@ export function FindingsSurface({
   const searching = query.trim().length > 0;
   const listType = searching ? '' : openType;
 
+  /** what the list shows, sent with Fix Selected / Dismiss Selected so the
+   *  server can refuse a row the view no longer lists (review 5 W3-TT) */
+  const viewScope = useMemo<FindingsViewScope>(
+    () => ({
+      jobId: jobFilter,
+      status: statusFilter,
+      severity: severityFilter,
+      findingType: listType,
+      q: query.trim(),
+    }),
+    [jobFilter, listType, query, severityFilter, statusFilter],
+  );
+  /** the inbox's filters, for the group-row bulk buttons */
+  const groupFilters = useMemo(
+    () => ({ jobId: jobFilter || undefined, severity: severityFilter || undefined }),
+    [jobFilter, severityFilter],
+  );
+
   // ── Loading ────────────────────────────────────────────────────────────────
 
   /** Set below, so `loadCounts` can call the watcher without the two
@@ -420,10 +443,20 @@ export function FindingsSurface({
     if (!video) setCacheHealth(await fetchCacheHealth());
   }, [video]);
 
+  const groupsToken = useRef(0);
   const loadGroups = useCallback(async () => {
-    setGroups(await fetchFindingGroups());
+    // a filter changed while an older load was out: the newest wins
+    const token = ++groupsToken.current;
+    const filtered = Boolean(jobFilter || severityFilter);
+    const [all, narrowed] = await Promise.all([
+      fetchFindingGroups(),
+      filtered ? fetchFindingGroups({ jobId: jobFilter, severity: severityFilter }) : null,
+    ]);
+    if (token !== groupsToken.current) return;
+    setGroups(all);
+    setInboxGroups(narrowed ?? all);
     setGroupsLoaded(true);
-  }, []);
+  }, [jobFilter, severityFilter]);
 
   const loadFindings = useCallback(async () => {
     // Nothing is open and nothing is being searched: the inbox IS the view,
@@ -571,9 +604,15 @@ export function FindingsSurface({
 
   useEffect(() => {
     void loadCounts();
+  }, [loadCounts]);
+
+  useEffect(() => {
     void loadGroups();
+  }, [loadGroups]);
+
+  useEffect(() => {
     void fetchFindingTypes().then(setTypes);
-  }, [loadCounts, loadGroups]);
+  }, []);
 
   useEffect(() => {
     void loadFindings();
@@ -924,16 +963,22 @@ export function FindingsSurface({
 
   const bulkDismiss = useCallback(async () => {
     if (selected.size === 0) return;
-    const count = selected.size;
     const ids = [...selected];
     try {
-      await bulkFindingAction(ids, 'dismiss');
-      offerUndo(ids, `${count.toLocaleString()} findings dismissed`);
+      const { updated, refused } = await bulkFindingAction(ids, 'dismiss', viewScope);
+      // the server dismissed only what this view still lists
+      if (refused) {
+        toast(
+          `${refused.toLocaleString()} selected finding${refused === 1 ? ' is' : 's are'} no longer in this list and ${refused === 1 ? 'was' : 'were'} left alone`,
+          'info',
+        );
+      }
+      offerUndo(ids, `${(updated || ids.length - refused).toLocaleString()} findings dismissed`);
       refreshAll();
     } catch {
       toast('Error updating findings', 'error');
     }
-  }, [offerUndo, refreshAll, selected]);
+  }, [offerUndo, refreshAll, selected, viewScope]);
 
   /** `bulkFixFindings` — ask once per finding KIND, then fix one id at a time. */
   const bulkFix = useCallback(async () => {
@@ -1030,31 +1075,41 @@ export function FindingsSurface({
     let fixed = 0;
     let failed = 0;
     let skipped = 0;
+    let refused = 0;
     let otherArtistSkipped = 0;
     let lastError = '';
     toast(`Fixing ${ids.length} findings...`, 'info');
 
+    // Backfill "Just Clear" and quality "Ignore" both dismiss rather than
+    // fix, so they bypass the fix endpoint entirely. one scoped dismiss, so
+    // the server checks them against this view like every other row
+    // (review 5 W3-TT).
+    const dismissIds = ids.filter(
+      (id) =>
+        (typeOf(id) === TYPE_BACKFILL && backfillAction === 'dismiss') ||
+        (typeOf(id) === TYPE_QUALITY && qualityAction === 'ignore'),
+    );
+    if (dismissIds.length) {
+      try {
+        const result = await bulkFindingAction(dismissIds, 'dismiss', viewScope);
+        fixed += result.updated;
+        refused += result.refused;
+        const lost = dismissIds.length - result.updated - result.refused;
+        if (lost > 0) {
+          failed += lost;
+          lastError = 'dismiss failed';
+        }
+      } catch {
+        failed += dismissIds.length;
+        lastError = 'dismiss failed';
+      }
+    }
+    const dismissed = new Set(dismissIds);
+
     for (const id of ids) {
+      if (dismissed.has(id)) continue;
       const findingType = typeOf(id);
       try {
-        // Backfill "Just Clear" and quality "Ignore" both dismiss rather than
-        // fix, so they bypass the fix endpoint entirely.
-        if (
-          (findingType === TYPE_BACKFILL && backfillAction === 'dismiss') ||
-          (findingType === TYPE_QUALITY && qualityAction === 'ignore')
-        ) {
-          try {
-            if (await dismissFindingChecked(id)) fixed++;
-            else {
-              failed++;
-              lastError = 'dismiss failed';
-            }
-          } catch {
-            failed++;
-          }
-          continue;
-        }
-
         let fixAction: string | null = null;
         if (findingType === TYPE_ORPHAN && orphanAction) fixAction = orphanAction;
         else if (findingType === TYPE_DEAD && deadAction) fixAction = deadAction;
@@ -1069,12 +1124,14 @@ export function FindingsSurface({
         // would count as an explicit single fix, and the album gate
         // would let a select-all wishlist every other artist on every
         // compilation in the selection.
-        const result = await fixFinding(id, fixAction, { bulk: true });
+        // scope: the server refuses a row this view no longer lists
+        const result = await fixFinding(id, fixAction, { bulk: true, scope: viewScope });
         // Counted even on a successful fix: a partial gate resolves the
         // finding, and without this the held-back tracks are silent here
         // (the background Fix All reports them in its run note).
         otherArtistSkipped += result.other_artist_skipped || 0;
-        if (result.success) fixed++;
+        if (result.refused) refused++;
+        else if (result.success) fixed++;
         else if (result.skipped_by_design) skipped++;
         else {
           failed++;
@@ -1093,8 +1150,14 @@ export function FindingsSurface({
       otherArtistSkipped,
     );
     toast(message, type);
+    if (refused) {
+      toast(
+        `${refused.toLocaleString()} selected finding${refused === 1 ? ' is' : 's are'} no longer in this list and ${refused === 1 ? 'was' : 'were'} left alone`,
+        'info',
+      );
+    }
     refreshAll();
-  }, [items, prompts, refreshAll, selected, typeInfo, video]);
+  }, [items, prompts, refreshAll, selected, typeInfo, video, viewScope]);
 
   // ── Group-scoped actions ───────────────────────────────────────────────────
 
@@ -1159,10 +1222,12 @@ export function FindingsSurface({
                     // finding types would lose all of its pending rows when
                     // you cleared one group (the #1142 family).
                     findingType: group.finding_type,
+                    // and to the severity the row counted (review 5 W3-TT)
+                    severity: groupFilters.severity,
                   })
                 : {
                     success: true,
-                    deleted: (await dismissFindingType(group.finding_type)).updated,
+                    deleted: (await dismissFindingType(group.finding_type, groupFilters)).updated,
                   };
             toast(
               result.success
@@ -1196,7 +1261,7 @@ export function FindingsSurface({
         fixAction = await prompts.promptQuality();
         if (!fixAction) return;
         if (fixAction === 'ignore') {
-          const updated = (await dismissFindingType(group.finding_type)).updated || 0;
+          const updated = (await dismissFindingType(group.finding_type, groupFilters)).updated || 0;
           toast(`Dismissed ${updated.toLocaleString()} quality findings`, 'success');
           refreshAll();
           return;
@@ -1237,9 +1302,13 @@ export function FindingsSurface({
       }
 
       try {
+        // the inbox's job / severity filters: the run fixes the rows the
+        // row counted, not every row of the type (review 5 W3-TT)
         const result = await startBulkFix({
           findingType: group.finding_type,
           fixAction,
+          jobId: groupFilters.jobId,
+          severity: groupFilters.severity,
         });
         if (result.started) {
           toast(`Fixing ${result.total} ${label.toLowerCase()} in the background…`, 'info');
@@ -1254,7 +1323,7 @@ export function FindingsSurface({
         toast('Error starting bulk fix', 'error');
       }
     },
-    [prompts, refreshAll, video, watchBulkFixRun],
+    [groupFilters, prompts, refreshAll, video, watchBulkFixRun],
   );
 
   const dismissGroup = useCallback(
@@ -1268,7 +1337,7 @@ export function FindingsSurface({
       });
       if (!confirmed) return;
       try {
-        const result = await dismissFindingType(group.finding_type);
+        const result = await dismissFindingType(group.finding_type, groupFilters);
         toast(
           result.success
             ? `Dismissed ${(result.updated || 0).toLocaleString()} findings`
@@ -1280,7 +1349,7 @@ export function FindingsSurface({
         toast('Error dismissing findings', 'error');
       }
     },
-    [refreshAll],
+    [groupFilters, refreshAll],
   );
 
   /** Reopen all dismissed/resolved findings of one type — the bulk undo for
@@ -1297,7 +1366,11 @@ export function FindingsSurface({
       });
       if (!confirmed) return;
       try {
-        const count = await reopenFindingsBulk(undefined, group.finding_type);
+        const count = await reopenFindingsBulk(
+          groupFilters.jobId,
+          group.finding_type,
+          groupFilters.severity,
+        );
         toast(
           count > 0 ? `Reopened ${count.toLocaleString()} findings` : 'No findings to reopen',
           count > 0 ? 'success' : 'info',
@@ -1307,7 +1380,7 @@ export function FindingsSurface({
         toast(e instanceof Error ? e.message : 'Error reopening findings', 'error');
       }
     },
-    [refreshAll],
+    [groupFilters, refreshAll],
   );
 
   const safeCount = useMemo(() => safeFixablePending(groups, typeInfo), [groups, typeInfo]);
@@ -1452,12 +1525,12 @@ export function FindingsSurface({
 
   const shown = useMemo(
     () =>
-      visibleGroups(groups, {
+      visibleGroups(inboxGroups, {
         jobId: jobFilter,
         severity: severityFilter,
         status: statusFilter,
       }),
-    [groups, jobFilter, severityFilter, statusFilter],
+    [inboxGroups, jobFilter, severityFilter, statusFilter],
   );
 
   /**

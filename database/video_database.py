@@ -7894,18 +7894,22 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def repair_finding_groups(self) -> list:
+    def repair_finding_groups(self, job_id=None, severity=None) -> list:
         """one row per finding TYPE, every status counted, worst first.
 
         the music inbox shape (RepairWorker.get_finding_groups) so the same
-        client renders both sides."""
+        client renders both sides. job_id / severity are the inbox filters, so
+        a row counts what its bulk buttons act on (review 5 W3-TT)."""
+        w, params = self._repair_filter(job_id=job_id, severity=severity)
         conn = self._get_connection()
         try:
             rows = conn.execute(
                 "SELECT finding_type, status, severity, COUNT(*) n, MAX(created_at) last "
-                "FROM video_repair_findings GROUP BY finding_type, status, severity").fetchall()
+                f"FROM video_repair_findings{w} GROUP BY finding_type, status, severity",
+                params).fetchall()
             jobs = conn.execute(
-                "SELECT DISTINCT finding_type, job_id FROM video_repair_findings").fetchall()
+                f"SELECT DISTINCT finding_type, job_id FROM video_repair_findings{w}",
+                params).fetchall()
         finally:
             conn.close()
         rank = {"error": 0, "warning": 1, "info": 2}
@@ -7965,21 +7969,17 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def repair_reopen_dismissed(self, job_id=None, finding_type=None) -> int:
+    def repair_reopen_dismissed(self, job_id=None, finding_type=None, severity=None) -> int:
         """bulk undo for dismiss. dismissed rows only: a resolved row is work
         that happened, and reopening it in bulk would redo that work. empty
-        string filters are refused, they'd quietly widen to everything."""
-        if job_id == "" or finding_type == "":
+        string filters are refused, they'd quietly widen to everything.
+        severity is the inbox filter (review 5 W3-TT)."""
+        if job_id == "" or finding_type == "" or severity == "":
             return 0
+        w, params = self._repair_filter(job_id=job_id, status="dismissed",
+                                        severity=severity, finding_type=finding_type)
         sql = ("UPDATE video_repair_findings SET status='pending', user_action=NULL, "
-               "resolved_at=NULL, updated_at=CURRENT_TIMESTAMP WHERE status='dismissed'")
-        params = []
-        if job_id:
-            sql += " AND job_id=?"
-            params.append(job_id)
-        if finding_type:
-            sql += " AND finding_type=?"
-            params.append(finding_type)
+               f"resolved_at=NULL, updated_at=CURRENT_TIMESTAMP{w}")
         conn = self._get_connection()
         try:
             cur = conn.execute(sql, params)
@@ -7988,17 +7988,19 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def repair_dismiss_by_type(self, finding_type: str) -> int:
+    def repair_dismiss_by_type(self, finding_type: str, job_id=None, severity=None) -> int:
         """dismiss every PENDING finding of one type (the inbox's dismiss all).
-        handled rows stay as they are, they're history."""
+        handled rows stay as they are, they're history. job_id / severity are
+        the inbox filters: only the rows the row counted (review 5 W3-TT)."""
         if not finding_type:
             return 0
+        w, params = self._repair_filter(job_id=job_id, status="pending",
+                                        severity=severity, finding_type=finding_type)
         conn = self._get_connection()
         try:
             cur = conn.execute(
                 "UPDATE video_repair_findings SET status='dismissed', "
-                "resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP "
-                "WHERE finding_type=? AND status='pending'", (finding_type,))
+                f"resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP{w}", params)
             conn.commit()
             return cur.rowcount
         finally:
@@ -8022,6 +8024,32 @@ class VideoDatabase:
         try:
             return [r[0] for r in conn.execute(
                 f"SELECT id FROM video_repair_findings{w} ORDER BY id", params).fetchall()]
+        finally:
+            conn.close()
+
+    def repair_ids_in_view(self, ids, job_id=None, status=None, severity=None,
+                           finding_type=None, q=None) -> list:
+        """the ids out of ``ids`` the view the client describes still lists.
+        fix selected / dismiss selected act only on these (review 5 W3-TT)."""
+        clean = []
+        for i in ids or []:
+            try:
+                clean.append(int(i))
+            except (TypeError, ValueError):
+                continue
+        if not clean:
+            return []
+        w, params = self._repair_filter(job_id, status, severity, finding_type, q)
+        conn = self._get_connection()
+        try:
+            out = []
+            for i in range(0, len(clean), 500):
+                chunk = clean[i:i + 500]
+                sql = (f"SELECT id FROM video_repair_findings{w}"
+                       + (" AND " if w else " WHERE ")
+                       + "id IN (%s) ORDER BY id" % ",".join("?" * len(chunk)))
+                out.extend(r[0] for r in conn.execute(sql, [*params, *chunk]).fetchall())
+            return out
         finally:
             conn.close()
 

@@ -383,17 +383,18 @@ class VideoRepairWorker:
             out.append(row)
         return out
 
-    def get_finding_groups(self) -> list:
-        return self.db.repair_finding_groups()
+    def get_finding_groups(self, job_id=None, severity=None) -> list:
+        return self.db.repair_finding_groups(job_id=job_id, severity=severity)
 
     def reopen_finding(self, finding_id: int) -> bool:
         return self.db.repair_reopen_finding(finding_id)
 
-    def reopen_findings_bulk(self, job_id=None, finding_type=None) -> int:
-        return self.db.repair_reopen_dismissed(job_id=job_id, finding_type=finding_type)
+    def reopen_findings_bulk(self, job_id=None, finding_type=None, severity=None) -> int:
+        return self.db.repair_reopen_dismissed(job_id=job_id, finding_type=finding_type,
+                                               severity=severity)
 
-    def dismiss_findings_by_type(self, finding_type: str) -> int:
-        return self.db.repair_dismiss_by_type(finding_type)
+    def dismiss_findings_by_type(self, finding_type: str, job_id=None, severity=None) -> int:
+        return self.db.repair_dismiss_by_type(finding_type, job_id=job_id, severity=severity)
 
     # ── background bulk fix ───────────────────────────────────────────────────
     def _pending_fixable_ids(self, job_id=None, severity=None, ids=None,

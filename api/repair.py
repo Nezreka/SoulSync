@@ -52,6 +52,20 @@ def create_blueprint():
     return bp
 
 
+_VIEW_KEYS = ('job_id', 'status', 'severity', 'finding_type', 'q',
+              'group_by', 'group_artist', 'group_album')
+
+
+def _view_filters(data) -> dict:
+    """The filters of the view a selection was made in (``scope`` in the
+    body). Fix Selected and Dismiss Selected act only on ids that view still
+    lists, checked here, not trusted from the client (review 5 W3-TT)."""
+    scope = data.get('scope') if isinstance(data, dict) else None
+    if not isinstance(scope, dict):
+        scope = {}
+    return {key: (scope.get(key) or None) for key in _VIEW_KEYS}
+
+
 # --- Repair Worker API Endpoints ---
 
 @bp.route('/api/repair/status', methods=['GET'])
@@ -287,7 +301,11 @@ def repair_findings_groups():
     try:
         if _repair_worker() is None:
             return jsonify({'groups': []}), 200
-        return jsonify({'groups': _repair_worker().get_finding_groups()}), 200
+        # the inbox's job and severity filters: each row counts what its
+        # bulk buttons act on (review 5 W3-TT)
+        return jsonify({'groups': _repair_worker().get_finding_groups(
+            job_id=request.args.get('job_id') or None,
+            severity=request.args.get('severity') or None)}), 200
     except Exception as e:
         logger.error(f"Error grouping repair findings: {e}")
         return jsonify({'error': str(e)}), 500
@@ -388,7 +406,9 @@ def repair_findings_reopen_all():
         data = request.get_json(silent=True) or {}
         job_id = data.get('job_id')
         finding_type = data.get('finding_type')
-        count = _repair_worker().reopen_findings_bulk(job_id=job_id, finding_type=finding_type)
+        count = _repair_worker().reopen_findings_bulk(
+            job_id=job_id, finding_type=finding_type,
+            severity=data.get('severity') or None)
         return jsonify({'success': True, 'reopened': count}), 200
     except Exception as e:
         logger.error(f"Error bulk reopening findings: {e}")
@@ -429,6 +449,13 @@ def repair_finding_fix(finding_id):
 
         data = request.get_json(silent=True) or {}
         fix_action = data.get('fix_action')  # e.g. 'staging' or 'delete' for orphan files
+        if data.get('bulk'):
+            # Fix Selected: only a row the view it was picked from still lists
+            # (the library on screen and every filter), never a stale one
+            # from another library or album (review 5 W3-TT)
+            if not _repair_worker().ids_in_view([finding_id], **_view_filters(data)):
+                return jsonify({'success': False, 'refused': True,
+                                'error': 'Not in the list you picked it from any more'}), 409
         # This route is the single-finding fix, so it is the one place
         # that may declare a fix explicit — and only when the caller
         # does not declare itself bulk: a "Fix Selected" loop posts here
@@ -571,14 +598,24 @@ def repair_findings_bulk():
         if not finding_ids and finding_type:
             if action != 'dismiss':
                 return jsonify({'error': 'Only dismiss is supported for a type-scoped bulk'}), 400
-            count = _repair_worker().dismiss_findings_by_type(finding_type)
+            # the inbox's job / severity filters, so Dismiss all reaches only
+            # the rows its row counted (review 5 W3-TT)
+            count = _repair_worker().dismiss_findings_by_type(
+                finding_type, job_id=data.get('job_id') or None,
+                severity=data.get('severity') or None)
             return jsonify({'success': True, 'updated': count}), 200
 
         if not finding_ids:
             return jsonify({'error': 'No finding IDs provided'}), 400
+        if not isinstance(finding_ids, list):
+            return jsonify({'error': 'ids must be a list'}), 400
 
-        count = _repair_worker().bulk_update_findings(finding_ids, action)
-        return jsonify({'success': True, 'updated': count}), 200
+        # only ids the view they were picked in still lists: the library on
+        # screen plus every filter (review 5 W3-TT)
+        allowed = _repair_worker().ids_in_view(finding_ids, **_view_filters(data))
+        refused = len({str(i) for i in finding_ids}) - len(allowed)
+        count = _repair_worker().bulk_update_findings(allowed, action) if allowed else 0
+        return jsonify({'success': True, 'updated': count, 'refused': max(0, refused)}), 200
     except Exception as e:
         logger.error(f"Error bulk updating findings: {e}")
         return jsonify({'error': str(e)}), 500

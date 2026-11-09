@@ -269,9 +269,18 @@ export async function fetchFindingCounts(): Promise<RepairFindingCounts> {
  * groups" alongside a visible error beats the whole maintenance surface
  * disappearing because one of three parallel loads lost its connection.
  */
-export async function fetchFindingGroups(): Promise<FindingGroup[]> {
+export async function fetchFindingGroups(filters?: {
+  jobId?: string;
+  severity?: string;
+}): Promise<FindingGroup[]> {
+  // the inbox's job and severity filters: each row then counts exactly what
+  // its Fix all / Dismiss all / Reopen all act on (review 5 W3-TT)
+  const params = new URLSearchParams();
+  if (filters?.jobId) params.set('job_id', filters.jobId);
+  if (filters?.severity) params.set('severity', filters.severity);
+  const query = params.toString();
   try {
-    const response = await fetch(repairUrl('/findings/groups'));
+    const response = await fetch(repairUrl(`/findings/groups${query ? `?${query}` : ''}`));
     if (!response.ok) return [];
     const data = (await response.json()) as { groups?: FindingGroup[] };
     return data.groups || [];
@@ -313,10 +322,16 @@ export async function reopenFinding(id: number): Promise<boolean> {
 /** Reopen all dismissed findings, optionally filtered by job and/or
  *  type. The bulk undo for dismiss. Returns the count reopened, or
  *  throws with the backend error message. */
-export async function reopenFindingsBulk(jobId?: string, findingType?: string): Promise<number> {
+export async function reopenFindingsBulk(
+  jobId?: string,
+  findingType?: string,
+  severity?: string,
+): Promise<number> {
   const response = await postJson(repairUrl('/findings/reopen-all'), {
     job_id: jobId,
     finding_type: findingType,
+    // the inbox's severity filter (review 5 W3-TT)
+    severity: severity || undefined,
   });
   const data = (await response.json()) as { success?: boolean; reopened?: number; error?: string };
   if (!data.success) {
@@ -330,16 +345,52 @@ export async function reopenFindingsBulk(jobId?: string, findingType?: string): 
  *  to the browser only to post them straight back. */
 export async function dismissFindingType(
   findingType: string,
+  filters?: { jobId?: string; severity?: string },
 ): Promise<{ success?: boolean; updated?: number; error?: string }> {
   const response = await postJson(repairUrl('/findings/bulk'), {
     finding_type: findingType,
     action: 'dismiss',
+    // the inbox's filters: only the rows the group row counted (review 5 W3-TT)
+    job_id: filters?.jobId || undefined,
+    severity: filters?.severity || undefined,
   });
   return (await response.json()) as { success?: boolean; updated?: number; error?: string };
 }
 
+/**
+ * The view a selection was made in: the list's filters. Fix Selected and
+ * Dismiss Selected send it, and the server acts only on ids that view still
+ * lists (plus the library picked in the header), so a stale or wrong
+ * selection can't reach another type, job or album (review 5 W3-TT).
+ */
+export interface FindingsViewScope {
+  jobId?: string;
+  status?: string;
+  severity?: string;
+  findingType?: string;
+  q?: string;
+  group?: FindingsQuery['group'];
+}
+
+export function viewScopeBody(scope: FindingsViewScope): Record<string, string> {
+  const body: Record<string, string> = {};
+  if (scope.jobId) body.job_id = scope.jobId;
+  if (scope.status) body.status = scope.status;
+  if (scope.severity) body.severity = scope.severity;
+  if (scope.findingType) body.finding_type = scope.findingType;
+  if (scope.q?.trim()) body.q = scope.q.trim();
+  if (scope.group) {
+    body.group_by = scope.group.groupBy;
+    body.group_artist = scope.group.artist;
+    if (scope.group.album !== null) body.group_album = scope.group.album;
+  }
+  return body;
+}
+
 export interface FixResult {
   success?: boolean;
+  /** a bulk fix of a row the view no longer lists, refused by the server */
+  refused?: boolean;
   message?: string;
   error?: string;
   /** the fix was held back by design, not failed — e.g. an incomplete
@@ -367,11 +418,13 @@ export interface FixResult {
 export async function fixFinding(
   id: number,
   fixAction?: string | null,
-  options?: { bulk?: boolean },
+  options?: { bulk?: boolean; scope?: FindingsViewScope },
 ): Promise<FixResult> {
-  const body: { fix_action?: string; bulk?: boolean } = {};
+  const body: { fix_action?: string; bulk?: boolean; scope?: Record<string, string> } = {};
   if (fixAction) body.fix_action = fixAction;
   if (options?.bulk) body.bulk = true;
+  // the server refuses a bulk fix of a row this view no longer lists
+  if (options?.scope) body.scope = viewScopeBody(options.scope);
   const response = await postJson(repairUrl(`/findings/${id}/fix`), body);
   return (await response.json()) as FixResult;
 }
@@ -430,9 +483,24 @@ export async function albumFindingAction(
   return data;
 }
 
-/** `bulkRepairAction`. Response ignored; the toast fires regardless. */
-export async function bulkFindingAction(ids: number[], action: string): Promise<void> {
-  await postJson(repairUrl('/findings/bulk'), { ids, action });
+/** `bulkRepairAction`. `scope` is the view the ids were picked in; the
+ *  server skips any id that view no longer lists and says how many in
+ *  `refused` (review 5 W3-TT). */
+export async function bulkFindingAction(
+  ids: number[],
+  action: string,
+  scope?: FindingsViewScope,
+): Promise<{ updated: number; refused: number }> {
+  const body: { ids: number[]; action: string; scope?: Record<string, string> } = { ids, action };
+  if (scope) body.scope = viewScopeBody(scope);
+  const response = await postJson(repairUrl('/findings/bulk'), body);
+  const data = (await response.json().catch(() => ({}))) as {
+    updated?: number;
+    refused?: number;
+    error?: string;
+  };
+  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  return { updated: data.updated ?? 0, refused: data.refused ?? 0 };
 }
 
 export interface ClearFindingsResult {

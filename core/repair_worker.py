@@ -2303,6 +2303,40 @@ class RepairWorker:
             result['error'] = fixed['error']
         return result
 
+    def ids_in_view(self, finding_ids, *, job_id: str = None, status: str = None,
+                    severity: str = None, finding_type: str = None, q: str = None,
+                    group_by: str = None, group_artist=None, group_album=None) -> List[int]:
+        """The ids out of ``finding_ids`` that the view the client describes
+        actually lists: the library picked in the header plus every filter.
+
+        Fix Selected and Dismiss Selected send what they listed; this is the
+        server's check that each id is still one of those rows, so a stale or
+        wrong selection can't reach another library, type, job or album
+        (review 5 W3-TT).
+        """
+        wanted = []
+        for fid in finding_ids or []:
+            try:
+                wanted.append(int(fid))
+            except (TypeError, ValueError):
+                continue
+        if not wanted:
+            return []
+        where, params = self._findings_filter(
+            job_id=job_id, status=status, severity=severity,
+            finding_type=finding_type, q=q, group_by=group_by,
+            group_artist=group_artist, group_album=group_album)
+        where = f"{where} AND id IN ({_JSON_IDS})" if where else f"WHERE id IN ({_JSON_IDS})"
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            return [row[0] for row in conn.execute(
+                f"SELECT id FROM repair_findings {where} ORDER BY id",
+                params + [_json_ids(wanted)])]
+        finally:
+            if conn:
+                conn.close()
+
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
                            status: str = 'pending', finding_type: str = None,
                            q: str = None, limit: int = 200) -> List[dict]:
@@ -2417,7 +2451,7 @@ class RepairWorker:
                     conn.close()
         return out
 
-    def get_finding_groups(self) -> List[dict]:
+    def get_finding_groups(self, job_id: str = None, severity: str = None) -> List[dict]:
         """One row per finding TYPE — the unit the inbox works in.
 
         The flat list made a user page 30-at-a-time through thousands of rows
@@ -2427,11 +2461,22 @@ class RepairWorker:
         Counts every status in one GROUP BY (the type/status index carries
         it), so a group can show what is left AND what has already been dealt
         with without a second round trip.
+
+        ``job_id`` / ``severity`` are the inbox's filters: the row's count is
+        what its Fix all / Dismiss all / Reopen all act on, and those take the
+        same filters (review 5 W3-TT).
         """
         # the library picked in the header, like the list and the badges:
         # the row's "Fix all (N)" / "Dismiss all" count was every library's
         # (review 5 W3-TT-1)
         library = _findings_library_clause() or "1"
+        narrow, narrow_params = "", []
+        if job_id:
+            narrow += " AND job_id = ?"
+            narrow_params.append(job_id)
+        if severity:
+            narrow += " AND severity = ?"
+            narrow_params.append(severity)
         conn = None
         try:
             conn = self.db._get_connection()
@@ -2439,15 +2484,16 @@ class RepairWorker:
             cursor.execute(f"""
                 SELECT finding_type, status, severity, COUNT(*), MAX(created_at)
                 FROM repair_findings
-                WHERE {library}
+                WHERE {library}{narrow}
                 GROUP BY finding_type, status, severity
-            """)
+            """, narrow_params)
             rows = cursor.fetchall()
 
             # Which jobs feed each type — a group shows its source without
             # the user having to cross-reference the jobs list.
             cursor.execute(
-                f"SELECT DISTINCT finding_type, job_id FROM repair_findings WHERE {library}")
+                f"SELECT DISTINCT finding_type, job_id FROM repair_findings "
+                f"WHERE {library}{narrow}", narrow_params)
             jobs_by_type: Dict[str, set] = {}
             for finding_type, job_id in cursor.fetchall():
                 jobs_by_type.setdefault(finding_type, set()).add(job_id)
@@ -2464,8 +2510,8 @@ class RepairWorker:
                     "SELECT finding_type, COUNT(*) FROM repair_findings "
                     "WHERE status = 'pending' "
                     "AND json_extract(details_json, '$.has_manual_conflict') = 1 "
-                    f"AND {library} "
-                    "GROUP BY finding_type")
+                    f"AND {library}{narrow} "
+                    "GROUP BY finding_type", narrow_params)
                 manual_by_type = {row[0]: row[1] for row in cursor.fetchall()}
             except Exception as e:  # noqa: BLE001 - a count is not worth a 500
                 logger.debug("manual-conflict count unavailable: %s", e)
@@ -2543,16 +2589,18 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def reopen_findings_bulk(self, job_id: str = None, finding_type: str = None) -> int:
+    def reopen_findings_bulk(self, job_id: str = None, finding_type: str = None,
+                             severity: str = None) -> int:
         """Reopen all dismissed findings, optionally filtered.
 
         The bulk undo for dismiss — e.g. reopening 10k+ dismissed BPM
         findings at once. Only touches dismissed rows; resolved findings
         represent completed work and are never reopened in bulk.
-        Returns the number of findings reopened.
+        Returns the number of findings reopened. ``severity`` is the inbox's
+        severity filter: reopen only what the row counted (review 5 W3-TT).
         """
         # Guard against empty-string filters silently becoming unfiltered
-        if job_id == "" or finding_type == "":
+        if job_id == "" or finding_type == "" or severity == "":
             logger.warning("Bulk reopen called with empty filter, refusing")
             return 0
         conn = None
@@ -2572,6 +2620,9 @@ class RepairWorker:
             if finding_type:
                 query += " AND finding_type = ?"
                 params.append(finding_type)
+            if severity:
+                query += " AND severity = ?"
+                params.append(severity)
             # only the library picked in the header (review 5 W3-TT-1)
             library = _findings_library_clause()
             if library:
@@ -7253,7 +7304,8 @@ class RepairWorker:
         self._bulk_fix_stop_event.set()
         return True
 
-    def dismiss_findings_by_type(self, finding_type: str) -> int:
+    def dismiss_findings_by_type(self, finding_type: str, job_id: str = None,
+                                 severity: str = None) -> int:
         """Dismiss every PENDING finding of one type. Returns count updated.
 
         The inbox works a whole group at a time, and "dismiss this group" had
@@ -7263,9 +7315,20 @@ class RepairWorker:
         Pending only. A resolved row is a record of work that actually
         happened — rewriting it to 'dismissed' would falsify the history the
         recurrence grace and the run counters both read.
+
+        ``job_id`` / ``severity`` are the inbox's filters. without them a
+        filtered row's Dismiss all reached rows the filter hid (review 5
+        W3-TT).
         """
         if not finding_type:
             return 0
+        narrow, params = "", [finding_type]
+        if job_id:
+            narrow += " AND job_id = ?"
+            params.append(job_id)
+        if severity:
+            narrow += " AND severity = ?"
+            params.append(severity)
         conn = None
         try:
             conn = self.db._get_connection()
@@ -7277,8 +7340,8 @@ class RepairWorker:
                 UPDATE repair_findings
                 SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE finding_type = ? AND status = 'pending' AND {library}
-            """, (finding_type,))
+                WHERE finding_type = ? AND status = 'pending' AND {library}{narrow}
+            """, params)
             conn.commit()
             count = cursor.rowcount
             logger.info("Dismissed %d pending findings of type %s", count, finding_type)

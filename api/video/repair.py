@@ -56,6 +56,19 @@ def _with_schedules(jobs: list) -> list:
     return jobs
 
 
+_VIEW_KEYS = ("job_id", "status", "severity", "finding_type", "q")
+
+
+def _view_filters(body) -> dict:
+    """the filters of the view a selection was made in (``scope`` in the
+    body). fix selected and dismiss selected act only on ids that view still
+    lists, checked here (review 5 W3-TT, same contract as music)."""
+    scope = body.get("scope") if isinstance(body, dict) else None
+    if not isinstance(scope, dict):
+        scope = {}
+    return {key: (scope.get(key) or None) for key in _VIEW_KEYS}
+
+
 def register_routes(bp):
     @bp.route("/repair/status", methods=["GET"])
     def video_repair_status():
@@ -152,7 +165,11 @@ def register_routes(bp):
 
     @bp.route("/repair/findings/groups", methods=["GET"])
     def video_repair_findings_groups():
-        return jsonify({"groups": _worker().get_finding_groups()})
+        # the inbox's job / severity filters: a row counts what its bulk
+        # buttons act on (review 5 W3-TT)
+        return jsonify({"groups": _worker().get_finding_groups(
+            job_id=request.args.get("job_id") or None,
+            severity=request.args.get("severity") or None)})
 
     @bp.route("/repair/finding-types", methods=["GET"])
     def video_repair_finding_types():
@@ -169,12 +186,19 @@ def register_routes(bp):
     def video_repair_findings_reopen_all():
         body = request.get_json(silent=True) or {}
         n = _worker().reopen_findings_bulk(job_id=body.get("job_id"),
-                                           finding_type=body.get("finding_type"))
+                                           finding_type=body.get("finding_type"),
+                                           severity=body.get("severity") or None)
         return jsonify({"success": True, "reopened": n})
 
     @bp.route("/repair/findings/<int:fid>/fix", methods=["POST"])
     def video_repair_finding_fix(fid):
         body = request.get_json(silent=True) or {}
+        if body.get("bulk"):
+            # fix selected: only a row its view still lists (review 5 W3-TT)
+            from . import get_video_db
+            if not get_video_db().repair_ids_in_view([fid], **_view_filters(body)):
+                return jsonify({"success": False, "refused": True,
+                                "error": "Not in the list you picked it from any more"}), 409
         res = _worker().fix_finding(fid, body.get("fix_action"))
         return jsonify(res), (200 if res.get("success") else 400)
 
@@ -227,11 +251,17 @@ def register_routes(bp):
             if action != "dismiss":
                 return jsonify({"error": "Only dismiss is supported for a type-scoped bulk"}), 400
             return jsonify({"success": True,
-                            "updated": _worker().dismiss_findings_by_type(finding_type)})
-        if action not in ("dismiss", "resolve") or not ids:
+                            "updated": _worker().dismiss_findings_by_type(
+                                finding_type, job_id=body.get("job_id") or None,
+                                severity=body.get("severity") or None)})
+        if action not in ("dismiss", "resolve") or not ids or not isinstance(ids, list):
             return jsonify({"error": "bad request"}), 400
-        return jsonify({"success": True,
-                        "updated": _worker().bulk_update_findings(ids, action)})
+        # only ids the view they were picked in still lists (review 5 W3-TT)
+        from . import get_video_db
+        allowed = get_video_db().repair_ids_in_view(ids, **_view_filters(body))
+        updated = _worker().bulk_update_findings(allowed, action) if allowed else 0
+        return jsonify({"success": True, "updated": updated,
+                        "refused": max(0, len({str(i) for i in ids}) - len(allowed))})
 
     @bp.route("/repair/findings/clear", methods=["POST"])
     def video_repair_clear():

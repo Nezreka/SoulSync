@@ -23,7 +23,8 @@ export interface FindingsInboxProps {
   /** Already filtered by the toolbar; ordering is this component's job. */
   groups: readonly FindingGroup[];
   typeInfo: (findingType: string) => FindingTypeInfo | undefined;
-  /** Which count each row shows — follows the status segmented control. */
+  /** Which count each row shows — follows the status segmented control. It
+   *  also decides which bulk buttons a row offers. */
   status: string;
   /** the severity filter, so a row counts and colours only those rows */
   severity?: string;
@@ -79,7 +80,12 @@ export function FindingsInbox({
         const destructive = Boolean(info?.destructive);
         // A type with no handler gets NO button. The client used to guess at
         // fixability and offered two types a button that could only ever fail.
-        const canFix = Boolean(info?.fixable) && group.pending > 0;
+        // fix all / dismiss all act on open rows, reopen all on dismissed
+        // ones: each only shows in a status view that lists those rows, so a
+        // button never reaches rows the view hides (review 5 W3-TT)
+        const showsPending = status === 'pending' || status === '';
+        const showsDismissed = status === 'dismissed' || status === '';
+        const canFix = Boolean(info?.fixable) && group.pending > 0 && showsPending;
 
         return (
           <div
@@ -147,7 +153,7 @@ export function FindingsInbox({
                     {` all (${group.pending.toLocaleString()})`}
                   </button>
                 ) : null}
-                {group.pending > 0 ? (
+                {group.pending > 0 && showsPending ? (
                   <button
                     type="button"
                     className="repair-inbox-btn ghost"
@@ -158,7 +164,7 @@ export function FindingsInbox({
                     Dismiss all
                   </button>
                 ) : null}
-                {group.dismissed > 0 ? (
+                {group.dismissed > 0 && showsDismissed ? (
                   <button
                     type="button"
                     className="repair-inbox-btn ghost"
