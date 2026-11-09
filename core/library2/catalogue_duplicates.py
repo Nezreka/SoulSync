@@ -440,7 +440,7 @@ def _candidate(conn, a, b):
     # a clean and an explicit copy are two releases, whatever ids a name
     # match handed both
     clean_vs_explicit = _explicit_conflict(a, b) or any(
-        _explicit_conflict(one, two) for one, two in zip(a["tracks"], b["tracks"]))
+        _explicit_conflict(one, two) for one, two in zip(a["tracks"], b["tracks"], strict=False))
     identical_release = (len(shared) >= 2 and all(ids_a[k] == ids_b[k] for k in shared)
                          and not clean_vs_explicit)
     # a proven release needs its full tracklist on both rows, not the
@@ -826,8 +826,8 @@ def merge_import_twins(database):
                     "🧹", "Duplicate releases merged",
                     f"{stats['merged']} releases your older media servers listed twice are one "
                     "release now. Tools → Duplicate Detector has any left to review.")
-            except Exception:  # noqa: BLE001 - the note is a courtesy
-                pass
+            except Exception as exc:  # noqa: BLE001 - the note is a courtesy
+                logger.debug("twin merge activity note skipped: %s", exc)
     except Exception as exc:  # noqa: BLE001 - a duplicate row is never a blocker
         logger.warning("upgrade twin merge skipped (retries next start): %s", exc)
     return stats

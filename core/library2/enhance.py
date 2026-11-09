@@ -24,7 +24,7 @@ def target_quality_profile(conn: Any, quality_profile_id: Any) -> Optional[Dict[
     try:
         wanted = int(quality_profile_id)
     except (TypeError, ValueError):
-        raise LookupError("Quality profile not found")
+        raise LookupError("Quality profile not found") from None
     row = conn.execute("SELECT * FROM quality_profiles WHERE id=?", (wanted,)).fetchone()
     if row is None:
         raise LookupError("Quality profile not found")

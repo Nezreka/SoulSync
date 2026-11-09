@@ -225,8 +225,8 @@ def prune_acquisition_journal(conn, *, days: int = DEFAULT_RETENTION_DAYS,
     except Exception:
         try:
             conn.rollback()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as rollback_exc:  # noqa: BLE001 - the error above is the one that matters
+            logger.debug("rollback after a failed carry: %s", rollback_exc)
         raise
     if any(stats.values()):
         logger.info("Acquisition journal pruned (older than %s days): %s", days, stats)

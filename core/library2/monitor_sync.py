@@ -1335,6 +1335,6 @@ def carry_member_watchlists(conn: Any) -> Dict[str, int]:
         logger.warning("household watchlists not carried: %s", exc)
         try:
             conn.rollback()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as rollback_exc:  # noqa: BLE001 - the error above is the one that matters
+            logger.debug("rollback after a failed carry: %s", rollback_exc)
     return stats

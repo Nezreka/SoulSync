@@ -120,7 +120,7 @@ def _linked_rows(cursor, extra: str, links: List[str]) -> Dict[str, List[Dict[st
                            link="(SELECT m2.server_id FROM lib2_media_server_mappings m2"
                                 " WHERE m2.entity_type = 'track' AND m2.entity_id = t.id"
                                 f" AND m2.server_id IN ({marks}) LIMIT 1)")
-            + f" UNION ALL "
+            + " UNION ALL "
             + _candidate_sql(extra, f"t.server_source IN ({servers}) AND t.server_id IN ({marks})",
                              link="t.server_id"),
             [*chunk, *_SERVERS, *chunk, *_SERVERS, *chunk])

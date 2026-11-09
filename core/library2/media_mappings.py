@@ -12,6 +12,9 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 from core.media_server import specs
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.media_mappings")
 
 # every server the media-server descriptors call external: a new server's ids
 # reach the mappings without another edit here (#1050)
@@ -150,8 +153,8 @@ def repoint_server_track_id(cursor: Any, server_source: str, old_id: str, new_id
             "UPDATE sync_match_cache SET server_track_id=? "
             "WHERE server_source=? AND server_track_id=?",
             (new_id, server_source, old_id))
-    except Exception:  # noqa: BLE001 - a cache from before the table: nothing to move
-        pass
+    except Exception as exc:  # noqa: BLE001 - a cache from before the table: nothing to move
+        logger.debug("sync cache repoint skipped: %s", exc)
 
 
 def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
