@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 import pytest
@@ -189,6 +190,66 @@ class TestListMissing:
         assert total2 == 5
         assert len(rows2) == 1
 
+
+
+class TestMissingKeepsItsFilelessIds:
+    """review 5 perf: finding the fileless wanted tracks read every wanted row
+    (every imported file is wanted), ~0.8 s a pass on 310k tracks and two
+    passes a page. the ids are kept until the member counter moves"""
+
+    @staticmethod
+    def _seed(tmp_path):
+        from core.library2 import member_version
+        member_version.clear()
+        conn = _make_conn(tmp_path)
+        album = _album(conn, _artist(conn, "Drake"), "Views")
+        tracks = [_track(conn, album, f"Song {i}", track_number=i + 1) for i in range(6)]
+        for t in tracks:
+            _want(conn, t)
+        for t in tracks[:4]:
+            _file(conn, t)
+        conn.commit()
+        return conn, tracks
+
+    def test_a_page_reads_only_the_fileless_rows(self, tmp_path):
+        conn, tracks = self._seed(tmp_path)
+        assert list_missing(conn)[1] == 2
+        seen: list = []
+        conn.set_trace_callback(seen.append)
+        rows, total = list_missing(conn)
+        conn.set_trace_callback(None)
+        assert total == 2 and [r["track_id"] for r in rows] == tracks[4:]
+        # served from the kept ids: no statement walks every wanted row
+        reads = [s for s in seen if s.lstrip().upper().startswith(("SELECT", "WITH"))]
+        assert reads
+        for sql in reads:
+            plan = " | ".join(r[-1] for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
+            assert "idx_lib2_wanted_tracks_wanted" not in plan, plan
+            assert not re.search(r"SCAN (w|t|tf|lib2_wanted_tracks)\b", plan), plan
+
+    def test_a_file_coming_or_going_shows_on_the_next_page(self, tmp_path):
+        conn, tracks = self._seed(tmp_path)
+        assert list_missing(conn)[1] == 2
+        _file(conn, tracks[4])
+        conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE track_id=?",
+                     (tracks[0],))
+        conn.commit()
+        rows, total = list_missing(conn)
+        assert total == 2
+        assert [r["track_id"] for r in rows] == [tracks[0], tracks[5]]
+
+    def test_another_library_scope_has_its_own_ids(self, tmp_path, monkeypatch):
+        from core import library_scope
+        conn, tracks = self._seed(tmp_path)
+        conn.execute("UPDATE lib2_track_files SET owner_profile_id=2 WHERE track_id=?",
+                     (tracks[0],))
+        conn.commit()
+        assert list_missing(conn)[1] == 2
+        monkeypatch.setattr(library_scope, "SCOPE_PARKED", False)
+        monkeypatch.setattr(library_scope, "any_own_library_exists", lambda: True)
+        monkeypatch.setattr(library_scope, "current_library_scope", lambda: "shared")
+        # the shared library does not have the file profile 2 owns
+        assert list_missing(conn)[1] == 3
 
 class TestListCutoffUnmet:
     """the evaluated list is kept between pages while nothing it reads changed"""

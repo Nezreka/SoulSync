@@ -743,6 +743,43 @@ def test_album_detail_batches_legacy_download_provenance(imported_conn):
     assert track["file"]["bit_depth"] is None
 
 
+
+def _provenance_table(conn):
+    conn.execute(
+        """CREATE TABLE track_downloads(
+               id INTEGER PRIMARY KEY, file_path TEXT, source_service TEXT,
+               spotify_track_id TEXT, musicbrainz_recording_id TEXT, isrc TEXT,
+               track_title TEXT, track_artist TEXT, track_album TEXT)""")
+
+
+def test_album_provenance_by_file_name_reads_indexes_not_the_history(imported_conn):
+    """review 5 perf: the album view matched a moved download by file name
+    with a "LIKE '%/name'" pair per track, a pass over the whole download
+    history for each one (0.96 s for a 468-track album on the 300k copy). the
+    name is now an indexed expression, and the match is the same"""
+    from core.library2.schema import ensure_library_v2_schema
+    conn = imported_conn
+    _provenance_table(conn)
+    ensure_library_v2_schema(conn)
+    conn.execute(
+        """INSERT INTO track_downloads(id, file_path, source_service, track_title)
+           VALUES(1, 'D:\\old\\place\\01.flac', 'moved-windows', 'Elsewhere'),
+                 (2, '/x/101.flac', 'longer-name', 'Elsewhere'),
+                 (3, '/x/01.flac.part', 'suffixed', 'Elsewhere')""")
+    views_id = conn.execute("SELECT id FROM lib2_albums WHERE title='Views'").fetchone()[0]
+    seen: list = []
+    conn.set_trace_callback(seen.append)
+    album = Q.get_album(conn, views_id)
+    conn.set_trace_callback(None)
+
+    track = next(item for item in album["tracks"] if item["title"] == "One Dance")
+    assert track["file"]["source"] == "moved-windows"
+    lookups = [s for s in seen if "FROM track_downloads" in s]
+    assert lookups
+    for sql in lookups:
+        plan = " | ".join(r[-1] for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
+        assert "SCAN track_downloads" not in plan, plan
+
 def test_confirmed_missing_file_is_not_counted_as_present(imported_conn):
     album_id = imported_conn.execute(
         "SELECT id FROM lib2_albums WHERE title='Views'"

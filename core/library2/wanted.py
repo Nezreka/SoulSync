@@ -384,6 +384,16 @@ def track_is_wanted(conn: Any, track_id: int, *, profile_id: int = 1) -> bool:
 def wanted_projection_status(conn: Any, *, profile_id: int = 1) -> Dict[str, Any]:
     """Read-only completeness/drift metrics for the staged consumer cutover."""
     profile_id = int(profile_id)
+    # one pass over every track (~1.3 s on 310k). everything it reads (the
+    # tracks, their monitored flag, the wanted rows) bumps the member counter,
+    # so the answer is kept until it moves (review 5 perf)
+    from core.library2.member_version import cached
+    kept = cached(conn, ("wanted_projection_status", profile_id, PROJECTION_VERSION),
+                  lambda c: _projection_status(c, profile_id))
+    return dict(kept) if kept is not None else _projection_status(conn, profile_id)
+
+
+def _projection_status(conn: Any, profile_id: int) -> Dict[str, Any]:
     row = conn.execute(
         """SELECT COUNT(*) AS tracks,
                   SUM(CASE WHEN w.track_id IS NULL THEN 1 ELSE 0 END) AS missing,

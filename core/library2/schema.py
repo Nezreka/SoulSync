@@ -1561,6 +1561,16 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_track_downloads_file_path "
                 "ON track_downloads(file_path)")
+            # and the album view's other provenance keys, so its one lookup
+            # for a whole album reads them off indexes, not the whole history
+            # (review 5 perf)
+            from core.library2.queries import TRACK_DOWNLOAD_FILE_NAME_SQL
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_file_name "
+                           f"ON track_downloads({TRACK_DOWNLOAD_FILE_NAME_SQL})")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_title_lower "
+                           "ON track_downloads(lower(track_title))")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_album_lower "
+                           "ON track_downloads(lower(track_album))")
     except Exception as e:  # noqa: BLE001
         logger.debug("track_downloads index skipped: %s", e)
     # Automatic initial-import bootstrap (§78 / tool-integration-audit §7.7):

@@ -13,6 +13,7 @@ per-album quality badges. Read-only; never raises.
 from __future__ import annotations
 
 import copy
+import json
 import time
 from typing import Any, Dict, Iterator, List, Tuple
 
@@ -44,18 +45,35 @@ _CONSOLIDATED_ELSEWHERE_TEMPLATE = """
 _HAS_FILE_TEMPLATE = """
     EXISTS (
         SELECT 1 FROM lib2_track_files tf
-         WHERE tf.track_id = t.id
+         WHERE tf.track_id = {track}
            AND tf.path IS NOT NULL AND tf.path <> ''
            AND COALESCE(tf.file_state,'active') NOT IN ('missing_confirmed','deleted'){tf_owner}
     )
 """
 
 
-def _has_file_sql() -> str:
+def _has_file_sql(track: str = "t.id") -> str:
     """"there is a file for this track" -- in the CALLER's library. Built per
     call because the scope belongs to whoever is asking (#1199)."""
     from core.library2.sql_util import owner_clause
-    return _HAS_FILE_TEMPLATE.format(tf_owner=owner_clause(column="tf.owner_profile_id"))
+    return _HAS_FILE_TEMPLATE.format(
+        track=track, tf_owner=owner_clause(column="tf.owner_profile_id"))
+
+
+def _fileless_wanted_ids(conn: Any, profile_id: int):
+    """The profile's wanted tracks with no file in the caller's library, or
+    None when there is no member counter to key them by.
+
+    finding them reads every wanted row, and every imported file is wanted:
+    ~0.8 s on 310k tracks, twice a page (the count and the page). every input
+    (the wanted rows, the files, the tracks) bumps the member counter, so the
+    ids are kept until it moves and are never stale (review 5 perf)."""
+    from core.library2.member_version import cached_member_ids
+    return cached_member_ids(
+        conn,
+        "SELECT w.track_id FROM lib2_wanted_tracks w"
+        f" WHERE w.profile_id = {int(profile_id)} AND w.wanted = 1"
+        f" AND NOT ({_has_file_sql('w.track_id')})")
 
 
 def _consolidated_elsewhere_sql() -> str:
@@ -134,8 +152,13 @@ def list_missing(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
     limit = max(1, min(int(limit), 500))
     offset = (page - 1) * limit
     like_sql, like_params = _search_clause(search)
+    fileless = _fileless_wanted_ids(conn, profile_id)
+    # with the kept ids the rest of the rule is asked of those few rows only;
+    # the + keeps sqlite on them, off the (profile_id, wanted) index that walks
+    # every wanted row
+    wanted = "+w.wanted = 1" if fileless is not None else "w.wanted = 1"
     where = (
-        "WHERE w.profile_id = :profile_id AND w.wanted = 1 "
+        f"WHERE w.profile_id = :profile_id AND {wanted} "
         f"AND NOT ({_has_file_sql()}) AND NOT ({_consolidated_elsewhere_sql()})"
         # §49.6(c): the same audio may already be on disk under another
         # release. Listing it as missing would send the user to download a
@@ -144,6 +167,9 @@ def list_missing(conn: Any, *, search: str = "", page: int = 1, limit: int = 75,
         + like_sql
     )
     params: Dict[str, Any] = {"profile_id": int(profile_id), **like_params}
+    if fileless is not None:
+        where += " AND w.track_id IN (SELECT value FROM json_each(:fileless))"
+        params["fileless"] = json.dumps(fileless)
 
     total = conn.execute(
         f"SELECT COUNT(*) AS c {_ROW_FROM} {where}", params

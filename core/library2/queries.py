@@ -362,6 +362,55 @@ def _source_has_albums(source: str) -> bool:
     return True
 
 
+# the album grid's sorts, written the way an index can hand them back in
+# order: a page is then read off the index instead of sorting every release
+# (review 5 perf). built with the songs sort indexes, off the startup path
+ALBUM_SORT_INDEXES = {
+    "idx_lib2_albums_alpha_order":
+        "lib2_albums({key}, title COLLATE NOCASE, id)",
+    "idx_lib2_albums_year_desc_order":
+        "lib2_albums(COALESCE(year, 0) = 0, year DESC, title COLLATE NOCASE, id)",
+    "idx_lib2_albums_year_asc_order":
+        "lib2_albums(COALESCE(year, 0) = 0, year, title COLLATE NOCASE, id)",
+    "idx_lib2_albums_added_order": "lib2_albums(added_at DESC, id)",
+}
+
+
+def _album_membership(conn) -> str:
+    """The releases the album grid lists, as a WHERE body on ``al``: a live
+    file, or monitoring intent on the release or one of its tracks, inside
+    what this scope may see."""
+    from core.library2.sql_util import intent_profile_id, owned_sql
+    clauses = [f"({owned_sql('album', 'al')} OR {monitored_sql('album', 'al')}=1 OR EXISTS ("
+               "SELECT 1 FROM lib2_tracks wt JOIN lib2_wanted_tracks ww ON ww.track_id=wt.id "
+               f"AND ww.profile_id={intent_profile_id()} AND ww.wanted=1 WHERE wt.album_id=al.id))"]
+    visible = scope_visibility_sql("album", "al")
+    if visible:
+        clauses.append(visible)
+    return " AND ".join(clauses)
+
+
+def _album_page_ids(conn, members: set, frm: str, where: str, order: str,
+                    params: Dict[str, Any], offset: int, limit: int) -> List[int]:
+    """One page of member releases in ``order``, read off the sort index a
+    batch at a time and checked against the member set in Python. Nearly every
+    release is a member, so the first batch is usually the page."""
+    want = offset + limit
+    found: List[int] = []
+    skip, batch = 0, max(want, 100)
+    while len(found) < want:
+        rows = [r[0] for r in conn.execute(
+            f"SELECT al.id {frm}{' WHERE ' + where if where else ''}"
+            f" ORDER BY {order}, al.id LIMIT :batch OFFSET :skip",
+            {**params, "batch": batch, "skip": skip})]
+        found.extend(i for i in rows if i in members)
+        if len(rows) < batch:
+            break
+        skip += batch
+        batch *= 2
+    return found[offset:want]
+
+
 def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
                 page: int = 1, limit: int = 75, letter: str = "all",
                 source_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
@@ -377,32 +426,28 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
     # Same membership as the artist list: a live file, or monitoring intent on
     # the release or one of its tracks. An empty release a cleared wish left
     # behind is not part of the library any more.
-    from core.library2.sql_util import intent_profile_id, owned_sql
-    clauses = [f"({owned_sql('album', 'al')} OR {album_monitored}=1 OR EXISTS ("
-               "SELECT 1 FROM lib2_tracks wt JOIN lib2_wanted_tracks ww ON ww.track_id=wt.id "
-               f"AND ww.profile_id={intent_profile_id()} AND ww.wanted=1 WHERE wt.album_id=al.id))"]
-    visible = scope_visibility_sql("album", "al")
-    if visible:
-        clauses.append(visible)
+    from core.library2.sql_util import intent_profile_id
+    membership = _album_membership(conn)
+    filters: List[str] = []
     params: Dict[str, Any] = {}
     if search:
         escaped = (str(search).replace("\\", "\\\\")
                    .replace("%", "\\%").replace("_", "\\_"))
         params["like"] = f"%{escaped}%"
-        clauses.append("(al.title LIKE :like ESCAPE '\\'"
+        filters.append("(al.title LIKE :like ESCAPE '\\'"
                        " OR ar.name LIKE :like ESCAPE '\\')")
     if monitored == "monitored":
-        clauses.append(f"{album_monitored} = 1")
+        filters.append(f"{album_monitored} = 1")
     elif monitored == "unmonitored":
-        clauses.append(f"{album_monitored} = 0")
+        filters.append(f"{album_monitored} = 0")
     if letter and letter != "all":
         # the alphabet bar, by the album's title, same rule as the artists
         from database.music_database import _library_stripped_sql
         stripped = _library_stripped_sql("al.title")
         if letter == "#":
-            clauses.append(f"SUBSTR(UPPER({stripped}),1,1) NOT GLOB '[A-Z]'")
+            filters.append(f"SUBSTR(UPPER({stripped}),1,1) NOT GLOB '[A-Z]'")
         else:
-            clauses.append(f"UPPER(SUBSTR({stripped},1,1)) = UPPER(:letter)")
+            filters.append(f"UPPER(SUBSTR({stripped},1,1)) = UPPER(:letter)")
             params["letter"] = str(letter)[:1]
     from .provider_ids import normalize_provider_name
     source = normalize_provider_name(str(source_filter or "").lstrip("!"))
@@ -417,25 +462,53 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
         if source in ("spotify", "musicbrainz"):
             parts.append(f"COALESCE(al.{source}_id,'') <> ''")
         predicate = "(" + " OR ".join(parts) + ")"
-        clauses.append(f"NOT {predicate}" if str(source_filter).startswith("!") else predicate)
-    where = " AND ".join(clauses)
-    base = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"
-            " ON ar.id = al.primary_artist_id WHERE " + where)
-    total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+        filters.append(f"NOT {predicate}" if str(source_filter).startswith("!") else predicate)
+    order = _ALBUM_SORTS.get(sort, _ALBUM_SORTS["title"])
+    offset = (page - 1) * limit
+    joined = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"
+              " ON ar.id = al.primary_artist_id")
+    # membership walks every release (~0.7 s on a 71k-release library), and
+    # the count and the page each walked it. the member ids are kept until a
+    # table they come from changes (core.library2.member_version), so a page
+    # is a count of that list and a walk down the sort index (review 5 perf)
+    from core.library2.member_version import cached_member_ids
+    member_ids = cached_member_ids(conn, f"SELECT al.id FROM lib2_albums al WHERE {membership}")
+    if member_ids is not None:
+        members = set(member_ids)
+        # the artist join only when a filter reads it, so the walk stays on
+        # the album index
+        frm = joined if search else "FROM lib2_albums al"
+        where = " AND ".join(filters)
+        if where:
+            total = sum(1 for r in conn.execute(f"SELECT al.id {frm} WHERE {where}", params)
+                        if r[0] in members)
+        else:
+            total = len(members)
+        page_ids = _album_page_ids(conn, members, frm, where, order, params, offset, limit)
+        page_sql = (f"SELECT al.id, al.title, al.album_type, al.year, al.image_url, al.added_at,"
+                    f" al.spotify_id, al.musicbrainz_id, al.external_ids,"
+                    f" {album_monitored} AS monitored,"
+                    f" COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,"
+                    f" ar.name AS artist_name {joined}"
+                    f" WHERE al.id IN (SELECT value FROM json_each(:page_ids))")
+        page_params: Dict[str, Any] = {"page_ids": json.dumps(page_ids)}
+    else:
+        # no counter (a database without it): membership in the query, as before
+        base = f"{joined} WHERE " + " AND ".join([membership, *filters])
+        total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+        page_ids = None
+        page_sql = (f"SELECT al.id, al.title, al.album_type, al.year, al.image_url, al.added_at,"
+                    f" al.spotify_id, al.musicbrainz_id, al.external_ids,"
+                    f" {album_monitored} AS monitored,"
+                    f" COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,"
+                    f" ar.name AS artist_name {base}"
+                    f" ORDER BY {order}, al.id LIMIT :limit OFFSET :offset")
+        page_params = {**params, "limit": limit, "offset": offset}
     track_monitored = monitored_sql("track", "t")
     tf_owner = owner_clause(column="tf.owner_profile_id")
     rows = conn.execute(
         f"""
-        WITH page_albums AS MATERIALIZED (
-            SELECT al.id, al.title, al.album_type, al.year, al.image_url, al.added_at,
-                   al.spotify_id, al.musicbrainz_id, al.external_ids,
-                   {album_monitored} AS monitored,
-                   COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,
-                   ar.name AS artist_name
-              {base}
-             ORDER BY {_ALBUM_SORTS.get(sort, _ALBUM_SORTS["title"])}, al.id
-             LIMIT :limit OFFSET :offset
-        ),
+        WITH page_albums AS MATERIALIZED ({page_sql}),
         stats AS (
             SELECT t.album_id,
                    COUNT(DISTINCT CASE
@@ -459,8 +532,11 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
                COALESCE(s.tracks_present, 0) AS tracks_present
           FROM page_albums pa LEFT JOIN stats s ON s.album_id = pa.id
         """,
-        {**params, "limit": limit, "offset": (page - 1) * limit},
+        page_params,
     ).fetchall()
+    if page_ids is not None:
+        position = {album_id: n for n, album_id in enumerate(page_ids)}
+        rows = sorted(rows, key=lambda r: position[r["id"]])
     albums = []
     for r in rows:
         count, present = int(r["track_count"] or 0), int(r["tracks_present"] or 0)
@@ -576,6 +652,26 @@ def ensure_song_sort_indexes(conn) -> int:
             made += 1
         except Exception as exc:  # noqa: BLE001
             logger.warning("songs sort index %s not built (retried next start): %s", name, exc)
+    return made
+
+
+def ensure_album_sort_indexes(conn) -> int:
+    """Create the album grid's sort indexes that are missing; how many were
+    made. Never raises: without them a page sorts every release, as before."""
+    from database.music_database import _library_sort_key_sql
+    made = 0
+    for name, target in ALBUM_SORT_INDEXES.items():
+        try:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                            (name,)).fetchone():
+                continue
+            # replace, not format: the A-Z key's strip set holds braces
+            target = target.replace("{key}", _library_sort_key_sql("title"))
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {target}")
+            conn.commit()
+            made += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("album sort index %s not built (retried next start): %s", name, exc)
     return made
 
 
@@ -1270,6 +1366,14 @@ def _track_artists_many(
     return result
 
 
+# a download's file name: what follows the last slash or backslash of its
+# path (rtrim drops every trailing character that is not one). indexed as
+# idx_td_file_name, so it must stay this exact expression
+TRACK_DOWNLOAD_FILE_NAME_SQL = (
+    "substr(file_path, length(rtrim(file_path,"
+    " replace(replace(file_path, '/', ''), '\\', ''))) + 1)")
+
+
 def _download_provenance_for_path(conn, path: Optional[str], *,
                                   track: Any = None,
                                   album: Optional[Dict[str, Any]] = None,
@@ -1396,9 +1500,10 @@ def _download_provenance_many(
         params.extend(value.lower() if lower else value for value in values)
 
     _in("file_path", paths)
-    for filename in filenames:
-        predicates.append("(file_path LIKE ? OR file_path LIKE ?)")
-        params.extend((f"%/{filename}", f"%\\{filename}"))
+    # the file name, through its index. one "LIKE '%/name'" pair per track
+    # read the whole history once per track (0.96 s for a 468-track album on
+    # the 300k copy, review 5 perf); the match below wants the exact name
+    _in(TRACK_DOWNLOAD_FILE_NAME_SQL, filenames)
     _in("spotify_track_id", _values("spotify_id"))
     _in("musicbrainz_recording_id", _values("musicbrainz_id"))
     _in("isrc", _values("isrc"))
