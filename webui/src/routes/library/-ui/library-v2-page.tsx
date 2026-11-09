@@ -1808,22 +1808,34 @@ function EnrichDropdown({
         const services = enrichServices(entity);
         window.showToast?.(`Enriching ${entityName} from all services...`, 'info');
         let resynced = false;
+        // a failure per service was only logged, so a run where every one
+        // refused still read as a green "nothing new" (review 5 W3-TL-2)
+        const failed: { label: string; message: string }[] = [];
         for (const s of services) {
           try {
             const res = await enrichLibraryV2Entity(entity, entityId, s.key);
             if (res.resynced) resynced = true;
           } catch (e) {
             console.error(`Bulk enrich failed for ${s.key}:`, e);
+            failed.push({ label: s.label, message: mutationErrorMessage(e, 'failed') });
           }
         }
-        return { resynced };
+        if (failed.length && failed.length === services.length) {
+          const reasons = [...new Set(failed.map((f) => f.message))].join('; ');
+          throw new Error(`Enrichment failed on every service: ${reasons}`);
+        }
+        return { resynced, failed: failed.map((f) => f.label) };
       }
       window.showToast?.(`Enriching ${entityName} from ${service}...`, 'info');
       return enrichLibraryV2Entity(entity, entityId, service);
     },
     onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
-      if (data?.resynced) {
+      const failed = 'failed' in data ? data.failed : [];
+      if (failed.length) {
+        const done = data.resynced ? 'Enriched and refreshed' : 'Enriched (nothing new found)';
+        window.showToast?.(`${done}, but ${failed.join(', ')} failed.`, 'warning');
+      } else if (data?.resynced) {
         window.showToast?.('Enriched and refreshed.', 'success');
       } else {
         window.showToast?.('Enriched (nothing new found).', 'success');

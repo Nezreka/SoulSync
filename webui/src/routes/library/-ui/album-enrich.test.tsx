@@ -100,3 +100,44 @@ describe('album menu enrich (review 5 W3-TL-1)', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });
+
+describe('enrich with all reports failures (review 5 W3-TL-2)', () => {
+  it('shows an error, not a green success, when every service failed', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/12/enrich', () =>
+        HttpResponse.json({ success: false, error: 'rate limited' }),
+      ),
+    );
+    renderMenu();
+    openEnrichSubmenu();
+
+    press(screen.getByRole('button', { name: 'Enrich with all' }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(expect.stringContaining('rate limited'), 'error'),
+    );
+    expect(toast.mock.calls.filter(([, kind]) => kind === 'success')).toEqual([]);
+  });
+
+  it('names the services that failed when only some did', async () => {
+    server.use(
+      http.post('/api/library/v2/albums/12/enrich', async ({ request }) => {
+        const { service } = (await request.json()) as { service: string };
+        if (service === 'spotify' || service === 'tidal') {
+          return HttpResponse.json({ success: false, error: 'not configured' });
+        }
+        return HttpResponse.json({ success: true, resynced: true });
+      }),
+    );
+    renderMenu();
+    openEnrichSubmenu();
+
+    press(screen.getByRole('button', { name: 'Enrich with all' }));
+
+    await waitFor(() =>
+      expect(toast).toHaveBeenCalledWith(expect.stringMatching(/Spotify, Tidal/), 'warning'),
+    );
+    expect(toast.mock.calls.filter(([, kind]) => kind === 'success')).toEqual([]);
+    expect(toast.mock.calls.filter(([, kind]) => kind === 'error')).toEqual([]);
+  });
+});
