@@ -15495,6 +15495,9 @@ def _tracks_with_mirrored_quality_profile(
                 track = dict(track)
                 if explicit or track.get('quality_profile_id') is None:
                     track['quality_profile_id'] = quality_profile_id
+                    # only a dialog pick pins the imported track, never a
+                    # mirror's assignment (review 5 W2-WD-1)
+                    track['quality_profile_explicit'] = explicit
             enriched.append(track)
         return enriched, quality_profile_id
     except Exception as exc:

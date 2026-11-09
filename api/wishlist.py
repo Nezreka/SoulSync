@@ -91,6 +91,8 @@ def register_routes(bp):
                 source_type=source_type,
                 profile_id=profile_id,
                 quality_profile_id=quality_profile_id,
+                # named for this track, so it may pin it (review 5 W2-WD-1)
+                quality_profile_explicit=quality_profile_id is not None,
                 # An API caller asking for a track IS explicit user intent, so it
                 # bypasses the ignore-list gate and updates an existing row
                 # authoritatively rather than being silently dropped.

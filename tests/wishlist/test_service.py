@@ -221,6 +221,8 @@ def test_get_wishlist_tracks_for_download_formats_modal_shape():
             # per-profile instead of stamping every batch with the runtime's.
             "profile_id": 7,
             "quality_profile_id": None,
+            # review 5 W2-WD-1: whether the user picked that profile for this wish
+            "quality_profile_explicit": False,
             "id": "sp-1",
             "name": "Song One",
             "artists": [{"name": "Artist One"}],

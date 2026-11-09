@@ -271,3 +271,43 @@ def test_an_own_library_download_is_released_for_the_profile_that_wanted_it(db, 
 
     assert sorted(p for p, _ in released) == [1, 3]
     assert all(ids == [track_id] for _, ids in released)
+
+
+def _track_profile(db):
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT quality_profile_id, quality_profile_explicit FROM lib2_tracks').fetchone()
+        return row[0], row[1]
+
+
+def test_a_default_profile_wish_leaves_the_track_inheriting(db):
+    # review 5 W2-WD-1: the row stores the default id when nobody chose one;
+    # that must not pin the catalogue track, or a later artist change never reaches it
+    assert db.add_to_wishlist(track(), source_type='watchlist', quality_profile_id=None)
+    assert _track_profile(db)[1] == 0
+    # a watchlist/playlist profile is a choice for the group, not this track
+    with db._get_connection() as conn:
+        qp = conn.execute('SELECT id FROM quality_profiles ORDER BY id LIMIT 1').fetchone()[0]
+    assert db.add_to_wishlist(track(2), source_type='watchlist', quality_profile_id=qp)
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT MAX(quality_profile_explicit) FROM lib2_tracks').fetchone()[0] == 0
+
+
+def test_a_profile_picked_for_the_wish_pins_the_track_and_survives_a_group_refresh(db):
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO quality_profiles(name) VALUES('Picked')")
+        picked = conn.execute("SELECT id FROM quality_profiles WHERE name='Picked'").fetchone()[0]
+        conn.commit()
+    assert db.add_to_wishlist(track(), source_type='manual', quality_profile_id=picked,
+                              quality_profile_explicit=True)
+    assert _track_profile(db) == (picked, 1)
+    # a later watchlist pass naming another profile does not overwrite the pick
+    with db._get_connection() as conn:
+        other = conn.execute('SELECT id FROM quality_profiles WHERE id<>? ORDER BY id LIMIT 1',
+                             (picked,)).fetchone()[0]
+    db.add_to_wishlist(track(), source_type='watchlist', quality_profile_id=other)
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT quality_profile_id, quality_profile_explicit FROM wishlist_tracks').fetchone()
+    assert (row[0], row[1]) == (picked, 1)
+    assert _track_profile(db) == (picked, 1)
+    rows = db.get_wishlist_tracks()
+    assert rows[0]['quality_profile_explicit'] is True

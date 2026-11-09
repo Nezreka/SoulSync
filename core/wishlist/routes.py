@@ -1216,6 +1216,8 @@ def add_album_track_to_wishlist(
             # (otherwise the add is silently dropped — carlosjfcasero, #897).
             user_initiated=True,
             quality_profile_id=quality_profile_id,
+            # picked in the dialog for this track, so it may pin it (review 5 W2-WD-1)
+            quality_profile_explicit=quality_profile_id is not None,
         )
 
         if success:

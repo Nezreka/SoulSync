@@ -2394,6 +2394,8 @@ class AutoImportWorker:
                 # default", which the pipeline resolves on its own.
                 if auto_import_profile_id:
                     context['track_info']['quality_profile_id'] = auto_import_profile_id
+                    # the user set it for this import, so it pins (review 5 W2-WD-1)
+                    context['track_info']['quality_profile_explicit'] = True
 
                 # #1504: AcoustID relocate breadcrumb — the staged file may
                 # carry a sidecar with the owning user profile. Read it into

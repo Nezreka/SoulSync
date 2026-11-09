@@ -203,7 +203,9 @@ def album(tmp_path, monkeypatch):
         enrich(path, {"track_info": track}, {}, {})
         paths.append(path)
     context = {"profile_id": profile, "source": "deezer", "artist": {"name": "Artist"}, "album": album_info,
-               "track_info": dict(tracks[0], quality_profile_id=quality_profile),
+               # review 5 W2-WD-1: only a picked profile pins the imported tracks
+               "track_info": dict(tracks[0], quality_profile_id=quality_profile,
+                                  quality_profile_explicit=True),
                "task_id": "requested-task", "batch_id": "requested-batch",
                "original_search_result": {"username": "usenet", "filename": "release.nzb"}}
     download_tasks["requested-task"] = {"status": "completed"}

@@ -149,6 +149,7 @@ class WishlistService:
         profile_id: int = 1,
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
+        quality_profile_explicit: bool = False,
     ) -> bool:
         """
         Directly add a track to the wishlist.
@@ -177,6 +178,7 @@ class WishlistService:
             profile_id=profile_id,
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
+            quality_profile_explicit=quality_profile_explicit,
         )["created"]
 
     def add_track_to_wishlist_detailed(
@@ -189,6 +191,7 @@ class WishlistService:
         profile_id: int = 1,
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
+        quality_profile_explicit: bool = False,
     ) -> Dict[str, Any]:
         """Like :meth:`add_track_to_wishlist` but reports the full outcome.
 
@@ -211,6 +214,7 @@ class WishlistService:
             profile_id=profile_id,
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
+            quality_profile_explicit=quality_profile_explicit,
         )
         return outcome
 
@@ -314,6 +318,8 @@ class WishlistService:
             # settings LIVE via core/quality/selection.py::load_profile_by_id
             # when it needs them — this is only ever the pointer.
             "quality_profile_id": wishlist_track.get("quality_profile_id"),
+            # only a picked profile may pin the imported track (review 5 W2-WD-1)
+            "quality_profile_explicit": wishlist_track.get("quality_profile_explicit") is True,
             "id": track_id,
             "name": track_name,
             "artists": artists,

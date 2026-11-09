@@ -914,6 +914,12 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         # default") — without it, later Quality Check / Upgrade passes
         # re-resolve the track against the default profile instead.
         track_quality_profile_id = track_info.get("quality_profile_id")
+        # every wishlist row carries a concrete id (the default when nobody
+        # chose), so the id alone is not a choice. only a profile the user
+        # picked for this item pins the track; anything else keeps it
+        # following its album and artist (review 5 W2-WD-1)
+        if track_info.get("quality_profile_explicit") is not True:
+            track_quality_profile_id = None
 
         db = get_database()
         with db._get_connection() as conn:

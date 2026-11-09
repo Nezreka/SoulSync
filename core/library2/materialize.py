@@ -127,6 +127,11 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
     data = json.loads(row['spotify_data'] or '{}')
     if not isinstance(data, dict):
         raise ValueError('Wishlist track payload is not an object')
+    # the row's id is concrete even when nobody chose it (the default), so
+    # only a profile the user picked for this wish pins the track (review 5 W2-WD-1)
+    picked_profile = (row['quality_profile_id']
+                      if 'quality_profile_explicit' in row.keys() and row['quality_profile_explicit']
+                      else None)
     from core.library2.importer import _wishlist_provider
     from core.library2.provider_ids import indexed_provider_id_sql
     data.setdefault('id', str(row['spotify_track_id']).split('::', 1)[0])
@@ -157,7 +162,7 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
     if track is None:
         data.setdefault('name', 'Unknown Track')
         data['artists'] = data.get('artists') or [{'name': 'Unknown Artist'}]
-        result = materialize_from_spotify_track(conn, data, profile_id=profile_id, explicit_profile_id=row['quality_profile_id'])
+        result = materialize_from_spotify_track(conn, data, profile_id=profile_id, explicit_profile_id=picked_profile)
         if result is None:
             raise ValueError('Wishlist track cannot be linked to Library: missing title or artist')
         track_id, album_id = result['track_id'], result['album_id']
@@ -165,8 +170,8 @@ def materialize_wishlist_row(conn, row_id: int, *, profile_id: int = 1) -> Optio
         track_id, album_id = track['id'], track['album_id']
         if int(profile_id) == 1:
             conn.execute('UPDATE lib2_tracks SET monitored=1 WHERE id=? AND monitored=0', (track_id,))
-            if row['quality_profile_id'] is not None and (track['quality_profile_id'] != row['quality_profile_id'] or not track['quality_profile_explicit']):
-                assign_quality_profile(conn, 'tracks', track_id, int(row['quality_profile_id']))
+            if picked_profile is not None and (track['quality_profile_id'] != picked_profile or not track['quality_profile_explicit']):
+                assign_quality_profile(conn, 'tracks', track_id, int(picked_profile))
         rule = conn.execute("SELECT monitored FROM lib2_monitor_rules WHERE entity_type='track' AND entity_id=? AND profile_id=?", (track_id, profile_id)).fetchone()
         if rule is None or not rule[0]:
             record_rule(conn, 'track', track_id, True, PROVENANCE_WISHLIST, profile_id=profile_id)
