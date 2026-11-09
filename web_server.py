@@ -165,7 +165,7 @@ from core.wishlist.state import (
 )
 from core.imports.album_naming import resolve_album_group as _resolve_album_group
 from core.imports.paths import artist_letter as _shared_artist_letter
-from core.imports.collab_artist import first_listed_artist, listed_primary_of
+from core.imports.collab_artist import collab_primary, library_has_artist
 from core.imports.album import build_album_import_match_payload
 from core.imports.filename import extract_track_number_from_filename, parse_filename_metadata
 from core.imports.staging import (
@@ -14096,7 +14096,9 @@ def _apply_path_template(template: str, context: dict) -> str:
     # (e.g., $albumartist must be replaced before $album to prevent "Scorpionartist" from typo "$albumartis")
 
     # Longest variables first
-    album_artist_value = clean_context.get('albumartist', clean_context.get('artist', 'Unknown Artist'))
+    # an empty name is no name, same as core/imports/paths.py (#2023)
+    artist_value = clean_context.get('artist') or 'Unknown Artist'
+    album_artist_value = clean_context.get('albumartist') or artist_value
     # Collaborative album artist handling: "first" uses only the primary artist for folder names
     collab_mode = config_manager.get('file_organization.collab_artist_mode', 'first')
     if collab_mode == 'first' and album_artist_value:
@@ -14107,9 +14109,10 @@ def _apply_path_template(template: str, context: dict) -> str:
         # same rule as core/imports/paths.py: a lone listed name counts when
         # the album artist is that name plus collaborators
         _raw_album_artist = str(context.get('albumartist') or context.get('artist') or album_artist_value)
-        primary = first_listed_artist(_raw_album_artist, artists_list)
-        if not primary and context.get('_track_artists_list'):
-            primary = listed_primary_of(_raw_album_artist, context['_track_artists_list'][0])
+        primary = collab_primary(
+            _raw_album_artist, artists_list, context.get('_track_artists_list'),
+            known_names=context.get('_collab_known_names') or (),
+            library_has=library_has_artist)
         if primary:
             # raw list name: sanitize like every other value (#1954)
             album_artist_value = _sanitize_filename(primary)
@@ -14161,7 +14164,7 @@ def _apply_path_template(template: str, context: dict) -> str:
         'atypes': clean_context.get('atypes', ''),
         'playlist': clean_context.get('playlist_name', ''),
         'artistletter': artist_letter_value,
-        'artist': clean_context.get('artist', 'Unknown Artist'),
+        'artist': artist_value,
         'album': clean_context.get('album', 'Unknown Album'),
         'title': clean_context.get('title', 'Unknown Track'),
         'track': f"{clean_context.get('track_number', 1):02d}",
@@ -14191,7 +14194,7 @@ def _apply_path_template(template: str, context: dict) -> str:
 
     # Medium length variables
     result = result.replace('$artistletter', artist_letter_value)
-    result = result.replace('$artist', clean_context.get('artist', 'Unknown Artist'))
+    result = result.replace('$artist', artist_value)
     result = result.replace('$album', clean_context.get('album', 'Unknown Album'))
     result = result.replace('$title', clean_context.get('title', 'Unknown Track'))
     # $track_disambiguation must replace before $track: it starts with $track,

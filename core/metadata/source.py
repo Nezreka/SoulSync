@@ -26,7 +26,7 @@ from core.imports.context import (
     is_real_provider_album_id,
     normalize_import_context,
 )
-from core.imports.collab_artist import first_listed_artist, listed_primary_of
+from core.imports.collab_artist import collab_primary, library_has_artist
 from core.imports.compilation import VARIOUS_ARTIST_NAMES
 from core.metadata.artist_resolution import resolve_track_artists
 from core.metadata.registry import get_itunes_client
@@ -2229,13 +2229,14 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     collab_mode = cfg.get("file_organization.collab_artist_mode", "first")
     if collab_mode == "first" and raw_album_artist:
         context_artists = album_artists_for_collab or original_search.get("artists") or track_info_ctx.get("artists") or []
-        primary = first_listed_artist(raw_album_artist, context_artists)
-        if not primary:
-            # the album list can be the combined name itself while the track
-            # names the primary on its own
-            _track_artists = original_search.get("artists") or track_info_ctx.get("artists") or []
-            if _track_artists:
-                primary = listed_primary_of(raw_album_artist, _track_artists[0])
+        # the album list can be the combined name itself while the track
+        # names the primary on its own, or no list splits it at all (#2028).
+        # same rule as the folder (core/imports/paths.py)
+        _track_artists = original_search.get("artists") or track_info_ctx.get("artists") or []
+        primary = collab_primary(
+            raw_album_artist, context_artists, _track_artists,
+            known_names=[n for n in (artist_dict.get("name"), *(all_artists or [])) if n],
+            library_has=library_has_artist)
         if primary:
             raw_album_artist = primary
         elif len(context_artists) == 1 and ("," in raw_album_artist or " & " in raw_album_artist):
