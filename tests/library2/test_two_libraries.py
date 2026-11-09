@@ -590,6 +590,54 @@ class TestJobsWorkInOneLibrary:
             assert counts["pending"] == pending
             assert counts["by_job"]["j"]["total"] == pending
 
+    def _group_worker(self, two):
+        from core.repair_worker import RepairWorker
+        with two.db._get_connection() as conn:
+            conn.executemany(
+                "INSERT INTO repair_findings (job_id, finding_type, severity, status, "
+                " entity_type, entity_id, file_path, title, description) "
+                "VALUES ('j', 'library_retag', 'info', ?, 'track', '1', ?, ?, '')",
+                [("pending", os.path.join(two.kim_root, "x.flac"), "kim"),
+                 ("pending", os.path.join(two.shared, "x.flac"), "shared"),
+                 ("pending", os.path.join(two.shared, "y.flac"), "shared"),
+                 ("dismissed", os.path.join(two.kim_root, "d.flac"), "kim"),
+                 ("dismissed", os.path.join(two.shared, "d.flac"), "shared")])
+            conn.commit()
+        worker = RepairWorker.__new__(RepairWorker)
+        worker.db = two.db
+        return worker
+
+    def _statuses(self, two):
+        with two.db._get_connection() as conn:
+            return sorted(tuple(r) for r in conn.execute(
+                "SELECT title, status FROM repair_findings"))
+
+    def test_the_inbox_group_counts_the_library_on_screen(self, two):
+        """review 5 W3-TT-1: the group row's "Fix all (N)" counted every library"""
+        worker = self._group_worker(two)
+        for scope, pending, dismissed in ((two.kim, 1, 1), ("shared", 2, 1), (None, 3, 2)):
+            with library_scope.library_scope(scope):
+                group = {g["finding_type"]: g for g in worker.get_finding_groups()}
+            assert group["library_retag"]["pending"] == pending
+            assert group["library_retag"]["dismissed"] == dismissed
+
+    def test_dismiss_all_stays_in_the_library_on_screen(self, two):
+        """review 5 W3-TT-1: dismissing a type in kim's library silenced the
+        shared library's findings of that type too"""
+        worker = self._group_worker(two)
+        with library_scope.library_scope(two.kim):
+            assert worker.dismiss_findings_by_type("library_retag") == 1
+        assert ("shared", "pending") in self._statuses(two)
+        assert ("kim", "pending") not in self._statuses(two)
+
+    def test_reopen_all_stays_in_the_library_on_screen(self, two):
+        """review 5 W3-TT-1: reopen all brought back every library's dismissed rows"""
+        worker = self._group_worker(two)
+        with library_scope.library_scope(two.kim):
+            assert worker.reopen_findings_bulk(finding_type="library_retag") == 1
+        assert ("shared", "dismissed") in self._statuses(two)
+        assert ("kim", "dismissed") not in self._statuses(two)
+
     def test_a_reorganize_queued_for_all_libraries_runs_in_each_folder(self, two):
         from core.reorganize_runner import _libraries_for
         with two.db._get_connection() as conn:

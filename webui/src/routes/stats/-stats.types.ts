@@ -202,6 +202,8 @@ export interface StatsDbStoragePayload {
   method?: string;
   // the server is working out a newer result; ask again shortly
   refreshing?: boolean;
+  // the last pass failed and none is running (review 5 W3-TU-2)
+  report_failed?: boolean;
   error?: string;
 }
 
@@ -213,6 +215,7 @@ export interface StatsLibraryDiskUsagePayload {
   tracks_without_size?: number;
   by_format?: Record<string, number>;
   refreshing?: boolean;
+  report_failed?: boolean;
   error?: string;
 }
 

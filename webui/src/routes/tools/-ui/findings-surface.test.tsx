@@ -710,7 +710,7 @@ describe('filters', () => {
     expect(options).toEqual(['All Jobs', 'Orphan File Detector', 'Dead File Cleaner']);
   });
 
-  it('filters the inbox by job without a round trip', async () => {
+  it('filters the inbox by job, counted by the server for that job', async () => {
     routes({
       [GROUPS]: {
         groups: [
@@ -735,9 +735,273 @@ describe('filters', () => {
       node.getAttribute('data-finding-type'),
     );
     expect(shown).toEqual(['dead_file']);
-    // Tens of group rows, not thousands — re-querying the server for a
-    // dropdown change would buy nothing.
-    expect(fetchMock.mock.calls.length).toBe(before);
+    // changed for review 5 W3-TT: a row's count is what its bulk buttons act
+    // on, and only the server knows how many of a type's rows one job raised
+    const after = fetchMock.mock.calls.slice(before).map((call) => String(call[0]));
+    expect(after).toContain('/api/repair/findings/groups?job_id=dead_file_cleaner');
+  });
+});
+
+// ── Bulk actions act on what the view counts (review 5 W3-TT) ────────────────
+
+describe('a filtered inbox row acts on the rows it counts', () => {
+  const gap = (pending: number, severities: Record<string, number>, over = {}) =>
+    group({
+      finding_type: 'metadata_gap',
+      pending,
+      dismissed: 2,
+      total: pending + 2,
+      severity_max: 'warning',
+      job_ids: ['orphan_file_detector'],
+      severities: { pending: severities, dismissed: { warning: 1, info: 1 } },
+      ...over,
+    });
+  const gapRoutes = (extra: Record<string, unknown> = {}) =>
+    routes({
+      [GROUPS]: { groups: [gap(5, { warning: 2, info: 3 })] },
+      '/findings/groups?severity=warning': {
+        groups: [
+          gap(
+            2,
+            { warning: 2 },
+            { dismissed: 1, severities: { pending: { warning: 2 }, dismissed: { warning: 1 } } },
+          ),
+        ],
+      },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'metadata_gap',
+            label: 'Metadata Gaps',
+            verb: 'Fill',
+            destructive: false,
+            job_ids: ['orphan_file_detector'],
+          }),
+        ],
+      },
+      '/bulk-fix-start': { started: true, total: 2 },
+      '/api/repair/findings/bulk': { success: true, updated: 2 },
+      '/findings/reopen-all': { success: true, reopened: 1 },
+      ...extra,
+    });
+
+  async function pickSeverity(value: string) {
+    fireEvent.change(document.getElementById('repair-findings-severity-filter') as HTMLElement, {
+      target: { value },
+    });
+    await flush();
+    await flush();
+  }
+
+  it('Fix all counts and fixes only the severity picked', async () => {
+    gapRoutes();
+    renderSurface();
+    await flush();
+    await pickSeverity('warning');
+
+    fireEvent.click(screen.getByText('Fill all (2)'));
+    await flush();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('all 2 metadata gaps') }),
+    );
+    expect(bodyOf('/bulk-fix-start')).toEqual({
+      finding_type: 'metadata_gap',
+      severity: 'warning',
+    });
+  });
+
+  it('Dismiss all and Reopen all send the filters the row counted', async () => {
+    gapRoutes();
+    renderSurface();
+    await flush();
+    await pickSeverity('warning');
+
+    fireEvent.click(screen.getByText('Dismiss all'));
+    await flush();
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('Dismiss all 2 open') }),
+    );
+    expect(bodyOf('/api/repair/findings/bulk')).toEqual({
+      finding_type: 'metadata_gap',
+      action: 'dismiss',
+      severity: 'warning',
+    });
+
+    // reopen all lives in the view that lists dismissed rows
+    fireEvent.click(screen.getByText('Dismissed'));
+    await flush();
+    fireEvent.click(screen.getByText('Reopen all'));
+    await flush();
+    expect(bodyOf('/findings/reopen-all')).toEqual({
+      finding_type: 'metadata_gap',
+      severity: 'warning',
+    });
+  });
+
+  it('a job filter goes to the server with Dismiss all too', async () => {
+    gapRoutes({
+      '/findings/groups?job_id=orphan_file_detector': { groups: [gap(4, { warning: 2, info: 2 })] },
+    });
+    renderSurface();
+    await flush();
+    fireEvent.change(document.getElementById('repair-findings-job-filter') as HTMLElement, {
+      target: { value: 'orphan_file_detector' },
+    });
+    await flush();
+    await flush();
+
+    fireEvent.click(screen.getByText('Dismiss all'));
+    await flush();
+    expect(bodyOf('/api/repair/findings/bulk')).toEqual({
+      finding_type: 'metadata_gap',
+      action: 'dismiss',
+      job_id: 'orphan_file_detector',
+    });
+  });
+
+  it('offers each bulk button only in a status view that lists its rows', async () => {
+    gapRoutes();
+    renderSurface();
+    await flush();
+    const buttons = () =>
+      [...document.querySelectorAll('.repair-inbox-btn')].map((node) => node.textContent);
+    expect(buttons()).toEqual(['Fill all (5)', 'Dismiss all']);
+
+    fireEvent.click(screen.getByText('Dismissed'));
+    await flush();
+    expect(buttons()).toEqual(['Reopen all']);
+
+    fireEvent.click(screen.getByText('All'));
+    await flush();
+    expect(buttons()).toEqual(['Fill all (5)', 'Dismiss all', 'Reopen all']);
+  });
+
+  it('says so when the server refuses a selected row the view no longer lists', async () => {
+    routes({
+      [FINDINGS]: page([finding({ id: 1, finding_type: 'metadata_gap' })]),
+      '/api/repair/findings/1/fix': { success: false, refused: true },
+    });
+    await renderList();
+    await flush();
+    fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
+    await flush();
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+    await flush();
+    expect(toastSpy).toHaveBeenCalledWith(
+      '1 selected finding is no longer in this list and was left alone',
+      'info',
+    );
+  });
+});
+
+// ── Drilling into an album or artist card (review 5 W3-TT-2) ─────────────────
+
+describe('drilling into a card inside an open type', () => {
+  const albumCard = {
+    group_by: 'album',
+    key: 'adetola|beacon',
+    artist: 'Adetola',
+    album: 'Beacon',
+    count: 1,
+    worst_score: null,
+    best_score: null,
+    worst_quality: '',
+    best_quality: '',
+    album_thumb_url: null,
+    artist_thumb_url: null,
+    artist_id: null,
+    first_seen: null,
+    last_seen: null,
+  };
+
+  async function drillIn() {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'missing_lyrics', pending: 4 })] },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'missing_lyrics',
+            label: 'Missing Lyrics',
+            verb: 'Fetch',
+            destructive: false,
+          }),
+        ],
+      },
+      '/api/repair/findings/albums': { groups: [albumCard] },
+      [FINDINGS]: page([finding({ id: 7, finding_type: 'missing_lyrics', title: 'Beacon track' })]),
+      '/api/repair/findings/7/fix': { success: true },
+      '/api/repair/findings/clear': { success: true, deleted: 1 },
+    });
+    renderSurface();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-inbox-head') as HTMLElement);
+    await flush();
+    fireEvent.click(screen.getByText('Albums'));
+    await flush();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-album-card') as HTMLElement);
+    await flush();
+    await flush();
+  }
+
+  const lastListUrl = () =>
+    fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.startsWith('/api/repair/findings?'))
+      .at(-1) ?? '';
+
+  it('keeps the type and asks for that album by its key, not a search', async () => {
+    await drillIn();
+    const params = new URL(lastListUrl(), 'http://x').searchParams;
+    expect(params.get('finding_type')).toBe('missing_lyrics');
+    expect(params.get('group_by')).toBe('album');
+    expect(params.get('group_artist')).toBe('Adetola');
+    expect(params.get('group_album')).toBe('Beacon');
+    expect(params.get('q')).toBeNull();
+    // the search box stays empty, so the inbox is not swapped for an
+    // every-type search
+    expect((document.getElementById('repair-findings-search') as HTMLInputElement).value).toBe('');
+    expect(screen.getByTestId('repair-drill-chip').textContent).toContain('Beacon');
+  });
+
+  it('Fix Selected and Delete matching carry the type and the album', async () => {
+    await drillIn();
+    fireEvent.click(document.getElementById('repair-select-all-cb') as HTMLElement);
+    await flush();
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+    await flush();
+    expect(bodyOf('/7/fix')).toEqual({
+      bulk: true,
+      scope: {
+        status: 'pending',
+        finding_type: 'missing_lyrics',
+        group_by: 'album',
+        group_artist: 'Adetola',
+        group_album: 'Beacon',
+      },
+    });
+
+    fireEvent.click(screen.getByText('Delete matching…'));
+    await flush();
+    expect(bodyOf('/findings/clear')).toEqual({
+      status: 'pending',
+      finding_type: 'missing_lyrics',
+      group_by: 'album',
+      group_artist: 'Adetola',
+      group_album: 'Beacon',
+    });
+  });
+
+  it('the chip goes back to every finding of the type', async () => {
+    await drillIn();
+    fireEvent.click(screen.getByLabelText('Show every finding of this type again'));
+    await flush();
+    const params = new URL(lastListUrl(), 'http://x').searchParams;
+    expect(params.get('finding_type')).toBe('missing_lyrics');
+    expect(params.get('group_by')).toBeNull();
+    expect(screen.queryByTestId('repair-drill-chip')).toBeNull();
   });
 });
 
@@ -1429,9 +1693,12 @@ describe('bulk selection', () => {
     fireEvent.click(screen.getByText('Dismiss Selected'));
     await flush();
 
+    // with the view it was made in: the server dismisses only rows that view
+    // still lists (review 5 W3-TT)
     expect(bodyOf('/findings/bulk')).toEqual({
       ids: [1, 2],
       action: 'dismiss',
+      scope: { status: 'pending', q: 'a' },
     });
     // dismiss is "never raise this again", so it comes with a way back
     expect(document.querySelector('.repair-undo-bar')?.textContent).toContain(
@@ -1486,9 +1753,12 @@ describe('bulk selection', () => {
     await flush();
 
     const bodyFor = (id: number) => bodyOf(`/${id}/fix`);
-    expect(bodyFor(1)).toEqual({ fix_action: 'staging', bulk: true });
-    expect(bodyFor(2)).toEqual({ fix_action: 'staging', bulk: true });
-    expect(bodyFor(3)).toEqual({ fix_action: 'remove', bulk: true });
+    // scope: the view the rows were picked in, so the server can refuse a
+    // row it no longer lists (review 5 W3-TT)
+    const scope = { status: 'pending', q: 'a' };
+    expect(bodyFor(1)).toEqual({ fix_action: 'staging', bulk: true, scope });
+    expect(bodyFor(2)).toEqual({ fix_action: 'staging', bulk: true, scope });
+    expect(bodyFor(3)).toEqual({ fix_action: 'remove', bulk: true, scope });
     expect(toastSpy).toHaveBeenCalledWith('Fixed 3', 'success');
   });
 
