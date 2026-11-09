@@ -2627,6 +2627,39 @@ def test_reimport_keeps_provider_genres_a_legacy_row_does_not_carry(legacy_db):
         assert artist["summary"] == 'Bio.'
 
 
+def test_reimport_does_not_fill_genres_the_cleanup_locked_empty(legacy_db):
+    """review 5 W2-WF-1: a cleanup that removed every genre leaves a locked
+    []. that is its answer, not a hole for the legacy snapshot to fill."""
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE artists SET genres='[\"seen live\"]' WHERE name='Drake'")
+        conn.execute("UPDATE albums SET genres='[\"seen live\"]' WHERE title='Views'")
+        conn.commit()
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET genres='[]', genres_locked=1 WHERE title='Views'")
+        conn.execute("UPDATE lib2_artists SET genres='[]', genres_locked=1 WHERE name='Drake'")
+        conn.commit()
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute(
+            "SELECT genres FROM lib2_albums WHERE title='Views'").fetchone()[0] == "[]"
+        assert conn.execute(
+            "SELECT genres FROM lib2_artists WHERE name='Drake'").fetchone()[0] == "[]"
+        # unlocked, the same hole fills
+        conn.execute("UPDATE lib2_artists SET genres_locked=0 WHERE name='Drake'")
+        conn.commit()
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute(
+            "SELECT genres FROM lib2_artists WHERE name='Drake'").fetchone()[0] \
+            == '["seen live"]'
+
+
 def test_the_plex_updaters_marker_is_not_imported_as_a_biography(legacy_db):
     """The legacy plex updater stamps "-updatedAt<date>" into a plex artist's
     summary as bookkeeping; it showed as the bio on 443 artists (Nov 4 2026)."""

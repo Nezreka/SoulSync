@@ -927,7 +927,9 @@ class _ArtistResolver:
                 "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url "
                 "               ELSE COALESCE(?, image_url) END, "
                 "art_locked=MAX(COALESCE(art_locked,0),COALESCE(?,0)), "
-                "genres=CASE WHEN genres IS NULL OR genres IN ('', '[]') "
+                # a locked [] is the cleanup's answer, not a hole (review 5 W2-WF-1)
+                "genres=CASE WHEN COALESCE(genres_locked,0)=0 "
+                "            AND (genres IS NULL OR genres IN ('', '[]')) "
                 "            THEN ? ELSE genres END, "
                 "summary=COALESCE(summary, ?), "
                 "style=COALESCE(?, style), mood=COALESCE(?, mood), "
@@ -2048,7 +2050,9 @@ def import_legacy_library(database, *, reset: bool = False, progress: ProgressCb
                     "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url "
                     "               ELSE COALESCE(?, image_url) END, "
                     "art_locked=MAX(COALESCE(art_locked,0),COALESCE(?,0)), "
-                    "genres=CASE WHEN genres IS NULL OR genres IN ('', '[]') "
+                    # a locked [] is the cleanup's answer (review 5 W2-WF-1)
+                    "genres=CASE WHEN COALESCE(genres_locked,0)=0 "
+                    "            AND (genres IS NULL OR genres IN ('', '[]')) "
                     "            THEN ? ELSE genres END, "
                     "track_count=COALESCE(track_count, ?), "
                     "expected_track_count=COALESCE(expected_track_count, ?), "
