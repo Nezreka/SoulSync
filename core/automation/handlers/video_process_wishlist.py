@@ -41,7 +41,7 @@ logger = get_logger("automation.video_process_wishlist")
 def acceptable_candidates(candidates: List[Dict[str, Any]],
                           min_rank: int = 0) -> List[Dict[str, Any]]:
     """Every release worth trying, best first. ``_evaluate_hits`` already sorts
-    best-first (accepted, score, availability), so this just filters.
+    best-first (core/video/release_rank), so this just filters.
 
     ``min_rank`` > 0 = an UPGRADE pick for an owned item: only releases with a
     resolution STRICTLY better than the current copy qualify (a same-quality

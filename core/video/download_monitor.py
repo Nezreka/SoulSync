@@ -1817,9 +1817,10 @@ def _search_for_retry(query, max_seconds=55):
 
 
 def _requery_worker(dl_id) -> None:
-    from core.video.quality_eval import evaluate_release
+    from core.video.custom_formats import load_formats
     from core.video.quality_profile import profile_by_id
     from core.video.release_parse import parse_release
+    from core.video.release_rank import judge, sort_ranked
     from core.video.retry import exhausted_reason, merge_candidates, plan_retry
     try:
         db = _db_provider() if _db_provider else None
@@ -1858,20 +1859,32 @@ def _requery_worker(dl_id) -> None:
             accepted = []
             blocked_users = db.blocked_usernames()
             from api.video.downloads import _parse_text
+            try:
+                formats = load_formats(db)
+            except Exception:   # noqa: BLE001 - no formats, never a failed retry
+                formats = []
             for hit in (polled.get("hits") or []):
                 if hit.get("username") in blocked_users:
                     continue                                  # source-wide blocked uploader
-                v = evaluate_release(parse_release(_parse_text(hit)), profile,
-                                     scope=ctx.get("scope") or "movie",
-                                     want_season=ctx.get("season"), want_episode=ctx.get("episode"),
-                                     want_year=ctx.get("year"),
-                                     want_title=ctx.get("titles") or ctx.get("title"),
-                                     want_date=ctx.get("air_date"),
-                                     want_absolute=ctx.get("absolute"),
-                                     want_alt=_scene_alt(ctx),
-                                     size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
+                # the same judge + rank as every other picker (#2033): custom
+                # formats and their minimum count here too, and the retry takes
+                # the best release, not whatever slskd listed first
+                name = _parse_text(hit)
+                avail = hit.get("availability")
+                if avail is None:
+                    avail = hit.get("peers") or 0
+                v = judge(parse_release(name), name, profile, formats,
+                          avail=avail, size_bytes=hit.get("size_bytes") or 0,
+                          scope=ctx.get("scope") or "movie",
+                          want_season=ctx.get("season"), want_episode=ctx.get("episode"),
+                          want_year=ctx.get("year"),
+                          want_title=ctx.get("titles") or ctx.get("title"),
+                          want_date=ctx.get("air_date"),
+                          want_absolute=ctx.get("absolute"),
+                          want_alt=_scene_alt(ctx),
+                          size_gb=round((hit.get("size_bytes") or 0) / (1024 ** 3), 1))
                 if v["accepted"]:
-                    accepted.append(hit)
+                    accepted.append({**hit, "rank": v["rank"]})
                     seen["accepted"] += 1
                 else:
                     # Every refusal, so the summary counts the same population it
@@ -1886,6 +1899,7 @@ def _requery_worker(dl_id) -> None:
                 tried_files = json.loads(row2.get("tried_files") or "[]")
             except (ValueError, TypeError):
                 tried_files = []
+            accepted = sort_ranked(accepted)
             fresh = merge_candidates(accepted, tried_files, blocked=_blocked_pairs(db), blocked_users=_blocked_users(db))
             if fresh and _apply_candidate(db, dl_id, row2, fresh[0], fresh[1:]):
                 return

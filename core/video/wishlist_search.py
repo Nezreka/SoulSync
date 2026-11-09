@@ -89,8 +89,10 @@ def _all_source_search(item: Dict[str, Any], media_type: str):
             skips.append("%s skipped — %s" % (src, err or "search didn't run"))
             continue
         out.extend(cands or [])
-    out.sort(key=lambda c: (1 if c.get("accepted") else 0, int(c.get("score") or 0), c.get("_avail") or 0),
-             reverse=True)
+    # the same rank every picker uses (#2033). this sort read the flat score
+    # and an _avail that _evaluate_hits had already dropped
+    from core.video.release_rank import sort_ranked
+    out = sort_ranked(out)
     if out:
         return out, "; ".join(skips) or None
     if len(skips) == len(chain):

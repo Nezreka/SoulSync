@@ -374,9 +374,10 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
     them up. Blocked hits stay VISIBLE in manual search (greyed, with the reason — the
     Sonarr behaviour) but are never `accepted`, so every auto-picker skips them; a manual
     grab of one is a deliberate user override."""
-    from core.video.custom_formats import format_score, load_formats
-    from core.video.quality_eval import evaluate_release
+    from core.video.custom_formats import load_formats
     from core.video.release_parse import parse_release, search_title
+    from core.video.release_rank import apply_formats, rank_values, sort_ranked
+    from core.video.quality_eval import evaluate_release
     # Custom formats (P3): loaded once per evaluation batch; scored per hit
     # under THIS profile's overrides. Failure = no formats, never a 500.
     try:
@@ -410,17 +411,12 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
                                    want_title=want_title, want_date=want_date,
                                    want_absolute=want_absolute, seeders=seeders,
                                    want_alt=want_alt)
-        # Custom formats: matched formats ADD their (per-profile) score; a
-        # summed score under the profile's floor hard-rejects (Radarr's
-        # min custom format score).
-        fscore, fnames = (0, [])
-        if _formats:
-            fscore, fnames = format_score(_parse_text(hit), _formats, profile)
-            verdict = {**verdict, "score": verdict["score"] + fscore}
-            floor = (profile or {}).get("min_format_score") or 0
-            if floor and verdict["accepted"] and fscore < floor:
-                verdict = {**verdict, "accepted": False,
-                           "rejected": "Format score %d is below your minimum %d" % (fscore, floor)}
+        # Custom formats: matched formats ADD their (per-profile) score, ranked
+        # right after quality; a summed score under the profile's floor
+        # hard-rejects (Radarr's min custom format score). release_rank is the
+        # one place this happens, so every picker ranks the same (#2033).
+        verdict = apply_formats(verdict, _parse_text(hit), _formats, profile)
+        fscore, fnames = verdict["format_score"], verdict["formats"]
         user = hit.get("username")
         is_blocked = bool(user and user in blocked_users) or (user, hit.get("filename")) in blocked
         # ``rejected`` is a STRING contract everywhere ('rejected says why') —
@@ -445,6 +441,7 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
         avail = hit.get("availability")
         if avail is None:
             avail = hit.get("seeders") if hit.get("seeders") is not None else (hit.get("peers") or 0)
+        rank = rank_values(verdict, avail, hit.get("size_bytes") or 0)
         results.append({
             "title": hit.get("title"), "size_gb": size_gb, "size_bytes": hit.get("size_bytes") or 0,
             "seeders": hit.get("seeders"), "peers": hit.get("peers"),
@@ -458,6 +455,9 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
             "rejected": verdict["rejected"], "score": verdict["score"], "blocked": is_blocked,
             "format_score": fscore, "formats": fnames,
+            # why it ranks where it does: every factor and its points, and the
+            # compared values in order (release_rank.rank_values)
+            "breakdown": verdict.get("breakdown") or [], "rank": rank,
             "resolution": parsed.get("resolution"), "source": parsed.get("source"),
             "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
             "audio": parsed.get("audio"), "group": parsed.get("group"),
@@ -495,8 +495,9 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode, blocked=None,
             "is_season_pack": bool(parsed.get("is_season_pack")),
             "is_series_pack": bool(parsed.get("is_series_pack")),
         })
-    # accepted first, then quality-profile score, then availability, then bigger file.
-    results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"], r["size_bytes"]), reverse=True)
+    # accepted first, then quality, custom formats, tie-breaks, availability,
+    # bigger file (core/video/release_rank).
+    results = sort_ranked(results)
     for r in results:
         r.pop("_avail", None)
     # Keep every accepted release, but cap the greyed-out rejects — the structured
