@@ -8211,39 +8211,42 @@ class MusicDatabase:
             # (ADR-03: one primary plus keepers). The byte total therefore sums
             # every live file, while the two counts stay track-centric, which
             # is what the "(run a Deep Scan)" hint on the page means.
+            #
+            # one pass over the live files answers all of it. the counts used
+            # to walk every owned track with a file subquery each, 6.7 s of
+            # this route's 9.4 s on a 300k library (review 5 perf); a track
+            # is owned when a live file in the caller's library hangs off it,
+            # and measured when any live file of it has a size, as before.
+            from core.library2.sql_util import owner_clause
+            mine = owner_clause(column="f.owner_profile_id")
             cursor.execute(
-                "SELECT COALESCE(SUM(f.size), 0) FROM lib2_track_files f "
-                f"WHERE {_LIVE_FILE}"
+                f"SELECT f.track_id, f.path, f.size, CASE WHEN 1{mine} THEN 1 ELSE 0 END"
+                f" FROM lib2_track_files f WHERE {_LIVE_FILE}"
             )
-            total_bytes = int((cursor.fetchone() or [0])[0] or 0)
-            cursor.execute(
-                "SELECT COUNT(*), "
-                "       COUNT(*) FILTER (WHERE t.sized > 0) "
-                "  FROM (SELECT t.id, ("
-                "            SELECT COUNT(f.size) FROM lib2_track_files f "
-                f"            WHERE f.track_id = t.id AND {_LIVE_FILE}"
-                f"        ) AS sized FROM lib2_tracks t WHERE {_owned_track()}) t"
-            )
-            row = cursor.fetchone()
-            tracks_with_size = int((row or [0, 0])[1] or 0)
-            tracks_without_size = int((row or [0, 0])[0] or 0) - tracks_with_size
-
-            # Per-format breakdown via Python aggregation. Doing the
-            # extension split in SQLite is fragile (paths with dots
-            # before the file extension would group wrong); doing it
-            # in Python is one os.path.splitext per row, which is
-            # negligible cost compared to the SUM() above.
-            cursor.execute(
-                "SELECT f.path, f.size FROM lib2_track_files f "
-                f"WHERE {_LIVE_FILE} AND f.size IS NOT NULL "
-                "      AND f.path IS NOT NULL AND f.path != ''"
-            )
+            total_bytes = 0
+            owned: set = set()
+            sized: set = set()
             by_format: dict = {}
-            for path, size in cursor.fetchall():
+            for track_id, path, size, in_scope in cursor:
+                if in_scope:
+                    owned.add(track_id)
+                if size is None:
+                    continue
+                total_bytes += size
+                sized.add(track_id)
+                # the extension split stays in python: in sqlite, paths with
+                # dots before the file extension would group wrong
                 ext = os.path.splitext(path)[1].lstrip('.').lower()
                 if not ext or len(ext) > 6:
                     continue
                 by_format[ext] = by_format.get(ext, 0) + int(size or 0)
+            total_bytes = int(total_bytes or 0)
+            # a file whose track row is gone owns nothing
+            owned.discard(None)
+            if owned:
+                owned &= {r[0] for r in cursor.execute("SELECT id FROM lib2_tracks")}
+            tracks_with_size = len(owned & sized)
+            tracks_without_size = len(owned) - tracks_with_size
 
             return {
                 'total_bytes': total_bytes,

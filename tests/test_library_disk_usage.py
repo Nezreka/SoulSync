@@ -187,6 +187,63 @@ def test_provider_only_catalogue_is_not_owned_or_missing_size(db: MusicDatabase)
     assert db.get_statistics_for_server() == {'artists': 0, 'albums': 0, 'tracks': 0}
 
 
+def test_aggregator_reads_the_files_once_not_a_subquery_per_track(db: MusicDatabase, monkeypatch) -> None:
+    """review 5 perf: the counts walked every owned track and ran a file
+    subquery for each (6.7 s of 9.4 s on a 300k library). one pass over the
+    live files answers it now, with the same numbers."""
+    _insert_track(db, track_id='t1', file_path='/x/a.flac', file_size=10)
+    _insert_track(db, track_id='t2', file_path='/x/b.mp3', file_size=None)
+    # a second live copy of t1 counts its bytes, not a second track
+    with db._get_connection() as conn:
+        first = conn.execute("SELECT MIN(id) FROM lib2_tracks").fetchone()[0]
+        conn.execute("INSERT INTO lib2_track_files (track_id, path, size) VALUES (?, '/y/a.flac', 7)",
+                     (first,))
+        conn.commit()
+        # a file whose track row is gone holds bytes but is no owned track
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("INSERT INTO lib2_track_files (track_id, path, size) VALUES (99999, '/z/c.ogg', 5)")
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys = ON")
+
+    connect = db._get_connection
+    seen = []
+
+    def traced():
+        conn = connect()
+        conn.set_trace_callback(seen.append)
+        return conn
+
+    monkeypatch.setattr(db, '_get_connection', traced)
+    assert db.get_library_disk_usage() == {
+        'total_bytes': 22, 'tracks_with_size': 1, 'tracks_without_size': 1,
+        'by_format': {'flac': 17, 'ogg': 5}, 'has_data': True,
+    }
+    with connect() as conn:
+        for statement in seen:
+            plan = [str(r[-1]) for r in conn.execute("EXPLAIN QUERY PLAN " + statement)]
+            assert not any('CORRELATED' in p for p in plan), (statement, plan)
+
+
+def test_aggregator_counts_only_the_callers_library(db: MusicDatabase, monkeypatch) -> None:
+    """a track is owned through a live file in the library being read; its
+    size can come from any live copy, as the per-track count did."""
+    from core import library_scope
+
+    _insert_track(db, track_id='t1', file_path='/x/a.flac', file_size=10)
+    _insert_track(db, track_id='t2', file_path='/x/b.flac', file_size=None)
+    with db._get_connection() as conn:
+        conn.execute("UPDATE lib2_track_files SET owner_profile_id = 7")
+        conn.commit()
+    monkeypatch.setattr(library_scope, 'any_own_library_exists', lambda: True)
+    with library_scope.library_scope(7):
+        mine = db.get_library_disk_usage()
+    with library_scope.library_scope(8):
+        theirs = db.get_library_disk_usage()
+    assert (mine['tracks_with_size'], mine['tracks_without_size']) == (1, 1)
+    assert (theirs['tracks_with_size'], theirs['tracks_without_size']) == (0, 0)
+    assert mine['total_bytes'] == theirs['total_bytes'] == 10
+
+
 # ---------------------------------------------------------------------------
 # Backward compatibility — schema column ordering / NULL writes
 # ---------------------------------------------------------------------------
