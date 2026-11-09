@@ -450,10 +450,12 @@ def get_artist_map_genres():
 
         # 4. Library artists. review 5 R5-C-4: lib2_artists also holds
         # discography, watchlist and catalogue-only artists and other
-        # profiles' own libraries; 3.6.1 read only the library's artists
+        # profiles' own libraries; 3.6.1 read only the library's artists.
+        # review 5 W2-WC-3: artists with a release of their own on disk, not
+        # every featured credit ('artist' counts those: 29.6k of 29.8k live)
         from core.library2.sql_util import owned_sql
         cursor.execute("SELECT ar.name, ar.image_url AS thumb_url, ar.genres "
-                       f"FROM lib2_artists ar WHERE {owned_sql('artist', 'ar')}")
+                       f"FROM lib2_artists ar WHERE {owned_sql('release_artist', 'ar')}")
         for r in cursor.fetchall():
             genres = []
             if r['genres']:

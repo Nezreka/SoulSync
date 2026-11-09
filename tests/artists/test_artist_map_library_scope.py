@@ -53,3 +53,22 @@ def test_only_the_callers_library_artists_join_the_genre_map(db):
     assert _genre_map_names("shared") == {"Owned Band"}
     # another library is another cache entry, not the shared one's answer
     assert _genre_map_names(2) == {"Their Band"}
+
+
+def test_a_featured_credit_alone_does_not_join_the_genre_map(db):
+    """review 5 W2-WC-3: the 'artist' predicate also matched every artist
+    featured on an owned track, about 15k extra genre nodes live. 3.6.1's
+    artists table held artists with releases of their own"""
+    rock = json.dumps(["rock"])
+    with db._get_connection() as conn:
+        seed.track(conn, "Owned Band", "LP", "Song", credit="Guest Star")
+        seed.artist(conn, "Owned Band", genres=rock)
+        seed.artist(conn, "Guest Star", genres=rock)
+        # a joint album's second primary artist still counts
+        album_id = seed.album(conn, "Owned Band", "LP")
+        conn.execute(
+            "INSERT INTO lib2_album_artists (album_id, artist_id, role) VALUES (?, ?, 'primary')",
+            (album_id, seed.artist(conn, "Co Lead", genres=rock)))
+        conn.commit()
+
+    assert _genre_map_names("shared") == {"Owned Band", "Co Lead"}
