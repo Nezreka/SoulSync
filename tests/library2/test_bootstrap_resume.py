@@ -79,6 +79,14 @@ def _clear_lib2_durations(db):
         conn.commit()
 
 
+def _rowid_of(db, legacy_id):
+    """the walk checkpoints by the legacy table's own rowid. 3.6.1's ids are
+    TEXT, so a track's rowid is not its id (the fixture has the real shape)"""
+    with closing(db._get_connection()) as conn:
+        return int(conn.execute("SELECT rowid FROM tracks WHERE id=?",
+                                (str(legacy_id),)).fetchone()[0])
+
+
 def _set_legacy_duration(db, track_id, duration):
     with closing(db._get_connection()) as conn:
         conn.execute("UPDATE tracks SET duration=? WHERE id=?", (duration, track_id))
@@ -186,7 +194,7 @@ def test_resume_continues_the_walk_after_the_checkpoint_rowid(legacy_db):
 
     import_legacy_library(
         legacy_db,
-        resume=ResumePoint(stage="tracks", rowid=100, run_id=first.run_id),
+        resume=ResumePoint(stage="tracks", rowid=_rowid_of(legacy_db, 100), run_id=first.run_id),
     )
 
     assert _duration_of_legacy_track(legacy_db, 100) is None
@@ -201,7 +209,7 @@ def test_resume_reports_absolute_progress(legacy_db):
     import_legacy_library(
         legacy_db,
         progress=resumed,
-        resume=ResumePoint(stage="tracks", rowid=100, run_id=first.run_id),
+        resume=ResumePoint(stage="tracks", rowid=_rowid_of(legacy_db, 100), run_id=first.run_id),
     )
 
     track_calls = [call for call in resumed.calls if call["stage"] == "tracks"]
@@ -221,7 +229,7 @@ def test_reset_ignores_a_resume_point(legacy_db):
         legacy_db,
         reset=True,
         progress=rebuilt,
-        resume=ResumePoint(stage="tracks", rowid=100, run_id=first.run_id),
+        resume=ResumePoint(stage="tracks", rowid=_rowid_of(legacy_db, 100), run_id=first.run_id),
     )
 
     assert "artists" in rebuilt.stages
