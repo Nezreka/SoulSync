@@ -8,7 +8,6 @@ import { createTestQueryClient } from '@/test/query-client';
 import {
   LibraryV2CanWriteContext,
   MirrorStatusBanner,
-  MonitoringModal,
   MonitorToggle,
   SectionBulkMonitorButton,
 } from './library-v2-page';
@@ -23,37 +22,6 @@ function renderWithQueryClient(node: React.ReactNode, canWrite = true) {
 }
 
 describe('library v2 monitoring mutations', () => {
-  it('keeps every monitoring-modal submit path read-only', () => {
-    let writes = 0;
-    server.use(
-      http.post('/api/library/v2/artists/7/releases/monitor', () => {
-        writes += 1;
-        return HttpResponse.json({ success: true, job_id: 'unexpected' });
-      }),
-      http.post('/api/library/v2/artists/7/edit', () => {
-        writes += 1;
-        return HttpResponse.json({ success: true });
-      }),
-    );
-
-    renderWithQueryClient(
-      <MonitoringModal artistId={7} monitorNewItems="all" onClose={vi.fn()} />,
-      false,
-    );
-
-    for (const name of [
-      /^Add all releases to Wishlist/,
-      /^Add missing releases to Wishlist/,
-      /^Remove everything from Wishlist/,
-    ]) {
-      const button = screen.getByRole('button', { name });
-      expect(button).toBeDisabled();
-      fireEvent.click(button);
-    }
-    expect(screen.getByLabelText('Future releases')).toBeDisabled();
-    expect(writes).toBe(0);
-  });
-
   it('keeps mirror retries fail-closed for read-only profiles', async () => {
     let writes = 0;
     server.use(
@@ -124,76 +92,6 @@ describe('library v2 monitoring mutations', () => {
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     expect(attempts).toBe(2);
     expect(toggle).toBeEnabled();
-  });
-
-  it('rolls back a failed future-release choice and retries the rejected value', async () => {
-    let attempts = 0;
-    const submitted: unknown[] = [];
-    server.use(
-      http.post('/api/library/v2/artists/7/edit', async ({ request }) => {
-        attempts += 1;
-        submitted.push(await request.json());
-        return HttpResponse.json(
-          attempts === 1
-            ? { success: false, error: 'Monitor rule could not be saved' }
-            : { success: true },
-        );
-      }),
-    );
-
-    renderWithQueryClient(<MonitoringModal artistId={7} monitorNewItems="all" onClose={vi.fn()} />);
-
-    const select = screen.getByLabelText('Future releases');
-    fireEvent.change(select, { target: { value: 'new' } });
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Monitor rule could not be saved');
-    expect(select).toHaveValue('all');
-    expect(select).toBeEnabled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-
-    expect(await screen.findByText('New-release setting saved.')).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    expect(attempts).toBe(2);
-    expect(submitted).toEqual([{ monitor_new_items: 'new' }, { monitor_new_items: 'new' }]);
-    expect(select).toBeEnabled();
-  });
-
-  it('surfaces a failed bulk-monitor job and retries the same scope', async () => {
-    let starts = 0;
-    const submitted: unknown[] = [];
-    const onClose = vi.fn();
-    server.use(
-      http.post('/api/library/v2/artists/7/releases/monitor', async ({ request }) => {
-        starts += 1;
-        submitted.push(await request.json());
-        return HttpResponse.json({ success: true, job_id: `job-${starts}` });
-      }),
-      http.get('/api/library/v2/jobs/status', ({ request }) => {
-        const jobId = new URL(request.url).searchParams.get('job_id');
-        return HttpResponse.json({
-          running: false,
-          error: jobId === 'job-1' ? 'Wishlist mirror failed' : null,
-        });
-      }),
-    );
-
-    renderWithQueryClient(<MonitoringModal artistId={7} monitorNewItems="all" onClose={onClose} />);
-
-    fireEvent.click(screen.getByRole('button', { name: /Add missing releases to Wishlist/ }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Wishlist mirror failed');
-    expect(screen.getByRole('button', { name: /Add missing releases to Wishlist/ })).toBeEnabled();
-    expect(onClose).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
-
-    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
-    expect(starts).toBe(2);
-    expect(submitted).toEqual([
-      { scope: 'missing', monitored: true },
-      { scope: 'missing', monitored: true },
-    ]);
   });
 
   it('surfaces a failed release-section monitor job and retries its exact target', async () => {

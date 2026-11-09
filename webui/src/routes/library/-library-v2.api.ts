@@ -830,18 +830,6 @@ export async function bulkMonitorLibraryV2Releases(
   return payload.job_id;
 }
 
-export async function editLibraryV2Artist(
-  artistId: number,
-  monitorNewItems: 'all' | 'none' | 'new',
-): Promise<void> {
-  await lib2Json(
-    apiClient.post(`library/v2/artists/${artistId}/edit`, {
-      json: { monitor_new_items: monitorNewItems },
-    }),
-    'Edit failed',
-  );
-}
-
 /** §52.5/§56.2: on-demand Spotify stats for the current-match identity card —
  *  omitted entirely when the artist has no linked spotify id or the live
  *  lookup failed/was rate-limited, never a fake zero. */
