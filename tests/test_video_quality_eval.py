@@ -24,6 +24,19 @@ def test_resolution_rank_agrees_across_formats():
     assert resolution_rank("garbage") == 0
 
 
+def test_cropped_film_height_from_a_server_ranks_by_its_frame():
+    # #2025: jellyfin stored a 1920x1038 bluray as '1038p', which ranked 0, so
+    # the file read Unknown and 'below your 1080p target'
+    assert resolution_rank("1038p") == resolution_rank("800p") == 3
+    assert resolution_rank("1600p") == 4               # a 2.40 4K frame
+    assert resolution_rank("692p") == 2
+    assert resolution_rank("2k") == 3                  # plex's label for 1440p / dci 2k
+    assert resolution_label("1038p") == "1080p"
+    out = evaluate_owned({"resolution": "1038p", "video_codec": "h264"},
+                         {"cutoff_resolution": "1080p", "rejects": []})
+    assert out["meets"] is True and out["resolution_label"] == "1080p"
+
+
 def test_resolution_label():
     assert resolution_label("1920x1080") == "1080p"
     assert resolution_label("2160p") == "4K"

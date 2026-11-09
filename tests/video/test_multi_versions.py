@@ -92,3 +92,17 @@ def test_jellyfin_files_emits_every_source():
     # Bare Path (no sources) still yields the minimal single entry.
     assert JellyfinVideoSource._files({"Path": "/x.mkv"}) == [{"relative_path": "/x.mkv"}]
     assert JellyfinVideoSource._files({}) == []
+
+
+def test_jellyfin_cropped_film_reads_its_real_resolution():
+    # #2025: a 1920x1038 bluray must store as 1080p, not '1038p' (its height)
+    item = {"MediaSources": [
+        {"Path": "/m/a.mkv", "Size": 7, "MediaStreams": [
+            {"Type": "Video", "Codec": "h264", "Height": 1038, "Width": 1920}]},
+        {"Path": "/m/b.mkv", "Size": 30, "MediaStreams": [
+            {"Type": "Video", "Codec": "hevc", "Height": 1608, "Width": 3840}]},
+        {"Path": "/m/c.mkv", "Size": 1, "MediaStreams": [
+            {"Type": "Video", "Codec": "h264", "Height": 1080}]},
+    ]}
+    files = JellyfinVideoSource._files(item)
+    assert [f["resolution"] for f in files] == ["1080p", "2160p", "1080p"]
