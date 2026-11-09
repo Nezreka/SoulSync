@@ -6,7 +6,11 @@ import sqlite3
 
 import pytest
 
-from core.library2.schema import ensure_library_v2_schema
+from core.library2.schema import (
+    _PROFILE_FINGERPRINT_INDEX_SQL,
+    _PROFILE_FINGERPRINT_INDEXES,
+    ensure_library_v2_schema,
+)
 from tests.lib2_seed import row_conn
 
 _EXPECTED_TABLES = {
@@ -356,6 +360,10 @@ def test_migrates_default_one_columns_without_losing_graph_data():
     for table in ("lib2_artists", "lib2_albums", "lib2_tracks"):
         for suffix in ("default", "insert", "update"):
             conn.execute(f"DROP TRIGGER trg_{table}_quality_profile_{suffix}")
+        # the old shape predates the fingerprint indexes (review 5 W2-WE-5),
+        # which would block this drop
+        for index_name in _PROFILE_FINGERPRINT_INDEXES[table]:
+            conn.execute(f"DROP INDEX {index_name}")
         conn.execute(
             f"ALTER TABLE {table} ADD COLUMN quality_profile_id_old "
             "INTEGER NOT NULL DEFAULT 1")
@@ -365,6 +373,10 @@ def test_migrates_default_one_columns_without_losing_graph_data():
         conn.execute(
             f"ALTER TABLE {table} RENAME COLUMN quality_profile_id_old "
             "TO quality_profile_id")
+    # an install that has the fingerprint indexes on the old column: the
+    # rebuild below has to drop them before DROP COLUMN
+    for _table, index_sql in _PROFILE_FINGERPRINT_INDEX_SQL:
+        conn.execute(index_sql)
     conn.execute("UPDATE lib2_artists SET quality_profile_id=999")
     conn.execute("UPDATE lib2_albums SET quality_profile_id=2")
     conn.execute("UPDATE quality_profiles SET is_default=0")
@@ -396,6 +408,10 @@ def test_migrates_default_one_columns_without_losing_graph_data():
             fk[2] == "quality_profiles" and fk[3] == "quality_profile_id"
             for fk in conn.execute(f"PRAGMA foreign_key_list({table})")
         )
+        # and the fingerprint indexes are back on the rebuilt column
+        for index_name in _PROFILE_FINGERPRINT_INDEXES[table]:
+            assert conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                                (index_name,)).fetchone()
 
 
 def test_release_kind_migration_preserves_ambiguous_existing_albums():

@@ -337,3 +337,27 @@ def test_artist_page_counts_albums_by_seeking_the_page_albums(catalogue, monkeyp
     plan = [r[3] for r in traced.execute("EXPLAIN QUERY PLAN " + query)]
     assert "SCAN al" not in plan, plan
     assert any(p.startswith("SEARCH al USING INTEGER PRIMARY KEY") for p in plan), plan
+
+
+def test_the_counts_fingerprint_reads_only_narrow_indexes(catalogue):
+    """review 5 W2-WE-5: the fingerprint behind the "could be better" counts
+    runs every 30 s while the artist list is open, and each run scanned all
+    of lib2_tracks and lib2_albums (no index on quality_profile_explicit)
+    plus every wide artist row, about 2.9 s live"""
+    from core.library2.artist_reader import _upgrade_fingerprint
+
+    conn, _db = catalogue
+    seen = []
+    conn.set_trace_callback(seen.append)
+    try:
+        _upgrade_fingerprint(conn)
+    finally:
+        conn.set_trace_callback(None)
+    plans = {}
+    for sql in seen:
+        plans[sql] = " | ".join(str(r[-1]) for r in conn.execute(f"EXPLAIN QUERY PLAN {sql}"))
+    assert len(plans) == 4, plans
+    for sql, plan in plans.items():
+        # a plain SCAN of a table reads every wide row; a covering index or a
+        # partial-index seek reads only the few columns (or rows) it needs
+        assert "COVERING INDEX" in plan, (sql, plan)
