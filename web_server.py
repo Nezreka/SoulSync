@@ -24398,8 +24398,11 @@ def _library_v2_media_server_state():
     }
 
 
-def _run_library_v2_integrity_report(*, max_findings=1000):
-    """One read-only cross-index snapshot; no schema ensure or repair writes."""
+def _run_library_v2_integrity_report(*, max_findings=1000, progress=None):
+    """One read-only cross-index snapshot; no schema ensure or repair writes.
+
+    Slow by nature (it checks every library file on disk), so the route runs
+    it as a background job and ``progress(current, total)`` feeds that job."""
     from api.quarantine import _get_quarantine_dir
     from core.acquisition.reconciler import reconcile_persistent_grabs
     from core.library2.integrity_reconciler import build_integrity_report
@@ -24442,6 +24445,7 @@ def _run_library_v2_integrity_report(*, max_findings=1000):
             media_server=_library_v2_media_server_state(),
             config_manager=config_manager,
             max_findings=max_findings,
+            progress=progress,
         )
         # A read endpoint owns no commit boundary, even if a future path helper
         # accidentally begins a transaction.

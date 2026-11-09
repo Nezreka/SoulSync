@@ -912,39 +912,54 @@ class MetadataCache:
                 cursor = conn.cursor()
                 stats = {}
 
-                # Query 1: Main entity stats in one pass (was 7 separate queries)
-                junk_names = "', '".join(self._JUNK_NAMES - {''})
-                cursor.execute(f"""
-                    SELECT
-                        COUNT(*) as total,
-                        SUM(CASE WHEN (name IS NULL OR TRIM(name) = '' OR LOWER(TRIM(name)) IN ('{junk_names}'))
-                             AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
-                             AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
-                             THEN 1 ELSE 0 END) as junk,
-                        SUM(CASE WHEN julianday('now') - julianday(updated_at) > ttl_days - 1 THEN 1 ELSE 0 END) as exp_24h,
-                        SUM(CASE WHEN julianday('now') - julianday(updated_at) > ttl_days - 7 THEN 1 ELSE 0 END) as exp_7d,
-                        ROUND(AVG(julianday('now') - julianday(updated_at)), 1) as avg_age,
-                        COALESCE(SUM(access_count), 0) as total_hits
-                    FROM metadata_cache_entities
-                """)
-                row = cursor.fetchone()
-                stats['total_entities'] = row[0] or 0
-                stats['junk_entities'] = row[1] or 0
-                stats['expiring_24h'] = row[2] or 0
-                stats['expiring_7d'] = row[3] or 0
-                stats['avg_age_days'] = row[4] or 0
-                stats['total_access_hits'] = row[5] or 0
-
-                # Query 2: Group counts (source + type in one pass)
+                # every query here reads an index, never the table: a single
+                # pass over the rows dragged each raw_json blob off disk and
+                # took 33s on 340k cached entities. review 5 perf
+                # Query 1: counts and hits per group, off idx_mce_stats
                 cursor.execute("""
-                    SELECT source, entity_type, COUNT(*) as cnt
+                    SELECT source, entity_type, COUNT(*) as cnt,
+                           COALESCE(SUM(access_count), 0) as hits
                     FROM metadata_cache_entities GROUP BY source, entity_type
                 """)
                 by_source = {}
                 by_type = {}
+                total = 0
+                total_hits = 0
                 for r in cursor.fetchall():
                     by_source[r[0]] = by_source.get(r[0], 0) + r[2]
                     by_type[r[1]] = by_type.get(r[1], 0) + r[2]
+                    total += r[2]
+                    total_hits += r[3]
+
+                # Query 2: junk names. the inner scan reads only idx_mce_name;
+                # the few matches are then looked up by rowid for entity_id
+                junk_names = "', '".join(self._JUNK_NAMES - {''})
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM metadata_cache_entities
+                    WHERE id IN (
+                        SELECT id FROM metadata_cache_entities
+                        WHERE name IS NULL OR TRIM(name) = ''
+                           OR LOWER(TRIM(name)) IN ('{junk_names}'))
+                      AND entity_id NOT LIKE '%\\_features' ESCAPE '\\'
+                      AND entity_id NOT LIKE '%\\_tracks' ESCAPE '\\'
+                """)
+                junk = cursor.fetchone()[0]
+
+                # Query 3: ages, off idx_mce_age (updated_at, ttl_days)
+                cursor.execute("""
+                    SELECT
+                        SUM(CASE WHEN julianday('now') - julianday(updated_at) > ttl_days - 1 THEN 1 ELSE 0 END) as exp_24h,
+                        SUM(CASE WHEN julianday('now') - julianday(updated_at) > ttl_days - 7 THEN 1 ELSE 0 END) as exp_7d,
+                        ROUND(AVG(julianday('now') - julianday(updated_at)), 1) as avg_age
+                    FROM metadata_cache_entities
+                """)
+                row = cursor.fetchone()
+                stats['total_entities'] = total
+                stats['junk_entities'] = junk or 0
+                stats['expiring_24h'] = row[0] or 0
+                stats['expiring_7d'] = row[1] or 0
+                stats['avg_age_days'] = row[2] or 0
+                stats['total_access_hits'] = total_hits
                 stats['by_source'] = by_source
                 stats['by_type'] = by_type
 

@@ -11,9 +11,12 @@ from __future__ import annotations
 import os
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 from core.library2.paths import missing_path_root_is_healthy, resolve_lib2_path
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.integrity_reconciler")
 
 
 _TERMINAL_RUNTIME = {
@@ -197,10 +200,27 @@ def build_integrity_report(
     media_server: Optional[Mapping[str, Any]] = None,
     config_manager: Any = None,
     max_findings: int = 1000,
+    progress: Optional[Callable[[int, int], None]] = None,
 ) -> IntegrityReport:
-    """Build one database- and filesystem-read-only cross-index snapshot."""
+    """Build one database- and filesystem-read-only cross-index snapshot.
+
+    ``progress(current, total)`` hears about the per-file disk checks, the
+    slow part: every stored path is resolved on disk, which runs for most of
+    an hour on a 300k-track library. review 5 perf
+    """
     collector = _Collector(max_findings)
     observed: Counter[str] = Counter()
+    checked = {"current": 0, "total": 0}
+
+    def _report_progress(*, force: bool = False) -> None:
+        if progress is None:
+            return
+        if not force and checked["current"] % 500:
+            return
+        try:
+            progress(checked["current"], checked["total"])
+        except Exception as exc:  # noqa: BLE001 - progress is advisory
+            logger.debug("integrity report progress callback failed: %s", exc)
     tables = {
         name: _table_exists(conn, name)
         for name in (
@@ -229,7 +249,11 @@ def build_integrity_report(
             "FROM lib2_track_files WHERE path IS NOT NULL AND path<>''",
         )
         observed["lib2_files"] = len(rows)
+        checked["total"] += len(rows)
+        _report_progress(force=True)
         for row in rows:
+            checked["current"] += 1
+            _report_progress()
             raw_path = row["path"]
             resolved = _resolved(raw_path, config_manager=config_manager)
             state = str(row.get("file_state") or "active")
@@ -295,7 +319,11 @@ def build_integrity_report(
             conn, f"SELECT id, file_path FROM {table} WHERE file_path IS NOT NULL AND file_path<>''",
         )
         observed[table] = len(rows)
+        checked["total"] += len(rows)
+        _report_progress(force=True)
         for row in rows:
+            checked["current"] += 1
+            _report_progress()
             resolved = _resolved(row["file_path"], config_manager=config_manager)
             if resolved and _normalized(resolved) not in indexed_real:
                 collector.add(
@@ -473,6 +501,7 @@ def build_integrity_report(
                 state=raw_state, path=path, resolved_path=resolved,
             )
 
+    _report_progress(force=True)
     acquisition = dict(acquisition_report or {}) or None
     if acquisition:
         for decision in acquisition.get("decisions") or []:
