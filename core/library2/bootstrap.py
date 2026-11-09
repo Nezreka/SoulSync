@@ -782,6 +782,13 @@ def run_deferred_backfills(database: Any, *,
             )
             # Installs migrated before one-file-one-track also converge here.
             stats["shared_files"] = _fold_shared_files_once(database, conn)
+            # guests an older twin merge dropped from the kept album, once
+            # (review 5 W2-WE-1)
+            try:
+                from core.library2.catalogue_duplicates import restore_merged_album_credits
+                stats["merged_credits_restored"] = restore_merged_album_credits(conn)
+            except sqlite3.Error as exc:
+                logger.warning("merged album credits not restored yet: %s", exc)
             conn.commit()
             # 3.6.1 logged a scan import on every refresh; once, in batches
             from core.maintenance.library_history_dedupe import dedupe_scan_import_history
