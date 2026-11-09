@@ -1611,9 +1611,11 @@ function StatsDiskUsage({
               }`
             : payload?.refreshing
               ? 'Measuring your library…'
-              : tracksWithoutSize > 0
-                ? `Run a Deep Scan to populate (${tracksWithoutSize.toLocaleString()} tracks pending)`
-                : 'No tracks in library yet'}
+              : payload?.report_failed
+                ? 'Couldn’t measure your library just now. Try again in a minute.'
+                : tracksWithoutSize > 0
+                  ? `Run a Deep Scan to populate (${tracksWithoutSize.toLocaleString()} tracks pending)`
+                  : 'No tracks in library yet'}
         </div>
       </div>
       <div className={styles.statsDiskFormats}>
@@ -1676,7 +1678,11 @@ function StatsDbStorage({
             {formatDbStorageValue(payload?.total_file_size || 0, method)}
           </div>
           <div className={styles.statsDbTotalLabel}>
-            {payload?.refreshing && !tables.length ? 'Measuring tables…' : 'Total Size'}
+            {payload?.refreshing && !tables.length
+              ? 'Measuring tables…'
+              : payload?.report_failed && !tables.length
+                ? 'Couldn’t measure tables'
+                : 'Total Size'}
           </div>
         </div>
       </div>

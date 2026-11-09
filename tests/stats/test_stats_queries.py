@@ -672,6 +672,9 @@ def test_report_refreshes_when_the_library_files_change(db, monkeypatch):
     a download is refreshed, not served for its whole max age."""
     # a slow machine still has the first result inside the first ask
     monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 10)
+    # no gap: this checks that a change refreshes at all; the gap that stops
+    # an import from re-running it every poll has its own test (W3-TU-2)
+    monkeypatch.setattr(queries, 'REPORT_VERSION_GAP', 0)
     calls = []
     real = db.get_library_disk_usage
 
@@ -691,6 +694,81 @@ def test_report_refreshes_when_the_library_files_change(db, monkeypatch):
         conn.commit()
     _wait_for(lambda: queries.get_library_disk_usage(db).get('total_bytes') == 9)
     assert len(calls) == 2
+
+
+class _CountingDB:
+    """a report that answers at once and counts its passes."""
+
+    def __init__(self, path, fail=False):
+        self.database_path = path
+        self.fail = fail
+        self.calls = 0
+
+    def get_library_disk_usage(self):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError('disk report broke')
+        return {'total_bytes': 1, 'tracks_with_size': 1, 'tracks_without_size': 0,
+                'by_format': {}, 'has_data': True}
+
+
+def _settle():
+    _wait_for(lambda: not queries._report_jobs)
+
+
+def test_an_import_does_not_rerun_the_disk_report_every_poll(tmp_path, monkeypatch):
+    """review 5 W3-TU-2: every file an import writes bumps files_version, so
+    each 3 s poll found the result stale, ran the whole-library pass again and
+    answered refreshing, and the page polled for as long as the import ran."""
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 2)
+    version = {'n': 0}
+    monkeypatch.setattr(queries, '_files_version', lambda _db: version['n'])
+    db = _CountingDB(str(tmp_path / 'import.db'))
+    answers = []
+    for _poll in range(6):
+        answers.append(bool(queries.get_library_disk_usage(db).get('refreshing')))
+        _settle()
+        version['n'] += 1   # the import wrote a file before the next poll
+    assert answers == [False] * 6, answers
+    assert db.calls == 1
+
+
+def test_a_moved_counter_refreshes_once_the_gap_has_passed(tmp_path, monkeypatch):
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 2)
+    monkeypatch.setattr(queries, 'REPORT_VERSION_GAP', 0.05)
+    version = {'n': 0}
+    monkeypatch.setattr(queries, '_files_version', lambda _db: version['n'])
+    db = _CountingDB(str(tmp_path / 'gap.db'))
+    queries.get_library_disk_usage(db)
+    version['n'] = 1
+    import time as _time
+    _time.sleep(0.1)
+    assert queries.get_library_disk_usage(db)['refreshing'] is True
+    _settle()
+    assert db.calls == 2
+    # the new result carries the new counter: settled, no third pass
+    assert 'refreshing' not in queries.get_library_disk_usage(db)
+    assert db.calls == 2
+
+
+def test_a_report_that_keeps_failing_stops_the_polling(tmp_path, monkeypatch):
+    """review 5 W3-TU-2: a pass that raised stored nothing, so every poll
+    started another failing thread and the page said "measuring" forever."""
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 2)
+    monkeypatch.setattr(queries, '_files_version', lambda _db: 0)
+    db = _CountingDB(str(tmp_path / 'broken.db'), fail=True)
+    payloads = []
+    for _poll in range(5):
+        payloads.append(queries.get_library_disk_usage(db))
+        _settle()
+    assert db.calls == 1
+    assert all('refreshing' not in p for p in payloads), payloads
+    assert payloads[-1]['report_failed'] is True
+    # once the retry wait is over it tries again, and a success clears it
+    monkeypatch.setattr(queries, 'REPORT_RETRY_AFTER', 0)
+    db.fail = False
+    _wait_for(lambda: queries.get_library_disk_usage(db).get('has_data') is True)
+    assert 'report_failed' not in queries.get_library_disk_usage(db)
 
 
 def test_reports_keep_each_library_scope_apart(db, monkeypatch):
