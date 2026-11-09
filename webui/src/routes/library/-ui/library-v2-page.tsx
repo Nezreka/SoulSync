@@ -1783,7 +1783,7 @@ function EnrichDropdown({
   entity,
   entityId,
   entityName,
-  wrapperRef,
+  insideRefs,
   onClose,
   align = 'left',
   submenu = false,
@@ -1791,7 +1791,10 @@ function EnrichDropdown({
   entity: 'artists' | 'albums' | 'tracks';
   entityId: number;
   entityName: string;
-  wrapperRef: React.RefObject<HTMLSpanElement | null>;
+  /** presses in these count as inside: the menu that holds this list. the
+   *  album menu is portaled to the body, so its "..." button alone was not
+   *  enough (review 5 W3-TL-1) */
+  insideRefs: React.RefObject<HTMLElement | null>[];
   onClose: () => void;
   align?: 'left' | 'right';
   submenu?: boolean;
@@ -1831,18 +1834,23 @@ function EnrichDropdown({
     },
   });
 
+  const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) {
-        onClose();
-      }
+      // its own items are inside too: closing on their mousedown unmounted the
+      // list before the click landed, so no enrich ever ran (review 5 W3-TL-1)
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (insideRefs.some((ref) => ref.current?.contains(target))) return;
+      onClose();
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [onClose, wrapperRef]);
+  }, [onClose, insideRefs]);
 
   return (
     <div
+      ref={rootRef}
       className={`${styles.enrichDropdownMenu} ${align === 'right' ? styles.alignRight : styles.alignLeft} ${
         submenu ? styles.enrichDropdownSubmenu : ''
       }`}
@@ -3456,7 +3464,7 @@ export function AlbumOverflowMenu({
                     entity="albums"
                     entityId={album.id}
                     entityName={album.title}
-                    wrapperRef={wrapRef}
+                    insideRefs={[wrapRef, menuRef]}
                     align="right"
                     submenu
                     onClose={() => {
@@ -6710,7 +6718,7 @@ function ArtistToolsMenu({
       entity="artists"
       entityId={artistId}
       entityName={artistName}
-      wrapperRef={wrapRef}
+      insideRefs={[wrapRef]}
       onClose={() => {
         setOpen(false);
         setShowSubmenu(false);
