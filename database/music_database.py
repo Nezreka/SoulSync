@@ -2342,6 +2342,7 @@ class MusicDatabase:
         'similar_artists_rematch':  ('table', '_similar_artists_rematch_applied'),
         'similar_artist_images_durable': ('table', '_similar_artist_images_durable'),
         'wishlist_lib2_album_dates': ('table', '_wishlist_lib2_album_dates'),
+        'wishlist_lib2_album_dates_v2': ('table', '_wishlist_lib2_album_dates_v2'),
         'beatport_positional_purged': ('table', '_beatport_positional_purged'),
         'fake_provider_ids_purged': ('table', '_fake_provider_ids_purged'),
     }
@@ -4569,10 +4570,15 @@ class MusicDatabase:
         """one-time: wishlist rows the Library v2 mirror wrote carried an album
         with no release date, so they downloaded into a yearless twin of the
         album's [year] folder (SeadogsBooty, Nov 5). give the queued ones their
-        album's date. new rows get it from the mirror itself."""
+        album's date. new rows get it from the mirror itself.
+
+        review 5 W2-WJ-3: the first pass read lib2_album_id from
+        spotify_data['_source_info'], but the mirror moves that into the
+        source_info column, so it matched nothing. the corrected pass has its
+        own marker so installs that already ran the broken one get it."""
         try:
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' "
-                           "AND name='_wishlist_lib2_album_dates'")
+                           "AND name='_wishlist_lib2_album_dates_v2'")
             if cursor.fetchone():
                 return
             tables = {r[0] for r in cursor.execute(
@@ -4580,19 +4586,29 @@ class MusicDatabase:
             fixed = 0
             if {'wishlist_tracks', 'lib2_albums'} <= tables:
                 from core.library2.release_dates import album_release_date
+                has_info = any(r[1] == 'source_info' for r in cursor.execute(
+                    "PRAGMA table_info(wishlist_tracks)").fetchall())
+                info_col = 'source_info' if has_info else 'NULL'
                 dates = {}
                 updates = []
-                for row_id, raw in cursor.execute(
-                        "SELECT id, spotify_data FROM wishlist_tracks").fetchall():
+                for row_id, raw, raw_info in cursor.execute(
+                        f"SELECT id, spotify_data, {info_col} FROM wishlist_tracks").fetchall():
                     try:
                         data = json.loads(raw or '{}')
                     except (TypeError, ValueError):
                         continue
                     album = data.get('album') if isinstance(data, dict) else None
-                    info = data.get('_source_info') if isinstance(data, dict) else None
                     if not isinstance(album, dict) or album.get('release_date'):
                         continue
+                    try:
+                        info = json.loads(raw_info or '{}')
+                    except (TypeError, ValueError):
+                        info = None
                     album_id = info.get('lib2_album_id') if isinstance(info, dict) else None
+                    if not album_id:
+                        # an older shape kept it inside the payload
+                        legacy = data.get('_source_info')
+                        album_id = legacy.get('lib2_album_id') if isinstance(legacy, dict) else None
                     if not album_id:
                         continue
                     if album_id not in dates:
@@ -4608,9 +4624,9 @@ class MusicDatabase:
                     cursor.executemany(
                         "UPDATE wishlist_tracks SET spotify_data = ? WHERE id = ?", updates)
                 fixed = len(updates)
-            cursor.execute("CREATE TABLE _wishlist_lib2_album_dates "
+            cursor.execute("CREATE TABLE _wishlist_lib2_album_dates_v2 "
                            "(applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-            self._record_migration(cursor, 'wishlist_lib2_album_dates')
+            self._record_migration(cursor, 'wishlist_lib2_album_dates_v2')
             if fixed:
                 logger.info("wishlist: gave %d library album rows their release date", fixed)
         except Exception as e:
@@ -10384,15 +10400,20 @@ class MusicDatabase:
                     for aid, donor in rows.items():
                         if aid == best_id:
                             continue
-                        # a different spelling only merges when no provider id
-                        # disagrees: two artists can share a folded name (#1797)
-                        if donor['name_key'] != keeper['name_key']:
-                            theirs, ours = _lib2_provider_ids(donor), _lib2_provider_ids(keeper)
-                            clash = next((k for k in theirs if k in ours and theirs[k] != ours[k]), None)
-                            if clash:
-                                logger.info(f"   Not merging '{donor['name']}' ID {aid} into "
-                                            f"'{keeper['name']}' {best_id}: {clash} differs")
-                                continue
+                        # a pair only merges when no provider id disagrees. the
+                        # importer and autolink keep a same-named artist with a
+                        # different id as its own row on purpose, and two artists
+                        # can share a folded name (#1797). review 5 W2-WJ-1: this
+                        # used to run for a different spelling only. the keeper is
+                        # re-read so ids an earlier donor handed over count too
+                        keeper = cursor.execute(
+                            "SELECT * FROM lib2_artists WHERE id = ?", (best_id,)).fetchone() or keeper
+                        theirs, ours = _lib2_provider_ids(donor), _lib2_provider_ids(keeper)
+                        clash = next((k for k in theirs if k in ours and theirs[k] != ours[k]), None)
+                        if clash:
+                            logger.info(f"   Not merging '{donor['name']}' ID {aid} into "
+                                        f"'{keeper['name']}' {best_id}: {clash} differs")
+                            continue
                         # Preserve every independent server recognition when
                         # folding duplicate catalogue artists. If the keeper
                         # already has that server, its mapping wins.
@@ -10516,6 +10537,17 @@ class MusicDatabase:
                         cursor.execute(
                             "UPDATE lib2_artists SET canonical_artist_id = ? "
                             " WHERE canonical_artist_id = ?", (best_id, aid))
+                        # review 5 W2-WJ-4: a finding filed on the donor (a
+                        # dismissal) follows the keeper, like dedup_repair's
+                        # merge. left on a deleted id, the next job run raised
+                        # it again on the keeper
+                        try:
+                            cursor.execute(
+                                "UPDATE repair_findings SET entity_id=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE entity_type='artist' AND entity_id=?",
+                                (f"lib2:{best_id}", f"lib2:{aid}"))
+                        except sqlite3.OperationalError as exc:
+                            logger.debug("artist merge: findings not re-pointed: %s", exc)
                         cursor.execute("DELETE FROM lib2_artists WHERE id = ?", (aid,))
                         total_merged += 1
                         logger.info(f"   Merged '{artist_name}' id {aid} → {best_id} "
@@ -23388,13 +23420,20 @@ class MusicDatabase:
         catalogue_table = {"artists": "lib2_artists", "albums": "lib2_albums",
                            "tracks": "lib2_tracks"}[table]
         params = (external_id,)
-        if provider in promoted:
+        if table == "albums" and provider == "musicbrainz":
+            # albums index the release id folded (idx_lib2_albums_mbid_lower);
+            # the bare column compare read every album (review 5 W2-WJ-5)
+            where = "LOWER(musicbrainz_id) = LOWER(?)"
+        elif provider in promoted:
             where = f"{promoted[provider]} = ?"
         elif provider == "bandcamp":
             # the bandcamp id sits in its enrichment bucket, the url is the
-            # stored provider id; either finds the row
-            where = ("(json_extract(enrichment, '$.bandcamp.id') = ? "
-                     "OR json_extract(external_ids, '$.bandcamp') = ?)")
+            # stored provider id; either finds the row. both halves in their
+            # indexed form, one unindexed arm made the OR read every row
+            # (review 5 W2-WJ-5)
+            from core.library2.provider_ids import bandcamp_enrichment_id_sql, external_id_sql
+            where = (f"({bandcamp_enrichment_id_sql()} = ? "
+                     f"OR {external_id_sql('external_ids', 'bandcamp')} = ?)")
             params = (external_id, external_id)
         else:
             # the indexed TRIM(CAST(...)) form: the bare json_extract scanned

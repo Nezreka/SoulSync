@@ -1348,7 +1348,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         # audiodb and jiosaavn too: the external-id ownership check
         # (core/library/track_identity) ORs every id a source carries, and one
         # unindexed arm makes the whole OR a scan
-        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'jiosaavn'):
+        # genius, amazon and bandcamp: the public api's lookup by external id
+        # (review 5 W2-WJ-5, 3.6.1 had a column index for each)
+        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'jiosaavn',
+                        'genius', 'amazon', 'bandcamp'):
             name = f"idx_lib2_tracks_ext_{service}"
             expression = external_id_sql('external_ids', service)
             row = cursor.execute(
@@ -1360,11 +1363,21 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                 f"ON lib2_tracks({expression}) WHERE {expression} IS NOT NULL")
         # the same for releases: an import groups tracks into an album by its
         # provider id, and without these each miss parsed all 72k albums
-        for service in ('deezer', 'tidal', 'qobuz', 'itunes'):
+        # audiodb onwards: the public api's lookup by external id, which read
+        # every album for those (review 5 W2-WJ-5)
+        for service in ('deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'discogs', 'amazon',
+                        'jiosaavn', 'bandcamp'):
             expression = external_id_sql('external_ids', service)
             cursor.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_lib2_albums_ext_{service} "
                 f"ON lib2_albums({expression}) WHERE {expression} IS NOT NULL")
+        # the other half of a bandcamp lookup: the id the enrichment bucket keeps
+        from core.library2.provider_ids import bandcamp_enrichment_id_sql
+        bandcamp_expr = bandcamp_enrichment_id_sql()
+        for table in ('lib2_tracks', 'lib2_albums'):
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_enrich "
+                f"ON {table}({bandcamp_expr}) WHERE {bandcamp_expr} IS NOT NULL")
         # a recording's MusicBrainz id, for the same ownership check: partial,
         # most tracks carry none
         cursor.execute(

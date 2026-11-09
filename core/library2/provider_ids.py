@@ -32,6 +32,14 @@ def external_id_sql(column: str, service: str) -> str:
     return f"TRIM(CAST(json_extract({column},'$.{service}') AS TEXT))"
 
 
+def bandcamp_enrichment_id_sql(column: str = "enrichment") -> str:
+    """the bandcamp id kept in a row's enrichment bucket, as SQL. one text for
+    the lookup and its index, like external_id_sql (review 5 W2-WJ-5)."""
+    if not column.replace("_", "").isalnum():
+        raise ValueError(f"Unsafe column name for SQL: {column!r}")
+    return f"TRIM(CAST(json_extract({column},'$.bandcamp.id') AS TEXT))"
+
+
 def normalize_provider_name(value: Any) -> Optional[str]:
     """Return a safe lower-case provider namespace, or ``None``.
 
