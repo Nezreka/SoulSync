@@ -288,6 +288,20 @@ def test_add_nzb_validates_and_forwards(monkeypatch):
     assert r.get_json() == {'success': True, 'ref': 'SABnzbd_nzo_9'}
 
 
+def test_add_nzb_reports_a_failed_nzb_fetch(monkeypatch):
+    # #2030: the pasted url is fetched by soulsync; a failed fetch says so
+    from core.usenet_clients.nzb_fetch import NzbFetchError
+
+    class _Failing(_FakeTorrent):
+        async def add_nzb(self, url, category='soulsync', save_path=None):
+            raise NzbFetchError("could not download the NZB from the indexer (HTTP 404)")
+    c = _client(monkeypatch, usenet=_Failing())
+    r = c.post('/api/clients/usenet/add', json={'url': 'https://indexer/x.nzb?apikey=s'})
+    assert r.status_code == 200
+    assert r.get_json() == {'success': False,
+                            'error': 'could not download the NZB from the indexer (HTTP 404)'}
+
+
 def test_slskd_clear_completed(monkeypatch):
     class _Clearing(_FakeSlskd):
         async def clear_all_completed_downloads(self):

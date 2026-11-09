@@ -65,8 +65,12 @@ def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None) -> dict:
     adapter = get_active_adapter()
     if adapter is None or not adapter.is_configured():
         return {"ok": False, "error": "No usenet client configured — set it on Settings → Downloads."}
+    from core.usenet_clients.nzb_fetch import NzbFetchError
     try:
         ref = _run(adapter.add_nzb(url_or_nzb, category=_usenet_category(), save_path=save_path))
+    except NzbFetchError as e:
+        # #2030: the nzb never reached the client
+        return {"ok": False, "error": "Usenet grab failed: " + str(e)}
     except Exception as e:   # noqa: BLE001
         logger.warning("usenet add failed: %s", e, exc_info=True)
         return {"ok": False, "error": "Usenet client: " + str(e)}

@@ -16,8 +16,9 @@ from typing import Any, List, Optional, Union
 import requests as http_requests
 
 from core.settings import config_manager
-from core.async_utils import run_control
+from core.async_utils import run_client_add, run_control
 from core.usenet_clients.base import UsenetStatus
+from core.usenet_clients.nzb_fetch import resolve_nzb
 from utils.logging_config import get_logger
 
 logger = get_logger("usenet.nzbget")
@@ -112,7 +113,8 @@ class NZBGetAdapter:
         category: str = "soulsync",
         save_path: Optional[str] = None,
     ) -> Optional[str]:
-        return await run_control(
+        # its own pool, like sab: the add now fetches the nzb first (#2030)
+        return await run_client_add(
             self._add_nzb_sync, url_or_bytes, category, save_path)
 
     def _add_nzb_sync(
@@ -125,14 +127,12 @@ class NZBGetAdapter:
         # NZBGet's ``append`` takes: NZBFilename, Content, Category,
         # Priority, AddToTop, AddPaused, DupeKey, DupeScore, DupeMode,
         # PPParameters. We pass the minimum required for an unpause-on-add.
-        # Content is either base64 of the raw .nzb or a URL — NZBGet
-        # auto-detects which based on whether it looks like a URL.
-        if isinstance(url_or_bytes, bytes):
-            content = base64.b64encode(url_or_bytes).decode('ascii')
-            nzb_filename = 'soulsync.nzb'
-        else:
-            content = url_or_bytes
-            nzb_filename = ''
+        # #2030: Content is always the base64 nzb. a url is fetched here
+        # first, never handed over, so nzbget's queue and history never show
+        # the prowlarr link and its api key. a failed fetch raises
+        # NzbFetchError: the grab fails, no fallback.
+        payload, nzb_filename = resolve_nzb(url_or_bytes)
+        content = base64.b64encode(payload).decode('ascii')
         params = [
             nzb_filename,        # NZBFilename
             content,             # Content (URL or base64 NZB)

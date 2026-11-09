@@ -130,6 +130,7 @@ def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None) -> Dict[str
     ``{ok: False, error}``.
     """
     from core.usenet_clients import get_active_adapter
+    from core.usenet_clients.nzb_fetch import NzbFetchError
 
     adapter = get_active_adapter()
     if adapter is None or not adapter.is_configured():
@@ -139,6 +140,9 @@ def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None) -> Dict[str
         ref = _run(adapter.add_nzb(
             url_or_nzb, category=_category("usenet"), save_path=save_path,
         ))
+    except NzbFetchError as exc:
+        # #2030: the nzb never reached the client
+        return {"ok": False, "error": f"Usenet grab failed: {exc}"}
     except Exception as exc:                                # noqa: BLE001
         logger.warning("Audiobook usenet add failed: %s", exc, exc_info=True)
         return {"ok": False, "error": f"Usenet client: {exc}"}

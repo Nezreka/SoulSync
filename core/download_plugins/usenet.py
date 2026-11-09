@@ -65,6 +65,7 @@ from core.quality.release_format import (
     is_sample_release,
 )
 from core.usenet_clients import get_active_adapter as get_active_usenet_adapter
+from core.usenet_clients.nzb_fetch import NzbFetchError
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
 
@@ -690,6 +691,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 return
         try:
             job_id = run_async(adapter.add_nzb(nzb_url))
+        except NzbFetchError as e:
+            # #2030: the nzb could not be fetched, nothing reached the client
+            job_id, error = None, f"Usenet grab failed: {e}"
         except Exception as e:
             job_id, error = None, f"add_nzb failed: {e}"
         else:
@@ -1213,17 +1217,22 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         _emit('queued', release=picked.title, size=picked.size, grabs=picked.grabs)
 
         job_id = None
+        fetch_error = None
         for source in release_sources(picked):
             if not source.download_url:
                 continue
             try:
                 job_id = run_async(adapter.add_nzb(source.download_url))
+            except NzbFetchError as e:
+                # #2030: this indexer's nzb could not be fetched; try the next
+                job_id, fetch_error = None, str(e)
             except Exception:  # endpoint unavailable; do not log signed URLs
                 job_id = None
             if job_id:
                 break
         if not job_id:
-            result['error'] = 'Usenet client refused the NZB on every indexer source'
+            result['error'] = (f'Usenet grab failed: {fetch_error}' if fetch_error
+                               else 'Usenet client refused the NZB on every indexer source')
             return result
 
         # Persistent correlation (ADR-07): the bundle worker itself is not

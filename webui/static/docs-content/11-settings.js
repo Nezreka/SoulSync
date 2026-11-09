@@ -80,6 +80,8 @@ No media server at all: SoulSync itself is the player and library manager. Impor
 | **Usenet** | Search via Prowlarr indexers through your usenet client |
 | **Hybrid** | Drag sources into a priority chain — SoulSync works down the list and uses the first source that returns a match |
 
+For **Usenet**, SoulSync downloads each NZB from Prowlarr itself and hands SABnzbd or NZBGet the file, the way Sonarr does. Their queue shows the release name straight away, never a "Trying to fetch NZB" entry or the Prowlarr link with your api key, and they don't need to reach Prowlarr. If the NZB can't be fetched, nothing is sent to the client and the grab fails with the reason (for example the indexer's HTTP error).
+
 The chain editor lives on the Downloads tab: drag sources from **Available** into your **Download chain**. One source in the chain means "that source only"; two or more means hybrid. Any source can be configured on the Sources tab first — it doesn't need to be in the chain yet.
 
 ## Paths
