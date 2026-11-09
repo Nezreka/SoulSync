@@ -701,6 +701,21 @@
     function escA(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
     var LIB_KIND = { movie: 'Movies', show: 'TV' };
     var _libProfiles = [];   // named quality profiles, for each library's default
+    var LIB_SOURCES = [['soulseek', 'Soulseek'], ['usenet', 'Usenet'], ['torrent', 'Torrent'], ['extto', 'EXT.to']];
+    // a library's own source order: each picked source numbered in order,
+    // none picked = the global order (Settings > Downloads)
+    function libSourcesHtml(order) {
+        order = order || [];
+        return '<div class="video-library-field video-library-sources" role="group" aria-label="Download from, in order">' +
+            'Download from ' +
+            LIB_SOURCES.map(function (s) {
+                var at = order.indexOf(s[0]);
+                return '<button type="button" class="video-library-src' + (at >= 0 ? ' is-on' : '') + '" ' +
+                    'data-library-src="' + s[0] + '" aria-pressed="' + (at >= 0 ? 'true' : 'false') + '">' +
+                    (at >= 0 ? (at + 1) + ' ' : '') + s[1] + '</button>';
+            }).join('') +
+            '<span class="video-library-hint">' + (order.length ? '' : 'the global order') + '</span></div>';
+    }
     function libTerms(list) { return (list || []).join(', '); }
     function libraryRowHtml(lib) {
         var isNew = !lib.id;
@@ -740,6 +755,13 @@
                     return '<option value="' + escA(p.id) + '"' + (p.id === lib.quality_profile_id ? ' selected' : '') +
                         '>' + escA(p.name) + '</option>';
                 }).join('') + '</select></label>' +
+            libSourcesHtml((lib.options || {}).sources) +
+            '<div class="video-library-rules">' +
+                '<input type="text" class="video-library-tcat" value="' + escA((lib.options || {}).torrent_category || '') + '" ' +
+                    'placeholder="Torrent category / label" aria-label="Torrent client category or label" maxlength="64">' +
+                '<input type="text" class="video-library-ucat" value="' + escA((lib.options || {}).usenet_category || '') + '" ' +
+                    'placeholder="Usenet category" aria-label="Usenet client category" maxlength="64">' +
+            '</div>' +
             '<div class="video-library-actions">' +
                 (builtin ? '' : '<label class="checkbox-label"><input type="checkbox" class="video-library-enabled"' +
                     (lib.enabled !== false ? ' checked' : '') + '> Switched on</label>') +
@@ -771,12 +793,21 @@
                 if (d && d.libraries) renderLibraries(d.libraries, d.genres || []);
             });
     }
+    function libSourceOrder(row) {
+        var box = row.querySelector('.video-library-sources');
+        return box && box._order ? box._order.slice()
+            : Array.from(row.querySelectorAll('.video-library-src.is-on')).sort(function (a, b) {
+                return parseInt(a.textContent, 10) - parseInt(b.textContent, 10);
+            }).map(function (b) { return b.getAttribute('data-library-src'); });
+    }
     function libraryBody(row) {
         var val = function (sel) { var el = row.querySelector(sel); return el ? el.value.trim() : ''; };
         var split = function (v) { return v.split(',').map(function (x) { return x.trim(); }).filter(Boolean); };
         var body = { name: val('.video-library-name'),
             rules: { genres: split(val('.video-library-genres')), keywords: split(val('.video-library-keywords')) },
-            quality_profile_id: parseInt(val('.video-library-profile'), 10) || 0 };
+            quality_profile_id: parseInt(val('.video-library-profile'), 10) || 0,
+            sources: libSourceOrder(row),
+            torrent_category: val('.video-library-tcat'), usenet_category: val('.video-library-ucat') };
         if (!row.getAttribute('data-builtin')) {
             body.path = val('.video-library-path');
             var on = row.querySelector('.video-library-enabled');
@@ -834,6 +865,16 @@
             var name = host.querySelector('.video-library-row[data-library-id=""] .video-library-name');
             if (name) name.focus();
             if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('video');
+            return;
+        }
+        var src = t.closest('[data-library-src]');
+        if (src && src.closest('#video-libraries-list')) {
+            var box = src.closest('.video-library-sources');
+            var order = libSourceOrder(src.closest('.video-library-row'));
+            var key = src.getAttribute('data-library-src');
+            var at = order.indexOf(key);
+            if (at >= 0) order.splice(at, 1); else order.push(key);
+            box.outerHTML = libSourcesHtml(order);
             return;
         }
         var btn = t.closest('[data-library-action]');

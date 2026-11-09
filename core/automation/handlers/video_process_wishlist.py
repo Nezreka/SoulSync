@@ -1048,6 +1048,9 @@ def _default_search(item: Dict[str, Any], media_type: str):
     cfg = download_config.load(get_video_db())
     mode = str(cfg.get("download_mode") or "soulseek")
     chain = (cfg.get("hybrid_order") or ["soulseek"]) if mode == "hybrid" else [mode]
+    # the item's library may order its own sources (#2029); the title's
+    # preferred sources narrow that the way they narrow the global order
+    chain = item_source_chain(item, media_type, chain)
     chain = chain_for(chain, title_overrides_for_item(item, media_type))
     skips: List[str] = []
     fallback = None      # hits that didn't pass the profile — kept so the caller can say 'rejected'
@@ -1074,6 +1077,22 @@ def _default_search(item: Dict[str, Any], media_type: str):
     if len(skips) == len(chain):
         return None, note                            # → 'search didn't run' (nothing ran at all)
     return [], note                                  # → 'source empty' (+ any skip note)
+
+
+def item_library(item: Dict[str, Any], media_type: str) -> Optional[Dict[str, Any]]:
+    """The video library a wished item files into (#2029), read once per
+    item (cached on it like _overrides). None when it can't be read."""
+    if "_library" not in item:
+        item["_library"] = _default_pick_library(
+            item, media_type, lambda: _default_profile_library(item))
+    return item["_library"]
+
+
+def item_source_chain(item: Dict[str, Any], media_type: str, chain: List[str]) -> List[str]:
+    """The download sources an item's automatic search tries: its library's
+    own order, else ``chain`` (#2029)."""
+    from core.video.libraries import source_chain
+    return source_chain(item_library(item, media_type), chain)
 
 
 def _pack_preference_for(item: Dict[str, Any]) -> str:
@@ -1116,8 +1135,11 @@ def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: Lis
                         or "EXT.to would not hand over a magnet for this release."}
             best = {**best, "download_url": resolved["magnet"], "magnet_uri": resolved["magnet"]}
         from core.video.client_grab import grab
+        from core.video.libraries import client_category
+        # the category / label of the library it files into (#2029)
+        cat = client_category(get_video_db(), target_dir, transport_source)
         res = grab(transport_source, best.get("download_url"),
-                   fallback_magnet=best.get("magnet_uri"))
+                   fallback_magnet=best.get("magnet_uri"), **({"category": cat} if cat else {}))
         if not res.get("ok"):
             logger.warning("video hybrid: %s grab refused for %s: %s", source, name, res.get("error"))
             return {"ok": False, "error": res.get("error") or "the download client refused it"}

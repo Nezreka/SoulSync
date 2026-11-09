@@ -33,7 +33,7 @@ def _usenet_category() -> str:
 
 
 def grab_torrent(url_or_magnet: str, *, save_path: Optional[str] = None,
-                 fallback_magnet: Optional[str] = None) -> dict:
+                 fallback_magnet: Optional[str] = None, category: Optional[str] = None) -> dict:
     """Add a magnet/.torrent URL to the active torrent client. Returns
     ``{ok, ref}`` (ref = the info-hash to poll) or ``{ok: False, error}``.
 
@@ -48,7 +48,8 @@ def grab_torrent(url_or_magnet: str, *, save_path: Optional[str] = None,
         return {"ok": False, "error": "No torrent client configured — set it on Settings → Downloads."}
     try:
         from core.torrent_clients.base import add_torrent_smart
-        ref = _run(add_torrent_smart(adapter, url_or_magnet, category=_torrent_category(),
+        # a video library's own category / label (#2029), else the client's
+        ref = _run(add_torrent_smart(adapter, url_or_magnet, category=category or _torrent_category(),
                                      save_path=save_path, fallback_magnet=fallback_magnet))
     except Exception as e:   # noqa: BLE001 - surface the client error to the grab handler
         logger.warning("torrent add failed: %s", e, exc_info=True)
@@ -58,7 +59,8 @@ def grab_torrent(url_or_magnet: str, *, save_path: Optional[str] = None,
     return {"ok": True, "ref": str(ref)}
 
 
-def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None) -> dict:
+def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None,
+                category: Optional[str] = None) -> dict:
     """Add an NZB (URL or bytes) to the active usenet client. Returns
     ``{ok, ref}`` (ref = the nzo_id/NZBID to poll) or ``{ok: False, error}``."""
     from core.usenet_clients import get_active_adapter
@@ -66,7 +68,8 @@ def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None) -> dict:
     if adapter is None or not adapter.is_configured():
         return {"ok": False, "error": "No usenet client configured — set it on Settings → Downloads."}
     try:
-        ref = _run(adapter.add_nzb(url_or_nzb, category=_usenet_category(), save_path=save_path))
+        ref = _run(adapter.add_nzb(url_or_nzb, category=category or _usenet_category(),
+                                   save_path=save_path))
     except Exception as e:   # noqa: BLE001
         logger.warning("usenet add failed: %s", e, exc_info=True)
         return {"ok": False, "error": "Usenet client: " + str(e)}
@@ -76,16 +79,19 @@ def grab_usenet(url_or_nzb: Any, *, save_path: Optional[str] = None) -> dict:
 
 
 def grab(source: str, url: Any, *, save_path: Optional[str] = None,
-         fallback_magnet: Optional[str] = None) -> dict:
+         fallback_magnet: Optional[str] = None, category: Optional[str] = None) -> dict:
     """Dispatch a grab by source (torrent | usenet).
 
     ``fallback_magnet`` is torrent-only and ignored for usenet, which has no
     such thing — keeping it on the shared signature means callers don't have
     to branch on the source just to pass it."""
+    # ``category``: a video library's own client category / label (#2029);
+    # None keeps the client's setting
+    extra = {"category": category} if category else {}
     if str(source).lower() == "torrent":
-        return grab_torrent(url, save_path=save_path, fallback_magnet=fallback_magnet)
+        return grab_torrent(url, save_path=save_path, fallback_magnet=fallback_magnet, **extra)
     if str(source).lower() == "usenet":
-        return grab_usenet(url, save_path=save_path)
+        return grab_usenet(url, save_path=save_path, **extra)
     return {"ok": False, "error": "Unsupported source %r" % source}
 
 

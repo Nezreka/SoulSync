@@ -76004,6 +76004,12 @@ body.src-modal-open { overflow: hidden; }
 #settings-page .video-library-rules { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 #settings-page .video-library-rules input { min-width: 0; }
 #settings-page .video-library-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#settings-page .video-library-src {
+    padding: 4px 10px; border: 1px solid var(--white-a08); border-radius: var(--radius-pill);
+    background: transparent; color: var(--text-secondary); font: inherit; font-size: 12px; cursor: pointer;
+}
+#settings-page .video-library-src.is-on { border-color: var(--accent); color: var(--text-primary); }
+#settings-page .video-library-hint { color: var(--text-secondary); font-size: 12px; }
 #settings-page .video-library-field {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     color: var(--text-secondary); font-size: 13px;

@@ -260,7 +260,7 @@ def _rss_pass_inner(*, fetch, log, extto=None) -> Dict[str, Any]:
             pool = _prescreen(hits, titles)
             if not pool:
                 continue
-            cands = _rank(pool, item, media_type)
+            cands = _library_sources_only(_rank(pool, item, media_type), item, media_type)
             if not cands:
                 continue
             matched += 1
@@ -321,6 +321,19 @@ def _skip_reason(cands: List[Dict[str, Any]], min_rank: int, item: Dict[str, Any
         base = why or "didn't pass the quality/scope filter"
         return "%d release(s) matched by name but none accepted (%s)" % (n, base)
     return "no release qualified"
+
+
+def _library_sources_only(cands: List[Dict[str, Any]], item: Dict[str, Any],
+                          media_type: str) -> List[Dict[str, Any]]:
+    """Releases from the sources the item's video library searches (#2029),
+    when it orders its own; every one otherwise. RSS itself still only runs
+    for the indexer sources in the global order."""
+    from core.automation.handlers import video_process_wishlist as vpw
+    from core.video.libraries import source_chain
+    own = source_chain(vpw.item_library(item, media_type), [])
+    if not own:
+        return cands
+    return [c for c in cands or [] if str(c.get("source") or c.get("protocol") or "torrent").lower() in own]
 
 
 def _rank(pool: List[Dict[str, Any]], item: Dict[str, Any], media_type: str) -> List[Dict[str, Any]]:

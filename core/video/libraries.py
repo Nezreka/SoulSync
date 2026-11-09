@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -37,6 +38,9 @@ from utils.logging_config import get_logger
 logger = get_logger("video.libraries")
 
 KINDS = ("movie", "show")
+# the download sources a library can order (core.video.download_config.SOURCES)
+SOURCES = ("soulseek", "torrent", "usenet", "extto")
+_CATEGORY_BAD = re.compile(r"[^A-Za-z0-9 ._-]")
 MAX_NAME = 80
 MAX_RULE_TERMS = 30
 
@@ -89,12 +93,31 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
     - rules: {genres, keywords} that send a new title here
     - quality_profile_id: the profile titles in this library are grabbed
       and upgraded by when they have none of their own (0 = the kind's
-      default, as before)"""
+      default, as before)
+    - sources: the download sources its automatic searches try, in order
+      ([] = the global order in Settings > Downloads)
+    - torrent_category / usenet_category: the category (qBittorrent,
+      SABnzbd, NZBGet) or label (Deluge, Transmission) its downloads get in
+      the client ('' = the client's own setting)"""
     raw = raw if isinstance(raw, dict) else {}
     rules = raw.get("rules") if isinstance(raw.get("rules"), dict) else {}
+    sources = []
+    for src in raw.get("sources") if isinstance(raw.get("sources"), list) else []:
+        src = str(src or "").strip().lower()
+        if src in SOURCES and src not in sources:
+            sources.append(src)
     return {"rules": {"genres": _terms(rules.get("genres")),
                       "keywords": _terms(rules.get("keywords"))},
-            "quality_profile_id": max(0, _int(raw.get("quality_profile_id")))}
+            "quality_profile_id": max(0, _int(raw.get("quality_profile_id"))),
+            "sources": sources,
+            "torrent_category": _category(raw.get("torrent_category")),
+            "usenet_category": _category(raw.get("usenet_category"))}
+
+
+def _category(value: Any) -> str:
+    """a client category / label: letters, digits, space, dot, dash and
+    underscore, at most 64 (what every supported client takes)"""
+    return _CATEGORY_BAD.sub("", " ".join(str(value or "").split()))[:64].strip()
 
 
 def _load_options(text: Any) -> Dict[str, Any]:
@@ -195,6 +218,10 @@ def _check_path(db, path: Any, *, skip_id: Optional[int] = None) -> str:
     return path
 
 
+# a library's options, settable at the top of a create / update body too
+_OPTION_KEYS = ("rules", "quality_profile_id", "sources", "torrent_category", "usenet_category")
+
+
 def _check_profile(db, profile_id: int) -> None:
     if profile_id and not db.get_named_quality_profile(int(profile_id)):
         raise ValueError("No such quality profile")
@@ -208,8 +235,7 @@ def create_library(db, body: Any) -> Dict[str, Any]:
         raise ValueError("A library holds movies or TV")
     name = _check_name(body.get("name"))
     path = _check_path(db, body.get("path"))
-    options = normalize_options(body.get("options") or {
-        "rules": body.get("rules"), "quality_profile_id": body.get("quality_profile_id")})
+    options = normalize_options(body.get("options") or {k: body.get(k) for k in _OPTION_KEYS})
     _check_profile(db, options["quality_profile_id"])
     conn = db.connect()
     try:
@@ -251,10 +277,10 @@ def update_library(db, library_id: Any, body: Any) -> Dict[str, Any]:
             args.append(1 if body.get("enabled") else 0)
     elif "path" in body and not _same(body.get("path"), lib["path"]):
         raise ValueError("Change this library's folder above, in its own setting")
-    if any(k in body for k in ("options", "rules", "quality_profile_id")):
+    if any(k in body for k in ("options",) + _OPTION_KEYS):
         merged = dict(lib["options"])
         merged.update(body.get("options") if isinstance(body.get("options"), dict) else {})
-        for key in ("rules", "quality_profile_id"):
+        for key in _OPTION_KEYS:
             if key in body:
                 merged[key] = body.get(key)
         opts = normalize_options(merged)
@@ -569,6 +595,38 @@ def default_profile_for(db, kind: Any, *, tmdb_id: Any = None, explicit_id: Any 
         return None
 
 
+# ── where a library's downloads go (#2029 step 3) ────────────────────────────
+
+def library_of_folder(db, folder: Any) -> Optional[Dict[str, Any]]:
+    """The library a download's target folder belongs to (the folder or the
+    deepest library folder holding it), or None for one in no library (the
+    anime / YouTube folders, a forced manual placement)."""
+    try:
+        return library_for_path(db, folder)
+    except Exception:   # noqa: BLE001 - no libraries: none
+        return None
+
+
+def client_category(db, target_dir: Any, source: Any) -> Optional[str]:
+    """The download client category / label for a grab filed in
+    ``target_dir`` over ``source`` (torrent / usenet; EXT.to is a torrent),
+    or None for the client's own setting."""
+    src = str(source or "").lower()
+    key = {"torrent": "torrent_category", "extto": "torrent_category",
+           "usenet": "usenet_category"}.get(src)
+    if not key:
+        return None
+    lib = library_of_folder(db, target_dir)
+    return ((lib or {}).get("options") or {}).get(key) or None
+
+
+def source_chain(lib: Optional[Dict[str, Any]], chain: List[str]) -> List[str]:
+    """The download sources a library's automatic searches try, in order:
+    its own order, else ``chain`` (the global one)."""
+    own = ((lib or {}).get("options") or {}).get("sources") or []
+    return list(own) if own else list(chain)
+
+
 # ── a second copy in another library (#2029 step 2, movies) ──────────────────
 
 def title_copies(db, kind: Any, tmdb_id: Any) -> List[int]:
@@ -704,5 +762,6 @@ __all__ = ["KINDS", "kind_of", "normalize_options", "list_libraries", "get_libra
            "create_library", "update_library", "delete_library", "set_default",
            "title_assignment", "assign_title", "has_rules", "rule_match", "title_tags",
            "choose", "custom_folders", "library_for_path", "folder_for",
-           "default_profile_for", "title_copies", "add_copy", "remove_copy", "attribute_files"]
+           "default_profile_for", "title_copies", "add_copy", "remove_copy", "attribute_files",
+           "SOURCES", "library_of_folder", "client_category", "source_chain"]
 

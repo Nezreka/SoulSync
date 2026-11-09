@@ -136,6 +136,9 @@ describe('settings: more libraries', () => {
       enabled: true,
       rules: { genres: ['Kids', 'Family'], keywords: [] },
       quality_profile_id: 0,
+      sources: [],
+      torrent_category: '',
+      usenet_category: '',
     });
   });
 
@@ -158,6 +161,9 @@ describe('settings: more libraries', () => {
       name: 'Movies',
       rules: { genres: [], keywords: ['drama'] },
       quality_profile_id: 7,
+      sources: [],
+      torrent_category: '',
+      usenet_category: '',
     });
   });
 
@@ -290,5 +296,32 @@ describe('get window: second copies (#2029 step 2)', () => {
     expect(wired).toContain("copyCall('POST'");
     expect(wired).toContain("copyCall('DELETE'");
     expect(VIEW).toContain('libraryPickerHTML(info) + copiesHTML(info)');
+  });
+});
+
+describe('settings: a library picks its sources and categories (#2029 step 3)', () => {
+  it('orders the sources by the order they are picked and saves categories', async () => {
+    const { doc, fetcher } = setup();
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    const row = () => doc.querySelectorAll('.video-library-row')[2] as HTMLElement;
+    const click = (src: string) =>
+      (row().querySelector(`[data-library-src="${src}"]`) as HTMLButtonElement).click();
+    expect(row().querySelector('.video-library-hint')!.textContent).toBe('the global order');
+    click('usenet');
+    click('torrent');
+    click('soulseek');
+    click('torrent'); // off again
+    const on = Array.from(row().querySelectorAll('.video-library-src.is-on')).map(
+      (b) => b.textContent,
+    );
+    expect(on).toEqual(['2 Soulseek', '1 Usenet']);
+    (row().querySelector('.video-library-tcat') as HTMLInputElement).value = 'standup';
+    (row().querySelector('.video-library-ucat') as HTMLInputElement).value = 'standup-nzb';
+    (row().querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
+    const body = JSON.parse(put![1]!.body as string);
+    expect(body.sources).toEqual(['usenet', 'soulseek']);
+    expect(body.torrent_category).toBe('standup');
+    expect(body.usenet_category).toBe('standup-nzb');
   });
 });

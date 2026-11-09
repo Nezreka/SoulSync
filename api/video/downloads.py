@@ -1598,8 +1598,11 @@ def register_routes(bp):
             # torrent / usenet — hand the magnet/NZB to the SHARED download client; the monitor
             # tracks progress + completion by client_ref. No Soulseek-style alternate requery.
             from core.video.client_grab import grab
+            from core.video.libraries import client_category
+            # the category / label of the library it files into (#2029)
+            cat = client_category(db, target, source)
             res = grab(source, body.get("download_url"),
-                       fallback_magnet=body.get("magnet_uri"))
+                       fallback_magnet=body.get("magnet_uri"), **({"category": cat} if cat else {}))
             if not res.get("ok"):
                 return jsonify({"ok": False, "error": res.get("error") or "The download client refused it."}), 502
             dl_id = _add_client_row(db, common, body, source, res["ref"])
