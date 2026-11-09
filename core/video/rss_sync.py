@@ -256,6 +256,10 @@ def _rss_pass_inner(*, fetch, log, extto=None) -> Dict[str, Any]:
         for item in items:
             if vpw.item_key(item, media_type) in active:
                 continue
+            # a library with automatic search (or upgrades) off (#2029)
+            if not vpw.library_allows(item, media_type, vpw._default_pick_library,
+                                      vpw._default_profile_library):
+                continue
             titles = [item.get("title") or item.get("show_title")]
             pool = _prescreen(hits, titles)
             if not pool:

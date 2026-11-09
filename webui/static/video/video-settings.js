@@ -800,6 +800,14 @@
                 '<input type="text" class="video-library-ucat" value="' + escA((lib.options || {}).usenet_category || '') + '" ' +
                     'placeholder="Usenet category" aria-label="Usenet client category" maxlength="64">' +
             '</div>' +
+            '<div class="video-library-field">' +
+                '<label class="checkbox-label" title="The wishlist and RSS sync hunt its titles; off = only when you search">' +
+                    '<input type="checkbox" class="video-library-auto"' + ((lib.options || {}).auto_search === false ? '' : ' checked') +
+                    '> Search automatically</label>' +
+                '<label class="checkbox-label" title="Titles you have keep upgrading toward their profile\'s cutoff">' +
+                    '<input type="checkbox" class="video-library-upgrades"' + ((lib.options || {}).upgrades === false ? '' : ' checked') +
+                    '> Upgrade what you have</label>' +
+            '</div>' +
             '<div class="video-library-actions">' +
                 (builtin ? '' : '<label class="checkbox-label"><input type="checkbox" class="video-library-enabled"' +
                     (lib.enabled !== false ? ' checked' : '') + '> Switched on</label>') +
@@ -846,6 +854,10 @@
             quality_profile_id: parseInt(val('.video-library-profile'), 10) || 0,
             sources: libSourceOrder(row),
             torrent_category: val('.video-library-tcat'), usenet_category: val('.video-library-ucat') };
+        var auto = row.querySelector('.video-library-auto');
+        var upg = row.querySelector('.video-library-upgrades');
+        if (auto) body.auto_search = auto.checked;
+        if (upg) body.upgrades = upg.checked;
         // the indexers: what's ticked once the list loaded, else what it had
         var idxBox = row.querySelector('.video-library-indexers');
         if (idxBox) {

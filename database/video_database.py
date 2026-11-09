@@ -89,7 +89,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 66   # v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 67   # v67: video_wishlist.filed_library_id (the library a wish files into, for the wanted list's library filter, #2029); v66: second copies in another library (video_title_copies, video_library_id on wishlist / downloads / movies / shows, the movie wishlist unique per library, #2029); v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -288,6 +288,9 @@ _COLUMN_MIGRATIONS = [
     # the title's own library, picked by core.video.libraries.choose), and
     # which library a scanned movie / show's files sit in (by folder)
     ("video_wishlist", "video_library_id", "INTEGER"),
+    # v67 (#2029): the library a title's own row files into, as its last
+    # search (or a library pick) worked it out: the wanted list's filter
+    ("video_wishlist", "filed_library_id", "INTEGER"),
     ("video_downloads", "video_library_id", "INTEGER"),
     ("movies", "video_library_id", "INTEGER"),
     ("shows", "video_library_id", "INTEGER"),
@@ -9430,6 +9433,29 @@ class VideoDatabase:
                         "title": r.get("title"), "status": r.get("status")})
         return out
 
+    def stamp_filed_library(self, kind: str, tmdb_id, library_id) -> int:
+        """Note which video library a title's own wishlist rows file into
+        (#2029; the wanted list's library filter). kind 'movie' or 'show'
+        (every episode row of the show). Writes only rows that change."""
+        try:
+            tmdb = int(tmdb_id)
+        except (TypeError, ValueError):
+            return 0
+        wl_kind = "movie" if kind == "movie" else "episode"
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_wishlist SET filed_library_id=? WHERE kind=? AND tmdb_id=? "
+                "AND video_library_id IS NULL AND filed_library_id IS NOT ?",
+                (library_id, wl_kind, tmdb, library_id))
+            conn.commit()
+            return int(cur.rowcount or 0)
+        except sqlite3.Error:
+            logger.exception("stamp_filed_library failed")
+            return 0
+        finally:
+            conn.close()
+
     def get_movie_wishlist_profiles(self, tmdb_id: int, video_library_id=ANY_LIBRARY) -> list:
         """(profile_id, quality_profile_id) for every profile wishing this movie
         (in one library's row, #2029, when ``video_library_id`` is given)."""
@@ -10381,7 +10407,7 @@ class VideoDatabase:
 
 
     def query_wishlist(self, kind: str, *, search=None, sort="added", page=1, limit=60,
-                         profile_id: int = 1) -> dict:
+                         profile_id: int = 1, video_library=None) -> dict:
         """One paged slice of the wishlist. kind='movie' → movie cards; kind='show'
         → shows grouped show→season→episode with wanted/done roll-ups. ``sort`` ∈
         added | title | wanted (wanted = most episodes, shows only). {items,
@@ -10394,8 +10420,22 @@ class VideoDatabase:
         s = (search or "").strip()
         conn = self._get_connection()
         try:
+            # the library a wish files into (#2029): a copy's own, else
+            # where the title's own row was last worked out to go
+            try:
+                vlib = int(video_library) if video_library not in (None, "", "0", 0) else None
+            except (TypeError, ValueError):
+                vlib = None
+            # a copy's library, else a library picked for the title, else
+            # where its last search filed it
+            def lib_sql(tkind):
+                return ("COALESCE(video_library_id, (SELECT t.library_id FROM video_title_libraries t "
+                        "WHERE t.kind='%s' AND t.tmdb_id=video_wishlist.tmdb_id), filed_library_id) = ?"
+                        % tkind)
             if kind == "movie":
                 where, args = ["kind='movie'", "profile_id=?"], [int(profile_id)]
+                if vlib:
+                    where.append(lib_sql("movie")); args.append(vlib)
                 if s:
                     where.append("title LIKE ? COLLATE NOCASE"); args.append("%" + s + "%")
                 wsql = " WHERE " + " AND ".join(where)
@@ -10422,6 +10462,8 @@ class VideoDatabase:
                           "search_snapshot": _load_snapshot(r["search_snapshot"])} for r in rows]
             else:   # shows (grouped from episode rows)
                 where, args = ["kind='episode'", "profile_id=?"], [int(profile_id)]
+                if vlib:
+                    where.append(lib_sql("show")); args.append(vlib)
                 if s:
                     where.append("title LIKE ? COLLATE NOCASE"); args.append("%" + s + "%")
                 wsql = " WHERE " + " AND ".join(where)
@@ -12627,7 +12669,7 @@ class VideoDatabase:
     def query_library(self, kind: str, *, search=None, letter=None, sort="title",
                       include_size=True,
                       status="all", genre=None, resolution=None, page=1, limit=75,
-                      server_source=None, watcher=None) -> dict:
+                      server_source=None, watcher=None, video_library=None) -> dict:
         """One page of movies/shows with search + A–Z + sort + owned/wanted/
         watched + genre filtering done in SQL. Scoped to ``server_source`` (the
         active video server) so Plex and Jellyfin libraries never commingle —
@@ -12662,6 +12704,14 @@ class VideoDatabase:
         if server_source:
             where.append(f"{alias}.server_source = ?")
             params.append(server_source)
+        # the video library its files sit in (#2029, stamped by the scan)
+        try:
+            vlib = int(video_library) if video_library not in (None, "", "0", 0) else None
+        except (TypeError, ValueError):
+            vlib = None
+        if vlib:
+            where.append(f"{alias}.video_library_id = ?")
+            params.append(vlib)
         if search:
             where.append(f"{alias}.title LIKE ? COLLATE NOCASE")
             params.append("%" + search + "%")

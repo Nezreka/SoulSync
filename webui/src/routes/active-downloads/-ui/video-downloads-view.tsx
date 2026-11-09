@@ -8,7 +8,7 @@
  * blueprint the music side uses.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { VdlCardActions } from './vdl-list';
 
@@ -31,6 +31,19 @@ export function VideoDownloadsView() {
   useReportActive('video', dl.counts.active);
   const review = useVdlReview();
   const [historyOpen, setHistoryOpen] = useState(false);
+  // #2029: only one video library's downloads; offered once two show up
+  const [library, setLibrary] = useState('');
+  const libraryNames = useMemo(
+    () =>
+      Array.from(
+        new Set(dl.downloads.map((d) => d.video_library_name).filter((n): n is string => !!n)),
+      ).sort(),
+    [dl.downloads],
+  );
+  const shownLibrary = libraryNames.includes(library) ? library : '';
+  const listed = shownLibrary
+    ? dl.downloads.filter((d) => d.video_library_name === shownLibrary)
+    : dl.downloads;
   const [historyCount, setHistoryCount] = useState<number | null>(null);
 
   const refreshHistoryCount = useCallback(async () => {
@@ -100,18 +113,37 @@ export function VideoDownloadsView() {
           ) : dl.view === 'review' ? (
             <VdlReviewPane review={review} onChanged={() => void review.loadReview()} />
           ) : (
-            <VdlList
-              downloads={dl.downloads}
-              filter={dl.filter}
-              loaded={dl.loaded}
-              expanded={dl.expanded}
-              collapsedGroups={dl.collapsedGroups}
-              metaFor={dl.metaFor}
-              ensureMeta={dl.ensureMeta}
-              onToggleGroup={dl.toggleGroup}
-              cardActions={cardActions}
-              onCancelGroup={onCancelGroup}
-            />
+            <>
+              {libraryNames.length > 1 ? (
+                <label className="vdl-library-filter">
+                  Library{' '}
+                  <select
+                    aria-label="Show one library's downloads"
+                    value={shownLibrary}
+                    onChange={(event) => setLibrary(event.target.value)}
+                  >
+                    <option value="">All</option>
+                    {libraryNames.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              <VdlList
+                downloads={listed}
+                filter={dl.filter}
+                loaded={dl.loaded}
+                expanded={dl.expanded}
+                collapsedGroups={dl.collapsedGroups}
+                metaFor={dl.metaFor}
+                ensureMeta={dl.ensureMeta}
+                onToggleGroup={dl.toggleGroup}
+                cardActions={cardActions}
+                onCancelGroup={onCancelGroup}
+              />
+            </>
           )}
 
           <VdlHistoryModal

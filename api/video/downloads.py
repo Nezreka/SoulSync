@@ -172,6 +172,20 @@ def _title_copies_info(db, kind, tmdb, names) -> list:
     return out
 
 
+def _annotate_libraries(db, rows) -> None:
+    """Name the video library (#2029) each download files into, by its target
+    folder, for the activity list's library filter. Best-effort."""
+    try:
+        from core.video.libraries import library_for_path, list_libraries
+        libs = list_libraries(db)
+        for r in rows or []:
+            lib = library_for_path(db, r.get("target_dir"), libs=libs) if r.get("target_dir") else None
+            r["video_library_id"] = r.get("video_library_id") or (lib["id"] if lib else None)
+            r["video_library_name"] = lib["name"] if lib else None
+    except Exception:   # noqa: BLE001 - the filter is an extra, never a failed list
+        logger.debug("download library names failed", exc_info=True)
+
+
 def _target_for(db, kind, body) -> str:
     """The library folder a download of this title is filed in: a library
     picked for the title by hand, else the anime folder by the show's routing
@@ -1935,6 +1949,7 @@ def register_routes(bp):
         db = get_video_db()
         ensure_started(get_video_db, wake=False)   # (re)start the monitor when the page is open, without interrupting its idle sleep (#1905)
         rows = db.list_video_downloads()
+        _annotate_libraries(db, rows)
         _annotate_upgrade_watches(db, rows, _request_profile())
         _annotate_packs(rows)
         return jsonify({"downloads": rows})

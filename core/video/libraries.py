@@ -100,7 +100,12 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
       SABnzbd, NZBGet) or label (Deluge, Transmission) its downloads get in
       the client ('' = the client's own setting)
     - indexer_ids: the Prowlarr indexers its searches use ([] = every one,
-      within the global allowlist, as before)"""
+      within the global allowlist, as before)
+    - auto_search: the wishlist drain and RSS sync hunt its titles (on by
+      default; off = only a search you start, Radarr's monitored-but-no-
+      automatic-search)
+    - upgrades: its titles you already have keep being upgraded toward
+      their profile's cutoff (on by default)"""
     raw = raw if isinstance(raw, dict) else {}
     rules = raw.get("rules") if isinstance(raw.get("rules"), dict) else {}
     sources = []
@@ -114,7 +119,16 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
             "sources": sources,
             "torrent_category": _category(raw.get("torrent_category")),
             "usenet_category": _category(raw.get("usenet_category")),
-            "indexer_ids": _indexer_ids(raw.get("indexer_ids"))}
+            "indexer_ids": _indexer_ids(raw.get("indexer_ids")),
+            "auto_search": _flag(raw.get("auto_search")),
+            "upgrades": _flag(raw.get("upgrades"))}
+
+
+def _flag(value: Any) -> bool:
+    """on unless clearly switched off (a missing key is the default: on)"""
+    if value is None:
+        return True
+    return str(value).strip().lower() not in ("0", "false", "no", "off", "")
 
 
 def _indexer_ids(value: Any) -> List[int]:
@@ -232,7 +246,7 @@ def _check_path(db, path: Any, *, skip_id: Optional[int] = None) -> str:
 
 # a library's options, settable at the top of a create / update body too
 _OPTION_KEYS = ("rules", "quality_profile_id", "sources", "torrent_category", "usenet_category",
-                "indexer_ids")
+                "indexer_ids", "auto_search", "upgrades")
 
 
 def _check_profile(db, profile_id: int) -> None:
@@ -411,6 +425,9 @@ def assign_title(db, kind: Any, tmdb_id: Any, library_id: Any) -> Optional[int]:
         lid = lib["id"]
     conn = db.connect()
     try:
+        # the wanted list's library filter follows the pick at once
+        conn.execute("UPDATE video_wishlist SET filed_library_id=? WHERE kind=? AND tmdb_id=? "
+                     "AND video_library_id IS NULL", (lid, "movie" if k == "movie" else "episode", tmdb))
         if lid is None:
             conn.execute("DELETE FROM video_title_libraries WHERE kind=? AND tmdb_id=?", (k, tmdb))
         else:
@@ -647,6 +664,18 @@ def indexer_ids_for(lib: Optional[Dict[str, Any]]) -> Optional[List[int]]:
     return list(ids) or None
 
 
+def allows_automatic(lib: Optional[Dict[str, Any]], owned: bool) -> bool:
+    """May the wishlist drain / RSS sync hunt a title filed in ``lib``
+    (#2029 step 5)? Not when the library's automatic search is off, nor for
+    one already owned when its upgrades are off. No library: yes."""
+    o = (lib or {}).get("options") or {}
+    if o.get("auto_search") is False:
+        return False
+    if owned and o.get("upgrades") is False:
+        return False
+    return True
+
+
 # ── a second copy in another library (#2029 step 2, movies) ──────────────────
 
 def title_copies(db, kind: Any, tmdb_id: Any) -> List[int]:
@@ -783,5 +812,6 @@ __all__ = ["KINDS", "kind_of", "normalize_options", "list_libraries", "get_libra
            "title_assignment", "assign_title", "has_rules", "rule_match", "title_tags",
            "choose", "custom_folders", "library_for_path", "folder_for",
            "default_profile_for", "title_copies", "add_copy", "remove_copy", "attribute_files",
-           "SOURCES", "library_of_folder", "client_category", "source_chain", "indexer_ids_for"]
+           "SOURCES", "library_of_folder", "client_category", "source_chain", "indexer_ids_for",
+           "allows_automatic"]
 

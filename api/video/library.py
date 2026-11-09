@@ -37,7 +37,8 @@ def _capped_library(db, cap, server):
             genre=request.args.get("genre") or None,
             resolution=request.args.get("resolution") or None,
             page=p, limit=500, server_source=server, include_size=False,
-            watcher=current_watcher().rows)
+            watcher=current_watcher().rows,
+            video_library=request.args.get("video_library") or None)
         kept.extend(filter_library_items(db, chunk.get("items") or [], cap, kind))
         if not (chunk.get("pagination") or {}).get("has_next"):
             break
@@ -94,10 +95,27 @@ def register_routes(bp):
                 limit=request.args.get("limit", 75),
                 server_source=resolve_video_server(),
                 watcher=current_watcher().rows,
+                # the video library its files sit in (#2029)
+                video_library=request.args.get("video_library") or None,
             ))
         except Exception:
             logger.exception("Failed to query video library")
             return jsonify({"error": "Failed to load video library"}), 500
+
+    @bp.route("/library/video-libraries", methods=["GET"])
+    def video_library_names():
+        """The video libraries (#2029) for the library, wanted and activity
+        filters: [{id, name, kind}] of the ones switched on with a folder.
+        Names only, so any profile with video access can read it (the full
+        config is the admin-only /libraries/folders)."""
+        from . import get_video_db
+        from core.video.libraries import list_libraries
+        try:
+            return jsonify({"libraries": [{"id": x["id"], "name": x["name"], "kind": x["kind"]}
+                                          for x in list_libraries(get_video_db()) if x["usable"]]})
+        except Exception:
+            logger.exception("Failed to list video library names")
+            return jsonify({"libraries": []})
 
     @bp.route("/library/resolutions", methods=["GET"])
     def video_library_resolutions():

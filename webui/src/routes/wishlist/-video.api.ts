@@ -30,9 +30,31 @@ export interface VideoListParams {
   search: string;
   sort: VideoSort;
   page: number;
+  /** #2029: only what files into this video library (0 / undefined = every one). */
+  library?: number;
 }
 
 export type VideoListItem = VideoMovieItem | VideoShowItem;
+
+/** #2029: the video libraries switched on, for the library filter. */
+export interface VideoLibraryName {
+  id: number;
+  name: string;
+  kind: 'movie' | 'show';
+}
+
+export function videoLibraryNamesQueryOptions() {
+  return queryOptions({
+    queryKey: [...VIDEO_WISHLIST_QUERY_KEY, 'library-names'] as const,
+    queryFn: async () =>
+      (
+        await readJson<{ libraries?: VideoLibraryName[] }>(
+          apiClient.get('video/library/video-libraries'),
+        )
+      ).libraries ?? [],
+    staleTime: 60_000,
+  });
+}
 
 export function videoWishlistListQueryOptions(profileId: number, p: VideoListParams) {
   return queryOptions({
@@ -44,9 +66,16 @@ export function videoWishlistListQueryOptions(profileId: number, p: VideoListPar
       p.search,
       p.sort,
       p.page,
+      p.library || 0,
     ] as const,
     queryFn: () => {
-      const searchParams = { search: p.search, sort: p.sort, page: p.page, limit: VIDEO_PAGE_SIZE };
+      const searchParams = {
+        search: p.search,
+        sort: p.sort,
+        page: p.page,
+        limit: VIDEO_PAGE_SIZE,
+        ...(p.library && p.media !== 'youtube' ? { video_library: p.library } : {}),
+      };
       return p.media === 'youtube'
         ? readJson<VideoWishlistResponse<VideoShowItem>>(
             apiClient.get('video/youtube/wishlist', { searchParams }),

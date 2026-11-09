@@ -140,6 +140,8 @@ describe('settings: more libraries', () => {
       torrent_category: '',
       usenet_category: '',
       indexer_ids: [],
+      auto_search: true,
+      upgrades: true,
     });
   });
 
@@ -166,6 +168,8 @@ describe('settings: more libraries', () => {
       torrent_category: '',
       usenet_category: '',
       indexer_ids: [],
+      auto_search: true,
+      upgrades: true,
     });
   });
 
@@ -359,5 +363,21 @@ describe('settings: a library picks its indexers (#2029 step 4)', () => {
     (row.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
     const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
     expect(JSON.parse(put![1]!.body as string).indexer_ids).toEqual([7]);
+  });
+});
+
+describe('settings: automatic search and upgrades per library (#2029 step 5)', () => {
+  it('saves the two switches', async () => {
+    const { doc, fetcher } = setup();
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    const row = doc.querySelectorAll('.video-library-row')[2] as HTMLElement;
+    const auto = row.querySelector('.video-library-auto') as HTMLInputElement;
+    expect(auto.checked).toBe(true);
+    auto.checked = false;
+    (row.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
+    const body = JSON.parse(put![1]!.body as string);
+    expect(body.auto_search).toBe(false);
+    expect(body.upgrades).toBe(true);
   });
 });

@@ -775,11 +775,17 @@ def _default_pick_library(item: Dict[str, Any], media_type: str,
     try:
         from api.video import get_video_db
         from core.video.libraries import choose
+        db = get_video_db()
+        kind = "movie" if media_type == "movie" else "show"
         tmdb = item.get("tmdb_id") if media_type == "movie" else item.get("show_tmdb_id")
         title = item.get("title") if media_type == "movie" else (item.get("show_title") or item.get("title"))
-        return choose(get_video_db(), "movie" if media_type == "movie" else "show",
-                      tmdb_id=tmdb, explicit_id=item.get("video_library_id"),
-                      profile_library=profile_library, title=title)
+        lib = choose(db, kind, tmdb_id=tmdb, explicit_id=item.get("video_library_id"),
+                     profile_library=profile_library, title=title)
+        if lib and tmdb and not item.get("video_library_id"):
+            # where the title's own wish files into, for the wanted list's
+            # library filter (a no-op write when nothing moved)
+            db.stamp_filed_library(kind, tmdb, lib["id"])
+        return lib
     except Exception:   # noqa: BLE001 - routing falls back to the main folder
         logger.debug("library pick failed", exc_info=True)
         return None
@@ -1080,6 +1086,16 @@ def _default_search(item: Dict[str, Any], media_type: str):
     return [], note                                  # → 'source empty' (+ any skip note)
 
 
+def library_allows(item: Dict[str, Any], media_type: str, pick_library: Callable[..., Any],
+                   profile_library: Callable[[Dict[str, Any]], str]) -> bool:
+    """May the drain / RSS hunt this item, by its library's automatic search
+    and upgrade switches (#2029)? Reads (and caches) the item's library."""
+    from core.video.libraries import allows_automatic
+    if "_library" not in item:
+        item["_library"] = pick_library(item, media_type, lambda: profile_library(item))
+    return allows_automatic(item["_library"], bool(item.get("owned")))
+
+
 def item_library(item: Dict[str, Any], media_type: str) -> Optional[Dict[str, Any]]:
     """The video library a wished item files into (#2029), read once per
     item (cached on it like _overrides). None when it can't be read."""
@@ -1363,6 +1379,10 @@ def auto_video_process_wishlist(
         if media_type == 'movie':
             _backfill_movie_available_dates()   # resolve downloadable dates so the gate can skip cinema-only films
         items = fetch_items(media_type) or []
+        if pick_library is not None:
+            # a library with automatic search off (or upgrades off, for what
+            # it already has) is only searched when you ask (#2029)
+            items = [it for it in items if library_allows(it, media_type, pick_library, profile_library)]
         # Upgrade-until-cutoff: owned rows are judged against the profile cutoff
         # (skip when met; strictly-better-only when below). Only loaded when an
         # owned row is actually present — the common all-new case stays DB-free.

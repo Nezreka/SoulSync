@@ -134,7 +134,9 @@ def register_routes(bp):
                 res = db.query_wishlist(
                     kind, search=request.args.get("search", ""), sort=request.args.get("sort", "added"),
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60),
-                    profile_id=_profile())
+                    profile_id=_profile(),
+                    # where it files (#2029): a copy's library, else its own's
+                    video_library=request.args.get("video_library") or None)
                 _annotate_live_state(db, kind, res.get("items") or [])
                 _annotate_trouble(kind, res.get("items") or [])
                 from .kids import filter_tmdb_items, video_cap

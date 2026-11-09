@@ -167,6 +167,8 @@ interface Call {
 }
 
 let calls: Call[] = [];
+// #2029: the video libraries the library filter offers
+let libraryNames: { id: number; name: string; kind: string }[] = [];
 let lists: { movie: unknown; show: unknown; youtube: unknown };
 let pagination: {
   page: number;
@@ -194,6 +196,7 @@ function stubServer() {
       }
       calls.push({ method: req.method, path, params: Object.fromEntries(url.searchParams), body });
 
+      if (path === 'video/library/video-libraries') return res({ libraries: libraryNames });
       if (path === 'video/wishlist/counts')
         return res({
           success: true,
@@ -288,6 +291,7 @@ function renderRoute(entry: string) {
 beforeEach(() => {
   lists = { movie: MOVIES, show: SHOWS, youtube: CHANNELS };
   pagination = null;
+  libraryNames = [];
   window.SoulSyncWebShellBridge = createShellBridge();
   window.showToast = vi.fn();
   window.showConfirmDialog = vi.fn(async () => true);
@@ -304,6 +308,29 @@ afterEach(() => {
 });
 
 describe('movies', () => {
+  it('filters by video library once the kind has two (#2029)', async () => {
+    libraryNames = [
+      { id: 1, name: 'Movies', kind: 'movie' },
+      { id: 2, name: 'Movies 4K', kind: 'movie' },
+      { id: 3, name: 'TV', kind: 'show' },
+    ];
+    renderRoute('/wishlist?media=movies');
+    const sel = (await findEl('select[aria-label="Show one library"]')) as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.textContent)).toEqual(['All', 'Movies', 'Movies 4K']);
+    expect(gets('video/wishlist').every((c) => !('video_library' in c.params))).toBe(true);
+    fireEvent.change(sel, { target: { value: '2' } });
+    await waitFor(() =>
+      expect(gets('video/wishlist').some((c) => c.params.video_library === '2')).toBe(true),
+    );
+  });
+
+  it('has no library filter with one library per kind', async () => {
+    libraryNames = [{ id: 1, name: 'Movies', kind: 'movie' }];
+    renderRoute('/wishlist?media=movies');
+    await waitFor(() => expect(document.querySelectorAll('.wlp-zone')).toHaveLength(3));
+    expect(document.querySelector('select[aria-label="Show one library"]')).toBeNull();
+  });
+
   it('lists posters in zones by what is wrong, worst first', async () => {
     renderRoute('/wishlist?media=movies');
     await waitFor(() => expect(document.querySelectorAll('.wlp-zone')).toHaveLength(3));

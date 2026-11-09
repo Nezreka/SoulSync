@@ -147,6 +147,10 @@ A new title files into, first match wins:
 **Where a library downloads from.** **Download from** on a library's card picks the sources its automatic searches use (the wishlist, Search now, retries), in the order you click them: Usenet first then Torrent, say. None picked follows the global order in Settings > Downloads. RSS sync still runs on the global order's indexer sources, and keeps only releases from the library's own sources. **Torrent category / label** and **Usenet category** give that library's downloads their own category in the client (qBittorrent / SABnzbd / NZBGet category, Deluge / Transmission label); empty uses the client's own. Make the category in the client first: SABnzbd files an unknown one under its default. SoulSync talks to one torrent client and one usenet client (Settings > Downloads), so a library picks between those; two instances of the same client aren't supported.
 
 **Which indexers a library searches.** Open **Indexers** on a library's card to tick the Prowlarr indexers its searches use: private 4K trackers for Movies 4K, say. None ticked searches every indexer (within Settings > Indexers' own allowlist), as before. The wishlist, Search now, retries, manual search in Get, and RSS sync all follow it (an EXT.to release has no indexer and is kept).
+
+**Searching and upgrading per library.** **Search automatically** off: the wishlist drain and RSS sync leave that library's titles alone, and they're only searched when you click Search now (or Search all missing). **Upgrade what you have** off: titles you already have in that library stop being upgraded toward their profile's cutoff; missing ones are still hunted.
+
+**Filtering by library.** Once a kind has two libraries, the Movies / TV list has a **Library** filter (the library its files sit in, as the last scan saw them), the wishlist has one (a copy's library, else the library picked for the title, else where its last search filed it), and so does the video Downloads list (the library a download files into).
 `
         },
         {
