@@ -92,3 +92,47 @@ def test_recent_library_tracks_are_serialized_tracks(monkeypatch):
     tracks = sample_api.recent_library_tracks(50)
     assert asked == {"entity_type": "tracks", "limit": 50}
     assert tracks[0]["id"] == "7" and tracks[0]["title"] == "ISSA"
+
+
+def _traced(db):
+    """a raw connection to ``db`` that records every statement it runs."""
+    seen = []
+    conn = db._open_connection()
+    conn.set_trace_callback(seen.append)
+    return conn, seen
+
+
+def test_recent_tracks_walk_the_added_index_and_keep_the_order(tmp_path, monkeypatch):
+    """review 5 perf: ORDER BY COALESCE(added_at, updated_at) matched no index,
+    so the panel read and sorted every owned track (6 s on 300k). the newest
+    ids now come off idx_lib2_tracks_added_order, and the order is the same."""
+    from core.library2.queries import ensure_song_sort_indexes
+    from database.music_database import MusicDatabase
+    from tests.lib2_seed import track
+
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    with db._get_connection() as conn:
+        old = track(conn, "A", "Old", "old", path="/m/old.flac", added_at="2026-01-01 00:00:00")
+        new = track(conn, "A", "New", "new", path="/m/new.flac", added_at="2026-03-01 00:00:00")
+        tie_low = track(conn, "B", "Tie", "tie1", path="/m/t1.flac", added_at="2026-02-01 00:00:00")
+        tie_high = track(conn, "B", "Tie", "tie2", path="/m/t2.flac", added_at="2026-02-01 00:00:00")
+        # no added_at: it still sorts by updated_at, between new and the ties
+        undated = track(conn, "C", "Undated", "undated", path="/m/u.flac")
+        conn.execute("UPDATE lib2_tracks SET added_at = NULL, updated_at = '2026-02-15 00:00:00'"
+                     " WHERE id = ?", (undated,))
+        # a catalogue row with no file is nobody's recent addition
+        track(conn, "D", "Wanted", "wanted", owned=False, added_at="2026-04-01 00:00:00")
+        ensure_song_sort_indexes(conn)
+        conn.commit()
+
+    conn, seen = _traced(db)
+    monkeypatch.setattr(db, "_get_connection", lambda: conn)
+    rows = db.api_get_recently_added("tracks", limit=10)
+    query = next(s for s in seen if "lib2_tracks e" in s)
+    plan = [r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + query)]
+    assert any("idx_lib2_tracks_added_order" in p for p in plan), plan
+    assert not any(p.startswith("SCAN e") for p in plan), plan
+
+    # same order as before; a tie on added_at now breaks newest id first
+    assert [int(r["id"]) for r in rows] == [new, undated, tie_high, tie_low, old]
+    assert rows[0]["file_path"] == "/m/new.flac" and rows[0]["album_title"] == "New"

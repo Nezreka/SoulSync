@@ -25129,10 +25129,29 @@ class MusicDatabase:
             if entity_type == "tracks":
                 from core.library2.sql_util import owned_sql, owner_clause
                 from core.library2.track_files import primary_order
+                owned = owned_sql('track', 'e')
+                # the newest ids first, then the projection for just those.
+                # ORDER BY COALESCE(added_at, updated_at) matched no index, so
+                # every owned track got its file subquery and was sorted: 6 s
+                # on a 300k library (review 5 perf). added_at walks
+                # idx_lib2_tracks_added_order and stops at the limit; the rare
+                # row with no added_at still sorts by updated_at, as before.
                 cursor.execute(f"""
+                    WITH recent AS MATERIALIZED (
+                        SELECT id, k FROM (
+                            SELECT e.id, e.added_at AS k FROM lib2_tracks e
+                             WHERE e.added_at IS NOT NULL AND {owned}
+                             ORDER BY e.added_at DESC, e.id DESC LIMIT :limit)
+                        UNION ALL
+                        SELECT id, k FROM (
+                            SELECT e.id, e.updated_at AS k FROM lib2_tracks e
+                             WHERE e.added_at IS NULL AND {owned}
+                             ORDER BY e.updated_at DESC, e.id DESC LIMIT :limit)
+                    )
                     SELECT e.*, COALESCE(NULLIF(e.track_artist, ''), ar.name) AS artist_name,
                            al.title AS album_title, f.path AS file_path, f.bitrate
-                    FROM lib2_tracks e
+                    FROM recent r
+                    CROSS JOIN lib2_tracks e ON e.id=r.id
                     LEFT JOIN lib2_albums al ON al.id=e.album_id
                     LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
                     LEFT JOIN lib2_track_files f ON f.id=(
@@ -25140,9 +25159,8 @@ class MusicDatabase:
                         WHERE own.track_id=e.id AND COALESCE(own.file_state,'active')='active'
                           AND COALESCE(own.path,'')!='' {owner_clause(column='own.owner_profile_id')}
                         ORDER BY {primary_order('own')} LIMIT 1)
-                    WHERE {owned_sql('track', 'e')}
-                    ORDER BY COALESCE(e.added_at, e.updated_at) DESC LIMIT ?
-                """, (limit,))
+                    ORDER BY r.k DESC, r.id DESC LIMIT :limit
+                """, {"limit": limit})
                 return self._api_project_lib2(conn, 'track', cursor.fetchall())
             # what came INTO the library: a discography fetch adds release rows
             # with added_at = now, and those are no one's recent additions
