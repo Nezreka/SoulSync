@@ -585,6 +585,37 @@ CREATE TABLE IF NOT EXISTS video_title_profiles (
     PRIMARY KEY (kind, tmdb_id)
 );
 
+-- Video libraries (#2029): named movie / TV libraries, each with its own folder,
+-- Radarr/Sonarr style. The main and 4K folders are rows too (builtin 'main' /
+-- '4k') whose folder stays in the settings keys they always used (movies_path,
+-- movies_4k_path + its switch, ...), so nothing that reads those changes. A
+-- custom library keeps its own path. options is the library's config as JSON:
+-- assignment rules, default quality profile, download and indexer choices.
+CREATE TABLE IF NOT EXISTS video_libraries (
+    id          INTEGER PRIMARY KEY,
+    kind        TEXT    NOT NULL CHECK (kind IN ('movie', 'show')),
+    name        TEXT    NOT NULL,
+    path        TEXT    NOT NULL DEFAULT '',
+    builtin     TEXT,                          -- 'main' | '4k' | NULL (custom)
+    enabled     INTEGER NOT NULL DEFAULT 1,    -- custom only; a builtin follows its settings
+    is_default  INTEGER NOT NULL DEFAULT 0,    -- new titles of this kind go here
+    position    INTEGER NOT NULL DEFAULT 0,
+    options     TEXT    NOT NULL DEFAULT '{}',
+    created_at  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_video_libraries_builtin
+    ON video_libraries(kind, builtin) WHERE builtin IS NOT NULL;
+
+-- A library picked for a title by hand (its page, or the Get / Manual search
+-- modal). Keyed like video_title_profiles; wins over the rules and the default.
+CREATE TABLE IF NOT EXISTS video_title_libraries (
+    kind        TEXT    NOT NULL,              -- 'movie' | 'show'
+    tmdb_id     INTEGER NOT NULL,
+    library_id  INTEGER NOT NULL REFERENCES video_libraries(id) ON DELETE CASCADE,
+    updated_at  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, tmdb_id)
+);
+
 -- WISHLIST (curated 'get this') — atomic units are MOVIES and EPISODES. Adding a
 -- whole show or a season just expands into episode rows. Upcoming (un-aired)
 -- episodes do NOT live here; the watchlist/calendar promote them once they air,

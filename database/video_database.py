@@ -89,7 +89,7 @@ def _yt_skip_reason(state) -> str | None:
     return "%d failed attempt%s — will try again on the next run" % (
         attempts, "" if attempts == 1 else "s")
 
-SCHEMA_VERSION = 64   # v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
+SCHEMA_VERSION = 65   # v65: video_libraries + video_title_libraries (#2029, the main and 4K folders become libraries); v64: re-sync anime TMDB lumped that AniList splits; v63: video_title_profiles (a quality profile picked for a title before it lands); v62: video_watch_state (per-profile watch state, #1941); v61: anime layer (anime_id_map, video_anime, anilist by id, on for everyone once); v60: media_files audio/subtitle languages (#Thibs language tags); v59: re-sync shows left with day-apart lumped-season rows; v58: video_airing_offers (airing auto-wishlist receipts); v57: video_repair_findings.last_error + video_repair_job_runs.error_text (findings parity); v56: re-sync shows TMDB lumped into one season (tvdb regroup); v54: shows.library_name + show_type_hints (anime by library); v53: tvdb_episode_cache (scene numbering); v52: subtitle_overrides ("Replace Bazarr" Phase 3); v51: subtitle_fetch_history + subtitle_quota ("Replace Bazarr" Phase 2); v50: subtitle_wanted ("Replace Bazarr" subtitle wanted queue); v49: per-profile video_watchlist/video_wishlist isolation; v48: video_manual_matches ("I have this" manual library links); v47: video_extto_cache (Fresh Releases match cache); v46: media_files format facts (channels/HDR/Atmos badges); v45: per-episode watch state + resume offsets (Continue Watching); v44: video_wishlist.search_attempts/last_search_at
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 
@@ -728,6 +728,7 @@ class VideoDatabase:
             self._ensure_columns(conn)
             self._ensure_indexes(conn)
             self._seed_named_links_from_scalar(conn)
+            self._seed_builtin_libraries(conn)
             self._run_data_migrations(conn, prev_version)
             conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
             conn.commit()
@@ -5149,6 +5150,28 @@ class VideoDatabase:
             rid = conn.execute(f"SELECT id FROM {ref_table} WHERE name=? COLLATE NOCASE", (name,)).fetchone()["id"]
             conn.execute(f"INSERT OR IGNORE INTO {link_table} ({owner_col}, {ref_fk}) VALUES (?, ?)",
                          (owner_id, rid))
+
+    # the main and 4K folders as library rows (#2029): kind, builtin, name
+    _BUILTIN_LIBRARIES = (("movie", "main", "Movies", 0), ("movie", "4k", "Movies 4K", 1),
+                          ("show", "main", "TV", 0), ("show", "4k", "TV 4K", 1))
+
+    @classmethod
+    def _seed_builtin_libraries(cls, conn) -> None:
+        """The main and 4K folders as libraries, on every start (idempotent).
+        Their folders stay in the settings they always lived in, so an existing
+        install routes exactly as before: the main one is each kind's default
+        until another library is made the default."""
+        for kind, builtin, name, pos in cls._BUILTIN_LIBRARIES:
+            conn.execute(
+                "INSERT OR IGNORE INTO video_libraries (kind, name, builtin, is_default, position) "
+                "VALUES (?, ?, ?, ?, ?)", (kind, name, builtin, 1 if builtin == "main" else 0, pos))
+        for kind in ("movie", "show"):
+            # a kind left with no default (its default library was removed)
+            # falls back to the main one
+            if not conn.execute("SELECT 1 FROM video_libraries WHERE kind=? AND is_default=1",
+                                (kind,)).fetchone():
+                conn.execute("UPDATE video_libraries SET is_default=1 WHERE kind=? AND builtin='main'",
+                             (kind,))
 
     @staticmethod
     def _seed_named_links_from_scalar(conn) -> None:

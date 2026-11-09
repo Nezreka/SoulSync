@@ -248,7 +248,8 @@ def _rss_pass_inner(*, fetch, log, extto=None) -> Dict[str, Any]:
         if not target:
             continue
         # each item's own folder, the way the wishlist drain files it: the
-        # anime folder by show type, the 4K one by quality profile (RSS used to
+        # anime folder by show type, its library (#2029: picked, the 4K one by
+        # quality profile, the rules, the default) (RSS used to
         # send every episode to the TV folder, anime included)
         anime_root = vpw._default_anime_dir() if media_type == "episode" else ""
         four_k_root = vpw._default_four_k_dir(media_type)
@@ -272,7 +273,8 @@ def _rss_pass_inner(*, fetch, log, extto=None) -> Dict[str, Any]:
                                            _skip_reason(cands, min_rank, item)))
                 continue
             folder = vpw.item_target_dir(item, media_type, target, anime_root, four_k_root,
-                                         vpw._default_route_type, vpw._default_profile_library)
+                                         vpw._default_route_type, vpw._default_profile_library,
+                                         vpw._default_pick_library)
             if vpw._default_enqueue(item, best, cands, media_type, folder):
                 grabbed += 1
                 active.add(vpw.item_key(item, media_type))

@@ -295,11 +295,13 @@ def _library_roots() -> set:
             v = db.get_setting(key)
             if v:
                 roots.add(os.path.abspath(str(v)))
-        from core.video.library_roots import four_k_path
+        from core.video.library_roots import custom_library_paths, four_k_path
         for kind in ("movie", "episode"):
             v = four_k_path(db, kind)
             if v:
                 roots.add(os.path.abspath(v))
+        for v in custom_library_paths(db):
+            roots.add(os.path.abspath(v))
     except Exception:   # noqa: BLE001
         pass
     return roots
@@ -331,11 +333,13 @@ def _sweep_import_temps(db) -> int:
         if v:
             roots.add(os.path.abspath(str(v)))
     try:
-        from core.video.library_roots import four_k_path
+        from core.video.library_roots import custom_library_paths, four_k_path
         for kind in ("movie", "episode"):
             v = four_k_path(db, kind)
             if v:
                 roots.add(os.path.abspath(v))
+        for v in custom_library_paths(db):
+            roots.add(os.path.abspath(v))
     except Exception:   # noqa: BLE001 - the sweep is best-effort
         pass
     try:

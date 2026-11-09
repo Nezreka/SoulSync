@@ -97,14 +97,74 @@ def _profile_library_for(db, kind, body) -> str:
     return str(profile_by_id(db, pid, kind=kind).get("library") or "main")
 
 
+def _title_tmdb_for(db, kind, body):
+    """The tmdb id of the title a request names (by tmdb id, or by its library
+    row), or None."""
+    library_id, tmdb = _title_keys(body or {})
+    if not tmdb and library_id:
+        try:
+            tmdb = (db.search_ids_for(kind, library_id=int(library_id)) or {}).get("tmdb_id")
+        except (TypeError, ValueError):
+            tmdb = None
+    try:
+        return int(tmdb) if tmdb not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _library_for(db, kind, body):
+    """The video library (#2029) a download of this title files into, or None
+    for youtube / an unknown kind. See core.video.libraries.choose."""
+    from core.video.libraries import choose, kind_of
+    k = kind_of(kind)
+    if not k:
+        return None
+    body = body or {}
+    return choose(db, k, tmdb_id=_title_tmdb_for(db, k, body),
+                  explicit_id=body.get("video_library_id"),
+                  profile_library=lambda: _profile_library_for(db, kind, body),
+                  title=body.get("title"))
+
+
+def _title_library_info(db, kind, src) -> dict:
+    """The title's library for the Get / Manual search modal's picker: every
+    usable library of its kind, the one it files into and why, and its own
+    pick (0 = none). {} when libraries can't be read."""
+    from core.video.libraries import list_libraries, title_assignment
+    try:
+        tmdb = _title_tmdb_for(db, kind, src)
+        lib = _library_for(db, kind, src)
+        return {
+            "libraries": [{"id": x["id"], "name": x["name"], "builtin": x["builtin"]}
+                          for x in list_libraries(db, kind) if x["usable"]],
+            "library": ({"id": lib["id"], "name": lib["name"], "why": lib["why"]} if lib else None),
+            "library_assigned": int((title_assignment(db, kind, tmdb) if tmdb else None) or 0),
+        }
+    except Exception:   # noqa: BLE001 - the picker is an extra, never a failed search
+        logger.debug("title library info failed", exc_info=True)
+        return {}
+
+
 def _target_for(db, kind, body) -> str:
-    """The library folder a download of this title is filed in: by kind, the
-    show's routing type (the anime folder) and the title's quality profile's
-    library (the 4K folder, when it's switched on)."""
+    """The library folder a download of this title is filed in: a library
+    picked for the title by hand, else the anime folder by the show's routing
+    type, else its library by the 4K profile, the rules or the default
+    (#2029; the main and 4K folders are libraries too)."""
     from core.video.download_pipeline import target_dir_for
     from core.video.library_roots import output_paths
-    return target_dir_for(kind, output_paths(db), _series_type_for(db, kind, body),
-                          _profile_library_for(db, kind, body))
+    lib = _library_for(db, kind, body)
+    if lib and lib.get("why") in ("picked", "assigned") and lib.get("path"):
+        return lib["path"]
+    paths = output_paths(db)
+    series_type = _series_type_for(db, kind, body)
+    if lib and not lib.get("builtin") and lib.get("path"):
+        anime = str(paths.get("anime_path") or "").strip()
+        if lib["kind"] == "show" and anime and str(series_type or "").strip().lower() == "anime":
+            return anime
+        return lib["path"]
+    return target_dir_for(kind, paths, series_type,
+                          "4k" if lib and lib.get("builtin") == "4k" else
+                          ("main" if lib else _profile_library_for(db, kind, body)))
 
 
 # The shared input/download dir — the SAME config key the music side reads/writes.
@@ -941,7 +1001,31 @@ def register_routes(bp):
             "kind": kind, "profile_id": int(pid or 0), "profile": profile,
             "assigned": bool(own), "kind_default_id": int(kind_default_id(db, kind) or 0),
             "profiles": [{"id": p["id"], "name": p["name"]} for p in list_profiles(db)],
+            **_title_library_info(db, kind, src),
         })
+
+    @bp.route("/downloads/quality/library", methods=["POST"])
+    def video_library_choose_for_title():
+        """Pick the video library (#2029) a title files into, from the Get /
+        Manual search modal or its page; library_id 0 = back to the rules and
+        the default. Body: kind/scope, media_id, media_source, tmdb_id,
+        library_id."""
+        from . import get_video_db
+        from core.video.libraries import assign_title
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        scope = str(body.get("scope") or body.get("kind") or "movie").lower()
+        kind = "movie" if scope == "movie" else "show"
+        tmdb = _title_tmdb_for(db, kind, body)
+        if not tmdb:
+            return jsonify({"success": False, "error": "The title has no TMDB id to keep the pick on"}), 400
+        try:
+            assign_title(db, kind, tmdb, body.get("library_id"))
+        except LookupError as e:
+            return jsonify({"success": False, "error": str(e)}), 404
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        return jsonify({"success": True, **_title_library_info(db, kind, body)})
 
     @bp.route("/downloads/quality/choose", methods=["POST"])
     def video_quality_choose_for_title():

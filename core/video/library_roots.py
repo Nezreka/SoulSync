@@ -4,7 +4,9 @@ The optional 4K libraries (``movies_4k_path`` / ``tv_4k_path``) DO: a title on a
 quality profile that saves to the 4K library imports there. Each is off until
 its switch (``movies_4k_enabled`` / ``tv_4k_enabled``) is on and a folder is
 set, and a switched-off 4K folder is invisible everywhere (routing, scanning,
-the monitor's roots), so turning it off is a clean undo."""
+the monitor's roots), so turning it off is a clean undo. Custom libraries
+(#2029, core.video.libraries) are the same: their folders count as library
+folders while they're switched on."""
 import json
 import os
 
@@ -106,6 +108,8 @@ def library_roots(db, kind=None):
         four_k = four_k_path(db, item)
         if four_k:
             roots.append(four_k)
+        if item != "youtube":
+            roots.extend(custom_library_paths(db, item))
         if item == "episode":
             # the optional anime folder is a TV library too (new episodes of
             # anime-type shows import there); normalize_paths dedupes it if it
@@ -120,6 +124,17 @@ def library_roots(db, kind=None):
             # folder on another drive is a movie library folder like any other
             roots.extend(_mapped_folders(db, item))
     return normalize_paths(roots)
+
+
+def custom_library_paths(db, kind=None):
+    """The folders of the switched-on custom libraries (#2029; Settings >
+    Folders > Video > More libraries) for 'movie' or 'episode', or all of
+    them. Best-effort: a bad row never hides the configured folders."""
+    try:
+        from core.video.libraries import custom_folders
+        return custom_folders(db, None if kind is None else ("movie" if kind == "movie" else "show"))
+    except Exception:   # noqa: BLE001
+        return []
 
 
 def _mapped_folders(db, kind):

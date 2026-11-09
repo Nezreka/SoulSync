@@ -692,6 +692,138 @@
         if (e.target && e.target.id === 'video-drive-map-save') saveDriveMap();
     });
 
+    // ── more libraries (#2029): named movie / TV libraries, each with its own
+    // folder, rules and default. the main and 4K ones are listed too; their
+    // folders are the settings above, so here they only take a name, rules and
+    // the default.
+    var LIBS_URL = '/api/video/libraries/folders';
+    // esc for attribute values too (a library named with a quote)
+    function escA(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+    var LIB_KIND = { movie: 'Movies', show: 'TV' };
+    function libTerms(list) { return (list || []).join(', '); }
+    function libraryRowHtml(lib) {
+        var isNew = !lib.id;
+        var builtin = lib.builtin;
+        var rules = lib.rules || {};
+        var head = isNew
+            ? '<select class="video-library-kind-pick" aria-label="What the library holds">' +
+                '<option value="movie">Movies</option><option value="show">TV</option></select>'
+            : '<span class="video-library-kind">' + escA(LIB_KIND[lib.kind] || lib.kind) + '</span>';
+        var state = builtin === '4k' && !lib.enabled ? 'Off: switch it on above'
+            : !lib.usable ? (lib.enabled ? 'No folder yet' : 'Switched off')
+            : lib.is_default ? 'Default for new ' + (lib.kind === 'movie' ? 'movies' : 'shows') : '';
+        var folder = builtin
+            ? '<div class="video-library-known">' + escA(lib.path || 'No folder set') + ' <span>(set above)</span></div>'
+            : '<input type="text" class="video-library-path" value="' + escA(lib.path || '') + '" ' +
+                'placeholder="/media/stand-up" aria-label="Library folder" data-folder-check="video" ' +
+                'data-folder-label="' + escA((lib.name || 'New') + ' library') + '">';
+        return '<div class="video-library-row" data-library-id="' + escA(lib.id || '') + '" data-kind="' + escA(lib.kind || 'movie') + '"' +
+            (builtin ? ' data-builtin="' + escA(builtin) + '"' : '') + '>' +
+            '<div class="video-library-head">' +
+                '<input type="text" class="video-library-name" value="' + escA(lib.name || '') + '" ' +
+                    'placeholder="Library name, e.g. Stand-Up" aria-label="Library name" maxlength="80">' +
+                head +
+                (state ? '<span class="video-library-state' + (lib.is_default && lib.usable ? ' is-default' : '') + '">' + escA(state) + '</span>' : '') +
+            '</div>' +
+            folder +
+            '<div class="video-library-rules">' +
+                '<input type="text" class="video-library-genres" list="video-library-genre-list" value="' + escA(libTerms(rules.genres)) + '" ' +
+                    'placeholder="Genres, e.g. Documentary, Family" aria-label="Genres that send a title here">' +
+                '<input type="text" class="video-library-keywords" value="' + escA(libTerms(rules.keywords)) + '" ' +
+                    'placeholder="Keywords, e.g. stand-up" aria-label="Keywords that send a title here">' +
+            '</div>' +
+            '<div class="video-library-actions">' +
+                (builtin ? '' : '<label class="checkbox-label"><input type="checkbox" class="video-library-enabled"' +
+                    (lib.enabled !== false ? ' checked' : '') + '> Switched on</label>') +
+                '<button type="button" class="test-button" data-library-action="save">' + (isNew ? 'Add' : 'Save') + '</button>' +
+                (!isNew && lib.usable && !lib.is_default
+                    ? '<button type="button" class="test-button" data-library-action="default">Make default</button>' : '') +
+                (isNew || !builtin ? '<button type="button" class="test-button" data-library-action="remove">' +
+                    (isNew ? 'Cancel' : 'Remove') + '</button>' : '') +
+            '</div></div>';
+    }
+    function renderLibraries(list, genres) {
+        var host = document.getElementById('video-libraries-list');
+        if (!host) return;
+        host.innerHTML = (list || []).map(libraryRowHtml).join('');
+        var dl = document.getElementById('video-library-genre-list');
+        if (dl && genres) dl.innerHTML = genres.map(function (g) { return '<option value="' + escA(g) + '">'; }).join('');
+        if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('video');
+    }
+    function loadLibraries() {
+        return fetch(LIBS_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d && d.libraries) renderLibraries(d.libraries, d.genres || []); })
+            .catch(function () {});
+    }
+    function libraryBody(row) {
+        var val = function (sel) { var el = row.querySelector(sel); return el ? el.value.trim() : ''; };
+        var split = function (v) { return v.split(',').map(function (x) { return x.trim(); }).filter(Boolean); };
+        var body = { name: val('.video-library-name'),
+            rules: { genres: split(val('.video-library-genres')), keywords: split(val('.video-library-keywords')) } };
+        if (!row.getAttribute('data-builtin')) {
+            body.path = val('.video-library-path');
+            var on = row.querySelector('.video-library-enabled');
+            body.enabled = on ? on.checked : true;
+        }
+        var pick = row.querySelector('.video-library-kind-pick');
+        if (pick) body.kind = pick.value;
+        return body;
+    }
+    function libraryRequest(url, method, body, done) {
+        return fetch(url, {
+            method: method, headers: { 'Content-Type': 'application/json' },
+            body: body ? JSON.stringify(body) : undefined,
+        }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+                if (!res.ok || res.j.success === false) {
+                    toast((res.j && res.j.error) || 'Could not save the library', 'error');
+                    return;
+                }
+                toast(done, 'success');
+                loadLibraries();
+            }).catch(function () { toast('Could not save the library', 'error'); });
+    }
+    function onLibraryAction(btn) {
+        var row = btn.closest('.video-library-row');
+        if (!row) return;
+        var id = row.getAttribute('data-library-id');
+        var action = btn.getAttribute('data-library-action');
+        if (action === 'save') {
+            var body = libraryBody(row);
+            if (id) libraryRequest(LIBS_URL + '/' + id, 'PUT', body, 'Library saved');
+            else libraryRequest(LIBS_URL, 'POST', body, 'Library added');
+        } else if (action === 'default') {
+            libraryRequest(LIBS_URL + '/' + id + '/default', 'POST', null, 'Default library changed');
+        } else if (action === 'remove') {
+            if (!id) { row.remove(); return; }
+            var name = (row.querySelector('.video-library-name') || {}).value || 'this library';
+            var go = function () { libraryRequest(LIBS_URL + '/' + id, 'DELETE', null, 'Library removed'); };
+            var msg = 'Titles picked for ' + name + ' go back to the rules and the default. ' +
+                'Its folder and files stay where they are.';
+            // the house yes/no modal; without the shell (never in the app) the
+            // folder and files stay anyway, so it just goes
+            if (typeof showConfirmDialog !== 'function') { go(); return; }
+            showConfirmDialog({ title: 'Remove ' + name + '?', message: msg, confirmText: 'Remove',
+                cancelText: 'Keep it', destructive: true }).then(function (ok) { if (ok) go(); });
+        }
+    }
+    document.addEventListener('click', function (e) {
+        var t = e.target;
+        if (!t || !t.closest) return;
+        if (t.id === 'video-library-add') {
+            var host = document.getElementById('video-libraries-list');
+            if (!host || host.querySelector('.video-library-row[data-library-id=""]')) return;
+            host.insertAdjacentHTML('beforeend', libraryRowHtml({ kind: 'movie', enabled: true }));
+            var name = host.querySelector('.video-library-row[data-library-id=""] .video-library-name');
+            if (name) name.focus();
+            if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('video');
+            return;
+        }
+        var btn = t.closest('[data-library-action]');
+        if (btn && btn.closest('#video-libraries-list')) onLibraryAction(btn);
+    });
+
     function loadDownloads() {
         return fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -712,6 +844,7 @@
                 setP('video-tv-4k-path', d.tv_4k_path);
                 refreshVideoFolders();
                 loadDriveMap();
+                loadLibraries();
                 _videoMode = d.download_mode || 'soulseek';
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
                 var ms = document.getElementById('video-download-mode');

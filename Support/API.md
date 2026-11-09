@@ -2422,6 +2422,21 @@ The video search the web UI runs (`POST /api/video/downloads/search`, `/download
 
 The quality profile (`GET/POST /api/video/downloads/quality` and the named profiles) adds `preferred_movie_gb` and `preferred_episode_gb`: a tie-break, closer ranks higher, in tenths of a GB, `0` = off (the default), clamped to the max size.
 
+#### Video libraries (web UI session API, admin)
+
+Named movie and TV libraries, each with its own folder (#2029). The main and 4K folders are libraries too (`builtin` `main` / `4k`); their folders stay in the folder settings (`movies_path`, `movies_4k_path` + `movies_4k_enabled`, ...).
+
+- `GET /api/video/libraries/folders`: `{libraries: [...], genres: [...]}`. Each library: `id`, `kind` (`movie` / `show`), `name`, `path`, `builtin` (`main`, `4k` or null), `enabled`, `usable` (on and has a folder), `is_default`, `rules` (`{genres: [], keywords: []}`) and `options`. `genres` are the genre names your library knows, for the rule picker.
+- `POST /api/video/libraries/folders`: add one. Body: `{kind, name, path, rules?, enabled?, is_default?}`. `400` with a message for a missing name or folder, or a folder another library (or the anime / YouTube folder) already uses.
+- `PUT /api/video/libraries/folders/<id>`: change `name`, `rules`, `options`, and for a custom library `path` and `enabled`. A builtin's folder is changed in its own setting (`400`). `is_default: true` makes it the default.
+- `POST /api/video/libraries/folders/<id>/default`: the default for its kind (needs a folder and to be on).
+- `DELETE /api/video/libraries/folders/<id>`: remove a custom library. Its files stay; titles picked for it go back to the rules and the default; a removed default hands the kind to the main library. The builtins can't be removed (`400`).
+
+Which library a new title files into: a library picked for the grab (`video_library_id` on `POST /api/video/downloads/grab` and the manual import), else one picked for the title, else the 4K library when its quality profile saves to 4K, else the first library whose rules match its genres or TMDB keywords (a keyword also matches inside its name), else the kind's default. The anime folder still takes anime shows unless a library was picked for the title.
+
+- `GET /api/video/downloads/quality/for` adds `libraries` (`[{id, name, builtin}]`, the usable ones of the title's kind), `library` (`{id, name, why}`, where it files now; `why` is `picked`, `assigned`, `profile`, `rule: ...` or `default`) and `library_assigned` (the title's own pick, `0` = none).
+- `POST /api/video/downloads/quality/library` (admin): pick a title's library. Body: `{kind, media_id, media_source, tmdb_id, library_id}`, `library_id: 0` clears the pick. Answers with the same three fields.
+
 #### `GET /api/v1/video/calendar`
 
 Upcoming and recent episodes and releases. `start` and `end` as ISO dates.

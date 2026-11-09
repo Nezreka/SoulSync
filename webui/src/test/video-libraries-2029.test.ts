@@ -1,0 +1,221 @@
+import { waitFor } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
+
+/**
+ * #2029: named video libraries. Settings > Folders > Video lists every library
+ * (the main and 4K ones with their folders set above, custom ones with their
+ * own), adds, saves, makes default and removes; the Get / Manual search
+ * window picks a title's library.
+ */
+
+const SETTINGS = readFileSync(resolve(process.cwd(), 'static/video/video-settings.js'), 'utf8');
+const HTML = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+const VIEW = readFileSync(resolve(process.cwd(), 'static/video/video-download-view.js'), 'utf8');
+
+const LIBRARIES = [
+  {
+    id: 1,
+    kind: 'movie',
+    name: 'Movies',
+    path: '/movies',
+    builtin: 'main',
+    enabled: true,
+    usable: true,
+    is_default: true,
+    rules: { genres: [], keywords: [] },
+  },
+  {
+    id: 2,
+    kind: 'movie',
+    name: 'Movies 4K',
+    path: '',
+    builtin: '4k',
+    enabled: false,
+    usable: false,
+    is_default: false,
+    rules: { genres: [], keywords: [] },
+  },
+  {
+    id: 5,
+    kind: 'movie',
+    name: 'Stand-Up "Specials"',
+    path: '/standup',
+    builtin: null,
+    enabled: true,
+    usable: true,
+    is_default: false,
+    rules: { genres: ['Comedy'], keywords: ['stand-up'] },
+  },
+];
+
+function setup() {
+  const doc = new DOMParser().parseFromString(HTML, 'text/html');
+  const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+    const body = (v: unknown) => new Response(JSON.stringify(v));
+    if (url === '/api/video/libraries/folders' && !init?.method) {
+      return body({ libraries: LIBRARIES, genres: ['Comedy', 'Documentary'] });
+    }
+    if (url.startsWith('/api/video/libraries/folders')) return body({ success: true });
+    if (url.includes('/organization')) return body({ movie_template: '$title' });
+    if (url.includes('/libraries/drives')) return body({ folders: [] });
+    return body({ movies_path: '/movies', tv_path: '/tv' });
+  });
+  const confirm = vi.fn(async () => true);
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  new Function('document', 'window', 'fetch', 'showConfirmDialog', SETTINGS)(
+    doc,
+    {},
+    fetcher,
+    confirm,
+  );
+  doc.dispatchEvent(new Event('DOMContentLoaded'));
+  doc.dispatchEvent(new CustomEvent('soulsync:library-settings-shown'));
+  return { doc, fetcher, confirm };
+}
+
+const calls = (f: ReturnType<typeof vi.fn>) => f.mock.calls as unknown as [string, RequestInit?][];
+
+describe('settings: more libraries', () => {
+  it('lists every library, builtins without a folder box or remove', async () => {
+    const { doc } = setup();
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    const [main, fourK, custom] = Array.from(doc.querySelectorAll('.video-library-row'));
+    expect(main.querySelector('.video-library-path')).toBeNull();
+    expect(main.querySelector('.video-library-known')!.textContent).toContain('/movies');
+    expect(main.querySelector('[data-library-action="remove"]')).toBeNull();
+    expect(main.querySelector('[data-library-action="default"]')).toBeNull();
+    expect(main.querySelector('.video-library-state')!.textContent).toBe('Default for new movies');
+    expect(fourK.querySelector('.video-library-state')!.textContent).toContain(
+      'switch it on above',
+    );
+    expect(fourK.querySelector('[data-library-action="default"]')).toBeNull();
+    // a custom one: its own folder (checked like every folder), rules, remove
+    const path = custom.querySelector('.video-library-path') as HTMLInputElement;
+    expect(path.value).toBe('/standup');
+    expect(path.getAttribute('data-folder-check')).toBe('video');
+    expect((custom.querySelector('.video-library-name') as HTMLInputElement).value).toBe(
+      'Stand-Up "Specials"',
+    );
+    expect((custom.querySelector('.video-library-genres') as HTMLInputElement).value).toBe(
+      'Comedy',
+    );
+    expect(custom.querySelector('[data-library-action="remove"]')).not.toBeNull();
+    expect(custom.querySelector('[data-library-action="default"]')).not.toBeNull();
+    expect(doc.querySelectorAll('#video-library-genre-list option').length).toBe(2);
+  });
+
+  it('adds a library with its kind, folder and rules', async () => {
+    const { doc, fetcher } = setup();
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    (doc.getElementById('video-library-add') as HTMLButtonElement).click();
+    (doc.getElementById('video-library-add') as HTMLButtonElement).click(); // one new row only
+    const rows = doc.querySelectorAll('.video-library-row');
+    expect(rows.length).toBe(4);
+    const row = rows[3];
+    (row.querySelector('.video-library-name') as HTMLInputElement).value = 'Kids TV';
+    (row.querySelector('.video-library-kind-pick') as HTMLSelectElement).value = 'show';
+    (row.querySelector('.video-library-path') as HTMLInputElement).value = ' /kids ';
+    (row.querySelector('.video-library-genres') as HTMLInputElement).value = 'Kids, Family,';
+    (row.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    const post = calls(fetcher).find((c) => c[1]?.method === 'POST');
+    expect(post![0]).toBe('/api/video/libraries/folders');
+    expect(JSON.parse(post![1]!.body as string)).toEqual({
+      name: 'Kids TV',
+      kind: 'show',
+      path: '/kids',
+      enabled: true,
+      rules: { genres: ['Kids', 'Family'], keywords: [] },
+    });
+  });
+
+  it('saves a builtin with only its name and rules', async () => {
+    const { doc, fetcher } = setup();
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    const main = doc.querySelector('.video-library-row') as HTMLElement;
+    (main.querySelector('.video-library-keywords') as HTMLInputElement).value = 'drama';
+    (main.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
+    expect(put![0]).toBe('/api/video/libraries/folders/1');
+    expect(JSON.parse(put![1]!.body as string)).toEqual({
+      name: 'Movies',
+      rules: { genres: [], keywords: ['drama'] },
+    });
+  });
+
+  it('makes default and removes after asking', async () => {
+    const { doc, fetcher, confirm } = setup();
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    const custom = doc.querySelectorAll('.video-library-row')[2];
+    (custom.querySelector('[data-library-action="default"]') as HTMLButtonElement).click();
+    expect(calls(fetcher).some((c) => c[0] === '/api/video/libraries/folders/5/default')).toBe(
+      true,
+    );
+    (custom.querySelector('[data-library-action="remove"]') as HTMLButtonElement).click();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ destructive: true }));
+    await waitFor(() =>
+      expect(calls(fetcher).some((c) => c[1]?.method === 'DELETE' && c[0].endsWith('/5'))).toBe(
+        true,
+      ),
+    );
+  });
+});
+
+describe('get window: the library picker', () => {
+  const ESC = VIEW.slice(VIEW.indexOf('function esc'), VIEW.indexOf('function toast'));
+  const SRC = VIEW.slice(
+    VIEW.indexOf('function libraryPickerHTML'),
+    VIEW.indexOf("// fetch the title's profile"),
+  );
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  const pick = new Function(`${ESC}; ${SRC}; return libraryPickerHTML;`)() as (
+    i: unknown,
+  ) => string;
+
+  it('hides with one library and shows auto with the resolved one', () => {
+    expect(pick({ libraries: [{ id: 1, name: 'Movies' }] })).toBe('');
+    expect(pick(null)).toBe('');
+    const html = pick({
+      libraries: [
+        { id: 1, name: 'Movies' },
+        { id: 5, name: 'Stand-Up' },
+      ],
+      library: { id: 5, name: 'Stand-Up', why: 'rule: keyword stand-up' },
+      library_assigned: 0,
+    });
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const sel = doc.querySelector('[data-vdl-library]') as HTMLSelectElement;
+    expect(Array.from(sel.options).map((o) => o.textContent)).toEqual([
+      'Auto (Stand-Up)',
+      'Movies',
+      'Stand-Up',
+    ]);
+    expect(sel.value).toBe('0');
+  });
+
+  it('selects the title pick', () => {
+    const html = pick({
+      libraries: [
+        { id: 1, name: 'Movies' },
+        { id: 5, name: 'Stand-Up' },
+      ],
+      library: { id: 5, name: 'Stand-Up', why: 'assigned' },
+      library_assigned: 5,
+    });
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const sel = doc.querySelector('[data-vdl-library]') as HTMLSelectElement;
+    expect(sel.value).toBe('5');
+    expect(sel.options[0].textContent).toBe('Auto');
+  });
+
+  it('posts the pick to the title library endpoint', () => {
+    const wired = VIEW.slice(
+      VIEW.indexOf('function loadTitleProfile'),
+      VIEW.indexOf('function renderTarget'),
+    );
+    expect(wired).toContain("closest('[data-vdl-library]')");
+    expect(wired).toContain("'/api/video/downloads/quality/library'");
+    expect(VIEW).toContain('profilePickerHTML(info) + libraryPickerHTML(info)');
+  });
+});

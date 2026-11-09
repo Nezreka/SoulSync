@@ -123,6 +123,22 @@ To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch o
 - Switch a 4K folder off and it's ignored everywhere (routing, scans, health checks). Its path is kept for next time.
 
 In Docker, map each 4K folder in your compose file (the default compose has commented \`/media/movies-4k\` and \`/media/tv-4k\` lines) and add it to a library on your media server. See [Video: Downloads](#video-downloads) for the full pipeline.
+
+## More libraries
+
+Add your own movie and TV libraries, like a **Stand-Up**, **Documentaries** or **Kids** library in Plex, under Settings > Folders > Video > More libraries. Each has a name, its own folder and optional rules. The main and 4K libraries are listed there too (their folders are the ones set above), so an install with no extra library works exactly as before.
+
+A new title files into, first match wins:
+
+1. the library picked for it: the **Library** picker in **Get** / **Manual search** (shown once a kind has two libraries), which sticks to the title
+2. the 4K library, when its quality profile saves to 4K
+3. the first library whose **rules** match: a **genre** (TMDB's, like Documentary or Family) or a **keyword** (found inside one of the title's TMDB keywords, like stand-up comedy, or in its name)
+4. the **default** library for its kind (**Make default** on a library)
+
+- Anime shows keep the anime folder unless a library was picked for them.
+- Titles you already have stay where they are, and their upgrades land beside the copy you have.
+- A library that's switched off or has no folder is skipped everywhere; **Remove** keeps its folder and files, and titles picked for it go back to the rules and the default.
+- A library's folder is a library folder like the main ones: scans, health checks and the download monitor know it. Map it in Docker and add it to a library on your media server.
 `
         },
         {

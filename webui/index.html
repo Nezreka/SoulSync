@@ -6604,6 +6604,24 @@
                                             </div>
 
                                             <div class="settings-group" data-stg="library">
+                                                <h3>More libraries</h3>
+                                                <div class="setting-help-text">
+                                                    Your own movie and TV libraries, each with its own folder, like a
+                                                    Stand-Up, Documentaries or Kids library in Plex. A new title files
+                                                    into the library picked for it (in its Get or Manual search window),
+                                                    else the 4K one when its quality profile says so, else the first
+                                                    library whose rules match its genres or TMDB keywords, else the
+                                                    default library for its kind. Titles you already have stay where
+                                                    they are. The main and 4K libraries are here too: their folders are
+                                                    the ones above.
+                                                </div>
+                                                <div id="video-libraries-list" class="video-libraries"></div>
+                                                <datalist id="video-library-genre-list"></datalist>
+                                                <button type="button" class="test-button" id="video-library-add">+ Add
+                                                    library</button>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
                                                 <h3>Your library's folders</h3>
                                                 <div class="setting-help-text">
                                                     Every folder your Plex / Jellyfin libraries read, Movies or TV.

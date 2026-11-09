@@ -317,6 +317,20 @@
             '<span class="vdl-prof-lab">Profile</span>' +
             '<select class="vdl-prof-sel" data-vdl-profile>' + opts + '</select></label>';
     }
+    // the title's video library (#2029): where a grab of it files. only shown
+    // with more than one library of its kind; "Auto" is the rules / default
+    function libraryPickerHTML(info) {
+        if (!info || !info.libraries || info.libraries.length < 2) return '';
+        var cur = info.library_assigned || 0;
+        var auto = 'Auto' + (info.library && !cur ? ' (' + info.library.name + ')' : '');
+        var opts = '<option value="0"' + (cur ? '' : ' selected') + '>' + esc(auto) + '</option>' +
+            info.libraries.map(function (l) {
+                return '<option value="' + l.id + '"' + (l.id === cur ? ' selected' : '') + '>' + esc(l.name) + '</option>';
+            }).join('');
+        return '<label class="vdl-prof" title="The library this title is filed in">' +
+            '<span class="vdl-prof-lab">Library</span>' +
+            '<select class="vdl-prof-sel" data-vdl-library>' + opts + '</select></label>';
+    }
     // fetch the title's profile, render it, and keep the picker's change wired.
     // onChanged runs after a pick is saved (the overlay re-runs its searches)
     function loadTitleProfile(host, getIdent, kind, render, onChanged) {
@@ -330,6 +344,23 @@
         if (host._vdlProfWired) return;
         host._vdlProfWired = true;
         host.addEventListener('change', function (e) {
+            var lib = e.target.closest && e.target.closest('[data-vdl-library]');
+            if (lib) {
+                var body = titleBody(getIdent(), kind, null);
+                delete body.profile_id;
+                body.library_id = parseInt(lib.value, 10) || 0;
+                lib.disabled = true;
+                postJSON('/api/video/downloads/quality/library', body).then(function (res) {
+                    lib.disabled = false;
+                    if (!res || res.success === false) {
+                        toast((res && res.error) || 'Could not change the library', 'error');
+                    } else {
+                        toast(res.library ? 'Files into ' + res.library.name : 'Library saved for this title', 'success');
+                    }
+                    loadTitleProfile(host, getIdent, kind, render, onChanged);
+                });
+                return;
+            }
             var sel = e.target.closest && e.target.closest('[data-vdl-profile]');
             if (!sel) return;
             var pid = parseInt(sel.value, 10) || 0;
@@ -366,7 +397,7 @@
             if (p.max_movie_gb) chips.push(chip('Movie ≤ ' + p.max_movie_gb + ' GB'));
             if (p.max_episode_gb) chips.push(chip('Episode ≤ ' + p.max_episode_gb + ' GB'));
         }
-        box.innerHTML = (isYt ? '' : profilePickerHTML(info)) + chips.join('');
+        box.innerHTML = (isYt ? '' : profilePickerHTML(info) + libraryPickerHTML(info)) + chips.join('');
     }
 
     // Owned copy → "In your library · 720p · BluRay · X265" + a verdict against the
