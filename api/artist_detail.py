@@ -62,6 +62,12 @@ def configure(**deps):
 
 bp = Blueprint('artist_detail', __name__)
 
+# The Discover "Your Albums" multi-artist batch posts to
+# /api/artist/your-albums/download-discography (the frontend's
+# BATCH_ENDPOINT in -discover.your-albums-actions.ts). That path segment
+# is a placeholder, not an artist id — keep the two in step.
+_BATCH_ARTIST_ID = 'your-albums'
+
 
 def create_blueprint():
     return bp
@@ -2187,6 +2193,68 @@ def download_discography(artist_id):
         )
         db = MusicDatabase()
         profile_id = get_current_profile_id()
+        # #2022: queue each release under ITS artist's WATCHLIST quality
+        # profile, the way the watchlist scanner does (SYNC-01). The panel
+        # that sets it promises "every release this artist queues uses it",
+        # but this path never asked, so a discography queued for an artist
+        # set to (say) a lossless profile landed on the default instead.
+        # Per entry, not per request: this endpoint is also the Discover
+        # "Your Albums" batch endpoint, whose albums span many artists —
+        # the envelope artist must not lend its profile to all of them,
+        # and each batch artist deserves its own. None = no watchlist
+        # assignment, and add_to_wishlist resolves the app-wide default
+        # exactly as before. Resolved once per distinct artist per stream.
+        _discography_profile_cache = {}
+
+        def _discography_quality_profile_id(entry_artist_name):
+            # str() coercion first: a non-string name in the payload must
+            # degrade to "no assignment", never raise outside the guard.
+            # Cached per ARTIST, not per (artist, source): an artist's
+            # assignment cannot depend on which source an album came
+            # through, and gap-fill albums carry their own source — a
+            # per-source key would resolve the same artist twice and
+            # could pin the two halves of one discography differently.
+            entry_key = str(entry_artist_name or '').strip().casefold()
+            if entry_key in _discography_profile_cache:
+                return _discography_profile_cache[entry_key]
+            resolved = None
+            failed = False
+            try:
+                lookup = getattr(
+                    db, 'get_watchlist_artist_quality_profile_id', None)
+                if lookup is not None:
+                    if entry_key == str(artist_name or '').strip().casefold() \
+                            and str(artist_id) != _BATCH_ARTIST_ID:
+                        # the envelope artist: the URL id is THEIRS, in
+                        # the PAGE's namespace — so the page's source
+                        # labels it, never an album's. A gap-fill album
+                        # from another source must not relabel the id:
+                        # the resolver's library detection and column
+                        # trust key off that label, and this cache would
+                        # pin whichever album happened to stream first.
+                        resolved = lookup(
+                            artist_id, profile_id=profile_id,
+                            artist_name=entry_artist_name,
+                            source=artist_source)
+                    else:
+                        # name-only: no id travels with this call, and
+                        # the resolver keys every source behaviour off
+                        # the id — passing an album's source here would
+                        # suggest a scoping that doesn't exist
+                        resolved = lookup(
+                            None, profile_id=profile_id,
+                            artist_name=entry_artist_name,
+                            source=None)
+            except Exception as _qp_err:  # noqa: BLE001 - never break queueing
+                failed = True
+                logger.warning("Discography: watchlist quality profile lookup "
+                               "failed for %s: %s", entry_artist_name, _qp_err)
+            # an exception HERE is not cached — the next album retries.
+            # (the resolver itself fails open to None on its own errors;
+            # that None IS cached, like any other answer.)
+            if not failed:
+                _discography_profile_cache[entry_key] = resolved
+            return resolved
         # Honor the same content-type filters the watchlist scanner uses
         # (issue #559). One read at the top — settings don't change
         # mid-stream and the four bool reads aren't worth re-running per
@@ -2277,6 +2345,13 @@ def download_discography(artist_id):
 
                     album = result.get('album', {}) or {}
                     tracks = result.get('tracks', []) or []
+                    # resolved only now that the album itself resolved:
+                    # a failed album queues nothing and costs no lookup
+                    # (or warning repeat); a resolved-but-trackless album
+                    # still pays one, cached per artist. Once per album,
+                    # not per track — a failure retries on the next album.
+                    entry_quality_profile_id = _discography_quality_profile_id(
+                        hint_artist)
                     album_name = album.get('name') or hint_album_name or 'Unknown'
                     album_images = album.get('images') or (
                         [{'url': album['image_url']}] if album.get('image_url') else []
@@ -2413,6 +2488,12 @@ def download_discography(artist_id):
                                     'source': resolved_source,
                                 }),
                                 profile_id=profile_id,
+                                quality_profile_id=entry_quality_profile_id,
+                                # the profile applies to rows this click
+                                # creates; a row already queued (from a
+                                # playlist, a search, an earlier scan)
+                                # keeps the profile it already has
+                                overwrite_existing_profile=False,
                             )
                             if was_added:
                                 added += 1

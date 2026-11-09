@@ -762,6 +762,22 @@ def _album_rows_of(track_id) -> tuple:
     return (key + "::", key + ":;")
 
 
+# provider -> the ARTIST_IDS_SQL alias holding that provider's artist id
+# for a Library-v2 artist (see _library_watchlist_id_pairs). Keyed by
+# provider name; the watchlist side comes from SOURCE_COLUMNS, so a
+# provider with no alias here is skipped — extending this map is part of
+# adding a provider to SOURCE_COLUMNS (the P1-05 drift shape), and a test
+# pins the two together.
+_LIBRARY_ARTIST_ID_ALIASES = {
+    "spotify": "spotify_artist_id",
+    "itunes": "itunes_artist_id",
+    "deezer": "deezer_id",
+    "discogs": "discogs_id",
+    "musicbrainz": "musicbrainz_id",
+    "amazon": "amazon_id",
+}
+
+
 class MusicDatabase:
     """SQLite database manager for SoulSync music library data"""
     
@@ -15869,6 +15885,7 @@ class MusicDatabase:
         quality_profile_id: Optional[int] = None,
         raise_on_error: bool = False,
         request_approved: bool = False,
+        overwrite_existing_profile: bool = True,
     ) -> bool:
         """``True`` when a NEW wishlist row was inserted.
 
@@ -15891,6 +15908,7 @@ class MusicDatabase:
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
             request_approved=request_approved,
+            overwrite_existing_profile=overwrite_existing_profile,
         )
         if raise_on_error and outcome["status"] == "error":
             raise RuntimeError(outcome.get("reason") or "add_to_wishlist failed")
@@ -15907,6 +15925,7 @@ class MusicDatabase:
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
         request_approved: bool = False,
+        overwrite_existing_profile: bool = True,
     ) -> Dict[str, Any]:
         """Add a failed track to the wishlist for retry.
 
@@ -15926,7 +15945,15 @@ class MusicDatabase:
         "add to wishlist" modal). Like ``source_type == 'manual'`` it bypasses
         the ignore-list gate AND clears any stale ignore — but unlike changing
         ``source_type`` it preserves the real provenance ('album'), which the
-        wishlist categorisation (Albums vs Singles) relies on (#874/#897)."""
+        wishlist categorisation (Albums vs Singles) relies on (#874/#897).
+
+        ``overwrite_existing_profile`` (default True, the scanner's
+        contract) lets an explicit ``quality_profile_id`` refresh a row
+        that is already queued. A caller that only wants its profile on
+        rows it CREATES — Download Discography, #2022 — passes False:
+        existing rows keep the profile (and, with duplicates off, the
+        whole row) they already have, exactly as they did when that
+        caller passed no profile at all."""
         try:
             if track_data is not None and spotify_track_data is None:
                 spotify_track_data = track_data
@@ -16113,8 +16140,12 @@ class MusicDatabase:
                                 existing_artist.lower() == artist_name.lower()):
                                 # A caller carrying an explicit Quality Profile
                                 # is authoritative. Refresh the row rather than
-                                # dropping the request as a duplicate.
-                                if source_type == 'enhance' or quality_profile_id is not None:
+                                # dropping the request as a duplicate. (A caller
+                                # that opted out of overwriting existing rows'
+                                # profiles keeps the plain duplicate skip.)
+                                if source_type == 'enhance' or (
+                                        quality_profile_id is not None
+                                        and overwrite_existing_profile):
                                     try:
                                         _stored_info = json.loads(cursor.execute(
                                             "SELECT source_info FROM wishlist_tracks WHERE id=?",
@@ -16136,7 +16167,8 @@ class MusicDatabase:
                                     if source_info:
                                         updates.append("source_info = ?")
                                         params.append(source_json)
-                                    if quality_profile_id is not None and resolved_qp_id is not None:
+                                    if quality_profile_id is not None and resolved_qp_id is not None \
+                                            and overwrite_existing_profile:
                                         updates.append("quality_profile_id = ?")
                                         params.append(resolved_qp_id)
                                     if source_type == 'manual' or existing['source_type'] != 'manual':
@@ -16235,7 +16267,8 @@ class MusicDatabase:
                         _existing_payload = {}
                     updates = ["spotify_data = ?"]
                     params: List[Any] = [_refreshed_wishlist_json(_existing_payload, spotify_json)]
-                    if quality_profile_id is not None and resolved_qp_id is not None:
+                    if quality_profile_id is not None and resolved_qp_id is not None \
+                            and overwrite_existing_profile:
                         updates.append("quality_profile_id = ?")
                         params.append(resolved_qp_id)
                     if source_info:
@@ -17907,6 +17940,309 @@ class MusicDatabase:
                 e,
             )
             return False
+
+    def get_watchlist_artist_quality_profile_id(
+        self,
+        artist_id: str = None,
+        profile_id: int = 1,
+        artist_name: str = None,
+        source: str = None,
+    ) -> Optional[int]:
+        """The quality profile a watchlist artist's queued releases must use.
+
+        The watchlist panel promises "every release this artist queues uses
+        it", and the watchlist scanner honors that (SYNC-01) — but a caller
+        queueing releases for the artist through another path (Download
+        Discography, #2022) has to ask for the profile itself or its
+        wishlist rows silently land on the app-wide default.
+
+        Identity here is (id, name) corroboration, because neither half
+        is trustworthy alone from the callers that queue discographies:
+
+        - The URL id's provider is NOT reliably labelled. The discography
+          modal picks the id Spotify > iTunes > Deezer from the artist's
+          enhanced record while ``source`` names the provider the PAGE is
+          showing, and gap-fill albums carry their own source again — so
+          an id labelled "deezer" is routinely a Spotify id. Matching it
+          in only the labelled provider's column (or excluding rows whose
+          labelled column disagrees) misses the very artist it names.
+        - A bare id matched against every column can still collide with
+          a DIFFERENT artist's id in another provider's namespace.
+
+        So: the id is searched in every provider column, and the rows it
+        matches are corroborated by the artist name the request is about
+        (the name its tracks are filtered and queued under):
+
+        1. Id-matched rows whose name folds to the request name — that
+           set's assignment. (A row matched this way is AUTHORITATIVE,
+           unset included: "this artist queues at the default" must not
+           be overridden by a different same-named artist's assignment.)
+        2. Id-matched rows under another name, while a DIFFERENT watched
+           artist bears the request name — the id belongs to that other
+           artist; the named artist's own rows decide.
+        3. Otherwise uncorroborated id matches are trusted only as far
+           as their claim goes: a match in the very column the labelled
+           provider owns (a renamed row still counts), or any match when
+           no source was sent at all (legacy payloads, where the id is
+           the only claim). A match in a DIFFERENT provider's column
+           than the label's — including a label with no watchlist column
+           at all, like tidal — is a cross-namespace collision, not an
+           identity, and decides nothing.
+        4. No id match: the request name's rows (the same artist is
+           often filed under another source's id entirely).
+
+        ``source`` spots a Library-v2 row id (``library``/``lib2`` or a
+        ``lib2:`` prefix), which is translated to the provider ids that
+        row carries, each searched in its own provider's column. It is
+        never used to reinterpret a provider id as a library row id from
+        the id's shape alone (the G02-4 mistake) — but a bare number
+        whose lib2 row carries the request's name IS read as that row:
+        the discography modal posts library row numbers under provider
+        labels, and small counting numbers are exactly the ids that
+        collide across namespaces. The same check vetoes a library
+        label whose row carries a different name — when the request
+        carries a name at all; a nameless library-labelled request has
+        nothing to veto against and is translated as labelled.
+        Accepted tradeoff, pinned by test: once a bare number IS
+        corroborated as a library row, its provider reading is
+        discarded entirely — if the translation and the name together
+        yield nothing, the answer is None even when some watch row
+        holds that number as a provider id under an alias, because
+        that row is indistinguishable from a stranger's.
+
+        Cost note: an id match runs one small query per provider column
+        (six today), and the name fallback scans the profile's watchlist
+        rows — both trivial at watchlist sizes, and the endpoint caches
+        per artist per request.
+
+        Within a matched set, an unset row and a row pointing at a
+        since-deleted profile both abstain (neither is an opinion); the
+        remaining assignments must agree on ONE profile, else the set is
+        ambiguous, not a coin flip. A lone dangling id reads as no
+        assignment, never as that id itself: ``add_to_wishlist`` rejects
+        unknown profile ids outright, which would queue nothing at all.
+        Context-sentinel ids (``from_sync_modal`` and friends, #1284) are
+        not ids and match nothing.
+
+        Fail-open: returns ``None`` (the caller queues at the default) on
+        any error — a profile lookup must never break queueing.
+        """
+        try:
+            profile_id = 1 if profile_id is None else int(profile_id)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(watchlist_artists)")
+                cols = {c[1] for c in cursor.fetchall()}
+                if "quality_profile_id" not in cols:
+                    return None
+
+                from core.context_sentinels import is_context_sentinel
+                from core.watchlist_sources import (
+                    ARTIST_ID_COLUMNS,
+                    SOURCE_COLUMNS,
+                    normalize_source,
+                )
+
+                aid = str(artist_id or "").strip()
+                if is_context_sentinel(aid) or aid.casefold() in (
+                        "null", "undefined"):
+                    # the playlist explorer can post its nullable id
+                    # stringified; no provider issues an id like these
+                    aid = ""
+                raw_source = str(source or "").strip().lower()
+                is_library_id = raw_source in ("library", "lib2") or aid.startswith("lib2:")
+                provider = None if is_library_id else normalize_source(source)
+                labelled_col = SOURCE_COLUMNS.get(provider) if provider else None
+                name = str(artist_name or "").strip()
+                folded = name.casefold()
+
+                def _lib2_row_name():
+                    """The name on the Library-v2 row this id numbers, or
+                    None. A missing table, a missing row, or a blank
+                    stored name is "no evidence", never an error — a
+                    blank name must not veto a translation it knows
+                    nothing about."""
+                    digits = aid[5:] if aid.startswith("lib2:") else aid
+                    if not digits.isdigit():
+                        return None
+                    try:
+                        row = cursor.execute(
+                            "SELECT name FROM lib2_artists WHERE id = ?",
+                            (int(digits),)).fetchone()
+                    except Exception:
+                        return None
+                    if not row:
+                        return None
+                    return str(row[0] or "").strip() or None
+
+                # A bare number can be a library row id wearing a
+                # provider label: the discography modal falls back to
+                # the library row number when the enhanced record has no
+                # provider ids, and labels it with the page's source.
+                # Library numbers are small counting numbers — exactly
+                # the ids that collide with real provider ids — so the
+                # number is read as a library id only when the row it
+                # numbers carries the request's name. Symmetrically, an
+                # explicitly library-labelled id whose row carries a
+                # DIFFERENT name is a lying label: no translation, the
+                # name alone decides.
+                lib2_name = _lib2_row_name() if aid else None
+                if lib2_name is not None and name:
+                    if lib2_name.casefold() == folded:
+                        is_library_id = True
+                    elif is_library_id:
+                        is_library_id = False
+                    provider = None if is_library_id else normalize_source(source)
+                    labelled_col = (
+                        SOURCE_COLUMNS.get(provider) if provider else None)
+
+                def _rows(pairs):
+                    """(name, quality_profile_id, matched column) of the
+                    rows these (column, id) pairs match, scoped to the
+                    profile. Queried pair by pair so the column that
+                    matched survives — corroboration depends on it."""
+                    found = []
+                    for col, val in pairs:
+                        if not val:
+                            continue
+                        found.extend(
+                            (r[0], r[1], col)
+                            for r in cursor.execute(
+                                "SELECT artist_name, quality_profile_id "
+                                "FROM watchlist_artists "
+                                f"WHERE profile_id = ? AND {col} = ?",
+                                (profile_id, str(val)),
+                            ).fetchall())
+                    return found
+
+                _name_rows_cache = {}
+
+                def _name_rows():
+                    """(name, quality_profile_id) of this profile's rows
+                    bearing the request name — computed at most once, and
+                    only when a weaker identity claim actually needs it.
+                    One Python scan, deliberately: SQL LOWER() is
+                    ASCII-only and doesn't trim, so a SQL-first shortcut
+                    can find SOME same-named rows and miss others (a
+                    " BJÖRK" next to a "björk"), and the unanimity check
+                    would then run on an incomplete set. A profile's
+                    watchlist is a small table; one exact-semantics scan
+                    beats two disagreeing ones."""
+                    if not name:
+                        return []
+                    if "rows" not in _name_rows_cache:
+                        _name_rows_cache["rows"] = [r for r in cursor.execute(
+                            "SELECT artist_name, quality_profile_id "
+                            "FROM watchlist_artists WHERE profile_id = ?",
+                            (profile_id,),
+                        ).fetchall()
+                            if str(r[0] or "").strip().casefold() == folded]
+                    return _name_rows_cache["rows"]
+
+                def _pick(rows):
+                    """One assignment out of a matched set, or None.
+
+                    Dangling ids (their profile was deleted) and
+                    non-numeric stored values abstain like unset rows;
+                    what remains must agree unanimously."""
+                    candidates = set()
+                    for r in rows:
+                        if r[1] is None:
+                            continue
+                        if isinstance(r[1], float) and not r[1].is_integer():
+                            continue  # a fractional stored id is corrupt, not 2
+                        try:
+                            candidates.add(int(r[1]))
+                        except (TypeError, ValueError):
+                            continue
+                    if not candidates:
+                        return None
+                    marks = ", ".join("?" for _ in candidates)
+                    live = {r[0] for r in cursor.execute(
+                        f"SELECT id FROM quality_profiles "
+                        f"WHERE id IN ({marks})",
+                        tuple(candidates),
+                    ).fetchall()}
+                    return live.pop() if len(live) == 1 else None
+
+                id_rows = []
+                if aid and is_library_id:
+                    id_rows = _rows(self._library_watchlist_id_pairs(cursor, aid))
+                elif aid:
+                    id_rows = _rows([(col, aid) for col in ARTIST_ID_COLUMNS])
+                if id_rows:
+                    if name:
+                        named = [r for r in id_rows
+                                 if str(r[0] or "").strip().casefold() == folded]
+                        if named:
+                            return _pick(named)
+                        if _name_rows():
+                            # the id is a different watched artist's; the
+                            # request is about the named one
+                            return _pick(_name_rows())
+                    if labelled_col:
+                        # renamed row, but the id matched in the very
+                        # column its label claims — that claim is enough
+                        return _pick([r for r in id_rows
+                                      if r[2] == labelled_col])
+                    if raw_source and not is_library_id:
+                        # the label names SOME provider (even one with no
+                        # watchlist column, e.g. tidal): every match here
+                        # is cross-namespace and uncorroborated — a plain
+                        # numeric collision, not an identity
+                        return None
+                    # no source at all: the id is the only claim there is
+                    return _pick(id_rows)
+                if name:
+                    return _pick(_name_rows())
+                return None
+        except Exception as e:
+            logger.warning(
+                "Watchlist artist quality profile lookup failed (ID: %s): %s",
+                artist_id, e,
+            )
+            return None
+
+    @staticmethod
+    def _library_watchlist_id_pairs(cursor, artist_id):
+        """(watchlist column, provider id) pairs for a Library-v2 artist.
+
+        The provider-preserving twin of ``library_artist_provider_ids``
+        (core/watchlist_sources.py): that helper's flat list is fine for
+        "match any", but a caller resolving an identity must keep each id
+        in its own provider's column — a Deezer id pooled into the
+        Spotify column manufactures matches against other artists. Same
+        id-shape guard as the original: only a bare numeric (or
+        ``lib2:``-prefixed) id can be a library row id at all. (The
+        original also de-duplicates its flat list; here each provider
+        contributes its own column, so duplicates can't arise.)
+        """
+        aid = str(artist_id or "").strip()
+        if aid.startswith("lib2:"):
+            aid = aid[5:]
+        if not aid.isdigit():
+            return []
+        from core.library2.provider_ids import ARTIST_IDS_SQL
+        from core.watchlist_sources import SOURCE_COLUMNS
+
+        library_alias = _LIBRARY_ARTIST_ID_ALIASES
+        providers = [p for p in SOURCE_COLUMNS if p in library_alias]
+        row = cursor.execute(
+            f"SELECT {', '.join(library_alias[p] for p in providers)} FROM "
+            f"(SELECT {ARTIST_IDS_SQL} FROM lib2_artists WHERE id = ? LIMIT 1)",
+            (int(aid),)).fetchone()
+        if not row:
+            return []
+        pairs = []
+        for provider, value in zip(providers, tuple(row), strict=True):
+            v = str(value or "").strip()
+            # v == aid would be the library row's own number echoing back
+            # as a "provider id" (the original helper drops it too): it
+            # says nothing about identity and could match a stranger
+            # whose provider id happens to be that number
+            if v and v != aid:
+                pairs.append((SOURCE_COLUMNS[provider], v))
+        return pairs
 
     def remove_artist_from_watchlist(self, artist_id: str, profile_id: int = 1,
                                      raise_on_error: bool = False, source: str = None) -> bool:

@@ -178,11 +178,14 @@ export interface BatchAlbumPayload {
 /**
  * The request body (1954-1969).
  *
- * `artist_name: 'Your Albums'` and `source: null` are placeholders — the
- * backend resolves each album through its own per-album `source` and
- * `artist_name`, so the envelope's values are never read. The URL's
- * `your-albums` segment is the same idea: it makes the route match without
- * naming an arbitrary library artist.
+ * `artist_name: 'Your Albums'` and `source: null` are placeholders. No
+ * album is resolved or profiled through them: the backend works through
+ * each album's own per-album `source` and `artist_name`, and queues the
+ * album under that artist's watchlist quality profile (#2022). The one
+ * place the envelope name is still read is the owned-tracks pre-fetch,
+ * where it matches no artist. The URL's `your-albums` segment is the
+ * same idea: it makes the route match without naming an arbitrary
+ * library artist.
  */
 export const BATCH_ENDPOINT = '/api/artist/your-albums/download-discography';
 export const BATCH_ENVELOPE_ARTIST = 'Your Albums';
