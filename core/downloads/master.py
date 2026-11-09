@@ -755,6 +755,12 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         from core.library_scope import library_scope_for_profile
         _lib2_wishlist = (int(batch_profile_id or 1) == 1
                           or library_scope_for_profile(batch_profile_id) == int(batch_profile_id))
+        # an upgrade intent comes only from what the server stored on the
+        # wishlist row, never from the track json this batch was handed (a
+        # client can post that). read here, off the lock (review 5 W2-WD-2)
+        _stored_upgrade_sources = (
+            _stored_wishlist_sources(db, batch_profile_id, tracks_json)
+            if playlist_id == 'wishlist' and _lib2_wishlist else {})
 
         # Most album requests carry one explicit/mirrored profile on the batch.
         # For older/internal callers, recover the same intent from the first
@@ -1837,12 +1843,14 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
                     and playlist_id == 'wishlist'
                     and _lib2_wishlist
                 ):
-                    _upgrade_source = track_info.get('source_info') or {}
-                    if isinstance(_upgrade_source, str):
-                        try:
-                            _upgrade_source = json.loads(_upgrade_source)
-                        except (TypeError, ValueError):
-                            _upgrade_source = {}
+                    _wishlist_row = str(track_info.get('wishlist_id') or '')
+                    _stored = (_stored_upgrade_sources.get(int(_wishlist_row))
+                               if _wishlist_row.isdigit() else None)
+                    # the row this track names, and only when it is that track
+                    _upgrade_source = (
+                        _stored[1] if _stored
+                        and _stored[0] == str(track_info.get('spotify_track_id') or '')
+                        else {})
                     if (
                         isinstance(_upgrade_source, dict)
                         and _upgrade_source.get('source') == 'library_v2'
@@ -1916,6 +1924,34 @@ def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: M
         if is_auto_batch and playlist_id == 'wishlist':
             logger.error("[Auto-Wishlist] Master worker error - resetting auto-processing flag")
             deps.reset_wishlist_auto_processing()
+
+
+def _stored_wishlist_sources(db, profile_id, tracks) -> dict:
+    """wishlist row id -> (row key, source_info) as the server stored them,
+    for the rows these tracks name. empty when nothing can be read."""
+    ids = sorted({int(t['wishlist_id']) for t in tracks or []
+                  if isinstance(t, dict) and str(t.get('wishlist_id') or '').isdigit()})
+    out = {}
+    if not ids:
+        return out
+    try:
+        with db._get_connection() as conn:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                rows = conn.execute(
+                    "SELECT id, spotify_track_id, source_info FROM wishlist_tracks"
+                    f" WHERE profile_id=? AND id IN ({','.join('?' * len(chunk))})",
+                    (int(profile_id or 1), *chunk)).fetchall()
+                for row_id, key, raw in rows:
+                    try:
+                        info = json.loads(raw or '{}')
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(info, dict):
+                        out[int(row_id)] = (str(key or ''), info)
+    except Exception as exc:  # noqa: BLE001 - unreadable: no upgrade authority
+        logger.debug("stored wishlist sources unreadable: %s", exc)
+    return out
 
 
 def _lib2_track_for_path(db, path):

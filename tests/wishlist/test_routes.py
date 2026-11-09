@@ -731,6 +731,27 @@ def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context()
     assert add_call["track_data"]["explicit"] is True
 
 
+def test_add_album_track_to_wishlist_drops_client_upgrade_authority():
+    """review 5 W2-WD-2: the master turns a stored library_v2 / quality upgrade
+    source into a sealed upgrade intent, so a client never gets to store one."""
+    runtime, service, _db, _logger, _activity_calls = _build_runtime()
+    add_album_track_to_wishlist(
+        runtime,
+        track={"id": "t1", "name": "Any Song", "artists": [{"name": "Any Artist"}]},
+        artist={"id": "a1", "name": "Any Artist"},
+        album={"id": "al1", "name": "Any Album"},
+        source_context={"source": "library_v2", "upgrade_check": True, "lib2_track_id": 42,
+                        "lib2_album_id": 7, "job": "quality_upgrade_scan",
+                        "original_file_path": "/music/other.flac", "quality_profile_id": 2,
+                        "playlist_name": "Kept"},
+    )
+    stored = service.add_calls[0]["source_context"]
+    for key in ("source", "upgrade_check", "lib2_track_id", "lib2_album_id", "job",
+                "original_file_path", "quality_profile_id"):
+        assert key not in stored, (key, stored)
+    assert stored["playlist_name"] == "Kept"
+
+
 def test_add_album_track_to_wishlist_materializes_lib2_entity_on_success(monkeypatch):
     """§52.8: a confirmed 'Add to Wishlist' click must materialize the lib2
     Artist/Release/Track — best-effort, never affecting the response."""
