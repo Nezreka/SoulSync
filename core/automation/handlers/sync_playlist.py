@@ -128,7 +128,7 @@ def _run_all_playlists_sync_worker(
         try:
             res = _sync_single_mirrored_playlist(sub_config, deps, pl=pl, done_event=done_event)
             status = res.get('status')
-            if status == 'skipped':
+            if status in ('skipped', 'curation_pending'):
                 total_skipped += 1
                 if auto_id and hasattr(deps, 'update_progress'):
                     deps.update_progress(
@@ -265,6 +265,27 @@ def _sync_single_mirrored_playlist(
     if not tracks:
         return {'status': 'error', 'reason': 'No tracks in playlist'}
 
+    all_tracks = tracks
+    curation_snapshot = None
+    if pl.get('curation_enabled'):
+        try:
+            from core.playlists.curation import curated_tracks_for_operation
+            tracks, curation_snapshot = curated_tracks_for_operation(
+                db,
+                int(playlist_id),
+                all_tracks,
+                profile_id=int(pl.get('profile_id') or 1),
+            )
+        except Exception as exc:
+            deps.logger.error("Curation policy read failed for mirror %s: %s", playlist_id, exc)
+            return {'status': 'error', 'reason': f'Curation policy could not be verified: {exc}'}
+    if curation_snapshot and not tracks:
+        return {
+            'status': 'curation_pending',
+            'reason': 'Curation is enabled but no tracks are approved Keep',
+            'approved_tracks': '0',
+        }
+
     # Convert mirrored tracks to format expected by run_sync_task.
     # Use discovered metadata when available, fall back to Spotify
     # hint or raw playlist fields when not.
@@ -375,6 +396,12 @@ def _sync_single_mirrored_playlist(
     if quality_profile_id is not None:
         for track in tracks_json:
             track['quality_profile_id'] = quality_profile_id
+    if curation_snapshot:
+        for track in tracks_json:
+            track['_curation_origin'] = {
+                'mirrored_playlist_id': int(playlist_id),
+                'source_track_id': track.get('source_track_id') or '',
+            }
 
     # Preflight: hash the track list and compare against last sync.
     # Skip if the exact same set of tracks was already synced and
@@ -389,7 +416,7 @@ def _sync_single_mirrored_playlist(
     # no source id), tracks_hash stays identical to the pre-add sync and we
     # used to no-op with "unchanged" while the new song never hit wishlist.
     mirror_ids_str = ','.join(
-        sorted(t.get('source_track_id', '') or '' for t in tracks if t.get('source_track_id'))
+        sorted(t.get('source_track_id', '') or '' for t in all_tracks if t.get('source_track_id'))
     )
     mirror_tracks_hash = hashlib.md5(mirror_ids_str.encode()).hexdigest() if mirror_ids_str else ''
 
@@ -434,6 +461,9 @@ def _sync_single_mirrored_playlist(
         # a status from before the key existed ran in the global mode
         last_sync_mode = last_status.get('sync_mode') or resolve_sync_mode(None, _global_mode)
         sync_mode_changed = last_sync_mode != sync_mode
+        curation_changed = bool(curation_snapshot) and (
+            last_status.get('curation_revision') != curation_snapshot['revision']
+        )
         # unchanged tracks are not enough: a matched file deleted since the last
         # sync changes nothing above, and skipping then never re-matched or
         # wishlisted it (#1417). checked last, it is the only part that reads
@@ -443,6 +473,7 @@ def _sync_single_mirrored_playlist(
             and not mirror_changed
             and not quality_profile_changed
             and not sync_mode_changed
+            and not curation_changed
             and last_hash == tracks_hash
             and last_matched >= len(tracks_json)
         )
@@ -523,6 +554,12 @@ def _sync_single_mirrored_playlist(
                     f'Quality Profile changed ({last_quality_profile_id} → '
                     f'{quality_profile_id}) — re-running sync'
                 ),
+                log_type='info',
+            )
+        elif curation_changed:
+            deps.update_progress(
+                auto_id,
+                log_line='Curation decisions changed — running sync',
                 log_type='info',
             )
     except Exception as e:
@@ -619,6 +656,7 @@ def _sync_single_mirrored_playlist(
             'sync_mode': own_sync_mode,
             'is_request_list': bool(pl.get('is_request_list')),
             'auto_remove_fulfilled': bool(pl.get('auto_remove_fulfilled')),
+            'curation_snapshot': curation_snapshot,
         },
         daemon=True,
         name=f'auto-sync-{playlist_id}',

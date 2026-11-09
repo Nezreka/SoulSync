@@ -13,9 +13,19 @@ logger = logging.getLogger(__name__)
 def mirrored_tracks_to_download_json(
     tracks: List[Dict[str, Any]],
     quality_profile_id: Optional[int] = None,
+    mirrored_playlist_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Convert mirrored playlist rows to the payload expected by the download master."""
     out: List[Dict[str, Any]] = []
+    def _stamp(entry, track):
+        entry['source_track_id'] = track.get('source_track_id') or ''
+        if mirrored_playlist_id is not None:
+            entry['_curation_origin'] = {
+                'mirrored_playlist_id': int(mirrored_playlist_id),
+                'source_track_id': entry['source_track_id'],
+            }
+        return entry
+
     for t in tracks:
         extra = {}
         if t.get('extra_data'):
@@ -41,7 +51,7 @@ def mirrored_tracks_to_download_json(
                 entry['disc_number'] = md['disc_number']
             if quality_profile_id is not None:
                 entry['quality_profile_id'] = quality_profile_id
-            out.append(entry)
+            out.append(_stamp(entry, t))
             continue
 
         hint = extra.get('spotify_hint', {})
@@ -66,7 +76,7 @@ def mirrored_tracks_to_download_json(
             }
             if quality_profile_id is not None:
                 entry['quality_profile_id'] = quality_profile_id
-            out.append(entry)
+            out.append(_stamp(entry, t))
         elif t.get('source_track_id') and (t.get('track_name') or '').strip():
             entry = {
                 'name': t['track_name'].strip(),
@@ -77,7 +87,7 @@ def mirrored_tracks_to_download_json(
             }
             if quality_profile_id is not None:
                 entry['quality_profile_id'] = quality_profile_id
-            out.append(entry)
+            out.append(_stamp(entry, t))
     return out
 
 
@@ -101,9 +111,27 @@ def run_playlist_organize_download(
     source = (pl.get('source') or 'spotify').strip() or 'spotify'
 
     tracks = db.get_mirrored_playlist_tracks(int(mirrored_playlist_id))
+    curation_snapshot = None
+    if pl.get('curation_enabled'):
+        try:
+            from core.playlists.curation import curated_tracks_for_operation
+            tracks, curation_snapshot = curated_tracks_for_operation(
+                db,
+                int(mirrored_playlist_id),
+                tracks,
+                profile_id=int(pl.get('profile_id') or profile_id),
+            )
+        except Exception as exc:
+            return {'status': 'error', 'reason': f'Curation policy could not be verified: {exc}'}
+    if curation_snapshot and not tracks:
+        return {
+            'status': 'curation_pending',
+            'reason': 'Curation is enabled but no tracks are approved Keep',
+        }
     tracks_json = mirrored_tracks_to_download_json(
         tracks,
         quality_profile_id=pl.get('quality_profile_id'),
+        mirrored_playlist_id=(int(mirrored_playlist_id) if curation_snapshot else None),
     )
     if not tracks_json:
         return {'status': 'skipped', 'reason': 'No processable tracks'}
@@ -149,6 +177,7 @@ def run_playlist_organize_download(
             'organize_by_playlist': True,
             'source_playlist_ref': source_playlist_ref,
             'mirrored_playlist_id': int(mirrored_playlist_id),
+            'curation_snapshot': curation_snapshot,
         }
 
     if record_sync_history_start:

@@ -21,8 +21,15 @@ def _lib(rk, title, artist="Artist"):
     return SimpleNamespace(ratingKey=rk, title=title, artist=artist, album="Album")
 
 
-def _src(sid, name):
-    return SimpleNamespace(id=sid, name=name, artists=["Artist"], album="Album", duration_ms=180000)
+def _src(sid, name, source_track_id=None):
+    return SimpleNamespace(
+        id=sid,
+        source_track_id=source_track_id,
+        name=name,
+        artists=["Artist"],
+        album="Album",
+        duration_ms=180000,
+    )
 
 
 def _service(matches):
@@ -96,3 +103,18 @@ def test_no_folds_means_zero_and_no_marks():
     result = asyncio.run(service.sync_playlist(playlist))
     assert result.duplicate_tracks == 0
     assert all("folded_into" not in d for d in result.match_details)
+
+
+def test_history_preserves_provider_id_and_records_mirrored_source_id():
+    service, _client = _service([(_lib("k1", "Song"), 1.0)])
+    playlist = SimpleNamespace(
+        id="auto_mirror_7",
+        name="Deezer Mirror",
+        tracks=[_src("spotify-discovery-id", "Song", "deezer-source-id")],
+    )
+
+    result = asyncio.run(service.sync_playlist(playlist))
+
+    [detail] = result.match_details
+    assert detail["source_track_id"] == "spotify-discovery-id"
+    assert detail["mirrored_source_track_id"] == "deezer-source-id"

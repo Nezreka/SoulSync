@@ -158,6 +158,11 @@ export interface MirroredTrack {
   added_at?: string | null;
   /** where it stands: core/playlists/track_status.py (#1721) */
   status?: MirroredTrackStatus;
+  source_track_id?: string;
+  curation_decision?: 'keep' | 'pending' | 'reject' | null;
+  effective_decision?: 'keep' | 'pending' | 'reject' | 'unreviewed';
+  globally_rejected?: boolean;
+  curation_eligible?: boolean;
 }
 
 export type MirroredTrackStatus =

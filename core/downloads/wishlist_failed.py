@@ -109,6 +109,13 @@ def add_failed_tracks_to_wishlist(batch, permanently_failed_tracks, wishlist_ser
                 logger.exception(f"[Wishlist Processing] Provenance resolution failed for {track_name}, falling back to batch provenance: {e}")
                 track_source_type = batch_source_type
                 track_source_context = dict(batch_source_context)
+
+            # Preserve PR #1942's per-track mirrored-playlist identity after
+            # upstream's per-track provenance resolver has selected its source.
+            track_source_context = dict(track_source_context or {})
+            if isinstance(track_data, dict):
+                track_source_context.update(track_data.get('_curation_origin') or {})
+
             # the detailed outcome tells "already on the wishlist" and
             # "blocklisted" apart from a real failure, the bare bool reported
             # all of them as "Failed to add"

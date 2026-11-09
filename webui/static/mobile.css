@@ -4559,6 +4559,23 @@ body:has(.artist-map-container) #gsearch-bar {
     .mm-list--editable .mm-row {
         grid-template-columns: 26px 36px minmax(0, 1fr) 48px 28px 28px;
     }
+    .mm-list--curation .mm-list-head,
+    .mm-list--curation .mm-row {
+        grid-template-columns: 26px 36px minmax(0, 1fr) 126px 28px;
+    }
+    .mm-list--curation .mm-col-dur,
+    .mm-list--curation .mm-row-dur {
+        display: none;
+    }
+    .mm-curation {
+        grid-template-columns: 1fr;
+        padding: 12px 16px;
+    }
+    .mm-curation-counts,
+    .mm-curation-bulk {
+        grid-column: 1;
+    }
+    .mm-global-reject { display: none; }
     .mm-list-head > span:nth-child(4),
     .mm-row-album {
         display: none;
