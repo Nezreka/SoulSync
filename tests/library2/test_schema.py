@@ -34,6 +34,9 @@ _EXPECTED_TABLES = {
     "lib2_song_search_dirty", "lib2_song_search_state",
     # the artist grid's membership counter (core.library2.member_version)
     "lib2_member_state",
+    # the recording-identity pass's marks and re-pointed release tracks
+    # (review 5 W2-WE-2: it reads only what changed since its last pass)
+    "lib2_recording_identity_state", "lib2_recording_identity_dirty",
 }
 
 
