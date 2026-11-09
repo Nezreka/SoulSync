@@ -1696,3 +1696,39 @@ def test_provider_refresh_keeps_locked_genres(imported_conn, monkeypatch,
     assert locked_genres == ["rock"]
     # an unlocked row still takes the provider's genres
     assert open_genres == ["rock", "album rock", "seen live"]
+
+
+def test_a_split_creates_the_guest_component_unwatched(imported_conn):
+    """review 5 W2-WF-4: a component that did not exist yet was created with
+    the ghost's watch, before the rehome gave it to the primary only"""
+    ghost = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    _make_collab_release(imported_conn, ghost)
+
+    result = NE.smart_split_combined_artist(imported_conn, ghost, resolver=_component_resolver)
+
+    primary, guest = result["component_ids"][:2]
+    flags = dict(imported_conn.execute(
+        "SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)", (primary, guest)).fetchall())
+    assert flags == {primary: 1, guest: 0}
+
+
+def test_a_local_split_creates_the_guest_unwatched(imported_conn):
+    """review 5 W2-WF-4, the local credit split"""
+    lead = _insert_native_artist(imported_conn, "Oneheart")
+    imported_conn.execute("UPDATE lib2_artists SET spotify_id='SP_one' WHERE id=?", (lead,))
+    ghost = _insert_native_artist(imported_conn, "Oneheart, Malek")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    album = imported_conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) "
+                                  "VALUES(?, 'Snow')", (lead,)).lastrowid
+    track = imported_conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                                  "VALUES(?, 'Snow', 1)", (album,)).lastrowid
+    imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                          "VALUES(?,?, 'primary', 0)", (track, ghost))
+    imported_conn.commit()
+
+    assert NE.split_combined_credits_locally(imported_conn)["split"] == 1
+
+    flags = {r[0]: r[1] for r in imported_conn.execute(
+        "SELECT name, monitored FROM lib2_artists WHERE name IN ('Oneheart', 'Malek')")}
+    assert flags == {"Oneheart": 1, "Malek": 0}

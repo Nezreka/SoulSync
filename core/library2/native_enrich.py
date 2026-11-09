@@ -1241,12 +1241,12 @@ def smart_split_combined_artist(
             return None  # not confident — leave the combined row intact
         identities.append((component, identity))
 
-    ghost_monitored = int(row["monitored"] if row["monitored"] is not None else 1)
-
     component_ids: List[int] = []
     for component, identity in identities:
+        # born unwatched: _rehome_and_delete_combined gives the ghost's watch
+        # to the primary only, nobody chose the guest (review 5 W2-WF-4)
         cid = _get_or_create_component_artist(
-            conn, component, identity, monitored=ghost_monitored
+            conn, component, identity, monitored=0
         )
         if cid not in component_ids:
             component_ids.append(cid)
@@ -1773,7 +1773,7 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
     stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0,
              "collab_ghosts_cleared": unghosted}
     total = len(ghosts)
-    for index, (gid, name, monitored, settled) in enumerate(ghosts, start=1):
+    for index, (gid, name, _monitored, settled) in enumerate(ghosts, start=1):
         gid = int(gid)
         key = normalize_name(name or "")
         target = None if settled else identified.get(key)
@@ -1804,10 +1804,12 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
                 for piece, pkey in zip(pieces, keys, strict=True):
                     cid = identified.get(pkey) or anyone.get(pkey)
                     if cid is None or cid == gid:
+                        # born unwatched, the rehome watches the lead only
+                        # (review 5 W2-WF-4)
                         cid = int(conn.execute(
                             "INSERT INTO lib2_artists(name, name_key, sort_name, monitored) "
-                            "VALUES(?, ?, ?, ?)",
-                            (piece, pkey, piece, int(monitored or 0))).lastrowid)
+                            "VALUES(?, ?, ?, 0)",
+                            (piece, pkey, piece)).lastrowid)
                         anyone[pkey] = cid
                         stats["created"] += 1
                     if cid not in components:
