@@ -1445,6 +1445,9 @@ try:
         persistent_reconciler_runner=lambda: (
             _run_persistent_acquisition_reconciliation(dry_run=False)
         ),
+        # review 5 W2-WC-2: a job gone from the client ages out on the same clock
+        missing_ttl_getter=lambda: config_manager.get(
+            "acquisition.reconciliation_evidence_ttl_seconds", 24 * 60 * 60),
     )
     logger.info("  Usenet acquisition monitor initialized")
 except Exception as e:

@@ -16,6 +16,7 @@ from core.acquisition.client_monitor import (
     UsenetJobSnapshot,
     collect_usenet_snapshot,
     fail_stale_local_submissions,
+    fail_unobservable_grabs,
     reconcile_usenet_snapshot,
 )
 from core.acquisition.grabs import (
@@ -402,6 +403,87 @@ def test_a_job_deleted_in_the_client_ends_the_grab_without_blocklisting(conn):
     assert result.failed == ("dl-deleted",)
     assert get_request(conn, request.id).status == "failed"
     assert conn.execute("SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
+
+
+def _age_grab(conn, download_id, hours):
+    conn.execute(
+        "UPDATE acquisition_grabs SET updated_at=datetime('now', ?) WHERE download_id=?",
+        (f"-{hours} hours", download_id))
+
+
+def test_a_slow_job_the_client_still_has_is_never_aged_out(conn):
+    """review 5 W2-WC-2: the monitor writes only on a state change, so a job
+    sitting in the queue for a day looked evidence-less to the persistent
+    reconciler, which failed it while SABnzbd was still downloading it"""
+    from core.acquisition.reconciler import reconcile_persistent_grabs
+
+    request, _ = _linked_grab(conn, "dl-big", external_job_id="nzo-big")
+    snapshot = UsenetClientSnapshot(
+        client="FakeUsenetAdapter", category="soulsync",
+        jobs=(_job("nzo-big", state="downloading"),))
+    reconcile_usenet_snapshot(conn, snapshot)
+    _age_grab(conn, "dl-big", 30)
+
+    report = reconcile_persistent_grabs(conn, dry_run=False)
+    decisions = {d.download_id: (d.action, d.reason) for d in report.decisions}
+    assert decisions["dl-big"] == ("none", "client_monitor_owned")
+    result = reconcile_usenet_snapshot(conn, snapshot)
+
+    assert result.failed == ()
+    grab = get_grab(conn, "dl-big")
+    assert grab["status"] == STATUS_DOWNLOADING
+    assert get_request(conn, request.id).status == "grabbing"
+    # the sighting refreshed the last-seen clock
+    age = conn.execute(
+        "SELECT (julianday('now') - julianday(updated_at)) * 86400 "
+        "FROM acquisition_grabs WHERE download_id='dl-big'").fetchone()[0]
+    assert age < 60
+
+
+def test_a_seen_job_is_not_rewritten_on_every_tick(conn):
+    _linked_grab(conn, "dl-tick", external_job_id="nzo-tick")
+    snapshot = UsenetClientSnapshot(
+        client="FakeUsenetAdapter", category="soulsync",
+        jobs=(_job("nzo-tick", state="downloading"),))
+    reconcile_usenet_snapshot(conn, snapshot)
+    _age_grab(conn, "dl-tick", 0.5)
+    before = get_grab(conn, "dl-tick")["updated_at"]
+
+    result = reconcile_usenet_snapshot(conn, snapshot)
+
+    assert result.updated == ()
+    assert get_grab(conn, "dl-tick")["updated_at"] == before
+
+
+def test_a_job_the_client_dropped_ages_out_from_its_last_sighting(conn):
+    request, _ = _linked_grab(conn, "dl-gone", external_job_id="nzo-gone")
+    empty = UsenetClientSnapshot(client="FakeUsenetAdapter", category="soulsync", jobs=())
+    _age_grab(conn, "dl-gone", 2)
+    assert reconcile_usenet_snapshot(conn, empty).failed == ()
+    assert get_grab(conn, "dl-gone")["status"] == STATUS_QUEUED
+
+    _age_grab(conn, "dl-gone", 25)
+    lookup_error = UsenetClientSnapshot(
+        client="FakeUsenetAdapter", category="soulsync", jobs=(),
+        lookup_errors=("nzo-gone",))
+    assert reconcile_usenet_snapshot(conn, lookup_error).failed == ()
+
+    result = reconcile_usenet_snapshot(conn, empty)
+
+    assert result.failed == ("dl-gone",)
+    assert get_grab(conn, "dl-gone")["status"] == "failed"
+    assert get_request(conn, request.id).status == "failed"
+    # a runtime failure: the release did nothing wrong
+    assert conn.execute("SELECT COUNT(*) FROM release_blocklist").fetchone()[0] == 0
+
+
+def test_unobservable_jobs_age_out_when_no_client_is_configured(conn):
+    _linked_grab(conn, "dl-fresh", external_job_id="nzo-fresh")
+    _linked_grab(conn, "dl-old", external_job_id="nzo-old")
+    _age_grab(conn, "dl-old", 25)
+
+    assert fail_unobservable_grabs(conn) == ("dl-old",)
+    assert get_grab(conn, "dl-fresh")["status"] == STATUS_QUEUED
 
 
 def test_one_inconsistent_grab_does_not_undo_the_others(conn, monkeypatch):

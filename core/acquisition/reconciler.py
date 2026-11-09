@@ -476,6 +476,12 @@ def _analyse_row(
             has_final_path=True,
         )
 
+    if row.get("source") == "usenet" and row.get("external_job_id"):
+        # review 5 W2-WC-2: the usenet monitor sees this job every cycle and
+        # writes only on a state change, so updated_at is not "no evidence".
+        # a slow or paused job is alive; the monitor closes a vanished one
+        return _decision(row, "none", "client_monitor_owned", "client_monitor")
+
     updated = _timestamp(row.get("updated_at"))
     age_seconds = max(0, int(now - updated)) if updated is not None else None
     if age_seconds is not None and age_seconds >= evidence_ttl_seconds:
@@ -638,7 +644,7 @@ def reconcile_persistent_grabs(
     rows = conn.execute(
         f"""SELECT g.download_id, g.status AS grab_status,
                    g.last_client_state, g.output_path, g.context_json,
-                   g.updated_at, r.id AS request_id, r.status AS request_status,
+                   g.updated_at, g.source, g.external_job_id, r.id AS request_id, r.status AS request_status,
                    r.search_options_json, r.trigger
                    {import_columns}
               FROM acquisition_grabs g

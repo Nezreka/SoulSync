@@ -65,6 +65,10 @@ def _title_key(value: Any) -> str:
 # R4-C-7: the first journal retention sweep runs this long after start
 FIRST_RETENTION_DELAY_S = 3600
 
+# review 5 W2-WC-2: a job the client still has is refreshed this often, so
+# updated_at reads "last seen in the client" without a write on every tick
+SEEN_HEARTBEAT_S = 3600
+
 
 @dataclass(frozen=True)
 class UsenetJobSnapshot:
@@ -124,6 +128,8 @@ class MonitorRunResult:
     imports: Optional[Any] = None
     persistent_reconciliation: Optional[Any] = None
     skipped_reason: Optional[str] = None
+    # review 5 W2-WC-2: closed because no configured client can see them
+    unobservable_failed: Tuple[str, ...] = ()
 
 
 async def collect_usenet_snapshot(
@@ -275,12 +281,78 @@ def _isolated(conn: Any, download_id: str, apply: Any, *args: Any, **kwargs: Any
     return True
 
 
+def _seen_at(grab: dict) -> Optional[float]:
+    from core.acquisition.reconciler import _timestamp
+    return _timestamp(grab.get("updated_at"))
+
+
+def _missing_ttl(value: Any) -> int:
+    from core.acquisition.reconciler import (
+        DEFAULT_EVIDENCE_TTL_SECONDS,
+        MIN_EVIDENCE_TTL_SECONDS,
+    )
+    try:
+        ttl = int(value) if value is not None else DEFAULT_EVIDENCE_TTL_SECONDS
+    except (TypeError, ValueError):
+        ttl = DEFAULT_EVIDENCE_TTL_SECONDS
+    return max(ttl, MIN_EVIDENCE_TTL_SECONDS)
+
+
+def _fail_if_unseen(conn: Any, grab: dict, now: float, ttl: int, error: str) -> bool:
+    """close a grab its client has not shown for ``ttl`` seconds (a runtime
+    failure, so the release is never blocklisted)"""
+    seen = _seen_at(grab)
+    if seen is None or now - seen < ttl:
+        return False
+    request = conn.execute(
+        "SELECT status FROM acquisition_requests WHERE id=?",
+        (grab["acquisition_request_id"],)).fetchone()
+    if request is None or request[0] != "grabbing":
+        # nothing to close it into, and retrying would only log every cycle
+        return False
+    download_id = str(grab["download_id"])
+    return _isolated(conn, download_id, record_grab_outcome,
+                     conn, download_id, completed=False, error=error,
+                     failure_kind="runtime")
+
+
+def fail_unobservable_grabs(
+    conn: Any,
+    *,
+    now: Optional[float] = None,
+    missing_ttl_seconds: Optional[int] = None,
+) -> Tuple[str, ...]:
+    """with no usenet client configured nothing can see these jobs; age them
+    out on the same clock the persistent reconciler used (review 5 W2-WC-2)"""
+    timestamp = time.time() if now is None else float(now)
+    ttl = _missing_ttl(missing_ttl_seconds)
+    failed = []
+    for grab in open_grabs(conn, "usenet"):
+        if (grab.get("acquisition_request_id") and grab.get("external_job_id")
+                and grab["status"] != STATUS_CANCEL_PENDING
+                and _fail_if_unseen(conn, grab, timestamp, ttl,
+                                    "No usenet client is configured to finish this job")):
+            failed.append(str(grab["download_id"]))
+    return tuple(sorted(failed))
+
+
 def reconcile_usenet_snapshot(
     conn: Any,
     snapshot: UsenetClientSnapshot,
+    *,
+    now: Optional[float] = None,
+    missing_ttl_seconds: Optional[int] = None,
 ) -> ReconciliationResult:
-    """Apply one client snapshot in the caller's short DB transaction."""
+    """Apply one client snapshot in the caller's short DB transaction.
+
+    review 5 W2-WC-2: this monitor owns its grabs' lifetime. the persistent
+    reconciler no longer ages them out, because a job sitting in the client's
+    queue for a day is alive. a job the client has dropped is closed here,
+    once it has been gone longer than ``missing_ttl_seconds`` since last seen.
+    """
     ensure_acquisition_grabs_schema(conn)
+    timestamp = time.time() if now is None else float(now)
+    missing_ttl = _missing_ttl(missing_ttl_seconds)
     all_open = [
         grab for grab in open_grabs(conn, "usenet")
         if grab.get("acquisition_request_id")
@@ -366,7 +438,13 @@ def reconcile_usenet_snapshot(
         grab = grabs[0]
         download_id = str(grab["download_id"])
         if grab.get("client") and grab["client"] != snapshot.client:
-            conflicts.append(download_id)
+            # another client's job: this one can never see it
+            if grab["status"] != STATUS_CANCEL_PENDING and _fail_if_unseen(
+                    conn, grab, timestamp, missing_ttl,
+                    "Sent to a usenet client that is no longer the active one"):
+                failed.append(download_id)
+            else:
+                conflicts.append(download_id)
             continue
         if grab["status"] == STATUS_CANCEL_PENDING:
             cancel_pending.append(download_id)
@@ -385,8 +463,15 @@ def reconcile_usenet_snapshot(
         if job is None:
             if job_id not in snapshot.lookup_errors:
                 missing.append(download_id)
+                if _fail_if_unseen(conn, grab, timestamp, missing_ttl,
+                                   "The usenet client no longer has this job"):
+                    failed.append(download_id)
             continue
         observed.append(download_id)
+        seen = _seen_at(grab)
+        if seen is None or timestamp - seen >= SEEN_HEARTBEAT_S:
+            # last-seen heartbeat; a status change below writes it anyway
+            update_grab(conn, download_id)
 
         business_status = _ACTIVE_STATE_TO_STATUS.get(job.state)
         if business_status is not None:
@@ -504,6 +589,7 @@ class UsenetAcquisitionMonitor:
         process_started_at: Optional[str] = None,
         import_pipeline_runner: Optional[Callable[[], Any]] = None,
         persistent_reconciler_runner: Optional[Callable[[], Any]] = None,
+        missing_ttl_getter: Optional[Callable[[], Any]] = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._adapter_getter = adapter_getter or self._default_adapter
@@ -512,6 +598,7 @@ class UsenetAcquisitionMonitor:
         self._import_pipeline_runner = (
             import_pipeline_runner or self._default_import_pipeline)
         self._persistent_reconciler_runner = persistent_reconciler_runner
+        self._missing_ttl_getter = missing_ttl_getter
         self._process_started_at = process_started_at or datetime.now(
             timezone.utc,
         ).strftime("%Y-%m-%d %H:%M:%S")
@@ -639,12 +726,35 @@ class UsenetAcquisitionMonitor:
         finally:
             conn.close()
 
+    def _missing_ttl(self) -> Optional[int]:
+        if self._missing_ttl_getter is None:
+            return None
+        try:
+            return int(self._missing_ttl_getter())
+        except Exception:  # noqa: BLE001 - a bad setting falls back to the default
+            return None
+
+    def _fail_unobservable(self) -> Tuple[str, ...]:
+        conn = self._connection_factory()
+        try:
+            failed = fail_unobservable_grabs(
+                conn, missing_ttl_seconds=self._missing_ttl())
+            conn.commit()
+            return failed
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def _apply_snapshot(
         self, snapshot: UsenetClientSnapshot,
     ) -> ReconciliationResult:
+        ttl = self._missing_ttl()
         conn = self._connection_factory()
         try:
-            result = reconcile_usenet_snapshot(conn, snapshot)
+            result = reconcile_usenet_snapshot(
+                conn, snapshot, missing_ttl_seconds=ttl)
             conn.commit()
             return result
         except Exception:
@@ -757,9 +867,11 @@ class UsenetAcquisitionMonitor:
 
             adapter = self._adapter_getter()
             if adapter is None or not adapter.is_configured():
+                unobservable = self._fail_unobservable()
                 result = MonitorRunResult(
-                    open_grabs=len(grabs),
+                    open_grabs=len(grabs) - len(unobservable),
                     stale_submissions_failed=stale,
+                    unobservable_failed=unobservable,
                     imports=imports_result,
                     persistent_reconciliation=persistent_result,
                     skipped_reason="client_unconfigured",
@@ -892,5 +1004,6 @@ __all__ = [
     "UsenetJobSnapshot",
     "collect_usenet_snapshot",
     "fail_stale_local_submissions",
+    "fail_unobservable_grabs",
     "reconcile_usenet_snapshot",
 ]
