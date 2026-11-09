@@ -625,6 +625,12 @@ def _apply_descriptive_metadata(
             assignments.append(
                 "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END"
             )
+        elif column == "genres":
+            # the genre cleanup locked these; enrich and full retag must not
+            # put back what it removed (review 5 W2-WF-1)
+            assignments.append(
+                "genres=CASE WHEN COALESCE(genres_locked,0)=1 THEN genres ELSE ? END"
+            )
         elif fill_identity_only and column in _IDENTITY_COLUMNS:
             assignments.append(
                 f"{column}=CASE WHEN {_IDENTITY_COLUMNS[column]} THEN ? ELSE {column} END")

@@ -1630,3 +1630,49 @@ def test_the_browse_prune_reads_rules_per_track_without_planner_stats(imported_c
     for alias in ("r2", "r3", "r4"):
         assert f"SEARCH {alias} USING INDEX idx_lib2_monitor_rules_entity (entity_type=? AND entity_id=?)" in plan, plan
     assert "SCAN w" not in plan and "AUTOMATIC" not in plan, plan
+
+
+# review 5 W2-WF-1: enrich and full retag keep the genres the cleanup locked
+@pytest.mark.parametrize("fill_identity_only", [False, True])
+@pytest.mark.parametrize("entity_type", ["artist", "album"])
+def test_provider_refresh_keeps_locked_genres(imported_conn, monkeypatch,
+                                              entity_type, fill_identity_only):
+    from core.library2 import provider_adapters as PA
+
+    conn = imported_conn
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name, spotify_id, genres, genres_locked) "
+        "VALUES('Cleaned', 'sp-clean', '[\"rock\"]', 1)").lastrowid
+    entity_id = artist_id
+    if entity_type == "album":
+        entity_id = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id, genres, genres_locked) "
+            "VALUES(?, 'Cleaned LP', 'sp-clean', '[\"rock\"]', 1)", (artist_id,)).lastrowid
+        unlocked = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id, genres) "
+            "VALUES(?, 'Open LP', 'sp-open', '[\"rock\"]')", (artist_id,)).lastrowid
+    else:
+        unlocked = conn.execute(
+            "INSERT INTO lib2_artists(name, spotify_id, genres) "
+            "VALUES('Open', 'sp-open', '[\"rock\"]')").lastrowid
+    conn.commit()
+
+    def fetch(kind, source_ids, **_kw):
+        sid = source_ids["spotify"]
+        return PA.DescriptiveMetadataProviderResult(
+            provider="spotify", provider_entity_id=sid,
+            genres=("rock", "album rock", "seen live"))
+
+    monkeypatch.setattr(PA, "fetch_descriptive_metadata", fetch)
+    table = f"lib2_{entity_type}s"
+    NE.refresh_native_entity_metadata(conn, entity_type, entity_id, {"spotify": "sp-clean"},
+                                      fill_identity_only=fill_identity_only)
+    NE.refresh_native_entity_metadata(conn, entity_type, unlocked, {"spotify": "sp-open"},
+                                      fill_identity_only=fill_identity_only)
+    locked_genres = json.loads(conn.execute(
+        f"SELECT genres FROM {table} WHERE id=?", (entity_id,)).fetchone()[0])
+    open_genres = json.loads(conn.execute(
+        f"SELECT genres FROM {table} WHERE id=?", (unlocked,)).fetchone()[0])
+    assert locked_genres == ["rock"]
+    # an unlocked row still takes the provider's genres
+    assert open_genres == ["rock", "album rock", "seen live"]
