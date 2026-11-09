@@ -8521,6 +8521,11 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_release_date "
                            "ON metadata_cache_entities (entity_type, release_date) "
                            "WHERE release_date IS NOT NULL AND release_date != ''")
+            # the repair page's cache health reads every row's age; without
+            # this it walked the whole table, raw_json and all (33s on 340k
+            # rows). review 5 perf
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_mce_age "
+                           "ON metadata_cache_entities (updated_at, ttl_days)")
         except Exception as e:
             logger.error(f"Error creating metadata cache indexes (will retry next start): {e}")
 
