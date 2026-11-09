@@ -1396,6 +1396,26 @@ def test_release_borrowed_identities_clears_guests_and_keeps_the_owner(imported_
         assert row["genres"] == "[]"
 
 
+def test_release_borrowed_identities_keeps_locked_genres(imported_conn):
+    """review 5 W2-WF-1: genres the cleanup locked are settled, even when they
+    match the owner's byte for byte. the borrowed id still goes"""
+    owner = _insert_native_artist(imported_conn, "Major Lazer")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-ML', genres='[\"moombahton\"]' WHERE id=?",
+        (owner,))
+    _insert_album(imported_conn, owner, "Peace Is The Mission", spotify_id="SP-PITM")
+    guest = _insert_native_artist(imported_conn, "DJ Snake")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-ML', genres='[\"moombahton\"]', "
+        "genres_locked=1 WHERE id=?", (guest,))
+
+    assert NE.release_borrowed_artist_identities(imported_conn)["released"] == 1
+    row = imported_conn.execute(
+        "SELECT spotify_id, genres FROM lib2_artists WHERE id=?", (guest,)).fetchone()
+    assert row["spotify_id"] is None
+    assert row["genres"] == '["moombahton"]'
+
+
 def test_release_borrowed_identities_leaves_ambiguous_groups_alone(imported_conn):
     """Two co-composers of one soundtrack, neither the primary of any release:
     nothing in the catalogue says which one owns the id, so neither is touched

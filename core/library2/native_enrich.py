@@ -1385,14 +1385,16 @@ def _clear_borrowed_identity(conn, artist_id: int, namespace: str,
         assignments.append("external_ids=json_remove(external_ids, ?)")
         params.append(f"$.{namespace}")
     row = conn.execute(
-        "SELECT image_url, genres, art_locked FROM lib2_artists WHERE id=?",
+        "SELECT image_url, genres, art_locked, genres_locked FROM lib2_artists WHERE id=?",
         (int(artist_id),),
     ).fetchone()
     if row is not None:
         if (not row["art_locked"] and row["image_url"]
                 and row["image_url"] == owner_row["image_url"]):
             assignments.append("image_url=NULL")
-        if row["genres"] and row["genres"] == owner_row["genres"]:
+        # the genre cleanup settled locked genres (review 5 W2-WF-1)
+        if (not row["genres_locked"] and row["genres"]
+                and row["genres"] == owner_row["genres"]):
             assignments.append("genres='[]'")
     params.append(int(artist_id))
     conn.execute(
