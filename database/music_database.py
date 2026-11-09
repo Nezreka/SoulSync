@@ -23363,13 +23363,20 @@ class MusicDatabase:
         catalogue_table = {"artists": "lib2_artists", "albums": "lib2_albums",
                            "tracks": "lib2_tracks"}[table]
         params = (external_id,)
-        if provider in promoted:
+        if table == "albums" and provider == "musicbrainz":
+            # albums index the release id folded (idx_lib2_albums_mbid_lower);
+            # the bare column compare read every album (review 5 W2-WJ-5)
+            where = "LOWER(musicbrainz_id) = LOWER(?)"
+        elif provider in promoted:
             where = f"{promoted[provider]} = ?"
         elif provider == "bandcamp":
             # the bandcamp id sits in its enrichment bucket, the url is the
-            # stored provider id; either finds the row
-            where = ("(json_extract(enrichment, '$.bandcamp.id') = ? "
-                     "OR json_extract(external_ids, '$.bandcamp') = ?)")
+            # stored provider id; either finds the row. both halves in their
+            # indexed form, one unindexed arm made the OR read every row
+            # (review 5 W2-WJ-5)
+            from core.library2.provider_ids import bandcamp_enrichment_id_sql, external_id_sql
+            where = (f"({bandcamp_enrichment_id_sql()} = ? "
+                     f"OR {external_id_sql('external_ids', 'bandcamp')} = ?)")
             params = (external_id, external_id)
         else:
             # the indexed TRIM(CAST(...)) form: the bare json_extract scanned
