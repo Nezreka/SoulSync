@@ -10379,15 +10379,20 @@ class MusicDatabase:
                     for aid, donor in rows.items():
                         if aid == best_id:
                             continue
-                        # a different spelling only merges when no provider id
-                        # disagrees: two artists can share a folded name (#1797)
-                        if donor['name_key'] != keeper['name_key']:
-                            theirs, ours = _lib2_provider_ids(donor), _lib2_provider_ids(keeper)
-                            clash = next((k for k in theirs if k in ours and theirs[k] != ours[k]), None)
-                            if clash:
-                                logger.info(f"   Not merging '{donor['name']}' ID {aid} into "
-                                            f"'{keeper['name']}' {best_id}: {clash} differs")
-                                continue
+                        # a pair only merges when no provider id disagrees. the
+                        # importer and autolink keep a same-named artist with a
+                        # different id as its own row on purpose, and two artists
+                        # can share a folded name (#1797). review 5 W2-WJ-1: this
+                        # used to run for a different spelling only. the keeper is
+                        # re-read so ids an earlier donor handed over count too
+                        keeper = cursor.execute(
+                            "SELECT * FROM lib2_artists WHERE id = ?", (best_id,)).fetchone() or keeper
+                        theirs, ours = _lib2_provider_ids(donor), _lib2_provider_ids(keeper)
+                        clash = next((k for k in theirs if k in ours and theirs[k] != ours[k]), None)
+                        if clash:
+                            logger.info(f"   Not merging '{donor['name']}' ID {aid} into "
+                                        f"'{keeper['name']}' {best_id}: {clash} differs")
+                            continue
                         # Preserve every independent server recognition when
                         # folding duplicate catalogue artists. If the keeper
                         # already has that server, its mapping wins.
