@@ -794,8 +794,10 @@ def run_deferred_backfills(database: Any, *,
                 stats.update(_carry_upgrade_state(conn))
             # the Songs tab's artist/album/year/recent sorts walk these
             # (a pass over every track the first time, then nothing)
-            from core.library2.queries import ensure_song_sort_indexes
+            from core.library2.queries import ensure_album_sort_indexes, ensure_song_sort_indexes
             stats["song_sort_indexes"] = ensure_song_sort_indexes(conn)
+            # and the album grid's sorts (a pass over every release, once)
+            stats["album_sort_indexes"] = ensure_album_sort_indexes(conn)
     finally:
         ticker.stop()
         conn.close()
