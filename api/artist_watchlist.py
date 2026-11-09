@@ -506,12 +506,15 @@ def export_library_artists():
             cur = conn.cursor()
             # the artists you have, once each: lib2_artists also holds
             # featured credits, discography / wishlist / watchlist rows and
-            # alias members, and 3.6.1's export was the owned library
+            # alias members, and 3.6.1's export was the owned library. the
+            # release-artist set: a featured credit on one owned track is not
+            # an artist you have (review 5 W3-TD-3)
             from core.library2.sql_util import owned_sql
             cur.execute(f"""
                 SELECT id, name, soul_id, {_ARTIST_IDS_SQL}
                 FROM lib2_artists
-                WHERE canonical_artist_id IS NULL AND {owned_sql('artist', 'lib2_artists')}
+                WHERE canonical_artist_id IS NULL
+                  AND {owned_sql('release_artist', 'lib2_artists')}
                 ORDER BY name COLLATE NOCASE
             """)
             cols = [d[0] for d in cur.description]

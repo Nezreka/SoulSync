@@ -2789,6 +2789,12 @@ class MusicDatabase:
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
+            if scope == 'failed':
+                count = self._reset_failed_enrichment(conn, service, entity_type, sql, params)
+                conn.commit()
+                from core.enrichment.unmatched import invalidate_unmatched_snapshots
+                invalidate_unmatched_snapshots()
+                return count
             ids = [row[0] for row in cursor.execute(sql, params)]
             from core.library2.match_status import set_library_v2_match
             for item_id in ids:
@@ -2803,6 +2809,61 @@ class MusicDatabase:
             return len(ids)
         finally:
             conn.close()
+
+    @staticmethod
+    def _reset_failed_enrichment(conn, service, entity_type, sql, params) -> int:
+        """Retry all: clear every not_found pair of one source, set-based.
+
+        it used to walk each row through set_library_v2_match plus a DELETE in
+        one write transaction, 8 statements a row, 1.86M for the live audiodb
+        tracks, with the write lock held the whole time (review 5 W3-TD-2).
+        a not_found row holds no id for the source, so all it needs is its
+        attempt and provenance rows gone. the rare row that still carries an
+        id (or unreadable external_ids) keeps the full per-row clear. the ids
+        are staged in a temp table first, which takes no lock on the library,
+        so the lock is held only for the writes themselves."""
+        from core.enrichment.unmatched import reset_carrier_sql
+        from core.library2.match_status import set_library_v2_match
+
+        cursor = conn.cursor()
+        carrier, carrier_params = '0', []
+        if service != 'similar_artists':
+            table = sql.split(' FROM ', 1)[1].split(None, 1)[0]
+            columns = {row[1] for row in cursor.execute(f"PRAGMA table_info({table})")}
+            carrier, carrier_params = reset_carrier_sql(service, 'e', columns)
+        cursor.execute("DROP TABLE IF EXISTS temp.lib2_reset_failed")
+        cursor.execute("CREATE TEMP TABLE lib2_reset_failed "
+                       "(id INTEGER PRIMARY KEY, carrier INTEGER NOT NULL)")
+        try:
+            staged = sql.replace("SELECT e.id FROM", f"SELECT e.id, ({carrier}) FROM", 1)
+            cursor.execute(f"INSERT OR IGNORE INTO temp.lib2_reset_failed(id, carrier) {staged}",
+                           [*carrier_params, *params])
+            count = cursor.execute("SELECT COUNT(*) FROM temp.lib2_reset_failed").fetchone()[0]
+            carriers = [row[0] for row in cursor.execute(
+                "SELECT id FROM temp.lib2_reset_failed WHERE carrier")]
+            for item_id in carriers:
+                set_library_v2_match(conn, entity_type, item_id, service, None)
+                cursor.execute(
+                    "DELETE FROM lib2_provider_attempts WHERE entity_type=? "
+                    "AND entity_id=? AND service=?", (entity_type, item_id, service))
+            if service != 'similar_artists':
+                try:
+                    cursor.execute(
+                        "DELETE FROM metadata_match_provenance WHERE entity_type=? "
+                        "AND service=? AND entity_id IN "
+                        "(SELECT id FROM temp.lib2_reset_failed WHERE NOT carrier)",
+                        (f"lib2_{entity_type}", service))
+                except sqlite3.OperationalError as exc:  # older databases may not have provenance yet
+                    logger.debug("could not clear Library-v2 match provenance: %s", exc)
+            # still not_found: a pair the worker settled since the read stays
+            cursor.execute(
+                "DELETE FROM lib2_provider_attempts WHERE entity_type=? AND service=? "
+                "AND status='not_found' AND entity_id IN "
+                "(SELECT id FROM temp.lib2_reset_failed WHERE NOT carrier)",
+                (entity_type, service))
+            return count
+        finally:
+            cursor.execute("DROP TABLE IF EXISTS temp.lib2_reset_failed")
 
     # Names/titles per entity table for the degenerate-title scan — computed
     # once per verify call, shared across all services.

@@ -84,3 +84,20 @@ def test_hits_are_judged_against_every_credited_artist(env):  # noqa: F811
     assert verdicts[id(lead_plain)]["accepted"] is False
     assert verdicts[id(cover)]["accepted"] is False
     assert verdicts[id(sped_up)]["accepted"] is False
+
+
+def test_a_feat_credit_in_the_title_does_not_vouch_for_another_act(env):  # noqa: F811
+    # review 5 W3-TD-1: "(feat. A7S)" on a cover by another act used to waive
+    # the artist gate, so the cover passed where the same cover without the
+    # credit failed. a real feature on the wanted lead still passes.
+    plain_cover = _hit("Robbe, Kuokka, ropsu", "Kernkraft 400 (A Better Day)")
+    feat_cover = _hit("Robbe, Kuokka, ropsu", "Kernkraft 400 (A Better Day) (feat. A7S)")
+    lead_feat = _hit("Topic", "Kernkraft 400 (A Better Day) (feat. A7S)")
+
+    verdicts = judge_results(None, KERNKRAFT, [plain_cover, feat_cover, lead_feat], [],
+                             "Topic Kernkraft 400")
+
+    assert verdicts[id(plain_cover)]["accepted"] is False
+    assert verdicts[id(feat_cover)]["accepted"] is False, verdicts[id(feat_cover)]
+    assert verdicts[id(feat_cover)]["code"] == "artist_mismatch"
+    assert verdicts[id(lead_feat)]["accepted"] is True

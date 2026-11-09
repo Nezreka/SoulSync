@@ -176,9 +176,9 @@ def test_release_id_compare_ignores_case(cur):
     assert _find(cur, BABY_PUNK) == nk
 
 
-def test_a_provider_the_indexes_dont_know_still_unifies_by_its_id(cur):
-    """a provider without an index (a newer source) is looked up with the
-    json path bound as a value, so its ids still join a release"""
+def test_a_hydrabase_id_still_unifies_by_its_id(cur):
+    """a hydrabase import groups by its id; it has an index of its own now
+    (review 5 W3-TD-4), not the bound-path lookup that walked every album"""
     row = _add(cur, server_id="existing", title="Parachutes",
                external_ids={"hydrabase": "HB1"})
     got = find_existing_soulsync_album_id(
@@ -200,3 +200,22 @@ def test_a_provider_name_is_never_spliced_into_the_sql(cur, source):
         cur, name_key_id="different_hash", artist_id=1,
         album_name="Parachutes", album_source_id="anything", source=source)
     assert got == title_row
+
+
+@pytest.mark.parametrize("source", ["deezer", "hydrabase", "lastfm", "some_source"])
+def test_the_provider_lookup_never_walks_every_album(cur, source):
+    """review 5 W3-TD-4: a provider with no expression index (hydrabase, or any
+    other name) ran an unindexed lookup over every lib2_albums row for each
+    imported track, inside the import's write"""
+    conn = cur.connection
+    seen = []
+    conn.set_trace_callback(seen.append)
+    find_existing_soulsync_album_id(
+        cur, name_key_id="123", artist_id=1, album_name="X",
+        album_source_id="abc", source=source)
+    conn.set_trace_callback(None)
+    plans = [" | ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
+             for sql in seen
+             if "lib2_albums" in sql and sql.lstrip().upper().startswith("SELECT")]
+    assert plans
+    assert not [p for p in plans if "SCAN lib2_albums" in p], plans

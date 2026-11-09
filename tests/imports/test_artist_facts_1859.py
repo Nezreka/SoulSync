@@ -326,3 +326,42 @@ def test_the_name_lookup_rides_the_lowercase_name_index(db):
     finally:
         conn.close()
     assert any("idx_lib2_artists_name_lower" in step for step in plan), plan
+
+
+class _ByAlbumMB:
+    """musicbrainz that picks the artist by the album, as match_artist's
+    owned_titles hint does, with each answer's payload already cached."""
+
+    def __init__(self, db):
+        self.asked = []
+        conn = db._get_connection()
+        for mbid, payload in (("mbid-new-us", {"disambiguation": "new US band"}),
+                              ("mbid-new-uk", {"disambiguation": "new UK band"})):
+            conn.execute("INSERT INTO musicbrainz_cache (entity_type, entity_name, musicbrainz_id, "
+                         "metadata_json) VALUES ('artist', 'Newband', ?, ?)",
+                         (mbid, json.dumps(payload)))
+        conn.commit()
+        conn.close()
+
+    def match_artist(self, name, owned_titles=None):
+        self.asked.append((name, owned_titles))
+        return {"mbid": "mbid-new-uk" if "UK Record" in (owned_titles or []) else "mbid-new-us"}
+
+
+@pytest.mark.parametrize("ids", [False, True])
+def test_two_same_named_new_artists_are_not_one_cached_answer(db, monkeypatch, ids):
+    # review 5 W3-TD-5: the ask was cached by name only, so the second of two
+    # same-named new artists in one import got the first one's identity
+    import core.musicbrainz_service as mbs
+    monkeypatch.setattr(facts_mod, "ONLINE_LOOKUP", True)
+    fake = _ByAlbumMB(db)
+    monkeypatch.setattr(mbs, "get_musicbrainz_service", lambda: fake)
+    us_ids = {"source": "deezer", "source_id": "dz-new-us"} if ids else {}
+    uk_ids = {"source": "deezer", "source_id": "dz-new-uk"} if ids else {}
+
+    us = artist_facts("Newband", album="US Record", **us_ids)
+    uk = artist_facts("Newband", album="UK Record", **uk_ids)
+
+    assert us["disambiguation"] == "new US band"
+    assert uk["disambiguation"] == "new UK band"
+    assert len(fake.asked) == 2
