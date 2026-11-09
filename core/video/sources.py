@@ -1393,6 +1393,18 @@ def _stream_langs(streams, kind: str, *, embedded_only: bool = False) -> list:
     return out
 
 
+def _jf_resolution(vid) -> Any:
+    """a jellyfin video stream's resolution, bucketed by its width AND height.
+    the height alone misreads every cropped film: a 1920x1038 bluray came out
+    '1038p', which no resolution rank knows, so the file read as Unknown and
+    got flagged for an upgrade (#2025). height only when there is no width."""
+    from core.video.mediainfo import resolution_from_dimensions
+    w, h = vid.get("Width"), vid.get("Height")
+    if w and h:
+        return resolution_from_dimensions(w, h)
+    return (str(h) + "p") if h else None
+
+
 class JellyfinVideoSource:
     server_name = "jellyfin"
 
@@ -1831,7 +1843,7 @@ class JellyfinVideoSource:
             entry = {
                 "relative_path": fpath,
                 "size_bytes": src.get("Size"),
-                "resolution": (str(vid.get("Height")) + "p") if vid.get("Height") else None,
+                "resolution": _jf_resolution(vid),
                 "aspect": vid.get("AspectRatio") or (
                     (vid.get("Width") / vid.get("Height")) if vid.get("Width") and vid.get("Height") else None),
                 "video_codec": vid.get("Codec"),

@@ -11,14 +11,19 @@ imports only the sibling video ``quality_profile`` constants; nothing from music
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from core.video.quality_profile import TIERS as _QP_TIERS
 
 # Resolution ranking (higher = better). The loose cutoff and the owned-vs-target
 # check both compare on this rank, so "1920x1080", "1080p" and "1080" all agree.
-_RES_RANK = (("2160", 4), ("4k", 4), ("1440", 3), ("1080", 3),
+_RES_RANK = (("2160", 4), ("4k", 4), ("1440", 3), ("2k", 3), ("1080", 3),
              ("720", 2), ("576", 1), ("480", 1), ("sd", 1))
+# a bare frame height ('1038p', '800p', '1600p') a server stored for a cropped
+# film. bucketed the way a cropped frame sits under its full one: a 2.40 1080p
+# film is 800 tall, a 2.40 4K one 1600 (#2025)
+_BARE_HEIGHT = re.compile(r"^\s*(\d{3,4})\s*p?\s*$")
 _RES_LABEL = {4: "4K", 3: "1080p", 2: "720p", 1: "SD", 0: ""}
 
 
@@ -50,6 +55,16 @@ def resolution_rank(res: Any) -> int:
     for token, rank in _RES_RANK:
         if token in s:
             return rank
+    m = _BARE_HEIGHT.match(s)
+    if m:
+        h = int(m.group(1))
+        if h > 1200:
+            return 4
+        if h > 720:
+            return 3
+        if h > 576:
+            return 2
+        return 1 if h > 0 else 0
     return 0
 
 
