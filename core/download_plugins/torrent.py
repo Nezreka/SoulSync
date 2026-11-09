@@ -1039,8 +1039,14 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
             return result
         logger.info("[Torrent album] Staged %d audio files for '%s'", len(copied), album_name)
         _emit('staged', count=len(copied))
+        # review 5 W2-WC-6: album torrents get the seed policy too (client
+        # share limits or the seeding sweep), like every per-track torrent.
+        # without it they seeded forever whatever goals the user set
+        self._apply_seed_policy(torrent_id, torrent_name or picked.title)
         result['success'] = True
         result['files'] = copied
+        result['client_job_id'] = torrent_id
+        result['client_job_label'] = picked.title
         return result
 
 

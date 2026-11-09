@@ -1414,6 +1414,42 @@ def test_torrent_album_to_staging_no_results_flags_fallback(tmp_path: Path) -> N
     fake_adapter.add_torrent.assert_not_called()
 
 
+def test_torrent_album_to_staging_hands_the_torrent_to_the_seed_policy(tmp_path: Path) -> None:
+    """review 5 W2-WC-6: only the per-track flow applied the seed policy, so
+    every album torrent seeded forever whatever ratio/time goals were set"""
+    from types import SimpleNamespace
+
+    plugin = TorrentDownloadPlugin()
+    release = _make_torrent_result(title='Artist - Album [FLAC]')
+    audio = tmp_path / '01.flac'
+    audio.write_bytes(b'x')
+    adapter = MagicMock()
+    adapter.is_configured.return_value = True
+    adapter.get_status = AsyncMock(return_value=SimpleNamespace(
+        name='Artist - Album', content_path=None, state='seeding'))
+    applied = []
+    with patch.object(TorrentDownloadPlugin, 'is_configured', return_value=True), \
+         patch('core.download_plugins.torrent.get_active_torrent_adapter', return_value=adapter), \
+         patch('core.download_plugins.torrent.prowlarr_search_with_variants',
+               AsyncMock(return_value=[release])), \
+         patch('core.download_plugins.torrent.pick_best_album_release', return_value=release), \
+         patch('core.download_plugins.torrent.profile_allowed_formats', return_value=None), \
+         patch('core.download_plugins.torrent.profile_quality_targets', return_value=([], True)), \
+         patch('core.download_plugins.torrent.release_sources', return_value=[release]), \
+         patch('core.torrent_clients.base.add_torrent_smart', AsyncMock(return_value='hash-album')), \
+         patch('core.download_plugins.torrent.poll_album_download', return_value=str(tmp_path)), \
+         patch('core.download_plugins.torrent._collect_album_audio', return_value=([audio], tmp_path)), \
+         patch('core.download_plugins.torrent.copy_audio_files_atomically', return_value=[str(audio)]), \
+         patch.object(TorrentDownloadPlugin, '_apply_seed_policy',
+                      lambda self, h, t: applied.append((h, t))):
+        outcome = plugin.download_album_to_staging('Album', 'Artist', str(tmp_path / 'stage'))
+
+    assert outcome['success'] is True
+    assert applied == [('hash-album', 'Artist - Album')]
+    assert outcome['client_job_id'] == 'hash-album'
+    assert outcome['client_job_label'] == 'Artist - Album [FLAC]'
+
+
 def test_usenet_album_to_staging_no_results_flags_fallback(tmp_path: Path) -> None:
     """Same contract for usenet: an empty search must fall back to the
     per-track flow rather than hard-failing the album batch."""
