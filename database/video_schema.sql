@@ -616,6 +616,19 @@ CREATE TABLE IF NOT EXISTS video_title_libraries (
     PRIMARY KEY (kind, tmdb_id)
 );
 
+-- A second copy of a title wanted in another library (#2029): the same movie
+-- in Movies (1080p) and Movies 4K, Radarr's two-instance setup. The copy is
+-- hunted by its own wishlist row (video_wishlist.video_library_id) and owned
+-- only by a file in its library; this row is what keeps the two apart once
+-- the copy has landed and its wishlist row is gone. Movies only for now.
+CREATE TABLE IF NOT EXISTS video_title_copies (
+    kind        TEXT    NOT NULL,              -- 'movie'
+    tmdb_id     INTEGER NOT NULL,
+    library_id  INTEGER NOT NULL REFERENCES video_libraries(id) ON DELETE CASCADE,
+    created_at  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, tmdb_id, library_id)
+);
+
 -- WISHLIST (curated 'get this') — atomic units are MOVIES and EPISODES. Adding a
 -- whole show or a season just expands into episode rows. Upcoming (un-aired)
 -- episodes do NOT live here; the watchlist/calendar promote them once they air,

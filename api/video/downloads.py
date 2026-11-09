@@ -134,15 +134,42 @@ def _title_library_info(db, kind, src) -> dict:
     try:
         tmdb = _title_tmdb_for(db, kind, src)
         lib = _library_for(db, kind, src)
-        return {
-            "libraries": [{"id": x["id"], "name": x["name"], "builtin": x["builtin"]}
-                          for x in list_libraries(db, kind) if x["usable"]],
+        usable = [x for x in list_libraries(db, kind) if x["usable"]]
+        out = {
+            "libraries": [{"id": x["id"], "name": x["name"], "builtin": x["builtin"]} for x in usable],
             "library": ({"id": lib["id"], "name": lib["name"], "why": lib["why"]} if lib else None),
             "library_assigned": int((title_assignment(db, kind, tmdb) if tmdb else None) or 0),
         }
+        if kind == "movie":
+            # second copies wanted in other libraries (#2029, movies only)
+            out["copies"] = _title_copies_info(
+                db, kind, tmdb, {x["id"]: x["name"] for x in list_libraries(db, kind)})
+        return out
     except Exception:   # noqa: BLE001 - the picker is an extra, never a failed search
         logger.debug("title library info failed", exc_info=True)
         return {}
+
+
+def _title_copies_info(db, kind, tmdb, names) -> list:
+    """[{library_id, name, wished, owned}] for a movie's copies in other
+    libraries (#2029): wished while its wishlist row is open, owned once a
+    file in that library is scanned."""
+    from core.video.libraries import title_copies
+    if kind != "movie" or not tmdb:
+        return []
+    out = []
+    conn = db.connect()
+    try:
+        for lid in title_copies(db, "movie", tmdb):
+            wished = conn.execute("SELECT 1 FROM video_wishlist WHERE kind='movie' AND tmdb_id=? "
+                                  "AND video_library_id=? LIMIT 1", (int(tmdb), lid)).fetchone()
+            owned = conn.execute("SELECT 1 FROM movies WHERE tmdb_id=? AND has_file=1 "
+                                 "AND video_library_id=? LIMIT 1", (int(tmdb), lid)).fetchone()
+            out.append({"library_id": lid, "name": names.get(lid, "?"),
+                        "wished": bool(wished), "owned": bool(owned)})
+    finally:
+        conn.close()
+    return out
 
 
 def _target_for(db, kind, body) -> str:
@@ -234,8 +261,13 @@ def _profile_for_request(db, src):
                     library_id=int(library_id) if library_id else None)
             except (TypeError, ValueError):
                 pid = None
-    # nothing assigned: the kind's default (Default for movies / for TV), so a
-    # grab records the profile it was really judged under
+    # nothing assigned: its video library's default (#2029), else the kind's
+    # default (Default for movies / for TV), so a grab records the profile it
+    # was really judged under
+    if not pid:
+        from core.video.libraries import default_profile_for
+        pid = default_profile_for(db, kind, tmdb_id=_title_tmdb_for(db, kind, src),
+                                  explicit_id=src.get("video_library_id"), title=src.get("title"))
     if not pid:
         pid = kind_default_id(db, kind)
     return profile_by_id(db, pid, kind=kind), pid
@@ -1004,6 +1036,51 @@ def register_routes(bp):
             **_title_library_info(db, kind, src),
         })
 
+    @bp.route("/downloads/quality/copies", methods=["POST"])
+    def video_library_copy_add():
+        """Want a second copy of a movie in another library (#2029): the same
+        film in Movies and Movies 4K, neither replacing the other. Its own
+        wishlist row there, judged by that library's default profile (or
+        quality_profile_id). Body: media_id, media_source, tmdb_id,
+        library_id, title, year?, poster_url?, quality_profile_id?."""
+        from . import get_video_db
+        from core.profile_context import get_current_profile_id
+        from core.video.libraries import add_copy
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        tmdb = _title_tmdb_for(db, "movie", body)
+        if not tmdb:
+            return jsonify({"success": False, "error": "The title has no TMDB id"}), 400
+        own = _library_for(db, "movie", {**body, "video_library_id": None}) or {}
+        try:
+            if own.get("id") and int(body.get("library_id") or 0) == own["id"]:
+                return jsonify({"success": False,
+                                "error": "That's the library this title already files into"}), 400
+            lib = add_copy(db, "movie", tmdb, body.get("library_id"), title=body.get("title"),
+                           year=body.get("year"), poster_url=body.get("poster_url"),
+                           profile_id=int(get_current_profile_id() or 1),
+                           quality_profile_id=body.get("quality_profile_id"))
+        except LookupError as e:
+            return jsonify({"success": False, "error": str(e)}), 404
+        except (TypeError, ValueError) as e:
+            return jsonify({"success": False, "error": str(e)}), 400
+        logger.info("movie %s: a copy wanted in %s", tmdb, lib["name"])
+        return jsonify({"success": True, **_title_library_info(db, "movie", body)})
+
+    @bp.route("/downloads/quality/copies", methods=["DELETE"])
+    def video_library_copy_remove():
+        """Stop wanting a movie's copy in a library (#2029). Its wishlist row
+        goes; a file already there stays. Body: media_id, media_source,
+        tmdb_id, library_id."""
+        from . import get_video_db
+        from core.video.libraries import remove_copy
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        tmdb = _title_tmdb_for(db, "movie", body)
+        if not tmdb or not remove_copy(db, "movie", tmdb, body.get("library_id")):
+            return jsonify({"success": False, "error": "No such copy"}), 404
+        return jsonify({"success": True, **_title_library_info(db, "movie", body)})
+
     @bp.route("/downloads/quality/library", methods=["POST"])
     def video_library_choose_for_title():
         """Pick the video library (#2029) a title files into, from the Get /
@@ -1548,6 +1625,17 @@ def register_routes(bp):
             "poster_url": body.get("poster_url"), "search_ctx": _json.dumps(ctx), "attempts": 0,
             "quality_profile_id": _pid,   # the profile this grab is judged under (P2)
         }
+        # a grab for a second copy in another library (#2029, movies): the
+        # import files it there and judges only the copy already in it
+        try:
+            vlib = int(body.get("video_library_id") or 0)
+        except (TypeError, ValueError):
+            vlib = 0
+        if vlib and str(common["kind"]).lower() == "movie":
+            from core.video.libraries import title_copies
+            tmdb = _title_tmdb_for(db, "movie", body)
+            if tmdb and vlib in title_copies(db, "movie", tmdb):
+                common["video_library_id"] = vlib
         return common, ctx
 
     def _add_client_row(db, common, body, source, client_ref):

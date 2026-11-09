@@ -32,6 +32,10 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("video.libraries")
+
 KINDS = ("movie", "show")
 MAX_NAME = 80
 MAX_RULE_TERMS = 30
@@ -72,12 +76,25 @@ def _terms(value: Any) -> List[str]:
     return out[:MAX_RULE_TERMS]
 
 
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def normalize_options(raw: Any) -> Dict[str, Any]:
-    """A library's config, cleaned. Unknown keys dropped. Never raises."""
+    """A library's config, cleaned. Unknown keys dropped. Never raises.
+
+    - rules: {genres, keywords} that send a new title here
+    - quality_profile_id: the profile titles in this library are grabbed
+      and upgraded by when they have none of their own (0 = the kind's
+      default, as before)"""
     raw = raw if isinstance(raw, dict) else {}
     rules = raw.get("rules") if isinstance(raw.get("rules"), dict) else {}
     return {"rules": {"genres": _terms(rules.get("genres")),
-                      "keywords": _terms(rules.get("keywords"))}}
+                      "keywords": _terms(rules.get("keywords"))},
+            "quality_profile_id": max(0, _int(raw.get("quality_profile_id")))}
 
 
 def _load_options(text: Any) -> Dict[str, Any]:
@@ -117,7 +134,8 @@ def _row_to_lib(db, row) -> Dict[str, Any]:
     return {"id": int(row["id"]), "kind": kind, "name": row["name"], "path": path,
             "builtin": builtin, "enabled": enabled, "usable": bool(enabled and path),
             "is_default": bool(row["is_default"]), "position": int(row["position"] or 0),
-            "options": options, "rules": options["rules"]}
+            "options": options, "rules": options["rules"],
+            "quality_profile_id": options["quality_profile_id"]}
 
 
 def _rows(db, where: str = "", args: tuple = ()) -> list:
@@ -177,6 +195,11 @@ def _check_path(db, path: Any, *, skip_id: Optional[int] = None) -> str:
     return path
 
 
+def _check_profile(db, profile_id: int) -> None:
+    if profile_id and not db.get_named_quality_profile(int(profile_id)):
+        raise ValueError("No such quality profile")
+
+
 def create_library(db, body: Any) -> Dict[str, Any]:
     """A new custom library. Raises ValueError with a message for the user."""
     body = body if isinstance(body, dict) else {}
@@ -185,7 +208,9 @@ def create_library(db, body: Any) -> Dict[str, Any]:
         raise ValueError("A library holds movies or TV")
     name = _check_name(body.get("name"))
     path = _check_path(db, body.get("path"))
-    options = normalize_options(body.get("options") or {"rules": body.get("rules")})
+    options = normalize_options(body.get("options") or {
+        "rules": body.get("rules"), "quality_profile_id": body.get("quality_profile_id")})
+    _check_profile(db, options["quality_profile_id"])
     conn = db.connect()
     try:
         pos = conn.execute("SELECT COALESCE(MAX(position), 1) + 1 FROM video_libraries WHERE kind=?",
@@ -201,6 +226,7 @@ def create_library(db, body: Any) -> Dict[str, Any]:
         conn.close()
     if body.get("is_default"):
         set_default(db, new_id)
+    attribute_files(db)
     return get_library(db, new_id)
 
 
@@ -225,13 +251,16 @@ def update_library(db, library_id: Any, body: Any) -> Dict[str, Any]:
             args.append(1 if body.get("enabled") else 0)
     elif "path" in body and not _same(body.get("path"), lib["path"]):
         raise ValueError("Change this library's folder above, in its own setting")
-    if "options" in body or "rules" in body:
+    if any(k in body for k in ("options", "rules", "quality_profile_id")):
         merged = dict(lib["options"])
         merged.update(body.get("options") if isinstance(body.get("options"), dict) else {})
-        if "rules" in body:
-            merged["rules"] = body.get("rules")
+        for key in ("rules", "quality_profile_id"):
+            if key in body:
+                merged[key] = body.get(key)
+        opts = normalize_options(merged)
+        _check_profile(db, opts["quality_profile_id"])
         sets.append("options=?")
-        args.append(json.dumps(normalize_options(merged)))
+        args.append(json.dumps(opts))
     if sets:
         conn = db.connect()
         try:
@@ -242,6 +271,8 @@ def update_library(db, library_id: Any, body: Any) -> Dict[str, Any]:
             conn.close()
     if body.get("is_default"):
         set_default(db, lib["id"])
+    if "path" in body or "enabled" in body:
+        attribute_files(db)
     out = get_library(db, lib["id"])
     if out and out["is_default"] and not out["usable"]:
         # a default switched off hands the kind back to the main library
@@ -272,12 +303,17 @@ def delete_library(db, library_id: Any) -> bool:
     conn = db.connect()
     try:
         conn.execute("DELETE FROM video_title_libraries WHERE library_id=?", (lib["id"],))
+        # a copy wanted there is no longer wanted (its title copies cascade)
+        conn.execute("DELETE FROM video_wishlist WHERE video_library_id=?", (lib["id"],))
+        conn.execute("UPDATE movies SET video_library_id=NULL WHERE video_library_id=?", (lib["id"],))
+        conn.execute("UPDATE shows SET video_library_id=NULL WHERE video_library_id=?", (lib["id"],))
         conn.execute("DELETE FROM video_libraries WHERE id=?", (lib["id"],))
         conn.commit()
     finally:
         conn.close()
     if lib["is_default"]:
         _reset_default(db, lib["kind"])
+    attribute_files(db)
     return True
 
 
@@ -501,8 +537,172 @@ def folder_for(lib: Optional[Dict[str, Any]], fallback: str = "") -> str:
     return str((lib or {}).get("path") or "") or fallback
 
 
+# ── per-library quality profile (#2029 step 2) ───────────────────────────────
+
+def default_profile_for(db, kind: Any, *, tmdb_id: Any = None, explicit_id: Any = None,
+                        title: Any = None) -> Optional[int]:
+    """The default quality profile of the library a title files into (its
+    pick, the 4K one by the title's profile, the rules, the default), or None
+    when that library has none, which leaves the kind's default and the
+    Default exactly as before. The 4K step reads the profile the title would
+    have without a library, so this never asks itself. Best-effort."""
+    k = kind_of(kind)
+    if not k:
+        return None
+    try:
+        # no library has a default profile (every install until one is set):
+        # nothing to choose, so routing is never asked
+        if not any(x["quality_profile_id"] for x in list_libraries(db, k)):
+            return None
+        from core.video.quality_profile import profile_by_id
+
+        def profile_library():
+            return str(profile_by_id(db, None, kind=k).get("library") or "main")
+        lib = choose(db, k, tmdb_id=tmdb_id, explicit_id=explicit_id,
+                     profile_library=profile_library, title=title)
+    except Exception:   # noqa: BLE001 - no libraries: the defaults as before
+        return None
+    pid = (lib or {}).get("quality_profile_id") or 0
+    try:
+        return int(pid) if pid and db.get_named_quality_profile(int(pid)) else None
+    except Exception:   # noqa: BLE001 - a profile that can't be read is no default
+        return None
+
+
+# ── a second copy in another library (#2029 step 2, movies) ──────────────────
+
+def title_copies(db, kind: Any, tmdb_id: Any) -> List[int]:
+    """The libraries a title has a second copy wanted in."""
+    k = kind_of(kind)
+    try:
+        tmdb = int(tmdb_id)
+    except (TypeError, ValueError):
+        return []
+    conn = db.connect()
+    try:
+        return [int(r[0]) for r in conn.execute(
+            "SELECT library_id FROM video_title_copies WHERE kind=? AND tmdb_id=? ORDER BY library_id",
+            (k, tmdb)).fetchall()]
+    finally:
+        conn.close()
+
+
+def add_copy(db, kind: Any, tmdb_id: Any, library_id: Any, *, title: Any, year: Any = None,
+             poster_url: Any = None, profile_id: int = 1,
+             quality_profile_id: Any = None) -> Dict[str, Any]:
+    """Want a second copy of a movie in another library: the same film in
+    Movies and Movies 4K, neither replacing the other. Adds its own wishlist
+    row there, judged by ``quality_profile_id`` or that library's default
+    profile. Returns the library. Raises ValueError / LookupError."""
+    k = kind_of(kind)
+    if k != "movie":
+        raise ValueError("A second copy is for movies for now")
+    try:
+        tmdb = int(tmdb_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("The title has no TMDB id") from exc
+    lib = get_library(db, library_id)
+    if not lib or lib["kind"] != k:
+        raise LookupError("No such movie library")
+    if not lib["usable"]:
+        raise ValueError("%s needs a folder and to be switched on first" % lib["name"])
+    if not str(title or "").strip():
+        raise ValueError("The title has no name")
+    qpid = _int(quality_profile_id) or lib["quality_profile_id"] or None
+    if qpid:
+        _check_profile(db, qpid)
+    conn = db.connect()
+    try:
+        conn.execute("INSERT OR IGNORE INTO video_title_copies (kind, tmdb_id, library_id) VALUES (?, ?, ?)",
+                     (k, tmdb, lib["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    db.add_movie_to_wishlist(tmdb, str(title).strip(), year=year, poster_url=poster_url,
+                             profile_id=profile_id, video_library_id=lib["id"],
+                             quality_profile_id=qpid)
+    return lib
+
+
+def remove_copy(db, kind: Any, tmdb_id: Any, library_id: Any) -> bool:
+    """Stop wanting a copy in that library: its wishlist rows go too. A file
+    already there stays on disk (and counts for the title again)."""
+    k = kind_of(kind)
+    try:
+        tmdb, lid = int(tmdb_id), int(library_id)
+    except (TypeError, ValueError):
+        return False
+    conn = db.connect()
+    try:
+        cur = conn.execute("DELETE FROM video_title_copies WHERE kind=? AND tmdb_id=? AND library_id=?",
+                           (k, tmdb, lid))
+        conn.commit()
+        gone = cur.rowcount
+    finally:
+        conn.close()
+    db.remove_from_wishlist("movie", tmdb_id=tmdb, profile_id=None, video_library_id=lid)
+    return bool(gone)
+
+
+# ── which library a scanned title's files sit in ──────────────────────────────
+
+def _local_path(server_path: str, entries) -> str:
+    """the server's path of a file as seen from here: the drive map's
+    translation, else as the server wrote it"""
+    try:
+        from core.video import drive_map
+        mapped = drive_map.map_path(entries, server_path) if entries else None
+    except Exception:   # noqa: BLE001 - the map is a shortcut, never a failure
+        mapped = None
+    return mapped or server_path
+
+
+def attribute_files(db) -> int:
+    """Stamp each movie and show with the library its files sit in
+    (movies.video_library_id / shows.video_library_id), by folder: the
+    server's path through the drive map, else as the server wrote it.
+    NULL when no library folder holds it. Run after a scan and whenever the
+    libraries change. Returns the rows changed. Best-effort, never raises."""
+    try:
+        from core.video import drive_map
+        entries = drive_map.load(db)
+    except Exception:   # noqa: BLE001
+        entries = []
+    changed = 0
+    try:
+        libs = list_libraries(db)
+        by_kind = {k: [x for x in libs if x["kind"] == k] for k in KINDS}
+        conn = db.connect()
+        try:
+            for table, kind, sql in (
+                ("movies", "movie",
+                 "SELECT m.id, m.video_library_id, (SELECT f.relative_path FROM media_files f "
+                 "WHERE f.movie_id=m.id ORDER BY f.size_bytes DESC LIMIT 1) FROM movies m"),
+                ("shows", "show",
+                 "SELECT s.id, s.video_library_id, (SELECT f.relative_path FROM episodes e "
+                 "JOIN media_files f ON f.episode_id=e.id WHERE e.show_id=s.id LIMIT 1) FROM shows s"),
+            ):
+                updates = []
+                for row_id, current, path in conn.execute(sql).fetchall():
+                    lib = library_for_path(db, _local_path(path, entries), libs=by_kind[kind]) \
+                        if path else None
+                    want = lib["id"] if lib else None
+                    if want != current:
+                        updates.append((want, row_id))
+                if updates:
+                    conn.executemany("UPDATE %s SET video_library_id=? WHERE id=?" % table, updates)
+                    changed += len(updates)
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:   # noqa: BLE001 - attribution is an assist, never a failed scan
+        logger.debug("attribute_files failed", exc_info=True)
+    return changed
+
+
 __all__ = ["KINDS", "kind_of", "normalize_options", "list_libraries", "get_library",
            "create_library", "update_library", "delete_library", "set_default",
            "title_assignment", "assign_title", "has_rules", "rule_match", "title_tags",
-           "choose", "custom_folders", "library_for_path", "folder_for"]
+           "choose", "custom_folders", "library_for_path", "folder_for",
+           "default_profile_for", "title_copies", "add_copy", "remove_copy", "attribute_files"]
 

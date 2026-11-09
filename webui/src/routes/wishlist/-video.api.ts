@@ -77,6 +77,8 @@ export function videoWishlistCountsQueryOptions(profileId: number) {
 
 export interface VideoActionTarget {
   scope: 'movie' | 'show' | 'season' | 'episode';
+  /** #2029: one library's row of a movie (0 = the title's own, else a copy). */
+  video_library_id?: number;
   tmdb_id: number;
   season_number?: number;
   episode_number?: number;

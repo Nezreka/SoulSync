@@ -139,6 +139,10 @@ A new title files into, first match wins:
 - Titles you already have stay where they are, and their upgrades land beside the copy you have.
 - A library that's switched off or has no folder is skipped everywhere; **Remove** keeps its folder and files, and titles picked for it go back to the rules and the default.
 - A library's folder is a library folder like the main ones: scans, health checks and the download monitor know it. Map it in Docker and add it to a library on your media server.
+
+**Quality profile per library.** Each library can set the quality profile its titles are grabbed and upgraded by (**Quality profile** on its card). A title's own profile still wins; a library left on the default uses the kind's default as before.
+
+**The same movie in two libraries.** In a movie's **Get** window, **Also want a copy in…** adds a second copy in another library: the film in Movies (1080p) and in Movies 4K, neither replacing the other. Each copy is its own wishlist card (named with its library), hunted, grabbed and upgraded by its library's profile, and filed in its library. A copy is owned only by a file in its own library's folder (scans note which library each file sits in; on Docker, the server's folders need to be reached, see Your library's folders), so the 4K file never satisfies the 1080p wish or the other way round. Remove the copy with its **×**, or its wishlist card. Second copies are for movies; TV shows keep one copy.
 `
         },
         {

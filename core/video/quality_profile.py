@@ -392,7 +392,28 @@ def load_for_item(db, item: Any) -> dict:
     if isinstance(item, dict):
         pid = item.get("quality_profile_id")
         kind = item.get("kind")
+        if not pid:
+            # no profile of its own: its video library's default (#2029)
+            pid = library_profile_for_item(db, item)
     return profile_by_id(db, pid, kind=kind)
+
+
+def library_profile_for_item(db, item: Any) -> Optional[int]:
+    """The default quality profile of the video library a wished item files
+    into (#2029), or None. Reads the drain / RSS item shape (tmdb_id for a
+    movie, show_tmdb_id for an episode) and a copy's video_library_id."""
+    if not isinstance(item, dict):
+        return None
+    try:
+        from core.video.libraries import default_profile_for
+        is_movie = item.get("show_tmdb_id") is None and str(item.get("kind") or "movie") == "movie"
+        return default_profile_for(
+            db, "movie" if is_movie else "show",
+            tmdb_id=item.get("tmdb_id") if is_movie else item.get("show_tmdb_id"),
+            explicit_id=item.get("video_library_id"),
+            title=item.get("title") if is_movie else (item.get("show_title") or item.get("title")))
+    except Exception:   # noqa: BLE001 - no library default: the defaults as before
+        return None
 
 
 __all__ = [

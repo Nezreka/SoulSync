@@ -577,6 +577,28 @@ export function showMeta(show: VideoShowItem): string {
 }
 
 /** the line under a movie poster. */
+/**
+ * #2029: a movie card's action target. A row the server named a library for
+ * (null = the title's own row, a number = a copy wanted in another library)
+ * acts on that row alone; a row without the field acts as it always did.
+ */
+export function movieTarget(movie: VideoMovieItem): {
+  scope: 'movie';
+  tmdb_id: number;
+  video_library_id?: number;
+} {
+  const base = { scope: 'movie' as const, tmdb_id: movie.tmdb_id };
+  return movie.video_library_id === undefined
+    ? base
+    : { ...base, video_library_id: movie.video_library_id ?? 0 };
+}
+
+/** #2029: the card line, with a copy's library first. */
+export function movieCardMeta(movie: VideoMovieItem): string {
+  const meta = movieMeta(movie);
+  return movie.video_library_name ? `${movie.video_library_name} · ${meta}` : meta;
+}
+
 export function movieMeta(movie: VideoMovieItem): string {
   const zone = movieZone(movie);
   let tail: string;

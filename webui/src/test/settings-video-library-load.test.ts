@@ -51,12 +51,12 @@ describe('shared video Library initialization', () => {
       '$title ($year)/$title',
     );
     // folders, organization, libraries, the server's folder list, and the
-    // video libraries (#2029 added that one)
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    // video libraries with the quality profiles for their defaults (#2029)
+    expect(fetcher).toHaveBeenCalledTimes(6);
     expect(fetcher.mock.calls.map((c) => String(c[0]))).toContain('/api/video/libraries/drives');
     (doc.getElementById('video-movies-path') as HTMLInputElement).value = '/unsaved';
     show();
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(6);
     expect((doc.getElementById('video-movies-path') as HTMLInputElement).value).toBe('/unsaved');
   });
   it('keeps blank controls disabled after a failed load and allows retry', async () => {

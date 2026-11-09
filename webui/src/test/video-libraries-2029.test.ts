@@ -59,6 +59,14 @@ function setup() {
     }
     if (url.startsWith('/api/video/libraries/folders')) return body({ success: true });
     if (url.includes('/organization')) return body({ movie_template: '$title' });
+    if (url.includes('/quality/profiles')) {
+      return body({
+        profiles: [
+          { id: 0, name: 'Default' },
+          { id: 7, name: 'UHD' },
+        ],
+      });
+    }
     if (url.includes('/libraries/drives')) return body({ folders: [] });
     return body({ movies_path: '/movies', tv_path: '/tv' });
   });
@@ -127,6 +135,7 @@ describe('settings: more libraries', () => {
       path: '/kids',
       enabled: true,
       rules: { genres: ['Kids', 'Family'], keywords: [] },
+      quality_profile_id: 0,
     });
   });
 
@@ -135,12 +144,20 @@ describe('settings: more libraries', () => {
     await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
     const main = doc.querySelector('.video-library-row') as HTMLElement;
     (main.querySelector('.video-library-keywords') as HTMLInputElement).value = 'drama';
+    // a default quality profile per library (#2029 step 2)
+    const prof = main.querySelector('.video-library-profile') as HTMLSelectElement;
+    expect(Array.from(prof.options).map((o) => o.textContent)).toEqual([
+      'Default for new movies',
+      'UHD',
+    ]);
+    prof.value = '7';
     (main.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
     const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
     expect(put![0]).toBe('/api/video/libraries/folders/1');
     expect(JSON.parse(put![1]!.body as string)).toEqual({
       name: 'Movies',
       rules: { genres: [], keywords: ['drama'] },
+      quality_profile_id: 7,
     });
   });
 
@@ -217,5 +234,61 @@ describe('get window: the library picker', () => {
     expect(wired).toContain("closest('[data-vdl-library]')");
     expect(wired).toContain("'/api/video/downloads/quality/library'");
     expect(VIEW).toContain('profilePickerHTML(info) + libraryPickerHTML(info)');
+  });
+});
+
+describe('get window: second copies (#2029 step 2)', () => {
+  const ESC = VIEW.slice(VIEW.indexOf('function esc'), VIEW.indexOf('function toast'));
+  const SRC = VIEW.slice(
+    VIEW.indexOf('function copiesHTML'),
+    VIEW.indexOf("// fetch the title's profile"),
+  );
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  const copies = new Function(`${ESC}; ${SRC}; return copiesHTML;`)() as (i: unknown) => string;
+  const libraries = [
+    { id: 1, name: 'Movies' },
+    { id: 2, name: 'Movies 4K' },
+    { id: 5, name: 'Stand-Up' },
+  ];
+
+  it('offers every library but the one the title files into', () => {
+    const html = copies({ libraries, library: { id: 1, name: 'Movies' }, copies: [] });
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const opts = Array.from(doc.querySelectorAll('[data-vdl-copy-add] option')).map(
+      (o) => o.textContent,
+    );
+    expect(opts).toEqual(['Also want a copy in…', 'Movies 4K', 'Stand-Up']);
+  });
+
+  it('lists the copies with their state and a remove', () => {
+    const html = copies({
+      libraries,
+      library: { id: 1, name: 'Movies' },
+      copies: [{ library_id: 2, name: 'Movies 4K', wished: true, owned: false }],
+    });
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    expect(doc.querySelector('.vdl-copy')!.textContent).toContain('Movies 4K · wanted');
+    expect(doc.querySelector('[data-vdl-copy-remove="2"]')).not.toBeNull();
+    const opts = Array.from(doc.querySelectorAll('[data-vdl-copy-add] option')).map(
+      (o) => o.textContent,
+    );
+    expect(opts).toEqual(['Also want a copy in…', 'Stand-Up']);
+  });
+
+  it('hides for a show, one library, or an old server', () => {
+    expect(copies({ libraries, library: null })).toBe('');
+    expect(copies({ libraries: [libraries[0]], copies: [] })).toBe('');
+    expect(copies(null)).toBe('');
+  });
+
+  it('posts and deletes copies on the copies endpoint', () => {
+    const wired = VIEW.slice(
+      VIEW.indexOf('function loadTitleProfile'),
+      VIEW.indexOf('function renderTarget'),
+    );
+    expect(wired).toContain("'/api/video/downloads/quality/copies'");
+    expect(wired).toContain("copyCall('POST'");
+    expect(wired).toContain("copyCall('DELETE'");
+    expect(VIEW).toContain('libraryPickerHTML(info) + copiesHTML(info)');
   });
 });

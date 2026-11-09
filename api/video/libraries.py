@@ -41,6 +41,9 @@ def register_routes(bp):
         except ValueError as e:
             return jsonify({"error": str(e)}), 400
         logger.info("video library folders saved: %d reached", len(saved))
+        # a newly reached folder can put titles in a video library (#2029)
+        from core.video.libraries import attribute_files
+        attribute_files(get_video_db())
         return jsonify({"success": True, "map": saved,
                         "folders": drive_map.server_folders(get_video_db())})
 

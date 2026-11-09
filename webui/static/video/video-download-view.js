@@ -331,6 +331,30 @@
             '<span class="vdl-prof-lab">Library</span>' +
             '<select class="vdl-prof-sel" data-vdl-library>' + opts + '</select></label>';
     }
+    // a movie's second copies in other libraries (#2029): the same film in
+    // Movies and Movies 4K, neither replacing the other. each copy is its own
+    // wishlist entry, judged by its library's default profile
+    function copiesHTML(info) {
+        if (!info || !Array.isArray(info.copies) || !info.libraries || info.libraries.length < 2) return '';
+        var taken = {};
+        info.copies.forEach(function (c) { taken[c.library_id] = true; });
+        if (info.library) taken[info.library.id] = true;
+        var chips = info.copies.map(function (c) {
+            var state = c.owned ? 'in library' : c.wished ? 'wanted' : 'kept';
+            return '<span class="vdl-chip vdl-copy">' + esc(c.name) + ' · ' + esc(state) +
+                ' <button type="button" class="vdl-copy-x" data-vdl-copy-remove="' + c.library_id + '" ' +
+                'aria-label="Stop wanting a copy in ' + esc(c.name) + '" title="Stop wanting this copy">×</button></span>';
+        }).join('');
+        var free = info.libraries.filter(function (l) { return !taken[l.id]; });
+        var pick = free.length
+            ? '<select class="vdl-prof-sel" data-vdl-copy-add aria-label="Want a copy in another library">' +
+                '<option value="">Also want a copy in…</option>' +
+                free.map(function (l) { return '<option value="' + l.id + '">' + esc(l.name) + '</option>'; }).join('') +
+              '</select>'
+            : '';
+        if (!chips && !pick) return '';
+        return '<span class="vdl-copies" data-vdl-copies>' + chips + pick + '</span>';
+    }
     // fetch the title's profile, render it, and keep the picker's change wired.
     // onChanged runs after a pick is saved (the overlay re-runs its searches)
     function loadTitleProfile(host, getIdent, kind, render, onChanged) {
@@ -343,7 +367,37 @@
         });
         if (host._vdlProfWired) return;
         host._vdlProfWired = true;
+        function copyCall(method, libraryId) {
+            var o = getIdent() || {};
+            var body = titleBody(o, 'movie', null);
+            delete body.profile_id;
+            body.library_id = libraryId;
+            body.title = o.title || ''; body.year = o.year || null; body.poster_url = o.poster || null;
+            return fetch('/api/video/downloads/quality/copies', {
+                method: method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                body: JSON.stringify(body) })
+                .then(function (r) { return r.json().catch(function () { return null; }); })
+                .then(function (res) {
+                    if (!res || res.success === false) toast((res && res.error) || 'Could not change the copy', 'error');
+                    else toast(method === 'POST' ? 'A copy is on the wishlist for that library' : 'Copy no longer wanted', 'success');
+                    loadTitleProfile(host, getIdent, kind, render, onChanged);
+                    document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+                })
+                .catch(function () { toast('Could not change the copy', 'error'); });
+        }
+        host.addEventListener('click', function (e) {
+            var x = e.target.closest && e.target.closest('[data-vdl-copy-remove]');
+            if (!x) return;
+            x.disabled = true;
+            copyCall('DELETE', parseInt(x.getAttribute('data-vdl-copy-remove'), 10));
+        });
         host.addEventListener('change', function (e) {
+            var add = e.target.closest && e.target.closest('[data-vdl-copy-add]');
+            if (add) {
+                var id = parseInt(add.value, 10);
+                if (id) { add.disabled = true; copyCall('POST', id); }
+                return;
+            }
             var lib = e.target.closest && e.target.closest('[data-vdl-library]');
             if (lib) {
                 var body = titleBody(getIdent(), kind, null);
@@ -397,7 +451,8 @@
             if (p.max_movie_gb) chips.push(chip('Movie ≤ ' + p.max_movie_gb + ' GB'));
             if (p.max_episode_gb) chips.push(chip('Episode ≤ ' + p.max_episode_gb + ' GB'));
         }
-        box.innerHTML = (isYt ? '' : profilePickerHTML(info) + libraryPickerHTML(info)) + chips.join('');
+        box.innerHTML = (isYt ? '' : profilePickerHTML(info) + libraryPickerHTML(info) + copiesHTML(info)) +
+            chips.join('');
     }
 
     // Owned copy → "In your library · 720p · BluRay · X265" + a verdict against the

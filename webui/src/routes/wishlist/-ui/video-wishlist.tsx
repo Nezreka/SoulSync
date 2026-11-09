@@ -19,7 +19,7 @@ import {
   failingOnlyShows,
   initials,
   isFailingItem,
-  movieMeta,
+  movieCardMeta,
   movieZone,
   moviesNeedArt,
   rowZone,
@@ -170,7 +170,8 @@ export function VideoWishlist({
   );
   const showZones = useMemo(() => videoZones(visibleShows, showZone, media), [visibleShows, media]);
 
-  const keyOfMovie = (m: VideoMovieItem) => `m:${m.tmdb_id}`;
+  // a copy wanted in another library (#2029) is its own card
+  const keyOfMovie = (m: VideoMovieItem) => `m:${m.tmdb_id}:${m.video_library_id ?? ''}`;
   const keyOfShow = (s: VideoShowItem) =>
     s.source === 'youtube' ? `y:${s.youtube_id}` : `s:${s.tmdb_id}`;
   const openMovie = isMovies ? visibleMovies.find((m) => keyOfMovie(m) === openKey) : undefined;
@@ -388,7 +389,7 @@ export function VideoWishlist({
                           key={keyOfMovie(m)}
                           title={m.title}
                           image={sized(m.poster_url || '', 342)}
-                          meta={movieMeta(m)}
+                          meta={movieCardMeta(m)}
                           stuck={VIDEO_STUCK_ZONES.has(zone.kind)}
                           expanded={openKey === keyOfMovie(m)}
                           data={{ tmdb: String(m.tmdb_id) }}

@@ -301,6 +301,9 @@ def apply_group_overrides(candidates: List[Dict[str, Any]],
 def item_key(item: Dict[str, Any], media_type: str) -> tuple:
     """Stable identity for de-duping a wished item against active downloads."""
     if media_type == "movie":
+        # a copy wanted in another library (#2029) is its own item
+        if item.get("video_library_id"):
+            return ("movie", str(item.get("tmdb_id")), int(item["video_library_id"]))
         return ("movie", str(item.get("tmdb_id")))
     if item.get("episode_number") is None and item.get("season_number") is not None:
         return ("season", str(item.get("show_tmdb_id")), int(item.get("season_number") or 0))
@@ -315,7 +318,10 @@ def active_download_keys(active: Iterable[Dict[str, Any]]) -> set:
     for d in active or []:
         kind = str(d.get("kind") or "").lower()
         if kind == "movie":
-            keys.add(("movie", str(d.get("media_id"))))
+            if d.get("video_library_id"):
+                keys.add(("movie", str(d.get("media_id")), int(d["video_library_id"])))
+            else:
+                keys.add(("movie", str(d.get("media_id"))))
         elif kind in ("episode", "show", "season"):
             ctx = d.get("search_ctx")
             if isinstance(ctx, str):
@@ -599,6 +605,17 @@ def search_context(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
     return ctx
 
 
+def _library_profile(item: Dict[str, Any]) -> Optional[int]:
+    """The default profile of the item's video library (#2029), or None.
+    Best-effort: never stops a grab."""
+    try:
+        from api.video import get_video_db
+        from core.video.quality_profile import library_profile_for_item
+        return library_profile_for_item(get_video_db(), item)
+    except Exception:   # noqa: BLE001
+        return None
+
+
 def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates: List[Dict[str, Any]],
                           *, media_type: str, target_dir: str, query: Any) -> Dict[str, Any]:
     """The ``add_video_download`` row for a chosen release — identical shape to a manual
@@ -625,7 +642,11 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
         "poster_url": item.get("poster_url"), "search_ctx": json.dumps(ctx), "attempts": 0,
         # the profile this grab was judged under — the monitor's cutoff/requery
         # decisions stay consistent even if the title is reassigned mid-flight
-        "quality_profile_id": item.get("quality_profile_id"),
+        # (no profile of its own: its library's default, #2029)
+        "quality_profile_id": item.get("quality_profile_id") or _library_profile(item),
+        # a second copy's library (#2029): the import files it there and
+        # judges only the copy already in that library
+        "video_library_id": item.get("video_library_id"),
     }
     if transport_source == "soulseek":
         rest = [c for c in (candidates or []) if c.get("filename") != best.get("filename")]
@@ -1178,6 +1199,14 @@ def _wishlist_db_key(item: Dict[str, Any], media_type: str) -> tuple:
     return kind, tmdb, item.get('season_number'), item.get('episode_number')
 
 
+def _row_library(item: Dict[str, Any], media_type: str) -> Dict[str, Any]:
+    """The wishlist writers' library scope for a movie item (#2029): its own
+    row only, a copy's or the title's. {} for episodes (every row)."""
+    if media_type != "movie":
+        return {}
+    return {"video_library_id": item.get("video_library_id")}
+
+
 def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool,
                             refusal: Optional[Dict[str, Any]] = None) -> None:
     """Persist the drain search outcome on the wishlist row (#liveleak-failing-hub):
@@ -1201,7 +1230,7 @@ def _default_record_outcome(item: Dict[str, Any], media_type: str, grabbed: bool
             episode_number=episode,
             refusal=refusal_line(refusal),
             refusal_quality=(refusal or {}).get('quality_label'),
-            snapshot=item.get("_source_snapshot"))
+            snapshot=item.get("_source_snapshot"), **_row_library(item, media_type))
     except Exception:   # noqa: BLE001 - visibility must never break acquisition
         logger.debug("record_wishlist_search_outcome failed", exc_info=True)
 
@@ -1217,7 +1246,7 @@ def _default_record_note(item: Dict[str, Any], media_type: str, note: str,
             return
         get_video_db().record_wishlist_search_note(
             kind, tmdb, note, season_number=season, episode_number=episode,
-            refusal_quality=refusal_quality)
+            refusal_quality=refusal_quality, **_row_library(item, media_type))
     except Exception:   # noqa: BLE001 - visibility must never break acquisition
         logger.debug("record_wishlist_search_note failed", exc_info=True)
 

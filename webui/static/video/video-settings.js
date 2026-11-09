@@ -700,6 +700,7 @@
     // esc for attribute values too (a library named with a quote)
     function escA(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
     var LIB_KIND = { movie: 'Movies', show: 'TV' };
+    var _libProfiles = [];   // named quality profiles, for each library's default
     function libTerms(list) { return (list || []).join(', '); }
     function libraryRowHtml(lib) {
         var isNew = !lib.id;
@@ -732,6 +733,13 @@
                 '<input type="text" class="video-library-keywords" value="' + escA(libTerms(rules.keywords)) + '" ' +
                     'placeholder="Keywords, e.g. stand-up" aria-label="Keywords that send a title here">' +
             '</div>' +
+            '<label class="video-library-field">Quality profile ' +
+                '<select class="video-library-profile" aria-label="Quality profile for titles in this library">' +
+                '<option value="0">' + (lib.kind === 'show' ? 'Default for new shows' : 'Default for new movies') + '</option>' +
+                _libProfiles.filter(function (p) { return p.id; }).map(function (p) {
+                    return '<option value="' + escA(p.id) + '"' + (p.id === lib.quality_profile_id ? ' selected' : '') +
+                        '>' + escA(p.name) + '</option>';
+                }).join('') + '</select></label>' +
             '<div class="video-library-actions">' +
                 (builtin ? '' : '<label class="checkbox-label"><input type="checkbox" class="video-library-enabled"' +
                     (lib.enabled !== false ? ' checked' : '') + '> Switched on</label>') +
@@ -751,16 +759,24 @@
         if (window.SoulSyncFolderCheck) window.SoulSyncFolderCheck.refresh('video');
     }
     function loadLibraries() {
-        return fetch(LIBS_URL, { headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) { if (d && d.libraries) renderLibraries(d.libraries, d.genres || []); })
-            .catch(function () {});
+        var get = function (url) {
+            return fetch(url, { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .catch(function () { return null; });
+        };
+        return Promise.all([get(LIBS_URL), get('/api/video/downloads/quality/profiles')])
+            .then(function (res) {
+                _libProfiles = (res[1] && res[1].profiles) || [];
+                var d = res[0];
+                if (d && d.libraries) renderLibraries(d.libraries, d.genres || []);
+            });
     }
     function libraryBody(row) {
         var val = function (sel) { var el = row.querySelector(sel); return el ? el.value.trim() : ''; };
         var split = function (v) { return v.split(',').map(function (x) { return x.trim(); }).filter(Boolean); };
         var body = { name: val('.video-library-name'),
-            rules: { genres: split(val('.video-library-genres')), keywords: split(val('.video-library-keywords')) } };
+            rules: { genres: split(val('.video-library-genres')), keywords: split(val('.video-library-keywords')) },
+            quality_profile_id: parseInt(val('.video-library-profile'), 10) || 0 };
         if (!row.getAttribute('data-builtin')) {
             body.path = val('.video-library-path');
             var on = row.querySelector('.video-library-enabled');

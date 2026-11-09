@@ -331,6 +331,13 @@ class VideoLibraryScanner:
                 except Exception:
                     logger.debug("video scan: could not persist last-scan baseline", exc_info=True)
 
+            # which video library (#2029) each title's files sit in, by folder
+            try:
+                from core.video.libraries import attribute_files
+                attribute_files(self.db)
+            except Exception:   # noqa: BLE001 - never fails the scan itself
+                logger.exception("video scan: library attribution failed")
+
             self._set(state="done", phase="complete", finished_at=time.time(),
                       movies=movies, shows=shows, episodes=episodes, percent=100,
                       removed=removed_m + removed_s)
