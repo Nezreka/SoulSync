@@ -269,7 +269,7 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
                     tmdb_id: Any = None, tvdb_id: Any = None, air_date: Any = None,
                     absolute: Any = None, series_type: Any = None,
                     max_wait_seconds: Any = None, indexer_names: Any = None,
-                    alt: Any = None, alt_titles: Any = None) -> dict:
+                    alt: Any = None, alt_titles: Any = None, indexer_ids: Any = None) -> dict:
     """Search Prowlarr for a video release with the multi-strategy (structured + text)
     approach. ``source`` picks the protocol to keep (``torrent`` | ``usenet``). Returns
     ``{configured, error?, hits:[...]}`` — the hit shape ``_evaluate_hits`` consumes.
@@ -291,7 +291,10 @@ def prowlarr_search(scope: str, title: Any, *, year: Any = None, season: Any = N
     if target_ids == []:
         label = ", ".join(str(n) for n in (indexer_names if isinstance(indexer_names, (list, tuple, set)) else [indexer_names]))
         return {"configured": True, "error": "No enabled Prowlarr indexer matches " + label, "hits": []}
-    ids = target_ids if target_ids is not None else _indexer_ids()
+    # ``indexer_ids``: a video library's own indexers (#2029); else the
+    # global allowlist, as before
+    ids = target_ids if target_ids is not None else (
+        [int(i) for i in indexer_ids] if indexer_ids else _indexer_ids())
     strategies = build_strategies(scope, title, year=year, season=season, episode=episode,
                                   imdb_id=imdb_id, tmdb_id=tmdb_id, tvdb_id=tvdb_id,
                                   air_date=air_date, absolute=absolute, series_type=series_type,

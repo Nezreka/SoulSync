@@ -76010,6 +76010,8 @@ body.src-modal-open { overflow: hidden; }
 }
 #settings-page .video-library-src.is-on { border-color: var(--accent); color: var(--text-primary); }
 #settings-page .video-library-hint { color: var(--text-secondary); font-size: 12px; }
+#settings-page .video-library-indexers summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; }
+#settings-page .video-library-idx-list { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
 #settings-page .video-library-field {
     display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     color: var(--text-secondary); font-size: 13px;

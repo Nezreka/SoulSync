@@ -396,6 +396,18 @@ def _search_queries(body, source: str, scope: str, title: str, season, episode) 
         return []
 
 
+def _library_indexers(body, scope):
+    """The Prowlarr indexers the title's video library searches (#2029), or
+    None for every one. Best-effort: a search never fails on it."""
+    try:
+        from core.video.libraries import indexer_ids_for
+
+        from . import get_video_db
+        return indexer_ids_for(_library_for(get_video_db(), body.get("kind") or scope, body))
+    except Exception:   # noqa: BLE001
+        return None
+
+
 def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
     """The torrent/usenet lane, in ONE place.
 
@@ -422,6 +434,7 @@ def _torrent_lane_hits(body, scope, title, want_season, want_episode, source):
                            max_wait_seconds=MANUAL_SEARCH_MAX_WAIT_SECONDS,
                            indexer_names=_basic_indexer_names(body),
                            alt_titles=_alt_search_titles(body),
+                           indexer_ids=_library_indexers(body, scope),
                            **_external_ids(body))
     prowlarr_error = None
     if not pres.get("configured"):

@@ -325,15 +325,20 @@ def _skip_reason(cands: List[Dict[str, Any]], min_rank: int, item: Dict[str, Any
 
 def _library_sources_only(cands: List[Dict[str, Any]], item: Dict[str, Any],
                           media_type: str) -> List[Dict[str, Any]]:
-    """Releases from the sources the item's video library searches (#2029),
-    when it orders its own; every one otherwise. RSS itself still only runs
+    """Releases from the sources (and Prowlarr indexers) the item's video
+    library searches (#2029), when it sets its own; every one otherwise. RSS itself still only runs
     for the indexer sources in the global order."""
     from core.automation.handlers import video_process_wishlist as vpw
-    from core.video.libraries import source_chain
-    own = source_chain(vpw.item_library(item, media_type), [])
-    if not own:
-        return cands
-    return [c for c in cands or [] if str(c.get("source") or c.get("protocol") or "torrent").lower() in own]
+    from core.video.libraries import indexer_ids_for, source_chain
+    lib = vpw.item_library(item, media_type)
+    own = source_chain(lib, [])
+    if own:
+        cands = [c for c in cands or [] if str(c.get("source") or c.get("protocol") or "torrent").lower() in own]
+    # and its Prowlarr indexers (#2029 step 4); EXT.to has no indexer id
+    ids = indexer_ids_for(lib)
+    if ids:
+        cands = [c for c in cands or [] if c.get("indexer_id") is None or int(c["indexer_id"]) in ids]
+    return cands
 
 
 def _rank(pool: List[Dict[str, Any]], item: Dict[str, Any], media_type: str) -> List[Dict[str, Any]]:

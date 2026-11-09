@@ -704,6 +704,43 @@
     var LIB_SOURCES = [['soulseek', 'Soulseek'], ['usenet', 'Usenet'], ['torrent', 'Torrent'], ['extto', 'EXT.to']];
     // a library's own source order: each picked source numbered in order,
     // none picked = the global order (Settings > Downloads)
+    // a library's Prowlarr indexers (#2029 step 4): none ticked = every one.
+    // the list is asked from Prowlarr the first time a library's box opens
+    var _libIndexers = null;
+    function libIndexersHtml(ids) {
+        ids = ids || [];
+        var list = _libIndexers === null ? '<em class="video-library-hint">Loading…</em>'
+            : !_libIndexers.length ? '<em class="video-library-hint">No Prowlarr indexers (Settings → Indexers &amp; Downloaders).</em>'
+            : _libIndexers.map(function (i) {
+                return '<label class="checkbox-label"><input type="checkbox" class="video-library-idx" value="' + escA(i.id) + '"' +
+                    (ids.indexOf(i.id) >= 0 ? ' checked' : '') + '> ' + escA(i.name) +
+                    (i.protocol ? ' <span class="video-library-hint">' + escA(i.protocol) + '</span>' : '') + '</label>';
+            }).join('');
+        return '<details class="video-library-indexers" data-library-idx-ids="' + escA(ids.join(',')) + '">' +
+            '<summary>Indexers: ' + (ids.length ? ids.length + ' picked' : 'every one') + '</summary>' +
+            '<div class="video-library-idx-list">' + list + '</div></details>';
+    }
+    document.addEventListener('toggle', function (e) {
+        var box = e.target;
+        if (!box || !box.classList || !box.classList.contains('video-library-indexers') || !box.open) return;
+        if (_libIndexers !== null) return;
+        _libIndexers = [];
+        fetch('/api/prowlarr/indexers', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                _libIndexers = ((d && d.success && d.indexers) || []).map(function (i) {
+                    return { id: Number(i.id), name: i.name || ('Indexer ' + i.id), protocol: i.protocol || '' };
+                });
+                Array.from(document.querySelectorAll('.video-library-indexers')).forEach(function (b) {
+                    var list = b.querySelector('.video-library-idx-list');
+                    var ids = String(b.getAttribute('data-library-idx-ids') || '').split(',').filter(Boolean).map(Number);
+                    var tmp = document.createElement('div');
+                    tmp.innerHTML = libIndexersHtml(ids);
+                    list.innerHTML = tmp.querySelector('.video-library-idx-list').innerHTML;
+                });
+            })
+            .catch(function () { _libIndexers = []; });
+    }, true);
     function libSourcesHtml(order) {
         order = order || [];
         return '<div class="video-library-field video-library-sources" role="group" aria-label="Download from, in order">' +
@@ -756,6 +793,7 @@
                         '>' + escA(p.name) + '</option>';
                 }).join('') + '</select></label>' +
             libSourcesHtml((lib.options || {}).sources) +
+            libIndexersHtml((lib.options || {}).indexer_ids) +
             '<div class="video-library-rules">' +
                 '<input type="text" class="video-library-tcat" value="' + escA((lib.options || {}).torrent_category || '') + '" ' +
                     'placeholder="Torrent category / label" aria-label="Torrent client category or label" maxlength="64">' +
@@ -808,6 +846,13 @@
             quality_profile_id: parseInt(val('.video-library-profile'), 10) || 0,
             sources: libSourceOrder(row),
             torrent_category: val('.video-library-tcat'), usenet_category: val('.video-library-ucat') };
+        // the indexers: what's ticked once the list loaded, else what it had
+        var idxBox = row.querySelector('.video-library-indexers');
+        if (idxBox) {
+            body.indexer_ids = row.querySelector('.video-library-idx')
+                ? Array.from(row.querySelectorAll('.video-library-idx:checked')).map(function (c) { return Number(c.value); })
+                : String(idxBox.getAttribute('data-library-idx-ids') || '').split(',').filter(Boolean).map(Number);
+        }
         if (!row.getAttribute('data-builtin')) {
             body.path = val('.video-library-path');
             var on = row.querySelector('.video-library-enabled');

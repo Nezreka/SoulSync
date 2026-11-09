@@ -139,6 +139,7 @@ describe('settings: more libraries', () => {
       sources: [],
       torrent_category: '',
       usenet_category: '',
+      indexer_ids: [],
     });
   });
 
@@ -164,6 +165,7 @@ describe('settings: more libraries', () => {
       sources: [],
       torrent_category: '',
       usenet_category: '',
+      indexer_ids: [],
     });
   });
 
@@ -323,5 +325,39 @@ describe('settings: a library picks its sources and categories (#2029 step 3)', 
     expect(body.sources).toEqual(['usenet', 'soulseek']);
     expect(body.torrent_category).toBe('standup');
     expect(body.usenet_category).toBe('standup-nzb');
+  });
+});
+
+describe('settings: a library picks its indexers (#2029 step 4)', () => {
+  it('lists prowlarr indexers when opened and saves the ticked ones', async () => {
+    const { doc, fetcher } = setup();
+    fetcher.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/api/prowlarr/indexers') {
+        return new Response(
+          JSON.stringify({
+            success: true,
+            indexers: [
+              { id: 3, name: 'NZBgeek', protocol: 'usenet' },
+              { id: 7, name: 'TorrentLeech', protocol: 'torrent' },
+            ],
+          }),
+        );
+      }
+      if (url === '/api/video/libraries/folders' && !init?.method) {
+        return new Response(JSON.stringify({ libraries: LIBRARIES, genres: [] }));
+      }
+      return new Response(JSON.stringify({ success: true }));
+    });
+    await waitFor(() => expect(doc.querySelectorAll('.video-library-row').length).toBe(3));
+    const row = doc.querySelectorAll('.video-library-row')[2] as HTMLElement;
+    const box = row.querySelector('.video-library-indexers') as HTMLDetailsElement;
+    expect(box.querySelector('summary')!.textContent).toBe('Indexers: every one');
+    box.open = true;
+    box.dispatchEvent(new Event('toggle'));
+    await waitFor(() => expect(row.querySelectorAll('.video-library-idx').length).toBe(2));
+    (row.querySelector('.video-library-idx[value="7"]') as HTMLInputElement).checked = true;
+    (row.querySelector('[data-library-action="save"]') as HTMLButtonElement).click();
+    const put = calls(fetcher).find((c) => c[1]?.method === 'PUT');
+    expect(JSON.parse(put![1]!.body as string).indexer_ids).toEqual([7]);
   });
 });

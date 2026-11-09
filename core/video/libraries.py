@@ -98,7 +98,9 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
       ([] = the global order in Settings > Downloads)
     - torrent_category / usenet_category: the category (qBittorrent,
       SABnzbd, NZBGet) or label (Deluge, Transmission) its downloads get in
-      the client ('' = the client's own setting)"""
+      the client ('' = the client's own setting)
+    - indexer_ids: the Prowlarr indexers its searches use ([] = every one,
+      within the global allowlist, as before)"""
     raw = raw if isinstance(raw, dict) else {}
     rules = raw.get("rules") if isinstance(raw.get("rules"), dict) else {}
     sources = []
@@ -111,7 +113,17 @@ def normalize_options(raw: Any) -> Dict[str, Any]:
             "quality_profile_id": max(0, _int(raw.get("quality_profile_id"))),
             "sources": sources,
             "torrent_category": _category(raw.get("torrent_category")),
-            "usenet_category": _category(raw.get("usenet_category"))}
+            "usenet_category": _category(raw.get("usenet_category")),
+            "indexer_ids": _indexer_ids(raw.get("indexer_ids"))}
+
+
+def _indexer_ids(value: Any) -> List[int]:
+    out = set()
+    for v in value if isinstance(value, list) else []:
+        n = _int(v)
+        if n > 0:
+            out.add(n)
+    return sorted(out)[:200]
 
 
 def _category(value: Any) -> str:
@@ -219,7 +231,8 @@ def _check_path(db, path: Any, *, skip_id: Optional[int] = None) -> str:
 
 
 # a library's options, settable at the top of a create / update body too
-_OPTION_KEYS = ("rules", "quality_profile_id", "sources", "torrent_category", "usenet_category")
+_OPTION_KEYS = ("rules", "quality_profile_id", "sources", "torrent_category", "usenet_category",
+                "indexer_ids")
 
 
 def _check_profile(db, profile_id: int) -> None:
@@ -627,6 +640,13 @@ def source_chain(lib: Optional[Dict[str, Any]], chain: List[str]) -> List[str]:
     return list(own) if own else list(chain)
 
 
+def indexer_ids_for(lib: Optional[Dict[str, Any]]) -> Optional[List[int]]:
+    """The Prowlarr indexers a library's searches use (#2029 step 4), or None
+    for every indexer (the global allowlist)."""
+    ids = ((lib or {}).get("options") or {}).get("indexer_ids") or []
+    return list(ids) or None
+
+
 # ── a second copy in another library (#2029 step 2, movies) ──────────────────
 
 def title_copies(db, kind: Any, tmdb_id: Any) -> List[int]:
@@ -763,5 +783,5 @@ __all__ = ["KINDS", "kind_of", "normalize_options", "list_libraries", "get_libra
            "title_assignment", "assign_title", "has_rules", "rule_match", "title_tags",
            "choose", "custom_folders", "library_for_path", "folder_for",
            "default_profile_for", "title_copies", "add_copy", "remove_copy", "attribute_files",
-           "SOURCES", "library_of_folder", "client_category", "source_chain"]
+           "SOURCES", "library_of_folder", "client_category", "source_chain", "indexer_ids_for"]
 

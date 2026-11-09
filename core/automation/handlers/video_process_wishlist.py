@@ -923,7 +923,8 @@ def _search_one_source(source: str, item: Dict[str, Any], media_type: str):
                                series_type=ctx.get("series_type"),
                                imdb_id=ctx.get("imdb_id"), tmdb_id=ctx.get("tmdb_id"),
                                tvdb_id=ctx.get("tvdb_id"), alt=ctx_alt(ctx),
-                               alt_titles=(ctx.get("search_titles") or [])[1:])
+                               alt_titles=(ctx.get("search_titles") or [])[1:],
+                               indexer_ids=item_indexer_ids(item, media_type))
         prowlarr_err = None
         if not pres.get("configured"):
             prowlarr_err = "Prowlarr not configured"
@@ -1086,6 +1087,13 @@ def item_library(item: Dict[str, Any], media_type: str) -> Optional[Dict[str, An
         item["_library"] = _default_pick_library(
             item, media_type, lambda: _default_profile_library(item))
     return item["_library"]
+
+
+def item_indexer_ids(item: Dict[str, Any], media_type: str) -> Optional[List[int]]:
+    """The Prowlarr indexers the item's library searches (#2029), or None
+    for every one."""
+    from core.video.libraries import indexer_ids_for
+    return indexer_ids_for(item_library(item, media_type))
 
 
 def item_source_chain(item: Dict[str, Any], media_type: str, chain: List[str]) -> List[str]:
