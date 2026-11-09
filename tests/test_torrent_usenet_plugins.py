@@ -316,6 +316,91 @@ def test_usenet_cancel_during_file_collection_cannot_restore_success(monkeypatch
     assert plugin.active_downloads['dl']['state'] == 'Cancelled'
 
 
+class _TorrentCancelAdapter:
+    """review 5 W2-WC-5 fixture: a client that answers add_torrent_smart late"""
+
+    def __init__(self, plugin, *, cancel_on_add=False, cancel_on_poll=False, remove=False):
+        self.plugin, self.remove_files = plugin, remove
+        self.cancel_on_add, self.cancel_on_poll = cancel_on_add, cancel_on_poll
+        self.removals, self.polls = [], []
+
+    def is_configured(self):
+        return True
+
+    async def remove(self, torrent_hash, delete_files=False):
+        self.removals.append((torrent_hash, delete_files))
+        return True
+
+    async def get_status(self, torrent_hash):
+        self.polls.append(torrent_hash)
+        if self.cancel_on_poll:
+            await self.plugin.cancel_download('dl', remove=False)
+        return TorrentStatus(id=torrent_hash, name='Release', state='downloading',
+                             progress=0.25, size=100, downloaded=25, download_speed=1)
+
+
+def _drive_torrent_cancel(monkeypatch, adapter):
+    import core.download_plugins.torrent as module
+    import core.torrent_clients.base as client_base
+    plugin = adapter.plugin
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'torrent_hash': None}
+    polls_left = [3]
+    plugin.set_shutdown_check(lambda: polls_left.__setitem__(0, polls_left[0] - 1) or polls_left[0] < 0)
+
+    async def add(client, url, **kwargs):
+        if adapter.cancel_on_add:
+            await plugin.cancel_download('dl', remove=adapter.remove_files)
+        return 'late-hash'
+
+    monkeypatch.setattr(module, 'get_active_torrent_adapter', lambda: adapter)
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    monkeypatch.setattr(module.time, 'sleep', lambda *_: None)
+    monkeypatch.setattr(client_base, 'add_torrent_smart', add)
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.torrent', 'Release')
+
+
+@pytest.mark.parametrize('remove', [False, True])
+def test_torrent_cancel_during_submission_retires_the_late_torrent(monkeypatch, remove):
+    """review 5 W2-WC-5: a cancel before the client returned the hash removed
+    nothing, then the worker stored the hash and polled the torrent to the end"""
+    adapter = _TorrentCancelAdapter(TorrentDownloadPlugin(), cancel_on_add=True, remove=remove)
+    _drive_torrent_cancel(monkeypatch, adapter)
+
+    assert adapter.removals == [('late-hash', remove)]
+    assert adapter.polls == []
+    if remove:
+        assert 'dl' not in adapter.plugin.active_downloads
+    else:
+        assert adapter.plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+def test_torrent_cancel_during_status_poll_cannot_restore_downloading(monkeypatch):
+    adapter = _TorrentCancelAdapter(TorrentDownloadPlugin(), cancel_on_poll=True)
+    _drive_torrent_cancel(monkeypatch, adapter)
+
+    assert adapter.removals == [('late-hash', False)]
+    assert adapter.polls == ['late-hash']
+    assert adapter.plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
+def test_torrent_add_failure_after_cancel_preserves_cancelled_state(monkeypatch):
+    import core.download_plugins.torrent as module
+    import core.torrent_clients.base as client_base
+    plugin = TorrentDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'torrent_hash': None}
+
+    async def add(client, url, **kwargs):
+        await plugin.cancel_download('dl', remove=False)
+        return None
+
+    adapter = _TorrentCancelAdapter(plugin)
+    monkeypatch.setattr(module, 'get_active_torrent_adapter', lambda: adapter)
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    monkeypatch.setattr(client_base, 'add_torrent_smart', add)
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.torrent', 'Release')
+    assert plugin.active_downloads['dl']['state'] == 'Cancelled'
+
+
 @pytest.mark.parametrize('protocol', ['torrent', 'usenet'])
 def test_scene_artist_hint_does_not_override_explicit_artist_boundary(monkeypatch, protocol):
     from types import SimpleNamespace

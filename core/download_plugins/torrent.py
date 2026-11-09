@@ -123,6 +123,12 @@ _FILENAME_SEP = '||'
 _CANDIDATE_SEP = '\x1f'
 
 
+def _cancel_requested(row: Optional[Dict[str, Any]]) -> bool:
+    """a gone row or a cancel asked for (review 5 W2-WC-5, as usenet does)"""
+    return row is None or bool(row.get('cancel_requested')) \
+        or row.get('state') == 'Cancelled'
+
+
 def _encode_candidate(download_url: str, magnet: Optional[str]) -> str:
     """Pack the pair a candidate token resolves to. No magnet (or the same
     string twice) packs to the bare URL, so nothing changes for the common
@@ -415,6 +421,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         if adapter is None or not adapter.is_configured():
             self._mark_error(download_id, "No torrent client configured")
             return
+        # the same dict the cancel marks, kept even if the ui drops the row
+        with self._lock:
+            submission_row = self.active_downloads.get(download_id) or {}
 
         try:
             from core.torrent_clients.base import ReleaseRejected, add_torrent_smart
@@ -451,9 +460,21 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
         with self._lock:
             row = self.active_downloads.get(download_id)
-            if row is not None:
+            cancelled = _cancel_requested(row)
+            if not cancelled:
                 row['torrent_hash'] = torrent_hash
                 row['state'] = 'InProgress, Downloading'
+        if cancelled:
+            # review 5 W2-WC-5: cancelled while the add was in flight, so the
+            # cancel had no hash to remove. retire the late torrent here
+            try:
+                run_async(adapter.remove(
+                    torrent_hash,
+                    delete_files=bool(submission_row.get('cancel_remove_files', row is None))))
+            except Exception as e:
+                logger.warning("Torrent late-cancel cleanup on %s failed: %s",
+                               torrent_hash[:8], e)
+            return
 
         deadline = time.monotonic() + _POLL_TIMEOUT_SECONDS
         last_save_path: Optional[str] = None
@@ -470,6 +491,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         while time.monotonic() < deadline:
             if self.shutdown_check and self.shutdown_check():
                 return
+            with self._lock:
+                if _cancel_requested(self.active_downloads.get(download_id)):
+                    return
             try:
                 status = run_async(adapter.get_status(torrent_hash))
             except Exception as e:
@@ -490,6 +514,9 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
 
             with self._lock:
                 row = self.active_downloads.get(download_id)
+                if _cancel_requested(row):
+                    # cancelled while this poll was out: never back to life
+                    return
                 if row is not None:
                     row['progress'] = status.progress * 100.0
                     row['transferred'] = status.downloaded
@@ -617,6 +644,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         completed_hash = None
         with self._lock:
             row = self.active_downloads.get(download_id)
+            if _cancel_requested(row):
+                return
             if row is not None:
                 row['state'] = 'Completed, Succeeded'
                 row['progress'] = 100.0
@@ -637,7 +666,8 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         logger.error("Torrent download %s failed: %s", download_id[:8], message)
         with self._lock:
             row = self.active_downloads.get(download_id)
-            if row is not None:
+            # a cancelled row stays cancelled (review 5 W2-WC-5)
+            if row is not None and not _cancel_requested(row):
                 row['state'] = 'Completed, Errored'
                 row['error'] = message
                 row['failure_kind'] = failure_kind
@@ -703,6 +733,12 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
         with self._lock:
             row = self.active_downloads.get(download_id)
             torrent_hash = row.get('torrent_hash') if row else None
+            if row is not None and not str(row.get('state', '')).startswith('Completed'):
+                # review 5 W2-WC-5: a cancel before the client returned the
+                # hash removes nothing here; the worker retires the late
+                # torrent and stops polling when it sees this
+                row['cancel_requested'] = True
+                row['cancel_remove_files'] = remove
             # an errored row was already dealt with in the client when it gave
             # up: removed (abandon) or paused (pause, "leave it for me"). the
             # monitor cancels errored rows before retrying, and that used to
