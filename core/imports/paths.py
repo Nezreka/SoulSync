@@ -16,7 +16,7 @@ from utils.logging_config import get_logger
 # imported helper because the path builder still needs it.
 from core.imports.album_naming import resolve_album_group
 from core.imports.album_types import album_types_config, format_album_types
-from core.imports.collab_artist import first_listed_artist, listed_primary_of
+from core.imports.collab_artist import collab_primary, library_has_artist
 from core.imports.compilation import is_various_artists_credit, is_various_artists_name
 from core.library.case_folding import resolve_existing_case_dir
 from core.imports.context import (
@@ -777,13 +777,12 @@ def _replace_template_variables(template: str, context: dict) -> str:
         artists_list = context.get("_artists_list")
         # match on the raw name: the list's names aren't sanitized either
         _raw_album_artist = str(context.get("albumartist") or context.get("artist") or album_artist_value)
-        primary = first_listed_artist(_raw_album_artist, artists_list)
-        if not primary:
-            # the album list can be the combined name itself while the track
-            # names the primary on its own
-            track_list = context.get("_track_artists_list")
-            if track_list:
-                primary = listed_primary_of(_raw_album_artist, track_list[0])
+        # the album list can be the combined name itself while the track
+        # names the primary on its own, or no list splits it at all (#2028)
+        primary = collab_primary(
+            _raw_album_artist, artists_list, context.get("_track_artists_list"),
+            known_names=context.get("_collab_known_names") or (),
+            library_has=library_has_artist)
         if primary:
             # the list's name is raw: unsanitized, a collab album went to
             # "L.A.B." and a solo one to "L.A.B" (#1954), and a "/" in it
@@ -1640,6 +1639,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "atypes": atypes_value,
             "_artists_list": _album_artists_for_collab if _album_artists_for_collab else _artists,
             "_track_artists_list": _artists,
+            # names this download vouches for, so a credit given as one
+            # string can still be split on 'first listed' (#2028)
+            "_collab_known_names": [n for n in (artist_name, _artist_name) if n],
             "_itunes_artist_id": _itunes_aid,
             # #1299: the one thing telling same-named releases apart.
             "disambiguation": str((album_context or {}).get("disambiguation") or "").strip(),
@@ -1822,9 +1824,25 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         if _aid.isdigit():
             _itunes_aid = _aid
 
+    # a release typed single files under its own credit, like an album does.
+    # the download's artist is the track's, so a single credited to
+    # "Creed, 3 Doors Down & Finger Eleven" went under whichever of them sang
+    # this track (#2028)
+    _single_album_artist = artist_name
+    _single_artists_list = _artists
+    if _single_template_override and _album_ctx:
+        _credit = [a for a in (_album_ctx.get("artists") or [])
+                   if (a.get("name") if isinstance(a, dict) else a)]
+        if _credit:
+            _first = _credit[0]
+            _first_name = str(_first.get("name") if isinstance(_first, dict) else _first)
+            if _first_name != "Unknown Artist":
+                _single_album_artist = _first_name
+                _single_artists_list = _credit
+
     template_context = {
         "artist": artist_name,
-        "albumartist": artist_name,
+        "albumartist": _single_album_artist,
         "album": album_info.get("album_name", clean_track_name) if album_info else clean_track_name,
         "title": clean_track_name,
         "track_number": 1,
@@ -1833,7 +1851,9 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         "quality": context.get("_audio_quality", ""),
         "albumtype": album_type_display,
         "atypes": atypes_value,
-        "_artists_list": _artists,
+        "_artists_list": _single_artists_list,
+        "_track_artists_list": _artists,
+        "_collab_known_names": [artist_name] if artist_name else [],
         "_itunes_artist_id": _itunes_aid,
         # #1536: recording disambiguation for the single filename.
         "track_disambiguation": str((track_info or {}).get("disambiguation") or "").strip(),
