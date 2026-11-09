@@ -10502,6 +10502,17 @@ class MusicDatabase:
                         cursor.execute(
                             "UPDATE lib2_artists SET canonical_artist_id = ? "
                             " WHERE canonical_artist_id = ?", (best_id, aid))
+                        # review 5 W2-WJ-4: a finding filed on the donor (a
+                        # dismissal) follows the keeper, like dedup_repair's
+                        # merge. left on a deleted id, the next job run raised
+                        # it again on the keeper
+                        try:
+                            cursor.execute(
+                                "UPDATE repair_findings SET entity_id=?, updated_at=CURRENT_TIMESTAMP "
+                                "WHERE entity_type='artist' AND entity_id=?",
+                                (f"lib2:{best_id}", f"lib2:{aid}"))
+                        except sqlite3.OperationalError as exc:
+                            logger.debug("artist merge: findings not re-pointed: %s", exc)
                         cursor.execute("DELETE FROM lib2_artists WHERE id = ?", (aid,))
                         total_merged += 1
                         logger.info(f"   Merged '{artist_name}' id {aid} → {best_id} "

@@ -155,3 +155,20 @@ def test_a_third_twin_is_checked_against_ids_the_keeper_took_over(db):
 
     assert db.merge_duplicate_artists()['artists_merged'] == 1
     assert len(_artists(db)) == 2
+
+
+def test_a_merged_artists_dismissed_finding_follows_the_keeper(db):
+    """review 5 W2-WJ-4: a dismissal filed on the donor kept naming the
+    deleted id, so the next job run raised it again on the keeper."""
+    _artist(db, MB, ASCII, musicbrainz_id='mbid-one')
+    _artist(db, DZ, ASCII)
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO repair_findings(job_id, finding_type, status, entity_type, entity_id, title)"
+            " VALUES('artist_job', 'missing_art', 'dismissed', 'artist', ?, 't')", (f"lib2:{DZ}",))
+        conn.commit()
+
+    assert db.merge_duplicate_artists()['artists_merged'] == 1
+    with db._get_connection() as conn:
+        ids = [r[0] for r in conn.execute("SELECT entity_id FROM repair_findings")]
+    assert ids == [f"lib2:{MB}"]
