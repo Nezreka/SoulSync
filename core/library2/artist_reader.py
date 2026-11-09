@@ -630,7 +630,11 @@ def read_artist_page(conn, *, search: str = "", sort: str = "name", monitored: s
                         AND (al.origin='library' OR {album_monitored}=1)
                        THEN al.id END) AS single_count
               FROM artist_albums aa
-              JOIN lib2_albums al ON al.id=aa.album_id
+              -- CROSS JOIN for the same reason as above: with a plain JOIN the
+              -- planner scanned all of lib2_albums against the page's few
+              -- albums (half the artist page on a 71k-album library, review 5
+              -- perf)
+              CROSS JOIN lib2_albums al ON al.id=aa.album_id
              -- the same library as the track counters beside them, or the row
              -- reads "41 albums, 1 track present" from two different scopes
              WHERE {album_visible}

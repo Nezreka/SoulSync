@@ -1,6 +1,7 @@
 """Artist filters evaluate native, scoped file facts against live profiles."""
 
 import json
+import sqlite3
 
 import pytest
 
@@ -291,3 +292,48 @@ def test_concurrent_cold_filter_clicks_count_the_library_once(catalogue, monkeyp
         t.join()
     assert len(calls) == 1
     assert results == [{1: 2}] * 4
+
+
+# sqlite_stat1 rows from a 300k-track library (review 5 smoke copy): the plan
+# a real library gets, which a tiny test catalogue alone never shows
+_BIG_LIBRARY_STATS = (
+    ("lib2_albums", "idx_lib2_albums_artist", "71129 14"),
+    ("lib2_album_artists", "idx_lib2_album_artists_artist", "131701 19"),
+    ("lib2_album_artists", "sqlite_autoindex_lib2_album_artists_1", "131701 2 1"),
+    ("lib2_artists", "idx_lib2_artists_canonical", "28919 335"),
+    ("lib2_track_artists", "idx_lib2_track_artists_artist", "423965 72"),
+    ("lib2_track_artists", "sqlite_autoindex_lib2_track_artists_1", "423965 2 1"),
+    ("lib2_track_files", "idx_lib2_track_files_primary", "310791 1 1"),
+    ("lib2_track_files", "idx_lib2_track_files_track", "310791 1"),
+    ("lib2_wanted_tracks", "sqlite_autoindex_lib2_wanted_tracks_1", "310671 1001 1"),
+    ("lib2_monitor_rules", "sqlite_autoindex_lib2_monitor_rules_1", "410729 1001 1 1"),
+)
+
+
+def test_artist_page_counts_albums_by_seeking_the_page_albums(catalogue, monkeypatch):
+    """review 5 perf: album_stats joined artist_albums to lib2_albums with a
+    plain JOIN, and on a big library the planner scanned every album against
+    the page's few (half of /api/library/artists). it seeks them now."""
+    conn, db = catalogue
+    _seed(conn, "A", ("flac", 16, 44100, 900))
+    _seed(conn, "B", ("mp3", None, 44100, 320))
+    conn.execute("ANALYZE")
+    names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    conn.execute("DELETE FROM sqlite_stat1")
+    conn.executemany("INSERT INTO sqlite_stat1(tbl, idx, stat) VALUES (?,?,?)",
+                     [s for s in _BIG_LIBRARY_STATS if s[1] in names])
+    conn.commit()
+
+    seen = []
+    traced = sqlite3.connect(db.path)
+    traced.row_factory = sqlite3.Row
+    traced.set_trace_callback(seen.append)
+    monkeypatch.setattr(db, "_get_connection", lambda: traced)
+    page = MusicDatabase.get_library_artists(db, limit=10)
+    assert [a["name"] for a in page["artists"]] == ["A", "B"]
+    assert all(a["album_count"] == 1 for a in page["artists"])
+
+    query = next(s for s in seen if "album_stats AS" in s)
+    plan = [r[3] for r in traced.execute("EXPLAIN QUERY PLAN " + query)]
+    assert "SCAN al" not in plan, plan
+    assert any(p.startswith("SEARCH al USING INTEGER PRIMARY KEY") for p in plan), plan
