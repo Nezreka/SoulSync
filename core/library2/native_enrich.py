@@ -625,6 +625,12 @@ def _apply_descriptive_metadata(
             assignments.append(
                 "image_url=CASE WHEN COALESCE(art_locked,0)=1 THEN image_url ELSE ? END"
             )
+        elif column == "genres":
+            # the genre cleanup locked these; enrich and full retag must not
+            # put back what it removed (review 5 W2-WF-1)
+            assignments.append(
+                "genres=CASE WHEN COALESCE(genres_locked,0)=1 THEN genres ELSE ? END"
+            )
         elif fill_identity_only and column in _IDENTITY_COLUMNS:
             assignments.append(
                 f"{column}=CASE WHEN {_IDENTITY_COLUMNS[column]} THEN ? ELSE {column} END")
@@ -1235,12 +1241,12 @@ def smart_split_combined_artist(
             return None  # not confident — leave the combined row intact
         identities.append((component, identity))
 
-    ghost_monitored = int(row["monitored"] if row["monitored"] is not None else 1)
-
     component_ids: List[int] = []
     for component, identity in identities:
+        # born unwatched: _rehome_and_delete_combined gives the ghost's watch
+        # to the primary only, nobody chose the guest (review 5 W2-WF-4)
         cid = _get_or_create_component_artist(
-            conn, component, identity, monitored=ghost_monitored
+            conn, component, identity, monitored=0
         )
         if cid not in component_ids:
             component_ids.append(cid)
@@ -1379,14 +1385,16 @@ def _clear_borrowed_identity(conn, artist_id: int, namespace: str,
         assignments.append("external_ids=json_remove(external_ids, ?)")
         params.append(f"$.{namespace}")
     row = conn.execute(
-        "SELECT image_url, genres, art_locked FROM lib2_artists WHERE id=?",
+        "SELECT image_url, genres, art_locked, genres_locked FROM lib2_artists WHERE id=?",
         (int(artist_id),),
     ).fetchone()
     if row is not None:
         if (not row["art_locked"] and row["image_url"]
                 and row["image_url"] == owner_row["image_url"]):
             assignments.append("image_url=NULL")
-        if row["genres"] and row["genres"] == owner_row["genres"]:
+        # the genre cleanup settled locked genres (review 5 W2-WF-1)
+        if (not row["genres_locked"] and row["genres"]
+                and row["genres"] == owner_row["genres"]):
             assignments.append("genres='[]'")
     params.append(int(artist_id))
     conn.execute(
@@ -1765,7 +1773,7 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
     stats = {"considered": len(ghosts), "merged": 0, "split": 0, "left": 0, "created": 0,
              "collab_ghosts_cleared": unghosted}
     total = len(ghosts)
-    for index, (gid, name, monitored, settled) in enumerate(ghosts, start=1):
+    for index, (gid, name, _monitored, settled) in enumerate(ghosts, start=1):
         gid = int(gid)
         key = normalize_name(name or "")
         target = None if settled else identified.get(key)
@@ -1796,10 +1804,12 @@ def split_combined_credits_locally(conn, *, progress: Optional[Callable[[int, in
                 for piece, pkey in zip(pieces, keys, strict=True):
                     cid = identified.get(pkey) or anyone.get(pkey)
                     if cid is None or cid == gid:
+                        # born unwatched, the rehome watches the lead only
+                        # (review 5 W2-WF-4)
                         cid = int(conn.execute(
                             "INSERT INTO lib2_artists(name, name_key, sort_name, monitored) "
-                            "VALUES(?, ?, ?, ?)",
-                            (piece, pkey, piece, int(monitored or 0))).lastrowid)
+                            "VALUES(?, ?, ?, 0)",
+                            (piece, pkey, piece)).lastrowid)
                         anyone[pkey] = cid
                         stats["created"] += 1
                     if cid not in components:

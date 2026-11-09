@@ -27,3 +27,19 @@ def test_a_contradicting_id_beats_a_same_name():
     assert index.matches("Air", {"spotify": "sp-other"}) is False
     assert index.matches("Air", {"musicbrainz": "mb"}) is True
     assert index.matches("Somebody", {"spotify": "sp-french"}) is True
+
+
+def test_with_artists_a_name_needs_one_artist_and_an_unclaimed_entry():
+    """review 5 W2-WF-2: the reconcile's narrowed name fallback"""
+    entries = [{"name": "Nirvana", "provider_ids": {"spotify": "sp-us"}},
+               {"name": "Air", "provider_ids": {"spotify": "sp-air"}}]
+    artists = [(1, "Nirvana", {"spotify": "sp-us"}),
+               (2, "Nirvana", {"musicbrainz": "mb-uk"}),
+               (3, "Air", {"deezer": "dz-air"})]
+    index = _WatchlistIndex(entries, artists)
+    assert index.matches("Nirvana", {"spotify": "sp-us"}, 1) is True
+    assert index.matches("Nirvana", {"musicbrainz": "mb-uk"}, 2) is False
+    assert index.matches("Air", {"deezer": "dz-air"}, 3) is True
+    # without an identity it is the pairwise answer, as before
+    assert index.matches("Nirvana", {"musicbrainz": "mb-uk"}) is True
+    assert index.matching_entries("Air", {"deezer": "dz-air"}, 3) == [1]

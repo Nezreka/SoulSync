@@ -1396,6 +1396,26 @@ def test_release_borrowed_identities_clears_guests_and_keeps_the_owner(imported_
         assert row["genres"] == "[]"
 
 
+def test_release_borrowed_identities_keeps_locked_genres(imported_conn):
+    """review 5 W2-WF-1: genres the cleanup locked are settled, even when they
+    match the owner's byte for byte. the borrowed id still goes"""
+    owner = _insert_native_artist(imported_conn, "Major Lazer")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-ML', genres='[\"moombahton\"]' WHERE id=?",
+        (owner,))
+    _insert_album(imported_conn, owner, "Peace Is The Mission", spotify_id="SP-PITM")
+    guest = _insert_native_artist(imported_conn, "DJ Snake")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-ML', genres='[\"moombahton\"]', "
+        "genres_locked=1 WHERE id=?", (guest,))
+
+    assert NE.release_borrowed_artist_identities(imported_conn)["released"] == 1
+    row = imported_conn.execute(
+        "SELECT spotify_id, genres FROM lib2_artists WHERE id=?", (guest,)).fetchone()
+    assert row["spotify_id"] is None
+    assert row["genres"] == '["moombahton"]'
+
+
 def test_release_borrowed_identities_leaves_ambiguous_groups_alone(imported_conn):
     """Two co-composers of one soundtrack, neither the primary of any release:
     nothing in the catalogue says which one owns the id, so neither is touched
@@ -1630,3 +1650,85 @@ def test_the_browse_prune_reads_rules_per_track_without_planner_stats(imported_c
     for alias in ("r2", "r3", "r4"):
         assert f"SEARCH {alias} USING INDEX idx_lib2_monitor_rules_entity (entity_type=? AND entity_id=?)" in plan, plan
     assert "SCAN w" not in plan and "AUTOMATIC" not in plan, plan
+
+
+# review 5 W2-WF-1: enrich and full retag keep the genres the cleanup locked
+@pytest.mark.parametrize("fill_identity_only", [False, True])
+@pytest.mark.parametrize("entity_type", ["artist", "album"])
+def test_provider_refresh_keeps_locked_genres(imported_conn, monkeypatch,
+                                              entity_type, fill_identity_only):
+    from core.library2 import provider_adapters as PA
+
+    conn = imported_conn
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name, spotify_id, genres, genres_locked) "
+        "VALUES('Cleaned', 'sp-clean', '[\"rock\"]', 1)").lastrowid
+    entity_id = artist_id
+    if entity_type == "album":
+        entity_id = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id, genres, genres_locked) "
+            "VALUES(?, 'Cleaned LP', 'sp-clean', '[\"rock\"]', 1)", (artist_id,)).lastrowid
+        unlocked = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id, genres) "
+            "VALUES(?, 'Open LP', 'sp-open', '[\"rock\"]')", (artist_id,)).lastrowid
+    else:
+        unlocked = conn.execute(
+            "INSERT INTO lib2_artists(name, spotify_id, genres) "
+            "VALUES('Open', 'sp-open', '[\"rock\"]')").lastrowid
+    conn.commit()
+
+    def fetch(kind, source_ids, **_kw):
+        sid = source_ids["spotify"]
+        return PA.DescriptiveMetadataProviderResult(
+            provider="spotify", provider_entity_id=sid,
+            genres=("rock", "album rock", "seen live"))
+
+    monkeypatch.setattr(PA, "fetch_descriptive_metadata", fetch)
+    table = f"lib2_{entity_type}s"
+    NE.refresh_native_entity_metadata(conn, entity_type, entity_id, {"spotify": "sp-clean"},
+                                      fill_identity_only=fill_identity_only)
+    NE.refresh_native_entity_metadata(conn, entity_type, unlocked, {"spotify": "sp-open"},
+                                      fill_identity_only=fill_identity_only)
+    locked_genres = json.loads(conn.execute(
+        f"SELECT genres FROM {table} WHERE id=?", (entity_id,)).fetchone()[0])
+    open_genres = json.loads(conn.execute(
+        f"SELECT genres FROM {table} WHERE id=?", (unlocked,)).fetchone()[0])
+    assert locked_genres == ["rock"]
+    # an unlocked row still takes the provider's genres
+    assert open_genres == ["rock", "album rock", "seen live"]
+
+
+def test_a_split_creates_the_guest_component_unwatched(imported_conn):
+    """review 5 W2-WF-4: a component that did not exist yet was created with
+    the ghost's watch, before the rehome gave it to the primary only"""
+    ghost = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    _make_collab_release(imported_conn, ghost)
+
+    result = NE.smart_split_combined_artist(imported_conn, ghost, resolver=_component_resolver)
+
+    primary, guest = result["component_ids"][:2]
+    flags = dict(imported_conn.execute(
+        "SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)", (primary, guest)).fetchall())
+    assert flags == {primary: 1, guest: 0}
+
+
+def test_a_local_split_creates_the_guest_unwatched(imported_conn):
+    """review 5 W2-WF-4, the local credit split"""
+    lead = _insert_native_artist(imported_conn, "Oneheart")
+    imported_conn.execute("UPDATE lib2_artists SET spotify_id='SP_one' WHERE id=?", (lead,))
+    ghost = _insert_native_artist(imported_conn, "Oneheart, Malek")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    album = imported_conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) "
+                                  "VALUES(?, 'Snow')", (lead,)).lastrowid
+    track = imported_conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                                  "VALUES(?, 'Snow', 1)", (album,)).lastrowid
+    imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                          "VALUES(?,?, 'primary', 0)", (track, ghost))
+    imported_conn.commit()
+
+    assert NE.split_combined_credits_locally(imported_conn)["split"] == 1
+
+    flags = {r[0]: r[1] for r in imported_conn.execute(
+        "SELECT name, monitored FROM lib2_artists WHERE name IN ('Oneheart', 'Malek')")}
+    assert flags == {"Oneheart": 1, "Malek": 0}

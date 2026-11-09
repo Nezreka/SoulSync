@@ -1245,6 +1245,9 @@ def _guest_track_counts(conn, group, album_ids) -> Dict[str, int]:
     if not album_ids:
         return {"guest_track_count": 0, "guest_release_count": 0}
     marks = ",".join("?" for _ in group)
+    # the caller's library, like every other file count on the page (#1199,
+    # review 5 W2-WF-3)
+    f_owner = owner_clause(column="f.owner_profile_id")
     row = conn.execute(
         f"""SELECT COUNT(DISTINCT t.id), COUNT(DISTINCT t.album_id)
               FROM lib2_track_artists x
@@ -1253,7 +1256,7 @@ def _guest_track_counts(conn, group, album_ids) -> Dict[str, int]:
                AND t.album_id IN (SELECT value FROM json_each(?))
                AND EXISTS (SELECT 1 FROM lib2_track_files f
                             WHERE f.track_id = t.id
-                              AND COALESCE(f.file_state, 'active') = 'active')""",
+                              AND COALESCE(f.file_state, 'active') = 'active'{f_owner})""",
         (*[int(g) for g in group], json.dumps([int(a) for a in album_ids])),
     ).fetchone()
     return {"guest_track_count": int(row[0] or 0), "guest_release_count": int(row[1] or 0)}

@@ -1931,6 +1931,30 @@ def test_title_feature_list_splits_when_track_credit_supplies_a_known_anchor(leg
     assert "Wizkid & Kyla" not in names
 
 
+def test_watchlist_import_does_not_watch_a_namesake(imported_conn):
+    """review 5 W2-WF-2: the import's watchlist adoption takes the reconcile's
+    narrowed name fallback, so the UK Nirvana is not watched because the US
+    one (which holds the entry's spotify id) is"""
+    from core.library2.importer import apply_monitoring_from_watchlist_wishlist
+
+    conn = imported_conn
+    conn.execute("DROP TABLE IF EXISTS watchlist_artists")
+    conn.execute("CREATE TABLE watchlist_artists(id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                 "artist_name TEXT NOT NULL, spotify_artist_id TEXT, musicbrainz_artist_id TEXT)")
+    conn.execute("INSERT INTO watchlist_artists(artist_name, spotify_artist_id) "
+                 "VALUES('Nirvana', 'sp-us')")
+    us = conn.execute("INSERT INTO lib2_artists(name, spotify_id) "
+                      "VALUES('Nirvana', 'sp-us')").lastrowid
+    uk = conn.execute("INSERT INTO lib2_artists(name, external_ids) "
+                      "VALUES('Nirvana', '{\"musicbrainz\":\"mb-uk\"}')").lastrowid
+
+    apply_monitoring_from_watchlist_wishlist(conn.cursor())
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)",
+                               (us, uk)).fetchall())
+    assert states == {us: 1, uk: 0}
+
+
 def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("""
@@ -2625,6 +2649,39 @@ def test_reimport_keeps_provider_genres_a_legacy_row_does_not_carry(legacy_db):
             "SELECT genres, summary FROM lib2_artists WHERE name='Drake'").fetchone()
         assert artist["genres"] == '["rap"]'
         assert artist["summary"] == 'Bio.'
+
+
+def test_reimport_does_not_fill_genres_the_cleanup_locked_empty(legacy_db):
+    """review 5 W2-WF-1: a cleanup that removed every genre leaves a locked
+    []. that is its answer, not a hole for the legacy snapshot to fill."""
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE artists SET genres='[\"seen live\"]' WHERE name='Drake'")
+        conn.execute("UPDATE albums SET genres='[\"seen live\"]' WHERE title='Views'")
+        conn.commit()
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET genres='[]', genres_locked=1 WHERE title='Views'")
+        conn.execute("UPDATE lib2_artists SET genres='[]', genres_locked=1 WHERE name='Drake'")
+        conn.commit()
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute(
+            "SELECT genres FROM lib2_albums WHERE title='Views'").fetchone()[0] == "[]"
+        assert conn.execute(
+            "SELECT genres FROM lib2_artists WHERE name='Drake'").fetchone()[0] == "[]"
+        # unlocked, the same hole fills
+        conn.execute("UPDATE lib2_artists SET genres_locked=0 WHERE name='Drake'")
+        conn.commit()
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute(
+            "SELECT genres FROM lib2_artists WHERE name='Drake'").fetchone()[0] \
+            == '["seen live"]'
 
 
 def test_the_plex_updaters_marker_is_not_imported_as_a_biography(legacy_db):

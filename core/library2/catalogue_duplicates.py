@@ -576,6 +576,9 @@ def _adopt_gaps(conn, table, source, target):
     if table == "lib2_tracks":
         fill += ["bpm", "genius_lyrics"]
     columns = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    if target.get("genres_locked"):
+        # a locked [] is the cleanup's answer, not a gap (review 5 W2-WF-1)
+        fill.remove("genres")
     for column in fill:
         if column in columns and _empty(target.get(column)) and not _empty(source.get(column)):
             conn.execute(f"UPDATE {table} SET {column}=? WHERE id=?", (source[column], target["id"]))

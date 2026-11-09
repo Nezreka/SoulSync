@@ -39,6 +39,14 @@ def _columns(conn, table: str) -> set:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
+def _lock_guard(column: str, available: set) -> str:
+    """Keep a provider write off genres the cleanup locked. a locked row
+    emptied to [] looks like a gap to backfill (review 5 W2-WF-1)."""
+    if column == "genres" and "genres_locked" in available:
+        return " AND COALESCE(genres_locked,0)=0"
+    return ""
+
+
 def _is_empty(value: Any) -> bool:
     if value is None:
         return True
@@ -147,7 +155,8 @@ def write_provider_enrichment(
         for column, value in columns.items():
             if value not in (None, ""):
                 conn.execute(
-                    f"UPDATE {table} SET {column}=? WHERE id=?", (value, entity_id))
+                    f"UPDATE {table} SET {column}=? WHERE id=?{_lock_guard(column, available)}",
+                    (value, entity_id))
 
     if backfill:
         available = _columns(conn, table)
@@ -166,7 +175,7 @@ def write_provider_enrichment(
                 unknown_year = column == "year" and str(row[column]).strip() in ("0", "0.0")
                 if value not in (None, "") and (_is_empty(row[column]) or unknown_year):
                     conn.execute(
-                        f"UPDATE {table} SET {column}=? WHERE id=?",
+                        f"UPDATE {table} SET {column}=? WHERE id=?{_lock_guard(column, available)}",
                         (value, entity_id))
 
     conn.execute(

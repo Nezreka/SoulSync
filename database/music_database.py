@@ -10429,18 +10429,32 @@ class MusicDatabase:
                                 f"UPDATE lib2_artists SET {', '.join(set_parts)} WHERE id = ?",
                                 values)
 
+                        genres_union = ("(SELECT json_group_array(value) FROM ("
+                                        "SELECT value FROM json_each(COALESCE(genres,'[]')) UNION "
+                                        "SELECT value FROM json_each(COALESCE(?,'[]'))))")
+                        genre_params = [donor['genres']]
+                        if 'genres_locked' in donor.keys():
+                            # the genre cleanup's lock: a locked keeper keeps its
+                            # genres, a locked donor's become the keeper's, and
+                            # only two unlocked rows union (review 5 W2-WF-1)
+                            donor_locked = int(donor['genres_locked'] or 0)
+                            genres_set = ("genres=CASE WHEN COALESCE(genres_locked,0)=1 THEN genres "
+                                          f"WHEN ?=1 THEN ? ELSE {genres_union} END, "
+                                          "genres_locked=MAX(COALESCE(genres_locked,0), ?), ")
+                            genre_params = [donor_locked, donor['genres'], donor['genres'],
+                                            donor_locked]
+                        else:
+                            genres_set = f"genres={genres_union}, "
                         cursor.execute(
                             "UPDATE lib2_artists SET "
                             "external_ids=json_patch(COALESCE(?, '{}'), COALESCE(external_ids, '{}')), "
                             "enrichment=json_patch(COALESCE(?, '{}'), COALESCE(enrichment, '{}')), "
-                            "genres=(SELECT json_group_array(value) FROM ("
-                            "SELECT value FROM json_each(COALESCE(genres,'[]')) UNION "
-                            "SELECT value FROM json_each(COALESCE(?,'[]')))), "
+                            f"{genres_set}"
                             "monitored=MAX(monitored, ?), "
                             "quality_profile_id=CASE WHEN quality_profile_explicit=1 THEN quality_profile_id "
                             "WHEN ?=1 THEN ? ELSE COALESCE(quality_profile_id, ?) END, "
                             "quality_profile_explicit=MAX(quality_profile_explicit, ?) WHERE id=?",
-                            (donor['external_ids'], donor['enrichment'], donor['genres'],
+                            (donor['external_ids'], donor['enrichment'], *genre_params,
                              donor['monitored'], donor['quality_profile_explicit'],
                              donor['quality_profile_id'], donor['quality_profile_id'],
                              donor['quality_profile_explicit'], best_id))
