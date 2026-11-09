@@ -67,6 +67,11 @@ _artwork_cache_state: Dict[str, Any] = {
 # monitor/upgrade/retag may run concurrently without overwriting each other.
 _job_registry = JobRegistry()
 
+# the integrity report runs as a job: how long a request waits for it before
+# answering 202, and how long a finished report is served again
+_INTEGRITY_REPORT_WAIT_S = 1.5
+_INTEGRITY_REPORT_FRESH_S = 60 * 60
+
 # A11: how long lib2_write_tags waits out an already-running "retag" job
 # (most commonly its own just-triggered cover-embed background job, see
 # lib2_album_art_apply) before falling back to a 409. Module-level so tests
@@ -3840,12 +3845,107 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             )
         except (TypeError, ValueError):
             return _fail("max_findings must be an integer")
+        refresh = str(request.args.get("refresh") or "").strip().lower() in {
+            "1", "true", "yes",
+        }
+        # the report checks every library file on disk, most of an hour on a
+        # 300k-track library, and the request used to wait for all of it. it
+        # now runs as a job; the request waits a moment, then answers 202
+        # with the job and the next call gets the finished report.
+        # review 5 perf
+        with _integrity_lock:
+            if not refresh:
+                ready = _integrity_ready(max_findings)
+                if ready is not None:
+                    return jsonify(ready)
+            try:
+                job = _job_registry.start("integrity-report")
+                done = threading.Event()
+                _integrity_state["done"] = done
+                _start_integrity_job(job["job_id"], max_findings, done)
+            except JobAlreadyRunning as exc:
+                job = exc.state
+                done = _integrity_state.get("done") or threading.Event()
+        job_id = job["job_id"]
+        if done.wait(_INTEGRITY_REPORT_WAIT_S):
+            with _integrity_lock:
+                error = _integrity_state.get("error")
+                if error and error[0] == job_id:
+                    return _fail(error[1], 500)
+                ready = _integrity_ready(max_findings)
+                if ready is not None:
+                    return jsonify(ready)
+        state = _job_registry.get(job_id) or job
+        return jsonify({
+            "success": True,
+            "running": bool(state.get("running")),
+            "job_id": job_id,
+            "current": state.get("current", 0),
+            "total": state.get("total", 0),
+        }), 202
+
+    _integrity_lock = threading.Lock()
+    _integrity_state: Dict[str, Any] = {
+        "report": None, "max_findings": -1, "generated_at": None,
+        "error": None, "done": None,
+    }
+
+    def _integrity_ready(max_findings: int) -> Optional[Dict[str, Any]]:
+        """The last finished report, if fresh and big enough; under the lock."""
+        report = _integrity_state["report"]
+        if report is None or _integrity_state["max_findings"] < max_findings:
+            return None
+        if time.time() - _integrity_state["generated_at"] > _INTEGRITY_REPORT_FRESH_S:
+            return None
+        findings = list(report.get("findings") or [])
+        if len(findings) > max_findings:
+            # same first findings a run with this bound would have kept
+            report = {**report, "findings": findings[:max_findings], "truncated": True}
+        return {
+            "success": True,
+            "report": report,
+            "generated_at": _integrity_state["generated_at"],
+        }
+
+    def _start_integrity_job(job_id: str, max_findings: int, done: threading.Event) -> None:
+        def _progress(current, total):
+            try:
+                _job_registry.update(job_id, current=current, total=total)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("integrity report progress update failed: %s", exc)
+
+        def _run():
+            try:
+                report = integrity_report_runner(
+                    max_findings=max_findings, progress=_progress,
+                )
+                with _integrity_lock:
+                    _integrity_state.update(
+                        report=report, max_findings=max_findings,
+                        generated_at=time.time(), error=None,
+                    )
+                _job_registry.update(job_id, result={
+                    "findings_total": report.get("findings_total"),
+                    "truncated": report.get("truncated"),
+                })
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Library-v2 integrity report failed: %s", exc)
+                with _integrity_lock:
+                    _integrity_state["error"] = (job_id, str(exc))
+                _job_registry.update(job_id, error=str(exc))
+            finally:
+                _job_registry.finish(job_id)
+                done.set()
+
         try:
-            report = integrity_report_runner(max_findings=max_findings)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Library-v2 integrity report failed: %s", exc)
-            return _fail(str(exc), 500)
-        return jsonify({"success": True, "report": report})
+            threading.Thread(
+                target=carrying_scope(_run), name="lib2-integrity-report", daemon=True,
+            ).start()
+        except Exception:
+            # a job that never ran must not block every later report
+            _job_registry.finish(job_id, error="could not start the report")
+            done.set()
+            raise
 
     def _bulk_track_ids_for_albums(conn, album_ids: List[int]) -> List[int]:
         if not album_ids:
