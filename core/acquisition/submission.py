@@ -99,8 +99,12 @@ class UsenetSubmissionAdapter:
             raise SubmissionError(
                 "Candidate download reference is unavailable; search again")
         category = str(self._category_getter() or "soulsync").strip() or "soulsync"
+        from core.usenet_clients.nzb_fetch import NzbFetchError
         try:
             external_job_id = await client.add_nzb(nzb_url, category=category)
+        except NzbFetchError as exc:
+            # #2030: the nzb never left soulsync, so this is a sure failure
+            raise SubmissionError(f"Usenet grab failed: {exc}") from exc
         except Exception as exc:  # noqa: BLE001 - timeout may be accepted remotely
             raise SubmissionError(
                 f"Usenet client submission outcome is unknown: {exc}",

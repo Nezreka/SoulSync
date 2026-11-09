@@ -18,6 +18,7 @@ import requests as http_requests
 from core.settings import config_manager
 from core.async_utils import run_client_add, run_control
 from core.usenet_clients.base import UsenetStatus
+from core.usenet_clients.nzb_fetch import resolve_nzb
 from utils.logging_config import get_logger
 
 logger = get_logger("usenet.sabnzbd")
@@ -198,11 +199,12 @@ class SABnzbdAdapter:
         save_path: Optional[str],
     ) -> Optional[str]:
         cat = category or self._category
-        if isinstance(url_or_bytes, bytes):
-            files = {'name': ('soulsync.nzb', url_or_bytes, 'application/x-nzb')}
-            data = self._post_sync('addfile', files=files, _timeout=self.ADD_TIMEOUT, cat=cat)
-        else:
-            data = self._call_sync('addurl', _timeout=self.ADD_TIMEOUT, name=url_or_bytes, cat=cat)
+        # #2030: a url is fetched here and sent as the file (addfile), never
+        # as addurl, so sab's queue never shows the prowlarr link and its api
+        # key. a failed fetch raises NzbFetchError: the grab fails, no fallback.
+        payload, filename = resolve_nzb(url_or_bytes)
+        files = {'name': (filename, payload, 'application/x-nzb')}
+        data = self._post_sync('addfile', files=files, _timeout=self.ADD_TIMEOUT, cat=cat)
         if not data or not data.get('status'):
             return None
         ids = data.get('nzo_ids') or []

@@ -75,6 +75,42 @@ def _sab_with_config(url='http://sab:8080', api_key='k'):
     return adapter
 
 
+_NZB = (b'<?xml version="1.0" encoding="utf-8"?>\n'
+        b'<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb"><file/></nzb>')
+
+
+def _fake_indexer(status=200, body=_NZB, headers=None, final_url=None):
+    """A fake prowlarr download endpoint for nzb_fetch: patch target plus a
+    list that records each fetched url. No network."""
+    fetched = []
+
+    class _Resp:
+        def __init__(self, url):
+            self.ok = 200 <= status < 400
+            self.status_code = status
+            self.headers = headers or {}
+            self.url = final_url or url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def iter_content(self, chunk_size=1):
+            yield body
+
+    class _Session:
+        def get(self, url, **kwargs):
+            fetched.append(url)
+            return _Resp(url)
+
+        def close(self):
+            pass
+
+    return patch('core.usenet_clients.nzb_fetch._session', return_value=_Session()), fetched
+
+
 def test_sab_load_config_strips_incidental_category_whitespace() -> None:
     """The connection test validates a stripped category against SAB's
     category list; the adapter must submit that SAME stripped value, or a
@@ -536,16 +572,22 @@ def test_sab_history_prefers_storage_and_still_carries_incomplete_path() -> None
 
 
 def test_sab_add_nzb_via_url_returns_first_nzo_id() -> None:
+    # #2030: a url is fetched by soulsync and sent with addfile, not addurl
     adapter = _sab_with_config()
-    with patch('core.usenet_clients.sabnzbd.http_requests.get',
-               return_value=_mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_1']})) as mock_get:
+    fake, fetched = _fake_indexer()
+    with fake, patch('core.usenet_clients.sabnzbd.http_requests.get') as mock_get, \
+            patch('core.usenet_clients.sabnzbd.http_requests.post',
+                  return_value=_mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_1']})) as mock_post:
         job_id = _run(adapter.add_nzb('https://example.com/x.nzb', category='cat'))
     assert job_id == 'SABnzbd_1'
-    params = mock_get.call_args.kwargs['params']
-    assert params['mode'] == 'addurl'
+    assert fetched == ['https://example.com/x.nzb']
+    mock_get.assert_not_called()
+    params = mock_post.call_args.kwargs['params']
+    assert params['mode'] == 'addfile'
     assert params['apikey'] == 'k'
-    assert params['name'] == 'https://example.com/x.nzb'
     assert params['cat'] == 'cat'
+    assert 'name' not in params
+    assert mock_post.call_args.kwargs['files']['name'] == ('x.nzb', _NZB, 'application/x-nzb')
 
 
 def test_sab_add_nzb_via_bytes_uses_addfile_multipart() -> None:
@@ -566,13 +608,15 @@ def test_sab_add_nzb_via_bytes_uses_addfile_multipart() -> None:
 # out at 10:10:14, the grab was reported as refused, and SAB queued it anyway.
 
 
-def test_sab_addurl_waits_longer_than_a_status_call() -> None:
+def test_sab_url_add_waits_longer_than_a_status_call() -> None:
+    # #2030: a url add is an addfile post now, with the same long wait
     adapter = _sab_with_config()
-    with patch('core.usenet_clients.sabnzbd.http_requests.get',
-               return_value=_mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_1']})) as mock_get:
+    fake, _ = _fake_indexer()
+    with fake, patch('core.usenet_clients.sabnzbd.http_requests.post',
+                     return_value=_mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_1']})) as mock_post:
         _run(adapter.add_nzb('https://example.com/x.nzb', category='cat'))
-    assert mock_get.call_args.kwargs['timeout'] == SABnzbdAdapter.ADD_TIMEOUT
-    assert '_timeout' not in mock_get.call_args.kwargs['params']
+    assert mock_post.call_args.kwargs['timeout'] == SABnzbdAdapter.ADD_TIMEOUT
+    assert '_timeout' not in mock_post.call_args.kwargs['params']
 
 
 def test_sab_addfile_waits_longer_than_a_status_call() -> None:
@@ -872,7 +916,9 @@ def test_nzbget_mb_value_falls_back_to_mb() -> None:
     assert val == 500.0
 
 
-def test_nzbget_add_nzb_url_passes_through_unchanged() -> None:
+def test_nzbget_add_nzb_url_is_fetched_and_sent_as_content() -> None:
+    # #2030: nzbget gets the nzb itself, never the url (it would show the
+    # prowlarr link and api key in its queue and history)
     adapter = _nzbget_with_config()
     captured = {}
 
@@ -880,14 +926,18 @@ def test_nzbget_add_nzb_url_passes_through_unchanged() -> None:
         captured['payload'] = json
         return _mock_response(200, {'result': 42})
 
-    with patch('core.usenet_clients.nzbget.http_requests.post', side_effect=fake_post):
-        job_id = _run(adapter.add_nzb('https://x/x.nzb', category='cat'))
+    fake, fetched = _fake_indexer(
+        headers={'Content-Disposition': 'attachment; filename="Show.S01E01.1080p-GRP.nzb"'})
+    with fake, patch('core.usenet_clients.nzbget.http_requests.post', side_effect=fake_post):
+        job_id = _run(adapter.add_nzb('https://x/1/download?apikey=SECRET', category='cat'))
 
     assert job_id == '42'
+    assert fetched == ['https://x/1/download?apikey=SECRET']
     params = captured['payload']['params']
-    assert params[0] == ''  # NZBFilename empty when content is a URL
-    assert params[1] == 'https://x/x.nzb'
+    assert params[0] == 'Show.S01E01.1080p-GRP.nzb'
+    assert params[1] == base64.b64encode(_NZB).decode('ascii')
     assert params[2] == 'cat'
+    assert 'SECRET' not in str(captured['payload'])
 
 
 def test_nzbget_add_nzb_bytes_base64_encodes() -> None:
@@ -1015,9 +1065,142 @@ def test_sab_add_runs_on_its_own_threads_not_the_control_pool() -> None:
     adapter = _sab_with_config()
     seen = []
 
-    def _get(*_a, **_k):
+    def _post(*_a, **_k):
         seen.append(threading.current_thread().name)
         return _mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_3']})
-    with patch('core.usenet_clients.sabnzbd.http_requests.get', side_effect=_get):
+    # #2030: the url add is an addfile post after the fetch
+    fake, _ = _fake_indexer()
+    with fake, patch('core.usenet_clients.sabnzbd.http_requests.post', side_effect=_post):
+        _run(adapter.add_nzb('https://example.com/x.nzb', category='cat'))
+    assert seen and seen[0].startswith('soulsync-client-add')
+
+
+# -- #2030: nzbs go to the client as the file, never as the prowlarr url --
+
+_PROWLARR_URL = ('http://prowlarr:9696/3/download?apikey=PROWLARRSECRET'
+                 '&link=abc&file=Show.S02E03.1080p.WEB-GRP')
+
+
+def test_sab_never_sees_the_prowlarr_url_or_key() -> None:
+    adapter = _sab_with_config()
+    fake, fetched = _fake_indexer(
+        headers={'Content-Disposition': 'attachment; filename="Show.S02E03.1080p.WEB-GRP.nzb"'})
+    with fake, patch('core.usenet_clients.sabnzbd.http_requests.get') as mock_get, \
+            patch('core.usenet_clients.sabnzbd.http_requests.post',
+                  return_value=_mock_response(200, {'status': True, 'nzo_ids': ['SABnzbd_9']})) as mock_post:
+        job_id = _run(adapter.add_nzb(_PROWLARR_URL, category='tv'))
+    assert job_id == 'SABnzbd_9'
+    assert fetched == [_PROWLARR_URL]
+    mock_get.assert_not_called()
+    call = mock_post.call_args.kwargs
+    assert call['params']['mode'] == 'addfile'
+    assert call['params']['cat'] == 'tv'
+    # sab names the job after the file: the release name, as addurl did
+    assert call['files']['name'][0] == 'Show.S02E03.1080p.WEB-GRP.nzb'
+    assert 'PROWLARRSECRET' not in repr(mock_post.call_args)
+
+
+def test_sab_job_name_falls_back_to_the_title_in_the_link() -> None:
+    adapter = _sab_with_config()
+    fake, _ = _fake_indexer()
+    with fake, patch('core.usenet_clients.sabnzbd.http_requests.post',
+                     return_value=_mock_response(200, {'status': True, 'nzo_ids': ['x']})) as mock_post:
+        _run(adapter.add_nzb(_PROWLARR_URL, category='tv'))
+    assert mock_post.call_args.kwargs['files']['name'][0] == 'Show.S02E03.1080p.WEB-GRP.nzb'
+
+
+@pytest.mark.parametrize('status,body', [
+    (500, b'oops'),
+    (429, b'grab limit reached'),
+    (200, b'<html><body>login</body></html>'),
+    (200, b''),
+])
+def test_sab_failed_nzb_fetch_fails_the_grab_with_no_addurl_fallback(status, body) -> None:
+    from core.usenet_clients.nzb_fetch import NzbFetchError
+    adapter = _sab_with_config()
+    fake, _ = _fake_indexer(status=status, body=body)
+    with fake, patch('core.usenet_clients.sabnzbd.http_requests.get') as mock_get, \
+            patch('core.usenet_clients.sabnzbd.http_requests.post') as mock_post:
+        with pytest.raises(NzbFetchError) as err:
+            _run(adapter.add_nzb(_PROWLARR_URL, category='tv'))
+    mock_get.assert_not_called()
+    mock_post.assert_not_called()
+    assert 'PROWLARRSECRET' not in str(err.value)
+    assert 'indexer' in str(err.value)
+
+
+def test_nzb_fetch_network_error_message_never_holds_the_key() -> None:
+    import requests
+    from core.usenet_clients import nzb_fetch
+
+    class _Session:
+        def get(self, url, **kwargs):
+            raise requests.exceptions.ConnectionError(f"Max retries exceeded with url: {url}")
+
+        def close(self):
+            pass
+
+    log = MagicMock()
+    with patch.object(nzb_fetch, '_session', return_value=_Session()), \
+            patch.object(nzb_fetch, 'logger', log):
+        with pytest.raises(nzb_fetch.NzbFetchError) as err:
+            nzb_fetch.fetch_nzb(_PROWLARR_URL)
+    assert 'ConnectionError' in str(err.value)
+    assert 'PROWLARRSECRET' not in str(err.value)
+    assert err.value.__cause__ is None and err.value.__suppress_context__
+    assert 'PROWLARRSECRET' not in repr(log.mock_calls)
+
+
+def test_nzb_fetch_refuses_a_payload_too_big_to_be_an_nzb() -> None:
+    from core.usenet_clients import nzb_fetch
+    fake, _ = _fake_indexer(body=_NZB)
+    with fake, patch.object(nzb_fetch, 'MAX_NZB_BYTES', 10):
+        with pytest.raises(nzb_fetch.NzbFetchError):
+            nzb_fetch.fetch_nzb('https://x/y.nzb')
+
+
+@pytest.mark.parametrize('url,headers,final_url,body,expected', [
+    ('https://x/1/download?apikey=k', {'Content-Disposition': "attachment; filename*=UTF-8''A%20B.nzb"},
+     None, _NZB, 'A B.nzb'),
+    ('https://x/1/download?apikey=k', {'Content-Disposition': 'attachment; filename=Plain.Name'},
+     None, _NZB, 'Plain.Name.nzb'),
+    ('https://x/1/download?apikey=k', {'Content-Disposition': 'attachment; filename="../../etc/Evil.nzb"'},
+     None, _NZB, 'Evil.nzb'),
+    ('https://x/1/download?apikey=k', {}, 'https://indexer/get/Redirected.Name.nzb', _NZB,
+     'Redirected.Name.nzb'),
+    ('https://x/1/download?apikey=k', {}, None,
+     b'<?xml?><nzb><head><meta type="name">Meta.Name</meta></head></nzb>', 'Meta.Name.nzb'),
+    ('https://x/1/download?apikey=k', {}, None, _NZB, 'soulsync.nzb'),
+])
+def test_nzb_fetch_names_the_job_like_the_client_would(url, headers, final_url, body, expected) -> None:
+    from core.usenet_clients import nzb_fetch
+    fake, _ = _fake_indexer(headers=headers, final_url=final_url, body=body)
+    with fake:
+        payload, name = nzb_fetch.fetch_nzb(url)
+    assert payload == body
+    assert name == expected
+
+
+def test_nzbget_failed_nzb_fetch_fails_the_grab_with_no_url_fallback() -> None:
+    from core.usenet_clients.nzb_fetch import NzbFetchError
+    adapter = _nzbget_with_config()
+    fake, _ = _fake_indexer(status=404)
+    with fake, patch('core.usenet_clients.nzbget.http_requests.post') as mock_post:
+        with pytest.raises(NzbFetchError):
+            _run(adapter.add_nzb(_PROWLARR_URL, category='tv'))
+    mock_post.assert_not_called()
+
+
+def test_nzbget_add_runs_on_its_own_threads_not_the_control_pool() -> None:
+    # the add fetches the nzb first now; that wait stays off the poll pool
+    import threading
+    adapter = _nzbget_with_config()
+    seen = []
+
+    def _post(*_a, **_k):
+        seen.append(threading.current_thread().name)
+        return _mock_response(200, {'result': 5})
+    fake, _ = _fake_indexer()
+    with fake, patch('core.usenet_clients.nzbget.http_requests.post', side_effect=_post):
         _run(adapter.add_nzb('https://example.com/x.nzb', category='cat'))
     assert seen and seen[0].startswith('soulsync-client-add')

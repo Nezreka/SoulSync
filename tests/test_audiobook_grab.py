@@ -114,6 +114,16 @@ def test_usenet_errors_are_reported():
     assert "sab is down" in result["error"]
 
 
+def test_a_failed_nzb_fetch_is_reported_as_the_grab_failure():
+    # #2030: the nzb is fetched before the client sees anything
+    from core.usenet_clients.nzb_fetch import NzbFetchError
+    adapter = _Adapter(raises=NzbFetchError("could not download the NZB from the indexer (HTTP 500)"))
+    with patch("core.usenet_clients.get_active_adapter", return_value=adapter):
+        result = grab_usenet("https://example.invalid/a.nzb")
+    assert result == {"ok": False,
+                      "error": "Usenet grab failed: could not download the NZB from the indexer (HTTP 500)"}
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------

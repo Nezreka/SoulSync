@@ -1653,3 +1653,24 @@ def test_usenet_cancel_with_no_client_job_and_no_submission_still_says_no(monkey
     monkeypatch.setattr(plugin, '_persisted_job_id', lambda did: None)
     monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: None)
     assert asyncio.run(plugin.cancel_download('gone', remove=False)) is False
+
+
+def test_usenet_failed_nzb_fetch_marks_the_download_failed_with_the_reason(monkeypatch):
+    # #2030: the adapter fetches the nzb itself; a failed fetch is the grab's
+    # failure, said plainly, so the retry path picks it up
+    import core.download_plugins.usenet as module
+    from core.usenet_clients.nzb_fetch import NzbFetchError
+    plugin = UsenetDownloadPlugin()
+    plugin.active_downloads['dl'] = {'id': 'dl', 'state': 'Initializing', 'job_id': None}
+    errors = []
+
+    class Adapter:
+        def is_configured(self): return True
+        async def add_nzb(self, url):
+            raise NzbFetchError("could not download the NZB from the indexer (HTTP 429)")
+
+    monkeypatch.setattr(module, 'get_active_usenet_adapter', lambda: Adapter())
+    monkeypatch.setattr(module, 'run_async', asyncio.run)
+    monkeypatch.setattr(plugin, '_mark_error', lambda dl, msg: errors.append((dl, msg)))
+    plugin._download_thread('dl', 'https://indexer.invalid/synthetic.nzb?apikey=s')
+    assert errors == [('dl', 'Usenet grab failed: could not download the NZB from the indexer (HTTP 429)')]

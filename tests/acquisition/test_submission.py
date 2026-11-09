@@ -144,6 +144,29 @@ def test_unknown_candidate_reference_fails_before_client_call(conn):
     assert raised.value.failure_kind == "runtime"
 
 
+def test_nzb_fetch_failure_is_a_certain_failure_not_uncertain(conn):
+    # #2030: the adapter fetches the nzb before anything reaches the client,
+    # so a failed fetch is a sure failure the retry paths can act on
+    from core.usenet_clients.nzb_fetch import NzbFetchError
+    store = CandidateStore()
+    prepared = _prepared(conn, store)
+
+    class Client:
+        def is_configured(self):
+            return True
+
+        async def add_nzb(self, url, category):
+            raise NzbFetchError(
+                "could not download the NZB from the indexer (HTTP 429)")
+
+    adapter = UsenetSubmissionAdapter(client_getter=Client, candidate_store=store)
+
+    with pytest.raises(SubmissionError, match="HTTP 429") as raised:
+        asyncio.run(adapter.submit(prepared))
+    assert raised.value.uncertain is False
+    assert "secret" not in str(raised.value)
+
+
 def test_client_exception_is_uncertain_and_does_not_mark_failed(conn):
     store = CandidateStore()
     prepared = _prepared(conn, store)

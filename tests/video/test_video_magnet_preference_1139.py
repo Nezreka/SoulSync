@@ -137,3 +137,21 @@ def test_grab_torrent_hands_the_fallback_to_add_torrent_smart(monkeypatch):
                                    fallback_magnet='magnet:?xt=urn:btih:abc')
     assert out['ok'] is True
     assert seen['fallback'] == 'magnet:?xt=urn:btih:abc'
+
+
+def test_video_usenet_grab_reports_a_failed_nzb_fetch(monkeypatch):
+    # #2030: the nzb is fetched by soulsync first; that failure is the grab's
+    from core.usenet_clients.nzb_fetch import NzbFetchError
+
+    class _Ad:
+        def is_configured(self):
+            return True
+
+        async def add_nzb(self, url, category='soulsync', save_path=None):
+            raise NzbFetchError("could not download the NZB from the indexer (HTTP 503)")
+
+    import core.usenet_clients as uc
+    monkeypatch.setattr(uc, 'get_active_adapter', lambda: _Ad())
+    out = client_grab.grab_usenet('https://indexer/x.nzb?apikey=k')
+    assert out == {'ok': False,
+                   'error': 'Usenet grab failed: could not download the NZB from the indexer (HTTP 503)'}
