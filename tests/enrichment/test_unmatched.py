@@ -250,6 +250,82 @@ def test_reset_failed_requeues_all(db):
     assert bd['not_found'] == 0 and bd['pending'] == 3
 
 
+def test_reset_failed_is_set_based_and_clears_what_each_row_held(db):
+    # review 5 W3-TD-2: Retry all walked every not_found row through the
+    # per-row clear plus a DELETE (8 statements a row) in one write
+    # transaction. the statement count must not grow with the rows, and each
+    # row ends as the per-row clear left it.
+    import json
+
+    conn = db._get_connection()
+    cur = conn.cursor()
+    first = 100
+    n = 300
+    cur.executemany("INSERT INTO lib2_tracks (id, album_id, title) VALUES (?,1,?)",
+                    [(first + i, f"t{i}") for i in range(n)])
+    cur.execute("INSERT INTO lib2_track_files (track_id, path) "
+                "SELECT id, '/m/' || id || '.flac' FROM lib2_tracks WHERE id >= ?", (first,))
+    cur.executemany(
+        "INSERT INTO lib2_provider_attempts(entity_type,entity_id,service,status) VALUES(?,?,?,?)",
+        [('track', first + i, 'audiodb', 'not_found') for i in range(n)]
+        + [('track', first, 'deezer', 'not_found'), ('track', 11, 'audiodb', 'matched')])
+    # one not_found row still holds an id, one has a stale provenance row
+    cur.execute("UPDATE lib2_tracks SET external_ids=? WHERE id=?",
+                (json.dumps({"audiodb": "stale", "deezer": "9"}), first + 1))
+    cur.execute("UPDATE lib2_tracks SET external_ids=? WHERE id=?",
+                (json.dumps({"deezer": "7"}), first + 2))
+    cur.executemany(
+        "INSERT INTO metadata_match_provenance(entity_type,entity_id,service,origin,external_id) "
+        "VALUES(?,?,?,?,?)",
+        [('lib2_track', first + 1, 'audiodb', 'automatic', 'stale'),
+         ('lib2_track', first + 3, 'audiodb', 'automatic', 'old'),
+         ('lib2_track', first + 3, 'deezer', 'automatic', 'keep')])
+    conn.commit()
+    conn.close()
+
+    statements = []
+    real_connect = db._get_connection
+
+    def traced():
+        c = real_connect()
+        c.set_trace_callback(statements.append)
+        return c
+
+    db._get_connection = traced
+    assert db.reset_enrichment('audiodb', 'track', 'failed') == n
+    db._get_connection = real_connect
+
+    writes = [s for s in statements if s.lstrip().upper().startswith(("UPDATE", "DELETE", "INSERT"))]
+    assert len(writes) < 40, f"{len(writes)} writes for {n} rows"
+
+    conn = db._get_connection()
+    ledger = conn.execute(
+        "SELECT entity_id, service, status FROM lib2_provider_attempts "
+        "WHERE entity_type='track' AND entity_id >= ? OR entity_id = 11 AND entity_type='track' "
+        "ORDER BY entity_id, service", (first,)).fetchall()
+    assert [tuple(r) for r in ledger] == [(11, 'audiodb', 'matched'), (first, 'deezer', 'not_found')]
+    assert json.loads(conn.execute("SELECT external_ids FROM lib2_tracks WHERE id=?",
+                                   (first + 1,)).fetchone()[0]) == {"deezer": "9"}
+    assert json.loads(conn.execute("SELECT external_ids FROM lib2_tracks WHERE id=?",
+                                   (first + 2,)).fetchone()[0]) == {"deezer": "7"}
+    prov = conn.execute("SELECT entity_id, service FROM metadata_match_provenance "
+                        "WHERE entity_type='lib2_track' ORDER BY entity_id, service").fetchall()
+    assert [tuple(r) for r in prov] == [(first + 3, 'deezer')]
+    conn.close()
+
+
+def test_reset_failed_still_clears_a_spotify_id_column_a_not_found_row_holds(db):
+    # review 5 W3-TD-2: the set-based reset keeps the full clear for a row that
+    # still carries the id, here in spotify_id with no external_ids key
+    assert db.reset_enrichment('spotify', 'artist', 'failed') == 1
+    conn = db._get_connection()
+    assert conn.execute("SELECT spotify_id FROM lib2_artists WHERE id=2").fetchone()[0] is None
+    assert conn.execute("SELECT spotify_id FROM lib2_artists WHERE id=1").fetchone()[0] is None
+    assert conn.execute("SELECT COUNT(*) FROM lib2_provider_attempts WHERE entity_type='artist' "
+                        "AND entity_id=2 AND service='spotify'").fetchone()[0] == 0
+    conn.close()
+
+
 # --------------------------------------------------------------------------
 # Flask routes
 # --------------------------------------------------------------------------

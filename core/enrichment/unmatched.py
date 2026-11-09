@@ -246,6 +246,19 @@ def build_reset_query(
             + " AND ".join(_universe(service, entity_type)), [entity_type, service])
 
 
+def reset_carrier_sql(service: str, alias: str, columns) -> Tuple[str, List]:
+    """True for a row that still holds ``service``'s id: a key in
+    external_ids, the spotify_id/musicbrainz_id column, or external_ids that
+    don't parse. those need the full per-row clear on a reset; the rest only
+    lose their attempt rows (review 5 W3-TD-2)."""
+    ext = f"COALESCE({alias}.external_ids, '{{}}')"
+    parts = [f"(CASE WHEN json_valid({ext}) THEN json_type({ext}, ?) IS NOT NULL ELSE 1 END)"]
+    column = f"{service}_id"
+    if service in ('spotify', 'musicbrainz') and column in set(columns or ()):
+        parts.append(f"{alias}.{column} IS NOT NULL")
+    return "(" + " OR ".join(parts) + ")", [f'$."{service}"']
+
+
 # ── Verify matches — targeted repair of the pre-fix corruption classes ──────
 #
 # The Aug 2026 matching fixes STOP new corruption but can't repair rows the
@@ -540,6 +553,7 @@ __all__ = [
     'page_unmatched',
     'validate_request',
     'build_reset_query',
+    'reset_carrier_sql',
     'RESET_SCOPES',
     'degenerate_title',
     'build_artist_collision_queries',
