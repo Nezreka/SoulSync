@@ -298,6 +298,13 @@ def reattribute_media_plays(database, server_source: str = 'plex') -> int:
             "WHERE server_source = ? AND server_account_id IS NOT NULL", (server_source,)).fetchall()]
         for account in accounts:
             pile = media_account_owner(owners, account)
+            # runs on every listening poll: read first, and write (taking
+            # the write lock) only when a play is actually in the wrong pile
+            if conn.execute(
+                    "SELECT 1 FROM listening_history WHERE server_source = ? "
+                    "AND server_account_id = ? AND profile_id != ? LIMIT 1",
+                    (server_source, account, pile)).fetchone() is None:
+                continue
             cur = conn.execute(
                 "UPDATE OR IGNORE listening_history SET profile_id = ? "
                 "WHERE server_source = ? AND server_account_id = ? AND profile_id != ?",

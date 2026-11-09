@@ -261,3 +261,34 @@ def test_two_profiles_on_one_account_the_lowest_id_gets_its_plays(db):
     db.set_profile_plex_account(second, KIDS_PLEX)
     assert first < second
     assert media_account_owners(db, 'plex')[KIDS_PLEX] == first
+
+
+def test_a_poll_with_nothing_to_refile_writes_nothing_and_reads_by_index(db):
+    """live, Nov 8: the re-filing check runs on every listening poll and ran
+    an UPDATE and a DELETE per account, each a full scan of the history,
+    inside one write transaction (14 s of write lock on 156k plays) even when
+    every play was already in its pile. it reads first, through an index"""
+    _kids(db)
+    _worker(db, _Plex(HISTORY))._poll()
+    seen = []
+    real = type(db)._get_connection
+
+    def traced(self, *a, **k):
+        conn = real(self, *a, **k)
+        conn.set_trace_callback(seen.append)
+        return conn
+
+    import pytest as _pytest
+    mp = _pytest.MonkeyPatch()
+    mp.setattr(type(db), "_get_connection", traced)
+    try:
+        assert reattribute_media_plays(db, 'plex') == 0
+    finally:
+        mp.undo()
+    writes = [q for q in seen if q.lstrip().upper().startswith(("UPDATE", "DELETE"))]
+    assert writes == []
+    with db._get_connection() as conn:
+        plan = " | ".join(r[3] for r in conn.execute(
+            "EXPLAIN QUERY PLAN SELECT 1 FROM listening_history WHERE server_source = ? "
+            "AND server_account_id = ? AND profile_id != ? LIMIT 1", ('plex', 'x', 1)))
+    assert "idx_listening_account_pile" in plan, plan

@@ -6900,6 +6900,13 @@ class MusicDatabase:
         if 'server_account_id' not in [c[1] for c in cursor.fetchall()]:
             cursor.execute("ALTER TABLE listening_history ADD COLUMN server_account_id TEXT DEFAULT NULL")
             logger.info("Added server_account_id column to listening_history")
+        # the re-filing check on every listening poll looks plays up by
+        # account; without this each check scanned the whole history inside
+        # a write transaction (14 s of write lock on a 156k-play history)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_listening_account_pile "
+            "ON listening_history (server_source, server_account_id, profile_id) "
+            "WHERE server_account_id IS NOT NULL")
         from core.listening_import.dedup import ensure_import_events_table
         ensure_import_events_table(cursor.connection)
 
