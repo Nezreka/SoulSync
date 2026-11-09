@@ -9812,8 +9812,8 @@ def reidentify_apply():
             return jsonify({"success": False, "error": "library_track_id, source and track_id are required"}), 400
 
         from core.imports.rematch_search import resolve_hint_fields
-        from core.imports.rematch_apply import stage_file_for_reidentify, build_reidentify_hint
-        from core.imports.rematch_hints import create_hint
+        from core.imports.rematch_apply import build_reidentify_hint, stage_with_committed_hint
+        from core.library2.sql_util import owner_clause
 
         # 1) Resolve the picked release → the IDs the hint needs (album_id critically).
         hint_fields = resolve_hint_fields(source, track_id)
@@ -9825,10 +9825,14 @@ def reidentify_apply():
         try:
             cur = conn.cursor()
             # Library v2 owns the files: the path lives on lib2_track_files, and
-            # a track can carry several, so this takes the primary active one.
+            # a track can carry several, so this takes the primary active one
+            # of the library being worked in. the primary flag spans every
+            # library, so unscoped it staged another library's copy (review 5
+            # W2-WD-3)
             cur.execute(
-                "SELECT f.path AS file_path FROM lib2_track_files f "
-                "WHERE f.track_id = ? AND COALESCE(f.file_state, 'active') = 'active' "
+                "SELECT f.id AS file_id, f.path AS file_path FROM lib2_track_files f "
+                "WHERE f.track_id = ? AND COALESCE(f.file_state, 'active') = 'active'"
+                f"{owner_clause(column='f.owner_profile_id')} "
                 "ORDER BY f.is_primary DESC, f.id ASC LIMIT 1",
                 (str(library_track_id),))
             row = cur.fetchone()
@@ -9837,6 +9841,7 @@ def reidentify_apply():
         if not row or not row['file_path']:
             return jsonify({"success": False, "error": "Library track has no file on disk"}), 404
         stored_path = row['file_path']
+        replace_file_id = row['file_id']
 
         # Resolve the stored DB path to a file THIS process can actually read, using
         # the SAME strong resolver the rest of the app uses (transfer/download/library/
@@ -9860,20 +9865,16 @@ def reidentify_apply():
                 f"Searched: {searched}.\nIf the file lives on a media server SoulSync can't read directly "
                 f"(or the stored path is stale), re-identify isn't available for it.")}), 404
 
-        # 3) Copy into staging + fingerprint the copy.
+        # 3) + 4) Copy into staging under a hidden name, commit the single-use
+        # hint, then put the copy in place: no copy inside an open hint
+        # transaction, and auto-import never meets a staged file without its
+        # hint (it would file it as a new track). review 5 R5-D-3
         staging_dir = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
-        staged = stage_file_for_reidentify(real_path, staging_dir, library_track_id)
-
-        # 4) Persist the single-use hint.
-        hint = build_reidentify_hint(library_track_id, hint_fields,
-                                     staged['staged_path'], staged['content_hash'], replace=replace)
-        conn = database._get_connection()
-        try:
-            cur = conn.cursor()
-            hint_id = create_hint(cur, hint)
-            conn.commit()
-        finally:
-            conn.close()
+        hint_id, hint, staged = stage_with_committed_hint(
+            database._get_connection, real_path, staging_dir, library_track_id,
+            lambda staged_path, content_hash: build_reidentify_hint(
+                library_track_id, hint_fields, staged_path, content_hash,
+                replace=replace, replace_file_id=replace_file_id))
 
         # 5) Nudge the worker so it doesn't wait for the next timer tick.
         try:

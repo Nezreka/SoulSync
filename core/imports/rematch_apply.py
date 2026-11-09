@@ -21,6 +21,9 @@ from typing import Any, Callable, Dict, Optional
 
 from core.imports.paths import sanitize_filename
 from core.imports.rematch_hints import RematchHint, quick_file_signature
+from utils.logging_config import get_logger
+
+logger = get_logger("imports.rematch_apply")
 
 
 def staged_destination(staging_dir: str, real_path: str, library_track_id: Any) -> str:
@@ -84,6 +87,7 @@ def build_reidentify_hint(
     content_hash: Optional[str],
     *,
     replace: bool,
+    replace_file_id: Any = None,
 ) -> RematchHint:
     """Pure: assemble the RematchHint from the resolved release fields + staging
     info. ``replace_track_id`` is the library row to delete on success, but only
@@ -106,7 +110,74 @@ def build_reidentify_hint(
         replace_track_id=(int(library_track_id) if replace and str(library_track_id).isdigit() else
                           (library_track_id if replace else None)),
         exempt_dedup=True,
+        # the staged file, so the replace retires that copy and no other
+        # library's (review 5 W2-WD-3)
+        replace_file_id=(int(replace_file_id) if replace and replace_file_id else None),
     )
+
+
+def _remove_quietly(path: Optional[str]) -> None:
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("Could not remove orphaned staged copy %s: %s", path, exc)
+
+
+def stage_with_committed_hint(
+    get_connection: Callable[[], Any],
+    real_path: str,
+    staging_dir: str,
+    library_track_id: Any,
+    make_hint: Callable[[str, Optional[str]], RematchHint],
+    *,
+    stage_fn: Callable[..., Dict[str, Any]] = None,
+) -> tuple:
+    """Stage one track for a re-identify the way album reassign does (review 5
+    R5-D-3): copy to a hidden ``.part`` name with no transaction open, write
+    and COMMIT the hint, then rename the copy into place. Auto-import never
+    sees the file without its hint, and the copy never holds a write lock.
+
+    A hint that cannot be written takes the copy back out; a copy that cannot
+    be renamed into place takes its hint back out. Returns
+    ``(hint_id, hint, staged)``; raises on either failure."""
+    from core.imports.rematch_hints import create_hint
+
+    staged = (stage_fn or stage_file_for_reidentify)(
+        real_path, staging_dir, library_track_id, hidden=True)
+    temp = staged.get("temp_path")
+    hint = make_hint(staged["staged_path"], staged.get("content_hash"))
+    conn = get_connection()
+    try:
+        try:
+            hint_id = create_hint(conn.cursor(), hint)
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception as rollback_exc:            # noqa: BLE001
+                logger.debug("re-identify hint rollback failed: %s", rollback_exc)
+            _remove_quietly(temp or staged["staged_path"])
+            raise
+        if temp:
+            try:
+                os.replace(temp, staged["staged_path"])
+            except OSError:
+                # a hint with no file never gets consumed: take it back out
+                try:
+                    conn.execute("DELETE FROM rematch_hints WHERE id = ?", (hint_id,))
+                    conn.commit()
+                except Exception as hint_exc:            # noqa: BLE001
+                    logger.warning("Could not remove hint %s for unstaged file: %s",
+                                   hint_id, hint_exc)
+                _remove_quietly(temp)
+                raise
+    finally:
+        conn.close()
+    return hint_id, hint, staged
 
 
 __all__ = [
@@ -114,4 +185,5 @@ __all__ = [
     "is_reidentify_copy",
     "stage_file_for_reidentify",
     "build_reidentify_hint",
+    "stage_with_committed_hint",
 ]
