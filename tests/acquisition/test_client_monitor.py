@@ -859,3 +859,22 @@ def test_an_idle_install_never_polls_the_clients(tmp_path):
     seed.close()
     monitor.run_once()
     assert calls == ["reconcile"]
+
+
+def test_a_grab_no_request_owns_is_not_live_work(tmp_path):
+    """review 5 W2-WC-7: a plugin's own open grab (legacy per-track, album
+    bundle) is read by neither reconciler, yet it made every idle cycle run
+    the full persistent reconciler"""
+    seed, factory = _runtime_database(tmp_path)
+    record_grab(seed, "album-1", "usenet", title="Artist - Album",
+                context={"flow": "album_bundle"})
+    update_grab(seed, "album-1", status=STATUS_QUEUED, external_job_id="nzo-9")
+    seed.commit()
+    seed.close()
+    calls = []
+    monitor = UsenetAcquisitionMonitor(
+        factory, adapter_getter=lambda: None,
+        persistent_reconciler_runner=lambda: calls.append("reconcile"),
+        import_pipeline_runner=lambda: None)
+    monitor.run_once()
+    assert calls == []

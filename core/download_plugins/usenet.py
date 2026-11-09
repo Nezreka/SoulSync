@@ -210,6 +210,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         self._lock = threading.Lock()
         self.shutdown_check = None
         self._grabs_restored = False
+        # album grabs older than this belong to a worker a restart killed
+        from datetime import datetime, timezone
+        self._started_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # ------------------------------------------------------------------
     # Grab correlation (ADR-07): the client is the live queue; SoulSync
@@ -350,8 +353,10 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         recreated and a poll thread picks the job up again (the client kept
         downloading the whole time — P1-20). ``submitting`` rows never
         reached the client and their NZB URL is gone with the process, so
-        they become ``failed``. Album-bundle grabs stay untouched — their
-        synchronous worker is gone; the row itself remains as history.
+        they become ``failed``. Album-bundle grabs from before this process
+        are closed ``failed``: their synchronous worker died with it and
+        nothing else will ever settle them (review 5 W2-WC-7). The client's
+        job is left alone, its files stay there for a manual import.
         """
         with self._lock:
             if self._grabs_restored:
@@ -363,6 +368,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         try:
             from core.acquisition.grabs import (
                 STATUS_CANCEL_PENDING,
+                STATUS_FAILED,
                 ensure_acquisition_grabs_schema,
                 open_grabs,
                 update_grab,
@@ -375,6 +381,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 if grab.get("acquisition_request_id"):
                     continue
                 if (grab.get("context") or {}).get("flow") == "album_bundle":
+                    # an open row kept the acquisition monitor busy every
+                    # cycle; one this process started is still being worked
+                    if str(grab.get("created_at") or "") < self._started_at:
+                        update_grab(
+                            conn, grab["download_id"], status=STATUS_FAILED,
+                            error="Album download worker lost on restart")
                     continue
                 download_id = grab["download_id"]
                 job_id = grab.get("external_job_id")

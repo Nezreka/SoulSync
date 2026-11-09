@@ -215,6 +215,45 @@ def test_restart_adopts_open_client_jobs(grab_db):
     assert "dl-bundle" not in plugin.active_downloads
 
 
+def test_restart_closes_album_bundle_grabs_a_restart_orphaned(grab_db):
+    """review 5 W2-WC-7: an album grab's worker dies with the process, and
+    the row stayed open forever, which kept the acquisition monitor running
+    the full reconciler every cycle on an idle install"""
+    from core.download_plugins.usenet import UsenetDownloadPlugin
+
+    conn = grab_db()
+    record_grab(conn, "dl-orphan", "usenet", title="Bundle",
+                context={"flow": "album_bundle"})
+    update_grab(conn, "dl-orphan", status=STATUS_QUEUED, external_job_id="nzo-orphan")
+    conn.execute("UPDATE acquisition_grabs SET created_at=datetime('now', '-1 hour') "
+                 "WHERE download_id='dl-orphan'")
+    conn.commit()
+    conn.close()
+
+    plugin = UsenetDownloadPlugin()
+    # a bundle this process started after it came up is still being worked
+    conn = grab_db()
+    record_grab(conn, "dl-live", "usenet", title="Live Bundle",
+                context={"flow": "album_bundle"})
+    update_grab(conn, "dl-live", status=STATUS_QUEUED, external_job_id="nzo-live")
+    conn.execute("UPDATE acquisition_grabs SET created_at=datetime('now', '+1 second') "
+                 "WHERE download_id='dl-live'")
+    conn.commit()
+    conn.close()
+    with patch("core.download_plugins.usenet.threading.Thread") as thread_cls:
+        plugin._restore_grabs_once()
+
+    conn = grab_db()
+    orphan = get_grab(conn, "dl-orphan")
+    live = get_grab(conn, "dl-live")
+    conn.close()
+    assert orphan["status"] == STATUS_FAILED
+    assert "restart" in orphan["error"]
+    assert live["status"] == STATUS_QUEUED
+    thread_cls.assert_not_called()
+    assert plugin.active_downloads == {}
+
+
 def test_restore_runs_only_once(grab_db):
     from core.download_plugins.usenet import UsenetDownloadPlugin
 

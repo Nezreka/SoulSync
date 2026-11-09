@@ -690,8 +690,11 @@ class UsenetAcquisitionMonitor:
                 "'acquisition_quarantine_recoveries')")}
             checks = []
             if "acquisition_grabs" in tables:
+                # a grab with no request is the plugins' own (legacy per-track,
+                # album bundles): neither reconciler reads it (review 5 W2-WC-7)
                 checks.append("SELECT 1 FROM acquisition_grabs "
-                              "WHERE status NOT IN ('completed','failed','cancelled')")
+                              "WHERE status NOT IN ('completed','failed','cancelled') "
+                              "AND acquisition_request_id IS NOT NULL")
             if "acquisition_requests" in tables:
                 checks.append("SELECT 1 FROM acquisition_requests WHERE status='grabbing'")
             if "acquisition_imports" in tables:
