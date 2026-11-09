@@ -148,10 +148,9 @@
             for (var i = 0; i < rows.length; i++) {
                 var r = rows[i];
                 if (!(r.accepted && r.username)) continue;   // grabbable (Soulseek) + meets profile
-                var avail = r.peers || r.seeders || 0;
-                var bAvail = best ? (best.peers || best.seeders || 0) : -1;
-                if (!best || (r.score || 0) > (best.score || 0) ||
-                    ((r.score || 0) === (best.score || 0) && avail > bAvail)) {
+                // the server's rank, so the cross-source pick agrees with the
+                // drain and every other picker (#2033)
+                if (!best || rankCompare(r, best) > 0) {
                     best = r; bestPanel = panel; bestIdx = i;
                 }
             }
@@ -908,8 +907,9 @@
     }
 
     // Auto-pick: after an auto-search settles, grab the BEST grabbable release.
-    // Results arrive already ranked best-first (server sorts by accepted → score →
-    // availability), so the first accepted hit with an uploader is the best pick.
+    // Results arrive already ranked best-first (core/video/release_rank: quality,
+    // custom formats, tie-breaks, availability), so the first accepted hit with an
+    // uploader is the best pick.
     function _autoPick(panel, statusRow) {
         if (!panel || !panel.isConnected) return;
         var rows = panel._rows || [];
@@ -1002,7 +1002,7 @@
                 '<span class="vdl-pack-meta">' + r.file_count + ' ep' + (r.file_count === 1 ? '' : 's') + ' · ' + _gb(r.folder_size_bytes) + '</span>' +
                 getBtn +
             '</div>' +
-            '<div class="vdl-pack-list">' + rows + '</div>' +
+            '<div class="vdl-pack-list">' + rankWhyHTML(r) + rows + '</div>' +
         '</div>';
     }
 
@@ -1019,6 +1019,47 @@
         // The season token must start a word: bare /S\d/ also matches the '5' in an
         // audio tag like 'DTS5.1', which would file a MOVIE as a season pack.
         return /[Ss]eason[\s._-]*\d{1,2}|(?:^|[\s._\-[(])[Ss]\d{1,2}(?![\dEe])/.test(t);
+    }
+
+    // Which of two ranked releases is better (#2033): the server's rank values
+    // compared in order (accepted, quality, custom formats, tie-breaks, size
+    // fit, availability, size), the same order every automatic pick uses.
+    // > 0 means a ranks higher. A row without rank falls back to the score.
+    function rankCompare(a, b) {
+        var ra = (a && a.rank) || [a && a.accepted ? 1 : 0, (a && a.score) || 0];
+        var rb = (b && b.rank) || [b && b.accepted ? 1 : 0, (b && b.score) || 0];
+        for (var k = 0; k < Math.max(ra.length, rb.length); k++) {
+            var d = (Number(ra[k]) || 0) - (Number(rb[k]) || 0);
+            if (d) return d;
+        }
+        return 0;
+    }
+
+    var WHY_GROUPS = [['quality', 'Quality'], ['formats', 'Custom formats'], ['tiebreak', 'Tie-breaks']];
+
+    // "Why this rank": every factor and its points, grouped in the order they
+    // are compared. A group only counts when everything above it ties.
+    function rankWhyHTML(r) {
+        var lines = Array.isArray(r && r.breakdown) ? r.breakdown : [];
+        if (!lines.length) return '';
+        function pts(n) { return n > 0 ? '+' + n : String(n); }
+        var groups = WHY_GROUPS.map(function (g) {
+            var rows = lines.filter(function (b) { return b && b.group === g[0]; });
+            if (!rows.length) return '';
+            var total = rows.reduce(function (t, b) { return t + (Number(b.points) || 0); }, 0);
+            return '<div class="vdl-why-group"><div class="vdl-why-head"><span>' + esc(g[1]) + '</span>' +
+                '<b>' + esc(pts(total)) + '</b></div>' +
+                rows.map(function (b) {
+                    return '<div class="vdl-why-row"><span>' + esc(b.label) + '</span>' +
+                        '<em>' + (Number(b.points) ? esc(pts(Number(b.points))) : 'closer wins') + '</em></div>';
+                }).join('') + '</div>';
+        }).join('');
+        var avail = r.username ? 'free slots and queue' : 'seeders';
+        return '<details class="vdl-why">' +
+            '<summary>Why this rank</summary>' + groups +
+            '<div class="vdl-why-foot">Compared in this order: quality, then custom formats, then tie-breaks, ' +
+                'then ' + esc(avail) + ', then the bigger file.</div>' +
+            '</details>';
     }
 
     function resultCardHTML(r, i) {
@@ -1070,6 +1111,7 @@
                 formatNote +
                 '<div class="vdl-r-l3">' + verdict + grab + '</div>' +
                 note +
+                rankWhyHTML(r) +
             '</div>' +
         '</div>';
     }

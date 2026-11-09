@@ -2412,6 +2412,16 @@ Video downloads, active rows first then newest (the latest 100). `status` filter
 
 #### `GET /api/v1/video/downloads/history`
 
+#### Release ranking (web UI session API)
+
+The video search the web UI runs (`POST /api/video/downloads/search`, `/downloads/search/start` and `GET /downloads/search/poll`) returns each result with:
+
+- `breakdown`: every factor that scored it, `[{group, label, points}]`. `group` is `quality`, `formats` or `tiebreak`.
+- `rank`: the values it's compared on, best first: `[accepted, quality, formats, tiebreak, size_fit, availability, size_bytes]`. Results come back sorted by it, and the wishlist, RSS sync, upgrades and download retries sort by the same values.
+- `score` is still the total of the three groups, and `format_score` / `formats` are unchanged.
+
+The quality profile (`GET/POST /api/video/downloads/quality` and the named profiles) adds `preferred_movie_gb` and `preferred_episode_gb`: a tie-break, closer ranks higher, in tenths of a GB, `0` = off (the default), clamped to the max size.
+
 #### `GET /api/v1/video/calendar`
 
 Upcoming and recent episodes and releases. `start` and `end` as ISO dates.

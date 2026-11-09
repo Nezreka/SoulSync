@@ -1468,6 +1468,12 @@
         if (lab) lab.textContent = v ? (v + ' GB') : 'No limit';
     }
 
+    // preferred size (#2033): a tie-break only, closer ranks higher
+    function _vqPrefLabel(id, v) {
+        var lab = document.getElementById(id);
+        if (lab) lab.textContent = v ? ('Around ' + v + ' GB') : 'Off';
+    }
+
     function _vqSeg(id, attr, value) {
         var seg = document.getElementById(id);
         if (!seg) return;
@@ -1538,6 +1544,10 @@
         var ep = document.getElementById('vq-episode-size'); if (ep) ep.value = p.max_episode_gb || 0;
         _vqSizeLabel('vq-movie-label', p.max_movie_gb || 0);
         _vqSizeLabel('vq-episode-label', p.max_episode_gb || 0);
+        var pm = document.getElementById('vq-movie-pref'); if (pm) pm.value = p.preferred_movie_gb || 0;
+        var pe = document.getElementById('vq-episode-pref'); if (pe) pe.value = p.preferred_episode_gb || 0;
+        _vqPrefLabel('vq-movie-pref-label', p.preferred_movie_gb || 0);
+        _vqPrefLabel('vq-episode-pref-label', p.preferred_episode_gb || 0);
 
         // Swarm health floor. Absent from a profile stored before the gate existed
         // means "use the default", not "no floor" — same rule the normalizer applies,
@@ -1649,10 +1659,14 @@
             if (e.target.id === 'vq-movie-size') { _videoQuality.max_movie_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
             if (e.target.id === 'vq-episode-size') { _videoQuality.max_episode_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
             if (e.target.id === 'vq-min-seeders') { _videoQuality.min_seeders = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
+            if (e.target.id === 'vq-movie-pref') { _videoQuality.preferred_movie_gb = parseFloat(e.target.value) || 0; saveQuality(true); return; }
+            if (e.target.id === 'vq-episode-pref') { _videoQuality.preferred_episode_gb = parseFloat(e.target.value) || 0; saveQuality(true); return; }
         });
         card.addEventListener('input', function (e) {
             if (e.target.id === 'vq-movie-size') { _vqSizeLabel('vq-movie-label', parseInt(e.target.value, 10) || 0); return; }
             if (e.target.id === 'vq-episode-size') { _vqSizeLabel('vq-episode-label', parseInt(e.target.value, 10) || 0); return; }
+            if (e.target.id === 'vq-movie-pref') { _vqPrefLabel('vq-movie-pref-label', parseFloat(e.target.value) || 0); return; }
+            if (e.target.id === 'vq-episode-pref') { _vqPrefLabel('vq-episode-pref-label', parseFloat(e.target.value) || 0); return; }
             if (e.target.id === 'vq-min-seeders') { _vqSeedersLabel(e.target.value); return; }
         });
     }

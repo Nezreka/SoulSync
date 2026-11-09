@@ -678,9 +678,22 @@ A **quality profile** is an ordered ladder of allowed qualities — for example,
 For dubbed or MULTI copies, pick one or more **audio languages** on the profile and a mode:
 
 - **Prefer**: releases tagged with one of your languages (FRENCH, VFF, TRUEFRENCH, GERMAN, iTA, LATINO and so on) or with MULTI / Dual Audio rank first, even over a higher resolution.
-- **Require**: anything without one of those tags is skipped.
+- **Require**: a release tagged only with other languages is skipped.
 
-A release with no language tag is the original audio, so Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
+The scene only tags audio that isn't English, so a release with no language tag reads as English. With English on your list it counts as a match and is never ranked below one that spells out ENGLISH. With only other languages on your list it's the English original, so Prefer ranks it below a dub and Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
+
+## How releases are ranked
+
+Every search ranks releases the same way: the title's search modal, Auto, the wishlist's Search now, the hourly wishlist run, RSS sync, upgrades and the retry after a failed download. Among releases that meet the profile it compares, in order:
+
+1. **Quality**: the tier's place on your ladder (move a tier up and it ranks higher), plus the profile's preferences: codec, HDR, audio, repack and audio language.
+2. **Custom formats**: the summed format score.
+3. **Tie-breaks**: lossless or Atmos audio, then how close the size is to your **preferred size**.
+4. Then free slots or seeders, then the bigger file.
+
+A later step only matters when everything above it ties, so a +100 format beats a release that only differs by an ENGLISH tag, Atmos or size, and never beats a better quality tier. Each result in a search has **Why this rank**, which lists every factor and its points.
+
+**Preferred size** (per movie and per episode, off by default) sits beside the max size: releases closest to it win a tie. It never rejects anything, and it can't be set past the max size.
 
 ## Save to
 
@@ -688,7 +701,7 @@ A release with no language tag is the original audio, so Require skips it. Subti
 
 ## Custom formats
 
-**Custom formats** are scored release matchers layered on top of the profile. They nudge the ranker toward releases you like (a preferred release group, a specific HDR flavor, TrueHD audio) and away from ones you don't (extras, mislabeled scene tags). Positive scores boost a release; negative scores penalize it.
+**Custom formats** are scored release matchers layered on top of the profile. They nudge the ranker toward releases you like (a preferred release group, a specific HDR flavor, TrueHD audio) and away from ones you don't (extras, mislabeled scene tags). Positive scores boost a release; negative scores penalize it. Formats rank right after quality, so a modest score like +100 for a preferred group is enough: it doesn't need inflating to outweigh a language tag or a bigger file.
 
 ## Per-title overrides
 
