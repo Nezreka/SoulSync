@@ -26938,31 +26938,41 @@ class MusicDatabase:
                         'in_library': 0, 'library_checked': 0, 'needs_match': 0,
                     }
 
-                # Core counts: total + discovered, grouped per playlist
+                # Core counts: total + discovered, grouped per playlist.
+                # the in-library CASE (up to six provider probes and a name
+                # match per row) is worked out ONCE per row in the
+                # materialized CTE: written into both SUMs it ran twice for
+                # every undiscovered row, 1.3 s of the Sync page's 2.4 s on a
+                # 10k-track mirror set (review 5 perf)
                 cursor.execute(f"""
-                    SELECT mpt.playlist_id,
+                    WITH mirror_rows AS MATERIALIZED (
+                        SELECT mpt.playlist_id,
+                               CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1 ELSE 0 END AS discovered,
+                               -- Written by the SYNC MATCHER, not derived here. A join
+                               -- cannot answer this: it fails on collaborations and
+                               -- casing, and normalising at query time is a full scan
+                               -- of `tracks` per row.
+                               -- Current provider/file evidence supersedes an old
+                               -- negative result; checked name-only rejections stay.
+                               {_MIRRORED_ROW_IN_LIBRARY_CASE.format(owner=owner_clause(column="f.owner_profile_id"))} AS in_library,
+                               CASE WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 1 ELSE 0 END AS library_checked
+                          FROM mirrored_playlist_tracks mpt
+                          JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
+                         WHERE mp.profile_id = ?
+                    )
+                    SELECT playlist_id,
                            COUNT(*) as total,
                            -- a track already in the library is found, whatever
                            -- discovery said. it used to count as not found, so a
                            -- card read "2005 not found" beside 2696 in the library
-                           SUM(CASE WHEN mpt.extra_data LIKE '%"discovered": true%' THEN 1
-                                    ELSE {_MIRRORED_ROW_IN_LIBRARY_CASE.format(owner=owner_clause(column="f.owner_profile_id"))} END) as discovered,
-                           -- Written by the SYNC MATCHER, not derived here. A join
-                           -- cannot answer this: it fails on collaborations and
-                           -- casing, and normalising at query time is a full scan
-                           -- of `tracks` per row. Free to read — same scan, one
-                           -- more CASE.
-                           -- Current provider/file evidence supersedes an old
-                           -- negative result; checked name-only rejections stay.
-                           {_MIRRORED_ROW_IN_LIBRARY.format(owner=owner_clause(column="f.owner_profile_id"))} as in_library,
+                           SUM(CASE WHEN discovered = 1 THEN 1 ELSE in_library END) as discovered,
+                           SUM(in_library) as in_library,
                            -- How many rows have EVER been checked. Without this a
                            -- never-synced playlist reads as "you own none of it"
                            -- rather than "nobody has looked".
-                           SUM(CASE WHEN mpt.extra_data LIKE '%"library_checked_at"%' THEN 1 ELSE 0 END) as library_checked
-                    FROM mirrored_playlist_tracks mpt
-                    JOIN mirrored_playlists mp ON mp.id = mpt.playlist_id
-                    WHERE mp.profile_id = ?
-                    GROUP BY mpt.playlist_id
+                           SUM(library_checked) as library_checked
+                    FROM mirror_rows
+                    GROUP BY playlist_id
                 """, (profile_id,))
                 for row in cursor.fetchall():
                     pid = row['playlist_id']

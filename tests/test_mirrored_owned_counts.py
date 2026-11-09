@@ -254,3 +254,30 @@ def test_a_track_in_the_library_is_never_counted_not_found(tmp_path):
     assert counts['total'] == 3
     assert counts['in_library'] == 2
     assert counts['discovered'] == 3, "owned tracks count as found"
+
+
+def test_batched_counts_work_out_each_rows_library_state_once(tmp_path, monkeypatch):
+    """review 5 perf: the in-library CASE (six provider probes and a name
+    match) sat in both the discovered and the in_library SUM, so SQLite ran
+    it twice per undiscovered row: 1.3 s of the Sync page's 2.4 s on a 10k
+    mirror set. the plan carries one copy of those probes now."""
+    db = _build_db(tmp_path)
+    connect = db._get_connection
+    seen = []
+
+    def traced():
+        conn = connect()
+        conn.set_trace_callback(seen.append)
+        return conn
+
+    monkeypatch.setattr(db, "_get_connection", traced)
+    counts = db.get_all_mirrored_playlist_status_counts(profile_id=1)[10]
+    assert (counts["total"], counts["discovered"], counts["in_library"]) == (3, 2, 2)
+
+    query = next(s for s in seen if "COUNT(*) as total" in s)
+    with connect() as conn:
+        plan = [str(r[-1]) for r in conn.execute("EXPLAIN QUERY PLAN " + query)]
+    name_matches = [p for p in plan if "idx_lib2_tracks_title_lower" in p]
+    spotify_probes = [p for p in plan if "idx_lib2_tracks_spotify" in p]
+    assert len(name_matches) == 1, plan
+    assert len(spotify_probes) == 1, plan
