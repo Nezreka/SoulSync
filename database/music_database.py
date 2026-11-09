@@ -12436,6 +12436,10 @@ class MusicDatabase:
             # actual performer match correctly when the album sits under a different
             # primary artist (Plex's track.originalTitle, Jellyfin's ArtistItems[0]).
             track.track_artist = row['track_artist'] if 'track_artist' in row_keys else None
+            # which id space ``id`` is in: the server's id when it has one,
+            # else the catalogue row's. a stamp of it has to say which
+            # (review 5 W2-WB-2)
+            track.id_kind = 'server' if public_id else 'lib2'
             tracks.append(track)
         return tracks
 

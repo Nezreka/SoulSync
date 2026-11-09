@@ -300,3 +300,37 @@ def test_the_detail_says_how_many_are_due(tmp_path, monkeypatch):
     body = c.get(f"/api/mirrored-playlists/{pk}").get_json()
     assert body["library_check_due"] == 2
     assert body["status_counts"]["unchecked"] == 2
+
+
+def test_the_stamp_says_which_id_space_its_id_is_in(monkeypatch):
+    """review 5 W2-WB-2: a server id and a catalogue id look alike. the
+    pre-sync editor reads a catalogue id only when the stamp says it is one."""
+    db = _DB([_row(1, "On The Server", "A"), _row(2, "Catalogue Only", "B"), _row(3, "By Hand", "C")])
+    server_track, catalogue_track = _Track(501), _Track(9)
+    server_track.id_kind, catalogue_track.id_kind = "server", "lib2"
+    hits = {"On The Server": server_track, "Catalogue Only": catalogue_track}
+    monkeypatch.setattr(master, "match_track_in_library",
+                        lambda db, q, **kw: (q["name"] in hits, 0.9, hits.get(q["name"])))
+    monkeypatch.setattr(master, "live_manual_match", lambda db, pid, q, source: (
+        {"library_track_id": 77, "library_track_id_kind": "lib2"} if q["name"] == "By Hand" else None))
+    library_check.check_mirror_tracks(db, list(db.rows.values()), profile_id=1, source="deezer")
+    assert [_extra(db, i)["library_track_id_kind"] for i in (1, 2, 3)] == ["server", "lib2", "lib2"]
+
+
+def test_a_real_library_match_knows_its_id_space(tmp_path):
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+
+    path = str(tmp_path / "m.db")
+    db = MusicDatabase(path)
+    conn = lib2_seed.row_conn(path)
+    on_plex = lib2_seed.track(conn, "Band", "Record", "On Plex", server_source="plex", server_id="rk-1")
+    lib2_seed.track(conn, "Band", "Record", "Not On Plex")
+    conn.commit()
+    rows = conn.execute("SELECT t.*, al.primary_artist_id AS artist_id, a.name AS artist_name,"
+                        " al.title AS album_title, NULL AS file_path, NULL AS bitrate"
+                        " FROM lib2_tracks t JOIN lib2_albums al ON al.id=t.album_id"
+                        " JOIN lib2_artists a ON a.id=al.primary_artist_id ORDER BY t.id").fetchall()
+    tracks = db._rows_to_tracks(rows, server_source="plex")
+    assert [(t.id, t.id_kind) for t in tracks][0] == ("rk-1", "server")
+    assert tracks[1].id_kind == "lib2" and tracks[0].id != on_plex

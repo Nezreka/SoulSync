@@ -381,6 +381,8 @@ def _record_library_membership(tracks_json, match_details) -> None:
                 # which library row: the next sync's skip checks it still
                 # exists, or a deleted file was never noticed (#1417)
                 'library_track_id': ((detail.get('matched_track') or {}).get('id') or None) if found else None,
+                # the sync matches by the server's id (review 5 W2-WB-2)
+                'library_track_id_kind': 'server' if found else None,
                 # Stamped so the count can say WHEN it was true. The flag is a
                 # cache: deleting files outside SoulSync will not update it
                 # until the next sync, and a number that cannot say how old it

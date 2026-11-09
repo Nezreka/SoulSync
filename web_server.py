@@ -18469,12 +18469,15 @@ def library_search_tracks():
 # a manual match overrides it. this is that view, and changing a pick stores
 # the same durable match the server editor stores, so the first sync uses it.
 
-def _presync_track_rows(database, active_server, ids):
+def _presync_track_rows(database, active_server, ids, catalogue_ids=()):
     """{id: {id, title, artist, thumb, duration}} for the library tracks the
     mirror rows point at. the active server's track id first (what the check
-    stamps and the sync matches by), the catalogue id for a manual match that
-    named one."""
+    stamps and the sync matches by), the catalogue id only for a stamp that
+    says it is one (``catalogue_ids``). a server id and a catalogue id share
+    one numeric range, so a gone server track read as a catalogue id showed
+    an unrelated song as matched (review 5 W2-WB-2)."""
     ids = [str(i) for i in dict.fromkeys(ids) if i]
+    catalogue_ids = {str(i) for i in catalogue_ids if i}
     out = {}
     if not ids:
         return out
@@ -18498,7 +18501,7 @@ def _presync_track_rows(database, active_server, ids):
             for sql, params in queries:
                 for row in conn.execute(sql, params).fetchall():
                     out.setdefault(str(row['key']), row)
-        rest = [i for i in ids if i not in out and i.isdigit()]
+        rest = [i for i in ids if i not in out and i in catalogue_ids and i.isdigit()]
         for i in range(0, len(rest), 400):
             chunk = rest[i:i + 400]
             ph = ','.join('?' * len(chunk))
@@ -18551,7 +18554,9 @@ def mirrored_presync_matches(playlist_id):
             logger.debug(f"[PreSync] manual matches unavailable: {e}")
         library = _presync_track_rows(
             database, active_server,
-            [e.get('library_track_id') for e in extras if e.get('in_library')])
+            [e.get('library_track_id') for e in extras if e.get('in_library')],
+            catalogue_ids=[e.get('library_track_id') for e in extras
+                           if e.get('in_library') and e.get('library_track_id_kind') == 'lib2'])
         tracks = []
         unchecked = 0
         for row, extra in zip(rows, extras, strict=True):
@@ -18618,8 +18623,9 @@ def mirrored_presync_set_match(playlist_id):
             source_track_id, active_server, track_id, data.get('track_title', ''),
             row.get('track_name') or '', row.get('artist_name') or '',
             source=playlist.get('source') or 'spotify')
+        # the library search answers with the server's id (review 5 W2-WB-2)
         database.update_mirrored_track_extra_data(row['id'], {
-            'in_library': True, 'library_track_id': track_id,
+            'in_library': True, 'library_track_id': track_id, 'library_track_id_kind': 'server',
             'library_checked_at': int(time.time()), 'library_checked_via': 'manual'})
         return jsonify({"success": True, "message": "Match saved, the next sync uses it"})
     except Exception as e:
@@ -18648,7 +18654,7 @@ def mirrored_presync_unmatch(playlist_id):
                                 source_track_id, track_id):
                 return jsonify({"success": False, "error": "Could not save the unmatch"}), 500
         database.update_mirrored_track_extra_data(row['id'], {
-            'in_library': False, 'library_track_id': None,
+            'in_library': False, 'library_track_id': None, 'library_track_id_kind': None,
             'library_checked_at': int(time.time()), 'library_checked_via': 'manual'})
         return jsonify({"success": True, "message": "Match removed"})
     except Exception as e:
