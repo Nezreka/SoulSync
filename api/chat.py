@@ -346,6 +346,20 @@ def _library_like(text) -> str:
     return f"%{escaped}%"
 
 
+# the radio's library artist, folded across accents. unidecode_lower(name)
+# ran python over every artist (1 s on 30k, review 5 W3-TB-4); the indexed
+# name_key answers every plain spelling, and only the accented keys, read off
+# that index rather than the table, pay for the python fold
+_RADIO_ARTIST_SQL = (
+    "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
+    " WHERE name_key = :key"
+    " UNION ALL"
+    " SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_artists"
+    " WHERE id IN (SELECT id FROM lib2_artists"
+    "               WHERE name_key GLOB '*[^ -~]*' AND name_key <> :key"
+    "                 AND unidecode_lower(name_key) = :folded)")
+
+
 def _resolve_track_path(db, track_id):
     """A library track's on-disk path. The path lives on the track's primary
     FILE row (ADR-03), not on the track, and it is stored as the MEDIA SERVER
@@ -1946,14 +1960,15 @@ def create_blueprint() -> Blueprint:
         if artist:
             conn = None
             try:
+                from core.library2.importer import normalize_name
                 from core.library2.provider_ids import parse_external_ids
                 from core.text.normalize import normalize_for_comparison
                 conn = _db()._get_connection()
                 source_ids = []
+                folded = normalize_for_comparison(artist)
                 for row in conn.execute(
-                    "SELECT spotify_id, musicbrainz_id, external_ids "
-                    "FROM lib2_artists WHERE unidecode_lower(name) = ?",
-                    (normalize_for_comparison(artist),),
+                    _RADIO_ARTIST_SQL,
+                    {"key": normalize_name(folded), "folded": folded},
                 ).fetchall():
                     known = parse_external_ids(row["external_ids"])
                     for value in (row["spotify_id"], known.get("itunes"),
