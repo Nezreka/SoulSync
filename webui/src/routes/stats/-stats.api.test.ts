@@ -12,6 +12,8 @@ import {
   resolveStatsTrack,
   runLastfmListeningImport,
   runListenbrainzListeningImport,
+  statsDbStorageQueryOptions,
+  statsLibraryDiskUsageQueryOptions,
   streamStatsTrack,
   triggerListeningStatsSync,
 } from './-stats.api';
@@ -94,6 +96,17 @@ describe('stats api', () => {
 
     await expect(fetchStatsDbStorage()).rejects.toThrow('db unavailable');
     await expect(fetchStatsLibraryDiskUsage()).rejects.toThrow('disk unavailable');
+  });
+
+  it('asks again while a whole-library report is being refreshed', () => {
+    for (const options of [statsDbStorageQueryOptions(), statsLibraryDiskUsageQueryOptions()]) {
+      const interval = options.refetchInterval as (query: {
+        state: { data?: { refreshing?: boolean } };
+      }) => number | false;
+      expect(interval({ state: { data: { refreshing: true } } })).toBe(3000);
+      expect(interval({ state: { data: {} } })).toBe(false);
+      expect(interval({ state: {} })).toBe(false);
+    }
   });
 
   it('reads listening status and triggers manual sync', async () => {

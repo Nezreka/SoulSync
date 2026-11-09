@@ -228,10 +228,15 @@ export function listenbrainzListeningImportStatusQueryOptions() {
   });
 }
 
+const REPORT_REFRESH_MS = 3000;
+
 export function statsDbStorageQueryOptions() {
   return queryOptions({
     queryKey: [...STATS_QUERY_KEY, 'db-storage'],
     queryFn: fetchStatsDbStorage,
+    // a whole-file report: the server answers from its last result and says
+    // when a newer one is on the way
+    refetchInterval: (query) => (query.state.data?.refreshing ? REPORT_REFRESH_MS : false),
   });
 }
 
@@ -239,6 +244,7 @@ export function statsLibraryDiskUsageQueryOptions() {
   return queryOptions({
     queryKey: [...STATS_QUERY_KEY, 'library-disk-usage'],
     queryFn: fetchStatsLibraryDiskUsage,
+    refetchInterval: (query) => (query.state.data?.refreshing ? REPORT_REFRESH_MS : false),
   });
 }
 

@@ -200,6 +200,8 @@ export interface StatsDbStoragePayload {
   tables?: StatsDbStorageTable[];
   total_file_size?: number;
   method?: string;
+  // the server is working out a newer result; ask again shortly
+  refreshing?: boolean;
   error?: string;
 }
 
@@ -210,6 +212,7 @@ export interface StatsLibraryDiskUsagePayload {
   tracks_with_size?: number;
   tracks_without_size?: number;
   by_format?: Record<string, number>;
+  refreshing?: boolean;
   error?: string;
 }
 
