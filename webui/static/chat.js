@@ -7905,13 +7905,17 @@
     }
 
     var _attachSearchTimer = null;
+    // a slower answer to an older query must not replace a newer one
+    // (review 5 W3-TB-1)
+    var _attachSearchSeq = 0;
     function attachLibrarySearch(qstr) {
         var host = q('[data-chat-attach-results]');
         if (!host) return;
+        var seq = ++_attachSearchSeq;
         if (!qstr || qstr.length < 2) { host.innerHTML = ''; return; }
         getJSON('/api/chat/files/library-search?q=' + encodeURIComponent(qstr))
             .then(function (res) {
-                if (!res.ok) return;
+                if (seq !== _attachSearchSeq || !res.ok) return;
                 var tracks = res.body.tracks || [];
                 host.innerHTML = tracks.length ? tracks.map(function (t) {
                     var label = (t.artist ? t.artist + ' — ' : '') + t.title;

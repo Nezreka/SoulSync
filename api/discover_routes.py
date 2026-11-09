@@ -133,6 +133,16 @@ def _discover_dial_key():
         return '0.3'
 
 
+def _discover_source_key():
+    """The active metadata source, for shelves drawn from it. without it a
+    source switch kept serving the old source's ids until the warmer's next
+    pass or the 30-minute ttl (review 5 W3-TB-3)."""
+    try:
+        return _get_active_discovery_source()
+    except Exception:
+        return 'unknown'
+
+
 def _discover_rank_key():
     """The two re-ranked artist shelves: the dial, and this profile's more /
     less feedback, so an answer re-ranks that profile's shelf and no other."""
@@ -2015,7 +2025,7 @@ def get_decade_playlist(decade):
 @_hide_blocked({'tracks': WORKS})
 # a draw over the whole pool, 10s+ of cpu: kept like the other shelves (and
 # warmed by web_server's discover warmer), not redrawn on every visit
-@_discover_shelf_cache()
+@_discover_shelf_cache(key_extra=_discover_source_key)
 def get_popular_picks_playlist():
     """Get high popularity tracks from discovery pool"""
     try:
@@ -2040,7 +2050,7 @@ def get_popular_picks_playlist():
 @_hide_blocked({'tracks': WORKS})
 # a draw over the whole pool, 10s+ of cpu: kept like the other shelves (and
 # warmed by web_server's discover warmer), not redrawn on every visit
-@_discover_shelf_cache()
+@_discover_shelf_cache(key_extra=_discover_source_key)
 def get_hidden_gems_playlist():
     """Get hidden gems (low popularity) from discovery pool"""
     try:
@@ -2165,7 +2175,7 @@ def get_mood_mixes():
 @_hide_blocked({'tracks': WORKS})
 # a draw over the whole pool, 10s+ of cpu: kept like the other shelves (and
 # warmed by web_server's discover warmer), not redrawn on every visit
-@_discover_shelf_cache()
+@_discover_shelf_cache(key_extra=_discover_source_key)
 def get_discovery_shuffle():
     """Get Discovery Shuffle playlist - random tracks from discovery pool"""
     try:

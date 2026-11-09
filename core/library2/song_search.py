@@ -163,6 +163,94 @@ def matching_ids(conn, folded_query: str) -> Optional[List[int]]:
     return [int(r[0]) for r in rows]
 
 
+# fts5 keeps its own copy of every row in this table (id, then c0..c2 in the
+# order of _COLUMNS), part of its documented on-disk format. a scan of it is
+# a plain table read: LIKE in C with ESCAPE, which the fts table's own LIKE
+# cannot take, and about 3x faster than a full scan through the fts module
+_CONTENT = f"{TABLE}_content"
+
+
+def ready(conn) -> bool:
+    """The index has been filled once (dirty tracks may still be pending)."""
+    return _ready(conn)
+
+
+def like_pattern(folded_query: str) -> str:
+    """``%folded_query%`` with LIKE's own characters escaped (ESCAPE '\\'):
+    a typed ``%`` or ``_`` is a letter, not a wildcard."""
+    escaped = folded_query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def register_fold(conn) -> None:
+    """``norm_text``, which ``queries._fold_sql`` calls for non-ascii values."""
+    from core.text.normalize import normalize_for_comparison
+    conn.create_function("norm_text", 1, lambda x: normalize_for_comparison(x) if x else "",
+                         deterministic=True)
+
+
+def _match_columns(alias: str) -> str:
+    return " OR ".join(f"{alias}.c{i} LIKE :like ESCAPE '\\'" for i in range(len(_COLUMNS)))
+
+
+def indexed_match_sql(id_expr: str) -> str:
+    """Per row: ``id_expr`` is a track whose index row is current and holds
+    ``:like`` (a ``like_pattern``). Dirty tracks answer through
+    ``dirty_matches`` instead. A rowid lookup, so it fits an ordered walk."""
+    return (f"({id_expr} NOT IN (SELECT track_id FROM {_DIRTY})"
+            f" AND EXISTS (SELECT 1 FROM {_CONTENT} s WHERE s.id = {id_expr}"
+            f" AND ({_match_columns('s')})))")
+
+
+def dirty_matches(conn, like: str) -> List[int]:
+    """Dirty tracks (index row stale or missing) that hold ``like``, folded
+    live through ``_fold_sql``. Read from the dirty table outward: joined the
+    other way round sqlite walked every album to find them."""
+    from core.library2.queries import _fold_sql
+
+    register_fold(conn)
+    rows = conn.execute(
+        f"""SELECT t.id FROM {_DIRTY} d
+              CROSS JOIN lib2_tracks t ON t.id = d.track_id
+              CROSS JOIN lib2_albums al ON al.id = t.album_id
+              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
+             WHERE {_fold_sql('t.title')} LIKE :like ESCAPE '\\'
+                OR {_fold_sql('t.track_artist')} LIKE :like ESCAPE '\\'
+                OR {_fold_sql('ar.name')} LIKE :like ESCAPE '\\'""",
+        {"like": like}).fetchall()
+    return [int(r[0]) for r in rows]
+
+
+def indexed_ids(conn, folded_query: str, limit: Optional[int] = None) -> Optional[List[int]]:
+    """Tracks whose current index row holds the folded query, in no order,
+    at most ``limit``; dirty tracks are left to ``dirty_matches``. None when
+    the index is not built (or unreadable): the caller folds live instead.
+
+    Three plain characters or more read the trigram index. Shorter, or
+    holding a LIKE character, scans the index's folded copy: one C pass, no
+    python per row, where the live fold ran three python calls per track."""
+    if not folded_query or not _ready(conn):
+        return None
+    cap = f" LIMIT {int(limit)}" if limit is not None else ""
+    try:
+        if len(folded_query) >= 3 and "%" not in folded_query and "_" not in folded_query:
+            rows = conn.execute(
+                f"""SELECT rowid FROM {TABLE}
+                     WHERE (title LIKE :like OR track_artist LIKE :like OR artist LIKE :like)
+                       AND rowid NOT IN (SELECT track_id FROM {_DIRTY}){cap}""",
+                {"like": f"%{folded_query}%"}).fetchall()
+        else:
+            rows = conn.execute(
+                f"""SELECT s.id FROM {_CONTENT} s
+                     WHERE ({_match_columns('s')})
+                       AND s.id NOT IN (SELECT track_id FROM {_DIRTY}){cap}""",
+                {"like": like_pattern(folded_query)}).fetchall()
+    except Exception as exc:  # noqa: BLE001 - fall back, never fail a search
+        logger.debug("songs search index read failed: %s", exc)
+        return None
+    return [int(r[0]) for r in rows]
+
+
 def _rows_for(conn, track_ids: Optional[List[int]]):
     sql = ("SELECT t.id, t.title, t.track_artist, ar.name FROM lib2_tracks t "
            "JOIN lib2_albums al ON al.id = t.album_id "
