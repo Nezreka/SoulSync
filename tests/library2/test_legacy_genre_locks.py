@@ -34,8 +34,9 @@ def test_a_locked_album_and_artist_keep_their_lock(imported_conn):
     stats = carry_legacy_genre_locks(conn)
 
     assert stats == {"artists": 1, "albums": 1}
-    assert _locked(conn, "lib2_albums", "legacy_album_id") == {album}
-    assert _locked(conn, "lib2_artists", "legacy_artist_id") == {artist}
+    # 3.6.1's ids are TEXT; lib2's legacy columns keep the number
+    assert {str(v) for v in _locked(conn, "lib2_albums", "legacy_album_id")} == {str(album)}
+    assert {str(v) for v in _locked(conn, "lib2_artists", "legacy_artist_id")} == {str(artist)}
 
 
 def test_it_reads_the_retired_legacy_tables_too_and_runs_once(imported_conn):

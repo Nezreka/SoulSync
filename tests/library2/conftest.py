@@ -47,17 +47,21 @@ class LegacyDBShim:
         return conn
 
 
+# the id columns are TEXT, as 3.6.1 declares them (media-server ids: plex
+# ratingKeys, jellyfin guids). an INTEGER fixture hid the upgrade's TEXT vs
+# INTEGER join scan until it hung a real upgrade (Nov 7);
+# test_guard_fixture_shapes.py keeps this matched to the real schema
 _LEGACY_DDL = """
 CREATE TABLE artists(
-    id INTEGER PRIMARY KEY, name TEXT, thumb_url TEXT, genres TEXT, summary TEXT,
+    id TEXT PRIMARY KEY, name TEXT, thumb_url TEXT, genres TEXT, summary TEXT,
     spotify_artist_id TEXT, musicbrainz_id TEXT
 );
 CREATE TABLE albums(
-    id INTEGER PRIMARY KEY, artist_id INTEGER, title TEXT, year INTEGER,
+    id TEXT PRIMARY KEY, artist_id TEXT, title TEXT, year INTEGER,
     thumb_url TEXT, genres TEXT, track_count INTEGER, release_date TEXT
 );
 CREATE TABLE tracks(
-    id INTEGER PRIMARY KEY, album_id INTEGER, artist_id INTEGER, title TEXT,
+    id TEXT PRIMARY KEY, album_id TEXT, artist_id TEXT, title TEXT,
     track_number INTEGER, duration INTEGER, file_path TEXT, bitrate INTEGER,
     file_size INTEGER, track_artist TEXT
 );
