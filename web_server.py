@@ -4489,7 +4489,8 @@ def handle_settings():
                         reset_own_library_fallback_notifications()
                     except Exception as _inv_err:
                         logger.debug("scope cache invalidation failed: %s", _inv_err)
-                    if new_server not in _media_specs.names_where(supports_own_libraries=True):
+                    from core.library_scope import own_libraries_supported_on
+                    if not own_libraries_supported_on(new_server):
                         try:
                             own_profs = get_database().get_own_library_profiles()
                             if own_profs:

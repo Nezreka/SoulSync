@@ -88,10 +88,52 @@ def library_config_changed() -> None:
 
 
 def own_library_supported() -> bool:
-    from core.media_server import specs
     from core.settings import config_manager
-    descriptor = specs.describe(config_manager.get_active_media_server())
-    return bool(descriptor and descriptor.supports_own_libraries)
+    return own_libraries_supported_on(config_manager.get_active_media_server())
+
+
+def own_libraries_supported_on(server: Optional[str]) -> bool:
+    """whether this media server can keep a library per profile. plex and
+    jellyfin always; navidrome from 0.58, its first version with more than
+    one library (#2031). every check of the feature goes through here."""
+    return own_library_unsupported_reason(server) is None
+
+
+def own_library_unsupported_reason(server: Optional[str]) -> Optional[str]:
+    """None when own libraries work on this server, else the plain reason
+    the profile settings show."""
+    from core.media_server import specs
+    descriptor = specs.describe(server)
+    if not (descriptor and descriptor.supports_own_libraries):
+        name = descriptor.display_name if descriptor else (server or 'This media server')
+        return f"Own libraries need Plex, Jellyfin or Navidrome 0.58+. {name} keeps one shared library."
+    if descriptor.name == 'navidrome':
+        from core.navidrome_client import MULTI_LIBRARY_MIN_VERSION, known_server_version, multi_library_supported
+        if not multi_library_supported():
+            need = '.'.join(str(p) for p in MULTI_LIBRARY_MIN_VERSION)
+            seen = known_server_version()
+            if not seen:
+                return (f"Own libraries need Navidrome {need} or newer, and SoulSync has not "
+                        f"reached Navidrome yet to check its version.")
+            return (f"Own libraries need Navidrome {need} or newer (multiple libraries). "
+                    f"This server runs {seen}.")
+    return None
+
+
+def own_navidrome_folder(profile_id: Optional[int], db=None) -> Optional[str]:
+    """the navidrome library (music folder id) an own-library profile picked
+    under its own login (#2031), or None: not an own library right now, or
+    nothing picked. what its scan reads and its playlists search."""
+    try:
+        if not profile_id or library_scope_for_profile(profile_id) != int(profile_id):
+            return None
+        if db is None:
+            from database.music_database import get_database
+            db = get_database()
+        folder = (db.get_profile_server_library(int(profile_id)) or {}).get('navidrome_library_id')
+        return str(folder) if folder else None
+    except Exception:  # noqa: BLE001 - unreadable: the shared folder
+        return None
 
 
 def library_scope_for_profile(profile_id: Optional[int]) -> Scope:

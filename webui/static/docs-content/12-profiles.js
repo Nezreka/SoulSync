@@ -18,7 +18,7 @@ Profiles give everyone their own space inside a shared SoulSync installation. Ea
 - Side access and allowed pages
 - Connected music accounts (see [Your Accounts](#docs/prof-accounts))
 
-**Shared across all profiles**: settings, and the music library by default — though a profile can have its **own library** instead (\`library_mode == 'own'\`), with its own output folder on Plex or Jellyfin. **Automations are per-profile**: each profile runs its own automations; only system automations are shared across profiles. Profiles are about personalization and permissions, not separate servers — and access to the Automations page is a grantable permission, not admin-only.
+**Shared across all profiles**: settings, and the music library by default — though a profile can have its **own library** instead (\`library_mode == 'own'\`), with its own output folder on Plex, Jellyfin or Navidrome 0.58+ (Navidrome's multiple libraries). **Automations are per-profile**: each profile runs its own automations; only system automations are shared across profiles. Profiles are about personalization and permissions, not separate servers — and access to the Automations page is a grantable permission, not admin-only.
 
 ![Profile picker](profiles-picker.jpg)
 `
@@ -112,7 +112,8 @@ The admin account's services stay managed in Settings. Disconnecting a personal 
 
 - **Plex** — link a **Plex Home user** from the server's user list (PIN asked if they have one); the profile's playlists are then written as that user. Unlink to go back to the app account.
 - **Navidrome** — save your own Navidrome username and password (verified with one ping before saving); your playlists are written as you.
-- **Library choice** — pick which Plex/Jellyfin/Navidrome library the profile reads from.
+- **Library choice** — pick which Plex/Jellyfin library the profile reads from.
+- **Own library on Navidrome** — a profile the admin gave its own library picks it under **My Account → Navidrome** after signing in with its own Navidrome user. The list is what that login can see (Navidrome scopes libraries per user), the shared library marked. Its downloads go to its own folder, the library scan reads only that library, and its playlists are written as that user. Setup: add the profile's folder as a second library in Navidrome (0.58 or newer), give their Navidrome user only that library, pick the shared library's music folder in Settings → Media server (so the shared scan leaves theirs out), then switch the profile to **Own library** in Manage Profiles. On an older Navidrome the switch stays off and says why; their downloads keep going to the shared folder.
 
 ## Your own listening
 

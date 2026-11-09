@@ -322,7 +322,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password. Setup and troubleshooting: [docs/guides/OIDC.md](docs/guides/OIDC.md).
   - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
   - Reverse-proxy and sub-path aware.
-- **Own library per profile** (Plex / Jellyfin): a profile can have its own folder and server library.
+- **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
 - **Content caps** (video): per-profile G / PG / PG-13 / R limits, enforced across the video side.
 
 ## Chat & arcade

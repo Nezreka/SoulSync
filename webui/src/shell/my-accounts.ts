@@ -134,9 +134,22 @@ interface NamedOption {
   name: string;
 }
 
+interface NavidromeLibrary {
+  id: string;
+  name: string;
+  shared?: boolean;
+}
+
 interface ServerModel {
   type: 'navidrome' | 'plex' | 'jellyfin' | 'none';
   navidromeUser?: string;
+  /** an own library on navidrome (#2031): the profile has one, whether this
+   * navidrome can do it, why not, and the libraries its login sees */
+  navidromeOwn?: boolean;
+  navidromeOwnSupported?: boolean;
+  navidromeOwnMessage?: string;
+  navidromeLibraries?: NavidromeLibrary[];
+  navidromeLibrary?: string;
   plexLinkedUser?: string;
   plexHomeUserId?: string;
   plexHomeUsers?: PlexHomeUser[];
@@ -325,7 +338,22 @@ async function _maLoadServer(): Promise<ServerModel> {
   const lib = current || {};
 
   if (activeServer === 'navidrome') {
-    return { type: 'navidrome', navidromeUser: lib.navidrome_username || '' };
+    const own = await _maJson<{
+      own_library?: boolean;
+      supported?: boolean;
+      message?: string | null;
+      selected?: string;
+      folders?: NavidromeLibrary[];
+    }>('/api/profiles/me/navidrome-libraries');
+    return {
+      type: 'navidrome',
+      navidromeUser: lib.navidrome_username || '',
+      navidromeOwn: !!own?.own_library,
+      navidromeOwnSupported: own?.supported !== false,
+      navidromeOwnMessage: own?.message || '',
+      navidromeLibraries: own?.folders || [],
+      navidromeLibrary: own?.selected || '',
+    };
   }
   if (activeServer === 'plex' || activeServer === '') {
     const plex = await _maJson<{ libraries?: Array<string | { name?: string; title?: string }> }>(
@@ -557,8 +585,10 @@ function _maServerRow(): string {
 
 function _maServerLine(s: ServerModel): string {
   if (s.type === 'navidrome') {
+    const own = s.navidromeLibraries?.find((l) => l.id === s.navidromeLibrary)?.name;
+    const lib = s.navidromeOwn && own ? ` Your library: ${escapeHtml(own)}.` : '';
     return s.navidromeUser
-      ? `Signed in as ${escapeHtml(s.navidromeUser)}. Your playlists sync to your own account.`
+      ? `Signed in as ${escapeHtml(s.navidromeUser)}. Your playlists sync to your own account.${lib}`
       : "Using the app's account. Sign in so the playlists you sync are yours.";
   }
   if (s.type === 'plex') {
@@ -614,7 +644,8 @@ function _maServerForm(s: ServerModel): string {
       <div class="ma-actions">
         ${s.navidromeUser ? '<button type="button" class="ma-btn ma-btn-quiet" data-ma="nd-clear">Use app account</button>' : ''}
         <button type="button" class="ma-btn ma-btn-primary" data-ma="nd-save">Save</button>
-      </div>`;
+      </div>
+      ${_maNavidromeLibraryForm(s)}`;
   }
   if (s.type === 'plex') {
     const users = s.plexHomeUsers || [];
@@ -693,6 +724,35 @@ function _maServerForm(s: ServerModel): string {
       )}</select>`,
     )}
     <div class="ma-actions"><button type="button" class="ma-btn ma-btn-primary" data-ma="jf-save">Save</button></div>`;
+}
+
+/** an own library on navidrome (#2031): the library this profile's scans,
+ * downloads and playlists use, picked from what its own login can see.
+ * nothing for a profile on the shared library. */
+function _maNavidromeLibraryForm(s: ServerModel): string {
+  if (!s.navidromeOwn) return '';
+  const libs = s.navidromeLibraries || [];
+  if (!s.navidromeOwnSupported || !libs.length) {
+    const why =
+      s.navidromeOwnMessage || 'Your Navidrome login sees no library yet. Ask your admin.';
+    return `
+      <div class="ma-divider"></div>
+      <p class="ma-panel-text">You have your own library.</p>
+      <div class="ma-hint" id="ma-nd-lib-note">${escapeHtml(why)}</div>`;
+  }
+  return `
+    <div class="ma-divider"></div>
+    <p class="ma-panel-text">You have your own library. Pick the Navidrome library that is yours: its scans, your downloads and your playlists use it.</p>
+    ${_maField(
+      'ma-nd-lib',
+      'Your library',
+      `<select class="ma-input" id="ma-nd-lib">${_maOptions(
+        libs.map((l) => ({ value: l.id, label: l.shared ? `${l.name} (shared)` : l.name })),
+        s.navidromeLibrary || '',
+        'Pick your library',
+      )}</select>`,
+    )}
+    <div class="ma-actions"><button type="button" class="ma-btn ma-btn-quiet" data-ma="nd-lib-save">Save library</button></div>`;
 }
 
 /** listening that isn't a music-service row: a linked media-server user */
@@ -918,6 +978,18 @@ function _maOnClick(e: Event): void {
         'DELETE',
         null,
         "Plex user unlinked, using the app's account",
+      );
+      break;
+    case 'nd-lib-save':
+      if (!_maValue('ma-nd-lib')) {
+        toast('Pick your library first', 'error');
+        break;
+      }
+      void _maServerCall(
+        '/api/profiles/me/server-library',
+        'POST',
+        { server_type: 'navidrome', library_id: _maValue('ma-nd-lib') },
+        'Navidrome library saved',
       );
       break;
     case 'plex-lib-save':

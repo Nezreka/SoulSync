@@ -6292,7 +6292,14 @@ class MusicDatabase:
                 login = self.get_profile_navidrome_login(profile_id)
                 if not login:
                     return None
-                return {'username': login[0], 'password': login[1], 'label': login[0]}
+                identity = {'username': login[0], 'password': login[1], 'label': login[0]}
+                # an own library on navidrome (#2031) is read through its
+                # own music folder
+                from core.library_scope import own_navidrome_folder
+                folder = own_navidrome_folder(profile_id, self)
+                if folder:
+                    identity['music_folder_id'] = folder
+                return identity
         except Exception as e:
             logger.error(f"Error reading {server} identity for profile {profile_id}: {e}")
         return None

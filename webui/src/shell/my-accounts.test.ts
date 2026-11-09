@@ -40,8 +40,15 @@ function mockAccount({
   library = {} as Record<string, string>,
   imports = {} as Record<string, unknown>,
   scrobbling = {} as Record<string, unknown>,
+  navidromeLibraries = { own_library: false, supported: true, folders: [] } as Record<
+    string,
+    unknown
+  >,
 } = {}) {
   server.use(
+    http.get('/api/profiles/me/navidrome-libraries', () =>
+      HttpResponse.json({ success: true, ...navidromeLibraries }),
+    ),
     http.get('/api/profiles/me/scrobbling', () =>
       HttpResponse.json({ success: true, ...scrobbling }),
     ),
@@ -270,6 +277,71 @@ describe('My Account', () => {
         { url: '/api/profiles/me/navidrome-login', body: { username: 'kim', password: 'pw' } },
       ]),
     );
+  });
+
+  it('an own library on navidrome picks its library from what the login sees (#2031)', async () => {
+    mockAccount({
+      library: { navidrome_username: 'kim' },
+      navidromeLibraries: {
+        own_library: true,
+        supported: true,
+        selected: '',
+        folders: [
+          { id: '1', name: 'Music', shared: true },
+          { id: '2', name: 'Kim', shared: false },
+        ],
+      },
+    });
+    capturePosts('/api/profiles/me/server-library');
+    await opened();
+    click('[data-ma="toggle"][data-id="server"]');
+    const pick = document.getElementById('ma-nd-lib') as HTMLSelectElement;
+    expect([...pick.options].map((o) => o.textContent)).toEqual([
+      'Pick your library',
+      'Music (shared)',
+      'Kim',
+    ]);
+    // nothing picked: nothing sent
+    click('[data-ma="nd-lib-save"]');
+    expect(toasts).toContain('Pick your library first');
+    expect(posted).toEqual([]);
+    pick.value = '2';
+    click('[data-ma="nd-lib-save"]');
+    await vi.waitFor(() =>
+      expect(posted).toEqual([
+        {
+          url: '/api/profiles/me/server-library',
+          body: { server_type: 'navidrome', library_id: '2' },
+        },
+      ]),
+    );
+  });
+
+  it('an own library on an old navidrome says why instead of a picker (#2031)', async () => {
+    mockAccount({
+      library: { navidrome_username: 'kim' },
+      navidromeLibraries: {
+        own_library: true,
+        supported: false,
+        message:
+          'Own libraries need Navidrome 0.58 or newer (multiple libraries). This server runs 0.57.0.',
+        folders: [],
+      },
+    });
+    await opened();
+    click('[data-ma="toggle"][data-id="server"]');
+    expect(document.getElementById('ma-nd-lib')).toBeNull();
+    expect(document.getElementById('ma-nd-lib-note')?.textContent).toContain(
+      'Navidrome 0.58 or newer',
+    );
+  });
+
+  it('a shared-library profile on navidrome gets no library picker', async () => {
+    mockAccount({ library: { navidrome_username: 'kim' } });
+    await opened();
+    click('[data-ma="toggle"][data-id="server"]');
+    expect(document.getElementById('ma-nd-lib')).toBeNull();
+    expect(document.getElementById('ma-nd-lib-note')).toBeNull();
   });
 
   it('plex asks for the pin only for a protected home user', async () => {
