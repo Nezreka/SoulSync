@@ -2428,13 +2428,18 @@ class RepairWorker:
         it), so a group can show what is left AND what has already been dealt
         with without a second round trip.
         """
+        # the library picked in the header, like the list and the badges:
+        # the row's "Fix all (N)" / "Dismiss all" count was every library's
+        # (review 5 W3-TT-1)
+        library = _findings_library_clause() or "1"
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT finding_type, status, severity, COUNT(*), MAX(created_at)
                 FROM repair_findings
+                WHERE {library}
                 GROUP BY finding_type, status, severity
             """)
             rows = cursor.fetchall()
@@ -2442,7 +2447,7 @@ class RepairWorker:
             # Which jobs feed each type — a group shows its source without
             # the user having to cross-reference the jobs list.
             cursor.execute(
-                "SELECT DISTINCT finding_type, job_id FROM repair_findings")
+                f"SELECT DISTINCT finding_type, job_id FROM repair_findings WHERE {library}")
             jobs_by_type: Dict[str, set] = {}
             for finding_type, job_id in cursor.fetchall():
                 jobs_by_type.setdefault(finding_type, set()).add(job_id)
@@ -2459,6 +2464,7 @@ class RepairWorker:
                     "SELECT finding_type, COUNT(*) FROM repair_findings "
                     "WHERE status = 'pending' "
                     "AND json_extract(details_json, '$.has_manual_conflict') = 1 "
+                    f"AND {library} "
                     "GROUP BY finding_type")
                 manual_by_type = {row[0]: row[1] for row in cursor.fetchall()}
             except Exception as e:  # noqa: BLE001 - a count is not worth a 500
@@ -2566,6 +2572,10 @@ class RepairWorker:
             if finding_type:
                 query += " AND finding_type = ?"
                 params.append(finding_type)
+            # only the library picked in the header (review 5 W3-TT-1)
+            library = _findings_library_clause()
+            if library:
+                query += f" AND {library}"
             cursor.execute(query, params)
             conn.commit()
             count = cursor.rowcount
@@ -7260,11 +7270,14 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            # only the library picked in the header: dismissing a type in one
+            # library silenced it in every other one (review 5 W3-TT-1)
+            library = _findings_library_clause() or "1"
+            cursor.execute(f"""
                 UPDATE repair_findings
                 SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE finding_type = ? AND status = 'pending'
+                WHERE finding_type = ? AND status = 'pending' AND {library}
             """, (finding_type,))
             conn.commit()
             count = cursor.rowcount
