@@ -38,7 +38,6 @@ import {
   fetchBulkFixStatus,
   fetchFindingGroups,
   fetchFindingTypes,
-  fixFinding,
   reopenFinding,
   runRepairJob,
   setRepairJobEnabled,
@@ -51,6 +50,8 @@ import { healthBandLabel, isSafeType, libraryHealth } from '../-tools.groups';
 import { useToolsMedia, type ToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray } from './album-inspection-tray';
+import { ReidentifyFindingModal, useFindingFix } from './finding-fix';
+import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
 
 function toast(message: string, type = 'info') {
@@ -533,6 +534,40 @@ export function OperationsStudio({
       }
     };
   }, [bulkStatus?.running, onChanged, loadData]);
+
+  // ── The album tray's per-row fix and dismiss ───────────────────────────────
+
+  const prompts = useFindingPrompts();
+  const [reidentifyingFinding, setReidentifyingFinding] = useState<RepairFinding | null>(null);
+  const studioTypeInfo = useCallback((findingType: string) => catalog[findingType], [catalog]);
+  const refreshAfterFix = useCallback(() => {
+    onChanged();
+    void loadData();
+  }, [loadData, onChanged]);
+  const dismissOne = useCallback(
+    async (id: number) => {
+      try {
+        await dismissFinding(id);
+      } catch (error) {
+        toast(`Could not dismiss finding: ${(error as Error).message}`, 'error');
+        return;
+      }
+      refreshAfterFix();
+    },
+    [refreshAfterFix],
+  );
+  /** the same fix Advanced mode runs: its per-type question, the confirm
+   *  before a subjectless Delete File, and a toast with the result. this
+   *  used to be a bare fixFinding(id) that dropped the answer (review 5
+   *  W3-TT-3). */
+  const fixOne = useFindingFix({
+    video: media === 'video',
+    typeInfo: studioTypeInfo,
+    prompts,
+    dismiss: dismissOne,
+    refresh: refreshAfterFix,
+    onReidentify: setReidentifyingFinding,
+  });
 
   const jobMap = useMemo(() => {
     const map = new Map<string, RepairJob>();
@@ -1096,16 +1131,8 @@ export function OperationsStudio({
               group={selectedAlbum}
               status="pending"
               onClose={() => setSelectedAlbum(null)}
-              onFixFinding={async (f) => {
-                await fixFinding(f.id);
-                onChanged();
-                void loadData();
-              }}
-              onDismissFinding={async (id) => {
-                await dismissFinding(id);
-                onChanged();
-                void loadData();
-              }}
+              onFixFinding={fixOne}
+              onDismissFinding={dismissOne}
               onInspectRedownload={(f) => {
                 setRedownloadFinding(f);
               }}
@@ -1129,6 +1156,21 @@ export function OperationsStudio({
             onOpen={(group) => setSelectedAlbum(group)}
           />
         </div>
+      ) : null}
+
+      {prompts.promptNode}
+
+      {reidentifyingFinding ? (
+        <ReidentifyFindingModal
+          finding={reidentifyingFinding}
+          onApplied={async () => {
+            await dismissOne(reidentifyingFinding.id);
+          }}
+          onClose={() => {
+            setReidentifyingFinding(null);
+            refreshAfterFix();
+          }}
+        />
       ) : null}
 
       {/* ── Redownload Modal ──────────────────────────────────────────────── */}

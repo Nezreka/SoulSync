@@ -49,7 +49,6 @@ import {
   dismissFinding,
   dismissFindingType,
   fetchBulkFixStatus,
-  findExactArtist,
   fetchCacheHealth,
   fetchFindingCounts,
   fetchFindingGroups,
@@ -58,7 +57,6 @@ import {
   fixFinding,
   reopenFinding,
   reopenFindingsBulk,
-  searchLibraryArtists,
   startBulkFix,
   stopBulkFix,
 } from '../-tools.api';
@@ -84,9 +82,18 @@ import {
 import { safeFixablePending, visibleGroups } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
-import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
 import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
 import { FindingDetail } from './finding-detail';
+import {
+  ReidentifyFindingModal,
+  TYPE_ACOUSTID,
+  TYPE_BACKFILL,
+  TYPE_DEAD,
+  TYPE_ORPHAN,
+  TYPE_QUALITY,
+  TYPE_RETAG,
+  useFindingFix,
+} from './finding-fix';
 import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
 import { FindingsInbox } from './findings-inbox';
@@ -97,42 +104,8 @@ function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
 }
 
-/**
- * A poisoned album holds tracks by many artists, so it can't be re-identified
- * as one release. Open it in the library instead, where each track has its own
- * Re-identify (#1567). Findings from before the artist id was stored find the
- * artist by the album artist's name.
- */
-export async function openSuspectAlbum(finding: RepairFinding): Promise<void> {
-  const d = (finding.details as Record<string, any>) || {};
-  const router = window.SoulSyncWebRouter;
-  // native findings name the album as `lib2:<id>`; the library route wants the id
-  const albumId =
-    finding.entity_id != null ? String(finding.entity_id).replace(/^lib2:/, '') : null;
-  let artistId = d.artist_id != null && d.artist_id !== '' ? String(d.artist_id) : '';
-  let artistName = String(d.album_artist_name || '');
-  if (!artistId && artistName) {
-    try {
-      const exact = findExactArtist(await searchLibraryArtists(artistName), artistName);
-      if (exact) {
-        artistId = String(exact.id);
-        artistName = exact.name || artistName;
-      }
-    } catch {
-      // falls through to the toast below
-    }
-  }
-  if (!artistId || !router) {
-    toast("Couldn't find this album in your library", 'error');
-    return;
-  }
-  toast('Open each track there and pick Re-identify from its menu', 'info');
-  await router.navigateToPage('artist-detail', {
-    artistId,
-    artistName,
-    focusAlbumId: albumId ?? undefined,
-  });
-}
+// moved to finding-fix, which Simple mode shares (review 5 W3-TT-3)
+export { openSuspectAlbum } from './finding-fix';
 
 /** The vanilla's poll interval for a background Fix All run. */
 const BULK_FIX_POLL_MS = 2000;
@@ -178,16 +151,6 @@ function readStoredPageSize(): number {
     return REPAIR_DEFAULT_PAGE_SIZE;
   }
 }
-
-/** Finding types whose fix needs a question answered before it can run. Keyed
- *  by TYPE now, not by job — a job can emit more than one type. */
-const TYPE_ORPHAN = 'orphan_file';
-const TYPE_DEAD = 'dead_file';
-const TYPE_ACOUSTID = 'acoustid_mismatch';
-const TYPE_RETAG = 'library_retag';
-const TYPE_BACKFILL = 'missing_discography_track';
-const TYPE_QUALITY = 'quality_upgrade';
-const TYPE_SUSPECT_ALBUM = 'suspect_album_tag';
 
 /** Above this many files, a whole-group orphan DELETE goes through the
  *  type-the-phrase dialog. Same number the filter-wide Fix All has always
@@ -756,164 +719,32 @@ export function FindingsSurface({
     [refreshAll],
   );
 
-  /** `fixRepairFinding`. The per-type prompts run BEFORE the button is disabled.
-   *  `override` is a non-default action picked in the detail panel (the video
-   *  ghost's Forget); it skips the prompts because the user just chose. */
-  const fixOne = useCallback(
-    async (finding: RepairFinding, override?: string) => {
-      const type = finding.finding_type;
-      let fixAction: string | null = override ?? null;
-      if (video) {
-        // video types share some slugs with music (quality_upgrade) but none
-        // of music's questions. a fix that changes a file on disk asks once,
-        // in the words the catalog has for it.
-        const info = typeInfo(type);
-        if (!override && info?.destructive) {
-          const confirmed = await window.showConfirmDialog?.({
-            title: `${info.verb || 'Fix'}: ${finding.title}`,
-            message: info.confirm || 'This changes a file on disk.',
-            confirmText: info.verb || 'Fix',
-            destructive: true,
-          });
-          if (!confirmed) return;
-        }
-      } else if (!override) {
-        if (type === 'native_duplicate_releases') {
-          setExpanded((current) => new Set([...current, finding.id]));
-          return;
-        }
-        if (type === TYPE_ORPHAN) {
-          fixAction = await prompts.promptOrphan();
-          if (!fixAction) return;
-        }
-        if (type === TYPE_DEAD) {
-          fixAction = await prompts.promptDeadFile();
-          if (!fixAction) return;
-        }
-        if (type === TYPE_ACOUSTID) {
-          // an ambiguous finding carries its candidate recordings - hand them to
-          // the dialog so the user can pick which one to retag/relocate as
-          const d = (finding.details || {}) as {
-            ambiguous?: boolean;
-            candidates?: string[];
-          };
-          fixAction = await prompts.promptAcoustid(d.ambiguous ? d.candidates : undefined);
-          if (!fixAction) return;
-        }
-        if (type === TYPE_QUALITY) {
-          fixAction = await prompts.promptQuality();
-          if (!fixAction) return;
-          if (fixAction === 'ignore') {
-            await dismissOne(finding.id);
-            return;
-          }
-        }
-        if (type === TYPE_RETAG && !finding.details?.has_manual_conflict) {
-          // Nothing to settle on this row — the plain apply is the whole action.
-        } else if (type === TYPE_RETAG) {
-          fixAction = await prompts.promptRetag(1, 1);
-          if (!fixAction) return;
-          if (fixAction === 'safe') fixAction = null;
-        }
-        if (type === TYPE_BACKFILL) {
-          const choice = await prompts.promptBackfill(1);
-          if (!choice) return;
-          if (choice === 'dismiss') {
-            await dismissOne(finding.id);
-            return;
-          }
-          // 'add_to_wishlist' falls through with no fix_action — the handler
-          // already adds to the wishlist by default.
-        }
-        if (type === TYPE_SUSPECT_ALBUM && finding.entity_type === 'album') {
-          await openSuspectAlbum(finding);
-          return;
-        }
-        if (type === TYPE_SUSPECT_ALBUM) {
-          setReidentifyingFinding(finding);
-          return;
-        }
-      }
-
-      if (!video && type === 'native_duplicate_tracks') {
-        const weak = Boolean(finding.details?.requires_recording_confirmation);
-        const confirmed = await window.showConfirmDialog?.({
-          title: weak ? 'Confirm Recording & Keep Best' : 'Keep Best',
-          message: weak
-            ? 'After comparing these files, confirm they contain the same recording. Keep the recommended file and move redundant copies to recoverable quarantine? Protected copies stay.'
-            : 'Keep the recommended file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.',
-          confirmText: weak ? 'Confirm Recording & Keep Best' : 'Keep Best',
-          destructive: true,
-        });
-        if (!confirmed) return;
-        fixAction = weak ? 'keep_best:confirmed' : 'keep_best';
-      }
-
-      // A finding with no catalogue subject cannot be re-downloaded — the fix
-      // is a plain delete, and unlike every prompt above it has no dialog of
-      // its own to stop at. Confirm it here rather than let one click remove a
-      // file from disk.
-      if (!video && !override && findingRowFixLabel(finding) === 'Delete File') {
-        const quarantined = type === 'corrupt_audio' || type === 'fake_lossless';
-        const confirmed = await window.showConfirmDialog?.({
-          title: 'Delete File',
-          message: quarantined
-            ? `Move ${findingFilePath(finding) || 'this file'} to the deleted-files folder? It is not in your library, so nothing will be queued to replace it.`
-            : `Permanently delete ${findingFilePath(finding) || 'this file'} from disk? It is not in your library, so nothing will be queued to replace it.`,
-          confirmText: 'Delete',
-          destructive: true,
-        });
-        if (!confirmed) return;
-        // Fake lossless refuses to remove an uncatalogued file without being
-        // told to: its default action is a re-download.
-        fixAction = 'delete';
-      }
-
-      setBusyFix((current) => new Set(current).add(finding.id));
-      try {
-        let result = await fixFinding(finding.id, fixAction);
-        if (result.needs_confirm) {
-          // a library track has the same filename somewhere else. show it and
-          // let the user decide, instead of a dead end
-          const paths = result.library_paths ?? [];
-          const confirmed = await window.showConfirmDialog?.({
-            title: 'Same Filename In Library',
-            message: paths.length
-              ? `Your library already has a file with this name:\n\n${paths.join('\n')}\n\nIf it's the same song, this orphan is a leftover copy. Delete it from disk?`
-              : 'Your library already has a file with this name in another folder. If it is the same song, this orphan is a leftover copy. Delete it from disk?',
-            confirmText: 'Delete anyway',
-            destructive: true,
-          });
-          if (!confirmed) {
-            setBusyFix((current) => {
-              const next = new Set(current);
-              next.delete(finding.id);
-              return next;
-            });
-            refreshAll();
-            return;
-          }
-          result = await fixFinding(finding.id, 'delete_confirmed');
-        }
-        toast(
-          result.success ? result.message || 'Fixed successfully' : result.error || 'Fix failed',
-          result.success ? 'success' : 'error',
-        );
-        refreshAll();
-      } catch {
-        toast('Error applying fix', 'error');
-        // Restored ONLY on the error path. On success the button stays
-        // disabled until the reload lands — which is what stops a second
-        // click firing a second fix while the request is in flight.
-        setBusyFix((current) => {
-          const next = new Set(current);
-          next.delete(finding.id);
-          return next;
-        });
-      }
-    },
-    [dismissOne, prompts, refreshAll, typeInfo, video],
-  );
+  /** `fixRepairFinding`, shared with Simple mode's album tray so both ask the
+   *  same per-type questions (review 5 W3-TT-3). The per-type prompts run
+   *  BEFORE the button is disabled. `override` is a non-default action picked
+   *  in the detail panel (the video ghost's Forget); it skips the prompts
+   *  because the user just chose. */
+  const expandFinding = useCallback((finding: RepairFinding) => {
+    setExpanded((current) => new Set([...current, finding.id]));
+  }, []);
+  const setFixBusy = useCallback((id: number, busy: boolean) => {
+    setBusyFix((current) => {
+      const next = new Set(current);
+      if (busy) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const fixOne = useFindingFix({
+    video,
+    typeInfo,
+    prompts,
+    dismiss: dismissOne,
+    refresh: refreshAll,
+    onExpand: expandFinding,
+    onReidentify: setReidentifyingFinding,
+    setBusy: setFixBusy,
+  });
 
   const handleInspectRedownload = useCallback((finding: RepairFinding) => {
     setRedownloadFinding(finding);
@@ -2126,29 +1957,10 @@ export function FindingsSurface({
       {prompts.promptNode}
 
       {reidentifyingFinding ? (
-        <ReidentifyModal
-          trackId={reidentifyingFinding.entity_id}
-          trackTitle={String(
-            (reidentifyingFinding.details as Record<string, any>)?.track_title ||
-              reidentifyingFinding.title ||
-              '',
-          )}
-          artistName={String(
-            (reidentifyingFinding.details as Record<string, any>)?.artist_name || '',
-          )}
-          albumTitle={String(
-            (reidentifyingFinding.details as Record<string, any>)?.album_title || '',
-          )}
-          imageUrl={String(
-            (reidentifyingFinding.details as Record<string, any>)?.album_thumb_url || '',
-          )}
-          initialQuery={String(
-            (reidentifyingFinding.details as Record<string, any>)?.reidentify_query || '',
-          )}
+        <ReidentifyFindingModal
+          finding={reidentifyingFinding}
           onApplied={async () => {
-            if (reidentifyingFinding) {
-              await dismissOne(reidentifyingFinding.id);
-            }
+            await dismissOne(reidentifyingFinding.id);
           }}
           onClose={() => {
             setReidentifyingFinding(null);
