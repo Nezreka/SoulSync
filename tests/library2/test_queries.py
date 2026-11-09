@@ -1277,6 +1277,36 @@ def test_a_guest_spot_is_an_appearance_and_a_collaboration_is_their_own(imported
 
 
 
+def test_featured_in_your_library_counts_the_callers_files(imported_conn, tmp_path):
+    """review 5 W2-WF-3: a member with a library of their own read "featured
+    in your library" counted from the shared library's files"""
+    from unittest import mock
+    from core.library_scope import library_scope
+
+    conn = imported_conn
+    host = conn.execute("INSERT INTO lib2_artists(name, sort_name) VALUES('Host','Host')").lastrowid
+    guest = conn.execute("INSERT INTO lib2_artists(name, sort_name) VALUES('Guest','Guest')").lastrowid
+    album = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title, origin) "
+                         "VALUES(?, 'Hosted', 'library')", (host,)).lastrowid
+    conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?,?,'featured')",
+                 (album, guest))
+    track = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                         "VALUES(?, 'Duet', 1)", (album,)).lastrowid
+    conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                 "VALUES(?,?,'primary',0), (?,?,'featured',1)", (track, host, track, guest))
+    # the shared library's file (no owner)
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, file_state) VALUES(?, ?, 'active')",
+                 (track, str(tmp_path / "Duet.flac")))
+    conn.commit()
+
+    assert Q.get_artist(conn, guest)["guest_track_count"] == 1
+    with mock.patch('core.library_scope.any_own_library_exists', return_value=True), \
+            library_scope(2):
+        own = Q.get_artist(conn, guest)
+    assert sum(e["tracks_present"] for e in own["appears_on"]) == 0
+    assert (own["guest_track_count"], own["guest_release_count"]) == (0, 0)
+
+
 def test_a_split_single_appears_on_the_second_artists_page(imported_conn):
     """#2003: one side each is exactly half. the release is the first
     credited artist's, and appears on the other's page, not in their Singles."""
