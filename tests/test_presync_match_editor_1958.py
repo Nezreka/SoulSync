@@ -134,3 +134,46 @@ def test_someone_elses_mirror_is_not_there(client, db):
     assert client.post(f'/api/mirrored-playlists/{pk}/presync/match',
                        json={'mirror_track_id': rows[0]['id'], 'track_id': 'x'}).status_code == 404
     assert json.loads(db.get_mirrored_playlist_tracks(pk)[0].get('extra_data') or '{}') == {}
+
+
+def _stranger(db):
+    """an unrelated catalogue track, on plex under some other key. returns its lib2 id."""
+    tag = os.urandom(3).hex()
+    conn = db._get_connection()
+    try:
+        artist = conn.execute("INSERT INTO lib2_artists (name, name_key) VALUES (?, ?)",
+                              (f'Other Band {tag}', f'other band {tag}')).lastrowid
+        album = conn.execute("INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'B-Sides')",
+                             (artist,)).lastrowid
+        track = conn.execute(
+            "INSERT INTO lib2_tracks (album_id, title, server_source, server_id) "
+            "VALUES (?, 'Completely Different Song', 'plex', ?)", (album, f'k-{tag}')).lastrowid
+        conn.commit()
+    finally:
+        conn.close()
+    return track
+
+
+def test_a_gone_server_track_is_not_shown_as_some_other_song(client, db):
+    """review 5 W2-WB-2: the check stamped a plex ratingKey that has since left
+    the server. read as a catalogue id it named an unrelated song as matched."""
+    stranger = _stranger(db)
+    pk, rows = _mirror(db)
+    # plex key == the stranger's catalogue id, and that plex track is gone
+    db.update_mirrored_track_extra_data(rows[0]['id'], {
+        'in_library': True, 'library_track_id': str(stranger), 'library_track_id_kind': 'server',
+        'library_checked_at': 1, 'library_checked_via': 'check'})
+    _as(client, 1)
+    first = _view(client, pk)['tracks'][0]
+    assert first['server_track'] is None and first['match_status'] == 'missing'
+
+
+def test_a_stamp_that_names_a_catalogue_track_still_shows_it(client, db):
+    stranger = _stranger(db)
+    pk, rows = _mirror(db)
+    # a manual match that named the catalogue track (save_match stamps these)
+    db.update_mirrored_track_extra_data(rows[0]['id'], {
+        'in_library': True, 'library_track_id': str(stranger), 'library_track_id_kind': 'lib2',
+        'library_checked_at': 1, 'library_checked_via': 'manual'})
+    _as(client, 1)
+    assert _view(client, pk)['tracks'][0]['server_track']['title'] == 'Completely Different Song'

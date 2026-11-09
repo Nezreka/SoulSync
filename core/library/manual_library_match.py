@@ -54,7 +54,8 @@ def save_match(
         # the track as missing until the next sync ran.
         try:
             refresh_mirrored_library_flags(
-                db, profile_id, source_track_id, library_track_id
+                db, profile_id, source_track_id, library_track_id,
+                id_kind=meta.get("library_track_id_kind", "lib2"),
             )
         except Exception as exc:  # noqa: BLE001 - never fail the save over bookkeeping
             logger.debug("mirrored flag refresh failed: %s", exc)
@@ -99,6 +100,7 @@ def refresh_mirrored_library_flags(
     profile_id: int,
     source_track_id: str,
     library_track_id: str,
+    id_kind: str = "lib2",
 ) -> int:
     """Mark mirrored tracks for a manual match as in-library, immediately.
 
@@ -136,6 +138,8 @@ def refresh_mirrored_library_flags(
             if db.update_mirrored_track_extra_data(track["id"], {
                 "in_library": True,
                 "library_track_id": library_track_id,
+                # which id space the id is in (review 5 W2-WB-2)
+                "library_track_id_kind": id_kind,
                 "library_checked_at": checked_at,
                 # a user's own answer: the library check never re-asks it
                 "library_checked_via": "manual",
@@ -216,6 +220,7 @@ def clear_mirrored_library_flags(
             if db.update_mirrored_track_extra_data(track["id"], {
                 "in_library": False,
                 "library_track_id": None,
+                "library_track_id_kind": None,
                 "library_checked_at": checked_at,
                 # a user's own answer: the library check never re-asks it
                 "library_checked_via": "manual",

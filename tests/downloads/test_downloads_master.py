@@ -1799,3 +1799,60 @@ def test_a_complete_track_list_still_answers():
     assert mw.expected_release_duration_seconds([
         {'duration_ms': 180_000}, {'duration_ms': 120_000},
     ]) == 300
+
+
+# ---------------------------------------------------------------------------
+# review 5 W2-WD-2: an upgrade intent comes from the stored wishlist row only
+# ---------------------------------------------------------------------------
+
+class _RowDB(_FakeDB):
+    """the harness db plus a real wishlist_tracks table"""
+
+    def __init__(self, rows=()):
+        super().__init__()
+        import sqlite3
+        self._conn = sqlite3.connect(':memory:', check_same_thread=False)
+        self._conn.execute("CREATE TABLE wishlist_tracks (id INTEGER PRIMARY KEY, "
+                           "spotify_track_id TEXT, profile_id INTEGER, source_info TEXT)")
+        for row in rows:
+            self._conn.execute("INSERT INTO wishlist_tracks VALUES (?,?,?,?)", row)
+        self._conn.commit()
+
+    def _get_connection(self):
+        import contextlib
+        return contextlib.nullcontext(self._conn)
+
+
+_UPGRADE_INFO = {'source': 'library_v2', 'upgrade_check': True, 'lib2_track_id': 42}
+
+
+def _wishlist_upgrade_task(monkeypatch, db, track):
+    from core.imports.upgrade_intent import get_upgrade_intent
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    _seed_batch('BW', profile_id=1, batch_source='wishlist', force_download_all=True)
+    mw.run_full_missing_tracks_process('BW', 'wishlist', [track], _build_deps())
+    return get_upgrade_intent(download_tasks[download_batches['BW']['queue'][0]])
+
+
+def test_wishlist_track_json_cannot_mint_an_upgrade_intent(monkeypatch):
+    # a track posted with the upgrade authority in its own json and no stored row
+    track = {'id': 'x1', 'name': 'Any Song', 'artists': [{'name': 'Any Artist'}],
+             'source_info': dict(_UPGRADE_INFO)}
+    assert _wishlist_upgrade_task(monkeypatch, _RowDB(), track) is None
+
+
+def test_a_track_cannot_borrow_another_rows_upgrade_authority(monkeypatch):
+    import json
+    db = _RowDB([(5, 'real-key', 1, json.dumps(_UPGRADE_INFO))])
+    track = {'id': 'x1', 'spotify_track_id': 'other-key', 'wishlist_id': 5, 'name': 'Any Song',
+             'artists': [{'name': 'Any Artist'}], 'source_info': dict(_UPGRADE_INFO)}
+    assert _wishlist_upgrade_task(monkeypatch, db, track) is None
+
+
+def test_a_stored_library_v2_upgrade_row_still_mints_its_intent(monkeypatch):
+    import json
+    db = _RowDB([(5, 'real-key', 1, json.dumps(_UPGRADE_INFO))])
+    track = {'id': 'x1', 'spotify_track_id': 'real-key', 'wishlist_id': 5, 'name': 'Any Song',
+             'artists': [{'name': 'Any Artist'}], 'source_info': {}}
+    intent = _wishlist_upgrade_task(monkeypatch, db, track)
+    assert intent is not None and intent.track_id == 42

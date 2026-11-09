@@ -116,15 +116,30 @@ def redownload_start(track_id):
             return jsonify({"success": False, "error": "candidate with username and filename required"}), 400
 
         # Get current track info for old file path
+        # the copy in the library being worked in: the primary flag spans
+        # every library, so unscoped this replaced another library's file
+        # (review 5 W2-WB-1)
+        from core.library2.sql_util import owner_clause
         database = get_database()
         conn = database._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT path AS file_path FROM lib2_track_files WHERE track_id=? "
-            "AND COALESCE(file_state,'active')='active' "
+            "SELECT path AS file_path, owner_profile_id FROM lib2_track_files WHERE track_id=? "
+            f"AND COALESCE(file_state,'active')='active'{owner_clause(column='owner_profile_id')} "
             "ORDER BY is_primary DESC, id LIMIT 1", (track_id,))
         row = cursor.fetchone()
         conn.close()
+
+        # the new file lands in the library the old one is in, whoever pressed
+        # the button. without a stamp the worker (no request) filed it in the
+        # shared library while the old file in the profile's was deleted
+        from core.library_scope import BATCH_OWNER_KEY, owner_for_new_file
+        from core.profile_context import get_current_profile_id
+        requester = get_current_profile_id()
+        try:
+            library_owner = row['owner_profile_id'] if row is not None else owner_for_new_file(requester)
+        except (KeyError, IndexError):
+            library_owner = owner_for_new_file(requester)
 
         old_file_path = None
         old_stored_path = None
@@ -244,6 +259,8 @@ def redownload_start(track_id):
                 'permanently_failed_tracks': [],
                 'force_download': True,
                 'auto_initiated': False,
+                'profile_id': requester,
+                BATCH_OWNER_KEY: library_owner,
             }
 
             download_tasks[task_id] = {

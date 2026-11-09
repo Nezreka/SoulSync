@@ -2587,6 +2587,11 @@ class MusicDatabase:
             if cols and 'quality_profile_id' not in cols:
                 cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN quality_profile_id INTEGER DEFAULT NULL")
                 logger.info("Added quality_profile_id column to wishlist_tracks table (quality-profile pipeline)")
+            # the stored id is always concrete (the default when nobody chose),
+            # so whether the user picked it for this wish is its own fact. only
+            # a picked one may pin the catalogue track (review 5 W2-WD-1)
+            if cols and 'quality_profile_explicit' not in cols:
+                cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN quality_profile_explicit INTEGER NOT NULL DEFAULT 0")
             # Cleanup for installs that ran an earlier intermediate version:
             # acoustid_required/fallback_allowed/downsample_enabled were once
             # denormalized here too. Two were never read (the import gate
@@ -12431,6 +12436,10 @@ class MusicDatabase:
             # actual performer match correctly when the album sits under a different
             # primary artist (Plex's track.originalTitle, Jellyfin's ArtistItems[0]).
             track.track_artist = row['track_artist'] if 'track_artist' in row_keys else None
+            # which id space ``id`` is in: the server's id when it has one,
+            # else the catalogue row's. a stamp of it has to say which
+            # (review 5 W2-WB-2)
+            track.id_kind = 'server' if public_id else 'lib2'
             tracks.append(track)
         return tracks
 
@@ -15877,6 +15886,7 @@ class MusicDatabase:
         quality_profile_id: Optional[int] = None,
         raise_on_error: bool = False,
         request_approved: bool = False,
+        quality_profile_explicit: bool = False,
     ) -> bool:
         """``True`` when a NEW wishlist row was inserted.
 
@@ -15899,6 +15909,7 @@ class MusicDatabase:
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
             request_approved=request_approved,
+            quality_profile_explicit=quality_profile_explicit,
         )
         if raise_on_error and outcome["status"] == "error":
             raise RuntimeError(outcome.get("reason") or "add_to_wishlist failed")
@@ -15915,6 +15926,7 @@ class MusicDatabase:
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
         request_approved: bool = False,
+        quality_profile_explicit: bool = False,
     ) -> Dict[str, Any]:
         """Add a failed track to the wishlist for retry.
 
@@ -15929,6 +15941,11 @@ class MusicDatabase:
         pipeline stage looks up that profile's actual settings live when it
         needs them, so the pipeline never needs a global setting, and editing
         the profile later is picked up immediately.
+
+        ``quality_profile_explicit`` says the user picked that profile for
+        this wish (a dialog choice, or a re-add of a wish that had one). only
+        then may the profile pin the catalogue track; a watchlist, playlist or
+        default profile leaves the track inheriting (review 5 W2-WD-1).
 
         ``user_initiated`` marks an explicit user add (e.g. the library album
         "add to wishlist" modal). Like ``source_type == 'manual'`` it bypasses
@@ -16076,6 +16093,27 @@ class MusicDatabase:
                 resolved_qp_id = self._resolve_quality_profile_id(
                     cursor, quality_profile_id
                 )
+                # a re-add carries the flag on its payload (the formatted row)
+                qp_explicit = int(quality_profile_id is not None and resolved_qp_id is not None and (
+                    quality_profile_explicit
+                    or (isinstance(spotify_track_data, dict)
+                        and spotify_track_data.get('quality_profile_explicit') is True)))
+                has_explicit_col = 'quality_profile_explicit' in {
+                    c[1] for c in cursor.execute("PRAGMA table_info(wishlist_tracks)").fetchall()}
+
+                def profile_updates(updates, params):
+                    # a picked profile is never overwritten by one nobody picked
+                    if quality_profile_id is None or resolved_qp_id is None:
+                        return
+                    if not has_explicit_col:
+                        updates.append("quality_profile_id = ?")
+                        params.append(resolved_qp_id)
+                        return
+                    updates.append("quality_profile_id = CASE WHEN quality_profile_explicit=1 AND ?=0"
+                                   " THEN quality_profile_id ELSE ? END")
+                    updates.append("quality_profile_explicit = MAX(quality_profile_explicit, ?)")
+                    params.extend([qp_explicit, resolved_qp_id, qp_explicit])
+
                 def commit_wishlist(row_id):
                     from core.library2.materialize import materialize_wishlist_row
                     from core.library2.validation import notify_changes
@@ -16144,9 +16182,7 @@ class MusicDatabase:
                                     if source_info:
                                         updates.append("source_info = ?")
                                         params.append(source_json)
-                                    if quality_profile_id is not None and resolved_qp_id is not None:
-                                        updates.append("quality_profile_id = ?")
-                                        params.append(resolved_qp_id)
+                                    profile_updates(updates, params)
                                     if source_type == 'manual' or existing['source_type'] != 'manual':
                                         updates.append("source_type = ?")
                                         params.append(source_type)
@@ -16243,9 +16279,7 @@ class MusicDatabase:
                         _existing_payload = {}
                     updates = ["spotify_data = ?"]
                     params: List[Any] = [_refreshed_wishlist_json(_existing_payload, spotify_json)]
-                    if quality_profile_id is not None and resolved_qp_id is not None:
-                        updates.append("quality_profile_id = ?")
-                        params.append(resolved_qp_id)
+                    profile_updates(updates, params)
                     if source_info:
                         updates.append("source_info = ?")
                         params.append(source_json)
@@ -16275,8 +16309,12 @@ class MusicDatabase:
                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
                 """, (insert_track_id, spotify_json, failure_reason, source_type, source_json, profile_id,
                       resolved_qp_id))
+                new_row_id = cursor.lastrowid
+                if has_explicit_col and qp_explicit:
+                    cursor.execute("UPDATE wishlist_tracks SET quality_profile_explicit=1 WHERE id=?",
+                                   (new_row_id,))
 
-                commit_wishlist(cursor.lastrowid)
+                commit_wishlist(new_row_id)
 
                 logger.info(f"Added track to wishlist: '{track_name}' by {artist_name}")
                 return self._wishlist_outcome("created", insert_track_id)
@@ -17248,10 +17286,13 @@ class MusicDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                query = """
+                explicit_col = ('quality_profile_explicit' if 'quality_profile_explicit' in {
+                    c[1] for c in cursor.execute("PRAGMA table_info(wishlist_tracks)").fetchall()}
+                    else '0 AS quality_profile_explicit')
+                query = f"""
                     SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count,
                            last_attempted, date_added, source_type, source_info,
-                           quality_profile_id, musicbrainz_release_group_id
+                           quality_profile_id, {explicit_col}, musicbrainz_release_group_id
                     FROM wishlist_tracks
                     WHERE profile_id = ?
                 """
@@ -17311,6 +17352,8 @@ class MusicDatabase:
                             'source_type': row['source_type'],
                             'source_info': source_info,
                             'quality_profile_id': row['quality_profile_id'],
+                            # the user picked it for this wish (review 5 W2-WD-1)
+                            'quality_profile_explicit': bool(row['quality_profile_explicit']),
                             # filled in the background by the MusicBrainz worker
                             'musicbrainz_release_group_id': row['musicbrainz_release_group_id'],
                         })

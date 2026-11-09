@@ -285,3 +285,49 @@ def test_a_hint_written_by_earlier_v2_code_is_never_carried_as_legacy(conn, v2_r
     else:
         # a real 3.6.1 database: the legacy id still maps
         assert tuple(row) == (77, "lib2")
+
+
+# ── review 5 W2-WD-3: the replace retires the staged library's copy only ──────
+@pytest.fixture
+def two_library_conn():
+    from core.library2.schema import ensure_library_v2_schema
+    c = sqlite3.connect(":memory:")
+    c.row_factory = sqlite3.Row
+    ensure_library_v2_schema(c)
+    c.execute("INSERT INTO lib2_artists(id, name) VALUES(1, 'Band')")
+    c.execute("INSERT INTO lib2_albums(id, title, primary_artist_id) VALUES(1, 'Record', 1)")
+    c.execute("INSERT INTO lib2_tracks(id, album_id, title) VALUES(7, 1, 'Song')")
+    # profile 3's own library imported it first: its copy holds the one primary flag
+    c.execute("INSERT INTO lib2_track_files(id, track_id, path, is_primary, file_state, owner_profile_id)"
+              " VALUES(10, 7, '/profiles/3/Band/Record/01 Song.flac', 1, 'active', 3)")
+    c.execute("INSERT INTO lib2_track_files(id, track_id, path, is_primary, file_state, owner_profile_id)"
+              " VALUES(11, 7, '/music/Band/Record/01 Song.flac', 0, 'active', NULL)")
+    c.commit()
+    yield c
+    c.close()
+
+
+@pytest.mark.parametrize("staged,kept", [(11, 10), (10, 11)])
+def test_replace_retires_exactly_the_staged_copy(two_library_conn, staged, kept):
+    removed = []
+    delete_replaced_track(two_library_conn.cursor(), 7, unlink=removed.append,
+                          new_paths=["/elsewhere/01 Song.flac"], file_id=staged)
+    states = dict(two_library_conn.execute("SELECT id, file_state FROM lib2_track_files").fetchall())
+    assert states == {staged: 'deleted', kept: 'active'}
+    path = two_library_conn.execute("SELECT path FROM lib2_track_files WHERE id=?", (staged,)).fetchone()[0]
+    assert removed == [path]
+
+
+def test_a_hint_without_its_file_keeps_copies_in_two_libraries(two_library_conn):
+    removed = []
+    out = delete_replaced_track(two_library_conn.cursor(), 7, unlink=removed.append,
+                                new_paths=["/elsewhere/01 Song.flac"])
+    assert out is None and removed == []
+    assert {r[0] for r in two_library_conn.execute("SELECT file_state FROM lib2_track_files")} == {'active'}
+
+
+def test_the_hint_keeps_the_file_it_replaces(conn):
+    cur = conn.cursor()
+    hint_id = create_hint(cur, _hint(replace_track_id=7, replace_file_id=11))
+    assert find_hint_for_file(cur, "/staging/Song.flac").replace_file_id == 11
+    assert hint_id

@@ -193,3 +193,18 @@ def test_wishlist_row_of_one_release_is_listed_by_its_track_id(db):
     rows = mlm.list_unmatched_wanted_tracks(db, profile_id=1)
 
     assert [r["source_track_id"] for r in rows] == ["sp-rel"]
+
+
+def test_a_manual_match_stamps_the_id_space_of_its_id(db):
+    """review 5 W2-WB-2: the pre-sync editor reads a stamp as a catalogue id
+    only when it says so; a server id and a catalogue id look alike."""
+    import json
+    _add_mirrored_playlist(db, pid=10, name="Test Mix")
+    tid = _add_mirrored_track(db, 10, 0, "Linked Song", "Artist", "sp-k1")
+    db.api_get_tracks_by_ids = lambda ids: [{"id": i} for i in ids]   # live
+    assert mlm.refresh_mirrored_library_flags(db, 1, "sp-k1", "9") == 1
+    extra = lambda: json.loads(db.get_mirrored_playlist_tracks(10)[0]["extra_data"])  # noqa: E731
+    assert extra()["library_track_id_kind"] == "lib2"
+    assert mlm.refresh_mirrored_library_flags(db, 1, "sp-k1", "rk-9", id_kind="server") == 1
+    assert extra()["library_track_id_kind"] == "server"
+    assert tid

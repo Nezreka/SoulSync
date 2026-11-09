@@ -1140,6 +1140,28 @@ def _bulk_retry(runtime: WishlistRouteRuntime, ids):
     return _bulk_results(ids, outcomes)
 
 
+# what the server writes on a wish to make it an upgrade of a library file.
+# a client never gets to say it (review 5 W2-WD-2)
+_SERVER_SOURCE_KEYS = frozenset({
+    "job", "original_file_path", "original_file_id", "original_quality",
+    "quality_evaluation", "upgrade_policy", "quality_profile_name",
+    "quality_profile_source", "quality_profile_source_id",
+})
+
+
+def _client_source_context(source_context: Any) -> Dict[str, Any]:
+    """the provenance a client may give a wish: never the upgrade authority
+    the download master turns into a sealed intent (review 5 W2-WD-2)"""
+    from core.imports.upgrade_intent import sanitize_client_import_metadata
+    if not isinstance(source_context, dict):
+        return {}
+    context = {key: value for key, value in sanitize_client_import_metadata(source_context).items()
+               if key not in _SERVER_SOURCE_KEYS}
+    if context.get("source") == "library_v2":
+        context.pop("source")
+    return context
+
+
 def add_album_track_to_wishlist(
     runtime: WishlistRouteRuntime,
     *,
@@ -1197,7 +1219,7 @@ def add_album_track_to_wishlist(
             runtime.logger.debug("Wishlist add ownership check failed (adding anyway): %s", _own_err)
 
         enhanced_source_context = {
-            **(source_context or {}),
+            **_client_source_context(source_context),
             "artist_id": artist.get("id"),
             "artist_name": artist.get("name"),
             "album_id": album.get("id"),
@@ -1216,6 +1238,8 @@ def add_album_track_to_wishlist(
             # (otherwise the add is silently dropped — carlosjfcasero, #897).
             user_initiated=True,
             quality_profile_id=quality_profile_id,
+            # picked in the dialog for this track, so it may pin it (review 5 W2-WD-1)
+            quality_profile_explicit=quality_profile_id is not None,
         )
 
         if success:

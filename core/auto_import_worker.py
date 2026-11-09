@@ -1423,7 +1423,8 @@ class AutoImportWorker:
                 cursor = conn.cursor()
                 removed = delete_replaced_track(cursor, hint.replace_track_id,
                                                 resolve_fn=_resolve_old, new_paths=new_paths,
-                                                id_space=hint.replace_id_space)
+                                                id_space=hint.replace_id_space,
+                                                file_id=hint.replace_file_id)
                 consume_hint(cursor, hint.id)
                 conn.commit()
             finally:
@@ -2394,6 +2395,8 @@ class AutoImportWorker:
                 # default", which the pipeline resolves on its own.
                 if auto_import_profile_id:
                     context['track_info']['quality_profile_id'] = auto_import_profile_id
+                    # the user set it for this import, so it pins (review 5 W2-WD-1)
+                    context['track_info']['quality_profile_explicit'] = True
 
                 # #1504: AcoustID relocate breadcrumb — the staged file may
                 # carry a sidecar with the owning user profile. Read it into

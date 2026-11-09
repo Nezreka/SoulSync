@@ -165,6 +165,24 @@ def test_a_multi_file_track_is_listed_once(db):
     assert rows[0]['file_path'] == '/m/1.flac', 'the primary file is the one to move'
 
 
+def test_an_own_library_reassign_stages_that_librarys_copy(db, monkeypatch):
+    """review 5 W2-WD-3: a track's primary flag spans every library, so the
+    unscoped pick staged (and a replace then retired) the shared copy while
+    the admin worked in profile 3's library."""
+    import core.library_scope as library_scope
+    db._raw.execute("ALTER TABLE lib2_track_files ADD COLUMN owner_profile_id INTEGER")
+    _seed_track(db, 1, 'One', 1, '/music/1.flac')
+    db._raw.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, owner_profile_id) "
+                    "VALUES (1, '/profiles/3/1.flac', 0, 3)")
+    db._raw.commit()
+    monkeypatch.setattr(library_scope, 'own_library_ids', lambda: frozenset({3}))
+
+    with library_scope.library_scope(3):
+        rows = svc.local_album_tracks(db, 'lib2:7')
+    own_id = db._raw.execute("SELECT id FROM lib2_track_files WHERE owner_profile_id=3").fetchone()[0]
+    assert [(r['file_path'], r['file_id']) for r in rows] == [('/profiles/3/1.flac', own_id)]
+
+
 def test_a_bare_id_is_refused(db):
     """The contract, enforced rather than trusted: an unprefixed id is a
     legacy row reference, and this flow can no longer act on one safely."""
@@ -319,8 +337,10 @@ def test_the_hint_names_the_library_v2_track_to_replace(monkeypatch, db, tmp_pat
         staging_dir=str(tmp_path / 'staging'))
 
     assert result['success'] is True, result.get('error')
-    stored = db._raw.execute("SELECT replace_track_id FROM rematch_hints").fetchall()
-    assert [row[0] for row in stored] == [4242]
+    stored = db._raw.execute("SELECT replace_track_id, replace_file_id FROM rematch_hints").fetchall()
+    file_id = db._raw.execute("SELECT id FROM lib2_track_files WHERE track_id=4242").fetchone()[0]
+    # and the exact file staged, so a replace retires only that copy (review 5 W2-WD-3)
+    assert [tuple(row) for row in stored] == [(4242, file_id)]
 
 
 # ── the same-release guard (#889 invariant) ──────────────────────────────────

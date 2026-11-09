@@ -92,6 +92,8 @@ class TrackPairing:
     local_track_number: Optional[int]
     local_path: str
     target_id: Optional[str] = None
+    # the file staged, so a replace retires only that copy (review 5 W2-WD-3)
+    local_file_id: Optional[int] = None
     target_title: str = ""
     target_track_number: Optional[int] = None
     target_disc_number: Optional[int] = None
@@ -156,6 +158,7 @@ def map_album_tracks(
             local_title=str(local.get("title") or ""),
             local_track_number=_int_or_none(local.get("track_number")),
             local_path=str(local.get("file_path") or ""),
+            local_file_id=_int_or_none(local.get("file_id")),
         ))
 
     remaining = list(target_tracks or ())
@@ -339,6 +342,7 @@ def apply_album_reassign(
                 staging['staged_path'],
                 staging.get('content_hash'),
                 replace=replace,
+                replace_file_id=pairing.local_file_id,
             )
             hint_id = create_hint(cursor, hint)
             _commit()

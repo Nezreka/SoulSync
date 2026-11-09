@@ -49,6 +49,7 @@ _FIELDS = (
     "replace_track_id",
     "exempt_dedup",
     "replace_id_space",
+    "replace_file_id",
 )
 
 
@@ -74,6 +75,10 @@ class RematchHint:
     # a delete acts on: a 3.6.1 hint held a media-server/legacy id, and read
     # as a lib2 id it named an unrelated track and deleted its file
     replace_id_space: Optional[str] = "lib2"
+    # the exact file a replace retires: a track can hold a copy in the shared
+    # library and one in a profile's own, and only the staged one goes
+    # (review 5 W2-WD-3)
+    replace_file_id: Optional[int] = None
     id: Optional[int] = None
     status: str = "pending"
 
@@ -95,6 +100,7 @@ class RematchHint:
             self.replace_track_id,
             1 if self.exempt_dedup else 0,
             self.replace_id_space,
+            self.replace_file_id,
         )
 
 
@@ -123,6 +129,7 @@ def _row_to_hint(row: Any) -> RematchHint:
         replace_track_id=g("replace_track_id"),
         exempt_dedup=bool(g("exempt_dedup", 1)),
         replace_id_space=g("replace_id_space"),
+        replace_file_id=g("replace_file_id"),
         status=g("status") or "pending",
     )
 
@@ -147,6 +154,10 @@ def ensure_replace_id_space_column(cursor: Any) -> None:
     the replace at an unrelated track and delete its file, so those keep
     their import and lose only the replace (nothing gets deleted)"""
     cols = {r[1] for r in cursor.execute("PRAGMA table_info(rematch_hints)").fetchall()}
+    if cols and "replace_file_id" not in cols:
+        # the file a replace retires (review 5 W2-WD-3); an older hint has
+        # none and only replaces when the track has one library's copies
+        cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_file_id INTEGER")
     if cols and "replace_id_space" not in cols:
         cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_id_space TEXT")
         if _library_v2_has_run(cursor):
@@ -279,6 +290,7 @@ def delete_replaced_track(
     resolve_fn: Optional[Callable[[str], Optional[str]]] = None,
     new_paths: Optional[list] = None,
     id_space: Optional[str] = "lib2",
+    file_id: Any = None,
 ) -> Optional[str]:
     """Remove the OLD library row a re-identify replaces, and its file.
 
@@ -293,6 +305,12 @@ def delete_replaced_track(
     * the file is unlinked only if it still exists and **no other track row references
       it** (guards against yanking a file a different row legitimately points to).
 
+    ``file_id`` is the exact file the re-identify staged (review 5 W2-WD-3):
+    only that row goes, never another library's copy of the same track. A
+    hint written before it was recorded replaces only when every live copy
+    sits in one library; otherwise it keeps both (a duplicate is recoverable,
+    another library's only copy is not).
+
     Returns the path it removed, or ``None`` if there was nothing to do. ``unlink`` is
     injectable for tests. ``resolve_fn`` maps the STORED DB path to the file's actual
     on-disk location (the stored path may be a Docker/media-server view this process
@@ -304,10 +322,17 @@ def delete_replaced_track(
         # mapped) would name an unrelated lib2 track: keep the import, delete
         # nothing
         return None
-    cursor.execute(
-        "SELECT id, path FROM lib2_track_files WHERE track_id=? "
-        "AND COALESCE(file_state,'active')='active' "
-        "ORDER BY is_primary DESC, id LIMIT 1", (replace_track_id,))
+    if file_id:
+        cursor.execute(
+            "SELECT id, path FROM lib2_track_files WHERE id=? AND track_id=? "
+            "AND COALESCE(file_state,'active')='active'", (file_id, replace_track_id))
+    else:
+        if _copies_span_libraries(cursor, replace_track_id):
+            return None
+        cursor.execute(
+            "SELECT id, path FROM lib2_track_files WHERE track_id=? "
+            "AND COALESCE(file_state,'active')='active' "
+            "ORDER BY is_primary DESC, id LIMIT 1", (replace_track_id,))
     row = cursor.fetchone()
     if row is None:
         return None
@@ -346,6 +371,18 @@ def delete_replaced_track(
     except OSError:
         pass
     return None
+
+
+def _copies_span_libraries(cursor: Any, track_id: Any) -> bool:
+    """do the track's live files sit in more than one library?"""
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(lib2_track_files)").fetchall()}
+    if "owner_profile_id" not in cols:
+        return False
+    cursor.execute(
+        "SELECT COUNT(DISTINCT COALESCE(owner_profile_id, 0)) FROM lib2_track_files "
+        "WHERE track_id=? AND COALESCE(file_state,'active')='active'", (track_id,))
+    row = cursor.fetchone()
+    return bool(row) and int(row[0] or 0) > 1
 
 
 def quick_file_signature(path: str, *, chunk: int = 65536) -> Optional[str]:

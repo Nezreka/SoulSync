@@ -278,6 +278,8 @@ def test_record_soulsync_library_entry_persists_quality_profile_id(tmp_path, mon
             "id": "sp-track",
             "name": "Song One",
             "quality_profile_id": 42,
+            # review 5 W2-WD-1: only a picked profile pins, so the item says it was picked
+            "quality_profile_explicit": True,
             "_source": "spotify",
         },
         "original_search_result": {"title": "Song One", "_source": "spotify"},
@@ -291,6 +293,41 @@ def test_record_soulsync_library_entry_persists_quality_profile_id(tmp_path, mon
     track_row = _track_row(conn)
     assert track_row["quality_profile_id"] == 42
     assert track_row["quality_profile_explicit"] == 1
+
+
+def test_a_wishlist_rows_default_profile_does_not_pin_the_imported_track(tmp_path, monkeypatch):
+    """review 5 W2-WD-1: a wishlist row always stores a concrete profile id
+    (the default when nobody chose). Imported as an explicit track pin, a later
+    artist profile change never reached the track."""
+    from core.library2.profile_lookup import assign_quality_profile, effective_quality_profile
+
+    conn = _make_soulsync_db()
+    conn.execute("INSERT OR IGNORE INTO quality_profiles(id, name, ranked_targets, is_default)"
+                 " VALUES(1, 'Default', '[]', 1)")
+    conn.execute("INSERT INTO quality_profiles(id, name, ranked_targets) VALUES(5, 'Lossless', '[]')")
+    conn.commit()
+    final_path = tmp_path / "track.flac"
+    final_path.write_bytes(b"audio")
+    monkeypatch.setattr(side_effects, "get_database", lambda: _FakeDB(conn))
+    monkeypatch.setattr(side_effects, "_get_config_manager",
+                        lambda: SimpleNamespace(get_active_media_server=lambda: "soulsync"))
+    import core.genre_filter as genre_filter
+    monkeypatch.setattr(genre_filter, "filter_genres", lambda genres, _cfg: genres)
+
+    side_effects.record_soulsync_library_entry(
+        {"source": "spotify", "artist": {"id": "sp-artist", "name": "Artist One"},
+         "album": {"id": "sp-album", "name": "Album One"},
+         "track_info": {"id": "sp-track", "name": "Song One", "quality_profile_id": 1,
+                        "_source": "spotify"},
+         "original_search_result": {"title": "Song One", "_source": "spotify"},
+         "_final_processed_path": str(final_path)},
+        {"name": "Artist One", "genres": []}, {"is_album": True, "album_name": "Album One"})
+
+    track_row = _track_row(conn)
+    assert track_row["quality_profile_explicit"] == 0
+    assign_quality_profile(conn, "artists", _artist_row(conn)["id"], 5)
+    eff = effective_quality_profile(conn, "tracks", track_row["id"])
+    assert eff["id"] == 5 and eff["source"] == "artist"
 
 
 def test_record_soulsync_library_entry_ignores_numeric_spotify_ids(tmp_path, monkeypatch):

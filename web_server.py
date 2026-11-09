@@ -9815,8 +9815,8 @@ def reidentify_apply():
             return jsonify({"success": False, "error": "library_track_id, source and track_id are required"}), 400
 
         from core.imports.rematch_search import resolve_hint_fields
-        from core.imports.rematch_apply import stage_file_for_reidentify, build_reidentify_hint
-        from core.imports.rematch_hints import create_hint
+        from core.imports.rematch_apply import build_reidentify_hint, stage_with_committed_hint
+        from core.library2.sql_util import owner_clause
 
         # 1) Resolve the picked release → the IDs the hint needs (album_id critically).
         hint_fields = resolve_hint_fields(source, track_id)
@@ -9828,10 +9828,14 @@ def reidentify_apply():
         try:
             cur = conn.cursor()
             # Library v2 owns the files: the path lives on lib2_track_files, and
-            # a track can carry several, so this takes the primary active one.
+            # a track can carry several, so this takes the primary active one
+            # of the library being worked in. the primary flag spans every
+            # library, so unscoped it staged another library's copy (review 5
+            # W2-WD-3)
             cur.execute(
-                "SELECT f.path AS file_path FROM lib2_track_files f "
-                "WHERE f.track_id = ? AND COALESCE(f.file_state, 'active') = 'active' "
+                "SELECT f.id AS file_id, f.path AS file_path FROM lib2_track_files f "
+                "WHERE f.track_id = ? AND COALESCE(f.file_state, 'active') = 'active'"
+                f"{owner_clause(column='f.owner_profile_id')} "
                 "ORDER BY f.is_primary DESC, f.id ASC LIMIT 1",
                 (str(library_track_id),))
             row = cur.fetchone()
@@ -9840,6 +9844,7 @@ def reidentify_apply():
         if not row or not row['file_path']:
             return jsonify({"success": False, "error": "Library track has no file on disk"}), 404
         stored_path = row['file_path']
+        replace_file_id = row['file_id']
 
         # Resolve the stored DB path to a file THIS process can actually read, using
         # the SAME strong resolver the rest of the app uses (transfer/download/library/
@@ -9863,20 +9868,16 @@ def reidentify_apply():
                 f"Searched: {searched}.\nIf the file lives on a media server SoulSync can't read directly "
                 f"(or the stored path is stale), re-identify isn't available for it.")}), 404
 
-        # 3) Copy into staging + fingerprint the copy.
+        # 3) + 4) Copy into staging under a hidden name, commit the single-use
+        # hint, then put the copy in place: no copy inside an open hint
+        # transaction, and auto-import never meets a staged file without its
+        # hint (it would file it as a new track). review 5 R5-D-3
         staging_dir = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
-        staged = stage_file_for_reidentify(real_path, staging_dir, library_track_id)
-
-        # 4) Persist the single-use hint.
-        hint = build_reidentify_hint(library_track_id, hint_fields,
-                                     staged['staged_path'], staged['content_hash'], replace=replace)
-        conn = database._get_connection()
-        try:
-            cur = conn.cursor()
-            hint_id = create_hint(cur, hint)
-            conn.commit()
-        finally:
-            conn.close()
+        hint_id, hint, staged = stage_with_committed_hint(
+            database._get_connection, real_path, staging_dir, library_track_id,
+            lambda staged_path, content_hash: build_reidentify_hint(
+                library_track_id, hint_fields, staged_path, content_hash,
+                replace=replace, replace_file_id=replace_file_id))
 
         # 5) Nudge the worker so it doesn't wait for the next timer tick.
         try:
@@ -15498,6 +15499,9 @@ def _tracks_with_mirrored_quality_profile(
                 track = dict(track)
                 if explicit or track.get('quality_profile_id') is None:
                     track['quality_profile_id'] = quality_profile_id
+                    # only a dialog pick pins the imported track, never a
+                    # mirror's assignment (review 5 W2-WD-1)
+                    track['quality_profile_explicit'] = explicit
             enriched.append(track)
         return enriched, quality_profile_id
     except Exception as exc:
@@ -18468,12 +18472,15 @@ def library_search_tracks():
 # a manual match overrides it. this is that view, and changing a pick stores
 # the same durable match the server editor stores, so the first sync uses it.
 
-def _presync_track_rows(database, active_server, ids):
+def _presync_track_rows(database, active_server, ids, catalogue_ids=()):
     """{id: {id, title, artist, thumb, duration}} for the library tracks the
     mirror rows point at. the active server's track id first (what the check
-    stamps and the sync matches by), the catalogue id for a manual match that
-    named one."""
+    stamps and the sync matches by), the catalogue id only for a stamp that
+    says it is one (``catalogue_ids``). a server id and a catalogue id share
+    one numeric range, so a gone server track read as a catalogue id showed
+    an unrelated song as matched (review 5 W2-WB-2)."""
     ids = [str(i) for i in dict.fromkeys(ids) if i]
+    catalogue_ids = {str(i) for i in catalogue_ids if i}
     out = {}
     if not ids:
         return out
@@ -18497,7 +18504,7 @@ def _presync_track_rows(database, active_server, ids):
             for sql, params in queries:
                 for row in conn.execute(sql, params).fetchall():
                     out.setdefault(str(row['key']), row)
-        rest = [i for i in ids if i not in out and i.isdigit()]
+        rest = [i for i in ids if i not in out and i in catalogue_ids and i.isdigit()]
         for i in range(0, len(rest), 400):
             chunk = rest[i:i + 400]
             ph = ','.join('?' * len(chunk))
@@ -18550,7 +18557,9 @@ def mirrored_presync_matches(playlist_id):
             logger.debug(f"[PreSync] manual matches unavailable: {e}")
         library = _presync_track_rows(
             database, active_server,
-            [e.get('library_track_id') for e in extras if e.get('in_library')])
+            [e.get('library_track_id') for e in extras if e.get('in_library')],
+            catalogue_ids=[e.get('library_track_id') for e in extras
+                           if e.get('in_library') and e.get('library_track_id_kind') == 'lib2'])
         tracks = []
         unchecked = 0
         for row, extra in zip(rows, extras, strict=True):
@@ -18617,8 +18626,9 @@ def mirrored_presync_set_match(playlist_id):
             source_track_id, active_server, track_id, data.get('track_title', ''),
             row.get('track_name') or '', row.get('artist_name') or '',
             source=playlist.get('source') or 'spotify')
+        # the library search answers with the server's id (review 5 W2-WB-2)
         database.update_mirrored_track_extra_data(row['id'], {
-            'in_library': True, 'library_track_id': track_id,
+            'in_library': True, 'library_track_id': track_id, 'library_track_id_kind': 'server',
             'library_checked_at': int(time.time()), 'library_checked_via': 'manual'})
         return jsonify({"success": True, "message": "Match saved, the next sync uses it"})
     except Exception as e:
@@ -18647,7 +18657,7 @@ def mirrored_presync_unmatch(playlist_id):
                                 source_track_id, track_id):
                 return jsonify({"success": False, "error": "Could not save the unmatch"}), 500
         database.update_mirrored_track_extra_data(row['id'], {
-            'in_library': False, 'library_track_id': None,
+            'in_library': False, 'library_track_id': None, 'library_track_id_kind': None,
             'library_checked_at': int(time.time()), 'library_checked_via': 'manual'})
         return jsonify({"success": True, "message": "Match removed"})
     except Exception as e:
