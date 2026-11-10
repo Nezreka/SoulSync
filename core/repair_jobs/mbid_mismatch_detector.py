@@ -34,6 +34,11 @@ logger = get_logger("repair_job.mbid_mismatch")
 
 # Tag name → format mappings for the TRACK MBID (existing detection).
 # Must match web_server.py write logic.
+def _save(audio) -> bool:
+    from core.metadata.common import get_mutagen_symbols, save_audio_file
+    return bool(save_audio_file(audio, get_mutagen_symbols()))
+
+
 _MBID_TAG_KEYS = {
     # MP3 (ID3): UFID frame with owner 'http://musicbrainz.org'
     'mp3_ufid_owner': 'http://musicbrainz.org',
@@ -182,7 +187,9 @@ def _remove_mbid_from_file(file_path):
                 removed = True
 
         if removed:
-            audio.save()
+            # the atomic, audio-checked save every other tag write uses (#819):
+            # a plain save cut short leaves a truncated file
+            return _save(audio)
         return removed
 
     except Exception as e:
@@ -277,21 +284,18 @@ def _write_album_mbid_to_file(file_path: str, new_mbid: str) -> bool:
                 desc=_ALBUM_MBID_TAG_KEYS['mp3_txxx_desc'],
                 text=[new_mbid],
             ))
-            audio.save()
-            return True
+            return _save(audio)
 
         if isinstance(audio, (FLAC, OggVorbis)):
             for key in ('musicbrainz_albumid',):
                 if key in audio:
                     del audio[key]
             audio[_ALBUM_MBID_TAG_KEYS['vorbis']] = [new_mbid]
-            audio.save()
-            return True
+            return _save(audio)
 
         if isinstance(audio, MP4):
             audio[_ALBUM_MBID_TAG_KEYS['mp4']] = [new_mbid.encode('utf-8')]
-            audio.save()
-            return True
+            return _save(audio)
 
         return False
     except Exception as e:

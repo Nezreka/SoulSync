@@ -311,7 +311,9 @@ def test_a_known_total_missing_from_the_file_is_written(library):
     del audio['tracktotal'], audio['disctotal']
     audio.save()
     checks = json.loads(observe(library)['tags_json'])['_validation']['checks']
-    assert checks['total_tracks'] == checks['total_discs'] == 'missing'
+    # a one-disc release with no disc total is no finding of its own (165k of
+    # them on one library); the write below still fills it
+    assert (checks['total_tracks'], checks['total_discs']) == ('missing', 'not_required')
     assert write_tags(db, [7], embed_cover=False)['written'] == 1
     assert (FLAC(path)['tracktotal'], FLAC(path)['disctotal']) == (['13'], ['1'])
     with closing(db._get_connection()) as conn:

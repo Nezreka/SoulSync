@@ -4374,6 +4374,10 @@ class RepairWorker:
         validation = details.get('validation') or {}
         from core.library2 import retag
         options = retag.retag_options(details['retag_options']) if details.get('retag_options') is not None else None
+        if options is None and not details.get('diff'):
+            # filed by the tag scan: it writes the fields it flagged, never
+            # the whole tag set (scan_finding_options)
+            options = retag.scan_finding_options(details)
         selected = options.get('fields') if options else None
         writes_numbers = selected is None or bool(set(selected) & {'track_number', 'disc_number', 'total_tracks', 'total_discs', 'track_count'})
         if writes_numbers and validation.get('checks', {}).get('edition') == 'unknown':
@@ -5273,7 +5277,10 @@ class RepairWorker:
                     "[repair] album %s art is locked — keeping the chosen cover",
                     native_album_id,
                 )
-            elif artwork_url:
+            elif artwork_url and (details.get('db_missing', True) or not (existing[0] or '').strip()):
+                # only when the library has no cover: a finding for a file
+                # with no embedded art replaced the album's cover with the
+                # provider's (a 360px discogs image over a good one)
                 cursor.execute(
                     "UPDATE lib2_albums SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
                     (artwork_url, native_album_id))
@@ -5683,7 +5690,9 @@ class RepairWorker:
         if 'title' in missing and details.get('track_title'):
             data['title'] = details['track_title']
         if 'artist' in missing and details.get('artist'):
-            data['artist_name'] = details['artist']
+            # track_artist: artist_name would also rewrite the album artist,
+            # which this file is not missing
+            data['track_artist'] = details['artist']
         if 'album' in missing and details.get('album_title'):
             data['album_title'] = details['album_title']
         if not current.get('track_number') and details.get('track_number'):

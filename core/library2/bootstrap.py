@@ -812,6 +812,7 @@ def run_deferred_backfills(database: Any, *,
     # once per media server becomes one release (proven pairs only)
     from core.library2.catalogue_duplicates import merge_import_twins
     stats["import_twins"] = merge_import_twins(database)["merged"]
+    stats["scan_findings_closed"] = _settle_scan_findings_once(database, should_stop)
     if any(stats.values()):
         logger.info("Library v2 convergence complete: %s", stats)
     # PASSIVE: this runs on every start. a TRUNCATE takes the write lock and
@@ -823,6 +824,30 @@ def run_deferred_backfills(database: Any, *,
     from core.library2.wal import CHECKPOINT_PASSIVE
     _checkpoint_wal(database, CHECKPOINT_PASSIVE)
     return stats
+
+
+def _settle_scan_findings_once(database: Any, should_stop: Any = None) -> int:
+    """close the tag-scan findings that are no longer issues, once (the
+    one-disc "total_discs: missing" pile). a stopped pass runs again next
+    start, it only marks itself done when it reached the end"""
+    from core.library2.schema import _done_once, _mark_done
+    name = "retag_scan_findings_settled_v1"
+    try:
+        with closing(database._get_connection()) as conn:
+            if _done_once(conn.cursor(), name):
+                return 0
+        from core.library2.validation import settle_scan_findings
+        stats = settle_scan_findings(database, should_stop=should_stop)
+        if not (should_stop and should_stop()):
+            with closing(database._get_connection()) as conn:
+                _mark_done(conn.cursor(), name)
+                conn.commit()
+        if stats["closed"] or stats["updated"]:
+            logger.info("tag-scan findings re-checked: %s", stats)
+        return stats["closed"]
+    except Exception as exc:  # noqa: BLE001 - tidying findings never fails a start
+        logger.warning("tag-scan findings not re-checked: %s", exc)
+        return 0
 
 
 def should_stop_autostart(result: Dict[str, Any]) -> bool:

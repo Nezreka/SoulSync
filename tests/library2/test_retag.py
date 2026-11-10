@@ -57,7 +57,8 @@ def test_db_data_shape(imported_conn):
     assert data["title"] == "One Dance"
     assert data["album_title"] == "Views"
     assert data["artist_name"] == "Drake"
-    assert data["track_artist"] == "Drake; Wizkid"
+    # joined with the user's artist separator (", " unless they changed it)
+    assert data["track_artist"] == "Drake, Wizkid"
     assert data["artists_list"] == ["Drake", "Wizkid"]
     assert data["genres"] == ["rap", "pop"]
     assert data["release_date"] == "2016-04-29"
@@ -108,7 +109,7 @@ def test_aiff_library_preview_and_write(imported_conn, legacy_db, tmp_path, exte
     assert stats['failed'] == 0
     tags = read_file_tags(str(path))
     assert tags['title'] == 'One Dance'
-    assert tags['artist'] == 'Drake; Wizkid'
+    assert tags['artist'] == 'Drake, Wizkid'
     cached = imported_conn.execute(
         'SELECT tags_json FROM lib2_track_files WHERE track_id=?', (track_id,)).fetchone()
     assert json.loads(cached[0])['title'] == 'One Dance'
@@ -690,7 +691,7 @@ def test_a_hand_set_artist_name_is_what_gets_written(imported_conn):
     data = retag._db_data_for_row(conn, row)
 
     assert data['artist_name'] == 'Corrected Artist'
-    assert data['track_artist'] == 'Corrected Artist; Wizkid'
+    assert data['track_artist'] == 'Corrected Artist, Wizkid'
     assert data['artists_list'] == ['Corrected Artist', 'Wizkid']
 
 

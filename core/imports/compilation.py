@@ -34,6 +34,9 @@ VARIOUS_ARTIST_NAMES = frozenset({
     "v.a",
     "various artist",
     "diverse interpreten",
+    "varios artistas",
+    "vários artistas",
+    "artistes divers",
 })
 
 # `album_type` (Spotify), `record_type` (Deezer), `primary_type`/secondary

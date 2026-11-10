@@ -3094,8 +3094,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         try:
                             def _progress(_stage, current, total):
                                 _job_registry.update(job_id, current=current, total=total)
-                            stats = retag.write_tags(db, track_ids, embed_cover=True,
-                                                     force_cover=True, progress=_progress)
+                            # the cover only: without options this took the
+                            # Write Tags path and rewrote every text tag of
+                            # every track for a cover pick
+                            stats = retag.write_tags(
+                                db, track_ids, embed_cover=True, progress=_progress,
+                                options={'fields': ['cover_art'], 'cover_art': 'replace'})
                             _job_registry.update(job_id, result=stats)
                         except Exception as e:  # noqa: BLE001
                             logger.error("Library v2 cover-embed retag failed: %s", e, exc_info=True)

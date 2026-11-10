@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from contextlib import closing
 import os
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.library2.sql_util import pick
@@ -65,6 +66,36 @@ _POLICY_DATA_KEYS = {
     'bpm': 'bpm', 'style': 'style', 'mood': 'mood', 'copyright': 'copyright',
     'isrc': 'isrc', 'lyrics': 'lyrics',
 }
+
+
+#: a scan check -> the tag field (or cover) a fix for it writes
+_CHECK_FIELDS = {
+    'title': 'title', 'artist': 'artist', 'album': 'album', 'albumartist': 'album_artist',
+    'year': 'year', 'genre': 'genre', 'track_number': 'track_number', 'disc_number': 'disc_number',
+    'total_tracks': 'total_tracks', 'total_discs': 'total_discs',
+    'cover': 'cover_art', 'artwork_sidecar': 'cover_art', 'artwork_database': 'cover_art',
+}
+
+
+def scan_finding_options(details: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The write a scan-made finding is allowed: the fields it flagged.
+
+    A finding the tag scan files has no options of its own, and applying it
+    took the Write Tags path: every core tag rewritten from the library and
+    the embedded cover replaced, for a finding that said "total_discs:
+    missing". On one library that was 182k files, 57k genres and 13k artist
+    credits nobody had been shown. It writes what it reported and fills a
+    cover only where there is none. None when the finding flagged nothing.
+    """
+    validation = details.get('validation') or {}
+    flagged = set(details.get('required_fields') or ())
+    flagged.update(k for k, v in (validation.get('checks') or {}).items() if v in ('missing', 'mismatch'))
+    if not validation and not flagged:
+        return None
+    # nothing flagged any more: an empty list writes nothing, where None
+    # would mean "every field"
+    fields = sorted({_CHECK_FIELDS[k] for k in flagged if k in _CHECK_FIELDS})
+    return retag_options({'fields': fields, 'cover_art': 'fill_missing', 'lyrics': 'skip'})
 
 
 def _policy_diff(file_tags, db_data, options):
@@ -179,6 +210,7 @@ def _track_rows(conn, track_ids: List[int]) -> List[Any]:
     return conn.execute(
         f"""SELECT t.id, t.title, t.duration, t.track_number, t.disc_number,
                    t.spotify_id, t.musicbrainz_id, t.album_id, t.bpm, t.isrc, t.style, t.mood, t.copyright, t.genius_lyrics, t.external_ids,
+                   t.track_artist AS own_artist,
                    al.title AS album_title, al.album_type, al.year, al.release_date, al.genres,
                    al.expected_track_count, al.track_count,
                    al.image_url AS album_image_url,
@@ -321,6 +353,48 @@ def _apply_overrides(conn, row: Any, data: Dict[str, Any]) -> Dict[str, str]:
     return manual
 
 
+def _performers(artists: List[str], album_artist: Any, own_artist: Any) -> List[str]:
+    """the credits that belong in the ARTIST tag.
+
+    the upgrade import credits every track to its album artist as well as to
+    whoever the track's own artist names. on an album filed under someone
+    else (a soundtrack folder, a compilation, a guest's song on a mixtape)
+    that put the album artist in front of the performer: "Official
+    Soundtrack; Michael Giacchino" over a file that said "Michael Giacchino".
+    the track's own artist says who performs it, so an album artist it does
+    not name stays out of the tag."""
+    if len(artists) < 2 or not album_artist or not own_artist:
+        return artists
+    try:
+        from core.tag_writer import _artist_name_set
+        album_names = _artist_name_set(album_artist)
+        if not album_names or album_names & _artist_name_set(own_artist):
+            return artists
+        kept = [a for a in artists if not (_artist_name_set(a) & album_names)]
+        return kept or artists
+    except Exception:  # noqa: BLE001 - the full credit list is the fallback
+        return artists
+
+
+def _artist_joiner() -> str:
+    """the user's artist separator, as the download path writes it. the tag
+    was always joined with "; ", whatever the setting said."""
+    try:
+        from core.metadata.common import get_config_manager
+        joiner = get_config_manager().get("metadata_enhancement.tags.artist_separator", ", ")
+        return joiner if isinstance(joiner, str) and joiner.strip() else ", "
+    except Exception:  # noqa: BLE001
+        return ", "
+
+
+def _date_only(value: Any) -> Any:
+    """a release date without a time of day. itunes dates come as
+    2019-02-22T08:00:00Z and were written into the tag like that."""
+    text = str(value or "").strip()
+    match = re.match(r"^(\d{4}-\d{2}-\d{2})[T ]", text)
+    return match.group(1) if match else value
+
+
 def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
     """Shape a lib2 track row into the ``db_data`` dict core/tag_writer reads."""
     artists = _credited_artists(conn, row["id"])
@@ -329,14 +403,16 @@ def _db_data_for_row(conn, row: Any) -> Dict[str, Any]:
 
     album_artist_name = effective_artist_name(
         conn, row["album_artist_id"], row["album_artist_name"])
-    track_artist = "; ".join(artists) if artists else (album_artist_name or "")
+    own_artist = row["own_artist"] if "own_artist" in row.keys() else None
+    artists = _performers(artists, album_artist_name, own_artist)
+    track_artist = _artist_joiner().join(artists) if artists else (album_artist_name or "")
     data: Dict[str, Any] = {
         "title": row["title"],
         "artist_name": album_artist_name or (artists[0] if artists else None),
         "track_artist": track_artist or None,
         "album_title": row["album_title"],
         "year": row["year"],
-        "release_date": row["release_date"],
+        "release_date": _date_only(row["release_date"]),
         "genres": _genres_list(row["genres"]),
         "track_number": row["track_number"],
         "disc_number": row["disc_number"],
