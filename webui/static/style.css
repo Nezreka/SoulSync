@@ -74078,7 +74078,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-view-switch button[aria-pressed="true"] { background: var(--white-a14); color: var(--text-1); }
 #tools-page .repair-status-seg-count { font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; }
 #tools-page .repair-findings-search {
-    flex: 1 1 320px;
+    flex: 1 1 260px;
     min-width: 0;
     height: 40px;
     padding: 0 18px;
