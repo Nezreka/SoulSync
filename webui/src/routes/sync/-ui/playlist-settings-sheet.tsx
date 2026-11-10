@@ -13,7 +13,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { MirroredPlaylistRow } from '../-sync.mirrored';
 
-import { isUserPlaylist } from '../../../features/playlists/user-playlists';
+import {
+  fetchRotationPreview,
+  rotationStatus,
+  rotationSummary,
+  type RotationPreview,
+} from '../-sync.rotation';
+import { isUserPlaylist, LIKED_SOURCE_ID } from '../../../features/playlists/user-playlists';
 import styles from './playlists.module.css';
 
 export interface PlaylistSettingsSheetProps {
@@ -29,6 +35,8 @@ export interface PlaylistSettingsSheetProps {
   /** '' clears the rename */
   onRename: (customName: string) => void;
   onToggleOrganize: (enabled: boolean) => void;
+  /** rotating (#2039); absent hides the row */
+  onToggleRotating?: (enabled: boolean) => void;
   /** '' = back to the global mode */
   onSetSyncMode: (mode: string) => void;
   onToggleAutoRemove?: () => void;
@@ -47,6 +55,7 @@ export function PlaylistSettingsSheet({
   onSchedule,
   onRename,
   onToggleOrganize,
+  onToggleRotating,
   onSetSyncMode,
   onToggleAutoRemove,
   onEditSource,
@@ -95,6 +104,29 @@ export function PlaylistSettingsSheet({
 
   const spotifyRequest =
     Boolean(row.is_request_list) && (row.source === 'spotify' || row.source === 'spotify_public');
+
+  // a request list drops a track once it downloads, and Liked Songs is not a
+  // rotation. the server refuses both, so the row is not offered
+  const canRotate =
+    Boolean(onToggleRotating) &&
+    !row.is_request_list &&
+    !(own && row.source_playlist_id === LIKED_SOURCE_ID);
+  // what rotating does for THIS playlist right now, read again whenever the
+  // toggle lands so the words follow it
+  const [rotation, setRotation] = useState<RotationPreview | null>(null);
+  const { id: rowId, rotating: rowRotating } = row;
+  useEffect(() => {
+    if (!canRotate) return;
+    let live = true;
+    void fetchRotationPreview(rowId).then((preview) => {
+      if (live) setRotation(preview);
+    });
+    return () => {
+      live = false;
+    };
+  }, [canRotate, rowId, rowRotating]);
+  const rotationLine = rotationSummary(rotation);
+  const rotationState = rotationStatus(rotation);
 
   return (
     <>
@@ -231,6 +263,39 @@ export function PlaylistSettingsSheet({
               <span />
             </label>
           </div>
+          {canRotate ? (
+            <div className={styles.row}>
+              <div className={styles.rowText}>
+                <div className={styles.rowTitle}>Rotating</div>
+                <div className={styles.rowDesc}>
+                  Removes a song this playlist downloaded once it leaves the playlist. Songs you
+                  played, favourited or still have in another playlist stay
+                </div>
+                {rotationLine ? (
+                  <div className={styles.rowNote} data-testid="rotation-summary">
+                    {rotationLine}
+                  </div>
+                ) : null}
+                {rotationState ? (
+                  <div className={styles.rowNote} data-testid="rotation-status">
+                    {rotationState}{' '}
+                    <a className={styles.rowNoteLink} href="/tools?job=expired_download_cleaner">
+                      Cleaner settings
+                    </a>
+                  </div>
+                ) : null}
+              </div>
+              <label className={styles.switch}>
+                <input
+                  type="checkbox"
+                  aria-label="Rotating"
+                  checked={Boolean(row.rotating)}
+                  onChange={(e) => onToggleRotating?.(e.target.checked)}
+                />
+                <span />
+              </label>
+            </div>
+          ) : null}
           {spotifyRequest && onToggleAutoRemove ? (
             <div className={styles.row}>
               <div className={styles.rowText}>

@@ -8,6 +8,7 @@ module decides. Fully unit-testable.
 
 A download is proposed for deletion ONLY when ALL hold:
 - its origin's retention is set (not 'off') and it's older than that window,
+  OR it left a rotating playlist (``rotated_out``, #2039) long enough ago,
 - it's NOT protected (still in an actively-mirrored playlist / watched artist),
 - nobody has expressed that they want it (``curated`` — see ``is_curated``),
 - it does NOT predate the current library database (``grandfathered``),
@@ -33,6 +34,29 @@ RETENTION_DAYS = {
     "2mo": 60, "3mo": 90, "6mo": 180,
 }
 RETENTION_OPTIONS = ["off", "1w", "2w", "3w", "4w", "2mo", "3mo", "6mo"]
+
+# how long a track must stay gone from a rotating playlist before its download
+# is cleaned up (#2039). the wait covers one bad sync that dropped tracks the
+# source still has.
+ROTATION_GRACE_DAYS = {"none": 0, "1d": 1, "3d": 3, "1w": 7}
+ROTATION_GRACE_OPTIONS = ["none", "1d", "3d", "1w"]
+# the cleaner runs about once a day and never at the exact same minute, so a
+# one day wait would slip to the third run without some slack
+_ROTATION_GRACE_SLACK = timedelta(hours=2)
+
+
+def rotation_grace_passed(left_at: Any, grace: Optional[str], now: datetime) -> bool:
+    """True when a track that left its rotating playlist at ``left_at`` has
+    been gone long enough. an unreadable time or an unknown grace is a no."""
+    days = ROTATION_GRACE_DAYS.get((grace or "").strip().lower())
+    if days is None:
+        return False
+    left = parse_ts(left_at)
+    if left is None:
+        return False
+    if days == 0:
+        return True
+    return now - left >= timedelta(days=days) - _ROTATION_GRACE_SLACK
 
 
 def retention_cutoff(retention: Optional[str], now: datetime) -> Optional[datetime]:
@@ -174,7 +198,9 @@ def is_expired(
     ``entry`` needs: ``origin`` ('watchlist'|'playlist'), ``created_at``,
     ``play_count`` (int, or None when it could not be determined),
     ``protected`` (bool — still in an active mirror/watch), ``grandfathered``
-    (bool — predates this database's lifetime, see below)."""
+    (bool — predates this database's lifetime, see below). ``rotated_out``
+    (bool, optional) marks a download that left a rotating playlist: it skips
+    the retention window and nothing else."""
     if entry.get("protected"):
         return False
     if entry.get("curated"):
@@ -199,6 +225,10 @@ def is_expired(
         return False
     if play_count >= max(1, int(min_plays or 1)):
         return False  # listened to enough to keep
+    if entry.get("rotated_out"):
+        # left a rotating playlist (#2039). every keep rule above still held,
+        # only the retention window is skipped
+        return True
     origin = (entry.get("origin") or "").strip().lower()
     retention = watchlist_retention if origin == "watchlist" else playlist_retention
     cutoff = retention_cutoff(retention, now)

@@ -231,6 +231,19 @@ Pick **Generate cover art** from a playlist card's **⋯** menu, or the **⋯** 
 - **Restore original cover** in the same menu puts the source's own cover back
 - Free with no setup: one image every 45 seconds, with a small Pollinations mark in the corner. A key from enter.pollinations.ai in **Settings → Pollinations** removes both
 
+## Rotating playlists
+
+Some playlists change on their own: a weekly chart, a discovery mix, a Beatport top 100. Turn on **Rotating** in a playlist's **Settings** (the gear inside the playlist, or **Settings** in its **⋯** menu) and SoulSync cleans up after it: a song this playlist downloaded is removed from your library once it leaves the playlist.
+
+- It only touches files this playlist downloaded. Music that was already in your library is never removed
+- A song is kept if it is still in any other playlist you mirror (on any profile), if you played it twice or more, or if anyone on your media server favourited it, rated it or put it in a playlist
+- If SoulSync can't tell (the play count is unknown, the playlist's track list is empty), the song is kept
+- The Settings row shows what it will do before you turn it on: how many downloaded songs have left, how many will be removed, and why the rest stay
+- It runs through the **Expired Download Cleaner** on the Tools page, which turns on with the first rotating playlist. **Dry run** is on by default, so removals show up as findings for you to approve. Turn dry run off there to have files deleted automatically
+- **Rotating playlist wait** in the cleaner's settings is how long a song must be gone before it is removed. The default is one day, so a sync that came back short can't cost you files
+- Works on mirrored playlists and on **My Playlists**, where removing a song by hand counts as leaving. Request lists and Liked Songs can't be rotating
+- Use **Reconcile** or **Replace** sync mode with Rotating. **Append only** keeps every song in the server playlist, and a song in a server playlist is kept while curation signals are on
+
 ## Auto-sync schedules
 
 Mirrored playlists can refresh and re-sync on a schedule from **More → Bulk schedule** in the page header:

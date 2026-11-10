@@ -3659,6 +3659,18 @@ class RepairWorker:
         }
         if not entry['id']:
             return {'success': False, 'error': 'No history id in finding'}
+        if details.get('rotated_out'):
+            # a rotating playlist's song can come back before the finding is
+            # approved (#2039). ask again before the file goes
+            from core.repair_jobs.expired_download_cleaner import rotation_still_due
+            if not rotation_still_due(self.db, self._config_manager, entry['id']):
+                return {
+                    'success': False,
+                    'action': 'deleted_expired',
+                    'error': ('Not deleted: this song is back in its playlist or is '
+                              'kept now (played, favourited or in another playlist). '
+                              'Dismiss this finding.'),
+                }
         outcome = delete_origin_download(self.db, entry, self._config_manager)
         if outcome.get('error'):
             return {

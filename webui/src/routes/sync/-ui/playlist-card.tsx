@@ -289,6 +289,17 @@ export function PlaylistCard({
       </span>,
     );
   }
+  if (row.rotating) {
+    metaParts.push(
+      <span
+        key="rotating"
+        className="plc-rotating"
+        title="Rotating: a song this playlist downloaded is removed once it leaves the playlist. Played, favourited and shared songs are kept."
+      >
+        rotating
+      </span>,
+    );
+  }
   // fully discovered but not all downloaded: the line says so, and a check
   // beside it would contradict the words
   const undownloaded = libraryOwnedKnown(row) && libraryOwned(row) < libraryTotal(row);

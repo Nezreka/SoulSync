@@ -91,6 +91,7 @@ import {
   timeAgo,
 } from '../-sync.mirrored';
 import { SOURCE_REF_FAILED, sourceRefUpdatedToast } from '../-sync.pipeline';
+import { fetchRotationPreview, rotationConfirmMessage } from '../-sync.rotation';
 import { SYNC_SOURCES } from '../-sync.sources';
 import { asString } from '../-sync.url-tabs';
 import { useExportJobs } from '../-sync.use-export';
@@ -709,6 +710,44 @@ export function MirroredTab({
         // the next open shows it
       }
       void load();
+    },
+    [load],
+  );
+
+  /**
+   * Rotating (#2039). Turning it on asks first: it is the one playlist
+   * setting that ends in deleted files, and the confirm is where the keep
+   * rules get said out loud. The server turns the cleaner on with it.
+   */
+  const setRotating = useCallback(
+    async (row: MirroredPlaylistRow, enabled: boolean) => {
+      const name = row.display_name || row.name || 'Playlist';
+      try {
+        if (enabled) {
+          const preview = await fetchRotationPreview(row.id);
+          const ok = await window.showConfirmDialog?.({
+            title: 'Make this a rotating playlist',
+            message: rotationConfirmMessage(name, preview),
+            confirmText: 'Make rotating',
+            destructive: preview?.dry_run === false,
+          });
+          if (!ok) return;
+        }
+        const res = await patchMirroredPreferences(row.id, { rotating: enabled });
+        const data = (await res.json()) as { error?: string; cleaner_turned_on?: boolean };
+        if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
+        window.showToast?.(
+          enabled
+            ? data.cleaner_turned_on
+              ? `"${name}" is rotating. Expired Download Cleaner turned on`
+              : `"${name}" is rotating`
+            : `"${name}" keeps its downloads`,
+          'success',
+        );
+        await load();
+      } catch (err) {
+        window.showToast?.(`Error: ${err instanceof Error ? err.message : String(err)}`, 'error');
+      }
     },
     [load],
   );
@@ -1656,6 +1695,7 @@ export function MirroredTab({
           }
           onRename={(value) => void renameTo(settingsRow, value)}
           onToggleOrganize={(enabled) => void setOrganize(settingsRow, enabled)}
+          onToggleRotating={(enabled) => void setRotating(settingsRow, enabled)}
           onSetSyncMode={(mode) => void setSyncMode(settingsRow, mode)}
           onToggleAutoRemove={() => void toggleAutoRemove(settingsRow)}
           onEditSource={() => {

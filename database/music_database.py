@@ -1787,6 +1787,7 @@ class MusicDatabase:
             self._add_mirrored_playlist_custom_name_column(cursor)
             self._add_mirrored_playlist_sync_mode_column(cursor)
             self._add_mirrored_playlist_quality_profile_column(cursor)
+            self._add_mirrored_playlist_rotating_column(cursor)
             self._add_mirrored_playlist_source_skipped_column(cursor)
             self._add_mirrored_playlist_track_added_at_column(cursor)
             self._add_mirrored_playlist_request_list_columns(cursor)
@@ -3180,6 +3181,28 @@ class MusicDatabase:
                 logger.info("Added quality_profile_id column to mirrored_playlists")
         except Exception as e:
             logger.error(f"Error adding mirrored playlist quality profile column: {e}")
+
+    def _add_mirrored_playlist_rotating_column(self, cursor):
+        """Rotating playlists (#2039). a rotating playlist's downloads are
+        cleaned up once the track leaves it. playlist_rotation_exits remembers
+        when the cleaner first saw each download gone from its playlist."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'rotating' not in cols:
+                cursor.execute(
+                    "ALTER TABLE mirrored_playlists ADD COLUMN rotating INTEGER NOT NULL DEFAULT 0"
+                )
+                logger.info("Added rotating column to mirrored_playlists table")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS playlist_rotation_exits (
+                    history_id INTEGER PRIMARY KEY,
+                    playlist_name TEXT,
+                    left_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+        except Exception as e:
+            logger.error(f"Error adding rotating column to mirrored_playlists: {e}")
 
     def _add_mirrored_playlist_request_list_columns(self, cursor):
         """Add request list and upstream tracking columns to mirrored_playlists."""
@@ -23869,7 +23892,51 @@ class MusicDatabase:
             return {'complete': False, 'at': None, 'corrupt': True}
         return parsed if isinstance(parsed, dict) else {'complete': False, 'at': None}
 
-    def get_origin_cleanup_candidates(self):
+    def get_rotation_exits(self) -> Dict[int, str]:
+        """{download history id: when the cleaner first saw it gone from its
+        rotating playlist}. raises on a failed read so the caller can tell
+        "nothing has left" from "could not look"."""
+        with self._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT history_id, left_at FROM playlist_rotation_exits").fetchall()
+        return {int(r[0]): r[1] for r in rows}
+
+    def record_rotation_exits(self, exits) -> int:
+        """Remember downloads that just left their rotating playlist.
+        ``exits`` is (history_id, playlist_name) pairs. the first sighting
+        wins, a later run never moves the clock."""
+        rows = [(int(h), str(n or '')) for h, n in (exits or [])]
+        if not rows:
+            return 0
+        with self._get_connection() as conn:
+            cur = conn.executemany(
+                "INSERT OR IGNORE INTO playlist_rotation_exits (history_id, playlist_name) "
+                "VALUES (?, ?)", rows)
+            conn.commit()
+            return cur.rowcount or 0
+
+    def clear_rotation_exits(self, history_ids=None) -> int:
+        """Forget exits: the track came back, or the download is gone. with
+        no ids, drops exits whose download history row no longer exists."""
+        with self._get_connection() as conn:
+            if history_ids is None:
+                cur = conn.execute(
+                    "DELETE FROM playlist_rotation_exits WHERE history_id NOT IN "
+                    "(SELECT id FROM library_history)")
+            else:
+                ids = [int(h) for h in history_ids]
+                if not ids:
+                    return 0
+                cur = None
+                for i in range(0, len(ids), 500):
+                    chunk = ids[i:i + 500]
+                    cur = conn.execute(
+                        "DELETE FROM playlist_rotation_exits WHERE history_id IN (%s)"
+                        % ",".join("?" * len(chunk)), chunk)
+            conn.commit()
+            return (cur.rowcount or 0) if cur is not None else 0
+
+    def get_origin_cleanup_candidates(self, contexts=None):
         """Origin-tracked downloads (watchlist/playlist) annotated with the
         matching library track's play_count, for the Expired Download Cleaner.
 
@@ -23885,6 +23952,9 @@ class MusicDatabase:
         for every candidate and the "you played it" protection never fired at
         all. Where a suffix is ambiguous the HIGHEST play count wins, because
         ambiguity must fail toward keeping the file.
+
+        ``contexts`` (case-folded playlist / artist names) narrows the result
+        to those origins, for the per-playlist rotation preview.
         """
         try:
             conn = self._get_connection()
@@ -23904,6 +23974,10 @@ class MusicDatabase:
                     'file_path', 'title', 'artist_name', 'play_count',
                     'source_track_id']
             rows = [dict(zip(cols, row, strict=True)) for row in cursor.fetchall()]
+            if contexts is not None:
+                wanted = {str(c or '').strip().casefold() for c in contexts}
+                rows = [r for r in rows
+                        if str(r['origin_context'] or '').strip().casefold() in wanted]
 
             # Only pay for the fallback map when the exact join actually missed.
             unmatched = [r for r in rows if r['play_count'] is None and r['file_path']]
@@ -26321,6 +26395,7 @@ class MusicDatabase:
             return None
         pl = dict(row)
         pl['organize_by_playlist'] = bool(pl.get('organize_by_playlist', 0))
+        pl['rotating'] = bool(pl.get('rotating', 0))
         pl['is_request_list'] = bool(pl.get('is_request_list', 0))
         pl['auto_remove_fulfilled'] = bool(pl.get('auto_remove_fulfilled', 0))
         pl['custom_cover'] = bool(pl.get('custom_cover', 0))
@@ -26643,6 +26718,7 @@ class MusicDatabase:
         organize_by_playlist: Optional[bool] = None,
         quality_profile_id: Optional[int] = None,
         sync_mode: Optional[str] = None,
+        rotating: Optional[bool] = None,
     ) -> str:
         """Atomically update the per-playlist download preferences.
 
@@ -26681,6 +26757,10 @@ class MusicDatabase:
                 if sync_mode is not None:
                     assignments.append("sync_mode=?")
                     params.append(sync_mode or None)
+
+                if rotating is not None:
+                    assignments.append("rotating=?")
+                    params.append(1 if rotating else 0)
 
                 if not assignments:
                     return 'ok'

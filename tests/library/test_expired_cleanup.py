@@ -256,3 +256,41 @@ def test_normalize_track_key_empty_side_unusable():
     assert normalize_track_key("Artist", "   ") == ""
     assert normalize_track_key("", "Song") == ""
     assert normalize_track_key("", "") == ""
+
+
+# ── rotating playlists (#2039) ───────────────────────────────────────────────
+
+def test_rotated_out_skips_the_retention_window():
+    fresh = dict(_entry(days_old=1), rotated_out=True)
+    assert _check(fresh, pl="off") is True
+    assert _check(fresh, pl="6mo") is True
+    assert _check(_entry(days_old=1), pl="off") is False
+
+
+def test_rotated_out_skips_nothing_else():
+    base = dict(_entry(days_old=1), rotated_out=True)
+    assert _check(dict(base, protected=True), pl="off") is False
+    assert _check(dict(base, curated=True), pl="off") is False
+    assert _check(dict(base, grandfathered=True), pl="off") is False
+    assert _check(dict(base, play_count=None), pl="off") is False
+    assert _check(dict(base, play_count=2), pl="off") is False
+
+
+def test_rotation_grace():
+    from core.library.expired_cleanup import ROTATION_GRACE_OPTIONS, rotation_grace_passed
+
+    def ago(hours):
+        return (NOW - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+
+    assert rotation_grace_passed(ago(0), "none", NOW) is True
+    assert rotation_grace_passed(ago(10), "1d", NOW) is False
+    # the daily run drifts, an hour short still counts as the day
+    assert rotation_grace_passed(ago(23), "1d", NOW) is True
+    assert rotation_grace_passed(ago(48), "3d", NOW) is False
+    assert rotation_grace_passed(ago(24 * 7), "1w", NOW) is True
+    # anything unreadable is a no
+    assert rotation_grace_passed(None, "none", NOW) is False
+    assert rotation_grace_passed("junk", "1d", NOW) is False
+    assert rotation_grace_passed(ago(999), "bogus", NOW) is False
+    assert rotation_grace_passed(ago(999), None, NOW) is False
+    assert ROTATION_GRACE_OPTIONS[0] == "none"

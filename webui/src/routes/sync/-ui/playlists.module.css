@@ -828,6 +828,19 @@ new ---------- */
   color: var(--text-3);
   margin-top: 1px;
 }
+.rowNote {
+  font-size: 12.5px;
+  color: var(--text-2);
+  margin-top: 6px;
+}
+.rowNoteLink {
+  color: var(--accent-light);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rowNoteLink:hover {
+  text-decoration: underline;
+}
 .field {
   height: 36px;
   width: 220px;

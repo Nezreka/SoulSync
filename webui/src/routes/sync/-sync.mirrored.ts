@@ -70,6 +70,11 @@ export interface MirroredPlaylistRow {
    */
   organize_by_playlist?: boolean;
   /**
+   * rotating (#2039): a song this playlist downloaded is removed once it
+   * leaves the playlist. the Expired Download Cleaner does the removing.
+   */
+  rotating?: boolean;
+  /**
    * this playlist's own sync mode (#1704). null = the global Settings mode,
    * so an append-only mirror can live next to a Daily Mix that reconciles.
    */

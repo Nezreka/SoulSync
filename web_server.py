@@ -23854,6 +23854,7 @@ _cfg_mpl(
     _spotify_client=lambda: spotify_client,
     _matching_engine=lambda: matching_engine,
     _get_automation_deps=lambda: _automation_deps,
+    _repair_worker=lambda: repair_worker,
 )
 app.register_blueprint(_bp_mpl())
 

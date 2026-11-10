@@ -540,3 +540,17 @@ describe('the all-good check', () => {
     expect(container.querySelector('.plc-ok')).toBeNull();
   });
 });
+
+describe('the rotating label (#2039)', () => {
+  it('shows on a rotating playlist and says what is kept', () => {
+    const { container } = renderCard({ rotating: true });
+    const label = container.querySelector('.plc-rotating');
+    expect(label?.textContent).toBe('rotating');
+    expect(label?.getAttribute('title')).toMatch(/kept/);
+  });
+
+  it('is absent otherwise', () => {
+    const { container } = renderCard();
+    expect(container.querySelector('.plc-rotating')).toBeNull();
+  });
+});

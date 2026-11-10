@@ -237,7 +237,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Comma Artist Splitter | Finds dummy artists that are really several artists joined by separators ("Camellia, Toby Fox") and splits their tags — verifies against metadata APIs first so real separator-named acts like "Tyler, The Creator" are never split |
 | Watchlist & Wishlist Reconcile | Reconciles monitored artists with the Watchlist and missing or upgrade-eligible tracks with the Wishlist |
 | Empty Folder Cleaner | Finds truly-empty folders (or folders holding only OS junk like .DS_Store) in the library root — never touches a folder containing audio or cover art |
-| Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete) |
+| Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete). Also cleans up after **Rotating** playlists: a song the playlist downloaded goes once it has left the playlist, with no retention window |
 | Genre Tag Cleanup | Re-applies the strict genre whitelist to genres stored before it was enabled — one finding per artist/album with off-whitelist genres |
 | Genre Enrichment | Adds conservatively translated genres from stored metadata and caches |
 | Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track |

@@ -8,6 +8,8 @@ Download Discography now uses the artist's quality profile (thanks Foxxify). You
 
 Everything Library v2 touched was reviewed five times end to end. Every finding was fixed with a test, covering the 3.6.1 upgrade, household and own-library separation, tags, artwork, repair jobs and downloads. The library pages, reports and startup are much faster on large libraries.
 
+Playlists can now be rotating: a song the playlist downloaded is removed once it leaves the playlist, unless you played it, favourited it or still have it in another playlist (#2039).
+
 Library scans no longer get flagged as stuck while an own-library profile's scan is still working (#2036).
 
 Thanks also to nick2000713, splitsec2, lozog, Eric-sson, cremonies and jdfrye2 for fixes and reports.
