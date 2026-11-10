@@ -129,6 +129,9 @@ def _db_update_phase_callback(phase):
     _update_automation_progress(_db_update_automation_id, phase=phase)
 
 def _db_update_artist_callback(artist_name, success, details, album_count, track_count):
+    # a finished artist is progress, whatever else the worker reported
+    with db_update_lock:
+        db_update_state["last_progress_at"] = time.time()
     if success:
         # Use the details string from the worker — it includes context like "0 new tracks (150 existing updated)"
         log_msg = f'{artist_name} — {details}' if details else f'{artist_name} — {album_count} albums, {track_count} tracks'
@@ -840,6 +843,13 @@ def _run_own_library_scans(server_type, deep):
                 media_client=client, full_refresh=False, server_type=server_type,
                 force_sequential=True, owner_profile_id=prof['id'])
             worker.connect_callback('phase_changed', _db_update_phase_callback)
+            # progress has to reach the shared state too. without it the
+            # watchdog saw no ticks for the whole profile scan and called any
+            # own library that took over 5 minutes stuck (#2036)
+            worker.connect_callback(
+                'progress_updated',
+                lambda item, done, total, pct, _p=prof: _db_update_progress_callback(
+                    f"{_p['name']}: {item}", done, total, pct))
             worker.connect_callback('artist_processed', _db_update_artist_callback)
             worker.connect_callback('error', lambda msg, _p=prof: logger.error(f"[Own Library] {_p['name']}: {msg}"))
             if deep:
