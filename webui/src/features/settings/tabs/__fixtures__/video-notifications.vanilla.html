@@ -1,61 +1,53 @@
-<div
-  class="settings-section-header collapsed"
-  data-stg="connections"
-  data-video-only
-  onclick="
-    this.classList.toggle('collapsed');
-    const b = this.nextElementSibling;
-    b.classList.toggle('collapsed');
-    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
-  "
-  role="button"
-  tabindex="0"
-  aria-expanded="false"
->
-  <span class="settings-section-arrow">&#9660;</span>
-  <h3>Notifications</h3>
-  <span class="settings-section-hint">Discord, webhooks &amp; Telegram</span>
-</div>
-<div class="settings-section-body collapsed" data-stg="connections" data-video-only>
-  <div class="settings-group" data-stg="connections" data-video-only>
-    <!-- Was "Download Source". The source picker below is retired: the shared
+                                    <div class="settings-section-header collapsed" data-stg="connections" data-video-only
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Notifications</h3>
+                                        <span class="settings-section-hint">Discord, webhooks &amp; Telegram</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="connections" data-video-only>
+                                        <div class="settings-group" data-stg="connections" data-video-only>
+                                            <!-- Was "Download Source". The source picker below is retired: the shared
                                      download-chain widget (Source Settings) is the one editor for the video
                                      chain now, and it carries a Video tab. The select and its arrow list stay
                                      in the DOM because video-settings.js reads them on load, but they are
                                      hidden - two controls for one setting is how they drift, and these two
                                      genuinely did: saving a seed ratio used to re-post a stale chain. -->
-    <div class="setting-help-text" data-video-legacy-source hidden>
-      Video downloads from slskd, torrent or usenet only. Hybrid tries each enabled source in order.
-    </div>
-    <div class="form-group" data-video-legacy-source hidden>
-      <label>Download Source:</label>
-      <select id="video-download-mode" class="form-select">
-        <option value="soulseek">Soulseek Only</option>
-        <option value="torrent">Torrent Only (via Prowlarr)</option>
-        <option value="usenet">Usenet Only (via Prowlarr)</option>
-        <option value="hybrid">Hybrid (Primary + Fallback)</option>
-      </select>
-    </div>
-    <!-- Hybrid chain — reuses music's hybrid-source-list markup/CSS for
+                                            <div class="setting-help-text" data-video-legacy-source hidden>
+                                                Video downloads from slskd, torrent or usenet only. Hybrid tries each
+                                                enabled source in order.
+                                            </div>
+                                            <div class="form-group" data-video-legacy-source hidden>
+                                                <label>Download Source:</label>
+                                                <select id="video-download-mode" class="form-select">
+                                                    <option value="soulseek">Soulseek Only</option>
+                                                    <option value="torrent">Torrent Only (via Prowlarr)</option>
+                                                    <option value="usenet">Usenet Only (via Prowlarr)</option>
+                                                    <option value="hybrid">Hybrid (Primary + Fallback)</option>
+                                                </select>
+                                            </div>
+                                            <!-- Hybrid chain — reuses music's hybrid-source-list markup/CSS for
                                      visual parity (minus the album/track badge, which is music-only). -->
-    <div id="video-hybrid-container" data-video-legacy-source hidden>
-      <div class="setting-help-text" style="margin-top: 10px">
-        Use the arrows to order sources. Enable the ones you want — downloads try each enabled
-        source in order.
-      </div>
-      <div class="hybrid-source-list" id="video-hybrid-rows"></div>
-    </div>
-    <!-- Seeding lifecycle (arr-parity P5) — torrent grabs only -->
+                                            <div id="video-hybrid-container" data-video-legacy-source hidden>
+                                                <div class="setting-help-text" style="margin-top:10px;">Use the arrows
+                                                    to order sources. Enable the ones you want — downloads try each
+                                                    enabled source in order.</div>
+                                                <div class="hybrid-source-list" id="video-hybrid-rows"></div>
+                                            </div>
+                                            <!-- Seeding lifecycle (arr-parity P5) — torrent grabs only -->
 
-    <!-- Notifications (arr-parity P11) -->
-    <div class="form-group" id="video-notifications">
-      <label>Notifications:</label>
-      <small class="settings-hint" style="display: block; margin-bottom: 8px">
-        Get told when things happen — a Discord webhook, any generic webhook (raw JSON), or a
-        Telegram bot. Each connection picks which events it cares about.
-      </small>
-      <div id="vq-notify-rows"></div>
-      <button class="test-button" type="button" data-vq-notify-add>+ Add connection</button>
-    </div>
-  </div>
-</div>
+                                            <!-- Notifications (arr-parity P11) -->
+                                            <div class="form-group" id="video-notifications">
+                                                <label>Notifications:</label>
+                                                <small class="settings-hint" style="display:block; margin-bottom:8px;">
+                                                    Get told when things happen — a Discord webhook, any generic webhook
+                                                    (raw JSON), or a Telegram bot.
+                                                    Each connection picks which events it cares about.
+                                                </small>
+                                                <div id="vq-notify-rows"></div>
+                                                <button class="test-button" type="button" data-vq-notify-add>+ Add
+                                                    connection</button>
+                                            </div>
+                                        </div>
+                                    </div>
+

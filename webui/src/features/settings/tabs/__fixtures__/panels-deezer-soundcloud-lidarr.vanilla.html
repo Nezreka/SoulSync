@@ -1,106 +1,108 @@
-<div id="deezer-download-settings-container" class="src-config-panel">
-  <div class="form-group">
-    <label>Deezer ARL Token:</label>
-    <input
-      type="password"
-      id="deezer-download-arl"
-      class="form-input"
-      placeholder="Paste your ARL cookie token here"
-    />
-    <div class="setting-help-text">
-      Your ARL token authenticates with Deezer. To get it: log into
-      <a href="https://www.deezer.com" target="_blank" style="color: rgb(var(--accent-rgb))"
-        >deezer.com</a
-      >
-      → open browser DevTools (F12) → Application tab → Cookies → copy the <code>arl</code> value.
-    </div>
-  </div>
-  <div class="form-group">
-    <label>Deezer Status:</label>
-    <div class="form-actions" style="margin-top: 4px">
-      <button
-        class="test-button"
-        id="deezer-download-test-btn"
-        onclick="testDeezerDownloadConnection()"
-      >
-        Test Connection
-      </button>
-      <span id="deezer-download-status" class="setting-help-text" style="margin-left: 8px"></span>
-    </div>
-  </div>
-</div>
+                                            <div id="deezer-download-settings-container" class="src-config-panel">
+                                                <div class="form-group">
+                                                    <label>Deezer ARL Token:</label>
+                                                    <input type="password" id="deezer-download-arl" class="form-input"
+                                                        placeholder="Paste your ARL cookie token here">
+                                                    <div class="setting-help-text">
+                                                        Your ARL token authenticates with Deezer. To get it:
+                                                        log into <a href="https://www.deezer.com" target="_blank"
+                                                            style="color: rgb(var(--accent-rgb));">deezer.com</a>
+                                                        → open browser DevTools (F12) → Application tab → Cookies → copy
+                                                        the <code>arl</code> value.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Deezer Status:</label>
+                                                    <div class="form-actions" style="margin-top: 4px;">
+                                                        <button class="test-button" id="deezer-download-test-btn"
+                                                            onclick="testDeezerDownloadConnection()">
+                                                            Test Connection
+                                                        </button>
+                                                        <span id="deezer-download-status" class="setting-help-text"
+                                                            style="margin-left: 8px;"></span>
+                                                    </div>
+                                                </div>
+                                            </div>
 
-<!-- SoundCloud Download Settings -->
-<div id="soundcloud-download-settings-container" class="src-config-panel">
-  <div class="form-group">
-    <div class="setting-help-text">
-      SoundCloud downloads run anonymously — no account required. Use this for DJ mixes, remixes,
-      and tracks that aren't on Spotify/Tidal/Deezer.
-      <br /><br />
-      <strong>Quality:</strong> 128 kbps MP3 / AAC depending on the upload (anonymous tier).
-      SoundCloud doesn't expose lossless audio to anyone.
-    </div>
-  </div>
-  <div class="form-group">
-    <label>SoundCloud OAuth Token (optional):</label>
-    <input
-      type="password"
-      id="soundcloud-download-oauth-token"
-      class="form-input"
-      placeholder="Paste your oauth_token cookie here"
-    />
-    <div class="setting-help-text">
-      With a free SoundCloud account signed in, tracks whose uploader turned on the free Download
-      button come as the original file instead of the 128 kbps stream. Everything else still uses
-      the stream. To get it: log into soundcloud.com, open DevTools (F12), Application, Cookies, and
-      copy the
-      <code>oauth_token</code> value.
-    </div>
-  </div>
-  <div class="form-group">
-    <label>SoundCloud Status:</label>
-    <div class="form-actions" style="margin-top: 4px">
-      <button class="test-button" id="soundcloud-test-btn" onclick="testSoundcloudConnection()">
-        Test Connection
-      </button>
-      <span
-        id="soundcloud-connection-status"
-        class="setting-help-text"
-        style="margin-left: 8px"
-      ></span>
-    </div>
-  </div>
-</div>
+                                            <!-- SoundCloud Download Settings -->
+                                            <div id="soundcloud-download-settings-container" class="src-config-panel">
+                                                <div class="form-group">
+                                                    <div class="setting-help-text">
+                                                        SoundCloud downloads run anonymously — no account required. Use
+                                                        this for DJ mixes,
+                                                        remixes, and tracks that aren't on Spotify/Tidal/Deezer.
+                                                        <br><br>
+                                                        <strong>Quality:</strong> 128 kbps MP3 / AAC depending on the
+                                                        upload (anonymous tier).
+                                                        SoundCloud doesn't expose lossless audio to anyone.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>SoundCloud OAuth Token (optional):</label>
+                                                    <input type="password" id="soundcloud-download-oauth-token"
+                                                        class="form-input" placeholder="Paste your oauth_token cookie here">
+                                                    <div class="setting-help-text">
+                                                        With a free SoundCloud account signed in, tracks whose uploader
+                                                        turned on the free Download button come as the original file
+                                                        instead of the 128 kbps stream. Everything else still uses the
+                                                        stream. To get it: log into soundcloud.com, open DevTools
+                                                        (F12), Application, Cookies, and copy the
+                                                        <code>oauth_token</code> value.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>SoundCloud Status:</label>
+                                                    <div class="form-actions" style="margin-top: 4px;">
+                                                        <button class="test-button" id="soundcloud-test-btn"
+                                                            onclick="testSoundcloudConnection()">
+                                                            Test Connection
+                                                        </button>
+                                                        <span id="soundcloud-connection-status"
+                                                            class="setting-help-text" style="margin-left: 8px;"></span>
+                                                    </div>
+                                                </div>
+                                            </div>
 
-<!-- Lidarr Download Settings -->
-<div id="lidarr-download-settings-container" class="src-config-panel">
-  <div class="form-group">
-    <label>Lidarr URL:</label>
-    <input type="text" id="lidarr-url" placeholder="http://localhost:8686" />
-    <div class="setting-help-text">
-      Full URL to your Lidarr instance (e.g. http://192.168.1.100:8686)
-    </div>
-  </div>
-  <div class="form-group">
-    <label>API Key:</label>
-    <input type="password" id="lidarr-api-key" placeholder="Your Lidarr API key" />
-    <div class="setting-help-text">Found in Lidarr → Settings → General → Security → API Key</div>
-  </div>
-  <div class="form-group">
-    <label>Lidarr Status:</label>
-    <div class="form-actions" style="margin-top: 4px">
-      <button class="test-button" id="lidarr-test-btn" onclick="testLidarrConnection()">
-        Test Connection
-      </button>
-      <span id="lidarr-connection-status" class="setting-help-text" style="margin-left: 8px"></span>
-    </div>
-    <div class="setting-help-text" style="margin-top: 6px">
-      Uses Lidarr's indexers and download clients (Usenet/torrent) for album downloads.
-      <br /><br />
-      <strong>Best for full-album grabs.</strong> Lidarr is album-first by design — track-name
-      searches usually return nothing useful, so in hybrid mode Lidarr is mostly a no-op for
-      playlists and falls through to your other sources. Use Lidarr Only when you specifically want
-      to grab whole albums via your indexers.
-    </div>
-  </div>
-</div>
+                                            <!-- Lidarr Download Settings -->
+                                            <div id="lidarr-download-settings-container" class="src-config-panel">
+                                                <div class="form-group">
+                                                    <label>Lidarr URL:</label>
+                                                    <input type="text" id="lidarr-url"
+                                                        placeholder="http://localhost:8686">
+                                                    <div class="setting-help-text">
+                                                        Full URL to your Lidarr instance (e.g.
+                                                        http://192.168.1.100:8686)
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>API Key:</label>
+                                                    <input type="password" id="lidarr-api-key"
+                                                        placeholder="Your Lidarr API key">
+                                                    <div class="setting-help-text">
+                                                        Found in Lidarr → Settings → General → Security → API Key
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Lidarr Status:</label>
+                                                    <div class="form-actions" style="margin-top: 4px;">
+                                                        <button class="test-button" id="lidarr-test-btn"
+                                                            onclick="testLidarrConnection()">
+                                                            Test Connection
+                                                        </button>
+                                                        <span id="lidarr-connection-status" class="setting-help-text"
+                                                            style="margin-left: 8px;"></span>
+                                                    </div>
+                                                    <div class="setting-help-text" style="margin-top: 6px;">
+                                                        Uses Lidarr's indexers and download clients (Usenet/torrent) for
+                                                        album downloads.
+                                                        <br><br>
+                                                        <strong>Best for full-album grabs.</strong> Lidarr is
+                                                        album-first by design — track-name searches usually return
+                                                        nothing useful, so in hybrid mode Lidarr is mostly a no-op for
+                                                        playlists and falls through to your other sources. Use Lidarr
+                                                        Only when you specifically want to grab whole albums via your
+                                                        indexers.
+                                                    </div>
+                                                </div>
+                                            </div>
+

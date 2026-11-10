@@ -1,574 +1,534 @@
-<!-- Prowlarr - the indexer aggregator torrent and usenet both search through.
+                                            <!-- Prowlarr - the indexer aggregator torrent and usenet both search through.
                                      Moved off the Downloads tab so every source is set up in one place.
                                      Shared with the video side, which downloads through these too. -->
-<div id="prowlarr-settings-container" class="src-config-panel">
-  <span
-    class="ind-status-dot ind-status-dot-unknown"
-    id="prowlarr-status-dot"
-    title="Not tested"
-  ></span>
-  <div class="settings-group">
-    <div class="api-service-frame">
-      <div class="setting-row" style="padding: 14px 18px">
-        <h4
-          class="service-title prowlarr-title"
-          style="padding: 0 !important; border: 0 !important; margin: 0 !important; flex: 1"
-        >
-          ⬢ Prowlarr
-        </h4>
-        <span
-          class="info-icon"
-          role="button"
-          tabindex="0"
-          title="What's this?"
-          onclick="toggleSettingHelp(this)"
-          onkeydown="
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              toggleSettingHelp(this);
-            }
-          "
-          >i</span
-        >
-      </div>
-      <div class="setting-help-text setting-help-body" style="margin-bottom: 14px" hidden>
-        Prowlarr manages your Usenet and torrent indexers and exposes them through one API. SoulSync
-        uses Prowlarr to search across every indexer at once for the Torrent and Usenet download
-        sources.
-        <br /><br />
-        Don't have it? Grab Prowlarr from <code>prowlarr.com</code>
-        (or your *arr stack). You point Prowlarr at your indexers, then point SoulSync at Prowlarr.
-      </div>
-      <div class="form-group">
-        <label>Prowlarr URL:</label>
-        <input type="text" id="prowlarr-url" placeholder="http://localhost:9696" />
-        <div class="setting-help-text">
-          Full URL to your Prowlarr instance (e.g.
-          <code>http://192.168.1.100:9696</code>).
-        </div>
-      </div>
-      <div class="form-group">
-        <label>API Key:</label>
-        <input type="password" id="prowlarr-api-key" placeholder="Your Prowlarr API key" />
-        <div class="setting-help-text">
-          Found in Prowlarr → Settings → General → Security → API Key.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Restrict to indexer IDs (optional):</label>
-        <input
-          type="text"
-          id="prowlarr-indexer-ids"
-          placeholder="e.g. 1,3,7 (blank = all enabled indexers)"
-        />
-        <div class="setting-help-text">
-          Comma-separated Prowlarr indexer IDs. Leave blank to search every enabled indexer.
-          Restrict when you have a private tracker you want to prioritise or a noisy public one to
-          exclude.
-        </div>
-      </div>
-      <!-- #2061: the pacing was always there (core/prowlarr_throttle.py),
+                                            <div id="prowlarr-settings-container" class="src-config-panel">
+                                                <span class="ind-status-dot ind-status-dot-unknown"
+                                                    id="prowlarr-status-dot" title="Not tested"></span>
+                                                <div class="settings-group">
+                                                    <div class="api-service-frame">
+                                                        <div class="setting-row" style="padding:14px 18px;">
+                                                            <h4 class="service-title prowlarr-title"
+                                                                style="padding:0!important;border:0!important;margin:0!important;flex:1;">
+                                                                ⬢ Prowlarr</h4>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-text setting-help-body"
+                                                            style="margin-bottom: 14px;" hidden>
+                                                            Prowlarr manages your Usenet and torrent indexers and
+                                                            exposes them through one API. SoulSync uses Prowlarr to
+                                                            search across every indexer at once for the Torrent and
+                                                            Usenet download sources.
+                                                            <br><br>
+                                                            Don't have it? Grab Prowlarr from <code>prowlarr.com</code>
+                                                            (or your *arr stack). You point Prowlarr at your indexers,
+                                                            then point SoulSync at Prowlarr.
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Prowlarr URL:</label>
+                                                            <input type="text" id="prowlarr-url"
+                                                                placeholder="http://localhost:9696">
+                                                            <div class="setting-help-text">
+                                                                Full URL to your Prowlarr instance (e.g.
+                                                                <code>http://192.168.1.100:9696</code>).
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>API Key:</label>
+                                                            <input type="password" id="prowlarr-api-key"
+                                                                placeholder="Your Prowlarr API key">
+                                                            <div class="setting-help-text">
+                                                                Found in Prowlarr → Settings → General → Security → API
+                                                                Key.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Restrict to indexer IDs (optional):</label>
+                                                            <input type="text" id="prowlarr-indexer-ids"
+                                                                placeholder="e.g. 1,3,7 (blank = all enabled indexers)">
+                                                            <div class="setting-help-text">
+                                                                Comma-separated Prowlarr indexer IDs. Leave blank to
+                                                                search every enabled indexer. Restrict when you have a
+                                                                private tracker you want to prioritise or a noisy public
+                                                                one to exclude.
+                                                            </div>
+                                                        </div>
+                                                        <!-- #2061: the pacing was always there (core/prowlarr_throttle.py),
                                                              with no way to turn it down for a strict tracker -->
-      <div class="form-group">
-        <label>Seconds between searches:</label>
-        <input
-          type="number"
-          id="prowlarr-search-min-gap"
-          min="0"
-          max="600"
-          step="0.5"
-          placeholder="2"
-        />
-        <div class="setting-help-text">
-          The shortest wait between two searches sent to Prowlarr, music and video together. Default
-          2. Raise it if a tracker answers 429 Too Many Requests or Prowlarr marks an indexer
-          unhealthy: a tracker that asks for 11 seconds wants 12 or more here. 0 turns the wait off.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Searches per minute, at most:</label>
-        <input
-          type="number"
-          id="prowlarr-max-searches-per-minute"
-          min="0"
-          max="600"
-          step="1"
-          placeholder="20"
-        />
-        <div class="setting-help-text">
-          A ceiling on top of the wait above, so a long wishlist run cannot keep up a fast pace for
-          hours. Default 20. 0 turns the ceiling off. A manual search waits its turn behind
-          background searches.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Status:</label>
-        <div class="form-actions" style="margin-top: 4px">
-          <button class="test-button" id="prowlarr-test-btn" onclick="testProwlarrConnection()">
-            Test Connection
-          </button>
-          <button
-            class="test-button"
-            id="prowlarr-refresh-indexers-btn"
-            onclick="loadProwlarrIndexers()"
-            style="margin-left: 6px"
-          >
-            Refresh Indexer List
-          </button>
-          <span
-            id="prowlarr-connection-status"
-            class="setting-help-text"
-            style="margin-left: 8px"
-          ></span>
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Configured Indexers:</label>
-        <div id="prowlarr-indexer-list" class="ind-indexer-list">
-          Connect to Prowlarr and click <strong>Refresh Indexer List</strong> to see the indexers
-          SoulSync can search.
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+                                                        <div class="form-group">
+                                                            <label>Seconds between searches:</label>
+                                                            <input type="number" id="prowlarr-search-min-gap" min="0"
+                                                                max="600" step="0.5" placeholder="2">
+                                                            <div class="setting-help-text">
+                                                                The shortest wait between two searches sent to Prowlarr,
+                                                                music and video together. Default 2. Raise it if a
+                                                                tracker answers 429 Too Many Requests or Prowlarr marks
+                                                                an indexer unhealthy: a tracker that asks for 11 seconds
+                                                                wants 12 or more here. 0 turns the wait off.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Searches per minute, at most:</label>
+                                                            <input type="number" id="prowlarr-max-searches-per-minute"
+                                                                min="0" max="600" step="1" placeholder="20">
+                                                            <div class="setting-help-text">
+                                                                A ceiling on top of the wait above, so a long wishlist
+                                                                run cannot keep up a fast pace for hours. Default 20.
+                                                                0 turns the ceiling off. A manual search waits its turn
+                                                                behind background searches.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Status:</label>
+                                                            <div class="form-actions" style="margin-top: 4px;">
+                                                                <button class="test-button" id="prowlarr-test-btn"
+                                                                    onclick="testProwlarrConnection()">
+                                                                    Test Connection
+                                                                </button>
+                                                                <button class="test-button"
+                                                                    id="prowlarr-refresh-indexers-btn"
+                                                                    onclick="loadProwlarrIndexers()"
+                                                                    style="margin-left: 6px;">
+                                                                    Refresh Indexer List
+                                                                </button>
+                                                                <span id="prowlarr-connection-status"
+                                                                    class="setting-help-text"
+                                                                    style="margin-left: 8px;"></span>
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Configured Indexers:</label>
+                                                            <div id="prowlarr-indexer-list" class="ind-indexer-list">
+                                                                Connect to Prowlarr and click <strong>Refresh Indexer
+                                                                    List</strong> to see the indexers SoulSync can
+                                                                search.
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
 
-<!-- The torrent client.
+                                            <!-- The torrent client.
                                      Moved off the Downloads tab so every source is set up in one place.
                                      Shared with the video side, which downloads through these too. -->
-<div id="torrent-client-settings-container" class="src-config-panel">
-  <span
-    class="ind-status-dot ind-status-dot-unknown"
-    id="torrent-client-status-dot"
-    title="Not tested"
-  ></span>
-  <div class="settings-group">
-    <div class="api-service-frame">
-      <div class="setting-row" style="padding: 14px 18px">
-        <h4
-          class="service-title torrent-title"
-          style="padding: 0 !important; border: 0 !important; margin: 0 !important; flex: 1"
-        >
-          ⬢ Torrent Downloader
-        </h4>
-        <span
-          class="info-icon"
-          role="button"
-          tabindex="0"
-          title="What's this?"
-          onclick="toggleSettingHelp(this)"
-          onkeydown="
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              toggleSettingHelp(this);
-            }
-          "
-          >i</span
-        >
-      </div>
-      <div class="setting-help-text setting-help-body" style="margin-bottom: 14px" hidden>
-        Where SoulSync sends torrents once Prowlarr finds them. Pick the client you already use —
-        only one can be active at a time. Add the URL of the client's WebUI, log in if it asks for
-        credentials, and hit Test Connection.
-      </div>
-      <div class="form-group">
-        <label>Client Type:</label>
-        <select id="torrent-client-type" class="form-select">
-          <option value="qbittorrent">qBittorrent</option>
-          <option value="transmission">Transmission</option>
-          <option value="deluge">Deluge 2.x</option>
-          <option value="aria2">Aria2 (RPC)</option>
-        </select>
-        <div class="setting-help-text" id="torrent-client-help">
-          qBittorrent: WebUI port (default 8080). Transmission: RPC port (default 9091). Deluge:
-          WebUI port (default 8112). Aria2: RPC port (default 6800) — leave Username blank and put
-          your <code>--rpc-secret</code> in the Password field.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>WebUI URL:</label>
-        <input type="text" id="torrent-client-url" placeholder="http://localhost:8080" />
-      </div>
-      <div class="form-group" id="torrent-client-username-group">
-        <label>Username:</label>
-        <input
-          type="text"
-          id="torrent-client-username"
-          placeholder="leave blank if WebUI doesn't require auth"
-        />
-        <div class="setting-help-text">
-          qBittorrent and Transmission use username + password. Deluge uses password only — paste it
-          in the password field below.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Password:</label>
-        <input type="password" id="torrent-client-password" placeholder="WebUI password" />
-      </div>
-      <div class="form-group">
-        <label>Category / Label:</label>
-        <input type="text" id="torrent-client-category" placeholder="soulsync" value="soulsync" />
-        <div class="setting-help-text">
-          SoulSync tags every torrent it adds with this label so it's easy to spot in your client.
-          Deluge needs the Label plugin installed for this to stick.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Save Path (optional):</label>
-        <input
-          type="text"
-          id="torrent-client-save-path"
-          placeholder="leave blank to use the client's default"
-        />
-        <div class="setting-help-text">
-          Override where the torrent client writes downloads. This path is on the
-          <strong>torrent client's</strong>
-          machine, not SoulSync's.
-        </div>
-      </div>
-      <div class="form-group">
-        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
-          <input type="checkbox" id="torrent-client-start-torrents" />
-          Start the torrents SoulSync adds
-        </label>
-        <div class="setting-help-text">
-          qBittorrent only. Turn this on if your qBittorrent is set to add torrents stopped, or to
-          stop them once the metadata is in. SoulSync's torrents then start anyway, and everything
-          other apps add keeps your qBittorrent setting.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Completed Downloads Path — in SoulSync (optional):</label>
-        <input
-          type="text"
-          id="torrent-download-path"
-          placeholder="leave blank for the shared-volume default"
-        />
-        <div class="setting-help-text">
-          Where <strong>SoulSync</strong> can read finished torrents — its own in-container path.
-          Set this when your client saves to a category folder (e.g. a "Music" category at
-          <code>/data/downloads/music</code>) that's mounted here at a different path. SoulSync
-          finds the release by name under this folder. Blank = use the Soulseek download/transfer
-          folders.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Minimum seeders:</label>
-        <input type="number" id="torrent-min-seeders" min="0" step="1" placeholder="1" />
-        <div class="setting-help-text">
-          Skip releases the indexer reports as having fewer seeders than this, instead of queueing
-          something nobody is serving and waiting for it to time out. Releases that report
-          <strong>no</strong> seeder count (usenet, and indexers that omit the field) are never
-          skipped. <strong>0 disables</strong>.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Stalled torrent timeout (minutes):</label>
-        <input type="number" id="torrent-stall-timeout" min="0" step="1" placeholder="10" />
-        <div class="setting-help-text">
-          Give up on a torrent that makes <strong>zero download progress</strong> for this long — a
-          dead magnet stuck on "downloading metadata", or a swarm with no seeders. Without this, a
-          dud torrent ties up a download slot for the full 6-hour limit.
-          <strong>0 disables</strong> (wait the full limit).
-        </div>
-      </div>
-      <div class="form-group">
-        <label>When a torrent stalls:</label>
-        <select id="torrent-stall-action" class="form-select">
-          <option value="abandon">
-            Abandon — remove it &amp; its partial data, fail the download
-          </option>
-          <option value="pause">Pause — pause it in the client, leave it for me</option>
-        </select>
-        <div class="setting-help-text">
-          Abandon frees the slot so the next source can try. Pause keeps the torrent in your client
-          so you can inspect or resume it manually.
-        </div>
-      </div>
-      <!-- Seeding lifecycle — torrent grabs only. Music twin of the video side. -->
-      <div class="form-group" id="music-seeding-goals">
-        <label>Seeding goals (torrents):</label>
-        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center">
-          <span class="settings-hint">Ratio</span>
-          <input
-            type="number"
-            id="music-seed-ratio"
-            min="0"
-            step="0.1"
-            style="max-width: 90px"
-            placeholder="0"
-          />
-          <span class="settings-hint">or hours seeded</span>
-          <input
-            type="number"
-            id="music-seed-hours"
-            min="0"
-            step="1"
-            style="max-width: 90px"
-            placeholder="0"
-          />
-          <label style="display: flex; align-items: center; gap: 6px; font-size: 12.5px">
-            <input type="checkbox" id="music-seed-remove-data" checked /> also delete the client's
-            copy
-          </label>
-        </div>
-        <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px">
-          <span class="settings-hint">Enforced by</span>
-          <select id="music-seed-mode" class="form-select" style="max-width: 260px">
-            <option value="soulsync">SoulSync (watches the client + removes)</option>
-            <option value="client">Torrent client (writes its own seed limit)</option>
-          </select>
-        </div>
-        <small class="settings-hint"
-          >Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the
-          client and removes when a goal is hit (your imported library copy is separate and never
-          touched). <strong>Torrent client</strong>: SS writes the ratio/time limit into the client
-          (arr-style) and lets it enforce — it shows up in the client's share-limit dialog and works
-          even when SS is off.</small
-        >
-      </div>
-      <div class="form-group">
-        <label>Status:</label>
-        <div class="form-actions" style="margin-top: 4px">
-          <button
-            class="test-button"
-            id="torrent-client-test-btn"
-            onclick="testTorrentClientConnection()"
-          >
-            Test Connection
-          </button>
-          <span
-            id="torrent-client-connection-status"
-            class="setting-help-text"
-            style="margin-left: 8px"
-          ></span>
-        </div>
-      </div>
-    </div>
-  </div>
+                                            <div id="torrent-client-settings-container" class="src-config-panel">
+                                                <span class="ind-status-dot ind-status-dot-unknown"
+                                                    id="torrent-client-status-dot" title="Not tested"></span>
+                                                <div class="settings-group">
+                                                    <div class="api-service-frame">
+                                                        <div class="setting-row" style="padding:14px 18px;">
+                                                            <h4 class="service-title torrent-title"
+                                                                style="padding:0!important;border:0!important;margin:0!important;flex:1;">
+                                                                ⬢ Torrent Downloader</h4>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-text setting-help-body"
+                                                            style="margin-bottom: 14px;" hidden>
+                                                            Where SoulSync sends torrents once Prowlarr finds them. Pick
+                                                            the client you already use — only one can be active at a
+                                                            time. Add the URL of the client's WebUI, log in if it asks
+                                                            for credentials, and hit Test Connection.
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Client Type:</label>
+                                                            <select id="torrent-client-type" class="form-select">
+                                                                <option value="qbittorrent">qBittorrent</option>
+                                                                <option value="transmission">Transmission</option>
+                                                                <option value="deluge">Deluge 2.x</option>
+                                                                <option value="aria2">Aria2 (RPC)</option>
+                                                            </select>
+                                                            <div class="setting-help-text" id="torrent-client-help">
+                                                                qBittorrent: WebUI port (default 8080). Transmission:
+                                                                RPC port (default 9091). Deluge: WebUI port (default
+                                                                8112). Aria2: RPC port (default 6800) — leave Username
+                                                                blank and put your <code>--rpc-secret</code> in the
+                                                                Password field.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>WebUI URL:</label>
+                                                            <input type="text" id="torrent-client-url"
+                                                                placeholder="http://localhost:8080">
+                                                        </div>
+                                                        <div class="form-group" id="torrent-client-username-group">
+                                                            <label>Username:</label>
+                                                            <input type="text" id="torrent-client-username"
+                                                                placeholder="leave blank if WebUI doesn't require auth">
+                                                            <div class="setting-help-text">
+                                                                qBittorrent and Transmission use username + password.
+                                                                Deluge uses password only — paste it in the password
+                                                                field below.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Password:</label>
+                                                            <input type="password" id="torrent-client-password"
+                                                                placeholder="WebUI password">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Category / Label:</label>
+                                                            <input type="text" id="torrent-client-category"
+                                                                placeholder="soulsync" value="soulsync">
+                                                            <div class="setting-help-text">
+                                                                SoulSync tags every torrent it adds with this label so
+                                                                it's easy to spot in your client. Deluge needs the Label
+                                                                plugin installed for this to stick.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Save Path (optional):</label>
+                                                            <input type="text" id="torrent-client-save-path"
+                                                                placeholder="leave blank to use the client's default">
+                                                            <div class="setting-help-text">
+                                                                Override where the torrent client writes downloads. This
+                                                                path is on the <strong>torrent client's</strong>
+                                                                machine, not SoulSync's.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label
+                                                                style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                                                                <input type="checkbox" id="torrent-client-start-torrents">
+                                                                Start the torrents SoulSync adds
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                qBittorrent only. Turn this on if your qBittorrent is
+                                                                set to add torrents stopped, or to stop them once the
+                                                                metadata is in. SoulSync's torrents then start anyway,
+                                                                and everything other apps add keeps your qBittorrent
+                                                                setting.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Completed Downloads Path — in SoulSync
+                                                                (optional):</label>
+                                                            <input type="text" id="torrent-download-path"
+                                                                placeholder="leave blank for the shared-volume default">
+                                                            <div class="setting-help-text">
+                                                                Where <strong>SoulSync</strong> can read finished
+                                                                torrents — its own in-container path. Set this when your
+                                                                client saves to a category folder (e.g. a "Music"
+                                                                category at <code>/data/downloads/music</code>) that's
+                                                                mounted here at a different path. SoulSync finds the
+                                                                release by name under this folder. Blank = use the
+                                                                Soulseek download/transfer folders.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Minimum seeders:</label>
+                                                            <input type="number" id="torrent-min-seeders" min="0"
+                                                                step="1" placeholder="1">
+                                                            <div class="setting-help-text">
+                                                                Skip releases the indexer reports as having fewer
+                                                                seeders than this, instead of queueing something nobody
+                                                                is serving and waiting for it to time out. Releases that
+                                                                report <strong>no</strong> seeder count (usenet, and
+                                                                indexers that omit the field) are never skipped.
+                                                                <strong>0 disables</strong>.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Stalled torrent timeout (minutes):</label>
+                                                            <input type="number" id="torrent-stall-timeout" min="0"
+                                                                step="1" placeholder="10">
+                                                            <div class="setting-help-text">
+                                                                Give up on a torrent that makes <strong>zero download
+                                                                    progress</strong> for this long — a dead magnet
+                                                                stuck on "downloading metadata", or a swarm with no
+                                                                seeders. Without this, a dud torrent ties up a download
+                                                                slot for the full 6-hour limit. <strong>0
+                                                                    disables</strong> (wait the full limit).
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>When a torrent stalls:</label>
+                                                            <select id="torrent-stall-action" class="form-select">
+                                                                <option value="abandon">Abandon — remove it &amp; its
+                                                                    partial data, fail the download</option>
+                                                                <option value="pause">Pause — pause it in the client,
+                                                                    leave it for me</option>
+                                                            </select>
+                                                            <div class="setting-help-text">
+                                                                Abandon frees the slot so the next source can try. Pause
+                                                                keeps the torrent in your client so you can inspect or
+                                                                resume it manually.
+                                                            </div>
+                                                        </div>
+                                                        <!-- Seeding lifecycle — torrent grabs only. Music twin of the video side. -->
+                                                        <div class="form-group" id="music-seeding-goals">
+                                                            <label>Seeding goals (torrents):</label>
+                                                            <div
+                                                                style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                                                                <span class="settings-hint">Ratio</span>
+                                                                <input type="number" id="music-seed-ratio" min="0"
+                                                                    step="0.1" style="max-width:90px;" placeholder="0">
+                                                                <span class="settings-hint">or hours seeded</span>
+                                                                <input type="number" id="music-seed-hours" min="0"
+                                                                    step="1" style="max-width:90px;" placeholder="0">
+                                                                <label
+                                                                    style="display:flex; align-items:center; gap:6px; font-size:12.5px;">
+                                                                    <input type="checkbox" id="music-seed-remove-data"
+                                                                        checked> also delete the client's copy
+                                                                </label>
+                                                            </div>
+                                                            <div
+                                                                style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                                                                <span class="settings-hint">Enforced by</span>
+                                                                <select id="music-seed-mode" class="form-select"
+                                                                    style="max-width:260px;">
+                                                                    <option value="soulsync">SoulSync (watches the
+                                                                        client + removes)</option>
+                                                                    <option value="client">Torrent client (writes its
+                                                                        own seed limit)</option>
+                                                                </select>
+                                                            </div>
+                                                            <small class="settings-hint">Both at 0 = never remove (the
+                                                                old behavior). <strong>SoulSync</strong>: SS polls the
+                                                                client and removes when a goal is hit (your imported
+                                                                library copy is separate and never touched).
+                                                                <strong>Torrent client</strong>: SS writes the
+                                                                ratio/time limit into the client (arr-style) and lets it
+                                                                enforce — it shows up in the client's share-limit dialog
+                                                                and works even when SS is off.</small>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Status:</label>
+                                                            <div class="form-actions" style="margin-top: 4px;">
+                                                                <button class="test-button" id="torrent-client-test-btn"
+                                                                    onclick="testTorrentClientConnection()">
+                                                                    Test Connection
+                                                                </button>
+                                                                <span id="torrent-client-connection-status"
+                                                                    class="setting-help-text"
+                                                                    style="margin-left: 8px;"></span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
 
-  <!-- Video torrent seeding. Moved here from the video Downloads
+                                                <!-- Video torrent seeding. Moved here from the video Downloads
                                          tab: it configures what happens to a TORRENT after it
                                          finishes, so it belongs with the torrent client, not in a
                                          separate downloads page. Still data-video-only - the values
                                          live in the video db and video-settings.js owns them. -->
-  <div>
-    <div class="form-group" id="video-seeding-goals">
-      <label>Seeding goals (torrents):</label>
-      <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center">
-        <span class="settings-hint">Ratio</span>
-        <input
-          type="number"
-          id="video-seed-ratio"
-          min="0"
-          step="0.1"
-          style="max-width: 90px"
-          placeholder="0"
-        />
-        <span class="settings-hint">or hours seeded</span>
-        <input
-          type="number"
-          id="video-seed-hours"
-          min="0"
-          step="1"
-          style="max-width: 90px"
-          placeholder="0"
-        />
-        <label style="display: flex; align-items: center; gap: 6px; font-size: 12.5px">
-          <input type="checkbox" id="video-seed-remove-data" checked /> also delete the client's
-          copy
-        </label>
-      </div>
-      <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px">
-        <span class="settings-hint">Enforced by</span>
-        <select id="video-seed-mode" class="form-select" style="max-width: 260px">
-          <option value="soulsync">SoulSync (watches the client + removes)</option>
-          <option value="client">Torrent client (writes its own seed limit)</option>
-        </select>
-      </div>
-      <small class="settings-hint"
-        >Both at 0 = never remove (the old behavior). <strong>SoulSync</strong>: SS polls the client
-        and removes when a goal is hit (your imported library copy is separate and never touched).
-        <strong>Torrent client</strong>: SS writes the ratio/time limit into the client (arr-style)
-        and lets it enforce — it shows in the client's share-limit dialog and works even when SS is
-        off.</small
-      >
-      <div id="video-seed-per-indexer" style="margin-top: 12px">
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
-          <span class="settings-hint">Per-indexer overrides</span>
-          <button class="test-button" type="button" id="video-seed-idx-refresh">
-            Load indexers
-          </button>
-        </div>
-        <small class="settings-hint" style="display: block; margin: 6px 0 8px">
-          Sonarr/Radarr put seed rules on the indexer, not globally &mdash; a private tracker needs
-          a ratio or a week of seeding, a public one needs nothing. Leave a box
-          <strong>blank</strong> to inherit the goal above; type <strong>0</strong> to exempt that
-          tracker from it. <strong>Pack hrs</strong> is the longer window season packs get (blank =
-          same as Hours).
-        </small>
-        <div id="video-seed-idx-rows" class="ind-indexer-list">
-          <em class="settings-hint"
-            >Click Load indexers to list the torrent indexers from Prowlarr.</em
-          >
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+                                                <div>
+                                                    <div class="form-group" id="video-seeding-goals">
+                                                        <label>Seeding goals (torrents):</label>
+                                                        <div
+                                                            style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
+                                                            <span class="settings-hint">Ratio</span>
+                                                            <input type="number" id="video-seed-ratio" min="0"
+                                                                step="0.1" style="max-width:90px;" placeholder="0">
+                                                            <span class="settings-hint">or hours seeded</span>
+                                                            <input type="number" id="video-seed-hours" min="0" step="1"
+                                                                style="max-width:90px;" placeholder="0">
+                                                            <label
+                                                                style="display:flex; align-items:center; gap:6px; font-size:12.5px;">
+                                                                <input type="checkbox" id="video-seed-remove-data"
+                                                                    checked> also delete the client's copy
+                                                            </label>
+                                                        </div>
+                                                        <div
+                                                            style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                                                            <span class="settings-hint">Enforced by</span>
+                                                            <select id="video-seed-mode" class="form-select"
+                                                                style="max-width:260px;">
+                                                                <option value="soulsync">SoulSync (watches the client +
+                                                                    removes)</option>
+                                                                <option value="client">Torrent client (writes its own
+                                                                    seed limit)</option>
+                                                            </select>
+                                                        </div>
+                                                        <small class="settings-hint">Both at 0 = never remove (the old
+                                                            behavior). <strong>SoulSync</strong>: SS polls the client
+                                                            and removes when a goal is hit (your imported library copy
+                                                            is separate and never touched). <strong>Torrent
+                                                                client</strong>: SS writes the ratio/time limit into the
+                                                            client (arr-style) and lets it enforce — it shows in the
+                                                            client's share-limit dialog and works even when SS is
+                                                            off.</small>
+                                                        <div id="video-seed-per-indexer" style="margin-top:12px;">
+                                                            <div
+                                                                style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                                                <span class="settings-hint">Per-indexer overrides</span>
+                                                                <button class="test-button" type="button"
+                                                                    id="video-seed-idx-refresh">Load indexers</button>
+                                                            </div>
+                                                            <small class="settings-hint"
+                                                                style="display:block; margin:6px 0 8px;">
+                                                                Sonarr/Radarr put seed rules on the indexer, not
+                                                                globally &mdash; a private tracker needs a ratio or a
+                                                                week of seeding, a public one needs nothing.
+                                                                Leave a box <strong>blank</strong> to inherit the goal
+                                                                above; type <strong>0</strong> to exempt that tracker
+                                                                from it. <strong>Pack hrs</strong> is the longer window
+                                                                season packs get (blank = same as Hours).
+                                                            </small>
+                                                            <div id="video-seed-idx-rows" class="ind-indexer-list">
+                                                                <em class="settings-hint">Click Load indexers to list
+                                                                    the torrent indexers from Prowlarr.</em>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
 
-<!-- The usenet client.
+                                            <!-- The usenet client.
                                      Moved off the Downloads tab so every source is set up in one place.
                                      Shared with the video side, which downloads through these too. -->
-<div id="usenet-client-settings-container" class="src-config-panel">
-  <span
-    class="ind-status-dot ind-status-dot-unknown"
-    id="usenet-client-status-dot"
-    title="Not tested"
-  ></span>
-  <div class="settings-group">
-    <div class="api-service-frame">
-      <div class="setting-row" style="padding: 14px 18px">
-        <h4
-          class="service-title usenet-title"
-          style="padding: 0 !important; border: 0 !important; margin: 0 !important; flex: 1"
-        >
-          ⬢ Usenet Downloader
-        </h4>
-        <span
-          class="info-icon"
-          role="button"
-          tabindex="0"
-          title="What's this?"
-          onclick="toggleSettingHelp(this)"
-          onkeydown="
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              toggleSettingHelp(this);
-            }
-          "
-          >i</span
-        >
-      </div>
-      <div class="setting-help-text setting-help-body" style="margin-bottom: 14px" hidden>
-        Where SoulSync sends NZBs once Prowlarr finds them. Pick one usenet downloader. SABnzbd uses
-        an API key for auth; NZBGet uses a username + password.
-      </div>
-      <div class="form-group">
-        <label>Client Type:</label>
-        <select id="usenet-client-type" class="form-select" onchange="updateUsenetClientUI()">
-          <option value="sabnzbd">SABnzbd</option>
-          <option value="nzbget">NZBGet</option>
-        </select>
-        <div class="setting-help-text">
-          SABnzbd: default WebUI port 8080. NZBGet: default WebUI port 6789.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>WebUI URL:</label>
-        <input type="text" id="usenet-client-url" placeholder="http://localhost:8080" />
-      </div>
-      <div class="form-group" id="usenet-apikey-group">
-        <label>API Key:</label>
-        <input type="password" id="usenet-client-api-key" placeholder="SABnzbd API key" />
-        <div class="setting-help-text">
-          SABnzbd → Config → General → API Key. Used by SABnzbd only.
-        </div>
-      </div>
-      <div class="form-group" id="usenet-username-group" style="display: none">
-        <label>Username:</label>
-        <input type="text" id="usenet-client-username" placeholder="NZBGet WebUI username" />
-      </div>
-      <div class="form-group" id="usenet-password-group" style="display: none">
-        <label>Password:</label>
-        <input type="password" id="usenet-client-password" placeholder="NZBGet WebUI password" />
-      </div>
-      <div class="form-group">
-        <label>Category / Label:</label>
-        <input type="text" id="usenet-client-category" placeholder="soulsync" value="soulsync" />
-        <div class="setting-help-text">
-          SoulSync tags every NZB with this category so it ends up in a predictable post-processing
-          folder.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Completed Downloads Path — in SoulSync (optional):</label>
-        <input
-          type="text"
-          id="usenet-download-path"
-          placeholder="leave blank for the shared-volume default"
-        />
-        <div class="setting-help-text">
-          Where <strong>SoulSync</strong> can read finished NZB downloads — its own in-container
-          path. Set this when SABnzbd/NZBGet writes that category to a folder (e.g.
-          <code>/data/downloads/music</code>) mounted here at a different path. SoulSync finds the
-          release by name under this folder. Blank = use the Soulseek download/transfer folders.
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Status:</label>
-        <div class="form-actions" style="margin-top: 4px">
-          <button
-            class="test-button"
-            id="usenet-client-test-btn"
-            onclick="testUsenetClientConnection()"
-          >
-            Test Connection
-          </button>
-          <span
-            id="usenet-client-connection-status"
-            class="setting-help-text"
-            style="margin-left: 8px"
-          ></span>
-        </div>
-      </div>
-      <!-- Remove Completed: what happens to a usenet job once
+                                            <div id="usenet-client-settings-container" class="src-config-panel">
+                                                <span class="ind-status-dot ind-status-dot-unknown"
+                                                    id="usenet-client-status-dot" title="Not tested"></span>
+                                                <div class="settings-group">
+                                                    <div class="api-service-frame">
+                                                        <div class="setting-row" style="padding:14px 18px;">
+                                                            <h4 class="service-title usenet-title"
+                                                                style="padding:0!important;border:0!important;margin:0!important;flex:1;">
+                                                                ⬢ Usenet Downloader</h4>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-text setting-help-body"
+                                                            style="margin-bottom: 14px;" hidden>
+                                                            Where SoulSync sends NZBs once Prowlarr finds them. Pick one
+                                                            usenet downloader. SABnzbd uses an API key for auth; NZBGet
+                                                            uses a username + password.
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Client Type:</label>
+                                                            <select id="usenet-client-type" class="form-select"
+                                                                onchange="updateUsenetClientUI()">
+                                                                <option value="sabnzbd">SABnzbd</option>
+                                                                <option value="nzbget">NZBGet</option>
+                                                            </select>
+                                                            <div class="setting-help-text">
+                                                                SABnzbd: default WebUI port 8080. NZBGet: default WebUI
+                                                                port 6789.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>WebUI URL:</label>
+                                                            <input type="text" id="usenet-client-url"
+                                                                placeholder="http://localhost:8080">
+                                                        </div>
+                                                        <div class="form-group" id="usenet-apikey-group">
+                                                            <label>API Key:</label>
+                                                            <input type="password" id="usenet-client-api-key"
+                                                                placeholder="SABnzbd API key">
+                                                            <div class="setting-help-text">
+                                                                SABnzbd → Config → General → API Key. Used by SABnzbd
+                                                                only.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group" id="usenet-username-group"
+                                                            style="display: none;">
+                                                            <label>Username:</label>
+                                                            <input type="text" id="usenet-client-username"
+                                                                placeholder="NZBGet WebUI username">
+                                                        </div>
+                                                        <div class="form-group" id="usenet-password-group"
+                                                            style="display: none;">
+                                                            <label>Password:</label>
+                                                            <input type="password" id="usenet-client-password"
+                                                                placeholder="NZBGet WebUI password">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Category / Label:</label>
+                                                            <input type="text" id="usenet-client-category"
+                                                                placeholder="soulsync" value="soulsync">
+                                                            <div class="setting-help-text">
+                                                                SoulSync tags every NZB with this category so it ends up
+                                                                in a predictable post-processing folder.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Completed Downloads Path — in SoulSync
+                                                                (optional):</label>
+                                                            <input type="text" id="usenet-download-path"
+                                                                placeholder="leave blank for the shared-volume default">
+                                                            <div class="setting-help-text">
+                                                                Where <strong>SoulSync</strong> can read finished NZB
+                                                                downloads — its own in-container path. Set this when
+                                                                SABnzbd/NZBGet writes that category to a folder (e.g.
+                                                                <code>/data/downloads/music</code>) mounted here at a
+                                                                different path. SoulSync finds the release by name under
+                                                                this folder. Blank = use the Soulseek download/transfer
+                                                                folders.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Status:</label>
+                                                            <div class="form-actions" style="margin-top: 4px;">
+                                                                <button class="test-button" id="usenet-client-test-btn"
+                                                                    onclick="testUsenetClientConnection()">
+                                                                    Test Connection
+                                                                </button>
+                                                                <span id="usenet-client-connection-status"
+                                                                    class="setting-help-text"
+                                                                    style="margin-left: 8px;"></span>
+                                                            </div>
+                                                        </div>
+                                                        <!-- Remove Completed: what happens to a usenet job once
                                          its import has landed. Shown on both sides like the
                                          seeding goals (the Sources tab carries no side gating);
                                          the music value lives in config (usenet_client.remove_completed,
                                          settings.js), the video value in the video db (video-settings.js). -->
-      <div class="form-group" id="music-usenet-remove-completed-group">
-        <label>When a usenet download has imported (music):</label>
-        <select id="music-usenet-remove-completed" class="form-select">
-          <option value="off">Leave it in the client</option>
-          <option value="history">Remove it from the client's history</option>
-          <option value="files">Remove it and delete what's left in its folder</option>
-        </select>
-        <div class="setting-help-text">
-          Music grabs copy the audio out, so without this the whole release stays in your client's
-          completed folder. Only downloads SoulSync has imported are touched: an album goes once
-          every track in it imported, and a failed or unmatched download stays for you.
-        </div>
-      </div>
-      <div class="form-group" id="video-usenet-remove-completed-group">
-        <label>When a usenet download has imported (video):</label>
-        <select id="video-usenet-remove-completed" class="form-select">
-          <option value="off">Leave it in the client</option>
-          <option value="history">Remove it from the client's history</option>
-          <option value="files">Remove it and delete what's left in its folder</option>
-        </select>
-        <div class="setting-help-text">
-          SoulSync already clears the file it imported; this also takes the job out of the client
-          and, with the last option, deletes what it left behind (nfo, sample). Failed and
-          import-failed downloads keep their job for Manual import, and a season pack only goes when
-          every episode in it imported.
-        </div>
-      </div>
-      <!-- A video release the client failed: block it and grab the
+                                                        <div class="form-group" id="music-usenet-remove-completed-group">
+                                                            <label>When a usenet download has imported (music):</label>
+                                                            <select id="music-usenet-remove-completed"
+                                                                class="form-select">
+                                                                <option value="off">Leave it in the client</option>
+                                                                <option value="history">Remove it from the client's
+                                                                    history</option>
+                                                                <option value="files">Remove it and delete what's left
+                                                                    in its folder</option>
+                                                            </select>
+                                                            <div class="setting-help-text">
+                                                                Music grabs copy the audio out, so without this the whole
+                                                                release stays in your client's completed folder. Only
+                                                                downloads SoulSync has imported are touched: an album goes
+                                                                once every track in it imported, and a failed or unmatched
+                                                                download stays for you.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group" id="video-usenet-remove-completed-group">
+                                                            <label>When a usenet download has imported (video):</label>
+                                                            <select id="video-usenet-remove-completed"
+                                                                class="form-select">
+                                                                <option value="off">Leave it in the client</option>
+                                                                <option value="history">Remove it from the client's
+                                                                    history</option>
+                                                                <option value="files">Remove it and delete what's left
+                                                                    in its folder</option>
+                                                            </select>
+                                                            <div class="setting-help-text">
+                                                                SoulSync already clears the file it imported; this also
+                                                                takes the job out of the client and, with the last option,
+                                                                deletes what it left behind (nfo, sample). Failed and import-failed
+                                                                downloads keep their job for Manual import, and a season
+                                                                pack only goes when every episode in it imported.
+                                                            </div>
+                                                        </div>
+                                                        <!-- A video release the client failed: block it and grab the
                                          next one the profile ranks (core/video/download_monitor.py,
                                          redownload_failed in the video db). -->
-      <div class="form-group" id="video-redownload-failed-group">
-        <label class="checkbox-label">
-          <input type="checkbox" id="video-redownload-failed" checked />
-          When a video download fails, grab the next best release
-        </label>
-        <div class="setting-help-text">
-          When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, that
-          release is blocklisted and the next one your quality profile ranks is grabbed right away.
-          It stops after 5 failed releases of the same title in 2 days, and you get the failed
-          notification when nothing else could be taken.
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+                                                        <div class="form-group" id="video-redownload-failed-group">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="video-redownload-failed" checked>
+                                                                When a video download fails, grab the next best release
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                When SABnzbd or the torrent client fails a movie or episode,
+                                                                or a torrent stalls, that release is blocklisted and the next
+                                                                one your quality profile ranks is grabbed right away. It stops
+                                                                after 5 failed releases of the same title in 2 days, and you
+                                                                get the failed notification when nothing else could be taken.
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>

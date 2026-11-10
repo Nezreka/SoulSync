@@ -1,33 +1,22 @@
-<div
-  class="settings-section-header collapsed"
-  data-stg="advanced"
-  onclick="
-    this.classList.toggle('collapsed');
-    const b = this.nextElementSibling;
-    b.classList.toggle('collapsed');
-    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
-  "
-  role="button"
-  tabindex="0"
-  aria-expanded="false"
->
-  <span class="settings-section-arrow">&#9660;</span>
-  <h3>Saving</h3>
-  <span class="settings-section-hint">Autosave</span>
-</div>
-<div class="settings-section-body collapsed" data-stg="advanced">
-  <div class="settings-group" data-stg="advanced">
-    <div class="form-group">
-      <label class="checkbox-label">
-        <input type="checkbox" id="settings-autosave-enabled" checked />
-        Save settings as I change them
-      </label>
-      <small class="settings-hint"
-        >On by default. Turn it off and your changes wait until you click the save button at the top
-        of the page. Leaving Settings without saving drops them. Test and Connect buttons still save
-        first, and video-only settings always save on change.</small
-      >
-    </div>
-  </div>
-</div>
-<!-- end Saving body -->
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Saving</h3>
+                                        <span class="settings-section-hint">Autosave</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group" data-stg="advanced">
+                                            <div class="form-group">
+                                                <label class="checkbox-label">
+                                                    <input type="checkbox" id="settings-autosave-enabled" checked>
+                                                    Save settings as I change them
+                                                </label>
+                                                <small class="settings-hint">On by default. Turn it off and your
+                                                    changes wait until you click the save button at the top of the
+                                                    page. Leaving Settings without saving drops them. Test and
+                                                    Connect buttons still save first, and video-only settings always
+                                                    save on change.</small>
+                                            </div>
+                                        </div>
+                                    </div><!-- end Saving body -->

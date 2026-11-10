@@ -1,367 +1,315 @@
-<!-- Spotify Settings -->
-<div class="api-service-frame stg-service" data-service="spotify">
-  <div class="stg-service-header" onclick="toggleStgService(this)">
-    <span class="stg-service-dot" style="color: #1db954"></span>
-    <h4 class="service-title spotify-title">Spotify</h4>
-    <span class="stg-service-chevron">›</span>
-  </div>
-  <div class="stg-service-body">
-    <div class="form-group">
-      <label>Client ID:</label>
-      <input type="text" id="spotify-client-id" placeholder="Spotify Client ID" />
-    </div>
-    <div class="form-group">
-      <label>Client Secret:</label>
-      <input type="password" id="spotify-client-secret" placeholder="Spotify Client Secret" />
-    </div>
-    <div class="form-group">
-      <label>Redirect URI:</label>
-      <input type="text" id="spotify-redirect-uri" placeholder="http://127.0.0.1:8888/callback" />
-    </div>
-    <div class="callback-info">
-      <div class="callback-label">Current Redirect URI:</div>
-      <div class="callback-url" id="spotify-callback-display">http://127.0.0.1:8888/callback</div>
-      <div class="callback-help">
-        Add this URL to your Spotify app's 'Redirect URIs' in the Spotify Developer Dashboard.
-        Spotify requires HTTPS for any URI that isn't loopback — on a NAS or remote server, enter an
-        HTTPS proxy URL in the Redirect URI field above instead (see Help &amp; Docs → Getting
-        Started).
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="auth-button" onclick="authenticateSpotify()">🔐 Authenticate</button>
-      <button
-        class="auth-button disconnect-button"
-        id="spotify-disconnect-btn"
-        onclick="disconnectSpotify()"
-        style="display: none"
-      >
-        🔌 Disconnect
-      </button>
-      <button class="test-button" type="button" onclick="testConnection('spotify')">
-        Test Connection
-      </button>
-    </div>
-    <div
-      class="form-group"
-      style="margin-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 14px"
-    >
-      <div class="setting-row" style="flex: 1; min-width: 0">
-        <label
-          style="
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            font-weight: normal;
-            margin: 0;
-          "
-        >
-          <input type="checkbox" id="metadata-spotify-free-enrichment" />
-          <span>Use Spotify (no auth) for background enrichment</span>
-        </label>
-        <span
-          class="info-icon"
-          role="button"
-          tabindex="0"
-          title="What's this?"
-          onclick="toggleSettingHelp(this)"
-          onkeydown="
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              toggleSettingHelp(this);
-            }
-          "
-          >i</span
-        >
-      </div>
-      <div class="setting-help-text setting-help-body" hidden>
-        Runs the background metadata enrichment worker on the no-auth Spotify source instead of this
-        connected account — keeping bulk enrichment off your official API quota (and dodging
-        rate-limit bans), so your account is reserved for interactive search and playlist sync.
-        <strong>On by default.</strong> Turn off to enrich through your connected account instead.
-        Works even with no account connected. Note: the no-auth source can't supply artist genres.
-      </div>
-    </div>
-  </div>
-</div>
+                                        <!-- Spotify Settings -->
+                                        <div class="api-service-frame stg-service" data-service="spotify">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #1DB954;"></span>
+                                                <h4 class="service-title spotify-title">Spotify</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>Client ID:</label>
+                                                    <input type="text" id="spotify-client-id"
+                                                        placeholder="Spotify Client ID">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Client Secret:</label>
+                                                    <input type="password" id="spotify-client-secret"
+                                                        placeholder="Spotify Client Secret">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Redirect URI:</label>
+                                                    <input type="text" id="spotify-redirect-uri"
+                                                        placeholder="http://127.0.0.1:8888/callback">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-label">Current Redirect URI:</div>
+                                                    <div class="callback-url" id="spotify-callback-display">
+                                                        http://127.0.0.1:8888/callback</div>
+                                                    <div class="callback-help">Add this URL to your Spotify app's
+                                                        'Redirect URIs' in
+                                                        the Spotify Developer Dashboard. Spotify requires
+                                                        HTTPS for any URI that isn't loopback — on a NAS or
+                                                        remote server, enter an HTTPS proxy URL in the
+                                                        Redirect URI field above instead
+                                                        (see Help &amp; Docs → Getting Started).</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="auth-button" onclick="authenticateSpotify()">🔐
+                                                        Authenticate</button>
+                                                    <button class="auth-button disconnect-button"
+                                                        id="spotify-disconnect-btn" onclick="disconnectSpotify()"
+                                                        style="display: none;">🔌
+                                                        Disconnect</button>
+                                                    <button class="test-button" type="button" onclick="testConnection('spotify')">Test Connection</button>
+                                                </div>
+                                                <div class="form-group"
+                                                    style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
+                                                    <div class="setting-row" style="flex:1;min-width:0;">
+                                                        <label
+                                                            style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; margin:0;">
+                                                            <input type="checkbox"
+                                                                id="metadata-spotify-free-enrichment">
+                                                            <span>Use Spotify (no auth) for background enrichment</span>
+                                                        </label>
+                                                        <span class="info-icon" role="button" tabindex="0"
+                                                            title="What's this?" onclick="toggleSettingHelp(this)"
+                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    </div>
+                                                    <div class="setting-help-text setting-help-body" hidden>Runs the
+                                                        background metadata enrichment worker on the no-auth Spotify
+                                                        source instead of this connected account — keeping bulk
+                                                        enrichment off your official API quota (and dodging rate-limit
+                                                        bans), so your account is reserved for interactive search and
+                                                        playlist sync. <strong>On by default.</strong> Turn off to
+                                                        enrich through your connected account instead. Works even with
+                                                        no account connected. Note: the no-auth source can't supply
+                                                        artist genres.</div>
+                                                </div>
+                                            </div>
+                                        </div>
 
-<!-- iTunes Settings -->
-<div class="api-service-frame stg-service" data-service="itunes">
-  <div class="stg-service-header" onclick="toggleStgService(this)">
-    <span class="stg-service-dot" style="color: #fc3c44"></span>
-    <h4 class="service-title itunes-title">iTunes / Apple Music</h4>
-    <span class="stg-service-chevron">›</span>
-  </div>
-  <div class="stg-service-body">
-    <div class="form-group">
-      <label>Storefront Country:</label>
-      <select id="itunes-country">
-        <option value="US">United States (US)</option>
-        <option value="GB">United Kingdom (GB)</option>
-        <option value="CA">Canada (CA)</option>
-        <option value="AU">Australia (AU)</option>
-        <option value="DE">Germany (DE)</option>
-        <option value="FR">France (FR)</option>
-        <option value="JP">Japan (JP)</option>
-        <option value="KR">South Korea (KR)</option>
-        <option value="BR">Brazil (BR)</option>
-        <option value="SE">Sweden (SE)</option>
-        <option value="NL">Netherlands (NL)</option>
-        <option value="IT">Italy (IT)</option>
-        <option value="ES">Spain (ES)</option>
-        <option value="MX">Mexico (MX)</option>
-        <option value="IN">India (IN)</option>
-        <option value="RU">Russia (RU)</option>
-      </select>
-    </div>
-    <div class="callback-info">
-      <div class="callback-help">
-        Sets the primary Apple Music storefront. Region-specific albums are auto-searched across
-        other storefronts as fallback.
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="test-button" type="button" onclick="testConnection('itunes')">
-        Test Connection
-      </button>
-    </div>
-  </div>
-</div>
+                                        <!-- iTunes Settings -->
+                                        <div class="api-service-frame stg-service" data-service="itunes">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #fc3c44;"></span>
+                                                <h4 class="service-title itunes-title">iTunes / Apple Music</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>Storefront Country:</label>
+                                                    <select id="itunes-country">
+                                                        <option value="US">United States (US)</option>
+                                                        <option value="GB">United Kingdom (GB)</option>
+                                                        <option value="CA">Canada (CA)</option>
+                                                        <option value="AU">Australia (AU)</option>
+                                                        <option value="DE">Germany (DE)</option>
+                                                        <option value="FR">France (FR)</option>
+                                                        <option value="JP">Japan (JP)</option>
+                                                        <option value="KR">South Korea (KR)</option>
+                                                        <option value="BR">Brazil (BR)</option>
+                                                        <option value="SE">Sweden (SE)</option>
+                                                        <option value="NL">Netherlands (NL)</option>
+                                                        <option value="IT">Italy (IT)</option>
+                                                        <option value="ES">Spain (ES)</option>
+                                                        <option value="MX">Mexico (MX)</option>
+                                                        <option value="IN">India (IN)</option>
+                                                        <option value="RU">Russia (RU)</option>
+                                                    </select>
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">Sets the primary Apple Music storefront.
+                                                        Region-specific albums are auto-searched across other
+                                                        storefronts as fallback.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('itunes')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
 
-<!-- Deezer OAuth Auth -->
-<div class="api-service-frame stg-service" data-service="deezer">
-  <div class="stg-service-header" onclick="toggleStgService(this)">
-    <span class="stg-service-dot" style="color: #a238ff"></span>
-    <h4 class="service-title deezer-title">Deezer (Favorites & Playlists)</h4>
-    <span class="stg-service-chevron">›</span>
-  </div>
-  <div class="stg-service-body">
-    <div class="form-group">
-      <label>App ID:</label>
-      <input type="text" id="deezer-app-id" placeholder="Deezer App ID" />
-    </div>
-    <div class="form-group">
-      <label>App Secret:</label>
-      <input type="password" id="deezer-app-secret" placeholder="Deezer App Secret" />
-    </div>
-    <div class="form-group">
-      <label>Redirect URI:</label>
-      <input
-        type="text"
-        id="deezer-redirect-uri"
-        placeholder="http://127.0.0.1:8008/deezer/callback"
-      />
-    </div>
-    <div class="callback-info">
-      <div class="callback-label">Current Redirect URI:</div>
-      <div class="callback-url" id="deezer-callback-display">
-        http://127.0.0.1:8008/deezer/callback
-      </div>
-      <div class="callback-help">Add this URL to your Deezer app at developers.deezer.com</div>
-    </div>
-    <div class="form-actions">
-      <button class="auth-button" onclick="authenticateDeezer()">🔐 Authenticate</button>
-    </div>
-    <div
-      class="callback-info"
-      style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 10px"
-    >
-      <div class="callback-help" style="margin-bottom: 8px">
-        Or use an <strong>ARL token</strong> for playlist access and downloads (no OAuth app
-        needed):
-      </div>
-    </div>
-    <div class="form-group">
-      <label>ARL Token:</label>
-      <input
-        type="password"
-        id="deezer-connection-arl"
-        placeholder="Paste your ARL cookie token here"
-      />
-    </div>
-    <div class="callback-info">
-      <div class="callback-help">
-        Log into
-        <a href="https://www.deezer.com" target="_blank" style="color: #a238ff">deezer.com</a>
-        → DevTools (F12) → Application → Cookies → copy the
-        <code>arl</code> value. Provides playlist access + downloads.
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="test-button" type="button" onclick="testDeezerConnection()">
-        Test Connection
-      </button>
-    </div>
-  </div>
-</div>
+                                        <!-- Deezer OAuth Auth -->
+                                        <div class="api-service-frame stg-service" data-service="deezer">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #A238FF;"></span>
+                                                <h4 class="service-title deezer-title">Deezer (Favorites & Playlists)
+                                                </h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>App ID:</label>
+                                                    <input type="text" id="deezer-app-id" placeholder="Deezer App ID">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>App Secret:</label>
+                                                    <input type="password" id="deezer-app-secret"
+                                                        placeholder="Deezer App Secret">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Redirect URI:</label>
+                                                    <input type="text" id="deezer-redirect-uri"
+                                                        placeholder="http://127.0.0.1:8008/deezer/callback">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-label">Current Redirect URI:</div>
+                                                    <div class="callback-url" id="deezer-callback-display">
+                                                        http://127.0.0.1:8008/deezer/callback</div>
+                                                    <div class="callback-help">Add this URL to your Deezer app at
+                                                        developers.deezer.com</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="auth-button" onclick="authenticateDeezer()">🔐
+                                                        Authenticate</button>
+                                                </div>
+                                                <div class="callback-info"
+                                                    style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
+                                                    <div class="callback-help" style="margin-bottom: 8px;">Or use an
+                                                        <strong>ARL token</strong> for playlist access and downloads (no
+                                                        OAuth app needed):</div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>ARL Token:</label>
+                                                    <input type="password" id="deezer-connection-arl"
+                                                        placeholder="Paste your ARL cookie token here">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">Log into <a href="https://www.deezer.com"
+                                                            target="_blank" style="color: #A238FF;">deezer.com</a>
+                                                        → DevTools (F12) → Application → Cookies → copy the
+                                                        <code>arl</code> value. Provides playlist access + downloads.
+                                                    </div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testDeezerConnection()">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
 
-<!-- Discogs Settings -->
-<div class="api-service-frame stg-service" data-service="discogs">
-  <div class="stg-service-header" onclick="toggleStgService(this)">
-    <span class="stg-service-dot" style="color: #e0d4b8"></span>
-    <h4 class="service-title">Discogs</h4>
-    <span class="stg-service-chevron">›</span>
-  </div>
-  <div class="stg-service-body">
-    <div class="form-group">
-      <label>Personal Access Token:</label>
-      <input type="password" id="discogs-token" placeholder="Discogs Personal Access Token" />
-    </div>
-    <div class="callback-info">
-      <div class="callback-help">
-        Get your free token from
-        <a href="https://www.discogs.com/settings/developers" target="_blank" style="color: #ffff64"
-          >Discogs Developer Settings</a
-        >
-      </div>
-      <div class="callback-help">
-        Click "Generate new token" — no app registration needed. Provides 60 req/min and cover art
-        in search results.
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="test-button" type="button" onclick="testConnection('discogs')">
-        Test Connection
-      </button>
-    </div>
-  </div>
-</div>
+                                        <!-- Discogs Settings -->
+                                        <div class="api-service-frame stg-service" data-service="discogs">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #e0d4b8;"></span>
+                                                <h4 class="service-title">Discogs</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>Personal Access Token:</label>
+                                                    <input type="password" id="discogs-token"
+                                                        placeholder="Discogs Personal Access Token">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">Get your free token from <a
+                                                            href="https://www.discogs.com/settings/developers"
+                                                            target="_blank" style="color: #ffff64;">Discogs Developer
+                                                            Settings</a></div>
+                                                    <div class="callback-help">Click "Generate new token" — no app
+                                                        registration needed. Provides 60 req/min and cover art in search
+                                                        results.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('discogs')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
 
-<!-- Tidal Playlist/Metadata Auth -->
-<div class="api-service-frame stg-service" data-service="tidal">
-  <div class="stg-service-header" onclick="toggleStgService(this)">
-    <span class="stg-service-dot" style="color: #ff6600"></span>
-    <h4 class="service-title tidal-title">Tidal (Playlists & Metadata)</h4>
-    <span class="stg-service-chevron">›</span>
-  </div>
-  <div class="stg-service-body">
-    <div class="form-group">
-      <label>Client ID:</label>
-      <input type="text" id="tidal-client-id" placeholder="Tidal Client ID" />
-    </div>
-    <div class="form-group">
-      <label>Client Secret:</label>
-      <input type="password" id="tidal-client-secret" placeholder="Tidal Client Secret" />
-    </div>
-    <div class="form-group">
-      <label>Redirect URI:</label>
-      <input
-        type="text"
-        id="tidal-redirect-uri"
-        placeholder="http://127.0.0.1:8889/tidal/callback"
-      />
-    </div>
-    <div class="callback-info">
-      <div class="callback-label">Current Redirect URI:</div>
-      <div class="callback-url" id="tidal-callback-display">
-        http://127.0.0.1:8889/tidal/callback
-      </div>
-      <div class="callback-help">Add this URL to your Tidal app configuration</div>
-    </div>
-    <div class="form-actions">
-      <button class="auth-button" onclick="authenticateTidal()">🔐 Authenticate</button>
-      <button class="auth-button" onclick="disconnectTidal()" style="margin-left: 8px">
-        Disconnect
-      </button>
-      <button class="test-button" type="button" onclick="testConnection('tidal')">
-        Test Connection
-      </button>
-    </div>
-  </div>
-</div>
+                                        <!-- Tidal Playlist/Metadata Auth -->
+                                        <div class="api-service-frame stg-service" data-service="tidal">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #ff6600;"></span>
+                                                <h4 class="service-title tidal-title">Tidal (Playlists & Metadata)</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div class="form-group">
+                                                    <label>Client ID:</label>
+                                                    <input type="text" id="tidal-client-id"
+                                                        placeholder="Tidal Client ID">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Client Secret:</label>
+                                                    <input type="password" id="tidal-client-secret"
+                                                        placeholder="Tidal Client Secret">
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Redirect URI:</label>
+                                                    <input type="text" id="tidal-redirect-uri"
+                                                        placeholder="http://127.0.0.1:8889/tidal/callback">
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-label">Current Redirect URI:</div>
+                                                    <div class="callback-url" id="tidal-callback-display">
+                                                        http://127.0.0.1:8889/tidal/callback</div>
+                                                    <div class="callback-help">Add this URL to your Tidal app
+                                                        configuration</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="auth-button" onclick="authenticateTidal()">🔐
+                                                        Authenticate</button>
+                                                    <button class="auth-button" onclick="disconnectTidal()"
+                                                        style="margin-left: 8px;">
+                                                        Disconnect</button>
+                                                    <button class="test-button" type="button" onclick="testConnection('tidal')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
 
-<!-- Qobuz Metadata/Enrichment Auth -->
-<div class="api-service-frame stg-service" data-service="qobuz">
-  <div class="stg-service-header" onclick="toggleStgService(this)">
-    <span class="stg-service-dot" style="color: #4285f4"></span>
-    <h4 class="service-title qobuz-title">Qobuz (Metadata & Enrichment)</h4>
-    <span class="stg-service-chevron">›</span>
-  </div>
-  <div class="stg-service-body">
-    <div id="qobuz-connection-logged-in" style="display: none; margin-bottom: 8px">
-      <span id="qobuz-connection-user-info" class="setting-help-text" style="color: #4caf50"></span>
-      <button class="auth-button" onclick="logoutQobuz()" style="margin-left: 8px">
-        Disconnect
-      </button>
-    </div>
-    <div id="qobuz-connection-form">
-      <div class="form-group">
-        <label>Email:</label>
-        <input
-          type="email"
-          id="qobuz-connection-email"
-          class="form-input"
-          placeholder="Qobuz email"
-          autocomplete="email"
-        />
-      </div>
-      <div class="form-group">
-        <label>Password:</label>
-        <input
-          type="password"
-          id="qobuz-connection-password"
-          class="form-input"
-          placeholder="Qobuz password"
-          autocomplete="current-password"
-        />
-      </div>
-      <div class="form-actions">
-        <button
-          class="auth-button"
-          id="qobuz-connection-login-btn"
-          onclick="loginQobuzFromConnections()"
-        >
-          Connect Qobuz
-        </button>
-        <span
-          id="qobuz-connection-status"
-          class="setting-help-text"
-          style="margin-left: 8px"
-        ></span>
-      </div>
-    </div>
-    <div class="setting-help-text" style="margin-top: 6px">
-      Connects Qobuz for metadata enrichment (ISRC, labels, copyright). Also used for downloads if
-      Qobuz is your download source.
-    </div>
-    <div
-      class="callback-info"
-      style="margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.05); padding-top: 10px"
-    >
-      <div class="callback-help" style="margin-bottom: 8px">
-        <strong>Alternative: Auth Token</strong> — If email/password login fails (CAPTCHA), paste
-        your token directly:
-      </div>
-    </div>
-    <div class="form-group">
-      <label>Auth Token:</label>
-      <input
-        type="password"
-        id="qobuz-connection-token"
-        class="form-input"
-        placeholder="Paste your Qobuz auth token here"
-      />
-    </div>
-    <div class="form-actions">
-      <button class="auth-button" id="qobuz-token-login-btn" onclick="loginQobuzWithToken()">
-        Connect with Token
-      </button>
-      <span id="qobuz-token-status" class="setting-help-text" style="margin-left: 8px"></span>
-    </div>
-    <div class="callback-info">
-      <div class="callback-help">
-        To get your token: log into
-        <a href="https://play.qobuz.com" target="_blank" style="color: #4285f4">play.qobuz.com</a>
-        → DevTools (F12) → Network tab → find any request to
-        <code>www.qobuz.com/api.json</code>
-        → look in the request headers for <code>X-User-Auth-Token</code> → copy that value.
-      </div>
-    </div>
-    <div class="form-actions">
-      <button class="test-button" type="button" onclick="testConnection('qobuz')">
-        Test Connection
-      </button>
-    </div>
-  </div>
-</div>
+                                        <!-- Qobuz Metadata/Enrichment Auth -->
+                                        <div class="api-service-frame stg-service" data-service="qobuz">
+                                            <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                <span class="stg-service-dot" style="color: #4285f4;"></span>
+                                                <h4 class="service-title qobuz-title">Qobuz (Metadata & Enrichment)</h4>
+                                                <span class="stg-service-chevron">›</span>
+                                            </div>
+                                            <div class="stg-service-body">
+                                                <div id="qobuz-connection-logged-in"
+                                                    style="display: none; margin-bottom: 8px;">
+                                                    <span id="qobuz-connection-user-info" class="setting-help-text"
+                                                        style="color: #4caf50;"></span>
+                                                    <button class="auth-button" onclick="logoutQobuz()"
+                                                        style="margin-left: 8px;">
+                                                        Disconnect
+                                                    </button>
+                                                </div>
+                                                <div id="qobuz-connection-form">
+                                                    <div class="form-group">
+                                                        <label>Email:</label>
+                                                        <input type="email" id="qobuz-connection-email"
+                                                            class="form-input" placeholder="Qobuz email"
+                                                            autocomplete="email">
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Password:</label>
+                                                        <input type="password" id="qobuz-connection-password"
+                                                            class="form-input" placeholder="Qobuz password"
+                                                            autocomplete="current-password">
+                                                    </div>
+                                                    <div class="form-actions">
+                                                        <button class="auth-button" id="qobuz-connection-login-btn"
+                                                            onclick="loginQobuzFromConnections()">
+                                                            Connect Qobuz
+                                                        </button>
+                                                        <span id="qobuz-connection-status" class="setting-help-text"
+                                                            style="margin-left: 8px;"></span>
+                                                    </div>
+                                                </div>
+                                                <div class="setting-help-text" style="margin-top: 6px;">
+                                                    Connects Qobuz for metadata enrichment (ISRC, labels, copyright).
+                                                    Also used for downloads if Qobuz is your download source.
+                                                </div>
+                                                <div class="callback-info"
+                                                    style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px;">
+                                                    <div class="callback-help" style="margin-bottom: 8px;">
+                                                        <strong>Alternative: Auth Token</strong> — If email/password
+                                                        login fails (CAPTCHA), paste your token directly:</div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>Auth Token:</label>
+                                                    <input type="password" id="qobuz-connection-token"
+                                                        class="form-input"
+                                                        placeholder="Paste your Qobuz auth token here">
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="auth-button" id="qobuz-token-login-btn"
+                                                        onclick="loginQobuzWithToken()">
+                                                        Connect with Token
+                                                    </button>
+                                                    <span id="qobuz-token-status" class="setting-help-text"
+                                                        style="margin-left: 8px;"></span>
+                                                </div>
+                                                <div class="callback-info">
+                                                    <div class="callback-help">To get your token: log into <a
+                                                            href="https://play.qobuz.com" target="_blank"
+                                                            style="color: #4285f4;">play.qobuz.com</a>
+                                                        → DevTools (F12) → Network tab → find any request to
+                                                        <code>www.qobuz.com/api.json</code>
+                                                        → look in the request headers for <code>X-User-Auth-Token</code>
+                                                        → copy that value.</div>
+                                                </div>
+                                                <div class="form-actions">
+                                                    <button class="test-button" type="button" onclick="testConnection('qobuz')">Test Connection</button>
+                                                </div>
+                                            </div>
+                                        </div>
+

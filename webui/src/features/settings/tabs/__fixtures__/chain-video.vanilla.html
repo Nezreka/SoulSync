@@ -1,154 +1,24 @@
 <div id="download-chain-widget">
-  <div class="dlchain-tabs" id="dlchain-tabs" role="tablist">
-    <button type="button" role="tab" class="dlchain-tab" onclick="switchDownloadChain('music')">
-      Music</button
-    ><button
-      type="button"
-      role="tab"
-      class="dlchain-tab active"
-      onclick="switchDownloadChain('video')"
-    >
-      Video</button
-    ><button
-      type="button"
-      role="tab"
-      class="dlchain-tab"
-      onclick="switchDownloadChain('audiobooks')"
-    >
-      Audiobooks
-    </button>
-  </div>
-  <div class="setting-help-text" id="dlchain-help">
-    Video downloads try each source in order, top first. These settings are the video side's own and
-    save immediately.
-  </div>
-  <div class="dlchain-columns">
-    <div class="dlchain-col">
-      <div class="dlchain-col-head">
-        <span class="dlchain-col-label">Available</span>
-        <span class="dlchain-col-hint">drag one across, or click it</span>
-        <input
-          type="search"
-          id="dlchain-filter"
-          class="dlchain-filter"
-          placeholder="Filter"
-          aria-label="Filter available sources"
-          oninput="dlchainFilter(this.value)"
-          autocomplete="off"
-        />
-      </div>
-      <div class="dlchain-pool" id="dlchain-pool">
-        <div class="dlchain-group">
-          <div class="dlchain-group-head">
-            <span class="dlchain-group-label">Peer-to-peer</span
-            ><span class="dlchain-group-count">1</span>
-          </div>
-          <div class="dlchain-group-row">
-            <button
-              type="button"
-              class="dlchain-tile"
-              draggable="true"
-              data-src="soulseek"
-              onclick="dlchainAdd('soulseek')"
-              title="Add Soulseek to the chain"
-            >
-              <span class="dlchain-tile-art"
-                ><img
-                  class="dlchain-mark"
-                  src="/static/img/brands/slskd.png"
-                  alt=""
-                  onerror="this.outerHTML='<span class='emoji-icon'>🎵</span>'" /></span
-              ><span class="dlchain-tile-name">Soulseek</span>
-            </button>
-          </div>
-        </div>
-        <div class="dlchain-group">
-          <div class="dlchain-group-head">
-            <span class="dlchain-group-label">Torrent &amp; Usenet</span
-            ><span class="dlchain-group-count">2</span>
-          </div>
-          <div class="dlchain-group-row">
-            <button
-              type="button"
-              class="dlchain-tile"
-              draggable="true"
-              data-src="torrent"
-              onclick="dlchainAdd('torrent')"
-              title="Add Torrent to the chain"
-            >
-              <span class="dlchain-tile-art"><span class="emoji-icon">🧲</span></span
-              ><span class="dlchain-tile-name">Torrent</span></button
-            ><button
-              type="button"
-              class="dlchain-tile"
-              draggable="true"
-              data-src="extto"
-              onclick="dlchainAdd('extto')"
-              title="Add External to the chain"
-            >
-              <span class="dlchain-tile-art"><span class="emoji-icon">🔗</span></span
-              ><span class="dlchain-tile-name">External</span>
-            </button>
-          </div>
-        </div>
-        <div class="dlchain-empty" id="dlchain-no-match" hidden="">Nothing matches that.</div>
-      </div>
-    </div>
-    <div class="dlchain-col">
-      <div class="dlchain-col-head">
-        <span class="dlchain-col-label">Download chain</span>
-        <span class="dlchain-col-hint" id="dlchain-mode-hint">single source</span>
-      </div>
-      <div class="dlchain-list" id="dlchain-list">
-        <div
-          class="dlchain-step"
-          draggable="true"
-          data-src="usenet"
-          title="Usenet - Tried first"
-          aria-label="Usenet, Tried first"
-        >
-          <span class="dlchain-grip" aria-hidden="true">⠿</span
-          ><span class="dlchain-step-rank">1</span
-          ><span class="dlchain-step-art"><span class="emoji-icon">📰</span></span
-          ><span class="dlchain-step-text"
-            ><span class="dlchain-step-name">Usenet</span
-            ><span class="dlchain-step-role">Tried first</span></span
-          ><span class="dlchain-step-move"
-            ><button
-              type="button"
-              class="dlchain-move"
-              title="Move Usenet up"
-              aria-label="Move Usenet up"
-              disabled=""
-              onclick="dlchainMove('usenet', -1)"
-            >
-              ▲</button
-            ><button
-              type="button"
-              class="dlchain-move"
-              title="Move Usenet down"
-              aria-label="Move Usenet down"
-              disabled=""
-              onclick="dlchainMove('usenet', 1)"
-            >
-              ▼
-            </button></span
-          ><button
-            type="button"
-            class="dlchain-btn"
-            title="Remove Usenet from the chain"
-            aria-label="Remove Usenet from the chain"
-            onclick="dlchainRemove('usenet')"
-          >
-            ×
-          </button>
-        </div>
-        <div class="dlchain-connector"></div>
-        <div class="dlchain-slot" id="dlchain-slot">
-          <span class="dlchain-slot-title">Drag a source here — tried after Usenet</span
-          ><span class="dlchain-slot-hint">It only runs if everything above it came up empty.</span>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
+                                                    <div class="dlchain-tabs" id="dlchain-tabs" role="tablist"><button type="button" role="tab" class="dlchain-tab" onclick="switchDownloadChain('music')">Music</button><button type="button" role="tab" class="dlchain-tab active" onclick="switchDownloadChain('video')">Video</button><button type="button" role="tab" class="dlchain-tab" onclick="switchDownloadChain('audiobooks')">Audiobooks</button></div>
+                                                    <div class="setting-help-text" id="dlchain-help">Video downloads try each source in order, top first. These settings are the video side's own and save immediately.</div>
+                                                    <div class="dlchain-columns">
+                                                        <div class="dlchain-col">
+                                                            <div class="dlchain-col-head">
+                                                                <span class="dlchain-col-label">Available</span>
+                                                                <span class="dlchain-col-hint">drag one across, or click it</span>
+                                                                <input type="search" id="dlchain-filter" class="dlchain-filter" placeholder="Filter" aria-label="Filter available sources" oninput="dlchainFilter(this.value)" autocomplete="off">
+                                                            </div>
+                                                            <div class="dlchain-pool" id="dlchain-pool"><div class="dlchain-group"><div class="dlchain-group-head"><span class="dlchain-group-label">Peer-to-peer</span><span class="dlchain-group-count">1</span></div><div class="dlchain-group-row"><button type="button" class="dlchain-tile" draggable="true" data-src="soulseek" onclick="dlchainAdd('soulseek')" title="Add Soulseek to the chain"><span class="dlchain-tile-art"><img class="dlchain-mark" src="/static/img/brands/slskd.png" alt="" onerror="this.outerHTML='<span class='emoji-icon'>🎵</span>'"></span><span class="dlchain-tile-name">Soulseek</span></button></div></div><div class="dlchain-group"><div class="dlchain-group-head"><span class="dlchain-group-label">Torrent &amp; Usenet</span><span class="dlchain-group-count">2</span></div><div class="dlchain-group-row"><button type="button" class="dlchain-tile" draggable="true" data-src="torrent" onclick="dlchainAdd('torrent')" title="Add Torrent to the chain"><span class="dlchain-tile-art"><span class="emoji-icon">🧲</span></span><span class="dlchain-tile-name">Torrent</span></button><button type="button" class="dlchain-tile" draggable="true" data-src="extto" onclick="dlchainAdd('extto')" title="Add External to the chain"><span class="dlchain-tile-art"><span class="emoji-icon">🔗</span></span><span class="dlchain-tile-name">External</span></button></div></div><div class="dlchain-empty" id="dlchain-no-match" hidden="">Nothing matches that.</div></div>
+
+                                                        </div>
+                                                        <div class="dlchain-col">
+                                                            <div class="dlchain-col-head">
+                                                                <span class="dlchain-col-label">Download chain</span>
+                                                                <span class="dlchain-col-hint" id="dlchain-mode-hint">single source</span>
+                                                            </div>
+                                                            <div class="dlchain-list" id="dlchain-list"><div class="dlchain-step" draggable="true" data-src="usenet" title="Usenet - Tried first" aria-label="Usenet, Tried first"><span class="dlchain-grip" aria-hidden="true">⠿</span><span class="dlchain-step-rank">1</span><span class="dlchain-step-art"><span class="emoji-icon">📰</span></span><span class="dlchain-step-text"><span class="dlchain-step-name">Usenet</span><span class="dlchain-step-role">Tried first</span></span><span class="dlchain-step-move"><button type="button" class="dlchain-move" title="Move Usenet up" aria-label="Move Usenet up" disabled="" onclick="dlchainMove('usenet', -1)">▲</button><button type="button" class="dlchain-move" title="Move Usenet down" aria-label="Move Usenet down" disabled="" onclick="dlchainMove('usenet', 1)">▼</button></span><button type="button" class="dlchain-btn" title="Remove Usenet from the chain" aria-label="Remove Usenet from the chain" onclick="dlchainRemove('usenet')">×</button></div><div class="dlchain-connector"></div><div class="dlchain-slot" id="dlchain-slot"><span class="dlchain-slot-title">Drag a source here — tried after Usenet</span><span class="dlchain-slot-hint">It only runs if everything above it came up empty.</span></div></div>
+                                                        </div>
+                                                    </div>
+
+
+                                                </div>

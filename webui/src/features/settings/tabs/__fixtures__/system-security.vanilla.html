@@ -1,500 +1,374 @@
-<div
-  class="settings-section-header collapsed"
-  data-stg="advanced"
-  onclick="
-    this.classList.toggle('collapsed');
-    const b = this.nextElementSibling;
-    b.classList.toggle('collapsed');
-    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
-  "
-  role="button"
-  tabindex="0"
-  aria-expanded="false"
->
-  <span class="settings-section-arrow">&#9660;</span>
-  <h3>Security &amp; Access</h3>
-  <span class="settings-section-hint">PIN · user accounts · reverse proxy</span>
-</div>
-<div class="settings-section-body collapsed" data-stg="advanced">
-  <div class="settings-group security-wrapper" data-stg="advanced">
-    <div class="setting-help-text" style="margin-bottom: 18px">
-      By default, anyone who can reach SoulSync on your network can use it. Protect access below
-      with a simple shared <strong>PIN</strong>, or full <strong>user accounts</strong> with
-      passwords — you only need one. The last group is just for exposing SoulSync over the internet.
-    </div>
+                                    <div class="settings-section-header collapsed" data-stg="advanced"
+                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                        role="button" tabindex="0" aria-expanded="false">
+                                        <span class="settings-section-arrow">&#9660;</span>
+                                        <h3>Security &amp; Access</h3>
+                                        <span class="settings-section-hint">PIN · user accounts · reverse proxy</span>
+                                    </div>
+                                    <div class="settings-section-body collapsed" data-stg="advanced">
+                                        <div class="settings-group security-wrapper" data-stg="advanced">
+                                            <div class="setting-help-text" style="margin-bottom: 18px;">
+                                                By default, anyone who can reach SoulSync on your network can use it.
+                                                Protect access below with a simple shared <strong>PIN</strong>, or full
+                                                <strong>user accounts</strong> with passwords — you only need one. The
+                                                last group is just for exposing SoulSync over the internet.
+                                            </div>
 
-    <!-- ── Method A: PIN ── -->
-    <div class="security-subgroup">
-      <h4 class="security-subhead">
-        🔑 Lock with a PIN <span class="security-subhead-note">simple · one shared PIN</span>
-      </h4>
+                                            <!-- ── Method A: PIN ── -->
+                                            <div class="security-subgroup">
+                                                <h4 class="security-subhead">🔑 Lock with a PIN <span
+                                                        class="security-subhead-note">simple · one shared PIN</span>
+                                                </h4>
 
-      <div class="form-group" id="security-pin-setup" style="display: none">
-        <label>Step 1 — Set admin PIN:</label>
-        <div class="setting-help-text" style="margin-bottom: 8px">
-          Set a PIN before you can turn on the lock screen.
-        </div>
-        <input
-          type="password"
-          id="security-new-pin"
-          placeholder="4 to 20 digits"
-          inputmode="numeric"
-          maxlength="20"
-          autocomplete="off"
-          style="margin-bottom: 6px"
-        />
-        <input
-          type="password"
-          id="security-confirm-pin"
-          inputmode="numeric"
-          placeholder="Confirm PIN"
-          maxlength="20"
-          autocomplete="off"
-          style="margin-bottom: 6px"
-        />
-        <button class="auth-button" id="security-save-pin-btn" onclick="saveSecurityPin()">
-          Save PIN
-        </button>
-        <p
-          id="security-pin-msg"
-          class="setting-help-text"
-          style="margin-top: 6px; display: none"
-        ></p>
-      </div>
+                                                <div class="form-group" id="security-pin-setup" style="display: none;">
+                                                    <label>Step 1 — Set admin PIN:</label>
+                                                    <div class="setting-help-text" style="margin-bottom: 8px;">
+                                                        Set a PIN before you can turn on the lock screen.
+                                                    </div>
+                                                    <input type="password" id="security-new-pin" placeholder="4 to 20 digits" inputmode="numeric"
+                                                        maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
+                                                    <input type="password" id="security-confirm-pin" inputmode="numeric"
+                                                        placeholder="Confirm PIN" maxlength="20" autocomplete="off"
+                                                        style="margin-bottom: 6px;">
+                                                    <button class="auth-button" id="security-save-pin-btn"
+                                                        onclick="saveSecurityPin()">Save PIN</button>
+                                                    <p id="security-pin-msg" class="setting-help-text"
+                                                        style="margin-top: 6px; display: none;"></p>
+                                                </div>
 
-      <div class="form-group">
-        <label class="toggle-label">
-          <input
-            type="checkbox"
-            id="security-require-pin"
-            onchange="handleSecurityPinToggle(this)"
-          />
-          <span>Require PIN to access SoulSync</span>
-        </label>
-        <div class="setting-help-text">
-          A lock screen appears on every page load, verified against the admin PIN. Closing the tab
-          requires re-entry.
-        </div>
-      </div>
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-require-pin"
+                                                            onchange="handleSecurityPinToggle(this)">
+                                                        <span>Require PIN to access SoulSync</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        A lock screen appears on every page load, verified against the
+                                                        admin PIN. Closing the tab requires re-entry.
+                                                    </div>
+                                                </div>
 
-      <div class="form-group" id="security-change-pin-section" style="display: none">
-        <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
-      </div>
-    </div>
+                                                <div class="form-group" id="security-change-pin-section"
+                                                    style="display: none;">
+                                                    <button class="auth-button" onclick="showChangeSecurityPin()">Change
+                                                        PIN</button>
+                                                </div>
+                                            </div>
 
-    <!-- ── Method B: Login accounts ── -->
-    <div class="security-subgroup">
-      <h4 class="security-subhead">
-        👤 User accounts (login)
-        <span class="security-subhead-note">per-person · best for public access</span>
-      </h4>
-      <div class="setting-help-text" style="margin-bottom: 12px">
-        Everyone signs in with their account name + password. Turning this on
-        <strong>replaces</strong> the PIN and the profile picker. Set passwords for other people in
-        <strong>Manage Profiles</strong>.
-      </div>
+                                            <!-- ── Method B: Login accounts ── -->
+                                            <div class="security-subgroup">
+                                                <h4 class="security-subhead">👤 User accounts (login) <span
+                                                        class="security-subhead-note">per-person · best for public
+                                                        access</span></h4>
+                                                <div class="setting-help-text" style="margin-bottom: 12px;">
+                                                    Everyone signs in with their account name + password. Turning this
+                                                    on <strong>replaces</strong> the PIN and the profile picker. Set
+                                                    passwords for other people in <strong>Manage Profiles</strong>.
+                                                </div>
 
-      <div class="form-group">
-        <label>Step 1 — Admin login password:</label>
-        <div
-          class="security-saved-status"
-          id="security-login-password-status"
-          style="display: none"
-        >
-          ✓ A login password is set
-        </div>
-        <input
-          type="password"
-          id="security-login-password"
-          placeholder="Enter password (min 6)"
-          maxlength="200"
-          autocomplete="new-password"
-          style="margin: 6px 0"
-        />
-        <input
-          type="password"
-          id="security-login-password-confirm"
-          placeholder="Confirm password"
-          maxlength="200"
-          autocomplete="new-password"
-          style="margin-bottom: 6px"
-        />
-        <button class="auth-button" onclick="saveLoginPassword()">Save Password</button>
-        <p
-          id="security-login-password-msg"
-          class="setting-help-text"
-          style="margin-top: 6px; display: none"
-        ></p>
-      </div>
+                                                <div class="form-group">
+                                                    <label>Step 1 — Admin login password:</label>
+                                                    <div class="security-saved-status"
+                                                        id="security-login-password-status" style="display:none;">✓ A
+                                                        login password is set</div>
+                                                    <input type="password" id="security-login-password"
+                                                        placeholder="Enter password (min 6)" maxlength="200"
+                                                        autocomplete="new-password" style="margin: 6px 0;">
+                                                    <input type="password" id="security-login-password-confirm"
+                                                        placeholder="Confirm password" maxlength="200"
+                                                        autocomplete="new-password" style="margin-bottom: 6px;">
+                                                    <button class="auth-button" onclick="saveLoginPassword()">Save
+                                                        Password</button>
+                                                    <p id="security-login-password-msg" class="setting-help-text"
+                                                        style="margin-top: 6px; display: none;"></p>
+                                                </div>
 
-      <div class="form-group">
-        <label
-          >Step 2 <span style="opacity: 0.6">(recommended)</span> — Password recovery
-          question:</label
-        >
-        <div class="setting-help-text" style="margin-bottom: 8px">
-          So you can reset a forgotten password by answering it on the sign-in screen.
-        </div>
-        <div
-          class="security-saved-status"
-          id="security-recovery-status"
-          style="display: none"
-        ></div>
-        <select
-          id="security-recovery-question"
-          class="form-select"
-          onchange="handleRecoveryQuestionChange()"
-          style="margin-bottom: 6px"
-        >
-          <option value="">— Select a question —</option>
-          <option>What was the name of your first pet?</option>
-          <option>What city were you born in?</option>
-          <option>What was your first concert?</option>
-          <option>What is your all-time favorite album?</option>
-          <option>What was the make of your first car?</option>
-          <option value="__custom__">Custom question…</option>
-        </select>
-        <input
-          type="text"
-          id="security-recovery-custom"
-          placeholder="Type your own question"
-          maxlength="120"
-          style="display: none; margin-bottom: 6px"
-        />
-        <input
-          type="text"
-          id="security-recovery-answer"
-          placeholder="Your answer"
-          maxlength="120"
-          autocomplete="off"
-          style="margin-bottom: 6px"
-        />
-        <button class="auth-button" onclick="saveRecoveryQuestion()">Save Recovery Question</button>
-        <p
-          id="security-recovery-msg"
-          class="setting-help-text"
-          style="margin-top: 6px; display: none"
-        ></p>
-      </div>
+                                                <div class="form-group">
+                                                    <label>Step 2 <span style="opacity:0.6">(recommended)</span> —
+                                                        Password recovery question:</label>
+                                                    <div class="setting-help-text" style="margin-bottom: 8px;">
+                                                        So you can reset a forgotten password by answering it on the
+                                                        sign-in screen.
+                                                    </div>
+                                                    <div class="security-saved-status" id="security-recovery-status"
+                                                        style="display:none;"></div>
+                                                    <select id="security-recovery-question" class="form-select"
+                                                        onchange="handleRecoveryQuestionChange()"
+                                                        style="margin-bottom: 6px;">
+                                                        <option value="">— Select a question —</option>
+                                                        <option>What was the name of your first pet?</option>
+                                                        <option>What city were you born in?</option>
+                                                        <option>What was your first concert?</option>
+                                                        <option>What is your all-time favorite album?</option>
+                                                        <option>What was the make of your first car?</option>
+                                                        <option value="__custom__">Custom question…</option>
+                                                    </select>
+                                                    <input type="text" id="security-recovery-custom"
+                                                        placeholder="Type your own question" maxlength="120"
+                                                        style="display:none; margin-bottom: 6px;">
+                                                    <input type="text" id="security-recovery-answer"
+                                                        placeholder="Your answer" maxlength="120" autocomplete="off"
+                                                        style="margin-bottom: 6px;">
+                                                    <button class="auth-button" onclick="saveRecoveryQuestion()">Save
+                                                        Recovery Question</button>
+                                                    <p id="security-recovery-msg" class="setting-help-text"
+                                                        style="margin-top: 6px; display: none;"></p>
+                                                </div>
 
-      <div class="form-group" id="security-login-toggle-wrap">
-        <label class="toggle-label">
-          <input type="checkbox" id="security-require-login" />
-          <span>Step 3 — Require login (username + password)</span>
-        </label>
-        <div class="setting-help-text" id="security-require-login-help">
-          Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the
-          internet.
-        </div>
-      </div>
+                                                <div class="form-group" id="security-login-toggle-wrap">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-require-login">
+                                                        <span>Step 3 — Require login (username + password)</span>
+                                                    </label>
+                                                    <div class="setting-help-text" id="security-require-login-help">
+                                                        Replaces the profile picker + PIN with a sign-in screen. Best
+                                                        for instances exposed to the internet.
+                                                    </div>
+                                                </div>
 
-      <div class="form-group">
-        <label class="toggle-label">
-          <input type="checkbox" id="security-plex-signin" />
-          <span>Sign in with Plex</span>
-        </label>
-        <div class="setting-help-text">
-          Adds a "Sign in with Plex" button to the sign-in screen. Anyone with access to your Plex
-          server signs in with their Plex account (SoulSync never sees their password), and their
-          playlists sync to their own Plex account. The server's owner signs in as the admin. New
-          Plex profiles start with what New sign-ups below sets; widen them per person under
-          Profiles. Needs Plex as a media server and internet access to plex.tv.
-        </div>
-        <label class="toggle-label" style="margin-top: 8px">
-          <input type="checkbox" id="security-plex-signin-auto-create" checked />
-          <span
-            >Let new Plex users sign up (off: only people who already have a Plex profile here can
-            sign in)</span
-          >
-        </label>
-        <label class="toggle-label">
-          <input type="checkbox" id="security-plex-signin-can-download" />
-          <span>New Plex profiles can download (off: request-only)</span>
-        </label>
-      </div>
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-plex-signin">
+                                                        <span>Sign in with Plex</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        Adds a "Sign in with Plex" button to the sign-in screen. Anyone
+                                                        with access to your Plex server signs in with their Plex account
+                                                        (SoulSync never sees their password), and their playlists sync to
+                                                        their own Plex account. The server's owner signs in as the admin.
+                                                        New Plex profiles start with what New sign-ups below sets;
+                                                        widen them per person under Profiles.
+                                                        Needs Plex as a media server and internet access to plex.tv.
+                                                    </div>
+                                                    <label class="toggle-label" style="margin-top: 8px;">
+                                                        <input type="checkbox" id="security-plex-signin-auto-create" checked>
+                                                        <span>Let new Plex users sign up (off: only people who already
+                                                            have a Plex profile here can sign in)</span>
+                                                    </label>
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-plex-signin-can-download">
+                                                        <span>New Plex profiles can download (off: request-only)</span>
+                                                    </label>
+                                                </div>
 
-      <div class="form-group">
-        <label class="toggle-label">
-          <input type="checkbox" id="security-oidc-signin" onchange="syncOidcProviderBlock()" />
-          <span>Sign in with OIDC</span>
-        </label>
-        <div class="setting-help-text">
-          Adds a sign-in button for your own identity provider (Pocket ID, Authentik, Authelia,
-          Keycloak or any other OpenID Connect provider). SoulSync never sees passwords. Create a
-          client at the provider with this callback URL:
-          <code id="security-oidc-callback-url">/api/auth/oidc/callback</code>. New OIDC profiles
-          start with what New sign-ups below sets. Accounts are matched by the provider's account
-          id, never by email, and nobody becomes an admin from a provider claim: to sign in as the
-          admin, save these settings, then connect your own account at the bottom.
-        </div>
-        <div class="setting-warning" id="security-oidc-callback-warn" role="status" hidden>
-          SoulSync sees this connection as plain http, so that's the callback it sends your
-          provider. Turn on Behind a reverse proxy below and restart, have your proxy send
-          X-Forwarded-Proto, or set the Callback URL override to your https address.
-        </div>
-        <!-- the provider's settings: one nested block inside the toggle's row -->
-        <div class="security-nested security-nested-block" id="security-oidc-provider">
-          <div class="form-group">
-            <label for="security-oidc-issuer">Issuer URL:</label>
-            <input
-              type="text"
-              id="security-oidc-issuer"
-              placeholder="https://id.example.com"
-              autocomplete="off"
-              style="width: 100%; font-family: monospace; font-size: 12px"
-            />
-          </div>
-          <div class="form-group">
-            <label for="security-oidc-client-id">Client ID:</label>
-            <input
-              type="text"
-              id="security-oidc-client-id"
-              autocomplete="off"
-              style="width: 100%; font-family: monospace; font-size: 12px"
-            />
-          </div>
-          <div class="form-group">
-            <label for="security-oidc-client-secret">Client secret:</label>
-            <input
-              type="password"
-              id="security-oidc-client-secret"
-              autocomplete="new-password"
-              style="width: 100%; font-family: monospace; font-size: 12px"
-            />
-          </div>
-          <div class="form-group">
-            <label for="security-oidc-button-label">Button label:</label>
-            <input
-              type="text"
-              id="security-oidc-button-label"
-              placeholder="Sign in with OIDC"
-              autocomplete="off"
-              maxlength="40"
-              style="width: 100%"
-            />
-          </div>
-          <div class="form-group">
-            <label for="security-oidc-icon-url"
-              >Icon URL <span style="opacity: 0.6">(optional)</span>:</label
-            >
-            <input
-              type="text"
-              id="security-oidc-icon-url"
-              placeholder="https://..."
-              autocomplete="off"
-              style="width: 100%; font-family: monospace; font-size: 12px"
-            />
-            <div class="setting-help-text">
-              Your provider's logo, shown on the sign-in card in My Account (https only). Leave
-              empty for a plain key icon.
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="security-oidc-required-group"
-              >Required group <span style="opacity: 0.6">(optional)</span>:</label
-            >
-            <input
-              type="text"
-              id="security-oidc-required-group"
-              autocomplete="off"
-              style="width: 100%; font-family: monospace; font-size: 12px"
-            />
-            <div class="setting-help-text">
-              Only accounts in this group get in. Leave empty to let every account at the provider
-              sign in.
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="security-oidc-groups-claim">Groups claim:</label>
-            <input
-              type="text"
-              id="security-oidc-groups-claim"
-              placeholder="groups"
-              autocomplete="off"
-              style="width: 100%; font-family: monospace; font-size: 12px"
-            />
-          </div>
-          <div class="form-group">
-            <label for="security-oidc-scopes">Scopes:</label>
-            <input
-              type="text"
-              id="security-oidc-scopes"
-              placeholder="openid profile email"
-              autocomplete="off"
-              style="width: 100%; font-family: monospace; font-size: 12px"
-            />
-            <div class="setting-help-text">
-              Add the scope your provider needs to send groups, if you set a required group (Pocket
-              ID: <code>groups</code>). Add <code>offline_access</code> on Authentik or Authelia so
-              signing someone out there signs them out here too.
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="security-oidc-redirect-uri"
-              >Callback URL override <span style="opacity: 0.6">(optional)</span>:</label
-            >
-            <input
-              type="text"
-              id="security-oidc-redirect-uri"
-              autocomplete="off"
-              style="width: 100%; font-family: monospace; font-size: 12px"
-            />
-            <div class="setting-help-text">
-              Only if your reverse proxy doesn't pass the public address through.
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="toggle-label">
-              <input type="checkbox" id="security-oidc-signin-auto-create" checked />
-              <span
-                >Let new OIDC users sign up (off: only accounts already connected to a profile can
-                sign in)</span
-              >
-            </label>
-            <label class="toggle-label">
-              <input type="checkbox" id="security-oidc-signin-can-download" />
-              <span>New OIDC profiles can download (off: request-only)</span>
-            </label>
-          </div>
-          <!-- the admin's own connection (webui/src/shell/oidc-signin.ts):
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-oidc-signin"
+                                                            onchange="syncOidcProviderBlock()">
+                                                        <span>Sign in with OIDC</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        Adds a sign-in button for your own identity provider (Pocket ID,
+                                                        Authentik, Authelia, Keycloak or any other OpenID Connect
+                                                        provider). SoulSync never sees passwords. Create a client at the
+                                                        provider with this callback URL:
+                                                        <code id="security-oidc-callback-url">/api/auth/oidc/callback</code>.
+                                                        New OIDC profiles start with what New sign-ups below sets.
+                                                        Accounts are matched by the provider's account id, never by email,
+                                                        and nobody becomes an admin from a provider claim: to sign in as
+                                                        the admin, save these settings, then connect your own account
+                                                        at the bottom.
+                                                    </div>
+                                                    <div class="setting-warning" id="security-oidc-callback-warn" role="status" hidden>
+                                                        SoulSync sees this connection as plain http, so that's the
+                                                        callback it sends your provider. Turn on Behind a reverse proxy
+                                                        below and restart, have your proxy send X-Forwarded-Proto, or
+                                                        set the Callback URL override to your https address.
+                                                    </div>
+                                                    <!-- the provider's settings: one nested block inside the toggle's row -->
+                                                    <div class="security-nested security-nested-block" id="security-oidc-provider">
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-issuer">Issuer URL:</label>
+                                                            <input type="text" id="security-oidc-issuer" placeholder="https://id.example.com"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-client-id">Client ID:</label>
+                                                            <input type="text" id="security-oidc-client-id" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-client-secret">Client secret:</label>
+                                                            <input type="password" id="security-oidc-client-secret" autocomplete="new-password"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-button-label">Button label:</label>
+                                                            <input type="text" id="security-oidc-button-label" placeholder="Sign in with OIDC"
+                                                                autocomplete="off" maxlength="40" style="width: 100%;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-icon-url">Icon URL
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-icon-url" placeholder="https://..."
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Your provider's logo, shown on the sign-in card in My Account
+                                                                (https only). Leave empty for a plain key icon.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-required-group">Required group
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-required-group" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Only accounts in this group get in. Leave empty to let every
+                                                                account at the provider sign in.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-groups-claim">Groups claim:</label>
+                                                            <input type="text" id="security-oidc-groups-claim" placeholder="groups"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-scopes">Scopes:</label>
+                                                            <input type="text" id="security-oidc-scopes" placeholder="openid profile email"
+                                                                autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Add the scope your provider needs to send groups, if you set a
+                                                                required group (Pocket ID: <code>groups</code>). Add
+                                                                <code>offline_access</code> on Authentik or Authelia so signing
+                                                                someone out there signs them out here too.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label for="security-oidc-redirect-uri">Callback URL override
+                                                                <span style="opacity:0.6">(optional)</span>:</label>
+                                                            <input type="text" id="security-oidc-redirect-uri" autocomplete="off"
+                                                                style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                            <div class="setting-help-text">
+                                                                Only if your reverse proxy doesn't pass the public address through.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-signin-auto-create" checked>
+                                                                <span>Let new OIDC users sign up (off: only accounts already
+                                                                    connected to a profile can sign in)</span>
+                                                            </label>
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-signin-can-download">
+                                                                <span>New OIDC profiles can download (off: request-only)</span>
+                                                            </label>
+                                                        </div>
+                                                        <!-- the admin's own connection (webui/src/shell/oidc-signin.ts):
                                                              status, icon and disconnect when connected, else connect -->
-          <div class="form-group security-oidc-admin" id="security-oidc-admin">
-            <button
-              type="button"
-              class="auth-button"
-              onclick="
-                window.location.assign(
-                  window.SoulSyncURL.resolve('/api/profiles/me/oidc-connect/start'),
-                )
-              "
-            >
-              Connect my admin account
-            </button>
-          </div>
-          <!-- sign in with oidc only (#1839; webui/src/shell/oidc-only.ts) -->
-          <div class="form-group" id="security-oidc-only-wrap">
-            <label class="toggle-label">
-              <input type="checkbox" id="security-oidc-only" />
-              <span>OIDC only: turn off every other way to sign in</span>
-            </label>
-            <div class="setting-help-text">
-              Password sign-in, the recovery question, Sign in with Plex and switching profiles with
-              a password stop working, and anyone signed in some other way is signed out. Invites
-              send people to your provider instead of asking for a password. Needs login mode, and
-              you have to be signed in with OIDC yourself to turn it on. Every profile needs an OIDC
-              connection first. Passwords are kept and work again if you turn this off. If the
-              provider is ever down, set
-              <code>SOULSYNC_OIDC_ONLY_OVERRIDE=off</code> on the container and restart, then sign
-              in with the admin password.
-            </div>
-            <div class="setting-help-text" id="security-oidc-only-status" hidden></div>
-          </div>
-        </div>
-      </div>
-      <div class="form-group" id="security-signup-defaults">
-        <label for="security-signup-sides">New sign-ups start on</label>
-        <select id="security-signup-sides" class="form-select">
-          <option value="music">Music</option>
-          <option value="video">Movies &amp; TV</option>
-          <option value="both">Music and Movies &amp; TV</option>
-        </select>
-        <div class="setting-help-text">
-          What a profile made by sign-in can open. Music: Discover, Search, Library, Wishlist and
-          Stats. Movies &amp; TV: Discover, Search and Library on the video side. Request-only
-          profiles also get Requests. Help and Issues are always there; widen anyone further under
-          Profiles.
-        </div>
-      </div>
+                                                        <div class="form-group security-oidc-admin" id="security-oidc-admin">
+                                                            <button type="button" class="auth-button"
+                                                                onclick="window.location.assign(window.SoulSyncURL.resolve('/api/profiles/me/oidc-connect/start'))">Connect
+                                                                my admin account</button>
+                                                        </div>
+                                                        <!-- sign in with oidc only (#1839; webui/src/shell/oidc-only.ts) -->
+                                                        <div class="form-group" id="security-oidc-only-wrap">
+                                                            <label class="toggle-label">
+                                                                <input type="checkbox" id="security-oidc-only">
+                                                                <span>OIDC only: turn off every other way to sign in</span>
+                                                            </label>
+                                                            <div class="setting-help-text">
+                                                                Password sign-in, the recovery question, Sign in with Plex
+                                                                and switching profiles with a password stop working, and
+                                                                anyone signed in some other way is signed out. Invites send
+                                                                people to your provider instead of asking for a password.
+                                                                Needs login mode, and you have to be signed in with OIDC
+                                                                yourself to turn it on. Every profile needs an OIDC
+                                                                connection first. Passwords are kept and work again if you
+                                                                turn this off. If the provider is ever down, set
+                                                                <code>SOULSYNC_OIDC_ONLY_OVERRIDE=off</code> on the
+                                                                container and restart, then sign in with the admin password.
+                                                            </div>
+                                                            <div class="setting-help-text" id="security-oidc-only-status" hidden></div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group" id="security-signup-defaults">
+                                                    <label for="security-signup-sides">New sign-ups start on</label>
+                                                    <select id="security-signup-sides" class="form-select">
+                                                        <option value="music">Music</option>
+                                                        <option value="video">Movies &amp; TV</option>
+                                                        <option value="both">Music and Movies &amp; TV</option>
+                                                    </select>
+                                                    <div class="setting-help-text">
+                                                        What a profile made by sign-in can open. Music: Discover, Search,
+                                                        Library, Wishlist and Stats. Movies &amp; TV: Discover, Search and
+                                                        Library on the video side. Request-only profiles also get Requests.
+                                                        Help and Issues are always there; widen anyone further under
+                                                        Profiles.
+                                                    </div>
+                                                </div>
 
-      <div class="form-group" id="security-signup-request-limit-row">
-        <label for="security-signup-request-limit">Request limit for new sign-ups</label>
-        <div style="display: flex; gap: 8px; align-items: center">
-          <input
-            type="number"
-            id="security-signup-request-limit"
-            min="0"
-            max="1000"
-            value="0"
-            style="width: 6em"
-          />
-          <span class="settings-unit">requests every</span>
-          <input
-            type="number"
-            id="security-signup-request-limit-days"
-            min="1"
-            max="365"
-            value="7"
-            style="width: 5em"
-          />
-          <span class="settings-unit">days</span>
-        </div>
-        <div class="setting-help-text">
-          0 means no limit. A request is one movie, show, album or track. Applies to profiles made
-          after you save; change existing ones under Profiles.
-        </div>
-      </div>
-    </div>
+                                                <div class="form-group" id="security-signup-request-limit-row">
+                                                    <label for="security-signup-request-limit">Request limit for new
+                                                        sign-ups</label>
+                                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                                        <input type="number" id="security-signup-request-limit" min="0"
+                                                            max="1000" value="0" style="width: 6em;">
+                                                        <span class="settings-unit">requests every</span>
+                                                        <input type="number" id="security-signup-request-limit-days" min="1"
+                                                            max="365" value="7" style="width: 5em;">
+                                                        <span class="settings-unit">days</span>
+                                                    </div>
+                                                    <div class="setting-help-text">
+                                                        0 means no limit. A request is one movie, show, album or track.
+                                                        Applies to profiles made after you save; change existing ones
+                                                        under Profiles.
+                                                    </div>
+                                                </div>
+                                            </div>
 
-    <!-- ── Reverse proxy & remote access ── -->
-    <div class="security-subgroup">
-      <h4 class="security-subhead">🌐 Reverse proxy &amp; remote access</h4>
-      <div class="setting-help-text" style="margin-bottom: 12px">
-        Only needed if you expose SoulSync to the internet behind nginx / Caddy / Traefik. See
-        <code>Support/REVERSE-PROXY.md</code>.
-      </div>
+                                            <!-- ── Reverse proxy & remote access ── -->
+                                            <div class="security-subgroup">
+                                                <h4 class="security-subhead">🌐 Reverse proxy &amp; remote access</h4>
+                                                <div class="setting-help-text" style="margin-bottom: 12px;">
+                                                    Only needed if you expose SoulSync to the internet behind nginx /
+                                                    Caddy / Traefik. See <code>Support/REVERSE-PROXY.md</code>.
+                                                </div>
 
-      <div class="form-group">
-        <label class="toggle-label">
-          <input type="checkbox" id="security-trust-proxy" />
-          <span>Behind a reverse proxy</span>
-        </label>
-        <div class="setting-help-text">
-          Trusts the proxy's <code>X-Forwarded-*</code> headers, marks the session cookie
-          HTTPS-only, and adds security headers.
-          <strong>Leave OFF for direct / LAN access over http://</strong>
-          — it would otherwise break plain-HTTP login.
-          <strong>Takes effect after a restart.</strong>
-        </div>
-      </div>
+                                                <div class="form-group">
+                                                    <label class="toggle-label">
+                                                        <input type="checkbox" id="security-trust-proxy">
+                                                        <span>Behind a reverse proxy</span>
+                                                    </label>
+                                                    <div class="setting-help-text">
+                                                        Trusts the proxy's <code>X-Forwarded-*</code> headers, marks the
+                                                        session cookie HTTPS-only, and adds security headers.
+                                                        <strong>Leave OFF for direct / LAN access over http://</strong>
+                                                        — it would otherwise break plain-HTTP login. <strong>Takes
+                                                            effect after a restart.</strong>
+                                                    </div>
+                                                </div>
 
-      <div class="form-group security-nested">
-        <label for="security-auth-proxy-header"
-          >↳ Auth proxy user header <span style="opacity: 0.6">(optional)</span>:</label
-        >
-        <input
-          type="text"
-          id="security-auth-proxy-header"
-          placeholder="Remote-User"
-          autocomplete="off"
-          style="width: 100%; font-family: monospace; font-size: 12px"
-        />
-        <div class="setting-help-text">
-          If an auth proxy (Authelia / Authentik / oauth2-proxy) logs users in in front of SoulSync,
-          enter the header it sets and SoulSync trusts it.
-          <strong
-            >Only set this behind a proxy that strips any client-supplied copy of the
-            header.</strong
-          >
-          Blank = off.
-        </div>
-      </div>
+                                                <div class="form-group security-nested">
+                                                    <label for="security-auth-proxy-header">↳ Auth proxy user header
+                                                        <span style="opacity:0.6">(optional)</span>:</label>
+                                                    <input type="text" id="security-auth-proxy-header"
+                                                        placeholder="Remote-User" autocomplete="off"
+                                                        style="width: 100%; font-family: monospace; font-size: 12px;">
+                                                    <div class="setting-help-text">
+                                                        If an auth proxy (Authelia / Authentik / oauth2-proxy) logs
+                                                        users in in front of SoulSync, enter the header it sets and
+                                                        SoulSync trusts it. <strong>Only set this behind a proxy that
+                                                            strips any client-supplied copy of the header.</strong>
+                                                        Blank = off.
+                                                    </div>
+                                                </div>
 
-      <div class="form-group">
-        <label for="security-cors-origins">Allowed WebSocket Origins:</label>
-        <textarea
-          id="security-cors-origins"
-          rows="3"
-          placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888"
-          style="width: 100%; font-family: monospace; font-size: 12px"
-        ></textarea>
-        <div class="setting-help-text">
-          Origins (full URL, no trailing slash) allowed to open WebSocket connections — one per line
-          or comma-separated. Empty = same-origin only (the secure default; fine for direct access
-          and most reverse-proxy setups). Add your public domain if live updates fail behind a
-          proxy. <code>*</code> on its own line allows any origin (insecure).
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-<!-- end Security & Access body -->
+                                                <div class="form-group">
+                                                    <label for="security-cors-origins">Allowed WebSocket
+                                                        Origins:</label>
+                                                    <textarea id="security-cors-origins" rows="3"
+                                                        placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888"
+                                                        style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+                                                    <div class="setting-help-text">
+                                                        Origins (full URL, no trailing slash) allowed to open WebSocket
+                                                        connections — one per line or comma-separated. Empty =
+                                                        same-origin only (the secure default; fine for direct access and
+                                                        most reverse-proxy setups). Add your public domain if live
+                                                        updates fail behind a proxy. <code>*</code> on its own line
+                                                        allows any origin (insecure).
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div><!-- end Security & Access body -->

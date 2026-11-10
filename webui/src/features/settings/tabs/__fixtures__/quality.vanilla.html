@@ -1,767 +1,609 @@
-<div class="qp-layout" data-stg="quality">
-  <div class="qp-main" data-stg="quality">
-    <!-- ═══ QUALITY (ranked targets, search mode, fallback) ═══ -->
-    <!-- Whole tile is gated as a unit (Soulseek-only + downloads tab)
+                                    <div class="qp-layout" data-stg="quality">
+                                        <div class="qp-main" data-stg="quality">
+
+                                            <!-- ═══ QUALITY (ranked targets, search mode, fallback) ═══ -->
+                                            <!-- Whole tile is gated as a unit (Soulseek-only + downloads tab)
                                  by settings.js updateSourceVisibility — gating only the inner
                                  group would leave an empty expandable shell. -->
-    <div id="quality-profile-tile" data-stg="quality">
-      <div
-        class="settings-section-header collapsed"
-        onclick="
-          this.classList.toggle('collapsed');
-          const b = this.nextElementSibling;
-          b.classList.toggle('collapsed');
-          b.style.display = b.classList.contains('collapsed') ? 'none' : '';
-        "
-        role="button"
-        tabindex="0"
-        aria-expanded="false"
-      >
-        <span class="settings-section-arrow">&#9660;</span>
-        <h3>Music Quality</h3>
-        <span
-          class="qp-governed-badge"
-          title="Saved under the active profile in the panel on the right"
-          >Profile</span
-        >
-        <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
-      </div>
-      <div class="settings-section-body collapsed" data-stg="quality">
-        <!-- Quality Profile Settings (global — applies to all download sources) -->
-        <div class="settings-group" id="quality-profile-section" data-stg="quality">
-          <!-- Presets -->
-          <div class="quality-presets">
-            <label>Quick Presets:</label>
-            <div class="preset-buttons">
-              <button
-                class="preset-button"
-                onclick="applyQualityPreset('audiophile')"
-                title="FLAC only, strict size constraints"
-              >
-                🎧 Audiophile
-              </button>
-              <button
-                class="preset-button active"
-                onclick="applyQualityPreset('balanced')"
-                title="FLAC preferred, MP3 fallback"
-              >
-                ⚖️ Balanced
-              </button>
-              <button
-                class="preset-button"
-                onclick="applyQualityPreset('space_saver')"
-                title="MP3 preferred, smaller sizes"
-              >
-                💾 Space Saver
-              </button>
-            </div>
-            <div class="quality-presets-footer">
-              <span
-                class="help-text"
-                style="padding: 0; border: 0; background: none; margin: 0; flex: 1"
-              >
-                Edits below are saved <em>per preset</em> — switch away and back and your changes
-                are still there.
-              </span>
-              <button
-                type="button"
-                class="preset-reset-btn"
-                onclick="resetActiveQualityPreset()"
-                title="Restore the selected preset's factory settings"
-              >
-                <span class="preset-reset-icon">↺</span> Reset to defaults
-              </button>
-            </div>
-          </div>
+                                            <div id="quality-profile-tile" data-stg="quality">
+                                                <div class="settings-section-header collapsed"
+                                                    onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                                    role="button" tabindex="0" aria-expanded="false">
+                                                    <span class="settings-section-arrow">&#9660;</span>
+                                                    <h3>Music Quality</h3>
+                                                    <span class="qp-governed-badge"
+                                                        title="Saved under the active profile in the panel on the right">Profile</span>
+                                                    <span class="settings-section-hint">Format priorities, bitrate, bit
+                                                        depth</span>
+                                                </div>
+                                                <div class="settings-section-body collapsed" data-stg="quality">
 
-          <!-- Ranked target priority list (v3) -->
-          <div class="ranked-targets-editor">
-            <div class="setting-row">
-              <label class="ranked-targets-label" style="margin: 0"
-                >Quality priority (drag to reorder — 1st = most preferred):</label
-              >
-              <span
-                class="info-icon"
-                role="button"
-                tabindex="0"
-                title="What's this?"
-                onclick="toggleSettingHelp(this)"
-                onkeydown="
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    toggleSettingHelp(this);
-                  }
-                "
-                >i</span
-              >
-            </div>
-            <div class="help-text setting-help-body" hidden>
-              <strong>How it works:</strong> Each download source is checked against this list
-              top-down. The first target a source can satisfy wins; a source that meets no target is
-              skipped for the next one (source priority still decides between sources that can). For
-              lossless, bit depth + sample rate decide the match. For MP3/AAC the bitrate is a
-              <em>minimum</em> threshold (≥), so VBR and mono files aren't falsely rejected. After
-              download the real file is verified against the same list. With fallback off, a track
-              is left missing rather than accepting a quality below every target. <br /><br />
-              <strong>Acquisition vs retained output:</strong>
-              Downsample and Lossy Copy run only after the downloaded file passes this gate.
-              SoulSync remembers the acquired quality, so intentionally retaining 16/44.1 or a
-              lossy-only output does not make the same track appear as an upgrade again.
-            </div>
-            <div id="ranked-targets-list" class="ranked-targets-list">
-              <!-- rows injected by renderRankedTargets() -->
-            </div>
+                                                    <!-- Quality Profile Settings (global — applies to all download sources) -->
+                                                    <div class="settings-group" id="quality-profile-section"
+                                                        data-stg="quality">
 
-            <!-- Add a new target -->
-            <div class="ranked-target-add">
-              <select id="rt-add-format" onchange="onRtAddFormatChange()">
-                <optgroup label="Lossless">
-                  <option value="group:lossless">All lossless</option>
-                  <option value="flac">FLAC</option>
-                  <option value="alac">ALAC</option>
-                  <option value="wav">WAV / AIFF</option>
-                  <option value="dsf">DSD (DSF / DFF)</option>
-                </optgroup>
-                <optgroup label="Lossy">
-                  <option value="group:lossy">All lossy</option>
-                  <option value="mp3">MP3</option>
-                  <option value="aac">AAC</option>
-                  <option value="ogg">OGG (Vorbis)</option>
-                  <option value="opus">Opus</option>
-                  <option value="wma">WMA</option>
-                </optgroup>
-              </select>
-              <span class="rt-lossless-fields">
-                <select id="rt-add-bitdepth" title="Minimum bit depth">
-                  <option value="">Any bit depth</option>
-                  <option value="16">16-bit</option>
-                  <option value="24">24-bit</option>
-                </select>
-                <select id="rt-add-samplerate" title="Minimum sample rate">
-                  <option value="">Any sample rate</option>
-                  <option value="44100">≥ 44.1 kHz</option>
-                  <option value="48000">≥ 48 kHz</option>
-                  <option value="96000">≥ 96 kHz</option>
-                  <option value="192000">≥ 192 kHz</option>
-                </select>
-              </span>
-              <span class="rt-lossy-fields" style="display: none">
-                <select id="rt-add-bitrate" title="Minimum bitrate" onchange="onRtBitrateChange()">
-                  <option value="">Any bitrate</option>
-                  <option value="96">≥ 96 kbps</option>
-                  <option value="128">≥ 128 kbps</option>
-                  <option value="192">≥ 192 kbps</option>
-                  <option value="256">≥ 256 kbps</option>
-                  <option value="320" selected>≥ 320 kbps</option>
-                  <option value="custom">Custom…</option>
-                </select>
-                <label class="rt-inline-label" id="rt-add-bitrate-custom-wrap" style="display: none"
-                  >≥
-                  <input
-                    type="number"
-                    id="rt-add-bitrate-custom"
-                    min="0"
-                    max="5000"
-                    step="1"
-                    value="320"
-                    style="width: 72px"
-                    autocomplete="off"
-                    data-bwignore=""
-                    data-1p-ignore=""
-                    data-lpignore="true"
-                  />
-                  kbps
-                </label>
-              </span>
-              <button type="button" class="rt-add-btn" onclick="addRankedTarget()">
-                + Add target
-              </button>
-            </div>
-          </div>
+                                                        <!-- Presets -->
+                                                        <div class="quality-presets">
+                                                            <label>Quick Presets:</label>
+                                                            <div class="preset-buttons">
+                                                                <button class="preset-button"
+                                                                    onclick="applyQualityPreset('audiophile')"
+                                                                    title="FLAC only, strict size constraints">
+                                                                    🎧 Audiophile
+                                                                </button>
+                                                                <button class="preset-button active"
+                                                                    onclick="applyQualityPreset('balanced')"
+                                                                    title="FLAC preferred, MP3 fallback">
+                                                                    ⚖️ Balanced
+                                                                </button>
+                                                                <button class="preset-button"
+                                                                    onclick="applyQualityPreset('space_saver')"
+                                                                    title="MP3 preferred, smaller sizes">
+                                                                    💾 Space Saver
+                                                                </button>
+                                                            </div>
+                                                            <div class="quality-presets-footer">
+                                                                <span class="help-text"
+                                                                    style="padding:0;border:0;background:none;margin:0;flex:1;">
+                                                                    Edits below are saved <em>per preset</em> — switch
+                                                                    away and back and your
+                                                                    changes are still there.
+                                                                </span>
+                                                                <button type="button" class="preset-reset-btn"
+                                                                    onclick="resetActiveQualityPreset()"
+                                                                    title="Restore the selected preset's factory settings">
+                                                                    <span class="preset-reset-icon">↺</span> Reset to
+                                                                    defaults
+                                                                </button>
+                                                            </div>
+                                                        </div>
 
-          <!-- Upgrade cutoff -->
-          <div class="form-group">
-            <div class="setting-row" style="margin-bottom: 4px">
-              <label for="quality-upgrade-policy" style="font-weight: 600">Upgrade until</label>
-              <span
-                class="info-icon"
-                role="button"
-                tabindex="0"
-                title="What's this?"
-                onclick="toggleSettingHelp(this)"
-                onkeydown="
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    toggleSettingHelp(this);
-                  }
-                "
-                >i</span
-              >
-            </div>
-            <select
-              id="quality-upgrade-policy"
-              style="width: 100%; max-width: 420px"
-              onchange="
-                onUpgradePolicyChange();
-                debouncedSaveQualityProfile();
-              "
-            >
-              <option value="none">No upgrades</option>
-              <option value="acceptable">Any accepted target</option>
-              <option value="until_cutoff">Selected target or better</option>
-            </select>
-            <div id="quality-upgrade-cutoff-group" class="quality-upgrade-cutoff-group">
-              <label for="quality-upgrade-cutoff">Cutoff target</label>
-              <select id="quality-upgrade-cutoff" onchange="debouncedSaveQualityProfile()"></select>
-            </div>
-            <div class="help-text setting-help-body" hidden>
-              <strong>No upgrades</strong> never replaces a file that already exists. <br /><br />
-              <strong>Any accepted target</strong> stops upgrade findings as soon as a file matches
-              any target in the list. <br /><br />
-              <strong>Selected target or better</strong> keeps the Quality Upgrade job proposing
-              replacements until the file reaches the selected rank.
-            </div>
-          </div>
+                                                        <!-- Ranked target priority list (v3) -->
+                                                        <div class="ranked-targets-editor">
+                                                            <div class="setting-row">
+                                                                <label class="ranked-targets-label"
+                                                                    style="margin:0;">Quality priority (drag to reorder
+                                                                    — 1st = most preferred):</label>
+                                                                <span class="info-icon" role="button" tabindex="0"
+                                                                    title="What's this?"
+                                                                    onclick="toggleSettingHelp(this)"
+                                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                            </div>
+                                                            <div class="help-text setting-help-body" hidden>
+                                                                <strong>How it works:</strong> Each download source is
+                                                                checked against this list
+                                                                top-down. The first target a source can satisfy wins; a
+                                                                source that meets no target
+                                                                is skipped for the next one (source priority still
+                                                                decides between sources that can).
+                                                                For lossless, bit depth + sample rate decide the match.
+                                                                For MP3/AAC the bitrate is a
+                                                                <em>minimum</em> threshold (≥), so VBR and mono files
+                                                                aren't falsely rejected. After
+                                                                download the real file is verified against the same
+                                                                list. With fallback off, a track
+                                                                is left missing rather than accepting a quality below
+                                                                every target.
+                                                                <br><br>
+                                                                <strong>Acquisition vs retained output:</strong>
+                                                                Downsample and Lossy Copy run only
+                                                                after the downloaded file passes this gate. SoulSync
+                                                                remembers the acquired quality,
+                                                                so intentionally retaining 16/44.1 or a lossy-only
+                                                                output does not make the same track
+                                                                appear as an upgrade again.
+                                                            </div>
+                                                            <div id="ranked-targets-list" class="ranked-targets-list">
+                                                                <!-- rows injected by renderRankedTargets() -->
+                                                            </div>
 
-          <!-- Search strategy -->
-          <div class="form-group">
-            <div class="setting-row" style="margin-bottom: 4px">
-              <label for="quality-search-mode" style="font-weight: 600">Search strategy</label>
-              <span
-                class="info-icon"
-                role="button"
-                tabindex="0"
-                title="What's this?"
-                onclick="toggleSettingHelp(this)"
-                onkeydown="
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    toggleSettingHelp(this);
-                  }
-                "
-                >i</span
-              >
-            </div>
-            <select
-              id="quality-search-mode"
-              style="width: 100%; max-width: 420px"
-              onchange="onSearchModeChange()"
-            >
-              <option value="priority">
-                Source priority — fast (use the first source that has it)
-              </option>
-              <option value="best_quality">
-                Best quality — thorough (check every source, take the best)
-              </option>
-            </select>
-            <div class="help-text setting-help-body" hidden>
-              <strong>Source priority</strong> goes through your sources in order and downloads from
-              the <em>first one</em> that has the track. Fastest, fewest lookups.<br /><br />
-              <strong>Best quality</strong> asks <em>every</em> source, then downloads the
-              highest-quality copy it found — even if a faster source also had a lower-quality one.
-              Slower and more API calls, but you never settle for a worse file when a better one
-              exists.<br /><br />
-              Either way, the per-source retry limits stay the same.
-            </div>
-          </div>
+                                                            <!-- Add a new target -->
+                                                            <div class="ranked-target-add">
+                                                                <select id="rt-add-format"
+                                                                    onchange="onRtAddFormatChange()">
+                                                                    <optgroup label="Lossless">
+                                                                        <option value="group:lossless">All lossless
+                                                                        </option>
+                                                                        <option value="flac">FLAC</option>
+                                                                        <option value="alac">ALAC</option>
+                                                                        <option value="wav">WAV / AIFF</option>
+                                                                        <option value="dsf">DSD (DSF / DFF)</option>
+                                                                    </optgroup>
+                                                                    <optgroup label="Lossy">
+                                                                        <option value="group:lossy">All lossy</option>
+                                                                        <option value="mp3">MP3</option>
+                                                                        <option value="aac">AAC</option>
+                                                                        <option value="ogg">OGG (Vorbis)</option>
+                                                                        <option value="opus">Opus</option>
+                                                                        <option value="wma">WMA</option>
+                                                                    </optgroup>
+                                                                </select>
+                                                                <span class="rt-lossless-fields">
+                                                                    <select id="rt-add-bitdepth"
+                                                                        title="Minimum bit depth">
+                                                                        <option value="">Any bit depth</option>
+                                                                        <option value="16">16-bit</option>
+                                                                        <option value="24">24-bit</option>
+                                                                    </select>
+                                                                    <select id="rt-add-samplerate"
+                                                                        title="Minimum sample rate">
+                                                                        <option value="">Any sample rate</option>
+                                                                        <option value="44100">≥ 44.1 kHz</option>
+                                                                        <option value="48000">≥ 48 kHz</option>
+                                                                        <option value="96000">≥ 96 kHz</option>
+                                                                        <option value="192000">≥ 192 kHz</option>
+                                                                    </select>
+                                                                </span>
+                                                                <span class="rt-lossy-fields" style="display:none;">
+                                                                    <select id="rt-add-bitrate" title="Minimum bitrate"
+                                                                        onchange="onRtBitrateChange()">
+                                                                        <option value="">Any bitrate</option>
+                                                                        <option value="96">≥ 96 kbps</option>
+                                                                        <option value="128">≥ 128 kbps</option>
+                                                                        <option value="192">≥ 192 kbps</option>
+                                                                        <option value="256">≥ 256 kbps</option>
+                                                                        <option value="320" selected>≥ 320 kbps</option>
+                                                                        <option value="custom">Custom…</option>
+                                                                    </select>
+                                                                    <label class="rt-inline-label"
+                                                                        id="rt-add-bitrate-custom-wrap"
+                                                                        style="display:none;">≥
+                                                                        <input type="number" id="rt-add-bitrate-custom"
+                                                                            min="0" max="5000" step="1" value="320"
+                                                                            style="width:72px;" autocomplete="off"
+                                                                            data-bwignore="" data-1p-ignore=""
+                                                                            data-lpignore="true"> kbps
+                                                                    </label>
+                                                                </span>
+                                                                <button type="button" class="rt-add-btn"
+                                                                    onclick="addRankedTarget()">+ Add target</button>
+                                                            </div>
+                                                        </div>
 
-          <!-- Rank candidates by quality (priority mode only) -->
-          <div class="form-group" id="quality-rank-candidates-group">
-            <div class="setting-row">
-              <label class="checkbox-label" style="margin: 0">
-                <input type="checkbox" id="quality-rank-candidates" />
-                Rank-based download order
-              </label>
-              <span
-                class="info-icon"
-                role="button"
-                tabindex="0"
-                title="What's this?"
-                onclick="toggleSettingHelp(this)"
-                onkeydown="
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    toggleSettingHelp(this);
-                  }
-                "
-                >i</span
-              >
-            </div>
-            <div class="help-text setting-help-body" hidden>
-              A single source often returns several copies of the same track.<br /><br />
-              <strong>Off</strong> (default): the most likely-correct / fastest copy is downloaded
-              first — the original behaviour.<br /><br />
-              <strong>On</strong>: the highest-quality copy (per your target list above) is
-              downloaded first instead; correctness and speed only break ties.<br /><br />
-              Nothing is skipped and the source order doesn't change, so a track can't go missing —
-              it just prefers the better copy. (This is always how
-              <strong>Best quality</strong> works, which is why this option only appears for
-              <strong>Source priority</strong>.)
-            </div>
-          </div>
+                                                        <!-- Upgrade cutoff -->
+                                                        <div class="form-group">
+                                                            <div class="setting-row" style="margin-bottom:4px;">
+                                                                <label for="quality-upgrade-policy"
+                                                                    style="font-weight:600;">Upgrade until</label>
+                                                                <span class="info-icon" role="button" tabindex="0"
+                                                                    title="What's this?"
+                                                                    onclick="toggleSettingHelp(this)"
+                                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                            </div>
+                                                            <select id="quality-upgrade-policy"
+                                                                style="width:100%;max-width:420px;"
+                                                                onchange="onUpgradePolicyChange(); debouncedSaveQualityProfile();">
+                                                                <option value="none">No upgrades</option>
+                                                                <option value="acceptable">Any accepted target</option>
+                                                                <option value="until_cutoff">Selected target or better
+                                                                </option>
+                                                            </select>
+                                                            <div id="quality-upgrade-cutoff-group"
+                                                                class="quality-upgrade-cutoff-group">
+                                                                <label for="quality-upgrade-cutoff">Cutoff
+                                                                    target</label>
+                                                                <select id="quality-upgrade-cutoff"
+                                                                    onchange="debouncedSaveQualityProfile()"></select>
+                                                            </div>
+                                                            <div class="help-text setting-help-body" hidden>
+                                                                <strong>No upgrades</strong> never replaces a file
+                                                                that already exists.
+                                                                <br><br>
+                                                                <strong>Any accepted target</strong> stops upgrade
+                                                                findings as soon as a file matches any target in the
+                                                                list.
+                                                                <br><br>
+                                                                <strong>Selected target or better</strong> keeps the
+                                                                Quality Upgrade job proposing replacements until the
+                                                                file reaches the selected rank.
+                                                            </div>
+                                                        </div>
 
-          <!-- Fallback Option -->
-          <div class="form-group">
-            <div class="setting-row">
-              <label class="checkbox-label" style="margin: 0">
-                <input type="checkbox" id="quality-fallback-enabled" checked />
-                Accept off-list quality when nothing in the list is available
-              </label>
-              <span
-                class="info-icon"
-                role="button"
-                tabindex="0"
-                title="What's this?"
-                onclick="toggleSettingHelp(this)"
-                onkeydown="
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    toggleSettingHelp(this);
-                  }
-                "
-                >i</span
-              >
-            </div>
-            <div class="help-text setting-help-body" hidden>
-              This does <strong>not</strong> mean "walk down my list" — the list already does that
-              on its own.<br /><br />
-              When <strong>on</strong>, a file that matches <em>none</em> of your targets (e.g. a
-              16-bit FLAC or an MP3 when you only listed 24-bit) is
-              <strong>accepted anyway</strong> as a last resort.<br /><br />
-              Turn it <strong>off</strong> to strictly enforce your list — anything off-list is then
-              quarantined instead of completed.
-            </div>
-          </div>
-        </div>
-      </div>
-      <!-- end Quality Profile body -->
-    </div>
-    <!-- end Quality Profile tile -->
+                                                        <!-- Search strategy -->
+                                                        <div class="form-group">
+                                                            <div class="setting-row" style="margin-bottom:4px;">
+                                                                <label for="quality-search-mode"
+                                                                    style="font-weight:600;">Search strategy</label>
+                                                                <span class="info-icon" role="button" tabindex="0"
+                                                                    title="What's this?"
+                                                                    onclick="toggleSettingHelp(this)"
+                                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                            </div>
+                                                            <select id="quality-search-mode"
+                                                                style="width:100%;max-width:420px;"
+                                                                onchange="onSearchModeChange()">
+                                                                <option value="priority">Source priority — fast (use the
+                                                                    first source that has it)</option>
+                                                                <option value="best_quality">Best quality — thorough
+                                                                    (check every source, take the best)</option>
+                                                            </select>
+                                                            <div class="help-text setting-help-body" hidden>
+                                                                <strong>Source priority</strong> goes through your
+                                                                sources in order and
+                                                                downloads from the <em>first one</em> that has the
+                                                                track. Fastest, fewest
+                                                                lookups.<br><br>
+                                                                <strong>Best quality</strong> asks <em>every</em>
+                                                                source, then downloads the
+                                                                highest-quality copy it found — even if a faster source
+                                                                also had a lower-quality
+                                                                one. Slower and more API calls, but you never settle for
+                                                                a worse file when a
+                                                                better one exists.<br><br>
+                                                                Either way, the per-source retry limits stay the same.
+                                                            </div>
+                                                        </div>
 
-    <!-- ═══ QUALITY ON IMPORT (moved from Library > Import — quality enforcement at import time) ═══ -->
-    <div
-      class="settings-section-header collapsed"
-      data-stg="quality"
-      onclick="
-        this.classList.toggle('collapsed');
-        const b = this.nextElementSibling;
-        b.classList.toggle('collapsed');
-        b.style.display = b.classList.contains('collapsed') ? 'none' : '';
-      "
-      role="button"
-      tabindex="0"
-      aria-expanded="false"
-    >
-      <span class="settings-section-arrow">&#9660;</span>
-      <h3>Quality on Import</h3>
-      <span
-        class="qp-governed-badge"
-        title="Saved under the active profile in the panel on the right"
-        >Profile</span
-      >
-      <span class="settings-section-hint">Apply the profile to manually imported files</span>
-    </div>
-    <div class="settings-section-body collapsed" data-stg="quality">
-      <div class="settings-group" data-stg="quality">
-        <div class="form-group">
-          <div class="setting-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="import-replace-lower-quality" />
-              Replace lower quality files on import
-            </label>
-            <span
-              class="info-icon"
-              role="button"
-              tabindex="0"
-              title="What's this?"
-              onclick="toggleSettingHelp(this)"
-              onkeydown="
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleSettingHelp(this);
-                }
-              "
-              >i</span
-            >
-          </div>
-          <div class="setting-help-body" hidden>
-            When importing from Staging, if a track already exists in your library at a lower
-            quality (e.g. MP3), it will be replaced with the higher quality version (e.g. FLAC). If
-            disabled, existing tracks are always kept and the import file is skipped.
-            <br /><br />
-            <strong>Note:</strong> imported files are always checked against your Quality Profile's
-            priority list above — there's no separate on/off switch for that, since an empty list
-            (or Fallback turned on) already means "accept anything."
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- end Quality on Import body -->
+                                                        <!-- Rank candidates by quality (priority mode only) -->
+                                                        <div class="form-group" id="quality-rank-candidates-group">
+                                                            <div class="setting-row">
+                                                                <label class="checkbox-label" style="margin:0;">
+                                                                    <input type="checkbox" id="quality-rank-candidates">
+                                                                    Rank-based download order
+                                                                </label>
+                                                                <span class="info-icon" role="button" tabindex="0"
+                                                                    title="What's this?"
+                                                                    onclick="toggleSettingHelp(this)"
+                                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                            </div>
+                                                            <div class="help-text setting-help-body" hidden>
+                                                                A single source often returns several copies of the same
+                                                                track.<br><br>
+                                                                <strong>Off</strong> (default): the most likely-correct
+                                                                / fastest copy is
+                                                                downloaded first — the original behaviour.<br><br>
+                                                                <strong>On</strong>: the highest-quality copy (per your
+                                                                target list above) is
+                                                                downloaded first instead; correctness and speed only
+                                                                break ties.<br><br>
+                                                                Nothing is skipped and the source order doesn't change,
+                                                                so a track can't go
+                                                                missing — it just prefers the better copy. (This is
+                                                                always how
+                                                                <strong>Best quality</strong> works, which is why this
+                                                                option only appears for
+                                                                <strong>Source priority</strong>.)
+                                                            </div>
+                                                        </div>
 
-    <!-- ═══ ALBUM RELEASES (profile: what to import from a downloaded album release) ═══ -->
-    <div
-      class="settings-section-header collapsed"
-      data-stg="quality"
-      onclick="
-        this.classList.toggle('collapsed');
-        const b = this.nextElementSibling;
-        b.classList.toggle('collapsed');
-        b.style.display = b.classList.contains('collapsed') ? 'none' : '';
-      "
-      role="button"
-      tabindex="0"
-      aria-expanded="false"
-    >
-      <span class="settings-section-arrow">&#9660;</span>
-      <h3>Album Releases</h3>
-      <span
-        class="qp-governed-badge"
-        title="Saved under the active profile in the panel on the right"
-        >Profile</span
-      >
-      <span class="settings-section-hint"
-        >What to import when a Usenet or torrent download is a whole album</span
-      >
-    </div>
-    <div class="settings-section-body collapsed" data-stg="quality">
-      <div class="settings-group" data-stg="quality">
-        <div class="form-group">
-          <div class="setting-row" style="margin-bottom: 4px">
-            <label for="quality-release-import-mode" style="font-weight: 600"
-              >Import from album releases</label
-            >
-            <span
-              class="info-icon"
-              role="button"
-              tabindex="0"
-              title="What's this?"
-              onclick="toggleSettingHelp(this)"
-              onkeydown="
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleSettingHelp(this);
-                }
-              "
-              >i</span
-            >
-          </div>
-          <select
-            id="quality-release-import-mode"
-            style="width: 100%; max-width: 420px"
-            onchange="debouncedSaveQualityProfile()"
-          >
-            <option value="requested_tracks">Requested tracks only (default)</option>
-            <option value="album_tracks">Also the album's other tracks that pass</option>
-          </select>
-          <div class="help-text setting-help-body" hidden>
-            A requested track often arrives inside a whole album release.
-            <strong>Requested tracks only</strong> imports just the track you asked for.
-            <br /><br />
-            <strong>Also the album's other tracks</strong> then imports every other track of that
-            album found in the release and not yet in your library. Each one goes through the normal
-            import pipeline with this quality profile, like a wishlist download: a track that fails
-            a check is quarantined on its own, and the tracks that pass are imported.
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- end Album Releases body -->
+                                                        <!-- Fallback Option -->
+                                                        <div class="form-group">
+                                                            <div class="setting-row">
+                                                                <label class="checkbox-label" style="margin:0;">
+                                                                    <input type="checkbox" id="quality-fallback-enabled"
+                                                                        checked>
+                                                                    Accept off-list quality when nothing in the list is
+                                                                    available
+                                                                </label>
+                                                                <span class="info-icon" role="button" tabindex="0"
+                                                                    title="What's this?"
+                                                                    onclick="toggleSettingHelp(this)"
+                                                                    onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                            </div>
+                                                            <div class="help-text setting-help-body" hidden>
+                                                                This does <strong>not</strong> mean "walk down my list"
+                                                                — the list already
+                                                                does that on its own.<br><br>
+                                                                When <strong>on</strong>, a file that matches
+                                                                <em>none</em> of your targets
+                                                                (e.g. a 16-bit FLAC or an MP3 when you only listed
+                                                                24-bit) is
+                                                                <strong>accepted anyway</strong> as a last
+                                                                resort.<br><br>
+                                                                Turn it <strong>off</strong> to strictly enforce your
+                                                                list — anything off-list
+                                                                is then quarantined instead of completed.
+                                                            </div>
+                                                        </div>
 
-    <!-- ═══ POST-DOWNLOAD CONVERSION (quality — moved from Library) ═══ -->
-    <div
-      class="settings-section-header collapsed"
-      data-stg="quality"
-      onclick="
-        this.classList.toggle('collapsed');
-        const b = this.nextElementSibling;
-        b.classList.toggle('collapsed');
-        b.style.display = b.classList.contains('collapsed') ? 'none' : '';
-      "
-      role="button"
-      tabindex="0"
-      aria-expanded="false"
-    >
-      <span class="settings-section-arrow">&#9660;</span>
-      <h3>Post-Download Conversion</h3>
-      <span
-        class="qp-governed-badge"
-        title="Saved under the active profile in the panel on the right"
-        >Profile</span
-      >
-      <span class="settings-section-hint">Downsample hi-res, make lossy copies</span>
-    </div>
-    <div class="settings-section-body collapsed" data-stg="quality">
-      <div class="settings-group" data-stg="quality">
-        <div class="form-group">
-          <div class="setting-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="downsample-hires" />
-              Downsample Hi-Res FLAC to CD quality (16-bit / 44.1kHz)
-            </label>
-            <span
-              class="info-icon"
-              role="button"
-              tabindex="0"
-              title="What's this?"
-              onclick="toggleSettingHelp(this)"
-              onkeydown="
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleSettingHelp(this);
-                }
-              "
-              >i</span
-            >
-          </div>
-          <div class="setting-help-body" hidden>
-            When a 24-bit or high sample-rate FLAC is downloaded, it is automatically converted to
-            16-bit/44.1kHz. The hi-res original is <strong>replaced</strong>, not kept alongside.
-            Its acquired quality is remembered for upgrade decisions, preventing a
-            download/downsample loop. Requires ffmpeg.
-          </div>
-        </div>
-        <div class="form-group">
-          <div class="setting-row">
-            <label class="checkbox-label">
-              <input
-                type="checkbox"
-                id="lossy-copy-enabled"
-                onchange="
-                  document.getElementById('lossy-copy-options').style.display = this.checked
-                    ? 'block'
-                    : 'none'
-                "
-              />
-              Create lossy copy of downloaded FLAC files
-            </label>
-            <span
-              class="info-icon"
-              role="button"
-              tabindex="0"
-              title="What's this?"
-              onclick="toggleSettingHelp(this)"
-              onkeydown="
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleSettingHelp(this);
-                }
-              "
-              >i</span
-            >
-          </div>
-          <div class="setting-help-body" hidden>
-            After downloading a lossless file, a lossy derivative at the selected codec and bitrate
-            is created in the same folder. When the source is kept, it remains the canonical quality
-            and the derivative is treated as a companion version. Requires ffmpeg.
-          </div>
-        </div>
-        <div id="lossy-copy-options" style="display: none">
-          <div class="form-group">
-            <label>Codec:</label>
-            <select id="lossy-copy-codec" onchange="updateLossyBitrateOptions()">
-              <option value="mp3">MP3</option>
-              <option value="opus">Opus</option>
-              <option value="aac">AAC (M4A)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Bitrate:</label>
-            <select id="lossy-copy-bitrate">
-              <option value="320">320 kbps</option>
-              <option value="256">256 kbps</option>
-              <option value="192">192 kbps</option>
-              <option value="128">128 kbps</option>
-            </select>
-          </div>
-          <div class="form-group" style="margin-top: 12px">
-            <label class="checkbox-label">
-              <input type="checkbox" id="lossy-copy-delete-original" />
-              Keep lossy output only — delete the lossless source after conversion
-            </label>
-          </div>
-          <div class="help-text" style="color: rgba(255, 100, 100, 0.8)">
-            Warning: The acquired lossless file will be permanently deleted after the output is
-            verified. Its acquisition quality remains recorded, so this retention choice is not
-            shown as a new upgrade.
-          </div>
-        </div>
-        <div class="help-text">
-          <strong>One profile, two decisions:</strong> the quality list controls what SoulSync
-          acquires; these options control what it retains. A retained lossless + lossy pair is one
-          track with two file versions, not two duplicate tracks.
-        </div>
-      </div>
-    </div>
-    <!-- end Post-Download Conversion body -->
+                                                    </div>
 
-    <!-- ═══ AUDIO VERIFICATION (global quality gate) ═══ -->
-    <div
-      class="settings-section-header collapsed"
-      data-stg="quality"
-      onclick="
-        this.classList.toggle('collapsed');
-        const b = this.nextElementSibling;
-        b.classList.toggle('collapsed');
-        b.style.display = b.classList.contains('collapsed') ? 'none' : '';
-      "
-      role="button"
-      tabindex="0"
-      aria-expanded="false"
-    >
-      <span class="settings-section-arrow">&#9660;</span>
-      <h3>Audio Verification</h3>
-      <span
-        class="qp-governed-badge"
-        title="Saved under the active profile in the panel on the right"
-        >Profile</span
-      >
-      <span class="settings-section-hint"
-        >AcoustID identity match + truncated/silent detection</span
-      >
-    </div>
-    <div class="settings-section-body collapsed" data-stg="quality">
-      <div class="settings-group" data-stg="quality">
-        <!-- AcoustID identity gate — always shown here; help notes it needs AcoustID enabled -->
-        <div class="form-group" id="acoustid-require-verified-group">
-          <div class="setting-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="acoustid-require-verified" />
-              Only allow AcoustID-verified tracks for imports and downloads
-            </label>
-            <span
-              class="info-icon"
-              role="button"
-              tabindex="0"
-              title="What's this?"
-              onclick="toggleSettingHelp(this)"
-              onkeydown="
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleSettingHelp(this);
-                }
-              "
-              >i</span
-            >
-          </div>
-          <div class="setting-help-body" hidden>
-            Applies to both <strong>imports</strong> and <strong>downloads</strong>. When
-            <strong>on</strong>, a track that AcoustID runs but
-            <em>cannot confirm</em>
-            (no fingerprint match / cross-script metadata — the ⚠ "unverified" case) is
-            <strong>quarantined</strong> instead of being allowed into the library. Downloads then
-            try the next candidate; imports just quarantine (no candidate to retry). Only a clean
-            AcoustID <strong>pass</strong> is kept. <br /><br />
-            ⚠️ <strong>Use with care.</strong> AcoustID "could not confirm" is <em>common</em> for
-            perfectly good tracks — anything not in its fingerprint database: new/obscure releases,
-            classical, remixes, live cuts, remasters, non-Latin-script titles. With this on,
-            <strong>all of those get quarantined</strong>, so you may end up with many legitimate
-            files to review and approve by hand. Nothing is lost (quarantined files can be
-            approved), but expect manual cleanup. Leave this <strong>off</strong> to keep the safer
-            default: unconfirmed tracks import with the ⚠ "unverified" badge so you can review them
-            without anything being blocked. Transient lookup errors (rate-limit / outage) always
-            import, so an AcoustID outage never stalls you. Requires AcoustID enabled.
-          </div>
-        </div>
-        <div class="form-group">
-          <div class="setting-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="audio-completeness-check" />
-              Verify real audio with ffmpeg
-            </label>
-            <span
-              class="info-icon"
-              role="button"
-              tabindex="0"
-              title="What's this?"
-              onclick="toggleSettingHelp(this)"
-              onkeydown="
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleSettingHelp(this);
-                }
-              "
-              >i</span
-            >
-          </div>
-          <div class="setting-help-body" hidden>
-            Decodes every downloaded file with ffmpeg to catch fake 30s previews padded to full
-            length and mostly-silent files — the kind whose header lies about the length so mutagen
-            can't catch them. <strong>Off by default:</strong> this fully decodes each file, the
-            most CPU-heavy post-processing step. Most sources (HiFi, Qobuz) already catch previews
-            on their own, so only turn this on if you see padded/silent files slip through. Applies
-            to all download sources.
-          </div>
-        </div>
-        <div class="form-group">
-          <div class="setting-row">
-            <label class="checkbox-label">
-              <input type="checkbox" id="verify-flac-decode" />
-              Verify FLAC decode with flac -t
-            </label>
-            <span
-              class="info-icon"
-              role="button"
-              tabindex="0"
-              title="What's this?"
-              onclick="toggleSettingHelp(this)"
-              onkeydown="
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleSettingHelp(this);
-                }
-              "
-              >i</span
-            >
-          </div>
-          <div class="setting-help-body" hidden>
-            Opt-in second integrity tier: a FLAC that passes the size/parse/duration checks is fully
-            decoded with <code>flac -t</code>, which also verifies the STREAMINFO MD5. A file that
-            fails is quarantined and the next candidate is tried, so a damaged replacement can never
-            take the place of a good file. <strong>Off by default.</strong> Fails open — if the flac
-            binary is missing or the check times out, the file is left alone rather than
-            quarantined.
-          </div>
-        </div>
-      </div>
-    </div>
-    <!-- end Audio Verification body -->
-  </div>
-  <!-- end qp-main -->
+                                                </div><!-- end Quality Profile body -->
+                                            </div><!-- end Quality Profile tile -->
 
-  <!-- Right: detached, sticky Quality Profiles panel — everything on
+                                            <!-- ═══ QUALITY ON IMPORT (moved from Library > Import — quality enforcement at import time) ═══ -->
+                                            <div class="settings-section-header collapsed" data-stg="quality"
+                                                onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                                role="button" tabindex="0" aria-expanded="false">
+                                                <span class="settings-section-arrow">&#9660;</span>
+                                                <h3>Quality on Import</h3>
+                                                <span class="qp-governed-badge"
+                                                    title="Saved under the active profile in the panel on the right">Profile</span>
+                                                <span class="settings-section-hint">Apply the profile to manually
+                                                    imported files</span>
+                                            </div>
+                                            <div class="settings-section-body collapsed" data-stg="quality">
+                                                <div class="settings-group" data-stg="quality">
+                                                    <div class="form-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox"
+                                                                    id="import-replace-lower-quality">
+                                                                Replace lower quality files on import
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>
+                                                            When importing from Staging, if a track already exists in
+                                                            your library at a lower quality
+                                                            (e.g. MP3), it will be replaced with the higher quality
+                                                            version (e.g. FLAC).
+                                                            If disabled, existing tracks are always kept and the import
+                                                            file is skipped.
+                                                            <br><br>
+                                                            <strong>Note:</strong> imported files are always checked
+                                                            against your Quality Profile's
+                                                            priority list above — there's no separate on/off switch for
+                                                            that, since an empty list
+                                                            (or Fallback turned on) already means "accept anything."
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div><!-- end Quality on Import body -->
+
+                                            <!-- ═══ ALBUM RELEASES (profile: what to import from a downloaded album release) ═══ -->
+                                            <div class="settings-section-header collapsed" data-stg="quality"
+                                                onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                                role="button" tabindex="0" aria-expanded="false">
+                                                <span class="settings-section-arrow">&#9660;</span>
+                                                <h3>Album Releases</h3>
+                                                <span class="qp-governed-badge"
+                                                    title="Saved under the active profile in the panel on the right">Profile</span>
+                                                <span class="settings-section-hint">What to import when a Usenet or
+                                                    torrent download is a whole album</span>
+                                            </div>
+                                            <div class="settings-section-body collapsed" data-stg="quality">
+                                                <div class="settings-group" data-stg="quality">
+                                                    <div class="form-group">
+                                                        <div class="setting-row" style="margin-bottom:4px;">
+                                                            <label for="quality-release-import-mode"
+                                                                style="font-weight:600;">Import from album releases</label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?"
+                                                                onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <select id="quality-release-import-mode"
+                                                            style="width:100%;max-width:420px;"
+                                                            onchange="debouncedSaveQualityProfile()">
+                                                            <option value="requested_tracks">Requested tracks only (default)</option>
+                                                            <option value="album_tracks">Also the album's other tracks that pass</option>
+                                                        </select>
+                                                        <div class="help-text setting-help-body" hidden>
+                                                            A requested track often arrives inside a whole album release.
+                                                            <strong>Requested tracks only</strong> imports just the track you asked for.
+                                                            <br><br>
+                                                            <strong>Also the album's other tracks</strong> then imports every other
+                                                            track of that album found in the release and not yet in your library.
+                                                            Each one goes through the normal import pipeline with this quality
+                                                            profile, like a wishlist download: a track that fails a check is
+                                                            quarantined on its own, and the tracks that pass are imported.
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div><!-- end Album Releases body -->
+
+                                            <!-- ═══ POST-DOWNLOAD CONVERSION (quality — moved from Library) ═══ -->
+                                            <div class="settings-section-header collapsed" data-stg="quality"
+                                                onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                                role="button" tabindex="0" aria-expanded="false">
+                                                <span class="settings-section-arrow">&#9660;</span>
+                                                <h3>Post-Download Conversion</h3>
+                                                <span class="qp-governed-badge"
+                                                    title="Saved under the active profile in the panel on the right">Profile</span>
+                                                <span class="settings-section-hint">Downsample hi-res, make lossy
+                                                    copies</span>
+                                            </div>
+                                            <div class="settings-section-body collapsed" data-stg="quality">
+                                                <div class="settings-group" data-stg="quality">
+                                                    <div class="form-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="downsample-hires">
+                                                                Downsample Hi-Res FLAC to CD quality (16-bit / 44.1kHz)
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>When a 24-bit or high
+                                                            sample-rate FLAC is downloaded, it is automatically
+                                                            converted to 16-bit/44.1kHz. The hi-res original is
+                                                            <strong>replaced</strong>, not kept alongside. Its acquired quality is remembered for upgrade decisions, preventing a
+                                                            download/downsample loop. Requires ffmpeg.</div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="lossy-copy-enabled"
+                                                                    onchange="document.getElementById('lossy-copy-options').style.display = this.checked ? 'block' : 'none'">
+                                                                Create lossy copy of downloaded FLAC files
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>After downloading a
+                                                            lossless file, a lossy derivative at the selected codec and
+                                                            bitrate is created in the same folder. When the source is
+                                                            kept, it remains the canonical quality and the derivative is
+                                                            treated as a companion version. Requires ffmpeg.</div>
+                                                    </div>
+                                                    <div id="lossy-copy-options" style="display: none;">
+                                                        <div class="form-group">
+                                                            <label>Codec:</label>
+                                                            <select id="lossy-copy-codec"
+                                                                onchange="updateLossyBitrateOptions()">
+                                                                <option value="mp3">MP3</option>
+                                                                <option value="opus">Opus</option>
+                                                                <option value="aac">AAC (M4A)</option>
+                                                            </select>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Bitrate:</label>
+                                                            <select id="lossy-copy-bitrate">
+                                                                <option value="320">320 kbps</option>
+                                                                <option value="256">256 kbps</option>
+                                                                <option value="192">192 kbps</option>
+                                                                <option value="128">128 kbps</option>
+                                                            </select>
+                                                        </div>
+                                                        <div class="form-group" style="margin-top: 12px;">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="lossy-copy-delete-original">
+                                                                Keep lossy output only — delete the lossless source
+                                                                after conversion
+                                                            </label>
+                                                        </div>
+                                                        <div class="help-text" style="color: rgba(255, 100, 100, 0.8);">
+                                                            Warning: The acquired lossless file will be permanently
+                                                            deleted after the output is verified.
+                                                            Its acquisition quality remains recorded, so this retention
+                                                            choice is not shown as a new upgrade.
+                                                        </div>
+                                                    </div>
+                                                    <div class="help-text">
+                                                        <strong>One profile, two decisions:</strong> the quality list
+                                                        controls what SoulSync acquires;
+                                                        these options control what it retains. A retained lossless +
+                                                        lossy pair is one track with two
+                                                        file versions, not two duplicate tracks.
+                                                    </div>
+                                                </div>
+                                            </div><!-- end Post-Download Conversion body -->
+
+                                            <!-- ═══ AUDIO VERIFICATION (global quality gate) ═══ -->
+                                            <div class="settings-section-header collapsed" data-stg="quality"
+                                                onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
+                                                role="button" tabindex="0" aria-expanded="false">
+                                                <span class="settings-section-arrow">&#9660;</span>
+                                                <h3>Audio Verification</h3>
+                                                <span class="qp-governed-badge"
+                                                    title="Saved under the active profile in the panel on the right">Profile</span>
+                                                <span class="settings-section-hint">AcoustID identity match +
+                                                    truncated/silent detection</span>
+                                            </div>
+                                            <div class="settings-section-body collapsed" data-stg="quality">
+                                                <div class="settings-group" data-stg="quality">
+                                                    <!-- AcoustID identity gate — always shown here; help notes it needs AcoustID enabled -->
+                                                    <div class="form-group" id="acoustid-require-verified-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="acoustid-require-verified">
+                                                                Only allow AcoustID-verified tracks for imports and
+                                                                downloads
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>
+                                                            Applies to both <strong>imports</strong> and
+                                                            <strong>downloads</strong>. When
+                                                            <strong>on</strong>, a track that AcoustID runs but
+                                                            <em>cannot confirm</em>
+                                                            (no fingerprint match / cross-script metadata — the ⚠
+                                                            "unverified" case) is
+                                                            <strong>quarantined</strong> instead of being allowed into
+                                                            the library. Downloads then
+                                                            try the next candidate; imports just quarantine (no
+                                                            candidate to retry). Only a clean
+                                                            AcoustID <strong>pass</strong> is kept.
+                                                            <br><br>
+                                                            ⚠️ <strong>Use with care.</strong> AcoustID "could not
+                                                            confirm" is <em>common</em>
+                                                            for perfectly good tracks — anything not in its fingerprint
+                                                            database: new/obscure
+                                                            releases, classical, remixes, live cuts, remasters,
+                                                            non-Latin-script titles. With
+                                                            this on, <strong>all of those get quarantined</strong>, so
+                                                            you may end up with many
+                                                            legitimate files to review and approve by hand. Nothing is
+                                                            lost (quarantined files
+                                                            can be approved), but expect manual cleanup. Leave this
+                                                            <strong>off</strong> to keep
+                                                            the safer default: unconfirmed tracks import with the ⚠
+                                                            "unverified" badge so you can
+                                                            review them without anything being blocked. Transient lookup
+                                                            errors (rate-limit /
+                                                            outage) always import, so an AcoustID outage never stalls
+                                                            you. Requires AcoustID enabled.
+                                                        </div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="audio-completeness-check">
+                                                                Verify real audio with ffmpeg
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>Decodes every downloaded
+                                                            file with ffmpeg to catch fake 30s previews padded to full
+                                                            length and mostly-silent files — the kind whose header lies
+                                                            about the length so mutagen can't catch them. <strong>Off by
+                                                                default:</strong> this fully decodes each file, the most
+                                                            CPU-heavy post-processing step. Most sources (HiFi, Qobuz)
+                                                            already catch previews on their own, so only turn this on if
+                                                            you see padded/silent files slip through. Applies to all
+                                                            download sources.</div>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <div class="setting-row">
+                                                            <label class="checkbox-label">
+                                                                <input type="checkbox" id="verify-flac-decode">
+                                                                Verify FLAC decode with flac -t
+                                                            </label>
+                                                            <span class="info-icon" role="button" tabindex="0"
+                                                                title="What's this?" onclick="toggleSettingHelp(this)"
+                                                                onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                        </div>
+                                                        <div class="setting-help-body" hidden>Opt-in second integrity
+                                                            tier: a FLAC that passes the size/parse/duration checks is
+                                                            fully decoded with <code>flac -t</code>, which also verifies
+                                                            the STREAMINFO MD5. A file that fails is quarantined and
+                                                            the next candidate is tried, so a damaged replacement can
+                                                            never take the place of a good file. <strong>Off by
+                                                                default.</strong> Fails open — if the flac binary is
+                                                            missing or the check times out, the file is left alone
+                                                            rather than quarantined.</div>
+                                                    </div>
+                                                </div>
+                                            </div><!-- end Audio Verification body -->
+
+                                        </div><!-- end qp-main -->
+
+                                        <!-- Right: detached, sticky Quality Profiles panel — everything on
                                  the 4 tiles to the left is saved under whichever profile is
                                  selected here for editing. Always visible (no collapse), protruding to the
                                  right of the settings column on wide screens so it never takes
                                  width away from the tiles. -->
-  <div class="qp-side-panel" id="qp-side-panel" data-stg="quality">
-    <div class="qp-side-panel-header">
-      <h3 class="qp-side-panel-title">Quality Profiles</h3>
-      <button type="button" class="qp-manage-btn" onclick="openQualityProfileManager()">
-        Manage
-      </button>
-    </div>
-    <p class="qp-side-panel-hint">
-      Click a profile's name to view/edit its settings on the left. Changes autosave to that
-      profile, and Save Settings saves it too; viewing never activates it. Per row: ● set as active
-      default, ✏ rename, ✎ save now, ⇩ use for Auto-Import, × delete.
-    </p>
-    <div class="qp-editing-banner" id="qp-editing-banner" style="display: none">
-      Editing <strong class="qp-editing-banner-name">this profile</strong> — not the active default.
-      Changes autosave to this profile; the save status at the top saves it right away too.
-    </div>
-    <div class="qp-profile-list" id="qp-profile-list">
-      <!-- rows injected by renderCustomQualityProfiles() -->
-    </div>
-    <div class="qp-profile-new" id="qp-profile-new">
-      <button
-        type="button"
-        class="qp-profile-new-btn"
-        id="qp-profile-new-btn"
-        onclick="qpShowNewProfileInput()"
-      >
-        + New profile
-      </button>
-    </div>
-  </div>
-</div>
-<!-- end qp-layout -->
+                                        <div class="qp-side-panel" id="qp-side-panel" data-stg="quality">
+                                            <div class="qp-side-panel-header">
+                                                <h3 class="qp-side-panel-title">Quality Profiles</h3>
+                                                <button type="button" class="qp-manage-btn"
+                                                    onclick="openQualityProfileManager()">Manage</button>
+                                            </div>
+                                            <p class="qp-side-panel-hint">Click a profile's name to view/edit its
+                                                settings on the left. Changes autosave to that profile, and Save
+                                                Settings saves it too; viewing never activates it. Per row: ● set as
+                                                active default, ✏ rename, ✎ save now, ⇩ use for Auto-Import, × delete.
+                                            </p>
+                                            <div class="qp-editing-banner" id="qp-editing-banner" style="display:none">
+                                                Editing <strong class="qp-editing-banner-name">this profile</strong> —
+                                                not the active default. Changes autosave to this profile; the save status at the top saves it right away too.
+                                            </div>
+                                            <div class="qp-profile-list" id="qp-profile-list">
+                                                <!-- rows injected by renderCustomQualityProfiles() -->
+                                            </div>
+                                            <div class="qp-profile-new" id="qp-profile-new">
+                                                <button type="button" class="qp-profile-new-btn" id="qp-profile-new-btn"
+                                                    onclick="qpShowNewProfileInput()">+ New profile</button>
+                                            </div>
+                                        </div>
+
+                                    </div><!-- end qp-layout -->

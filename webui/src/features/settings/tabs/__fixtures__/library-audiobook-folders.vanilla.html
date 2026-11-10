@@ -1,87 +1,49 @@
-<div
-  id="folders-audiobooks-panel"
-  role="tabpanel"
-  aria-labelledby="folders-audiobooks-tab"
-  class="stg-media-panel"
-  hidden
-  tabindex="0"
->
-  <div class="stg-media-context">
-    <strong>Audiobook folders</strong
-    ><span class="stg-media-summary">Where finished books live</span>
-  </div>
+                                        <div id="folders-audiobooks-panel" role="tabpanel"
+                                            aria-labelledby="folders-audiobooks-tab" class="stg-media-panel" hidden
+                                            tabindex="0">
+                                            <div class="stg-media-context"><strong>Audiobook folders</strong><span
+                                                    class="stg-media-summary">Where finished books live</span></div>
 
-  <div class="settings-group" data-stg="library">
-    <div class="form-group">
-      <label>Audiobooks Folder (output):</label>
-      <div class="path-input-group">
-        <input
-          type="text"
-          id="audiobooks-path"
-          data-folder-check="audiobooks"
-          data-folder-label="Audiobooks folder"
-          placeholder="./audiobooks"
-          readonly
-        />
-        <button
-          class="browse-button locked"
-          onclick="
-            typeof togglePathLock === 'function'
-              ? togglePathLock('audiobooks', this)
-              : (function (b) {
-                  const i = document.getElementById('audiobooks-path');
-                  if (!i) return;
-                  const l = i.hasAttribute('readonly') || i.readOnly;
-                  if (l) {
-                    i.removeAttribute('readonly');
-                    i.readOnly = false;
-                    i.focus();
-                    b.textContent = 'Lock';
-                    b.classList.remove('locked');
-                  } else {
-                    i.setAttribute('readonly', '');
-                    i.readOnly = true;
-                    b.textContent = 'Unlock';
-                    b.classList.add('locked');
-                  }
-                })(this)
-          "
-        >
-          Unlock
-        </button>
-      </div>
-      <small class="settings-hint"
-        >Where downloaded audiobooks are saved and organized. Keep this separate from your music
-        library so a media server does not index chapter files as albums.</small
-      >
-    </div>
-    <div class="form-group">
-      <label>More audiobook folders:</label>
-      <div id="audiobooks-extra-paths"></div>
-      <button type="button" class="test-button" onclick="addAudiobookExtraPathRow()">
-        + Add folder
-      </button>
-      <small class="settings-hint"
-        >An existing collection on another drive. SoulSync scans and manages it, but new books
-        always land in the folder above. In Docker, mount it at its own container path, like
-        /app/audiobooks2. If a drive is unplugged, its books stay in your library until it's
-        back.</small
-      >
-    </div>
-  </div>
+                                            <div class="settings-group" data-stg="library">
+                                                <div class="form-group">
+                                                    <label>Audiobooks Folder (output):</label>
+                                                    <div class="path-input-group">
+                                                        <input type="text" id="audiobooks-path" data-folder-check="audiobooks" data-folder-label="Audiobooks folder"
+                                                            placeholder="./audiobooks" readonly>
+                                                        <button class="browse-button locked"
+                                                            onclick="typeof togglePathLock==='function'?togglePathLock('audiobooks', this):((function(b){const i=document.getElementById('audiobooks-path');if(!i)return;const l=i.hasAttribute('readonly')||i.readOnly;if(l){i.removeAttribute('readonly');i.readOnly=false;i.focus();b.textContent='Lock';b.classList.remove('locked');}else{i.setAttribute('readonly','');i.readOnly=true;b.textContent='Unlock';b.classList.add('locked');}})(this))">Unlock</button>
+                                                    </div>
+                                                    <small class="settings-hint">Where downloaded audiobooks are saved
+                                                        and organized. Keep this separate from your music library so a
+                                                        media server does not index chapter files as albums.</small>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>More audiobook folders:</label>
+                                                    <div id="audiobooks-extra-paths"></div>
+                                                    <button type="button" class="test-button"
+                                                        onclick="addAudiobookExtraPathRow()">+ Add folder</button>
+                                                    <small class="settings-hint">An existing collection on another
+                                                        drive. SoulSync scans and manages it, but new books always land
+                                                        in the folder above. In Docker, mount it at its own container
+                                                        path, like /app/audiobooks2. If a drive is unplugged, its
+                                                        books stay in your library until it's back.</small>
+                                                </div>
+                                            </div>
 
-  <div class="settings-group">
-    <div class="form-group">
-      <label>Spoken-word artists (music downloads filed as audiobooks):</label>
-      <div id="audiobook-routes-list"></div>
-      <small class="settings-hint"
-        >Children's audio plays and similar releases are found by the music search, not the
-        audiobook search. Downloads by the artists listed here are filed in the audiobooks folder
-        above instead of the music library, and count as owned so playlist syncs do not fetch them
-        again. Add an artist with <strong>Treat as audiobook</strong> on the artist's page or in the
-        watchlist settings. Routing only affects new downloads; <em>Move existing…</em> relocates
-        albums already in the music library.</small
-      >
-    </div>
-  </div>
-</div>
+                                            <div class="settings-group">
+                                                <div class="form-group">
+                                                    <label>Spoken-word artists (music downloads filed as audiobooks):</label>
+                                                    <div id="audiobook-routes-list"></div>
+                                                    <small class="settings-hint">Children's audio plays and similar
+                                                        releases are found by the music search, not the audiobook
+                                                        search. Downloads by the artists listed here are filed in the
+                                                        audiobooks folder above instead of the music library, and
+                                                        count as owned so playlist syncs do not fetch them again.
+                                                        Add an artist with <strong>Treat as audiobook</strong> on the
+                                                        artist's page or in the watchlist settings. Routing only
+                                                        affects new downloads; <em>Move existing…</em> relocates
+                                                        albums already in the music library.</small>
+                                                </div>
+                                            </div>
+
+                                        </div>

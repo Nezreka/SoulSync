@@ -1,211 +1,167 @@
-<div id="youtube-settings-container" class="src-config-panel">
-  <div class="form-group">
-    <label>YouTube Browser Cookies:</label>
-    <select id="youtube-cookies-browser" class="form-select">
-      <option value="">None (No cookies)</option>
-      <option value="chrome">Chrome</option>
-      <option value="firefox">Firefox</option>
-      <option value="edge">Edge</option>
-      <option value="brave">Brave</option>
-      <option value="opera">Opera</option>
-      <option value="safari">Safari</option>
-      <option value="custom">Paste cookies.txt (server / Docker)</option>
-    </select>
-    <div class="setting-warning" id="youtube-cookie-abe-warning" role="status" hidden></div>
-    <div class="setting-help-text">
-      Only needed for private playlists, your Liked Music, age-gated videos and Premium audio
-      qualities &mdash; public videos download fine with <strong>None</strong>. Reading a browser
-      only works when that browser is on the same machine as SoulSync, so on a server or in Docker
-      choose <strong>Paste cookies.txt</strong>. On Windows, Chrome and the other Chromium browsers
-      seal their cookies in a way yt-dlp cannot read at all &mdash; use <strong>Firefox</strong> or
-      <strong>Paste cookies.txt</strong>.
-    </div>
-  </div>
-  <div class="form-group" id="youtube-cookies-paste-group" style="display: none">
-    <label>Paste cookies.txt:</label>
-    <textarea
-      id="youtube-cookies-paste"
-      class="form-input"
-      rows="6"
-      placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;...&#9;NAME&#9;VALUE"
-    ></textarea>
-    <div class="setting-help-text">
-      For server/Docker installs with no local browser. Paste a Netscape/Mozilla
-      <code>cookies.txt</code>. Export with a "Get cookies.txt LOCALLY" extension and paste the
-      whole file &mdash; the <code># Netscape HTTP Cookie File</code> header alone is not enough.
-      Required for private playlists like your <strong>Liked Music</strong>, and for Premium audio
-      itags. Cookies expire periodically &mdash; re-paste if YouTube stops working.
-    </div>
-  </div>
-  <div class="form-group">
-    <label>YouTube Download Delay:</label>
-    <input
-      type="number"
-      id="youtube-download-delay"
-      min="0"
-      max="30"
-      step="1"
-      value="3"
-      placeholder="3"
-    />
-    <div class="setting-help-text">
-      Seconds between YouTube downloads to avoid bot detection. Default: 3
-    </div>
-  </div>
-  <div class="form-group">
-    <div class="setting-row">
-      <label class="checkbox-label">
-        <input type="checkbox" id="youtube-album-bundle" />
-        Download whole albums from YouTube Music
-      </label>
-      <span
-        class="info-icon"
-        role="button"
-        tabindex="0"
-        title="What's this?"
-        onclick="toggleSettingHelp(this)"
-        onkeydown="
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            toggleSettingHelp(this);
-          }
-        "
-        >i</span
-      >
-    </div>
-    <div class="setting-help-body" hidden>
-      For an album, find the album itself on YouTube Music and download its playlist, instead of
-      searching for each song. Helps with albums whose songs never show up in a song search. The
-      artist and album title must both match; if they don't, SoulSync searches track by track as
-      usual. Some albums need YouTube Music Premium cookies. Off by default.
-    </div>
-  </div>
-  <div class="form-group">
-    <div class="setting-row">
-      <label class="checkbox-label">
-        <input
-          type="checkbox"
-          id="youtube-transcode"
-          checked
-          onchange="
-            document.getElementById('youtube-transcode-options').style.display = this.checked
-              ? 'block'
-              : 'none'
-          "
-        />
-        Re-encode YouTube audio
-      </label>
-      <span
-        class="info-icon"
-        role="button"
-        tabindex="0"
-        title="What's this?"
-        onclick="toggleSettingHelp(this)"
-        onkeydown="
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            toggleSettingHelp(this);
-          }
-        "
-        >i</span
-      >
-    </div>
-    <div class="setting-help-body" hidden>
-      YouTube serves Opus or AAC, not FLAC or MP3. With this on, the quality list must include the
-      converted format (default MP3 320). With it off, add Opus or AAC to the list, or turn Fallback
-      on.
-    </div>
-  </div>
-  <div id="youtube-transcode-options">
-    <div class="form-group">
-      <label>Codec:</label>
-      <select id="youtube-transcode-codec" onchange="updateYoutubeTranscodeBitrateOptions()">
-        <option value="mp3">MP3</option>
-        <option value="opus">Opus</option>
-        <option value="aac">AAC (M4A)</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>Bitrate:</label>
-      <select id="youtube-transcode-bitrate">
-        <option value="320">320 kbps</option>
-        <option value="256">256 kbps</option>
-        <option value="192">192 kbps</option>
-        <option value="128">128 kbps</option>
-      </select>
-    </div>
-  </div>
-  <!-- yt-dlp updater. Lives with YouTube rather than under Advanced. It is the
+                                            <div id="youtube-settings-container" class="src-config-panel">
+                                                <div class="form-group">
+                                                    <label>YouTube Browser Cookies:</label>
+                                                    <select id="youtube-cookies-browser" class="form-select">
+                                                        <option value="">None (No cookies)</option>
+                                                        <option value="chrome">Chrome</option>
+                                                        <option value="firefox">Firefox</option>
+                                                        <option value="edge">Edge</option>
+                                                        <option value="brave">Brave</option>
+                                                        <option value="opera">Opera</option>
+                                                        <option value="safari">Safari</option>
+                                                        <option value="custom">Paste cookies.txt (server / Docker)
+                                                        </option>
+                                                    </select>
+                                                    <div class="setting-warning" id="youtube-cookie-abe-warning"
+                                                        role="status" hidden></div>
+                                                    <div class="setting-help-text">
+                                                        Only needed for private playlists, your Liked Music, age-gated
+                                                        videos
+                                                        and Premium audio qualities &mdash; public videos download fine
+                                                        with <strong>None</strong>.
+                                                        Reading a browser only works when that browser is on the same
+                                                        machine as SoulSync,
+                                                        so on a server or in Docker choose <strong>Paste
+                                                            cookies.txt</strong>. On Windows,
+                                                        Chrome and the other Chromium browsers seal their cookies in a
+                                                        way yt-dlp cannot
+                                                        read at all &mdash; use <strong>Firefox</strong> or
+                                                        <strong>Paste cookies.txt</strong>.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group" id="youtube-cookies-paste-group"
+                                                    style="display:none;">
+                                                    <label>Paste cookies.txt:</label>
+                                                    <textarea id="youtube-cookies-paste" class="form-input" rows="6"
+                                                        placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;...&#9;NAME&#9;VALUE"></textarea>
+                                                    <div class="setting-help-text">
+                                                        For server/Docker installs with no local browser. Paste a
+                                                        Netscape/Mozilla
+                                                        <code>cookies.txt</code>. Export with a
+                                                        "Get cookies.txt LOCALLY" extension and paste the whole file
+                                                        &mdash; the
+                                                        <code># Netscape HTTP Cookie File</code> header alone is not
+                                                        enough.
+                                                        Required for private playlists like your <strong>Liked
+                                                            Music</strong>, and for
+                                                        Premium audio itags. Cookies expire periodically &mdash;
+                                                        re-paste if YouTube stops working.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <label>YouTube Download Delay:</label>
+                                                    <input type="number" id="youtube-download-delay" min="0" max="30"
+                                                        step="1" value="3" placeholder="3">
+                                                    <div class="setting-help-text">
+                                                        Seconds between YouTube downloads to avoid bot detection.
+                                                        Default: 3
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <div class="setting-row">
+                                                        <label class="checkbox-label">
+                                                            <input type="checkbox" id="youtube-album-bundle">
+                                                            Download whole albums from YouTube Music
+                                                        </label>
+                                                        <span class="info-icon" role="button" tabindex="0"
+                                                            title="What's this?" onclick="toggleSettingHelp(this)"
+                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    </div>
+                                                    <div class="setting-help-body" hidden>
+                                                        For an album, find the album itself on YouTube Music and
+                                                        download its playlist, instead of searching for each song.
+                                                        Helps with albums whose songs never show up in a song
+                                                        search. The artist and album title must both match; if
+                                                        they don't, SoulSync searches track by track as usual.
+                                                        Some albums need YouTube Music Premium cookies.
+                                                        Off by default.
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <div class="setting-row">
+                                                        <label class="checkbox-label">
+                                                            <input type="checkbox" id="youtube-transcode" checked
+                                                                onchange="document.getElementById('youtube-transcode-options').style.display = this.checked ? 'block' : 'none'">
+                                                            Re-encode YouTube audio
+                                                        </label>
+                                                        <span class="info-icon" role="button" tabindex="0"
+                                                            title="What's this?" onclick="toggleSettingHelp(this)"
+                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    </div>
+                                                    <div class="setting-help-body" hidden>
+                                                        YouTube serves Opus or AAC, not FLAC or MP3.
+                                                        With this on, the quality list must include the converted format
+                                                        (default MP3 320). With it off, add Opus or AAC to the list,
+                                                        or turn Fallback on.
+                                                    </div>
+                                                </div>
+                                                <div id="youtube-transcode-options">
+                                                    <div class="form-group">
+                                                        <label>Codec:</label>
+                                                        <select id="youtube-transcode-codec"
+                                                            onchange="updateYoutubeTranscodeBitrateOptions()">
+                                                            <option value="mp3">MP3</option>
+                                                            <option value="opus">Opus</option>
+                                                            <option value="aac">AAC (M4A)</option>
+                                                        </select>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Bitrate:</label>
+                                                        <select id="youtube-transcode-bitrate">
+                                                            <option value="320">320 kbps</option>
+                                                            <option value="256">256 kbps</option>
+                                                            <option value="192">192 kbps</option>
+                                                            <option value="128">128 kbps</option>
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <!-- yt-dlp updater. Lives with YouTube rather than under Advanced. It is the
                                              thing that breaks YouTube downloads when it goes stale, so it belongs
                                              where somebody debugging YouTube will actually look. -->
-  <h4 class="settings-subheading">yt-dlp <span id="ytdlp-hint-badge" hidden>&#9679;</span></h4>
-  <div class="settings-group">
-    <div class="form-group">
-      <label>Installed:</label>
-      <span id="ytdlp-installed" class="readonly-field">Loading...</span>
-    </div>
-    <div class="form-group">
-      <label>Newest available:</label>
-      <span id="ytdlp-latest" class="readonly-field">Loading...</span>
-    </div>
-    <div class="form-group">
-      <label>Release channel:</label>
-      <select id="ytdlp-channel" onchange="loadYtdlpStatus()">
-        <option value="nightly" selected>Nightly (recommended)</option>
-        <option value="stable">Stable</option>
-      </select>
-      <span
-        class="info-icon"
-        role="button"
-        tabindex="0"
-        title="What's this?"
-        onclick="toggleSettingHelp(this)"
-        onkeydown="
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            toggleSettingHelp(this);
-          }
-        "
-        >i</span
-      >
-    </div>
-    <div class="help-text setting-help-body" hidden>
-      YouTube changes how it serves video far more often than yt-dlp cuts a stable release, so
-      nightly is what actually keeps downloads working. Stable is there if you'd rather move slowly.
-    </div>
+                                                <h4 class="settings-subheading">yt-dlp <span id="ytdlp-hint-badge"
+                                                        hidden>&#9679;</span></h4>
+                                                <div class="settings-group">
 
-    <div class="form-actions" style="flex-wrap: wrap">
-      <button class="test-button" id="ytdlp-update-btn" onclick="runYtdlpUpdate()">
-        Update yt-dlp
-      </button>
-    </div>
-    <div class="help-text">
-      When YouTube downloads start failing with <strong>403 Forbidden</strong>, an out-of-date
-      yt-dlp is nearly always the cause.
-      <strong>An update only takes effect after you restart SoulSync</strong> &mdash; the running
-      process keeps using the version it loaded at startup.
-    </div>
-    <div
-      id="ytdlp-status"
-      style="
-        display: none;
-        margin-top: 8px;
-        padding: 8px 12px;
-        border-radius: 8px;
-        font-size: 0.85em;
-      "
-    ></div>
-    <pre
-      id="ytdlp-detail"
-      style="
-        display: none;
-        margin-top: 8px;
-        max-height: 220px;
-        overflow: auto;
-        font-size: 0.75em;
-        white-space: pre-wrap;
-      "
-    ></pre>
-  </div>
-  <!-- end yt-dlp body -->
-</div>
+                                                    <div class="form-group">
+                                                        <label>Installed:</label>
+                                                        <span id="ytdlp-installed"
+                                                            class="readonly-field">Loading...</span>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Newest available:</label>
+                                                        <span id="ytdlp-latest" class="readonly-field">Loading...</span>
+                                                    </div>
+                                                    <div class="form-group">
+                                                        <label>Release channel:</label>
+                                                        <select id="ytdlp-channel" onchange="loadYtdlpStatus()">
+                                                            <option value="nightly" selected>Nightly (recommended)
+                                                            </option>
+                                                            <option value="stable">Stable</option>
+                                                        </select>
+                                                        <span class="info-icon" role="button" tabindex="0"
+                                                            title="What's this?" onclick="toggleSettingHelp(this)"
+                                                            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                                    </div>
+                                                    <div class="help-text setting-help-body" hidden>YouTube changes how
+                                                        it serves video far more often than yt-dlp cuts a stable
+                                                        release, so nightly is what actually keeps downloads working.
+                                                        Stable is there if you'd rather move slowly.</div>
+
+                                                    <div class="form-actions" style="flex-wrap: wrap;">
+                                                        <button class="test-button" id="ytdlp-update-btn"
+                                                            onclick="runYtdlpUpdate()">Update yt-dlp</button>
+                                                    </div>
+                                                    <div class="help-text">
+                                                        When YouTube downloads start failing with <strong>403
+                                                            Forbidden</strong>, an out-of-date yt-dlp is nearly always
+                                                        the cause.
+                                                        <strong>An update only takes effect after you restart SoulSync</strong> &mdash; the running process keeps using
+                                                        the version it loaded at startup.
+                                                    </div>
+                                                    <div id="ytdlp-status"
+                                                        style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;">
+                                                    </div>
+                                                    <pre id="ytdlp-detail"
+                                                        style="display: none; margin-top: 8px; max-height: 220px; overflow: auto; font-size: 0.75em; white-space: pre-wrap;"></pre>
+                                                </div><!-- end yt-dlp body -->
+                                            </div>
