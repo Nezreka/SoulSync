@@ -1966,6 +1966,36 @@ export function FindingsSurface({
         </FindingsInbox>
       )}
 
+      {/* the same findings by the record they are on. a shelf, not the whole
+          grid: the Albums view is one click away and holds the rest. the
+          section only shows once there is an album to show. */}
+      {viewMode === 'inbox' && !searching && !focused && !video ? (
+        <section className="repair-shelf">
+          <div className="tools-section-head">
+            <h3 className="tools-section-title">Albums with findings</h3>
+            <span className="tools-section-blurb">Open one to work on it track by track.</span>
+            <button
+              type="button"
+              className="repair-shelf-all"
+              onClick={() => changeViewMode('albums')}
+            >
+              See all
+            </button>
+          </div>
+          <FindingsAlbumGrid
+            shelf
+            groupBy="album"
+            jobId={jobFilter || undefined}
+            status={statusFilter || undefined}
+            refreshToken={refreshToken}
+            onOpen={(group) => {
+              setSelectedAlbum(group);
+              changeViewMode('albums');
+            }}
+          />
+        </section>
+      ) : null}
+
       {prompts.promptNode}
 
       {reidentifyingFinding ? (

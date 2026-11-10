@@ -77,13 +77,30 @@ export function FindingArt({ album, artist, file }: FindingArtProps) {
   );
 }
 
-/** A few covers fanned out: what an issue type is about, at a glance. */
-export function FindingArtStack({ urls }: { urls?: readonly string[] | null }) {
+/**
+ * Up to four covers as one tile, the way a playlist shows what is in it: what
+ * an issue type is about, before you read a word. A type with no pictures (an
+ * orphan file belongs to no album) gets the glyph in the same tile, so every
+ * row starts on one edge.
+ */
+export function FindingArtMosaic({
+  urls,
+  file,
+}: {
+  urls?: readonly string[] | null;
+  file?: boolean;
+}) {
   const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
   const shown = (urls || []).filter((url) => url && !broken.has(url)).slice(0, 4);
-  if (!shown.length) return <span className="repair-art-stack empty" aria-hidden="true" />;
+  if (!shown.length) {
+    return (
+      <span className="repair-art-mosaic empty" aria-hidden="true">
+        {file ? <FileGlyph /> : <NoteGlyph />}
+      </span>
+    );
+  }
   return (
-    <span className="repair-art-stack" aria-hidden="true">
+    <span className={`repair-art-mosaic n${shown.length}`} aria-hidden="true">
       {shown.map((url) => (
         <img
           src={url}

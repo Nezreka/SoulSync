@@ -155,18 +155,22 @@ describe('findings inbox sections', () => {
       group('orphan_file'),
     ]);
     const stack = (type: string) =>
-      [...container.querySelectorAll(`#repair-group-${type} .repair-art-stack img`)].map((img) =>
+      [...container.querySelectorAll(`#repair-group-${type} .repair-art-mosaic img`)].map((img) =>
         img.getAttribute('src'),
       );
     expect(stack('missing_lyrics')).toEqual(['/a.jpg', '/b.jpg']);
     expect(stack('orphan_file')).toEqual([]);
+    // the tile is still there, with a glyph, so the rows share one edge
+    expect(
+      container.querySelector('#repair-group-orphan_file .repair-art-mosaic.empty svg'),
+    ).not.toBeNull();
   });
 
   it('a cover that fails to load is dropped, not left as a broken picture', () => {
     const { container } = renderInbox([group('missing_lyrics', { art: ['/a.jpg', '/b.jpg'] })]);
-    fireEvent.error(container.querySelector('.repair-art-stack img[src="/a.jpg"]') as Element);
+    fireEvent.error(container.querySelector('.repair-art-mosaic img[src="/a.jpg"]') as Element);
     expect(
-      [...container.querySelectorAll('.repair-art-stack img')].map((img) =>
+      [...container.querySelectorAll('.repair-art-mosaic img')].map((img) =>
         img.getAttribute('src'),
       ),
     ).toEqual(['/b.jpg']);

@@ -92,3 +92,52 @@ def test_history_and_progress_endpoints(client):
     runs = c.get("/api/video/repair/history?job_id=missing_episodes").get_json()["runs"]
     assert len(runs) == 1 and runs[0]["items_scanned"] == 7
     assert c.get("/api/video/repair/progress").get_json() == {}
+
+
+# ── posters beside findings ──────────────────────────────────────────────────
+
+def test_a_finding_poster_comes_from_what_the_finding_names():
+    from api.video.repair import finding_poster
+    # one it already carries, as is
+    assert finding_poster({"details": {"poster_url": "/api/video/poster/show/3515"}}) \
+        == "/api/video/poster/show/3515"
+    # a bare tmdb path gets the tmdb host
+    assert finding_poster({"details": {"poster_url": "/abc.jpg"}}) \
+        == "https://image.tmdb.org/t/p/w342/abc.jpg"
+    assert finding_poster({"details": {"movie_id": 12}}) == "/api/video/poster/movie/12"
+    assert finding_poster({"details": {"show_id": "7"}}) == "/api/video/poster/show/7"
+    # an episode's library id is its show's
+    assert finding_poster({"details": {"kind": "episode", "library_id": "3515"}}) \
+        == "/api/video/poster/show/3515"
+    assert finding_poster({"entity_type": "movie", "entity_id": "44", "details": {}}) \
+        == "/api/video/poster/movie/44"
+
+
+def test_a_finding_that_names_nothing_gets_no_poster():
+    from api.video.repair import finding_poster
+    assert finding_poster({"details": {}}) is None
+    # a number with nothing saying movie or show is not guessed at
+    assert finding_poster({"details": {"library_id": "9"}}) is None
+    assert finding_poster({"entity_type": "wishlist", "entity_id": "e:90046:8:6", "details": {}}) is None
+    assert finding_poster({"details": None}) is None
+
+
+def test_findings_and_issue_types_carry_posters_over_http(client):
+    c, db = client
+    for show_id in (5, 5, 6):
+        db.repair_create_finding("missing_episodes", finding_type="missing_episodes",
+                                 title=f"Show {show_id}", entity_type="show",
+                                 entity_id=f"{show_id}:{id(object())}",
+                                 details={"show_id": show_id})
+    db.repair_create_finding("broken_files", finding_type="broken_file", title="Stub",
+                             entity_type="file", entity_id="f1", details={})
+    items = c.get("/api/video/repair/findings?status=pending&sort=oldest").get_json()["items"]
+    assert [i.get("album_thumb_url") for i in items] == [
+        "/api/video/poster/show/5", "/api/video/poster/show/5",
+        "/api/video/poster/show/6", None]
+    groups = {g["finding_type"]: g
+              for g in c.get("/api/video/repair/findings/groups").get_json()["groups"]}
+    # newest first, one of each
+    assert groups["missing_episodes"]["art"] == [
+        "/api/video/poster/show/6", "/api/video/poster/show/5"]
+    assert groups["broken_file"]["art"] == []

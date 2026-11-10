@@ -35,6 +35,9 @@ export interface FindingsAlbumGridProps {
    *  capped the album list (then the sum is a floor, not a total). the
    *  surface uses it to say how many findings AREN'T on any album. */
   onLoaded?: (covered: number, capped: boolean) => void;
+  /** one row of the first few albums, for the findings landing view. it
+   *  renders nothing at all while loading or when there are none. */
+  shelf?: boolean;
 }
 
 /** the server's default cap on album groups (api/repair.py). */
@@ -87,6 +90,9 @@ export function trackLabel(count: number): string {
   return count === 1 ? '1 track' : `${count} tracks`;
 }
 
+/** how many albums the landing shelf shows before "See all" */
+const SHELF_MAX = 14;
+
 export function FindingsAlbumGrid({
   groupBy,
   jobId,
@@ -97,6 +103,7 @@ export function FindingsAlbumGrid({
   selectedGroupKey,
   refreshToken = 0,
   onLoaded,
+  shelf = false,
 }: FindingsAlbumGridProps) {
   const [groups, setGroups] = useState<FindingAlbumGroup[] | null>(null);
   const onLoadedRef = useRef(onLoaded);
@@ -118,6 +125,8 @@ export function FindingsAlbumGrid({
     };
   }, [groupBy, jobId, status, findingType, q, refreshToken]);
 
+  if (shelf && !groups?.length) return null;
+
   if (groups === null) {
     return <div className="repair-album-grid-empty">Grouping findings…</div>;
   }
@@ -132,8 +141,8 @@ export function FindingsAlbumGrid({
   }
 
   return (
-    <div className="repair-album-grid" role="list">
-      {groups.map((group) => {
+    <div className={`repair-album-grid${shelf ? ' shelf' : ''}`} role="list">
+      {(shelf ? groups.slice(0, SHELF_MAX) : groups).map((group) => {
         const art = artFor(group);
         const name = group.group_by === 'artist' ? group.artist : group.album;
         const isSelected = selectedGroupKey === group.key;

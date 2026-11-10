@@ -33,6 +33,42 @@ def _int(val, default):
         return default
 
 
+def finding_poster(item: dict):
+    """The poster to show beside a video finding, or None.
+
+    The finding says what it is about: a poster it already carries, or the
+    movie or show it names. A bare number with nothing saying which it is
+    (movie or show) gets no poster rather than the wrong one.
+    """
+    details = item.get("details") if isinstance(item.get("details"), dict) else {}
+    poster = str(details.get("poster_url") or details.get("thumb_url") or "").strip()
+    if poster:
+        if poster.startswith("http") or poster.startswith("/api/"):
+            return poster
+        return "https://image.tmdb.org/t/p/w342" + poster
+
+    def _id(value):
+        text = str(value if value is not None else "").strip()
+        return text if text.isdigit() else None
+
+    if _id(details.get("movie_id")):
+        return f"/api/video/poster/movie/{_id(details.get('movie_id'))}"
+    if _id(details.get("show_id")):
+        return f"/api/video/poster/show/{_id(details.get('show_id'))}"
+    kind = str(details.get("kind") or item.get("entity_type") or "").lower()
+    library_id = _id(details.get("library_id")) or (
+        _id(item.get("entity_id")) if kind in ("movie", "show") else None)
+    if library_id and kind in ("movie", "show", "episode", "season"):
+        return f"/api/video/poster/{'movie' if kind == 'movie' else 'show'}/{library_id}"
+    return None
+
+
+# how many of a type's newest open findings are read for its posters, and how
+# many distinct ones the inbox row shows (the music side's numbers)
+_GROUP_ART_SAMPLE = 24
+_GROUP_ART_SHOWN = 4
+
+
 def _with_schedules(jobs: list) -> list:
     """the schedule lives on each job's system automation (in the app db,
     where the shared automation engine keeps its rows). hand the tools page the
@@ -152,11 +188,17 @@ def register_routes(bp):
     def video_repair_findings():
         from . import get_video_db
         q = request.args
-        return jsonify(get_video_db().repair_get_findings(
+        result = get_video_db().repair_get_findings(
             job_id=q.get("job_id") or None, status=q.get("status") or None,
             severity=q.get("severity") or None, finding_type=q.get("finding_type") or None,
             sort=q.get("sort") or None, q=q.get("q") or None,
-            page=_int(q.get("page"), 0), limit=_int(q.get("limit"), 50)))
+            page=_int(q.get("page"), 0), limit=_int(q.get("limit"), 50))
+        # the row's picture, under the name the shared findings list reads
+        for item in result.get("items") or []:
+            poster = finding_poster(item)
+            if poster:
+                item["album_thumb_url"] = poster
+        return jsonify(result)
 
     @bp.route("/repair/findings/counts", methods=["GET"])
     def video_repair_findings_counts():
@@ -167,9 +209,29 @@ def register_routes(bp):
     def video_repair_findings_groups():
         # the inbox's job / severity filters: a row counts what its bulk
         # buttons act on (review 5 W3-TT)
-        return jsonify({"groups": _worker().get_finding_groups(
-            job_id=request.args.get("job_id") or None,
-            severity=request.args.get("severity") or None)})
+        from . import get_video_db
+        job_id = request.args.get("job_id") or None
+        severity = request.args.get("severity") or None
+        groups = _worker().get_finding_groups(job_id=job_id, severity=severity)
+        # a few posters per type, off its newest open findings
+        for group in groups:
+            group["art"] = []
+            if not group.get("pending"):
+                continue
+            try:
+                sample = get_video_db().repair_get_findings(
+                    job_id=job_id, severity=severity, status="pending",
+                    finding_type=group.get("finding_type"), sort="newest",
+                    page=0, limit=_GROUP_ART_SAMPLE)
+                for item in sample.get("items") or []:
+                    poster = finding_poster(item)
+                    if poster and poster not in group["art"]:
+                        group["art"].append(poster)
+                        if len(group["art"]) >= _GROUP_ART_SHOWN:
+                            break
+            except Exception as exc:  # noqa: BLE001 - posters are not worth a 500
+                logger.debug("video group posters unavailable: %s", exc)
+        return jsonify({"groups": groups})
 
     @bp.route("/repair/finding-types", methods=["GET"])
     def video_repair_finding_types():

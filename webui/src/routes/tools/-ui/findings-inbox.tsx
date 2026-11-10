@@ -30,7 +30,7 @@ import {
   sortInboxGroups,
 } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
-import { FindingArtStack } from './finding-art';
+import { FindingArtMosaic } from './finding-art';
 import { STUDIO_CONFIG } from './operations-studio';
 
 export interface FindingsInboxProps {
@@ -163,8 +163,7 @@ export function FindingsInbox({
                 },
               })}
         >
-          <span className="repair-inbox-count">{count.toLocaleString()}</span>
-          <FindingArtStack urls={group.art} />
+          <FindingArtMosaic urls={group.art} file={!info?.fixable || destructive} />
           <span className="repair-inbox-text">
             <span className="repair-inbox-label">
               {/* worth a mark only when something is actually wrong */}
@@ -191,6 +190,7 @@ export function FindingsInbox({
             </span>
             <span className="repair-inbox-blurb">{blurb}</span>
           </span>
+          <span className="repair-inbox-count">{count.toLocaleString()}</span>
           <span className="repair-inbox-actions" onClick={(event) => event.stopPropagation()}>
             {canFix ? (
               <button
