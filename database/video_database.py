@@ -9071,6 +9071,250 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── deleting a whole title (core/video/delete_title.py) ──────────────────
+    # every read and write the title delete needs. the title is addressed by
+    # its library row; anything keyed by tmdb id is matched on the kind too,
+    # because a movie and a show can share a tmdb id.
+
+    def title_delete_rows(self, kind: str, item_id) -> list:
+        """the library row ids one delete takes: the row itself plus any
+        stale twin of it (same tmdb id, same server -- a Plex re-key leaves
+        one behind until the next deep scan). [] for an unknown row."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return []
+        conn = self._get_connection()
+        try:
+            r = conn.execute(f"SELECT id, tmdb_id, server_source FROM {table} WHERE id = ?",
+                             (int(item_id),)).fetchone()
+            if not r:
+                return []
+            if r["tmdb_id"] is None:
+                return [int(r["id"])]
+            return [int(x["id"]) for x in conn.execute(
+                f"SELECT id FROM {table} WHERE tmdb_id = ? AND server_source IS ? ORDER BY id",
+                (r["tmdb_id"], r["server_source"]))]
+        except (sqlite3.Error, TypeError, ValueError):
+            return []
+        finally:
+            conn.close()
+
+    def title_delete_episode_ids(self, show_ids) -> list:
+        """every episode row of the given shows (the findings sweep keys some
+        findings by episode)."""
+        ids = [int(i) for i in show_ids or []]
+        if not ids:
+            return []
+        ph = ",".join("?" * len(ids))
+        conn = self._get_connection()
+        try:
+            return [int(r["id"]) for r in conn.execute(
+                f"SELECT id FROM episodes WHERE show_id IN ({ph})", ids)]
+        finally:
+            conn.close()
+
+    def title_wishlist_count(self, kind: str, tmdb_id) -> int:
+        """wishlist rows for the title across EVERY profile."""
+        dbkind = {"movie": "movie", "show": "episode"}.get(kind)
+        if not dbkind or not tmdb_id:
+            return 0
+        conn = self._get_connection()
+        try:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM video_wishlist WHERE kind=? AND tmdb_id=?",
+                (dbkind, int(tmdb_id))).fetchone()[0])
+        finally:
+            conn.close()
+
+    def title_watchlist_followers(self, kind: str, tmdb_id) -> list:
+        """profile ids that FOLLOW the title on the watchlist (explicit follows;
+        an airing library show is also followed by default unless muted)."""
+        if kind != "show" or not tmdb_id:
+            return []
+        conn = self._get_connection()
+        try:
+            return [int(r["profile_id"]) for r in conn.execute(
+                "SELECT profile_id FROM video_watchlist WHERE kind='show' AND tmdb_id=? "
+                "AND state='follow' ORDER BY profile_id", (int(tmdb_id),))]
+        finally:
+            conn.close()
+
+    def _title_download_where(self, kind: str, tmdb_id, library_ids):
+        """(sql, args) matching the title's rows in video_downloads: grabbed
+        from its TMDB page (media_id = tmdb id) or its library page (media_id
+        = a library row id; older and manual rows leave media_source NULL).
+        A show's single-episode grabs are kind='episode' rows carrying the
+        SHOW's id, so a show matches both kinds."""
+        kinds = ("show", "episode") if kind == "show" else (kind,)
+        conds, args = [], []
+        if tmdb_id:
+            conds.append("(media_source='tmdb' AND media_id=?)")
+            args.append(str(int(tmdb_id)))
+        for i in library_ids or []:
+            conds.append("((media_source='library' OR media_source IS NULL) AND media_id=?)")
+            args.append(str(int(i)))
+        if not conds:
+            return None, []
+        where = ("kind IN (" + ",".join("?" * len(kinds)) + ") AND ("
+                 + " OR ".join(conds) + ")")
+        return where, list(kinds) + args
+
+    def title_active_downloads(self, kind: str, tmdb_id, library_ids) -> list:
+        """the title's downloads still in flight (queued .. importing)."""
+        from core.video.stats import ACTIVE_STATUSES
+        where, args = self._title_download_where(kind, tmdb_id, library_ids)
+        if not where:
+            return []
+        ph = ",".join("?" * len(ACTIVE_STATUSES))
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                f"SELECT * FROM video_downloads WHERE {where} AND status IN ({ph}) ORDER BY id",
+                args + list(ACTIVE_STATUSES))]
+        finally:
+            conn.close()
+
+    def title_seeding_torrents(self, kind: str, tmdb_id, library_ids) -> int:
+        """completed torrent grabs of the title the client may still be seeding
+        (the seeding sweep hasn't released them). delete leaves these alone."""
+        where, args = self._title_download_where(kind, tmdb_id, library_ids)
+        if not where:
+            return 0
+        conn = self._get_connection()
+        try:
+            return int(conn.execute(
+                f"SELECT COUNT(*) FROM video_downloads WHERE {where} AND status='completed' "
+                "AND source='torrent' AND client_ref IS NOT NULL AND client_ref <> '' "
+                "AND COALESCE(seed_released, 0) = 0", args).fetchone()[0])
+        finally:
+            conn.close()
+
+    def title_pending_requests(self, kind: str, tmdb_id) -> list:
+        """pending requests for the title from every profile (a show's
+        episode requests included)."""
+        kinds = {"movie": ("movie",), "show": ("show", "episode")}.get(kind)
+        if not kinds or not tmdb_id:
+            return []
+        ph = ",".join("?" * len(kinds))
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                f"SELECT * FROM video_requests WHERE kind IN ({ph}) AND tmdb_id=? "
+                "AND status='pending' ORDER BY id", (*kinds, int(tmdb_id)))]
+        finally:
+            conn.close()
+
+    def deny_title_requests(self, kind: str, tmdb_id, *, resolved_by,
+                            admin_response=None) -> list:
+        """deny every pending request for the title, from every profile, and
+        return the rows denied (only those this call flipped)."""
+        rows = self.title_pending_requests(kind, tmdb_id)
+        if not rows:
+            return []
+        ids = [int(r["id"]) for r in rows]
+        ph = ",".join("?" * len(ids))
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                f"UPDATE video_requests SET status='denied', admin_response=?, resolved_by=?, "
+                f"resolved_at=datetime('now') WHERE status='pending' AND id IN ({ph})",
+                (admin_response, int(resolved_by), *ids))
+            conn.commit()
+            taken = {int(r["id"]) for r in conn.execute(
+                f"SELECT id FROM video_requests WHERE id IN ({ph}) AND status='denied' "
+                f"AND resolved_by=?", (*ids, int(resolved_by)))}
+            return [r for r in rows if int(r["id"]) in taken]
+        except (sqlite3.Error, TypeError, ValueError):
+            logger.exception("deny_title_requests failed")
+            return []
+        finally:
+            conn.close()
+
+    def _title_findings_where(self, kind: str, row_ids, episode_ids, file_ids):
+        """(sql, args) matching PENDING repair findings about the title: keyed
+        by its movie/show row (a show's missing-episodes key is
+        '<show id>:<signature>'), one of its episodes or files, or naming the
+        row in their details."""
+        parts, args = [], []
+        rows = [str(int(i)) for i in row_ids or []]
+        if rows:
+            ph = ",".join("?" * len(rows))
+            parts.append(f"(entity_type=? AND entity_id IN ({ph}))")
+            args += [kind, *rows]
+            if kind == "show":
+                parts += ["(entity_type='show' AND entity_id LIKE ?)" for _ in rows]
+                args += [f"{r}:%" for r in rows]
+            key = "$.movie_id" if kind == "movie" else "$.show_id"
+            parts.append(f"(CAST(json_extract(details_json, '{key}') AS TEXT) IN ({ph}))")
+            args += rows
+        eps = [str(int(i)) for i in episode_ids or []]
+        if eps:
+            parts.append(f"(entity_type='episode' AND entity_id IN ({','.join('?' * len(eps))}))")
+            args += eps
+        files = [str(int(i)) for i in file_ids or []]
+        if files:
+            parts.append(f"(entity_type='file' AND entity_id IN ({','.join('?' * len(files))}))")
+            args += files
+        if not parts:
+            return None, []
+        return "status='pending' AND (" + " OR ".join(parts) + ")", args
+
+    def title_pending_findings(self, kind: str, row_ids, episode_ids=(), file_ids=()) -> int:
+        """pending repair findings about the title (see _title_findings_where)."""
+        where, args = self._title_findings_where(kind, row_ids, episode_ids, file_ids)
+        if not where:
+            return 0
+        conn = self._get_connection()
+        try:
+            return int(conn.execute(
+                f"SELECT COUNT(*) FROM video_repair_findings WHERE {where}", args).fetchone()[0])
+        except sqlite3.Error:
+            return 0
+        finally:
+            conn.close()
+
+    def resolve_title_findings(self, kind: str, row_ids, episode_ids=(), file_ids=(),
+                               action="Title deleted") -> int:
+        """close the title's pending findings as resolved, so nothing is left
+        to approve that would act on a title that's gone."""
+        where, args = self._title_findings_where(kind, row_ids, episode_ids, file_ids)
+        if not where:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                f"UPDATE video_repair_findings SET status='resolved', user_action=?, "
+                f"resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE {where}",
+                [action, *args])
+            conn.commit()
+            return cur.rowcount
+        except sqlite3.Error:
+            logger.exception("resolve_title_findings failed")
+            return 0
+        finally:
+            conn.close()
+
+    def drop_title_rows(self, kind: str, row_ids) -> int:
+        """forget the title's library rows; seasons, episodes and file rows go
+        with them (ON DELETE CASCADE). what the next deep scan would do once
+        the server has let go of it, done now. an 'I have this' link to one of
+        the rows goes too: row ids can be handed out again, and a stale link
+        would point a TMDB title at whatever gets the id next."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        ids = [int(i) for i in row_ids or []]
+        if not table or not ids:
+            return 0
+        ph = ",".join("?" * len(ids))
+        conn = self._get_connection()
+        try:
+            conn.execute(f"DELETE FROM video_manual_matches WHERE kind=? AND library_id IN ({ph})",
+                         (kind, *ids))
+            cur = conn.execute(f"DELETE FROM {table} WHERE id IN ({ph})", ids)
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
     def repair_stale_wishlist(self) -> list:
         """Wishlist rows whose target is ALREADY OWNED, annotated with the owned
         files' resolutions — the audit job judges them against the cutoff:
@@ -10234,6 +10478,27 @@ class VideoDatabase:
             cur = conn.execute(sql, args)
             conn.commit()
             return cur.rowcount
+        finally:
+            conn.close()
+
+    def wishlist_has(self, kind, *, tmdb_id, season_number=None, episode_number=None) -> bool:
+        """Is this still on ANY profile's wishlist? ``kind`` is 'movie' or
+        'episode'; for an episode, leaving ``episode_number`` None asks about the
+        whole season (a season pack). The drain asks right before it grabs,
+        because its item list was read before a long search and the title may
+        have been deleted or un-wished in between."""
+        if not tmdb_id:
+            return False
+        sql, args = "SELECT 1 FROM video_wishlist WHERE kind=? AND tmdb_id=?", [kind, int(tmdb_id)]
+        if kind == "episode" and season_number is not None:
+            sql += " AND season_number=?"
+            args.append(int(season_number))
+            if episode_number is not None:
+                sql += " AND episode_number=?"
+                args.append(int(episode_number))
+        conn = self._get_connection()
+        try:
+            return conn.execute(sql + " LIMIT 1", args).fetchone() is not None
         finally:
             conn.close()
 

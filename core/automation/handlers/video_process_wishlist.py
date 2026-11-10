@@ -673,6 +673,22 @@ def _default_fetch_items(media_type: str) -> List[Dict[str, Any]]:
     return annotate(db.episode_wishlist_to_download(), db=db)
 
 
+def _default_still_wanted(item: Dict[str, Any], media_type: str) -> bool:
+    """Is this item still on anyone's wishlist? Fails open: a DB hiccup must
+    not stop the drain from grabbing what it was asked to."""
+    try:
+        from api.video import get_video_db
+        db = get_video_db()
+        if media_type == "movie":
+            return db.wishlist_has("movie", tmdb_id=item.get("tmdb_id"))
+        return db.wishlist_has("episode", tmdb_id=item.get("show_tmdb_id"),
+                               season_number=item.get("season_number"),
+                               episode_number=item.get("episode_number"))
+    except Exception:   # noqa: BLE001 - visibility check, never a blocker
+        logger.debug("still_wanted check failed", exc_info=True)
+        return True
+
+
 def _backfill_movie_available_dates(limit: int = 25) -> None:
     """Resolve the DOWNLOADABLE (home/digital) date for wished movies that don't have one yet —
     TMDB digital/physical, or theatrical + a home-release window (Radarr's 'minimum availability
@@ -1318,6 +1334,7 @@ def auto_video_process_wishlist(
     enqueue: Optional[Callable[..., bool]] = None,
     record_outcome: Optional[Callable[[Dict[str, Any], str, bool], None]] = None,
     record_note: Optional[Callable[[Dict[str, Any], str, str, Optional[str]], None]] = None,
+    still_wanted: Optional[Callable[[Dict[str, Any], str], bool]] = None,
 ) -> Dict[str, Any]:
     """Auto-grab the wished movies (or episodes): search Soulseek, pick the best release,
     enqueue — at most ``max_simultaneous_downloads`` grabs per run (default 3); the rest
@@ -1325,6 +1342,11 @@ def auto_video_process_wishlist(
     (``max_concurrent``).
 
     Returns ``{'status': 'completed', 'searched': int, 'grabbed': int, ...}``."""
+    # Re-check against the same source the items came from: a caller that
+    # hands in its own items (a manual retry, a test) has no wishlist rows
+    # for the DB check to find.
+    if still_wanted is None:
+        still_wanted = _default_still_wanted if fetch_items is None else (lambda _it, _mt: True)
     fetch_items = fetch_items or _default_fetch_items
     active_keys = active_keys or _default_active_keys
     # a test that hands in its own folders routes by them alone unless it
@@ -1428,6 +1450,7 @@ def auto_video_process_wishlist(
         refused = [0]      # releases passed the profile; the download client said no
         deferred = [0]      # budget spent: left on the wishlist for the next run
         stopped = [0]       # cancel all hit mid-run: left on the wishlist untouched
+        gone = [0]          # taken off the wishlist while its search ran: not grabbed
         slots_claimed = [0]  # atomic grab-budget claims this run (never > max_downloads)
         total = [len(todo)]
         lock = threading.Lock()
@@ -1459,6 +1482,18 @@ def auto_video_process_wishlist(
             cooldown_wait = max([remaining for _c, remaining in cooled], default=0)
             ok, refusal = False, None
             budget_deferred = False
+            if usable and not still_wanted(it, media_type):
+                # The item list was read before this search, and a search can
+                # take minutes. If the title was deleted or un-wished in the
+                # meantime, grabbing it now brings it straight back -- and a
+                # failed grab re-wishes it outright. Drop it, record nothing.
+                with lock:
+                    gone[0] += 1
+                    deps.update_progress(
+                        automation_id, log_type='info',
+                        log_line="'%s' was removed from the wishlist while searching -- not grabbed"
+                                 % display_name(it, media_type))
+                return
             if usable:
                 # Atomic claim (YouTube's slots_free() pattern): threads race
                 # here, so the check + increment must be one locked step — at
@@ -1615,6 +1650,8 @@ def auto_video_process_wishlist(
             tail.append('%d rejected on quality' % rejected[0])
         if refused[0]:
             tail.append('%d refused by the download client' % refused[0])
+        if gone[0]:
+            tail.append('%d removed from the wishlist mid-search' % gone[0])
         if deferred[0]:
             tail.append('%d deferred to the next run (download cap %d)'
                         % (deferred[0], max_downloads))

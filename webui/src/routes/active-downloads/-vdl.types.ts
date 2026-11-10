@@ -148,6 +148,8 @@ export interface VdlRecycleEntry {
   reason?: string | null;
   size?: number | null;
   age_seconds?: number | null;
+  /** a whole title folder (Delete Show / Delete Movie), not a single file */
+  is_folder?: boolean | null;
 }
 
 export interface VdlRecycleBin {

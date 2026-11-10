@@ -1155,6 +1155,16 @@
             libMore += moreItem('unlink', '🔗', 'Linked by hand — unlink',
                 'This title was linked to your library by hand (I have this). Remove the link?');
         }
+        // Delete the whole title so it stays deleted — admins only (the routes
+        // are admin-gated too), last in the group because it's the one you
+        // can't take back with a click. Two confirmations follow.
+        var delId = (d.kind === 'movie' || d.kind === 'show') && ownLibItem && libRow
+            ? (d.source !== 'tmdb' ? d.id : d.library_id) : null;
+        if (delId != null && _canManualMatch()) {
+            libMore += moreItem('delete-title', '🗑', d.kind === 'movie' ? 'Delete Movie' : 'Delete Show',
+                'Delete this ' + d.kind + ' from your library and stop it coming back',
+                ' data-vd-del-id="' + esc(delId) + '" style="color:#f87171"');
+        }
         var links = externalLinks(d);
         var more = moreGroup('Get', getMore) + moreGroup('Library', libMore) + moreGroup('Open on', links);
         var html = primary + companions;
@@ -1390,6 +1400,194 @@
         input.focus();
         try { input.select(); } catch (e) { /* noop */ }
         kick();   // the TMDB title is pre-filled — search it immediately
+    }
+
+    // ── Delete Show / Delete Movie ──────────────────────────────────────────
+    // Two confirmations: first what the delete will do (read from the server's
+    // own preview, so the dialog can't promise something the delete won't
+    // do), then the title typed exactly. The server checks the typed title
+    // again; the dialog's check only arms the button.
+    var _vdtStyled = false;
+    function _deleteTitleStyles() {
+        _haveThisStyles();
+        if (_vdtStyled) return; _vdtStyled = true;
+        var css =
+            '.vdt-body{overflow-y:auto;padding:12px 18px 0;font-size:13px;line-height:1.5;}' +
+            '.vdt-list{margin:0;padding-left:18px;}' +
+            '.vdt-list li{margin:4px 0;}' +
+            '.vdt-path{display:block;font-family:ui-monospace,monospace;font-size:12px;opacity:.6;word-break:break-all;}' +
+            '.vdt-note{margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13px;' +
+            'background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);}' +
+            '.vdt-block{margin-top:12px;padding:10px 12px;border-radius:10px;font-size:13px;' +
+            'background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.35);}' +
+            '.vht-foot .vdt-go{background:#dc2626;border-color:#dc2626;color:#fff;font-weight:600;}' +
+            '.vht-foot .vdt-go:disabled{opacity:.4;cursor:default;}';
+        var st = document.createElement('style');
+        st.textContent = css;
+        document.head.appendChild(st);
+    }
+
+    function closeDeleteTitleModal() {
+        var ov = document.querySelector('.vht-overlay[data-vdt]');
+        if (ov) ov.remove();
+        document.removeEventListener('keydown', _vdtKey);
+    }
+    function _vdtKey(e) {
+        if (e.key === 'Escape') closeDeleteTitleModal();
+    }
+
+    function _plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+
+    // the same units the Library card shows for this title (1 GB = 10^9 bytes), so
+    // the dialog and the card don't disagree about the same files
+    function _deleteSize(bytes) {
+        bytes = +bytes || 0; if (!bytes) return '';
+        if (bytes >= 1e12) return (Math.round(bytes / 1e11) / 10) + ' TB';
+        if (bytes >= 1e9) return (Math.round(bytes / 1e8) / 10) + ' GB';
+        return Math.max(1, Math.round(bytes / 1e6)) + ' MB';
+    }
+
+    // the lines both steps repeat: where the files go, and that torrents keep seeding
+    function _deleteFate(p) {
+        var gone = p.recycling
+            ? 'They go to the recycle bin and stay there for ' + _plural(p.keep_days, 'day') +
+              ', so you can still restore them.'
+            : 'Recycling is off, so they are deleted for good.';
+        var seed = 'Torrents are left seeding. ' + (p.seeding
+            ? _plural(p.seeding, 'torrent') + ' for this title stay in your torrent client until your seeding rules, or you, remove them.'
+            : 'Nothing for this title is seeding right now; any torrent that is stays in your client.');
+        return { gone: gone, seed: seed };
+    }
+
+    function openDeleteTitleModal(id) {
+        if (!data || !id || (data.kind !== 'movie' && data.kind !== 'show')) return;
+        var kind = data.kind;
+        _deleteTitleStyles();
+        closeDeleteTitleModal();
+        var ov = document.createElement('div');
+        ov.className = 'vht-overlay';
+        ov.setAttribute('data-vdt', '1');
+        ov.innerHTML = '<div class="vht-modal" role="dialog" aria-modal="true" aria-label="Delete">' +
+            '<div class="vht-hint">Working out what this would delete…</div></div>';
+        document.body.appendChild(ov);
+        document.addEventListener('keydown', _vdtKey);
+        ov.addEventListener('click', function (e) { if (e.target === ov) closeDeleteTitleModal(); });
+        fetch('/api/video/title-delete/' + kind + '/' + encodeURIComponent(id),
+            { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json().catch(function () { return { success: false, error: 'HTTP ' + r.status }; }); })
+            .then(function (p) {
+                if (!document.body.contains(ov)) return;
+                if (!p || !p.success) {
+                    closeDeleteTitleModal();
+                    toast(p && p.error ? p.error : 'Could not read what this would delete', 'error');
+                    return;
+                }
+                _deleteStepOne(ov, p);
+            })
+            .catch(function () {
+                closeDeleteTitleModal();
+                toast('Couldn’t reach the server', 'error');
+            });
+    }
+
+    function _deleteStepOne(ov, p) {
+        var noun = p.kind === 'movie' ? 'movie' : 'show';
+        var fate = _deleteFate(p);
+        var items = [];
+        var paths = p.folders.map(function (f) { return f.path; })
+            .concat(p.loose_files.map(function (f) { return f.path; }));
+        if (p.files) {
+            items.push('<li>' + _plural(p.files, 'file') + (p.size_bytes ? ', ' + _deleteSize(p.size_bytes) : '') +
+                (p.folders.length ? ' (the whole folder, artwork and subtitles too)' : '') + '. ' + esc(fate.gone) +
+                paths.map(function (x) { return '<span class="vdt-path">' + esc(x) + '</span>'; }).join('') + '</li>');
+        } else {
+            items.push('<li>No files are stored for this ' + noun + '.</li>');
+        }
+        if (p.files_missing) {
+            items.push('<li>' + _plural(p.files_missing, 'file') + ' SoulSync can’t find (already gone, or ' +
+                'outside its folders) ' + (p.files_missing === 1 ? 'is' : 'are') + ' left alone.</li>');
+        }
+        if (p.kind === 'show') {
+            items.push('<li>Unfollowed for every profile' +
+                (p.followers.length ? ' (' + _plural(p.followers.length, 'profile') + (p.followers.length === 1 ? ' follows' : ' follow') + ' it now)' : '') + '.</li>');
+        }
+        if (p.wishlist) items.push('<li>' + _plural(p.wishlist, 'wishlist entry', 'wishlist entries') + ' removed, from every profile.</li>');
+        if (p.downloads) items.push('<li>' + _plural(p.downloads, 'download') + ' in progress cancelled.</li>');
+        if (p.requests) items.push('<li>' + _plural(p.requests, 'pending request') + ' declined with “Removed from the library”. Whoever asked is told.</li>');
+        if (p.findings) items.push('<li>' + _plural(p.findings, 'repair finding') + ' closed.</li>');
+        items.push('<li>Hidden from Discover.</li>');
+        var foot = p.blocked
+            ? '<button type="button" data-vdt="close">Close</button>'
+            : '<button type="button" data-vdt="close">Cancel</button>' +
+              '<button class="vdt-go" type="button" data-vdt="next">Continue</button>';
+        ov.innerHTML =
+            '<div class="vht-modal" role="dialog" aria-modal="true" aria-label="Delete ' + noun + '">' +
+                '<div class="vht-head"><div>' +
+                    '<div class="vht-title">Delete ' + esc(p.title) + (p.year ? ' (' + esc(p.year) + ')' : '') + '?</div>' +
+                    '<div class="vht-sub">This takes it out of your library and stops anything bringing it back, for everyone.</div>' +
+                '</div><button class="vht-x" type="button" data-vdt="close" aria-label="Close">✕</button></div>' +
+                '<div class="vdt-body"><ul class="vdt-list">' + items.join('') + '</ul>' +
+                    '<div class="vdt-note">' + esc(fate.seed) + '</div>' +
+                    (p.blocked ? '<div class="vdt-block">' + esc(p.blocked) + '</div>' : '') +
+                '</div>' +
+                '<div class="vht-foot">' + foot + '</div>' +
+            '</div>';
+        ov.querySelectorAll('[data-vdt="close"]').forEach(function (b) { b.addEventListener('click', closeDeleteTitleModal); });
+        var next = ov.querySelector('[data-vdt="next"]');
+        if (next) next.addEventListener('click', function () { _deleteStepTwo(ov, p); });
+    }
+
+    function _deleteStepTwo(ov, p) {
+        var noun = p.kind === 'movie' ? 'Movie' : 'Show';
+        var fate = _deleteFate(p);
+        ov.innerHTML =
+            '<div class="vht-modal" role="dialog" aria-modal="true" aria-label="Confirm delete">' +
+                '<div class="vht-head"><div>' +
+                    '<div class="vht-title">Type the title to delete it</div>' +
+                    '<div class="vht-sub">Type <b>' + esc(p.title) + '</b> exactly. ' + esc(fate.gone) + '</div>' +
+                '</div><button class="vht-x" type="button" data-vdt="close" aria-label="Close">✕</button></div>' +
+                '<input class="vht-search" type="text" autocomplete="off" spellcheck="false" ' +
+                    'aria-label="Title" placeholder="' + esc(p.title) + '">' +
+                '<div class="vdt-body"><div class="vdt-note">' + esc(fate.seed) + '</div></div>' +
+                '<div class="vht-foot"><button type="button" data-vdt="back">Back</button>' +
+                '<button class="vdt-go" type="button" data-vdt="go" disabled>Delete ' + noun + '</button></div>' +
+            '</div>';
+        var input = ov.querySelector('.vht-search');
+        var go = ov.querySelector('[data-vdt="go"]');
+        var want = String(p.title || '').trim();
+        input.addEventListener('input', function () { go.disabled = input.value.trim() !== want; });
+        input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !go.disabled) go.click(); });
+        ov.querySelector('[data-vdt="close"]').addEventListener('click', closeDeleteTitleModal);
+        ov.querySelector('[data-vdt="back"]').addEventListener('click', function () { _deleteStepOne(ov, p); });
+        go.addEventListener('click', function () {
+            if (go.disabled) return;
+            go.disabled = true;
+            go.textContent = 'Deleting…';
+            fetch('/api/video/title-delete/' + p.kind + '/' + encodeURIComponent(p.item_id), {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ confirm_title: input.value })
+            })
+                .then(function (r) { return r.json().catch(function () { return { success: false, error: 'HTTP ' + r.status }; }); })
+                .then(function (res) {
+                    if (!res || !res.success) {
+                        go.disabled = false;
+                        go.textContent = 'Delete ' + noun;
+                        toast(res && res.error ? res.error : 'Delete failed', 'error');
+                        return;
+                    }
+                    closeDeleteTitleModal();
+                    toast('Deleted “' + p.title + '”' +
+                        (res.server_refresh === 'failed' ? '. Your media server didn’t answer the rescan; it catches up on its own scan.' : ''),
+                        res.server_refresh === 'failed' ? 'warning' : 'success');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-library' }));
+                })
+                .catch(function () {
+                    go.disabled = false;
+                    go.textContent = 'Delete ' + noun;
+                    toast('Delete failed: couldn’t reach the server', 'error');
+                });
+        });
+        input.focus();
     }
 
     // Remove a hand-made link. The button lives in the More menu, which
@@ -4252,6 +4450,7 @@
             else if (which === 'watched-toggle') toggleWatchedState(act);
             else if (which === 'ihavethis') openHaveThisModal();
             else if (which === 'unlink') unlinkManualMatch();
+            else if (which === 'delete-title') openDeleteTitleModal(act.getAttribute('data-vd-del-id'));
             else if (which === 'library-tab') {
                 setTab('library');
                 var bar = q('[data-vd-tabs]');

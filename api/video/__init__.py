@@ -107,7 +107,9 @@ def create_video_blueprint() -> Blueprint:
                    "/api/video/organization", "/api/video/downloads/slskd",
                    "/api/video/enrichment/config", "/api/video/enrichment/priority",
                    "/api/video/notifications",   # P11: GETs return webhook URLs/bot tokens
-                   "/api/video/backups")         # P10: restore/download the whole database
+                   "/api/video/backups",         # P10: restore/download the whole database
+                   # delete a whole title; its preview GET lists file paths
+                   "/api/video/title-delete")
         # Config the Settings page WRITES but content views (download modal / grab)
         # legitimately READ — gate the writes, leave the GETs open.
         if writing:

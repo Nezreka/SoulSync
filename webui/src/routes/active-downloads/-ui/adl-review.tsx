@@ -1000,10 +1000,13 @@ export function BinStrip({
   line,
   control,
   warn,
+  countLabel,
 }: {
   size: string;
   count: number;
   line: string;
+  /** replaces the "N files" line, for a bin that also holds folders */
+  countLabel?: string;
   control?: React.ReactNode;
   warn?: string;
 }) {
@@ -1011,9 +1014,7 @@ export function BinStrip({
     <div className="dlc-strip">
       <div className="dlc-strip-big">
         <strong>{size}</strong>
-        <span>
-          {count} file{count === 1 ? '' : 's'}
-        </span>
+        <span>{countLabel ?? `${count} file${count === 1 ? '' : 's'}`}</span>
       </div>
       <div className="dlc-strip-line">
         {line}
