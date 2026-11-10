@@ -154,6 +154,106 @@ def register_routes(bp):
         _refresh_server("movie" if row.get("scope") == "movie" else "show")
         return jsonify(res)
 
+    # ── acting on what the tab reports (core.video.library_actions) ─────────
+    # all under /files, so the permission gate's admin rule for file writes
+    # covers them; the previews list paths, so they check for an admin too.
+
+    @bp.route("/files/bulk", methods=["POST"])
+    def video_files_bulk():
+        """body {action: rename|delete, file_ids: [...]}. the chosen files, one
+        at a time; the answer counts what happened to each."""
+        from . import get_video_db
+        from core.video import library_actions
+        body = request.get_json(silent=True) or {}
+        ids = body.get("file_ids")
+        if not isinstance(ids, list) or not ids or len(ids) > 2000:
+            return jsonify({"success": False, "error": "file_ids must be a list of 1 to 2000 files"}), 400
+        try:
+            ids = [int(i) for i in ids]
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "file_ids must be numbers"}), 400
+        res = library_actions.bulk(get_video_db(), str(body.get("action") or ""), ids)
+        if not res.get("success"):
+            return jsonify(res), 400
+        if res.get("done"):
+            _refresh_server(str(body.get("kind") or "show"))
+        return jsonify(res)
+
+    @bp.route("/files/<int:file_id>/reassign", methods=["POST"])
+    def video_file_reassign(file_id):
+        """body {episode_id}: file this under another episode of the same show."""
+        from . import get_video_db
+        from core.video import library_actions
+        body = request.get_json(silent=True) or {}
+        try:
+            res = library_actions.reassign_file(get_video_db(), file_id, body.get("episode_id"))
+        except Exception:
+            logger.exception("reassign failed for file %s", file_id)
+            return jsonify({"success": False, "error": "Couldn't move the file — see app.log"}), 500
+        if not res.get("success"):
+            return jsonify(res), 409
+        if res.get("renamed"):
+            _refresh_server("show")
+        return jsonify(res)
+
+    @bp.route("/files/extra-copies/<kind>/<int:item_id>", methods=["GET", "POST"])
+    def video_extra_copies(kind, item_id):
+        """GET: what keeping the best copy would remove. POST: remove them."""
+        from . import get_video_db
+        from core.video import library_actions
+        if not _is_admin():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        if kind not in _KINDS:
+            return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        db = get_video_db()
+        try:
+            if request.method == "GET":
+                return jsonify({"success": True, **library_actions.extra_copies_plan(db, kind, item_id)})
+            res = library_actions.remove_extra_copies(db, kind, item_id)
+        except Exception:
+            logger.exception("extra copies failed for %s %s", kind, item_id)
+            return jsonify({"success": False, "error": "Couldn't work out the copies — see app.log"}), 500
+        if res.get("removed"):
+            logger.info("library tab removed %s extra copies of %s %s", res["removed"], kind, item_id)
+            _refresh_server(kind)
+        return jsonify(res)
+
+    @bp.route("/files/consolidate/<int:show_id>", methods=["GET", "POST"])
+    def video_consolidate(show_id):
+        """GET ?target=: what bringing the show into one folder would move.
+        POST {target}: start moving (a background job; poll /status)."""
+        from . import get_video_db
+        from core.video import library_actions
+        if not _is_admin():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        db = get_video_db()
+        try:
+            if request.method == "GET":
+                plan = library_actions.consolidate_plan(db, show_id, request.args.get("target") or None)
+                if plan.get("error"):
+                    return jsonify({"success": False, "error": plan["error"]}), 409
+                return jsonify({"success": True, **plan})
+            body = request.get_json(silent=True) or {}
+            res = library_actions.consolidate_start(
+                db, show_id, body.get("target") or None,
+                on_done=lambda: _refresh_server("show"))
+        except Exception:
+            logger.exception("consolidate failed for show %s", show_id)
+            return jsonify({"success": False, "error": "Couldn't plan the move — see app.log"}), 500
+        return jsonify(res), (200 if res.get("success") else 409)
+
+    @bp.route("/files/consolidate/<int:show_id>/status", methods=["GET"])
+    def video_consolidate_status(show_id):
+        from core.video import library_actions
+        if not _is_admin():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        return jsonify({"success": True, **library_actions.consolidate_state(show_id)})
+
+    @bp.route("/files/consolidate/<int:show_id>/stop", methods=["POST"])
+    def video_consolidate_stop(show_id):
+        from core.video import library_actions
+        return jsonify({"success": library_actions.consolidate_stop(show_id)})
+
     @bp.route("/title-delete/<kind>/<int:item_id>", methods=["GET"])
     def video_title_delete_preview(kind, item_id):
         """what deleting the whole title would do -- the first confirmation."""

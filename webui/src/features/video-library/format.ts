@@ -50,6 +50,46 @@ export function runtimeLabel(seconds: number | null | undefined): string {
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
+/** the range a picture is graded in, as a badge reads: "Dolby Vision", "HDR10" */
+export function rangeLabel(range: string | null | undefined): string {
+  const r = (range || '').trim();
+  if (!r || /^sdr$/i.test(r)) return '';
+  if (/dolby|^dv$|dovi/i.test(r)) return 'Dolby Vision';
+  return r.toUpperCase().replace('HDR10PLUS', 'HDR10+');
+}
+
+/** what a file is judged by, in the order people read it: picture, sound, size */
+export function mediaFacts(f: LibraryFile): { key: string; text: string; strong?: boolean }[] {
+  const out: { key: string; text: string; strong?: boolean }[] = [];
+  const range = rangeLabel(f.dynamic_range);
+  if (range) out.push({ key: 'range', text: range, strong: true });
+  const codec = codecLabel(f.video_codec);
+  if (codec) out.push({ key: 'codec', text: codec });
+  const audio = audioLabel(f);
+  if (audio) out.push({ key: 'audio', text: audio, strong: f.atmos });
+  const size = formatBytes(f.size_bytes);
+  if (size) out.push({ key: 'size', text: size });
+  const runtime = runtimeLabel(f.runtime_seconds);
+  if (runtime) out.push({ key: 'runtime', text: runtime });
+  return out;
+}
+
+/** a drive or share as a short name: "\\\\host\\share" -> "share", "/mnt/md2" -> "md2" */
+export function driveLabel(root: string | null | undefined): string {
+  const parts = String(root || '')
+    .split(/[\\/]+/)
+    .filter(Boolean);
+  return parts[parts.length - 1] || '';
+}
+
+/** "Dune.2021.1080p.WEB-DL-GRP · 1337x · Nov 5, 2026": where a file came from */
+export function sourceLine(source: LibraryFile['source']): string {
+  if (!source) return '';
+  return [source.release, source.indexer || source.via, dateLabel(source.at)]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 /** "1080p · HEVC · EAC3 5.1 · 4.2 GB" — the line a file reads as. */
 export function fileFacts(f: LibraryFile): string[] {
   return [

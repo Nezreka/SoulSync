@@ -9000,7 +9000,11 @@ class VideoDatabase:
             return [dict(r) for r in conn.execute(
                 "SELECT e.id, e.season_number, e.episode_number, e.title, e.air_date, "
                 f"e.has_file, e.monitored, {pc} AS play_count, {vo} AS view_offset_ms, "
-                "e.runtime_minutes, COALESCE(se.monitored, 1) AS season_monitored "
+                "e.runtime_minutes, COALESCE(se.monitored, 1) AS season_monitored, "
+                # the tab's pictures: an episode's still and its season's poster
+                "(e.still_url IS NOT NULL AND e.still_url <> '') AS has_still, "
+                "se.id AS season_id, "
+                "(se.poster_url IS NOT NULL AND se.poster_url <> '') AS season_has_poster "
                 f"FROM episodes e LEFT JOIN seasons se ON se.id = e.season_id{join} "
                 "WHERE e.show_id = ? ORDER BY e.season_number, e.episode_number", (show_id,))]
         except sqlite3.Error:
@@ -9038,6 +9042,61 @@ class VideoDatabase:
             if row["file_id"] == file_id:
                 return row
         return None
+
+    def library_move_file(self, file_id, episode_id) -> dict | None:
+        """hand one stored file to another episode of the SAME show: the fix
+        for a file filed under the wrong episode. both episodes' has_file
+        follow. returns {from_episode, to_episode, show_id}, or None when the
+        file is a movie's, either episode is unknown, or they are different
+        shows (a file never changes show here; that is Fix match)."""
+        try:
+            file_id, episode_id = int(file_id), int(episode_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            f = conn.execute("SELECT episode_id FROM media_files WHERE id = ?", (file_id,)).fetchone()
+            if not f or f["episode_id"] is None:
+                return None
+            old = conn.execute("SELECT id, show_id FROM episodes WHERE id = ?", (f["episode_id"],)).fetchone()
+            new = conn.execute("SELECT id, show_id FROM episodes WHERE id = ?", (episode_id,)).fetchone()
+            if not old or not new or old["show_id"] != new["show_id"]:
+                return None
+            if old["id"] != new["id"]:
+                conn.execute("UPDATE media_files SET episode_id = ? WHERE id = ?", (new["id"], file_id))
+                conn.execute("UPDATE episodes SET has_file = 1 WHERE id = ?", (new["id"],))
+                left = conn.execute("SELECT COUNT(*) AS n FROM media_files WHERE episode_id = ?",
+                                    (old["id"],)).fetchone()["n"]
+                if not left:
+                    conn.execute("UPDATE episodes SET has_file = 0 WHERE id = ?", (old["id"],))
+                conn.commit()
+            return {"from_episode": old["id"], "to_episode": new["id"], "show_id": new["show_id"]}
+        except sqlite3.Error:
+            logger.exception("library_move_file failed for %s -> %s", file_id, episode_id)
+            return None
+        finally:
+            conn.close()
+
+    def library_title_grabs(self, kind: str, tmdb_id) -> list:
+        """the downloads that landed for one title, newest first: where each
+        file on the library tab came from. ``kind`` is movie|show; a show's
+        rows are its episodes' and its season packs'. [] for a title with no
+        tmdb id or no history."""
+        if not tmdb_id:
+            return []
+        types = ("movie",) if kind == "movie" else ("episode", "show")
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT season_number, episode_number, release_title, source, username, "
+                "dest_path, quality_label, completed_at FROM video_download_history "
+                "WHERE media_source = 'tmdb' AND media_id = ? AND outcome = 'completed' "
+                "AND dest_path IS NOT NULL AND media_type IN (%s) ORDER BY id DESC LIMIT 2000"
+                % ",".join("?" * len(types)), (str(tmdb_id), *types))]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
 
     def library_drop_file(self, file_id) -> dict | None:
         """forget one stored file after it was deleted from disk, and flip its

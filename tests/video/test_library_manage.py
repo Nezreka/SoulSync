@@ -207,7 +207,8 @@ def test_show_tab_counts_seasons_and_only_probes_the_asked_season(db, tmp_path):
     f2 = s2["episodes"][0]["files"][0]
     assert f1["reachable"] is True          # the asked season gets the disk checks
     assert "reachable" not in f2            # the rest stay database reads
-    assert tab["summary"]["folders"] == [{"path": str(tmp_path / "TV/Breaking Bad").replace("\\", "/"), "files": 2}]
+    assert [(f["path"], f["files"]) for f in tab["summary"]["folders"]] == [
+        (str(tmp_path / "TV/Breaking Bad").replace("\\", "/"), 2)]
     assert tab["quality"]["below_cutoff"] == 1 and s2["below_cutoff"] == 1
 
 

@@ -458,12 +458,25 @@ On a show, each episode row shows **Missing** or **Upcoming** only when there's 
             body: `
 Every movie and show in your library has two tabs: the page itself (**Overview** for a movie, **Episodes** for a show) and **Your library**. The tab you used last is remembered.
 
-**What you have**: how many copies and how big, your best copy's resolution, and whether it meets the quality target of the title's profile. **Find an upgrade** opens a manual search when it doesn't; **Quality and download settings** opens the Manage panel.
+**The summary**: how many copies and how big, your best copy's resolution, and whether it meets the quality target of the title's profile. **Find an upgrade** opens a manual search when it doesn't; **Quality and download settings** opens the Manage panel.
 
-**Files**: one card per copy, with the quality tag, codecs, audio, size and runtime, the file name and its folder, the subtitle files beside it, and whether its name matches your [naming template](#vlib-manage). The **⋯** menu on each file:
+**Needs attention** lists every problem with the title, each with its fix beside it. When there is nothing, it says so.
+
+| It says | The fix |
+|---------|---------|
+| *Files below your target* | **Look for upgrades** puts the movie, or exactly those episodes, on the wishlist and searches now. A better copy replaces the file when one turns up. |
+| *Aired episodes missing* | **Get missing** wishlists them and searches now. |
+| *Extra copies* | **Keep the best…** shows which copy of each movie or episode stays (the highest resolution, then the largest) and which go. Nothing is removed until you press the button, and removed copies go to the recycle bin. |
+| *Split across folders* | **Bring together…** moves the show into one of its folders. See below. |
+| *Not named by your template* | **Rename** or **Rename all**. |
+| *Not matched* | **Find the right title**. |
+
+**Files**: one row per copy, with the quality tag, HDR or Dolby Vision, codecs, audio (and Atmos), size and runtime, the file name and its folder, audio and subtitle languages, and whether its name matches your [naming template](#vlib-manage). A file SoulSync downloaded also says where it came from: the release, the indexer and the date. The **⋯** menu on each file:
 
 | Action | What it does |
 |--------|--------------|
+| **Find an upgrade / Search releases** | The manual search for that movie or that one episode. |
+| **Move to another episode…** | For a file filed under the wrong episode. Pick the right one; where SoulSync can reach the file it is renamed for the new episode so your media server agrees. |
 | **Rename to template** | Renames the file to what your template says, where it sits. Subtitles and sidecars move with it, nothing is overwritten, and the stored path follows. |
 | **Search subtitles** | The manual subtitle search, for that file. |
 | **Copy path** | The path as your media server reports it. |
@@ -474,7 +487,9 @@ Every movie and show in your library has two tabs: the page itself (**Overview**
 
 **Delete Show / Delete Movie** (admins, in the page's **More** menu) takes the whole title out of your library and stops it coming back. It unfollows it and clears its wishlist entries for every profile, cancels its downloads in progress, declines pending requests for it (the people who asked are told), closes its repair findings, hides it from Discover, moves its folder into the recycle bin as one entry (so it restores in one step), asks your media server to rescan, and forgets it. Torrents your client is still seeding are left alone; your seeding rules, or you, remove them. The first dialog lists exactly what will happen; the second asks you to type the title. A title with files outside your library folders is refused rather than deleted for good. Restoring the folder brings the files back, not the follow or the wishlist.
 
-For a **show**, the tab lists every season with what's owned, missing and upcoming, its size and resolution mix, and a **Monitored** switch. Open a season to see each episode's file, and **Rename all** when several have drifted from your template. **Where it lives** lists the folders the show's files are in; when it says *Split across 2 folders*, part of the show forked off somewhere else, usually an upgrade that couldn't find the original.
+For a **show**, the tab lists every season with its poster, what's owned, missing and upcoming, its size and resolution mix, and a **Monitored** switch. Open a season to see each episode with its still and its files. Tick episodes (or **Select all**) to act on several at once: **Look for upgrades**, **Rename to template** or **Delete**.
+
+**Where it lives** lists the folders the show's files are in, each with its drive, file count and size. When a show is split, part of it forked off somewhere else, usually an upgrade that couldn't find the original. **Bring together…** asks which folder to keep and shows what would move before anything does: how many files, how much has to be copied because it sits on another drive, and the free space there. Files keep their names and land in that folder's season folders, subtitles go along, and nothing is overwritten. A copy to another drive only takes its real name once it is complete, so a move that is interrupted leaves the original where it was. The move runs in the background; you can close the window, come back to its progress, or stop it after the current file.
 
 **Match** shows the TMDB, IMDb and TVDB ids the title is matched to. **Fix match** searches TMDB (a title, a title and year, or a pasted TMDB id) and re-points the title. The ids are locked, so a library scan can't switch them back, and if your server named the title differently, SoulSync takes TMDB's name and year. **Use the server's match again** undoes it.
 
