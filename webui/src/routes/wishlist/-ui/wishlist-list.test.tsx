@@ -150,7 +150,8 @@ describe('WishlistList', () => {
 
     // The album remove lives on the row's album cell now (flat table).
     fireEvent.click(screen.getByTitle('Remove all tracks from "SAW 85-92"'));
-    expect(onRemoveAlbum).toHaveBeenCalledWith('SAW 85-92');
+    // the artist rides along so a shared album name stays one artist's (review 5 R5-X1-2)
+    expect(onRemoveAlbum).toHaveBeenCalledWith('SAW 85-92', 'Aphex Twin');
 
     fireEvent.click(screen.getAllByTitle('Remove from wishlist')[0]);
     expect(onRemoveTrack).toHaveBeenCalledWith('f1');

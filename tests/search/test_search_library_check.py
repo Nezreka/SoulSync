@@ -633,3 +633,29 @@ def test_a_track_known_only_by_its_credit_text_is_found(db):
     )
 
     assert out['tracks'][0]['in_library'] is True
+
+
+def test_presence_check_reads_the_catalogue_once_not_per_search(tmp_path):
+    """third #1062 review G13-4: every search read every artist and every
+    credit text; the folded maps are kept until the catalogue grows"""
+    import sqlite3
+    from core.search import library_check as lc
+    conn = sqlite3.connect(str(tmp_path / "fold.db"))
+    conn.executescript("""
+        CREATE TABLE lib2_artists(id INTEGER PRIMARY KEY, name TEXT);
+        CREATE TABLE lib2_albums(id INTEGER PRIMARY KEY, primary_artist_id INTEGER);
+        CREATE TABLE lib2_tracks(id INTEGER PRIMARY KEY, album_id INTEGER, track_artist TEXT);
+        CREATE TABLE lib2_track_artists(track_id INTEGER, artist_id INTEGER);
+        INSERT INTO lib2_artists VALUES(1, 'Björk');
+        INSERT INTO lib2_albums VALUES(1, 1);
+        INSERT INTO lib2_tracks VALUES(1, 1, NULL);
+    """)
+    full_reads = []
+    conn.set_trace_callback(lambda q: full_reads.append(q)
+                            if q.strip() == "SELECT id, name FROM lib2_artists" else None)
+    for _ in range(3):
+        assert lc._result_scope(conn.cursor(), ["Bjork"]) == ([1], [1])
+    assert len(full_reads) == 1
+    conn.execute("INSERT INTO lib2_artists VALUES(2, 'Sigur Rós')")
+    assert lc._result_scope(conn.cursor(), ["Sigur Ros"])[0] == [2]
+    assert len(full_reads) == 2

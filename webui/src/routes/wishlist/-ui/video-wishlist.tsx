@@ -9,6 +9,7 @@ import {
   VIDEO_WISHLIST_QUERY_KEY,
   backfillMovieArt,
   backfillShowArt,
+  videoLibraryNamesQueryOptions,
   videoWishlistCountsQueryOptions,
   videoWishlistListQueryOptions,
 } from '../-video.api';
@@ -19,7 +20,7 @@ import {
   failingOnlyShows,
   initials,
   isFailingItem,
-  movieMeta,
+  movieCardMeta,
   movieZone,
   moviesNeedArt,
   rowZone,
@@ -92,8 +93,19 @@ export function VideoWishlist({
 
   const [sort, setSort] = useState<VideoSort>('added');
   const [exporting, setExporting] = useState(false);
+  // #2029: only what files into one video library; offered once the tab's
+  // kind has two
+  const [libraryPick, setLibraryPick] = useState<{ media: VideoMedia; id: number } | null>(null);
+  const libraryNames = useQuery(videoLibraryNamesQueryOptions());
+  const tabLibraries = (libraryNames.data ?? []).filter(
+    (l) => media !== 'youtube' && l.kind === (media === 'movies' ? 'movie' : 'show'),
+  );
+  const library =
+    libraryPick?.media === media && tabLibraries.some((l) => l.id === libraryPick.id)
+      ? libraryPick.id
+      : 0;
   // any change to what's listed starts again at page one.
-  const listKey = `${media}|${debounced}|${sort}`;
+  const listKey = `${media}|${debounced}|${sort}|${library}`;
   const [paging, setPaging] = useState({ key: listKey, page: 1 });
   const page = paging.key === listKey ? paging.page : 1;
   const setPage = (p: number) => setPaging({ key: listKey, page: p });
@@ -104,7 +116,7 @@ export function VideoWishlist({
   const setOpenKey = (key: string | null) => setOpen(key ? { media, key } : null);
 
   const list = useQuery(
-    videoWishlistListQueryOptions(profileId, { media, search: debounced, sort, page }),
+    videoWishlistListQueryOptions(profileId, { media, search: debounced, sort, page, library }),
   );
   const counts = useQuery(videoWishlistCountsQueryOptions(profileId));
 
@@ -170,7 +182,8 @@ export function VideoWishlist({
   );
   const showZones = useMemo(() => videoZones(visibleShows, showZone, media), [visibleShows, media]);
 
-  const keyOfMovie = (m: VideoMovieItem) => `m:${m.tmdb_id}`;
+  // a copy wanted in another library (#2029) is its own card
+  const keyOfMovie = (m: VideoMovieItem) => `m:${m.tmdb_id}:${m.video_library_id ?? ''}`;
   const keyOfShow = (s: VideoShowItem) =>
     s.source === 'youtube' ? `y:${s.youtube_id}` : `s:${s.tmdb_id}`;
   const openMovie = isMovies ? visibleMovies.find((m) => keyOfMovie(m) === openKey) : undefined;
@@ -288,6 +301,23 @@ export function VideoWishlist({
             {failingCount > 0 && <span className="wlp-count">{failingCount}</span>}
           </button>
         ) : null}
+        {tabLibraries.length > 1 ? (
+          <label className="wlp-sort">
+            Library
+            <select
+              aria-label="Show one library"
+              value={library}
+              onChange={(event) => setLibraryPick({ media, id: Number(event.target.value) })}
+            >
+              <option value={0}>All</option>
+              {tabLibraries.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="wlp-sort">
           Sort
           <select
@@ -388,7 +418,7 @@ export function VideoWishlist({
                           key={keyOfMovie(m)}
                           title={m.title}
                           image={sized(m.poster_url || '', 342)}
-                          meta={movieMeta(m)}
+                          meta={movieCardMeta(m)}
                           stuck={VIDEO_STUCK_ZONES.has(zone.kind)}
                           expanded={openKey === keyOfMovie(m)}
                           data={{ tmdb: String(m.tmdb_id) }}

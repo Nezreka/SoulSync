@@ -117,7 +117,11 @@ def register_routes(bp):
             "target_dir": _target_for(
                 db, _KIND_FOR_SCOPE[scope],
                 {"media_id": body.get("media_id"),
-                 "media_source": body.get("media_source") or "tmdb"}),
+                 "media_source": body.get("media_source") or "tmdb",
+                 # and its video library (#2029): one picked here, the
+                 # title's own, the rules or the default
+                 "video_library_id": body.get("video_library_id"),
+                 "title": body.get("title")}),
         }
         settings = organization.load(db)
         prober = probe if settings.get("verify_with_ffprobe", True) else None

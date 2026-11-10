@@ -134,6 +134,16 @@ def ensure_wishlist_track_format(track_info):
     }
     if track_info.get('quality_profile_id') is not None:
         normalized['quality_profile_id'] = track_info.get('quality_profile_id')
+    # keep the playlist a track came from (#1981). the dict-artist path above
+    # already does, this rebuild path dropped it
+    if track_info.get('source_type') is not None:
+        normalized['source_type'] = track_info.get('source_type')
+    if track_info.get('source_info') is not None:
+        # a copy, so a change to one payload can't leak into the other
+        source_info = track_info.get('source_info')
+        normalized['source_info'] = (
+            dict(source_info) if isinstance(source_info, dict) else source_info
+        )
     return normalized
 
 

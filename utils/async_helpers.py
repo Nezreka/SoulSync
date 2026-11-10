@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 import logging
 import queue
 import threading
@@ -82,13 +83,17 @@ async def _pump_jobs():
 
         while True:
             try:
-                coro, future = _jobs.get_nowait()
+                coro, future, context = _jobs.get_nowait()
             except queue.Empty:
                 break
             if future.cancelled():
                 coro.close()
                 continue
-            task = asyncio.create_task(_finish_job(coro, future))
+            # the caller's context variables ride along (a candidate token's
+            # profile binding, the quality profile, the library scope): a task
+            # started in the pump's own context lost them, and every torrent/
+            # usenet token was minted for profile 1
+            task = asyncio.create_task(_finish_job(coro, future), context=context)
             _active_tasks.add(task)
             _future_tasks[future] = task
             task.add_done_callback(
@@ -117,7 +122,7 @@ def _fail_queued(exc):
     """Resolve jobs a dying loop never got a chance to schedule."""
     while True:
         try:
-            coro, future = _jobs.get_nowait()
+            coro, future, _context = _jobs.get_nowait()
         except queue.Empty:
             return
         try:
@@ -220,7 +225,7 @@ def _submit(coro):
     with _lock:
         loop = _ensure_loop_locked()
         future = concurrent.futures.Future()
-        _jobs.put((coro, future))
+        _jobs.put((coro, future, contextvars.copy_context()))
     _wake_pump(loop)
     return future
 

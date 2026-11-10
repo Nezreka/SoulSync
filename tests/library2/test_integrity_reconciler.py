@@ -229,3 +229,66 @@ def test_findings_are_bounded_but_counts_cover_full_scan(tmp_path):
     assert report.findings_total == 3
     assert report.truncated is True
     assert report.counts["lib2_active_file_missing"] == 3
+
+
+def test_file_row_without_a_track_is_reported_not_a_crash(tmp_path):
+    # review 5 R5-E-7: a staged file or one whose track was deleted (on
+    # delete set null) has a NULL track_id; int(None) used to kill the report
+    conn = _connection()
+    linked = tmp_path / "linked.flac"
+    linked.write_bytes(b"x")
+    orphan = tmp_path / "orphan.flac"
+    orphan.write_bytes(b"y")
+    _track(conn, linked)
+    file_id = conn.execute(
+        "INSERT INTO lib2_track_files(track_id,path,file_state) VALUES(NULL,?,'active')",
+        (str(orphan),),
+    ).lastrowid
+    conn.commit()
+
+    report = build_integrity_report(conn, config_manager=_Config([str(tmp_path)]))
+
+    assert report.observed["lib2_files"] == 2
+    finding = next(item for item in report.findings if item.entity == str(file_id))
+    assert finding.code == "lib2_file_unlinked"
+    assert "lib2_path_multiple_tracks" not in _codes(report)
+
+
+def test_report_tells_its_job_how_far_the_disk_checks_got(tmp_path):
+    # review 5 perf: the report now runs as a background job and every
+    # stored path is a disk check, so the job needs the count as it goes
+    conn = _connection()
+    for index in range(3):
+        path = tmp_path / f"{index}.flac"
+        path.write_bytes(b"x")
+        _track(conn, path)
+    conn.execute(
+        "INSERT INTO library_history(file_path) VALUES(?)", (str(tmp_path / "0.flac"),),
+    )
+    conn.commit()
+    seen = []
+
+    build_integrity_report(
+        conn, config_manager=_Config([str(tmp_path)]),
+        progress=lambda current, total: seen.append((current, total)),
+    )
+
+    assert seen[-1] == (4, 4)
+    currents = [current for current, _ in seen]
+    assert currents == sorted(currents)
+
+
+def test_a_failing_progress_callback_never_breaks_the_report(tmp_path):
+    conn = _connection()
+    path = tmp_path / "a.flac"
+    path.write_bytes(b"x")
+    _track(conn, path)
+    conn.commit()
+
+    def _boom(current, total):
+        raise RuntimeError("job registry gone")
+
+    report = build_integrity_report(
+        conn, config_manager=_Config([str(tmp_path)]), progress=_boom,
+    )
+    assert report.observed["lib2_files"] == 1

@@ -8,6 +8,7 @@ progress, speed, ETA and byte counters remain owned by SABnzbd/NZBGet.
 from __future__ import annotations
 
 import threading
+import time
 import unicodedata
 from contextlib import closing
 from dataclasses import dataclass
@@ -59,6 +60,14 @@ def _title_key(value: Any) -> str:
     if text.casefold().endswith(".nzb"):
         text = text[:-4]
     return " ".join(text.split()).casefold()
+
+
+# R4-C-7: the first journal retention sweep runs this long after start
+FIRST_RETENTION_DELAY_S = 3600
+
+# review 5 W2-WC-2: a job the client still has is refreshed this often, so
+# updated_at reads "last seen in the client" without a write on every tick
+SEEN_HEARTBEAT_S = 3600
 
 
 @dataclass(frozen=True)
@@ -119,6 +128,8 @@ class MonitorRunResult:
     imports: Optional[Any] = None
     persistent_reconciliation: Optional[Any] = None
     skipped_reason: Optional[str] = None
+    # review 5 W2-WC-2: closed because no configured client can see them
+    unobservable_failed: Tuple[str, ...] = ()
 
 
 async def collect_usenet_snapshot(
@@ -182,7 +193,7 @@ async def collect_usenet_snapshot(
 # save_path and calls record_download_completed on a path that was already
 # imported or deleted — a phantom completion with no error anywhere. Adoption
 # is about attaching to work still in flight, so only non-terminal jobs
-# qualify. This also un-breaks the `unique_category_job` fallback (dd28-44),
+# qualify. This also keeps the one-to-one `near_title` pairing (dd28-44) working,
 # which practically never fired because history flooded `remaining_jobs`.
 _TERMINAL_CLIENT_STATES = frozenset({
     "completed", "complete", "failed", "error", "cancelled", "canceled",
@@ -224,14 +235,31 @@ def _adoption_pairs(
         else:
             ambiguous.extend(str(grab["download_id"]) for grab in grabs)
 
-    if len(remaining_grabs) == 1 and len(remaining_jobs) == 1:
-        pairs.append((remaining_grabs[0], remaining_jobs[0], "unique_category_job"))
+    # never title-blind: the category is shared (the wishlist's usenet
+    # plugin, the video side), and "one grab, one leftover job" bound a stuck
+    # grab to someone else's download and imported the wrong release. one of
+    # each still pairs when the client only reworded the title (dots for
+    # spaces, a release tag), never when it names something else
+    if (len(remaining_grabs) == 1 and len(remaining_jobs) == 1
+            and _near_title(remaining_grabs[0].get("title"), remaining_jobs[0].name)):
+        pairs.append((remaining_grabs[0], remaining_jobs[0], "near_title"))
         remaining_grabs.clear()
         remaining_jobs.clear()
     elif remaining_grabs and remaining_jobs:
         ambiguous.extend(str(grab["download_id"]) for grab in remaining_grabs)
 
     return pairs, sorted(set(ambiguous))
+
+
+def _near_title(grab_title: Any, job_name: Any) -> bool:
+    """the same release, reworded: one title's words all in the other's"""
+    import re
+    a = set(re.findall(r"\w+", _title_key(grab_title)))
+    b = set(re.findall(r"\w+", _title_key(job_name)))
+    if not a or not b:
+        return False
+    small, big = (a, b) if len(a) <= len(b) else (b, a)
+    return len(small) >= 2 and small <= big
 
 
 def _isolated(conn: Any, download_id: str, apply: Any, *args: Any, **kwargs: Any) -> bool:
@@ -253,12 +281,78 @@ def _isolated(conn: Any, download_id: str, apply: Any, *args: Any, **kwargs: Any
     return True
 
 
+def _seen_at(grab: dict) -> Optional[float]:
+    from core.acquisition.reconciler import _timestamp
+    return _timestamp(grab.get("updated_at"))
+
+
+def _missing_ttl(value: Any) -> int:
+    from core.acquisition.reconciler import (
+        DEFAULT_EVIDENCE_TTL_SECONDS,
+        MIN_EVIDENCE_TTL_SECONDS,
+    )
+    try:
+        ttl = int(value) if value is not None else DEFAULT_EVIDENCE_TTL_SECONDS
+    except (TypeError, ValueError):
+        ttl = DEFAULT_EVIDENCE_TTL_SECONDS
+    return max(ttl, MIN_EVIDENCE_TTL_SECONDS)
+
+
+def _fail_if_unseen(conn: Any, grab: dict, now: float, ttl: int, error: str) -> bool:
+    """close a grab its client has not shown for ``ttl`` seconds (a runtime
+    failure, so the release is never blocklisted)"""
+    seen = _seen_at(grab)
+    if seen is None or now - seen < ttl:
+        return False
+    request = conn.execute(
+        "SELECT status FROM acquisition_requests WHERE id=?",
+        (grab["acquisition_request_id"],)).fetchone()
+    if request is None or request[0] != "grabbing":
+        # nothing to close it into, and retrying would only log every cycle
+        return False
+    download_id = str(grab["download_id"])
+    return _isolated(conn, download_id, record_grab_outcome,
+                     conn, download_id, completed=False, error=error,
+                     failure_kind="runtime")
+
+
+def fail_unobservable_grabs(
+    conn: Any,
+    *,
+    now: Optional[float] = None,
+    missing_ttl_seconds: Optional[int] = None,
+) -> Tuple[str, ...]:
+    """with no usenet client configured nothing can see these jobs; age them
+    out on the same clock the persistent reconciler used (review 5 W2-WC-2)"""
+    timestamp = time.time() if now is None else float(now)
+    ttl = _missing_ttl(missing_ttl_seconds)
+    failed = []
+    for grab in open_grabs(conn, "usenet"):
+        if (grab.get("acquisition_request_id") and grab.get("external_job_id")
+                and grab["status"] != STATUS_CANCEL_PENDING
+                and _fail_if_unseen(conn, grab, timestamp, ttl,
+                                    "No usenet client is configured to finish this job")):
+            failed.append(str(grab["download_id"]))
+    return tuple(sorted(failed))
+
+
 def reconcile_usenet_snapshot(
     conn: Any,
     snapshot: UsenetClientSnapshot,
+    *,
+    now: Optional[float] = None,
+    missing_ttl_seconds: Optional[int] = None,
 ) -> ReconciliationResult:
-    """Apply one client snapshot in the caller's short DB transaction."""
+    """Apply one client snapshot in the caller's short DB transaction.
+
+    review 5 W2-WC-2: this monitor owns its grabs' lifetime. the persistent
+    reconciler no longer ages them out, because a job sitting in the client's
+    queue for a day is alive. a job the client has dropped is closed here,
+    once it has been gone longer than ``missing_ttl_seconds`` since last seen.
+    """
     ensure_acquisition_grabs_schema(conn)
+    timestamp = time.time() if now is None else float(now)
+    missing_ttl = _missing_ttl(missing_ttl_seconds)
     all_open = [
         grab for grab in open_grabs(conn, "usenet")
         if grab.get("acquisition_request_id")
@@ -270,7 +364,10 @@ def reconcile_usenet_snapshot(
         if job_id:
             attached.setdefault(str(job_id), []).append(grab)
 
-    known_ids = set(attached)
+    # every job SoulSync already follows, whichever feature submitted it
+    known_ids = set(attached) | {
+        str(grab["external_job_id"]) for grab in open_grabs(conn, "usenet")
+        if grab.get("external_job_id")}
     unknown_jobs = [
         job for job in snapshot.jobs
         if job.id not in known_ids
@@ -341,7 +438,13 @@ def reconcile_usenet_snapshot(
         grab = grabs[0]
         download_id = str(grab["download_id"])
         if grab.get("client") and grab["client"] != snapshot.client:
-            conflicts.append(download_id)
+            # another client's job: this one can never see it
+            if grab["status"] != STATUS_CANCEL_PENDING and _fail_if_unseen(
+                    conn, grab, timestamp, missing_ttl,
+                    "Sent to a usenet client that is no longer the active one"):
+                failed.append(download_id)
+            else:
+                conflicts.append(download_id)
             continue
         if grab["status"] == STATUS_CANCEL_PENDING:
             cancel_pending.append(download_id)
@@ -360,8 +463,15 @@ def reconcile_usenet_snapshot(
         if job is None:
             if job_id not in snapshot.lookup_errors:
                 missing.append(download_id)
+                if _fail_if_unseen(conn, grab, timestamp, missing_ttl,
+                                   "The usenet client no longer has this job"):
+                    failed.append(download_id)
             continue
         observed.append(download_id)
+        seen = _seen_at(grab)
+        if seen is None or timestamp - seen >= SEEN_HEARTBEAT_S:
+            # last-seen heartbeat; a status change below writes it anyway
+            update_grab(conn, download_id)
 
         business_status = _ACTIVE_STATE_TO_STATUS.get(job.state)
         if business_status is not None:
@@ -479,6 +589,7 @@ class UsenetAcquisitionMonitor:
         process_started_at: Optional[str] = None,
         import_pipeline_runner: Optional[Callable[[], Any]] = None,
         persistent_reconciler_runner: Optional[Callable[[], Any]] = None,
+        missing_ttl_getter: Optional[Callable[[], Any]] = None,
     ) -> None:
         self._connection_factory = connection_factory
         self._adapter_getter = adapter_getter or self._default_adapter
@@ -487,6 +598,7 @@ class UsenetAcquisitionMonitor:
         self._import_pipeline_runner = (
             import_pipeline_runner or self._default_import_pipeline)
         self._persistent_reconciler_runner = persistent_reconciler_runner
+        self._missing_ttl_getter = missing_ttl_getter
         self._process_started_at = process_started_at or datetime.now(
             timezone.utc,
         ).strftime("%Y-%m-%d %H:%M:%S")
@@ -500,6 +612,10 @@ class UsenetAcquisitionMonitor:
         self._last_error: Optional[str] = None
         self._last_logged_error: Optional[str] = None
         self._cancel_missing_counts: Dict[str, int] = {}
+        # G04-4: the journal's retention sweep, once a day. R4-C-7: the first
+        # one waits an hour after start, not the first cycle, when startup
+        # is busiest and a long journal makes the first sweep the biggest
+        self._last_retention_at = time.monotonic() - self.RETENTION_INTERVAL_S + FIRST_RETENTION_DELAY_S
 
     @staticmethod
     def _default_adapter() -> Optional[UsenetClientAdapter]:
@@ -509,6 +625,25 @@ class UsenetAcquisitionMonitor:
     def _default_import_pipeline(self) -> Any:
         from core.acquisition.import_pipeline import advance_open_imports
         return advance_open_imports(self._connection_factory)
+
+    RETENTION_INTERVAL_S = 24 * 3600
+
+    def _run_retention(self) -> None:
+        """settled acquisition rows past their retention, once a day; never
+        stops the cycle"""
+        now = time.monotonic()
+        if now - self._last_retention_at < self.RETENTION_INTERVAL_S:
+            return
+        self._last_retention_at = now
+        try:
+            from core.acquisition.retention import prune_acquisition_journal, retention_days
+            conn = self._connection_factory()
+            try:
+                prune_acquisition_journal(conn, days=retention_days())
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 - monitor must stay alive
+            logger.warning("Acquisition journal retention skipped: %s", redact_sensitive_text(exc))
 
     def _run_import_pipeline(self) -> Any:
         try:
@@ -544,6 +679,36 @@ class UsenetAcquisitionMonitor:
         except (TypeError, ValueError):
             return 15.0
 
+    def _has_live_work(self) -> bool:
+        """one cheap read: an open grab, a request still grabbing, an import
+        or a recovery under way. unreadable means yes (never skip real work)"""
+        conn = self._connection_factory()
+        try:
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                "('acquisition_grabs','acquisition_requests','acquisition_imports',"
+                "'acquisition_quarantine_recoveries')")}
+            checks = []
+            if "acquisition_grabs" in tables:
+                # a grab with no request is the plugins' own (legacy per-track,
+                # album bundles): neither reconciler reads it (review 5 W2-WC-7)
+                checks.append("SELECT 1 FROM acquisition_grabs "
+                              "WHERE status NOT IN ('completed','failed','cancelled') "
+                              "AND acquisition_request_id IS NOT NULL")
+            if "acquisition_requests" in tables:
+                checks.append("SELECT 1 FROM acquisition_requests WHERE status='grabbing'")
+            if "acquisition_imports" in tables:
+                checks.append("SELECT 1 FROM acquisition_imports "
+                              "WHERE status IN ('pending','matching','importing')")
+            if "acquisition_quarantine_recoveries" in tables:
+                checks.append("SELECT 1 FROM acquisition_quarantine_recoveries "
+                              "WHERE status IN ('recovered','reimporting')")
+            return any(conn.execute(q + " LIMIT 1").fetchone() for q in checks)
+        except Exception:  # noqa: BLE001
+            return True
+        finally:
+            conn.close()
+
     def _read_open_grabs(self) -> Tuple[Tuple[dict, ...], Tuple[str, ...]]:
         conn = self._connection_factory()
         try:
@@ -564,12 +729,35 @@ class UsenetAcquisitionMonitor:
         finally:
             conn.close()
 
+    def _missing_ttl(self) -> Optional[int]:
+        if self._missing_ttl_getter is None:
+            return None
+        try:
+            return int(self._missing_ttl_getter())
+        except Exception:  # noqa: BLE001 - a bad setting falls back to the default
+            return None
+
+    def _fail_unobservable(self) -> Tuple[str, ...]:
+        conn = self._connection_factory()
+        try:
+            failed = fail_unobservable_grabs(
+                conn, missing_ttl_seconds=self._missing_ttl())
+            conn.commit()
+            return failed
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
     def _apply_snapshot(
         self, snapshot: UsenetClientSnapshot,
     ) -> ReconciliationResult:
+        ttl = self._missing_ttl()
         conn = self._connection_factory()
         try:
-            result = reconcile_usenet_snapshot(conn, snapshot)
+            result = reconcile_usenet_snapshot(
+                conn, snapshot, missing_ttl_seconds=ttl)
             conn.commit()
             return result
         except Exception:
@@ -658,11 +846,16 @@ class UsenetAcquisitionMonitor:
                 skipped_reason="cycle_in_progress",
             )
         try:
-            persistent_result = self._run_persistent_reconciler()
+            # the reconciler polls every download client, copies every task
+            # and reads every quarantine sidecar: only when something is
+            # actually in flight (an idle install did all that every 15 s)
+            persistent_result = (self._run_persistent_reconciler()
+                                 if self._has_live_work() else None)
             # Evidence reconciliation must precede the import coordinator's
             # legacy seven-day fallback sweep.  That preserves a real indexed
             # completion or quarantine sidecar instead of aging it out first.
             imports_result = self._run_import_pipeline()
+            self._run_retention()
             grabs, stale = self._read_open_grabs()
             if not grabs:
                 result = MonitorRunResult(
@@ -677,9 +870,11 @@ class UsenetAcquisitionMonitor:
 
             adapter = self._adapter_getter()
             if adapter is None or not adapter.is_configured():
+                unobservable = self._fail_unobservable()
                 result = MonitorRunResult(
-                    open_grabs=len(grabs),
+                    open_grabs=len(grabs) - len(unobservable),
                     stale_submissions_failed=stale,
+                    unobservable_failed=unobservable,
                     imports=imports_result,
                     persistent_reconciliation=persistent_result,
                     skipped_reason="client_unconfigured",
@@ -812,5 +1007,6 @@ __all__ = [
     "UsenetJobSnapshot",
     "collect_usenet_snapshot",
     "fail_stale_local_submissions",
+    "fail_unobservable_grabs",
     "reconcile_usenet_snapshot",
 ]

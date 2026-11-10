@@ -57,7 +57,8 @@ def test_resolve_album_profile_id_file_location_wins():
 
 def test_resolve_album_profile_id_falls_back_to_db():
     db = _make_db_with_album(owner_profile_id=3)
-    tracks = [{"file_path": "/app/Transfer/Artist/Album/01.flac"}]
+    # the same file the row records (tracks come from those rows)
+    tracks = [{"file_path": "/app/libraries/user1/Artist/Album/01.flac"}]
     with patch(
         "core.imports.paths.profile_id_for_path", return_value=None
     ):
@@ -127,3 +128,19 @@ def test_the_mover_moves_within_one_library(tmp_path):
     assert summary["moved"] == 1 and summary["errors"] == []
     assert dst.exists() and not src.exists()
     assert updated == {"t1": str(dst)}
+
+
+def test_a_shared_copy_is_not_planned_into_another_librarys_root():
+    """third #1062 review G11-9: the shared album the admin looks at also has a
+    copy in bob's own library; any owned file of the album decided, so the
+    preview planned bob's copy in bob's root"""
+    db = _make_db_with_album(owner_profile_id=None)
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_tracks (id, album_id) VALUES (2, 1)")
+    conn.execute("INSERT INTO lib2_track_files (track_id, path, owner_profile_id) VALUES (2, ?, 7)",
+                 ("/own/bob/Artist/Album/02.flac",))
+    conn.commit()
+    tracks = [{"file_path": "/app/libraries/user1/Artist/Album/01.flac"}]
+    with patch("core.imports.paths.profile_id_for_path", return_value=None):
+        pid = reorg.resolve_album_profile_id(db, 1, tracks=tracks, resolve_file_path_fn=lambda p: p)
+    assert pid is None

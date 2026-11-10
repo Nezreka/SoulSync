@@ -8,6 +8,7 @@ import os
 from typing import Any, Dict, Optional
 
 from core.settings import config_manager
+from core.imports.paths import _coerce_int
 from core.imports.context import (
     extract_artist_name,
     get_import_clean_album,
@@ -139,6 +140,16 @@ _SOULSYNC_FILLABLE_COLUMNS = {
 }
 
 
+# the providers whose ids are page urls
+_URL_ID_PROVIDERS = frozenset({"lastfm", "bandcamp"})
+
+
+def _known_id_providers() -> frozenset:
+    from core.library2.match_status import SERVICES
+    from core.metadata.registry import METADATA_SOURCE_PRIORITY
+    return frozenset(name for name, _label, _columns in SERVICES) | frozenset(METADATA_SOURCE_PRIORITY)
+
+
 def _fill_external_id(cursor, table: str, row_id: Any, source: Optional[str],
                       value: Optional[str]) -> None:
     """Record the provider id this import came from, without clobbering.
@@ -150,6 +161,13 @@ def _fill_external_id(cursor, table: str, row_id: Any, source: Optional[str],
     provider = (source or "").strip().lower()
     identifier = str(value or "").strip()
     if not provider or not identifier or table not in _SOULSYNC_FILLABLE_COLUMNS:
+        return
+    # only a real provider, and only an id that can be one. 'webui_modal' is a
+    # screen, not a provider, and a last.fm page url landed under deezer, so
+    # the deezer worker asked for it on every pass (#1996)
+    if provider not in _known_id_providers():
+        return
+    if "://" in identifier and provider not in _URL_ID_PROVIDERS:
         return
     try:
         if provider in ("spotify", "musicbrainz"):
@@ -403,6 +421,7 @@ def record_download_provenance(context: Dict[str, Any],
     ``require_library`` is used by terminal pipeline paths: registration then
     becomes part of success instead of a debug-only best effort.
     """
+    download_row_id = None
     try:
         search_result = context.get("original_search_result") or context.get("search_result") or {}
         username = search_result.get("username", context.get("_download_username", ""))
@@ -517,6 +536,10 @@ def record_download_provenance(context: Dict[str, Any],
             isrc=isrc,
             acquired_quality_json=acquired_quality_json,
             retention_json=retention_json,
+            # the autolink below registers the file and links this row to it;
+            # the basename guess would walk every file row and still miss
+            # (review 5 R5-G-1)
+            link_by_basename=False,
         )
         # the "why this file" record for the task that fetched it
         if download_row_id and context.get("task_id"):
@@ -540,6 +563,17 @@ def record_download_provenance(context: Dict[str, Any],
         logger.debug("library v2 autolink skipped: %s", e)
     if require_library and linked_lib2_file_id is None:
         require_library_v2_registration(context)
+
+    # the provenance row was written before the file had a catalogue row, so
+    # its track_id is NULL or names the file this one replaced. point it at
+    # the track the autolink just registered, or Source Info shows the old
+    # uploader for a re-download (review 5 R5-G-1)
+    if download_row_id and linked_lib2_file_id is not None:
+        try:
+            get_database().link_track_download_to_file(
+                download_row_id, linked_lib2_file_id)
+        except Exception as e:
+            logger.debug("download provenance not linked to its file: %s", e)
 
     # The canonical tracklist deliberately comes from one provider, but a
     # confirmed album can carry several provider release IDs. Reconcile those
@@ -664,6 +698,19 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     album_ctx.get("name", "") or "album", _va_artist, artist_name,
                 )
                 artist_name = _va_artist
+            else:
+                # #2003: a release credited to several artists goes under
+                # its lead, the same artist its folder is named after, not
+                # under whichever of them the download was for
+                from core.imports.collab_artist import album_lead_artist
+                _lead = album_lead_artist(album_ctx, artist_name)
+                if _lead:
+                    logger.info(
+                        "[Import] '%s' is credited to %s first, filing the album "
+                        "there instead of under %s (the track keeps its own artist)",
+                        album_ctx.get("name", "") or "album", _lead, artist_name,
+                    )
+                    artist_name = _lead
 
         album_name = ""
         if _album_ctx_distrusted:
@@ -826,7 +873,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # fill-only writers + enrichment to resolve.
             total_tracks = _own_provider_album.get("total_tracks") or 0
         else:
-            total_tracks = album_ctx.get("total_tracks", 0) or 0
+            # goes straight into track_count, so a number or unknown. an album's
+            # title sat there until it stopped the library v2 migration (#1989)
+            total_tracks = _coerce_int(album_ctx.get("total_tracks"), 0)
         if _album_ctx_distrusted:
             # The batch's summed duration is a stranger's album total — use
             # the track's own duration (the only duration this import
@@ -865,6 +914,12 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
         # default") — without it, later Quality Check / Upgrade passes
         # re-resolve the track against the default profile instead.
         track_quality_profile_id = track_info.get("quality_profile_id")
+        # every wishlist row carries a concrete id (the default when nobody
+        # chose), so the id alone is not a choice. only a profile the user
+        # picked for this item pins the track; anything else keeps it
+        # following its album and artist (review 5 W2-WD-1)
+        if track_info.get("quality_profile_explicit") is not True:
+            track_quality_profile_id = None
 
         db = get_database()
         with db._get_connection() as conn:

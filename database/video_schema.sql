@@ -166,6 +166,7 @@ CREATE TABLE IF NOT EXISTS seasons (
     overview      TEXT,
     poster_url    TEXT,
     monitored     INTEGER NOT NULL DEFAULT 1,
+    monitor_locked INTEGER NOT NULL DEFAULT 0,  -- 1 = set by the user's season toggle
     UNIQUE (show_id, season_number)
 );
 CREATE INDEX IF NOT EXISTS idx_seasons_show ON seasons(show_id);
@@ -582,6 +583,50 @@ CREATE TABLE IF NOT EXISTS video_title_profiles (
     quality_profile_id  INTEGER NOT NULL,
     updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (kind, tmdb_id)
+);
+
+-- Video libraries (#2029): named movie / TV libraries, each with its own folder,
+-- Radarr/Sonarr style. The main and 4K folders are rows too (builtin 'main' /
+-- '4k') whose folder stays in the settings keys they always used (movies_path,
+-- movies_4k_path + its switch, ...), so nothing that reads those changes. A
+-- custom library keeps its own path. options is the library's config as JSON:
+-- assignment rules, default quality profile, download and indexer choices.
+CREATE TABLE IF NOT EXISTS video_libraries (
+    id          INTEGER PRIMARY KEY,
+    kind        TEXT    NOT NULL CHECK (kind IN ('movie', 'show')),
+    name        TEXT    NOT NULL,
+    path        TEXT    NOT NULL DEFAULT '',
+    builtin     TEXT,                          -- 'main' | '4k' | NULL (custom)
+    enabled     INTEGER NOT NULL DEFAULT 1,    -- custom only; a builtin follows its settings
+    is_default  INTEGER NOT NULL DEFAULT 0,    -- new titles of this kind go here
+    position    INTEGER NOT NULL DEFAULT 0,
+    options     TEXT    NOT NULL DEFAULT '{}',
+    created_at  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_video_libraries_builtin
+    ON video_libraries(kind, builtin) WHERE builtin IS NOT NULL;
+
+-- A library picked for a title by hand (its page, or the Get / Manual search
+-- modal). Keyed like video_title_profiles; wins over the rules and the default.
+CREATE TABLE IF NOT EXISTS video_title_libraries (
+    kind        TEXT    NOT NULL,              -- 'movie' | 'show'
+    tmdb_id     INTEGER NOT NULL,
+    library_id  INTEGER NOT NULL REFERENCES video_libraries(id) ON DELETE CASCADE,
+    updated_at  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, tmdb_id)
+);
+
+-- A second copy of a title wanted in another library (#2029): the same movie
+-- in Movies (1080p) and Movies 4K, Radarr's two-instance setup. The copy is
+-- hunted by its own wishlist row (video_wishlist.video_library_id) and owned
+-- only by a file in its library; this row is what keeps the two apart once
+-- the copy has landed and its wishlist row is gone. Movies only for now.
+CREATE TABLE IF NOT EXISTS video_title_copies (
+    kind        TEXT    NOT NULL,              -- 'movie'
+    tmdb_id     INTEGER NOT NULL,
+    library_id  INTEGER NOT NULL REFERENCES video_libraries(id) ON DELETE CASCADE,
+    created_at  TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, tmdb_id, library_id)
 );
 
 -- WISHLIST (curated 'get this') — atomic units are MOVIES and EPISODES. Adding a

@@ -36,9 +36,15 @@ def _run(monkeypatch, before, after=None, *, scan_result=None):
         "core.library2.maintenance_subjects.active_file_subjects",
         active_subjects,
     )
+    scans = []
     monkeypatch.setattr(
         "core.library2.scan.rescan_files",
-        lambda _db, **kwargs: scan_result or {"scanned": len(before)},
+        lambda _db, **kwargs: scans.append(kwargs) or scan_result or {"scanned": len(before)},
+    )
+    # the read-only look before any write sees what the scan would report
+    monkeypatch.setattr(
+        "core.repair_jobs.dead_file_cleaner._count_unreachable",
+        lambda _context, subjects: int((scan_result or {}).get("missing") or 0),
     )
     findings = []
     context = JobContext(
@@ -48,6 +54,7 @@ def _run(monkeypatch, before, after=None, *, scan_result=None):
         create_finding=lambda **kwargs: findings.append(kwargs) or True,
     )
     result = DeadFileCleanerJob().scan(context)
+    _run.scans = scans
     return result, findings, calls
 
 
@@ -135,6 +142,8 @@ def _unreachable(monkeypatch, *, total, missing, deferred=0, server=None):
                 "mass_missing_deferred": lost if deferred else 0}
     monkeypatch.setattr("core.library2.scan.rescan_files", rescan)
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
+    monkeypatch.setattr("core.repair_jobs.dead_file_cleaner._count_unreachable",
+                        lambda _context, _subjects: missing)
     progress = []
     context = JobContext(
         db=SimpleNamespace(), transfer_folder="/music",
@@ -181,6 +190,8 @@ def test_the_saved_guard_settings_still_decide(monkeypatch):
     monkeypatch.setattr("core.library2.scan.rescan_files", lambda _db, **kw: {
         "scanned": len(kw["file_ids"]) - 18, "missing": 18})
     monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
+    monkeypatch.setattr("core.repair_jobs.dead_file_cleaner._count_unreachable",
+                        lambda _context, _subjects: 18)
 
     def run(settings):
         context = JobContext(
@@ -195,3 +206,40 @@ def test_the_saved_guard_settings_still_decide(monkeypatch):
     assert run({"max_unresolved_fraction": 0.9}) == ""          # the user's 0.9
     assert run({"min_tracks_for_guard": 100}) == ""             # too small a library
     assert run({"max_unresolved_fraction": "junk"}) != ""       # garbage: default
+
+
+def test_a_run_that_trips_the_guard_files_nothing(monkeypatch):
+    """a file confirmed missing in an earlier healthy run waited, in 3.6.1,
+    for a run that could reach the library. v2 filed it while the guard said
+    the library was out of reach."""
+    total, lost = 30, 20
+    before = [_subject(i) for i in range(total)]
+    after = [_subject(i, "missing_confirmed" if i == 25 else "active") for i in range(total)]
+    calls = []
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects",
+                        lambda *_a, **_k: calls.append(1) or list(before if len(calls) == 1 else after))
+    monkeypatch.setattr("core.library2.scan.rescan_files", lambda _db, **kw: {
+        "scanned": len(kw["file_ids"]) - lost, "missing": lost})
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda *_a, **_k: None)
+    findings = []
+    context = JobContext(
+        db=SimpleNamespace(), transfer_folder="/music",
+        config_manager=SimpleNamespace(get=lambda key, default=None: default,
+                                       get_active_media_server=lambda: None),
+        create_finding=lambda **kw: findings.append(kw) or True)
+
+    result = DeadFileCleanerJob().scan(context)
+
+    assert result.stopped_early
+    assert findings == []
+
+
+def test_the_guard_stops_before_anything_is_marked_missing(monkeypatch):
+    """third #1062 review G11-2: the guard ran after every chunk had already
+    been rescanned (and its misses written), then said nothing was marked.
+    3.6.1 looked first and changed nothing"""
+    before = [_subject(n) for n in range(30)]
+    result, findings, _calls = _run(monkeypatch, before,
+                                    scan_result={"scanned": 0, "missing": 30})
+    assert result.stopped_early and findings == []
+    assert _run.scans == []

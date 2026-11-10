@@ -228,7 +228,7 @@ def register_artist_tool_routes(route, *, get_database, config_manager, registry
     @expose('/api/library/track/<legacy_id>/analyze-replaygain', methods=['POST'])
     def lib2_artist_track_rg(legacy_id):
         from core.library2.replaygain import analyze_track_replaygain
-        from core.replaygain import RG_REFERENCE_LUFS
+        from core.replaygain import get_target_lufs
         check_ffmpeg()
         with closing(get_database()._get_connection()) as conn:
             tid = resolve(conn, 'track', legacy_id)
@@ -236,7 +236,7 @@ def register_artist_tool_routes(route, *, get_database, config_manager, registry
         gain = result.get('track_gain_db')
         return jsonify(success=result['analyzed'], **result,
                        track_gain=f'{gain:+.2f} dB' if gain is not None else None,
-                       lufs=RG_REFERENCE_LUFS - gain if gain is not None else None)
+                       lufs=get_target_lufs(config_manager) - gain if gain is not None else None)
 
     @expose('/api/library/album/<legacy_id>/analyze-replaygain', methods=['POST'])
     def lib2_artist_album_rg(legacy_id):

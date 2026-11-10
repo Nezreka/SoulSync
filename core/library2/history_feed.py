@@ -70,6 +70,7 @@ EVENT_CATEGORY = {
     "candidates_evaluated": ("info", "Candidates evaluated"),
     "no_candidate": ("failed", "No candidate found"),
     "grab_prepared": ("grabbed", "Grab prepared"),
+    "grab_submission_started": ("info", "Sending to client"),
     "grab_submitted": ("grabbed", "Grabbed"),
     "grab_submission_uncertain": ("grabbed", "Grab uncertain"),
     "manual_grab_correlated": ("grabbed", "Grabbed (manual)"),
@@ -671,17 +672,19 @@ def _track_downloads_to_events(rows: Sequence[Any]) -> List[Dict[str, Any]]:
 def _track_download_events(
     conn, track_ids: Sequence[int], limit: int,
 ) -> "tuple[List[Dict[str, Any]], set]":
-    """``track_downloads`` rows for these tracks — resolved by legacy id first
-    (rename-proof, see ``source_info.py``), falling back to the primary file
-    path whenever the legacy-id lookup itself finds nothing for that track —
-    not only when the track has no legacy id at all. Real-DB finding:
-    ``track_downloads.track_id`` is frequently left NULL/never backfilled even
-    on a track whose own ``legacy_track_id`` IS set, so "has a legacy id"
-    can't be trusted to mean "the legacy-id query will find it" —
-    ``source_info.py`` already falls through on an empty legacy-id result for
-    exactly this reason; this mirrors that per-track fallthrough instead of
-    only checking presence/absence of the id. Also returns the matched row
-    ids so callers can dedupe a broader fallback query against them."""
+    """``track_downloads`` rows for these tracks, newest first, plus the
+    matched row ids so callers can dedupe a broader fallback query.
+
+    ``track_id`` holds two id spaces told apart by ``track_id_kind`` (the
+    rule ``source_info.py`` uses): 'lib2' rows are keyed on the catalogue
+    track (the upgrade carry and every download since), 'legacy' rows on a
+    3.6.1 ``tracks.id`` the carry could not map. a legacy-only lookup with
+    no kind filter hid a track's own downloads and showed another track's
+    whose catalogue id equals this track's legacy id (review 5 R5-E-2).
+    a table from before the kind column holds legacy ids only.
+
+    a track the id lookup finds nothing for falls back to its primary file
+    path: rows with no id at all are common on real dbs."""
     if not track_ids:
         return [], set()
     ph = _in_clause(track_ids)
@@ -695,44 +698,75 @@ def _track_download_events(
                  WHERE t.id IN ({ph})""",
             [_in_param(track_ids)],
         )
+        has_kind = "track_id_kind" in {
+            r[1] for r in conn.execute("PRAGMA table_info(track_downloads)")
+        }
     except Exception:  # noqa: BLE001
         return [], set()
 
+    lib2_ids = sorted({str(int(r["track_id"])) for r in link_rows})
     legacy_ids = sorted({str(r["legacy_id"]) for r in link_rows if r["legacy_id"] is not None})
+    cols = """id, track_id, file_path, track_title, track_album, source_service,
+              status, created_at"""
+    kind_col = ", track_id_kind" if has_kind else ", NULL AS track_id_kind"
     rows: List[Any] = []
-    matched_legacy_ids: set = set()
     try:
-        if legacy_ids:
-            legacy_rows = _rows(
+        if has_kind:
+            id_rows = _rows(
                 conn,
-                f"""SELECT id, track_id, file_path, track_title, track_album, source_service,
-                           status, created_at
-                      FROM track_downloads WHERE track_id IN ({_in_clause(legacy_ids)})
+                f"""SELECT {cols}{kind_col} FROM track_downloads
+                     WHERE (track_id IN ({_in_clause(lib2_ids)}) AND track_id_kind='lib2')
+                        OR (track_id IN ({_in_clause(legacy_ids)}) AND track_id_kind='legacy')
+                     ORDER BY id DESC LIMIT ?""",
+                (_in_param(lib2_ids), _in_param(legacy_ids), limit),
+            )
+        elif legacy_ids:
+            id_rows = _rows(
+                conn,
+                f"""SELECT {cols}{kind_col} FROM track_downloads
+                     WHERE track_id IN ({_in_clause(legacy_ids)})
                      ORDER BY id DESC LIMIT ?""",
                 (_in_param(legacy_ids), limit),
             )
-            rows.extend(legacy_rows)
-            matched_legacy_ids = {r["track_id"] for r in legacy_rows}
+        else:
+            id_rows = []
+        rows.extend(id_rows)
     except Exception:  # noqa: BLE001 — legacy table may be absent
         return [], set()
 
+    # the library track each download belongs to, so the history can file it there
+    by_lib2 = {str(int(r["track_id"])): r["track_id"] for r in link_rows}
+    by_legacy = {str(r["legacy_id"]): r["track_id"] for r in link_rows if r["legacy_id"] is not None}
+    by_path = {r["file_path"]: r["track_id"] for r in link_rows if r["file_path"]}
+
+    def _owner(r) -> Any:
+        kind = r["track_id_kind"]
+        key = str(r["track_id"]) if r["track_id"] is not None else None
+        if kind == "lib2":
+            return by_lib2.get(key) or by_path.get(r["file_path"])
+        return by_legacy.get(key) or by_path.get(r["file_path"])
+
+    found_for = {_owner(r) for r in id_rows}
     fallback_paths = sorted({
         r["file_path"] for r in link_rows
-        if r["file_path"]
-        and (r["legacy_id"] is None or str(r["legacy_id"]) not in matched_legacy_ids)
+        if r["file_path"] and r["track_id"] not in found_for
     })
     if fallback_paths:
         try:
+            # a 'lib2' row names its own catalogue track: one at this path
+            # that the id lookup didn't find belongs to another track
+            not_other_track = (
+                " AND (track_id_kind IS NULL OR track_id_kind <> 'lib2')" if has_kind else ""
+            )
             path_rows = _rows(
                 conn,
-                f"""SELECT id, track_id, file_path, track_title, track_album, source_service,
-                           status, created_at
-                      FROM track_downloads WHERE file_path IN ({_in_clause(fallback_paths)})
+                f"""SELECT {cols}{kind_col} FROM track_downloads
+                     WHERE file_path IN ({_in_clause(fallback_paths)}){not_other_track}
                      ORDER BY id DESC LIMIT ?""",
                 (_in_param(fallback_paths), limit),
             )
             rows.extend(path_rows)
-        except Exception:  # noqa: BLE001, S110 — the legacy-id pass above already succeeded
+        except Exception:  # noqa: BLE001, S110 — the id pass above already succeeded
             pass
 
     if not rows:
@@ -743,11 +777,8 @@ def _track_download_events(
     ordered = sorted(deduped.values(), key=lambda r: r["id"], reverse=True)[:limit]
     matched_ids = {r["id"] for r in ordered}
     events = _track_downloads_to_events(ordered)
-    # the library track each download belongs to, so the history can file it there
-    by_legacy = {str(r["legacy_id"]): r["track_id"] for r in link_rows if r["legacy_id"] is not None}
-    by_path = {r["file_path"]: r["track_id"] for r in link_rows if r["file_path"]}
     for event, r in zip(events, ordered, strict=True):
-        track_id = by_legacy.get(str(r["track_id"])) or by_path.get(r["file_path"])
+        track_id = _owner(r)
         if track_id:
             event["track_id"] = track_id
     return events, matched_ids

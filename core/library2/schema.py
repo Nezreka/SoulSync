@@ -272,6 +272,24 @@ CREATE TABLE IF NOT EXISTS lib2_file_origins (
 )
 """
 
+# the "could be better" counts' fingerprint indexes (review 5 W2-WE-5),
+# created after the additive migration; the quality-profile column rebuild
+# drops them first, since an index over a column blocks DROP COLUMN
+_PROFILE_FINGERPRINT_INDEX_SQL = (
+    ("lib2_tracks", "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_profile_explicit "
+                    "ON lib2_tracks(quality_profile_id) WHERE quality_profile_explicit=1"),
+    ("lib2_albums", "CREATE INDEX IF NOT EXISTS idx_lib2_albums_profile_explicit "
+                    "ON lib2_albums(quality_profile_id) WHERE quality_profile_explicit=1"),
+    ("lib2_artists", "CREATE INDEX IF NOT EXISTS idx_lib2_artists_profile_state "
+                     "ON lib2_artists(quality_profile_id, quality_profile_explicit, "
+                     "canonical_artist_id)"),
+)
+_PROFILE_FINGERPRINT_INDEXES = {
+    "lib2_tracks": ("idx_lib2_tracks_profile_explicit",),
+    "lib2_albums": ("idx_lib2_albums_profile_explicit",),
+    "lib2_artists": ("idx_lib2_artists_profile_state",),
+}
+
 _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_name ON lib2_artists(name)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_artists_spotify ON lib2_artists(spotify_id)",
@@ -281,6 +299,11 @@ _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_type ON lib2_albums(album_type)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_legacy ON lib2_albums(legacy_album_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_albums_origin ON lib2_albums(origin)",
+    # imports on the soulsync media server look the album up by these, once
+    # per track inside the import transaction (album_grouping, side_effects):
+    # unindexed that was a full table scan per downloaded track
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_server ON lib2_albums(server_source, server_id)",
+    "CREATE INDEX IF NOT EXISTS idx_lib2_albums_spotify ON lib2_albums(spotify_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_album_artists_artist ON lib2_album_artists(artist_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_album ON lib2_tracks(album_id)",
     "CREATE INDEX IF NOT EXISTS idx_lib2_tracks_isrc ON lib2_tracks(isrc)",
@@ -871,6 +894,19 @@ def _install_quality_profile_triggers(cursor: Any, table: str) -> None:
     """)
 
 
+def _done_once(cursor: Any, name: str) -> bool:
+    """whether a one-shot data migration already converged on this db.
+    third #1062 review P2C-5: these scanned whole tables under the init lock
+    on every start, finding nothing after the first"""
+    cursor.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+                   "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    return cursor.execute("SELECT 1 FROM lib2_upgrade_repairs WHERE name=?", (name,)).fetchone() is not None
+
+
+def _mark_done(cursor: Any, name: str) -> None:
+    cursor.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) VALUES(?)", (name,))
+
+
 def _migrate_quality_profile_constraints(cursor: Any) -> None:
     """Remove numeric defaults and attach Lib2 rows to app-wide profiles.
 
@@ -893,6 +929,9 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
     if default_row is None:
         raise RuntimeError("Library v2 requires at least one quality profile")
     default_id = int(default_row[0])
+    # the repoint below finds nothing once converged: the insert triggers
+    # default new rows and a referenced profile can't be deleted
+    ids_valid = _done_once(cursor, "quality_profile_ids_valid_v1")
 
     for table in _QUALITY_PROFILE_TABLES:
         info = {
@@ -925,12 +964,16 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
                            WHEN quality_profile_id IN (SELECT id FROM quality_profiles)
                            THEN quality_profile_id ELSE ? END
                 """, (default_id,))
+                # an index over the column blocks the drop; the fingerprint
+                # indexes are recreated further down this same ensure
+                for index_name in _PROFILE_FINGERPRINT_INDEXES.get(table, ()):
+                    cursor.execute(f"DROP INDEX IF EXISTS {index_name}")
                 cursor.execute(
                     f"ALTER TABLE {table} DROP COLUMN quality_profile_id")
                 cursor.execute(
                     f"ALTER TABLE {table} RENAME COLUMN quality_profile_id_v2 "
                     "TO quality_profile_id")
-            else:
+            elif not ids_valid:
                 cursor.execute(f"""
                     UPDATE {table}
                        SET quality_profile_id=?
@@ -946,6 +989,7 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
             cursor.execute(f"RELEASE SAVEPOINT {savepoint}")
             raise
 
+    _mark_done(cursor, "quality_profile_ids_valid_v1")
     cursor.execute("DROP TRIGGER IF EXISTS trg_quality_profiles_lib2_restrict")
     cursor.execute("""
         CREATE TRIGGER trg_quality_profiles_lib2_restrict
@@ -966,20 +1010,30 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
         "trg_quality_profiles_lib2_default_update",
     ):
         cursor.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")
+    # third #1062 review P2C-7: only the rows whose value changes. "set as
+    # default" rewrote every inherited row of a 300k library in the request
+    # transaction, holding the write lock and filling the WAL
     propagation_sql = """
         UPDATE lib2_artists
            SET quality_profile_id=NEW.id
-         WHERE COALESCE(quality_profile_explicit, 0)=0;
+         WHERE COALESCE(quality_profile_explicit, 0)=0
+           AND quality_profile_id IS NOT NEW.id;
         UPDATE lib2_albums
            SET quality_profile_id=(
                SELECT a.quality_profile_id FROM lib2_artists a
                 WHERE a.id=lib2_albums.primary_artist_id)
-         WHERE COALESCE(quality_profile_explicit, 0)=0;
+         WHERE COALESCE(quality_profile_explicit, 0)=0
+           AND quality_profile_id IS NOT (
+               SELECT a.quality_profile_id FROM lib2_artists a
+                WHERE a.id=lib2_albums.primary_artist_id);
         UPDATE lib2_tracks
            SET quality_profile_id=(
                SELECT al.quality_profile_id FROM lib2_albums al
                 WHERE al.id=lib2_tracks.album_id)
-         WHERE COALESCE(quality_profile_explicit, 0)=0;
+         WHERE COALESCE(quality_profile_explicit, 0)=0
+           AND quality_profile_id IS NOT (
+               SELECT al.quality_profile_id FROM lib2_albums al
+                WHERE al.id=lib2_tracks.album_id);
     """
     cursor.execute(f"""
         CREATE TRIGGER trg_quality_profiles_lib2_default_insert
@@ -1011,6 +1065,8 @@ def _backfill_quality_profile_provenance(cursor: Any) -> None:
     cannot be reconstructed from the old schema, but retaining the cascade is
     the least surprising and least destructive migration.
     """
+    if _done_once(cursor, "quality_profile_provenance_v1"):
+        return  # P2C-5: rows are born with DEFAULT 0; NULL only ever came from old installs
     default_row = cursor.execute(
         "SELECT id FROM quality_profiles ORDER BY is_default DESC, id LIMIT 1"
     ).fetchone()
@@ -1040,6 +1096,7 @@ def _backfill_quality_profile_provenance(cursor: Any) -> None:
                     ) THEN 1 ELSE 0 END
             WHERE quality_profile_explicit IS NULL"""
     )
+    _mark_done(cursor, "quality_profile_provenance_v1")
 
 
 def _migrate_artist_monitored_default(cursor: Any) -> None:
@@ -1237,6 +1294,16 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         )
     except Exception as e:  # noqa: BLE001
         logger.debug("idx_lib2_track_files_owner create skipped: %s", e)
+    # a v1 API track id (3.6.1's) and the user-reference remap look a file up
+    # by its legacy id; without this each lookup read all of the file table.
+    # partial: only imported files carry one
+    try:
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_legacy "
+            "ON lib2_track_files(legacy_track_id) WHERE legacy_track_id IS NOT NULL"
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.debug("idx_lib2_track_files_legacy create skipped: %s", e)
     # Owning by path (E-15): the folder table and the triggers that derive a
     # file's owner from where it is. The folders themselves are configuration
     # and are synced at start (core.library2.library_roots.sync_library_roots).
@@ -1281,7 +1348,10 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         # audiodb and jiosaavn too: the external-id ownership check
         # (core/library/track_identity) ORs every id a source carries, and one
         # unindexed arm makes the whole OR a scan
-        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'jiosaavn'):
+        # genius, amazon and bandcamp: the public api's lookup by external id
+        # (review 5 W2-WJ-5, 3.6.1 had a column index for each)
+        for service in ('spotify', 'deezer', 'tidal', 'qobuz', 'itunes', 'audiodb', 'jiosaavn',
+                        'genius', 'amazon', 'bandcamp'):
             name = f"idx_lib2_tracks_ext_{service}"
             expression = external_id_sql('external_ids', service)
             row = cursor.execute(
@@ -1293,11 +1363,22 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                 f"ON lib2_tracks({expression}) WHERE {expression} IS NOT NULL")
         # the same for releases: an import groups tracks into an album by its
         # provider id, and without these each miss parsed all 72k albums
-        for service in ('deezer', 'tidal', 'qobuz', 'itunes'):
+        # audiodb onwards: the public api's lookup by external id, which read
+        # every album for those (review 5 W2-WJ-5)
+        # hydrabase: an import from it groups by its id (review 5 W3-TD-4)
+        from core.library2.provider_ids import ALBUM_EXTERNAL_ID_INDEXED
+        for service in ALBUM_EXTERNAL_ID_INDEXED:
             expression = external_id_sql('external_ids', service)
             cursor.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_lib2_albums_ext_{service} "
                 f"ON lib2_albums({expression}) WHERE {expression} IS NOT NULL")
+        # the other half of a bandcamp lookup: the id the enrichment bucket keeps
+        from core.library2.provider_ids import bandcamp_enrichment_id_sql
+        bandcamp_expr = bandcamp_enrichment_id_sql()
+        for table in ('lib2_tracks', 'lib2_albums'):
+            cursor.execute(
+                f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_enrich "
+                f"ON {table}({bandcamp_expr}) WHERE {bandcamp_expr} IS NOT NULL")
         # a recording's MusicBrainz id, for the same ownership check: partial,
         # most tracks carry none
         cursor.execute(
@@ -1341,6 +1422,17 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
                        "ON lib2_tracks(album_soul_id)")
     except Exception as e:  # noqa: BLE001
         logger.error("soul_id index failed (will retry next start): %s", e)
+    # the "could be better" counts' fingerprint, read every 30 s while the
+    # artist list is open: without these it scanned all of lib2_tracks and
+    # lib2_albums for a few hundred explicit rows, and every wide artist row
+    # (2.9 s live). partial + covering, so each is a seek over the explicit
+    # rows; the artists' one is a narrow covering scan. columns arrive in the
+    # additive migration, so not in ``_INDEXES``. review 5 W2-WE-5
+    try:
+        for _table, index_sql in _PROFILE_FINGERPRINT_INDEX_SQL:
+            cursor.execute(index_sql)
+    except Exception as e:  # noqa: BLE001
+        logger.error("quality-profile fingerprint index failed (will retry next start): %s", e)
     # Release-group MBID. Same placement rule: the column arrives in the
     # additive migration above, so it cannot be declared in ``_INDEXES``.
     # mb_reconcile groups an artist's albums by this value on every run.
@@ -1374,6 +1466,18 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_derived_from "
             "ON lib2_track_files(derived_from_file_id)")
+        # the Cutoff Unmet cache's change check reads MAX(updated_at) on
+        # every page; without this it scanned every file row (review 5 R5-G-2)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_updated "
+            "ON lib2_track_files(updated_at)")
+        # every boot's unverified-history heal reads the verified files; with
+        # no index that was a scan of every file row (2.6-3.4 s live) to find
+        # a few hundred. partial: it holds just those (review 5 R5-X2-3)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib2_track_files_verified "
+            "ON lib2_track_files(path) "
+            "WHERE verification_status IN ('verified', 'human_verified')")
         from core.library2.track_files import install_primary_triggers
         install_primary_triggers(cursor)
     except Exception as e:  # noqa: BLE001
@@ -1390,12 +1494,15 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_lib2_monitor_rules_entity "
             "ON lib2_monitor_rules(entity_type, entity_id)")
-        from core.library2.monitor_rules import prune_orphaned_rules, seed_legacy_rules
+        from core.library2.monitor_rules import seed_legacy_rules
         if rules_table_is_fresh:
             seeded = seed_legacy_rules(cursor)
             if seeded:
                 logger.info("Seeded %d legacy_import monitor rules", seeded)
-        prune_orphaned_rules(cursor)
+        # the orphan prune runs with the deferred backfills: here it scanned
+        # ~880k rules inside the init transaction on every start, about 1.5 s
+        # every first get_database() waited out (review 5 R5-X2-2). entity
+        # ids are AUTOINCREMENT, so an orphan rule can't attach to a new row
     except Exception as e:  # noqa: BLE001
         logger.error("monitor-rules migration failed (will retry next start): %s", e)
     # Materialized wanted projection (audit §11.2 / ADR-02 Stufe 2): the
@@ -1501,6 +1608,16 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_track_downloads_file_path "
                 "ON track_downloads(file_path)")
+            # and the album view's other provenance keys, so its one lookup
+            # for a whole album reads them off indexes, not the whole history
+            # (review 5 perf)
+            from core.library2.queries import TRACK_DOWNLOAD_FILE_NAME_SQL
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_file_name "
+                           f"ON track_downloads({TRACK_DOWNLOAD_FILE_NAME_SQL})")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_title_lower "
+                           "ON track_downloads(lower(track_title))")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_td_album_lower "
+                           "ON track_downloads(lower(track_album))")
     except Exception as e:  # noqa: BLE001
         logger.debug("track_downloads index skipped: %s", e)
     # Automatic initial-import bootstrap (§78 / tool-integration-audit §7.7):
@@ -1633,10 +1750,35 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             logger.error("primary-file backfill failed (will retry next start): %s", e)
 
     if not _stopped():
+        try:
+            from core.library2.monitor_rules import prune_orphaned_rules
+            stats["orphaned_monitor_rules"] = prune_orphaned_rules(cursor)
+            _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("monitor-rule orphan prune failed (will retry next start): %s", e)
+
+    if not _stopped():
+        # review 5 R5-G-1: downloads recorded before their file was in the
+        # catalogue. once: new imports link their row after the autolink
+        try:
+            if not _done_once(cursor, "track_downloads_lib2_link_v1"):
+                from core.library2.track_files import link_unlinked_downloads
+                stats["download_links"] = link_unlinked_downloads(cursor)
+                _mark_done(cursor, "track_downloads_lib2_link_v1")
+                _commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("download provenance link failed (will retry next start): %s", e)
+
+    if not _stopped():
         # A provider's 0 ("no BPM", "no length") was stored as a value: the
         # retag wrote BPM 0 into files, and a length of 0 switched off the
         # import's duration check while COALESCE kept it over real lengths.
         try:
+            # P2C-5: every start scanned every track for this under the
+            # write lock. a partial index holds just the zero rows (none,
+            # normally), so the sweep is a seek and still heals a late writer
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lib2_tracks_zero_metadata "
+                           "ON lib2_tracks(id) WHERE bpm=0 OR duration=0")
             stats["zero_track_metadata"] = cursor.execute(
                 "UPDATE lib2_tracks SET bpm=NULLIF(bpm, 0), duration=NULLIF(duration, 0)"
                 " WHERE bpm=0 OR duration=0").rowcount

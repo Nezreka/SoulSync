@@ -1359,6 +1359,9 @@ def test_acquisition_grab_submits_once_and_returns_only_public_state(api):
         "candidates_evaluated",
         "force_grab",
         "grab_prepared",
+        # review 5 W2-WC-1: the submission-started journal entry is written
+        # now (it used to fail and roll back every time)
+        "grab_submission_started",
         "grab_submitted",
     ]
 
@@ -1507,6 +1510,44 @@ def test_album_cascade_still_projects_ruleless_tracks(api):
     with _conn(db) as conn:
         assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?",
                             (ids["album_track"],)).fetchone()[0] == 0
+
+
+def test_bulk_unwish_never_touches_an_album_the_artist_only_guests_on(api):
+    """third #1062 review G07-2: "Remove everything from Wishlist" on artist X
+    wrote an unmonitor rule on Artist Y's album X guests on, and Add all
+    wanted whole compilations. 3.6.1's watchlist acted on X's own releases"""
+    import time
+    from core.library2.artist_aliases import artist_fronted_album_ids
+    client, db, ids = api
+    with _conn(db) as conn:
+        other = conn.execute("INSERT INTO lib2_artists(name) VALUES('Artist Y')").lastrowid
+        their_album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, album_type, monitored) "
+            "VALUES(?, 'Y Album', 'album', 1)", (other,)).lastrowid
+        conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'primary')",
+                     (their_album, other))
+        conn.execute("INSERT INTO lib2_album_artists(album_id, artist_id, role) VALUES(?, ?, 'featured')",
+                     (their_album, ids["artist"]))
+        guest_track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, monitored) VALUES(?, 'Feat', 1, 1)",
+            (their_album,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) VALUES(?, ?, 'featured', 1)",
+                     (guest_track, ids["artist"]))
+        conn.commit()
+        assert their_album not in artist_fronted_album_ids(conn, ids["artist"])
+        assert ids["views"] in artist_fronted_album_ids(conn, ids["artist"])
+
+    started = client.post(f"/api/library/v2/artists/{ids['artist']}/releases/monitor",
+                          json={"scope": "all", "monitored": False}).get_json()
+    for _ in _patience():
+        if not client.get("/api/library/v2/jobs/status",
+                          query_string={"job_id": started["job_id"]}).get_json()["running"]:
+            break
+        time.sleep(0.01)
+    with _conn(db) as conn:
+        assert conn.execute("SELECT monitored FROM lib2_albums WHERE id=?", (their_album,)).fetchone()[0] == 1
+        assert not conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='album' "
+                                "AND entity_id=?", (their_album,)).fetchone()
 
 
 def test_bulk_monitor_updates_rules_projection_and_sets_hand_set_tracks(api):
@@ -1880,6 +1921,32 @@ def test_delete_album_withdraws_every_profiles_wish(api):
     assert {r["profile_id"] for r in db.wishlist_removes} == {1, 3}
     # an album delete leaves the artist on everyone's watchlist
     assert db.watchlist_removes == []
+
+
+def test_deleting_a_listed_album_keeps_it_on_the_discography(api):
+    """#2012: removing an album the provider lists took it off the artist's
+    discography too, so "3 of 3" became "2 of 2". as in lidarr it stays
+    listed, not owned and not wanted; one no provider lists is deleted"""
+    client, db, ids = api
+    with _conn(db) as conn:
+        conn.execute("UPDATE lib2_albums SET spotify_id='sp-views' WHERE id=?", (ids["views"],))
+        conn.execute("UPDATE lib2_albums SET spotify_id=NULL, musicbrainz_id=NULL, external_ids='{}'"
+                     " WHERE id=?", (ids["ep"],))
+        conn.commit()
+
+    assert client.delete(f"/api/library/v2/albums/{ids['views']}").get_json()["success"] is True
+    assert client.delete(f"/api/library/v2/albums/{ids['ep']}").get_json()["success"] is True
+
+    with _conn(db) as conn:
+        views = conn.execute("SELECT origin, monitored FROM lib2_albums WHERE id=?", (ids["views"],)).fetchone()
+        assert views is not None and views["origin"] == "discography" and views["monitored"] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id"
+            " WHERE t.album_id=?", (ids["views"],)).fetchone()[0] == 0
+        rule = conn.execute("SELECT monitored, provenance FROM lib2_monitor_rules WHERE entity_type='album'"
+                            " AND entity_id=? AND profile_id=1", (ids["views"],)).fetchone()
+        assert rule is not None and rule["monitored"] == 0 and rule["provenance"] == "user_explicit"
+        assert conn.execute("SELECT 1 FROM lib2_albums WHERE id=?", (ids["ep"],)).fetchone() is None
 
 
 def test_delete_featured_artist_keeps_owner_album(api):
@@ -4678,6 +4745,8 @@ def test_the_songs_section_lists_owned_songs_with_catalogue_ids(api):
     assert song["album_id"] == ids["views"] and song["format"] == "FLAC"
     assert song["album_thumb_url"].startswith("/api/library/v2/artwork/album/")
     assert song["liked"] is False and song["copies"] == 1
+    # a row names the file it shows: its delete acts on that file alone
+    assert song["file_id"] in song["file_ids"]
     copies = client.get(f"/api/library/v2/songs/{ids['album_track']}/copies").get_json()
     assert [c["file_path"] for c in copies["copies"]] == ["/m/one-dance.flac"]
     assert client.get("/api/library/v2/songs?limit=501").status_code == 400
@@ -4699,6 +4768,47 @@ def test_the_artist_detail_match_writes_the_library_v2_row(api):
         "SELECT external_ids FROM lib2_albums WHERE id=?", (ids["views"],)).fetchone()[0])
     conn.close()
     assert stored["deezer"] == "dz-album" and "deezer" not in cleared
+
+
+def test_a_cleared_match_is_not_searched_back(api):
+    """second v2 review (T2): clearing a wrong match deleted its attempt row,
+    so the worker read the album as never attempted, searched by name and
+    stored the same wrong id again. 3.6.1 kept a cleared match cleared until
+    the user matched it by hand"""
+    from core.library2.match_status import apply_manual_match
+    from core.library2.provider_attempts import due_entities
+    _client, db, ids = api
+    conn = _conn(db)
+    apply_manual_match(conn, "album", ids["views"], "deezer", "dz-wrong", actor="profile:1")
+    apply_manual_match(conn, "album", ids["views"], "deezer", None, actor="profile:1")
+    conn.commit()
+    assert ids["views"] not in due_entities(conn, entity_type="album", service="deezer", limit=1000)
+    # a manual match later is still the user's answer
+    apply_manual_match(conn, "album", ids["views"], "deezer", "dz-right", actor="profile:1")
+    conn.commit()
+    row = conn.execute("SELECT status FROM lib2_provider_attempts WHERE entity_type='album'"
+                       " AND entity_id=? AND service='deezer'", (ids["views"],)).fetchone()
+    conn.close()
+    assert row[0] == "matched"
+
+
+def test_an_id_moved_to_another_release_sends_its_old_holder_back_to_the_queue(api):
+    """third #1062 review P2B-1: matching release B by hand to an id release A
+    held moves the id, but A never said its match was wrong. it must be looked
+    up again (not "cleared by user"), and a pin naming that id is lifted"""
+    from core.library2.match_status import apply_manual_match
+    from core.library2.provider_attempts import due_entities
+    _client, db, ids = api
+    conn = _conn(db)
+    apply_manual_match(conn, "album", ids["ep"], "deezer", "dz-shared", actor="profile:1")
+    conn.commit()
+    apply_manual_match(conn, "album", ids["views"], "deezer", "dz-shared", actor="profile:1")
+    conn.commit()
+    assert ids["ep"] in due_entities(conn, entity_type="album", service="deezer", limit=1000)
+    pin = conn.execute("SELECT canonical_album_id, COALESCE(canonical_locked,0) FROM lib2_albums "
+                       "WHERE id=?", (ids["ep"],)).fetchone()
+    conn.close()
+    assert pin[0] != "dz-shared" and not pin[1]
 
 
 def test_a_fixed_artist_match_moves_the_profiles_watchlist_entry(api):
@@ -4856,3 +4966,47 @@ def test_discovery_resolves_a_provider_album_link_to_the_catalogue_release(api):
 
     assert hit["album_id"] == ids["views"]
     assert miss["album_id"] is None
+
+
+def test_an_import_waits_for_the_last_ones_convergence(api):
+    """review 4 R4-D-4: the convergence after an import folds and merges rows;
+    a second import started meanwhile wrote the same rows alongside it"""
+    import threading
+    client, _db, _ids = api
+    release = threading.Event()
+    t = threading.Thread(target=release.wait, name="lib2-converge", daemon=True)
+    t.start()
+    try:
+        r = client.post("/api/library/v2/import", json={})
+        assert r.status_code == 409
+        assert "settling" in r.get_json()["error"]
+    finally:
+        release.set()
+        t.join(2)
+
+
+def test_reset_rearms_the_one_time_upgrade_carries(api):
+    """review 4 R4-A-5: the 3.6.1 carries and the twin merge kept their
+    run-once markers through a reset, so a re-run upgrade skipped them"""
+    client, db, _ids = api
+    with closing(_conn(db)) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS lib2_upgrade_repairs "
+                     "(name TEXT PRIMARY KEY, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        for name in ("legacy_columns_v1", "legacy_album_kind_known_v1", "legacy_issue_ids_v1",
+                     "legacy_genre_locks_v1", "quality_profile_ids_valid_v1"):
+            conn.execute("INSERT OR IGNORE INTO lib2_upgrade_repairs(name) VALUES(?)", (name,))
+        for table in ("_lib2_import_twins_merged_v2", "_lib2_legacy_credits_carried",
+                      "_lib2_member_watchlists_carried"):
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {table} (applied_at TEXT)")
+        conn.commit()
+
+    assert client.post("/api/library/v2/reset").status_code == 200
+
+    with closing(_conn(db)) as conn:
+        names = {r[0] for r in conn.execute("SELECT name FROM lib2_upgrade_repairs")}
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "quality_profile_ids_valid_v1" in names      # not an upgrade carry
+    assert not names & {"legacy_columns_v1", "legacy_album_kind_known_v1",
+                        "legacy_issue_ids_v1", "legacy_genre_locks_v1"}
+    assert not tables & {"_lib2_import_twins_merged_v2", "_lib2_legacy_credits_carried",
+                         "_lib2_member_watchlists_carried"}

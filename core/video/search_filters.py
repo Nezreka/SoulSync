@@ -17,7 +17,7 @@ FIELDS = {
     "title": "text", "resolution": "number", "codec": "text", "source": "text",
     "group": "text", "indexer": "text", "size_gb": "number", "age_days": "number",
     "format_score": "number", "seeders": "number", "grabs": "number", "hdr": "text",
-    "audio": "text", "meets_profile": "bool",
+    "audio": "text", "language": "text", "meets_profile": "bool",
 }
 OPS = {
     "contains": ("text",), "not_contains": ("text",),

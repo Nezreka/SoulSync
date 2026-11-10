@@ -77,8 +77,10 @@ class ServerDescriptor:
     # library, a Navidrome music folder, or nothing.
     library_concept: str = 'none'
     # Per-profile own libraries (#1199) need a server that can hold more
-    # than one music library. Plex and Jellyfin can; Navidrome has one
-    # music folder per server; the standalone library has no server.
+    # than one music library. Plex and Jellyfin can; Navidrome can from
+    # 0.58 (#2031, version-checked at runtime); the standalone library
+    # has no server. Ask core.library_scope.own_libraries_supported_on,
+    # not this flag.
     supports_own_libraries: bool = False
     # The server has user accounts a profile can be linked to.
     per_user_accounts: bool = False
@@ -198,6 +200,9 @@ NAVIDROME = ServerDescriptor(
     detection=Detection(port=4533, path='/rest/ping'),
     brand=Brand(color='#3b6cf6', logo='/static/img/brands/navidrome.png'),
     library_concept='folder',
+    # from 0.58 only (multiple libraries, #2031): the running version is
+    # checked by core.library_scope.own_libraries_supported_on
+    supports_own_libraries=True,
     per_user_accounts=True,
 )
 

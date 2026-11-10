@@ -120,14 +120,14 @@ def test_user_view_dispatches_to_each_servers_acting_as_method(monkeypatch):
     seen = {}
     monkeypatch.setattr(c['plex'], 'as_home_user', lambda self, token, title='': seen.setdefault('plex', (token, title)))
     monkeypatch.setattr(c['jellyfin'], 'as_user', lambda self, user_id, library_id=None: seen.setdefault('jellyfin', (user_id, library_id)))
-    monkeypatch.setattr(c['navidrome'], 'as_user', lambda self, username, password: seen.setdefault('navidrome', (username, password)))
+    monkeypatch.setattr(c['navidrome'], 'as_user', lambda self, username, password, music_folder_id=None: seen.setdefault('navidrome', (username, password, music_folder_id)))
     plex = c['plex'].__new__(c['plex'])
     jf = c['jellyfin'].__new__(c['jellyfin'])
     nd = c['navidrome'].__new__(c['navidrome'])
     plex.user_view({'token': 't', 'title': 'Kid'})
     jf.user_view({'user_id': 'u1', 'library_id': 'l1'})
-    nd.user_view({'username': 'n', 'password': 'p'})
-    assert seen == {'plex': ('t', 'Kid'), 'jellyfin': ('u1', 'l1'), 'navidrome': ('n', 'p')}
+    nd.user_view({'username': 'n', 'password': 'p', 'music_folder_id': 'm1'})
+    assert seen == {'plex': ('t', 'Kid'), 'jellyfin': ('u1', 'l1'), 'navidrome': ('n', 'p', 'm1')}
     assert plex.user_view({}) is None and jf.user_view(None) is None and nd.user_view({'username': 'n'}) is None
 
 

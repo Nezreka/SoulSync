@@ -9,12 +9,39 @@ candidates whatever their monitoring, so a pick can opt those tracks in.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+
+def target_quality_profile(conn: Any, quality_profile_id: Any) -> Optional[Dict[str, Any]]:
+    """The profile an Enhance run aims for, or None for each track's own.
+
+    3.6.1's Enhance had a per-run "upgrade tracks below" picker. this is that
+    picker on the one quality model: any profile, ranked targets and all.
+    Raises LookupError for an id that names no profile, ValueError for one
+    that never upgrades (its picks would be pinned to "keep what you have")."""
+    if quality_profile_id in (None, "", 0, "0"):
+        return None
+    try:
+        wanted = int(quality_profile_id)
+    except (TypeError, ValueError):
+        raise LookupError("Quality profile not found") from None
+    row = conn.execute("SELECT * FROM quality_profiles WHERE id=?", (wanted,)).fetchone()
+    if row is None:
+        raise LookupError("Quality profile not found")
+    profile = dict(row)
+    from core.library2.quality_eval import is_upgrade_policy
+    if not is_upgrade_policy(profile.get("upgrade_policy")):
+        raise ValueError("That quality profile never upgrades")
+    return profile
 
 
 def enhance_candidates(conn: Any, entity: str, entity_id: int, *,
-                       profile_id: int) -> List[Dict[str, Any]]:
-    """One row per upgradable track of the scope, by album and position."""
+                       profile_id: int,
+                       target: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    """One row per upgradable track of the scope, by album and position.
+
+    ``target`` (``target_quality_profile``) judges every track against that
+    profile instead of its own."""
     from core.library2.quality_eval import (
         audio_quality_from_file, effective_track_profile, profile_targets,
     )
@@ -31,7 +58,8 @@ def enhance_candidates(conn: Any, entity: str, entity_id: int, *,
         return target.label or (target.format or "").upper() or None
 
     ids = upgrade_candidate_track_ids(
-        conn, profile_id=profile_id, track_ids=entity_track_ids(conn, entity, entity_id))
+        conn, profile_id=profile_id, track_ids=entity_track_ids(conn, entity, entity_id),
+        quality_profile=target)
     if not ids:
         return []
     files = primary_file_rows(conn, ids)
@@ -50,7 +78,7 @@ def enhance_candidates(conn: Any, entity: str, entity_id: int, *,
             " WHERE t.id IN (SELECT value FROM json_each(?))"
             " ORDER BY al.title COLLATE NOCASE, t.disc_number, t.track_number",
             (json.dumps(ids),)):
-        profile = effective_track_profile(conn, row["id"])
+        profile = target or effective_track_profile(conn, row["id"])
         if profile["id"] not in targets:
             targets[profile["id"]] = target_label(profile)
         quality = audio_quality_from_file(files.get(row["id"]))

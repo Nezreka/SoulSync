@@ -48,6 +48,8 @@ _FIELDS = (
     "disc_number",
     "replace_track_id",
     "exempt_dedup",
+    "replace_id_space",
+    "replace_file_id",
 )
 
 
@@ -69,6 +71,14 @@ class RematchHint:
     disc_number: Optional[int] = None
     replace_track_id: Optional[int] = None
     exempt_dedup: bool = True
+    # which id space ``replace_track_id`` lives in. 'lib2' is the only one
+    # a delete acts on: a 3.6.1 hint held a media-server/legacy id, and read
+    # as a lib2 id it named an unrelated track and deleted its file
+    replace_id_space: Optional[str] = "lib2"
+    # the exact file a replace retires: a track can hold a copy in the shared
+    # library and one in a profile's own, and only the staged one goes
+    # (review 5 W2-WD-3)
+    replace_file_id: Optional[int] = None
     id: Optional[int] = None
     status: str = "pending"
 
@@ -89,6 +99,8 @@ class RematchHint:
             self.disc_number,
             self.replace_track_id,
             1 if self.exempt_dedup else 0,
+            self.replace_id_space,
+            self.replace_file_id,
         )
 
 
@@ -116,12 +128,50 @@ def _row_to_hint(row: Any) -> RematchHint:
         disc_number=g("disc_number"),
         replace_track_id=g("replace_track_id"),
         exempt_dedup=bool(g("exempt_dedup", 1)),
+        replace_id_space=g("replace_id_space"),
+        replace_file_id=g("replace_file_id"),
         status=g("status") or "pending",
     )
 
 
+def _library_v2_has_run(cursor: Any) -> bool:
+    try:
+        row = cursor.execute(
+            "SELECT 1 FROM lib2_bootstrap_state WHERE id=1 "
+            "AND (status='done' OR started_at IS NOT NULL)").fetchone()
+    except Exception:  # noqa: BLE001 - no table: a 3.6.1 database
+        return False
+    return row is not None
+
+
+def ensure_replace_id_space_column(cursor: Any) -> None:
+    """the column a 3.6.1 database lacks; added where it is missing.
+
+    review 4 R4-D-1: a NULL space means "a 3.6.1 hint holding a legacy id",
+    which the upgrade maps through legacy_track_id. but an install that ran
+    library v2 before this column existed has pending hints that hold lib2
+    ids, and nothing tells the two apart. mapping one as legacy could point
+    the replace at an unrelated track and delete its file, so those keep
+    their import and lose only the replace (nothing gets deleted)"""
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(rematch_hints)").fetchall()}
+    if cols and "replace_file_id" not in cols:
+        # the file a replace retires (review 5 W2-WD-3); an older hint has
+        # none and only replaces when the track has one library's copies
+        cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_file_id INTEGER")
+    if cols and "replace_id_space" not in cols:
+        cursor.execute("ALTER TABLE rematch_hints ADD COLUMN replace_id_space TEXT")
+        if _library_v2_has_run(cursor):
+            cursor.execute(
+                "UPDATE rematch_hints SET replace_track_id=NULL, replace_id_space='lib2' "
+                "WHERE status='pending' AND replace_track_id IS NOT NULL")
+
+
 def create_hint(cursor: Any, hint: RematchHint) -> int:
     """Insert a pending hint; return its new id. Caller owns commit."""
+    if hint.replace_track_id and not hint.replace_id_space:
+        # every writer today names the library v2 track it replaces
+        hint.replace_id_space = "lib2"
+    ensure_replace_id_space_column(cursor)
     placeholders = ", ".join("?" for _ in _FIELDS)
     cursor.execute(
         f"INSERT INTO rematch_hints ({', '.join(_FIELDS)}) VALUES ({placeholders})",
@@ -239,6 +289,8 @@ def delete_replaced_track(
     unlink=os.remove,
     resolve_fn: Optional[Callable[[str], Optional[str]]] = None,
     new_paths: Optional[list] = None,
+    id_space: Optional[str] = "lib2",
+    file_id: Any = None,
 ) -> Optional[str]:
     """Remove the OLD library row a re-identify replaces, and its file.
 
@@ -253,16 +305,34 @@ def delete_replaced_track(
     * the file is unlinked only if it still exists and **no other track row references
       it** (guards against yanking a file a different row legitimately points to).
 
+    ``file_id`` is the exact file the re-identify staged (review 5 W2-WD-3):
+    only that row goes, never another library's copy of the same track. A
+    hint written before it was recorded replaces only when every live copy
+    sits in one library; otherwise it keeps both (a duplicate is recoverable,
+    another library's only copy is not).
+
     Returns the path it removed, or ``None`` if there was nothing to do. ``unlink`` is
     injectable for tests. ``resolve_fn`` maps the STORED DB path to the file's actual
     on-disk location (the stored path may be a Docker/media-server view this process
     can't read literally — without it we'd delete the row but orphan the file)."""
     if not replace_track_id:
         return None
-    cursor.execute(
-        "SELECT id, path FROM lib2_track_files WHERE track_id=? "
-        "AND COALESCE(file_state,'active')='active' "
-        "ORDER BY is_primary DESC, id LIMIT 1", (replace_track_id,))
+    if id_space != "lib2":
+        # an id from another space (a hint left from 3.6.1 that nothing
+        # mapped) would name an unrelated lib2 track: keep the import, delete
+        # nothing
+        return None
+    if file_id:
+        cursor.execute(
+            "SELECT id, path FROM lib2_track_files WHERE id=? AND track_id=? "
+            "AND COALESCE(file_state,'active')='active'", (file_id, replace_track_id))
+    else:
+        if _copies_span_libraries(cursor, replace_track_id):
+            return None
+        cursor.execute(
+            "SELECT id, path FROM lib2_track_files WHERE track_id=? "
+            "AND COALESCE(file_state,'active')='active' "
+            "ORDER BY is_primary DESC, id LIMIT 1", (replace_track_id,))
     row = cursor.fetchone()
     if row is None:
         return None
@@ -303,6 +373,18 @@ def delete_replaced_track(
     return None
 
 
+def _copies_span_libraries(cursor: Any, track_id: Any) -> bool:
+    """do the track's live files sit in more than one library?"""
+    cols = {r[1] for r in cursor.execute("PRAGMA table_info(lib2_track_files)").fetchall()}
+    if "owner_profile_id" not in cols:
+        return False
+    cursor.execute(
+        "SELECT COUNT(DISTINCT COALESCE(owner_profile_id, 0)) FROM lib2_track_files "
+        "WHERE track_id=? AND COALESCE(file_state,'active')='active'", (track_id,))
+    row = cursor.fetchone()
+    return bool(row) and int(row[0] or 0) > 1
+
+
 def quick_file_signature(path: str, *, chunk: int = 65536) -> Optional[str]:
     """A cheap, rename-proof content fingerprint: size + first/last chunk, hashed.
 
@@ -336,3 +418,33 @@ __all__ = [
     "delete_replaced_track",
     "quick_file_signature",
 ]
+
+
+def carry_legacy_rematch_hints(conn: Any) -> int:
+    """once, after the upgrade import: a hint still pending from 3.6.1 named
+    the track to replace by its legacy (media-server) id. map it onto the
+    lib2 track through legacy_track_id; a hint nothing maps keeps its import
+    and loses only the replace. returns how many were mapped."""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(rematch_hints)")}
+    except Exception:  # noqa: BLE001 - no table: nothing to carry
+        return 0
+    if "replace_id_space" not in cols:
+        return 0
+    rows = conn.execute(
+        "SELECT id, replace_track_id FROM rematch_hints WHERE status='pending' "
+        "AND replace_track_id IS NOT NULL AND replace_id_space IS NULL").fetchall()
+    mapped = 0
+    for hint_id, legacy_id in rows:
+        hit = conn.execute(
+            "SELECT track_id FROM lib2_track_files WHERE legacy_track_id=? "
+            "UNION SELECT id FROM lib2_tracks WHERE legacy_track_id=? LIMIT 2",
+            (str(legacy_id), str(legacy_id))).fetchall()
+        if len(hit) == 1:
+            conn.execute("UPDATE rematch_hints SET replace_track_id=?, replace_id_space='lib2' "
+                         "WHERE id=?", (int(hit[0][0]), hint_id))
+            mapped += 1
+        else:
+            conn.execute("UPDATE rematch_hints SET replace_track_id=NULL WHERE id=?", (hint_id,))
+    conn.commit()
+    return mapped

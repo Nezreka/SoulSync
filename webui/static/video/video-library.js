@@ -11,10 +11,14 @@
 
     var PAGE_ID = 'video-library';
     var LIBRARY_URL = '/api/video/library';
+    // Grid posters ask the server for a right-sized copy (Plex/Jellyfin resize
+    // it, the image cache keeps it), the same 342 px the watchlist and detail
+    // grids use. Without it every tile pulled the full original (~1.3 MB each).
+    var GRID_POSTER_W = 342;
     var LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('');
 
     var state = { tab: 'movies', search: '', letter: 'all', sort: 'title',
-                  status: 'all', genre: '', resolution: '', page: 1, limit: 75, loaded: false,
+                  status: 'all', genre: '', resolution: '', vlib: '', page: 1, limit: 75, loaded: false,
                   // Bulk select mode: id→true map (persists across pages), the
                   // open action popover, and the running-job poll timer.
                   selecting: false, selected: {}, bulkPop: null, bulkTimer: null };
@@ -99,7 +103,7 @@
         var fallback = kind === 'movie' ? '🎬' : '📺';
         var img = it.has_poster
             ? '<div class="library-artist-image"><img src="/api/video/poster/' + kind + '/' + it.id +
-              '" alt="" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>' +
+              '?w=' + GRID_POSTER_W + '" alt="" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>' +
               fallback + '</div>\'"></div>'
             : '<div class="library-artist-image"><div class="library-artist-image-fallback">' + fallback + '</div></div>';
 
@@ -241,6 +245,7 @@
             kind: apiKind, search: state.search, letter: state.letter, sort: state.sort,
             status: state.status, genre: state.genre, page: state.page, limit: state.limit });
         if (state.resolution && apiKind === 'movies') params.set('resolution', state.resolution);
+        if (state.vlib && apiKind !== 'channels') params.set('video_library', state.vlib);
         fetch(LIBRARY_URL + '?' + params.toString(), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -273,6 +278,30 @@
                     }).join('');
             })
             .catch(function () { /* the dropdown just stays on All Genres */ });
+    }
+
+    // the video libraries (#2029) of the current kind → the library filter,
+    // shown only once a kind has two. the list is read once
+    var _vlibs = null;
+    function fillLibraries() {
+        var sel = $('[data-video-lib-vlib]');
+        if (!sel) return;
+        var kind = state.tab === 'movies' ? 'movie' : state.tab === 'shows' ? 'show' : '';
+        var mine = (_vlibs || []).filter(function (l) { return l.kind === kind; });
+        sel.hidden = mine.length < 2;
+        if (!mine.some(function (l) { return String(l.id) === state.vlib; })) state.vlib = '';
+        sel.innerHTML = '<option value="">All Libraries</option>' + mine.map(function (l) {
+            return '<option value="' + l.id + '"' + (String(l.id) === state.vlib ? ' selected' : '') + '>' +
+                esc(l.name) + '</option>';
+        }).join('');
+    }
+    function loadLibraries() {
+        if (_vlibs !== null) { fillLibraries(); return; }
+        _vlibs = [];
+        fetch('/api/video/library/video-libraries', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { _vlibs = (d && d.libraries) || []; fillLibraries(); })
+            .catch(function () { /* no filter */ });
     }
 
     // Movie-file resolutions actually in the library → the resolution filter
@@ -606,6 +635,7 @@
                     }
                     loadGenres();
                     if (state.tab === 'movies') loadResolutions();
+                    fillLibraries();
                     reload();
                 });
             })(tabs[i]);
@@ -626,6 +656,8 @@
         if (genreSel) genreSel.addEventListener('change', function () { state.genre = genreSel.value; reload(); });
         var resSel = $('[data-video-lib-res]');
         if (resSel) resSel.addEventListener('change', function () { state.resolution = resSel.value; reload(); });
+        var vlibSel = $('[data-video-lib-vlib]');
+        if (vlibSel) vlibSel.addEventListener('change', function () { state.vlib = vlibSel.value; reload(); });
         var prev = $('[data-video-lib-prev]');
         if (prev) prev.addEventListener('click', function () {
             if (state.page > 1) { state.page--; load(); }
@@ -681,6 +713,7 @@
         checkServer();
         loadGenres();
         if (state.tab === 'movies') loadResolutions();
+        loadLibraries();
         if (!state.loaded) load();
     }
 

@@ -193,7 +193,7 @@ def _default_add_videos(playlist: Dict[str, Any], videos: List[Dict[str, Any]]) 
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
     return get_video_db().add_videos_to_wishlist(
-        playlist, videos, server_source=resolve_video_server(), profile_id=_profile())
+        playlist, videos, server_source=resolve_video_server(), profile_id=_profile(), auto=True)
 
 
 def auto_video_scan_watchlist_playlists(

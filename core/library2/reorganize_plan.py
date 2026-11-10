@@ -36,6 +36,7 @@ import json
 import os
 from typing import Any, Callable, Dict, List, Optional
 
+from core.library2.release_dates import album_release_date
 from utils.logging_config import get_logger
 
 logger = get_logger("library2.reorganize_plan")
@@ -203,13 +204,33 @@ def _album_row(conn, album_id: int):
         """SELECT al.id, al.title, al.year, al.release_date, al.album_type,
                   al.secondary_types, al.filed_release,
                   al.image_url, al.spotify_id, al.primary_artist_id,
-                  al.expected_track_count, al.track_count,
-                  ar.name AS artist_name
+                  al.expected_track_count, al.track_count, al.explicit,
+                  ar.name AS artist_name, ar.musicbrainz_id AS artist_musicbrainz_id
              FROM lib2_albums al
              LEFT JOIN lib2_artists ar ON ar.id = al.primary_artist_id
             WHERE al.id = ?""",
         (int(album_id),),
     ).fetchone()
+
+
+def _position_by_title(conn, album_id: int, title: str):
+    """(track, disc) the album's editions give a recording of this title, when
+    exactly one numbered position does; None otherwise"""
+    from core.library2.recording_links import normalize_title
+    key = normalize_title(title or "")
+    if not key:
+        return None
+    found = set()
+    for row in conn.execute(
+            """SELECT COALESCE(rt.title_override, r.title) AS title, rt.track_number, rt.disc_number
+                 FROM lib2_release_tracks rt
+                 JOIN lib2_release_editions e ON e.id = rt.release_edition_id
+                 JOIN lib2_recordings r ON r.id = rt.recording_id
+                WHERE e.release_group_id = ? AND COALESCE(rt.track_number, 0) > 0""",
+            (int(album_id),)):
+        if normalize_title(row["title"] or "") == key:
+            found.add((int(row["track_number"]), int(row["disc_number"] or 1)))
+    return found.pop() if len(found) == 1 else None
 
 
 def _track_rows(conn, album_id: int) -> List[Any]:
@@ -224,7 +245,7 @@ def _track_rows(conn, album_id: int) -> List[Any]:
     # the file of the library this runs in: a reorganize never moves another
     # library's copy into this library's folder (#1199)
     return conn.execute(
-        f"""SELECT t.id, t.title, t.track_number, t.disc_number,
+        f"""SELECT t.id, t.title, t.track_number, t.disc_number, t.explicit,
                    selected.id AS file_id, selected.path AS file_path
               FROM lib2_tracks t
               LEFT JOIN lib2_track_files selected ON selected.id =
@@ -277,6 +298,15 @@ def _credited_artists(conn, track_id: int) -> List[str]:
     return [n for n in (names.get(int(r["id"]), r["name"]) for r in rows) if n]
 
 
+def _flag(value: Any) -> Optional[bool]:
+    if value is None or value == "":
+        return None
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _as_provider_album(album: Dict[str, Any], track_count: int,
                        total_discs: int) -> Dict[str, Any]:
     """Shape the catalogue album like the provider payload the context builder
@@ -293,8 +323,9 @@ def _as_provider_album(album: Dict[str, Any], track_count: int,
     return {
         "id": album.get("spotify_id") or "",
         "name": album.get("title") or "Unknown Album",
-        "release_date": album.get("release_date") or (
-            str(album["year"]) if album.get("year") else ""),
+        # the same date a download of this album files under, so a
+        # reorganize never moves it to another [year] folder
+        "release_date": album_release_date(album.get("release_date"), album.get("year")),
         "total_tracks": track_count,
         "total_discs": total_discs,
         "image_url": album.get("image_url") or "",
@@ -339,6 +370,8 @@ def plan_album_reorganize(
         "album_type": album_row["album_type"],
         "secondary_types": album_row["secondary_types"],
         "image_url": album_row["image_url"],
+        # #2009: an explicit flag set by hand names the folder too
+        "explicit": album_row["explicit"],
     })
     album["spotify_id"] = album_row["spotify_id"]
     album_title = album.get("title") or "Unknown Album"
@@ -349,11 +382,30 @@ def plan_album_reorganize(
         conn, album_row["primary_artist_id"], album_row["artist_name"]
     ) or "Unknown Artist"
 
+    # 3.6.1 refused an album with placeholder metadata: a scan of untagged
+    # files reads "Unknown Artist", and an old import titled the album with
+    # its provider id. reorganizing either moves a hand-sorted folder into
+    # "Unknown Artist/" or "Artist/1234567890/". say what to run instead.
+    from core.library_reorganize import _is_unknown_artist
+    _title = str(album_title or "").strip()
+    if (_is_unknown_artist(album_row["artist_name"]) or _is_unknown_artist(artist_name)
+            or (len(_title) >= 6 and _title.isdigit())):
+        return {"success": False, "status": "placeholder_metadata",
+                "source": None, "album": album_title, "artist": artist_name,
+                "transfer_dir": transfer_dir, "tracks": [],
+                "error": ("Album has placeholder metadata (Unknown Artist or numeric "
+                          "title). Run the 'Fix Unknown Artists' repair job to recover "
+                          "the real artist and album from the file tags before reorganize.")}
+
     all_rows = _track_rows(conn, album_id)
     from core.library2.retag import track_contexts
     references = {r['id']: r['db_data'] for r in track_contexts(conn, [r['id'] for r in all_rows])}
+    # #2009: the track's explicit flag as the page shows it (a hand-set value
+    # wins), so $explicit renders what the user sees; the raw column ignored it
     all_tracks = [{**references[r['id']], 'id': r['id'], 'file_path': r['file_path'],
-                   'file_id': r['file_id']} for r in all_rows]
+                   'file_id': r['file_id'],
+                   'explicit': _effective(conn, "track", r['id'], {"explicit": r['explicit']})["explicit"]}
+                  for r in all_rows]
     tracks = [t for t in all_tracks if t["file_path"]]
     common = {
         "source": None,
@@ -418,10 +470,31 @@ def plan_album_reorganize(
         if not item["matched"]:
             planned.append(item)
             continue
-        if track.get('edition_status') == 'unknown' or not track.get('track_number'):
-            item.update(matched=False, reason='Unknown release position; select the release edition in Re-identify')
+        if track.get('edition_status') == 'unknown' and conn.execute(
+                "SELECT COUNT(DISTINCT release_edition_id) FROM lib2_release_tracks WHERE track_id=?",
+                (track['id'],)).fetchone()[0] > 1:
+            # two editions put this recording at different slots: a real
+            # choice for the user, never a guess (a track bound to no edition
+            # at all is also 'unknown': that one is placed by its title below)
+            item.update(matched=False, reason='Two editions place this track at different '
+                                              'positions; select the release edition in Re-identify')
             planned.append(item)
             continue
+        if not track.get('track_number'):
+            # no number (a 3.6.1 row that had none, kept as 0): 3.6.1 matched
+            # the title against the release's tracklist and fell back to 1, and
+            # moved the file. same here, from the album's own editions
+            # review 4 R4-B-1: a track bound to no edition comes here with its
+            # number blanked, though its own row holds one (a bonus track
+            # stored as #7). that number first; the title, then 1, only
+            # when the row has none
+            own = conn.execute("SELECT track_number, disc_number FROM lib2_tracks WHERE id=?",
+                               (track['id'],)).fetchone()
+            position = ((int(own[0]), int(own[1] or 1)) if own and own[0] and int(own[0]) > 0
+                        else _position_by_title(conn, album_id, title))
+            track = {**track, 'track_number': position[0] if position else 1,
+                     'disc_number': (position[1] if position else track.get('disc_number')) or 1}
+            item.update(track_number=track['track_number'], disc_number=int(track['disc_number']))
 
         # A matching basename is not evidence that neighbouring audio belongs
         # to this recording. Carry only catalogue versions of this track in
@@ -473,6 +546,12 @@ def plan_album_reorganize(
             total_discs,
             local_title=title,
             local_year=(str(album["year"]) if album.get("year") else None),
+            # #1859/#1860: the same $explicit / $contentrating and the artist's
+            # mbid for $albumartistinfo a download filed it with, so a
+            # reorganize never strips [E] off a folder the next download adds
+            local_explicit=_flag(track.get("explicit")),
+            local_album_explicit=_flag(album.get("explicit")),
+            local_artist_mbid=(album_row["artist_musicbrainz_id"] or None),
             record_type=filing["type"],
             type_source=filing["source"],
         )

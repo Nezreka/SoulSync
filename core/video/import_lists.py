@@ -259,7 +259,7 @@ def _stamp_movie_profile(db, tmdb_id, qpid, profile_id) -> None:
         try:
             conn.execute("UPDATE video_wishlist SET quality_profile_id=? "
                          "WHERE kind='movie' AND tmdb_id=? AND profile_id=? "
-                         "AND quality_profile_id IS NULL",
+                         "AND quality_profile_id IS NULL AND video_library_id IS NULL",
                          (int(qpid), int(tmdb_id), int(profile_id)))
             conn.commit()
         finally:

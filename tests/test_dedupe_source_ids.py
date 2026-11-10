@@ -223,3 +223,48 @@ def test_genius_matches_3_6_1_already_reset_are_kept(db, signal):
     assert 'genius_reset' not in report
     assert _get(db, "1", "genius_id") == "good"
 
+
+
+@pytest.mark.parametrize("a,b", [("JAY-Z", "Jay Z"), ("AC/DC", "AC DC"),
+                                 ("Beyoncé", "Beyonce")])
+def test_two_spellings_of_one_artist_keep_their_shared_id(db, a, b):
+    """this runs on its own at every upgrade import now. 3.6.1 only ran it
+    when asked; lowercasing alone called JAY-Z and Jay Z two artists and
+    cleared the deezer id they share."""
+    _insert(db, artist_id=1, name=a, deezer_id='27')
+    _insert(db, artist_id=2, name=b, deezer_id='27', server_source='jellyfin')
+    assert dd.find_corrupt_clusters(db) == []
+
+
+def test_different_artists_sharing_an_id_are_still_caught(db):
+    _insert(db, artist_id=1, name='Kendrick Lamar', deezer_id='525046')
+    _insert(db, artist_id=2, name='SZA', deezer_id='525046')
+    assert len(dd.find_corrupt_clusters(db)) == 1
+
+
+@pytest.mark.parametrize("names", [
+    ("The Notorious B.I.G.", "Notorious B.I.G."),
+    ("Mark Keali'i Ho'omalu", "Mark Kealiʻi Hoʻomalu", "Mark Keali`i Ho`omalu"),
+    ("Simon & Garfunkel", "Simon and Garfunkel"),
+])
+def test_one_artist_spelled_two_ways_keeps_its_id_on_import(db, names):
+    """review 5 R5-H-4: a leading 'The' and the okina made one artist two
+    names, so every import cleared the id both rows rightly share. live db:
+    deezer 2519 on 'The Notorious B.I.G.' and 'Notorious B.I.G.'"""
+    for i, name in enumerate(names, start=1):
+        _insert(db, artist_id=i, name=name, deezer_id='2519')
+    dd.repair_imported_state(db)
+    for i in range(1, len(names) + 1):
+        assert _get(db, str(i), "deezer_id") == '2519'
+
+
+def test_a_band_named_the_is_still_told_apart(db):
+    _insert(db, artist_id=1, name='The The', deezer_id='9')
+    _insert(db, artist_id=2, name='SZA', deezer_id='9')
+    assert len(dd.find_corrupt_clusters(db)) == 1
+
+
+def test_a_name_that_folds_to_nothing_keeps_the_id(db):
+    _insert(db, artist_id=1, name='!!!', deezer_id='5')
+    _insert(db, artist_id=2, name='Chk Chk Chk', deezer_id='5')
+    assert dd.find_corrupt_clusters(db) == []

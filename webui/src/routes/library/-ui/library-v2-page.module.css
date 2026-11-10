@@ -1600,7 +1600,6 @@ button.statusWarn:disabled {
   white-space: nowrap;
 }
 
-.mutationFeedback,
 .mutationError,
 .mutationSuccess {
   display: flex;
@@ -1610,10 +1609,6 @@ button.statusWarn:disabled {
   min-height: 24px;
   margin-top: 6px;
   font-size: 12px;
-}
-
-.mutationFeedback {
-  color: var(--white-a55);
 }
 
 .mutationError {
@@ -9621,4 +9616,20 @@ textarea.searchInput {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/* the service badges are for looking an artist up, not for scanning a grid
+   of them. six logos on every card was the loudest thing on the page, so on
+   a pointer they wait for the card to be hovered or focused (#1909). phones
+   already drop them, the artist and album pages carry every link. */
+@media (hover: hover) {
+  .page :global(.library-artist-card > .card-badge-container) {
+    opacity: 0;
+    transition: opacity var(--dur-fast) ease;
+  }
+
+  .page :global(.library-artist-card:hover > .card-badge-container),
+  .page :global(.library-artist-card:focus-within > .card-badge-container) {
+    opacity: 1;
+  }
 }

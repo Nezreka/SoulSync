@@ -31,6 +31,13 @@ def _fresh_throttle():
     ca._reset_throttle()
 
 
+@pytest.fixture(autouse=True)
+def _no_active_media_server(monkeypatch):
+    """the vibe reads ids through the active server's mapping (G13-2); another
+    test's engine left behind made these jellyfin rows invisible"""
+    monkeypatch.setattr(ca, "_active_server_source", lambda: None)
+
+
 def _png(size=(300, 300)):
     # noise, not a flat color: a flat png squeezes under the "is this really
     # an image" size floor
@@ -171,6 +178,20 @@ def test_vibe_reads_jellyfin_style_text_ids(mdb):
     assert vibe["genres"] == ["electronic"]
     assert vibe["moods"] == ["dreamy"]
     assert vibe["decade"] == 2020
+
+
+def test_a_plex_rating_key_is_not_also_read_as_a_catalogue_id(mdb):
+    """third #1062 review G13-2: a plex rating key found the right track
+    through the mapping AND an unrelated lib2_tracks row with the same
+    number, so every plex song added a random track's genres"""
+    _library(mdb, [("unused", "Noise Band", '["metal"]', '["metal"]', "angry", 1990)])
+    with mdb._get_connection() as conn:
+        collide = conn.execute("SELECT MAX(id) FROM lib2_tracks").fetchone()[0]
+    _library(mdb, [(str(collide), "Habn", '["ambient"]', '["electronic"]', "dreamy", 2021)])
+    pid = _mirror(mdb, tracks=[_owned_track("A", "Habn", str(collide))])
+    vibe = ca.collect_vibe(mdb, mdb.get_mirrored_playlist(pid))
+    assert vibe["genres"] == ["electronic"]
+    assert "angry" not in vibe["moods"]
 
 
 def test_vibe_borrows_genres_from_known_artists(mdb):

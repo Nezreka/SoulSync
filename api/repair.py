@@ -52,6 +52,20 @@ def create_blueprint():
     return bp
 
 
+_VIEW_KEYS = ('job_id', 'status', 'severity', 'finding_type', 'q',
+              'group_by', 'group_artist', 'group_album')
+
+
+def _view_filters(data) -> dict:
+    """The filters of the view a selection was made in (``scope`` in the
+    body). Fix Selected and Dismiss Selected act only on ids that view still
+    lists, checked here, not trusted from the client (review 5 W3-TT)."""
+    scope = data.get('scope') if isinstance(data, dict) else None
+    if not isinstance(scope, dict):
+        scope = {}
+    return {key: (scope.get(key) or None) for key in _VIEW_KEYS}
+
+
 # --- Repair Worker API Endpoints ---
 
 @bp.route('/api/repair/status', methods=['GET'])
@@ -237,10 +251,18 @@ def repair_findings_list():
         page = _safe_int(request.args.get('page'), 0)
         limit = _safe_int(request.args.get('limit'), 50)
 
+        # one album's (or artist's) rows by the grid's own key, for the
+        # album tray (review 5 W3-TU-1); only sent when asked for
+        group = {}
+        if request.args.get('group_by'):
+            group = {'group_by': request.args.get('group_by'),
+                     'group_artist': request.args.get('group_artist'),
+                     'group_album': request.args.get('group_album')}
+
         result = _repair_worker().get_findings(
             job_id=job_id, status=status, severity=severity,
             page=page, limit=limit, finding_type=finding_type,
-            sort=sort, q=q
+            sort=sort, q=q, **group
         )
 
         # Fix Plex/Jellyfin relative thumb URLs in finding details
@@ -279,7 +301,11 @@ def repair_findings_groups():
     try:
         if _repair_worker() is None:
             return jsonify({'groups': []}), 200
-        return jsonify({'groups': _repair_worker().get_finding_groups()}), 200
+        # the inbox's job and severity filters: each row counts what its
+        # bulk buttons act on (review 5 W3-TT)
+        return jsonify({'groups': _repair_worker().get_finding_groups(
+            job_id=request.args.get('job_id') or None,
+            severity=request.args.get('severity') or None)}), 200
     except Exception as e:
         logger.error(f"Error grouping repair findings: {e}")
         return jsonify({'error': str(e)}), 500
@@ -318,6 +344,41 @@ def repair_findings_albums():
         logger.error(f"Error grouping repair findings by album: {e}")
         return jsonify({'error': str(e)}), 500
 
+@bp.route('/api/repair/findings/album-action', methods=['POST'])
+def repair_findings_album_action():
+    """Resolve Album / Dismiss All for one album (or artist) group.
+
+    the server decides which findings belong to the group, so an id the
+    client sends from another album is refused, not acted on (review 5
+    W3-TU-1).
+    """
+    try:
+        if _repair_worker() is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+        data = request.get_json(silent=True) or {}
+        action = data.get('action')
+        group_by = data.get('group_by') or 'album'
+        if action not in ('fix', 'dismiss'):
+            return jsonify({'error': 'action must be fix or dismiss'}), 400
+        if group_by not in ('album', 'artist'):
+            return jsonify({'error': 'group_by must be album or artist'}), 400
+        ids = data.get('ids')
+        if ids is not None:
+            if not isinstance(ids, list):
+                return jsonify({'error': 'ids must be a list'}), 400
+            try:
+                ids = [int(i) for i in ids]
+            except (TypeError, ValueError):
+                return jsonify({'error': 'ids must be numbers'}), 400
+        result = _repair_worker().album_group_action(
+            action, group_by, data.get('artist'), data.get('album'),
+            finding_ids=ids, job_id=data.get('job_id') or None,
+            finding_type=data.get('finding_type') or None)
+        return jsonify({'success': not result.get('error'), **result}), 200
+    except Exception as e:
+        logger.error(f"Error running album action: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @bp.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
 def repair_finding_reopen(finding_id):
     """Put a resolved/dismissed finding back to pending — the undo half of
@@ -345,7 +406,9 @@ def repair_findings_reopen_all():
         data = request.get_json(silent=True) or {}
         job_id = data.get('job_id')
         finding_type = data.get('finding_type')
-        count = _repair_worker().reopen_findings_bulk(job_id=job_id, finding_type=finding_type)
+        count = _repair_worker().reopen_findings_bulk(
+            job_id=job_id, finding_type=finding_type,
+            severity=data.get('severity') or None)
         return jsonify({'success': True, 'reopened': count}), 200
     except Exception as e:
         logger.error(f"Error bulk reopening findings: {e}")
@@ -386,6 +449,13 @@ def repair_finding_fix(finding_id):
 
         data = request.get_json(silent=True) or {}
         fix_action = data.get('fix_action')  # e.g. 'staging' or 'delete' for orphan files
+        if data.get('bulk'):
+            # Fix Selected: only a row the view it was picked from still lists
+            # (the library on screen and every filter), never a stale one
+            # from another library or album (review 5 W3-TT)
+            if not _repair_worker().ids_in_view([finding_id], **_view_filters(data)):
+                return jsonify({'success': False, 'refused': True,
+                                'error': 'Not in the list you picked it from any more'}), 409
         # This route is the single-finding fix, so it is the one place
         # that may declare a fix explicit — and only when the caller
         # does not declare itself bulk: a "Fix Selected" loop posts here
@@ -528,14 +598,24 @@ def repair_findings_bulk():
         if not finding_ids and finding_type:
             if action != 'dismiss':
                 return jsonify({'error': 'Only dismiss is supported for a type-scoped bulk'}), 400
-            count = _repair_worker().dismiss_findings_by_type(finding_type)
+            # the inbox's job / severity filters, so Dismiss all reaches only
+            # the rows its row counted (review 5 W3-TT)
+            count = _repair_worker().dismiss_findings_by_type(
+                finding_type, job_id=data.get('job_id') or None,
+                severity=data.get('severity') or None)
             return jsonify({'success': True, 'updated': count}), 200
 
         if not finding_ids:
             return jsonify({'error': 'No finding IDs provided'}), 400
+        if not isinstance(finding_ids, list):
+            return jsonify({'error': 'ids must be a list'}), 400
 
-        count = _repair_worker().bulk_update_findings(finding_ids, action)
-        return jsonify({'success': True, 'updated': count}), 200
+        # only ids the view they were picked in still lists: the library on
+        # screen plus every filter (review 5 W3-TT)
+        allowed = _repair_worker().ids_in_view(finding_ids, **_view_filters(data))
+        refused = len({str(i) for i in finding_ids}) - len(allowed)
+        count = _repair_worker().bulk_update_findings(allowed, action) if allowed else 0
+        return jsonify({'success': True, 'updated': count, 'refused': max(0, refused)}), 200
     except Exception as e:
         logger.error(f"Error bulk updating findings: {e}")
         return jsonify({'error': str(e)}), 500
@@ -557,9 +637,15 @@ def repair_findings_clear():
         finding_type = data.get('finding_type')
         q = data.get('q')
 
+        # a drilled-in album or artist card is a filter too (review 5 W3-TT-2)
+        group = {}
+        if data.get('group_by'):
+            group = {'group_by': data.get('group_by'),
+                     'group_artist': data.get('group_artist'),
+                     'group_album': data.get('group_album')}
         count = _repair_worker().clear_findings(
             job_id=job_id, status=status, severity=severity,
-            finding_type=finding_type, q=q)
+            finding_type=finding_type, q=q, **group)
         return jsonify({'success': True, 'deleted': count}), 200
     except Exception as e:
         logger.error(f"Error clearing findings: {e}")

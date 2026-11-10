@@ -17,6 +17,11 @@ POST /api/video/detail/<kind>/<id>/identify   {tmdb_id}
     re-point the title and lock it (core.video.identity).
 POST /api/video/detail/<kind>/<id>/identify/release
     undo: the next scan takes the server's identity again.
+GET  /api/video/title-delete/<kind>/<id>
+    what deleting the whole title would do (core.video.delete_title.plan).
+POST /api/video/title-delete/<kind>/<id>   {confirm_title}
+    delete the whole title so it stays deleted (core.video.delete_title.run).
+    admin only for any method, the preview included: it lists file paths.
 
 Every write is admin-gated by the blueprint's permission gate.
 """
@@ -147,6 +152,44 @@ def register_routes(bp):
         logger.info("library tab deleted file %s (%s) — recycled=%s",
                     file_id, row.get("relative_path"), res.get("recycled"))
         _refresh_server("movie" if row.get("scope") == "movie" else "show")
+        return jsonify(res)
+
+    @bp.route("/title-delete/<kind>/<int:item_id>", methods=["GET"])
+    def video_title_delete_preview(kind, item_id):
+        """what deleting the whole title would do -- the first confirmation."""
+        from . import get_video_db
+        from core.video import delete_title
+        if not _is_admin():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        if kind not in _KINDS:
+            return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        p = delete_title.plan(get_video_db(), kind, item_id)
+        if not p:
+            return jsonify({"success": False, "error": "That title isn't in the library any more."}), 404
+        return jsonify({"success": True, **p})
+
+    @bp.route("/title-delete/<kind>/<int:item_id>", methods=["POST"])
+    def video_title_delete(kind, item_id):
+        """delete the whole title. body {confirm_title}: the title typed
+        exactly -- the second confirmation, checked here, not just in the UI."""
+        from . import get_video_db
+        from .requests import _notify
+        from core.video import delete_title
+        if not _is_admin():
+            return jsonify({"success": False, "error": "Admin only."}), 403
+        if kind not in _KINDS:
+            return jsonify({"success": False, "error": "kind must be movie|show"}), 400
+        body = request.get_json(silent=True) or {}
+        try:
+            res = delete_title.run(get_video_db(), kind, item_id,
+                                   typed_title=str(body.get("confirm_title") or ""),
+                                   resolved_by=int(getattr(g, "profile_id", 1) or 1),
+                                   notify=_notify)
+        except Exception:
+            logger.exception("title delete failed for %s %s", kind, item_id)
+            return jsonify({"success": False, "error": "Delete failed — see app.log"}), 500
+        if not res.get("success"):
+            return jsonify(res), 409
         return jsonify(res)
 
     @bp.route("/detail/<kind>/<int:item_id>/identify/search", methods=["GET"])

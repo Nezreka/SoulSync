@@ -282,3 +282,23 @@ describe('library v2 match chips (deep-dive A8)', () => {
     );
   });
 });
+
+describe('match chip wording for everyone (review 4 R4-E-4)', () => {
+  it('a profile without write rights still reads why a chip says what it says', () => {
+    render(
+      <QueryClientProvider client={createTestQueryClient()}>
+        <LibraryV2CanWriteContext.Provider value={false}>
+          <MatchChips
+            entityType="artist"
+            entityName="Xtal"
+            abbreviated={false}
+            services={[service({ status: 'not_found', external_id: null })]}
+          />
+        </LibraryV2CanWriteContext.Provider>
+      </QueryClientProvider>,
+    );
+    const chip = screen.getByRole('button', { name: 'Spotify' });
+    expect(chip.getAttribute('title')).toContain('not found');
+    expect(chip.getAttribute('title')).toContain("Matching is the admin's");
+  });
+});

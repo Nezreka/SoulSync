@@ -592,6 +592,222 @@ def test_get_db_storage_delegates_to_db():
 
 
 # ---------------------------------------------------------------------------
+# Whole-library reports answer from their last result (review 5 perf)
+# ---------------------------------------------------------------------------
+
+class _ReportDB:
+    """a database whose report blocks until the test lets it finish."""
+
+    def __init__(self, path, value):
+        import threading
+        self.database_path = path
+        self.value = value
+        self.release = threading.Event()
+        self.calls = []
+
+    def _get_connection(self):
+        raise RuntimeError('no counter here')
+
+    def _slow(self):
+        import threading
+        self.calls.append(threading.current_thread().name)
+        assert self.release.wait(5)
+        return dict(self.value)
+
+    get_db_storage_stats = get_library_disk_usage = get_library_health = _slow
+
+
+def _wait_for(predicate):
+    import time as _time
+    for _ in range(500):
+        if predicate():
+            return
+        _time.sleep(0.01)
+    raise AssertionError('timed out')
+
+
+@pytest.mark.parametrize('fetch', ['get_db_storage', 'get_library_disk_usage', 'get_library_health'])
+def test_whole_library_report_never_runs_on_the_request(tmp_path, monkeypatch, fetch):
+    """db storage read every page of an 11 GB file on the request (11 s on the
+    300k copy), disk usage 9 s, health 3 s. a request now answers at once and
+    the read runs on its own thread; the next ask gets the result."""
+    import time as _time
+    from core import library_scope
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 0.05)
+    # no own libraries: asking would open (and first build) the default db
+    monkeypatch.setattr(library_scope, 'any_own_library_exists', lambda: False)
+    db = _ReportDB(str(tmp_path / 'a.db'), {'answer': 1})
+    started = _time.monotonic()
+    first = getattr(queries, fetch)(db)
+    assert _time.monotonic() - started < 2
+    assert first['refreshing'] is True
+    _wait_for(lambda: db.calls)
+    assert db.calls[0].startswith('stats-report-')
+    db.release.set()
+    _wait_for(lambda: getattr(queries, fetch)(db) == {'answer': 1})
+    # a fresh result is the plain payload, read once
+    assert getattr(queries, fetch)(db) == {'answer': 1}
+    assert len(db.calls) == 1
+
+
+def test_stale_report_answers_at_once_and_refreshes_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 2)
+    db = _ReportDB(str(tmp_path / 'b.db'), {'tables': ['old']})
+    db.release.set()
+    assert queries.get_db_storage(db) == {'tables': ['old']}
+    monkeypatch.setitem(queries.REPORT_MAX_AGE, 'db_storage', 0.000001)
+    db.release.clear()
+    db.value = {'tables': ['new']}
+    stale = [queries.get_db_storage(db) for _ in range(3)]
+    assert stale == [{'tables': ['old'], 'refreshing': True}] * 3
+    _wait_for(lambda: len(db.calls) == 2)
+    assert len(db.calls) == 2, 'three asks share one refresh'
+    db.release.set()
+    monkeypatch.setitem(queries.REPORT_MAX_AGE, 'db_storage', 600)
+    _wait_for(lambda: queries.get_db_storage(db) == {'tables': ['new']})
+
+
+def test_report_refreshes_when_the_library_files_change(db, monkeypatch):
+    """the file triggers bump files_version; a cached disk usage from before
+    a download is refreshed, not served for its whole max age."""
+    # a slow machine still has the first result inside the first ask
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 10)
+    # no gap: this checks that a change refreshes at all; the gap that stops
+    # an import from re-running it every poll has its own test (W3-TU-2)
+    monkeypatch.setattr(queries, 'REPORT_VERSION_GAP', 0)
+    calls = []
+    real = db.get_library_disk_usage
+
+    def counted():
+        calls.append(1)
+        return real()
+
+    monkeypatch.setattr(db, 'get_library_disk_usage', counted)
+    first = queries.get_library_disk_usage(db)
+    assert first['has_data'] is False and 'refreshing' not in first
+    with db._get_connection() as conn:
+        artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('A')").lastrowid
+        album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'X')",
+                             (artist,)).lastrowid
+        track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'t')", (album,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,size) VALUES(?,'/m/t.flac',9)", (track,))
+        conn.commit()
+    _wait_for(lambda: queries.get_library_disk_usage(db).get('total_bytes') == 9)
+    assert len(calls) == 2
+
+
+class _CountingDB:
+    """a report that answers at once and counts its passes."""
+
+    def __init__(self, path, fail=False):
+        self.database_path = path
+        self.fail = fail
+        self.calls = 0
+
+    def get_library_disk_usage(self):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError('disk report broke')
+        return {'total_bytes': 1, 'tracks_with_size': 1, 'tracks_without_size': 0,
+                'by_format': {}, 'has_data': True}
+
+
+def _settle():
+    _wait_for(lambda: not queries._report_jobs)
+
+
+def test_an_import_does_not_rerun_the_disk_report_every_poll(tmp_path, monkeypatch):
+    """review 5 W3-TU-2: every file an import writes bumps files_version, so
+    each 3 s poll found the result stale, ran the whole-library pass again and
+    answered refreshing, and the page polled for as long as the import ran."""
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 2)
+    version = {'n': 0}
+    monkeypatch.setattr(queries, '_files_version', lambda _db: version['n'])
+    db = _CountingDB(str(tmp_path / 'import.db'))
+    answers = []
+    for _poll in range(6):
+        answers.append(bool(queries.get_library_disk_usage(db).get('refreshing')))
+        _settle()
+        version['n'] += 1   # the import wrote a file before the next poll
+    assert answers == [False] * 6, answers
+    assert db.calls == 1
+
+
+def test_a_moved_counter_refreshes_once_the_gap_has_passed(tmp_path, monkeypatch):
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 2)
+    monkeypatch.setattr(queries, 'REPORT_VERSION_GAP', 0.05)
+    version = {'n': 0}
+    monkeypatch.setattr(queries, '_files_version', lambda _db: version['n'])
+    db = _CountingDB(str(tmp_path / 'gap.db'))
+    queries.get_library_disk_usage(db)
+    version['n'] = 1
+    import time as _time
+    _time.sleep(0.1)
+    assert queries.get_library_disk_usage(db)['refreshing'] is True
+    _settle()
+    assert db.calls == 2
+    # the new result carries the new counter: settled, no third pass
+    assert 'refreshing' not in queries.get_library_disk_usage(db)
+    assert db.calls == 2
+
+
+def test_a_report_that_keeps_failing_stops_the_polling(tmp_path, monkeypatch):
+    """review 5 W3-TU-2: a pass that raised stored nothing, so every poll
+    started another failing thread and the page said "measuring" forever."""
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 2)
+    monkeypatch.setattr(queries, '_files_version', lambda _db: 0)
+    db = _CountingDB(str(tmp_path / 'broken.db'), fail=True)
+    payloads = []
+    for _poll in range(5):
+        payloads.append(queries.get_library_disk_usage(db))
+        _settle()
+    assert db.calls == 1
+    assert all('refreshing' not in p for p in payloads), payloads
+    assert payloads[-1]['report_failed'] is True
+    # once the retry wait is over it tries again, and a success clears it
+    monkeypatch.setattr(queries, 'REPORT_RETRY_AFTER', 0)
+    db.fail = False
+    _wait_for(lambda: queries.get_library_disk_usage(db).get('has_data') is True)
+    assert 'report_failed' not in queries.get_library_disk_usage(db)
+
+
+def test_reports_keep_each_library_scope_apart(db, monkeypatch):
+    # a slow machine still has the first result inside the first ask
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 10)
+    from core import library_scope
+
+    with db._get_connection() as conn:
+        artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('A')").lastrowid
+        album = conn.execute("INSERT INTO lib2_albums(primary_artist_id,title) VALUES(?,'X')",
+                             (artist,)).lastrowid
+        track = conn.execute("INSERT INTO lib2_tracks(album_id,title) VALUES(?,'t')", (album,)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,size,owner_profile_id)"
+                     " VALUES(?,'/m/t.flac',9,7)", (track,))
+        conn.commit()
+    monkeypatch.setattr(library_scope, 'any_own_library_exists', lambda: True)
+    with library_scope.library_scope(7):
+        assert queries.get_library_disk_usage(db)['tracks_with_size'] == 1
+    with library_scope.library_scope(8):
+        assert queries.get_library_disk_usage(db)['tracks_with_size'] == 0
+
+
+def test_first_health_ask_shows_the_workers_last_numbers(db, monkeypatch):
+    """the listening-stats worker stores a health snapshot; while the first
+    live result is worked out the route shows that, not an empty payload."""
+    import threading
+    monkeypatch.setattr(queries, 'REPORT_FIRST_WAIT', 0.05)
+    gate = threading.Event()
+    monkeypatch.setattr(db, 'get_library_health', lambda: gate.wait(5) and {'total_tracks': 2})
+    with db._get_connection() as conn:
+        conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES ('stats_cache_health', ?)",
+                     (json.dumps({'total_tracks': 1}),))
+        conn.commit()
+    assert queries.get_library_health(db) == {'total_tracks': 1, 'refreshing': True}
+    gate.set()
+    _wait_for(lambda: queries.get_library_health(db) == {'total_tracks': 2})
+
+
+# ---------------------------------------------------------------------------
 # Listening worker glue
 # ---------------------------------------------------------------------------
 

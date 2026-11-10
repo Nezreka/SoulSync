@@ -41,6 +41,63 @@ def _hand_tagged(conn, path: Any, keys: Optional[set] = None) -> bool:
         return False
 
 
+def _explicit(value: Any) -> Optional[bool]:
+    """the stored flag as a bool, None when the catalogue doesn't know."""
+    if value is None or value == "":
+        return None
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def library_album_identity(conn, album_id: int, musicbrainz_id: Any) -> Dict[str, Any]:
+    """what keeps a release apart from a same-named one at download time:
+    the musicbrainz release id the folder lookup checks, the default
+    edition's disambiguation (#1299 puts it on the folder) and disc count."""
+    identity: Dict[str, Any] = {}
+    if musicbrainz_id:
+        identity["musicbrainz_release_id"] = str(musicbrainz_id)
+    try:
+        row = conn.execute(
+            """SELECT disambiguation, disc_count FROM lib2_release_editions
+                WHERE release_group_id = ?
+                ORDER BY is_default DESC, id LIMIT 1""", (album_id,)).fetchone()
+    except Exception:  # noqa: BLE001 - an install without editions yet
+        row = None
+    if row is not None:
+        if str(row[0] or "").strip():
+            identity["disambiguation"] = str(row[0]).strip()
+        try:
+            discs = int(row[1] or 0)
+        except (TypeError, ValueError):
+            discs = 0
+        if discs > 1:
+            identity["total_discs"] = discs
+    return identity
+
+
+def library_album_artist_names(conn, album_id: int, primary_artist_id: int) -> List[str]:
+    """the album's own artists: its main artist, then a joint album's other
+    headliners (never a featured guest). the download names the album folder
+    and spots a various artists release from these; without them a wanted
+    track of a compilation or a split release was filed under the track's
+    own artist."""
+    names: List[str] = []
+    for row in conn.execute(
+            """SELECT ar.name FROM lib2_artists ar WHERE ar.id = ?
+               UNION ALL
+               SELECT ar.name FROM lib2_album_artists aa
+                 JOIN lib2_artists ar ON ar.id = aa.artist_id
+                WHERE aa.album_id = ? AND aa.artist_id <> ?
+                  AND COALESCE(aa.role, 'primary') IN ('primary', 'various')""",
+            (primary_artist_id, album_id, primary_artist_id)):
+        name = str(row[0] or "").strip()
+        if name and name.casefold() not in {n.casefold() for n in names}:
+            names.append(name)
+    return names
+
+
 def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     """Build the wishlist payload for a lib2 track (or None when unknown).
 
@@ -48,18 +105,23 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
     the library the caller works in (#1199): another library's copy neither
     satisfies this one nor gets replaced for it.
     """
+    from core.library2.release_dates import album_release_date
     from core.library2.recording_links import owned_by_recording_sql
     from core.library2.sql_util import owner_clause
     t = conn.execute(
         """SELECT t.id AS track_id, t.spotify_id, t.musicbrainz_id,
                   t.external_ids, t.isrc, t.title, t.track_number,
-                  t.disc_number, t.duration,
+                  t.disc_number, t.duration, t.explicit AS track_explicit,
+                  t.recording_disambiguation,
+                  al.explicit AS album_explicit,
                   al.id AS album_id, al.title album_title,
                   al.image_url album_image_url,
                   al.spotify_id album_spotify,
                   al.musicbrainz_id album_musicbrainz,
                   al.external_ids album_external_ids,
                   al.track_count, al.expected_track_count, al.album_type,
+                  al.release_date album_release_date, al.year album_year,
+                  al.primary_artist_id album_primary_artist_id,
                   EXISTS(SELECT 1 FROM lib2_track_files tf
                          WHERE tf.track_id = t.id
                            AND tf.path IS NOT NULL AND tf.path <> ''
@@ -78,6 +140,8 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
            FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id
            WHERE ta.track_id = ? ORDER BY ta.position""", (track_id,)
     ).fetchall()
+    album_artist_names = library_album_artist_names(
+        conn, t["album_id"], t["album_primary_artist_id"])
     from core.library2.provider_ids import (
         preferred_provider_identity,
         provider_only,
@@ -172,6 +236,15 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
             "provider_ids": album_provider_ids,
             "total_tracks": t["expected_track_count"] or t["track_count"] or 1,
             "album_type": t["album_type"],
+            # the download names the album folder from this ([$year]). it
+            # had none, so every wanted track landed in a yearless twin of
+            # its album's folder (SeadogsBooty, Nov 5)
+            "release_date": album_release_date(t["album_release_date"], t["album_year"]),
+            "artists": [{"name": name} for name in album_artist_names],
+            # $explicit / $contentrating in the naming template read these
+            # (#1860); without them a wanted track lost its [E] and split off
+            "explicit": _explicit(t["album_explicit"]),
+            **library_album_identity(conn, t["album_id"], t["album_musicbrainz"]),
             # The wishlist UI reads `album.images[0].url`, and the import
             # pipeline reads the same slot for cover.jpg / embedded art. This
             # payload carried no `images` at all, so every Library-v2 row
@@ -187,6 +260,14 @@ def track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         "track_number": t["track_number"],
         "disc_number": t["disc_number"],
         "duration_ms": t["duration"] or 0,
+        "explicit": _explicit(t["track_explicit"]),
+        # the recording comment ("acoustic", "live") a single's filename
+        # carries (#1536), and the recording's own ids for the match checks
+        **{key: value for key, value in (
+            ("disambiguation", str(t["recording_disambiguation"] or "").strip()),
+            ("musicbrainz_recording_id", str(t["musicbrainz_id"] or "").strip()),
+            ("isrc", str(t["isrc"] or "").strip()),
+        ) if value},
         "quality_profile_id": profile_info["id"],
         "quality_profile": profile_info,
         "_album_type": t["album_type"],
@@ -360,9 +441,12 @@ def mirror_projected_tracks_wishlist(
 
 
 def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
-                                track_ids: Optional[List[int]] = None) -> List[int]:
+                                track_ids: Optional[List[int]] = None,
+                                quality_profile: Optional[Dict[str, Any]] = None) -> List[int]:
     """Wanted tracks with files whose profile permits upgrades -- or, given
     ``track_ids``, exactly those whatever their monitoring (Enhance Quality).
+    ``quality_profile`` judges every track against that one profile instead
+    of its own (Enhance Quality's "upgrade to").
     The per-track upgrade re-check happens in
     ``mirror_tracks_wishlist`` (only genuine candidates queue)."""
     import json
@@ -378,8 +462,19 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
         if track_ids is None else
         ("WHERE t.id IN (SELECT value FROM json_each(?))",
          (json.dumps([int(t) for t in track_ids]),)))
+    # the live Track > Album > Artist > Global cascade, joined in once: the
+    # per-track effective_track_profile ran a 3-table join, a default lookup
+    # and a profile read for every wanted track on the hourly reconcile
+    # (review 5 R5-G-5). live, not the projection's effective_profile_id,
+    # which can trail a default change
     rows = conn.execute(
-        f"""SELECT t.id,
+        f"""SELECT t.id, t.album_id, al.primary_artist_id AS artist_id,
+                  t.quality_profile_id AS trk_prof,
+                  COALESCE(t.quality_profile_explicit, 0) AS trk_prof_expl,
+                  al.quality_profile_id AS alb_prof,
+                  COALESCE(al.quality_profile_explicit, 0) AS alb_prof_expl,
+                  ar.quality_profile_id AS art_prof,
+                  COALESCE(ar.quality_profile_explicit, 0) AS art_prof_expl,
                   (SELECT tf.path FROM lib2_track_files tf
                     WHERE tf.track_id=t.id AND tf.path IS NOT NULL AND tf.path<>''
                       AND COALESCE(tf.file_state,'active')
@@ -387,6 +482,8 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
                       {owner_clause(library, column="tf.owner_profile_id")}
                     ORDER BY {primary_order('tf')} LIMIT 1) AS path
              FROM lib2_tracks t
+             LEFT JOIN lib2_albums al ON al.id=t.album_id
+             LEFT JOIN lib2_artists ar ON ar.id=al.primary_artist_id
            {scope}
             AND EXISTS (SELECT 1 FROM lib2_track_files f
                          WHERE f.track_id=t.id AND f.path IS NOT NULL AND f.path<>''
@@ -396,7 +493,7 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
         scope_params,
     ).fetchall()
     from core.library2.manual_skips import active_skip_paths
-    from core.library2.quality_eval import effective_track_profile, is_upgrade_policy
+    from core.library2.quality_eval import is_upgrade_policy
     protected = active_skip_paths(
         conn, ("quality", "bit_depth"), profile_id=profile_id
     )
@@ -408,12 +505,35 @@ def upgrade_candidate_track_ids(conn, *, profile_id: int = 1,
     from core.library2.track_files import primary_file_rows
     primaries = primary_file_rows(conn, [int(row["id"]) for row in rows])
     targets_by_profile: Dict[Any, tuple] = {}
+    from core.library2.profile_lookup import (
+        default_quality_profile_id,
+        resolve_profile_cascade,
+    )
+    default_profile_id = None if quality_profile else default_quality_profile_id(conn)
+    profiles_by_id: Dict[int, Optional[Dict[str, Any]]] = {}
+
+    def _profile_for(row) -> Dict[str, Any]:
+        if quality_profile:
+            return quality_profile
+        pid = int(resolve_profile_cascade(
+            (("track", row["id"], row["trk_prof"], row["trk_prof_expl"]),
+             ("album", row["album_id"], row["alb_prof"], row["alb_prof_expl"]),
+             ("artist", row["artist_id"], row["art_prof"], row["art_prof_expl"])),
+            default_profile_id)["id"])
+        if pid not in profiles_by_id:
+            prow = conn.execute("SELECT * FROM quality_profiles WHERE id=?", (pid,)).fetchone()
+            profiles_by_id[pid] = dict(prow) if prow is not None else None
+        if profiles_by_id[pid] is None:
+            # the same miss effective_track_profile reports
+            raise LookupError("Effective quality profile not found")
+        return profiles_by_id[pid]
+
     candidates = set()
     for row in rows:
         if row["path"] in protected or _hand_tagged(conn, row["path"], hand_tagged):
             continue
         try:
-            profile = effective_track_profile(conn, int(row["id"]))
+            profile = _profile_for(row)
         except (LookupError, ValueError):
             continue
         if not is_upgrade_policy(profile.get("upgrade_policy")):

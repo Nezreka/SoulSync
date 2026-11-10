@@ -42,10 +42,16 @@ location.reload();return}if(s.status==='failed'){$('status').textContent=
 return}show(s)}catch(e){}setTimeout(poll,2000)}poll()</script></html>'''
 
 
+#: seconds a failed ordinary boot waits before ending the process (the log
+#: line and the failure page get out first)
+EXIT_DELAY = 5
+
+
 class StartupApplication:
-    def __init__(self, loader):
+    def __init__(self, loader, *, exit_fn=None):
         self._app = None
         self._failed = False
+        self._exit_fn = exit_fn or os._exit
         self._done = threading.Event()
         self._thread = threading.Thread(target=self._load, args=(loader,),
                                         name='SoulSyncStartup', daemon=True)
@@ -56,9 +62,42 @@ class StartupApplication:
             self._app = loader()
         except Exception:
             self._failed = True
-            logger.exception('SoulSync startup failed; application remains unavailable')
+            from core import startup_progress
+            if startup_progress.snapshot().get('step') is not None:
+                # the protected upgrade (its backup or schema step) failed: a
+                # restart would only repeat it, copying the whole database
+                # each time. stay up on the failure page until someone looks.
+                logger.exception('SoulSync upgrade failed; application remains unavailable '
+                                 'until the reported problem is resolved and it is restarted')
+            else:
+                # anything else (a share not mounted yet, a locked database):
+                # end the process, as 3.6.1's failed boot did, so the
+                # container's restart policy tries again. staying up behind a
+                # 503 left a dead app that Docker never restarts.
+                logger.exception('SoulSync startup failed; exiting so it can be restarted')
+                threading.Timer(EXIT_DELAY, self._exit_fn, args=(3,)).start()
         finally:
             self._done.set()
+
+    def _flask_answers(self, environ) -> bool:
+        """one cheap request through the real app (its before_request gates,
+        auth, the lot): /api/setup/status, which every profile may read"""
+        probe = dict(environ)
+        probe['PATH_INFO'] = '/api/setup/status'
+        probe['REQUEST_METHOD'] = 'GET'
+        probe['QUERY_STRING'] = ''
+        seen = []
+        try:
+            chunks = self._app(probe, lambda status, headers, *_a: seen.append(status))
+            for _chunk in chunks:
+                pass
+            close = getattr(chunks, 'close', None)
+            if callable(close):
+                close()
+        except Exception:  # noqa: BLE001 - an app that raises is not healthy
+            logger.exception('healthcheck: the app failed its probe request')
+            return False
+        return bool(seen) and not str(seen[0]).startswith('5')
 
     def wait(self, timeout=None):
         return self._done.wait(timeout)
@@ -83,9 +122,15 @@ class StartupApplication:
             path = path[len(base):] or '/'
         if path == '/api/startup-status':
             status = 'failed' if self._failed else ('ready' if self._app else 'starting')
+            if status == 'ready' and not self._flask_answers(environ):
+                # booted, but the app itself no longer answers: the probe
+                # must say so (3.6.1's healthcheck went through Flask, so a
+                # wedged app turned the container unhealthy)
+                status = 'unresponsive'
             from core import startup_progress
             body = json.dumps({'status': status, **startup_progress.snapshot()}).encode()
-            start_response('503 Service Unavailable' if self._failed else '200 OK',
+            healthy = status in ('ready', 'starting')
+            start_response('200 OK' if healthy else '503 Service Unavailable',
                            [('Content-Type', 'application/json'), ('Cache-Control', 'no-store')])
             return [body]
         if self._app is not None:

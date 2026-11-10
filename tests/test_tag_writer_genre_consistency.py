@@ -18,6 +18,7 @@ import os
 import tempfile
 
 import pytest
+from unittest.mock import patch
 from mutagen.flac import FLAC
 
 from core.tag_writer import build_tag_diff, write_tags_to_file
@@ -61,8 +62,11 @@ def test_write_still_applies_a_genuinely_different_genre(flac_path):
     audio['genre'] = ['Pop']
     audio.save()
 
-    result = write_tags_to_file(
-        flac_path, {'genres': ['Electronic', 'House']}, embed_cover=False)
+    # the joined format is the multi-value setting OFF; ON is covered in
+    # test_tag_writer_multi_value_genre.py
+    with patch('core.tag_writer._multi_artist_write_enabled', return_value=False):
+        result = write_tags_to_file(
+            flac_path, {'genres': ['Electronic', 'House']}, embed_cover=False)
     assert result['success'] is True
     assert FLAC(flac_path).get('genre') == ['Electronic, House']
 

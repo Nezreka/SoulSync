@@ -340,7 +340,12 @@ def create_blueprint() -> Blueprint:
         if not adapter or not adapter.is_configured():
             return jsonify({"success": False, "error": "no usenet client configured"}), 400
         category = str(config_manager.get('usenet_client.category', 'soulsync') or 'soulsync')
-        ref = _run(adapter.add_nzb(url, category=category), timeout=60)
+        from core.usenet_clients.nzb_fetch import NzbFetchError
+        try:
+            # 120: the nzb is fetched here first now (#2030)
+            ref = _run(adapter.add_nzb(url, category=category), timeout=120)
+        except NzbFetchError as e:
+            return jsonify({"success": False, "error": str(e)})
         if not ref:
             return jsonify({"success": False, "error": "the client did not accept it"})
         return jsonify({"success": True, "ref": str(ref)})

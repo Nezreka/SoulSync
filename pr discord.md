@@ -1,17 +1,17 @@
-**SoulSync 3.6.3 is out** :musical_note:
+**SoulSync 3.6.4 is out** :musical_note:
 
-A hot fix for 3.6.2. On a big library the Library page could time out with "Could not load your library". The artist list's membership check walked every album for every artist; it uses its indexes now and loads in a second or two, and the first visit after a restart is warmed in the background.
+Video now supports your own movie and TV libraries. Each library has its own quality profile, download sources, client category, Prowlarr indexers and automatic search, and the same movie can live in two libraries as two copies. Releases are ranked one way everywhere (quality, then custom formats, then tie-breaks), and every search result says why it ranked where it did. SABnzbd and NZBGet now receive the NZB file itself, and a season grab checks it has the right show (thanks SeadogsBooty and Thibs). Admins can now delete a show or movie and have it stay deleted: nothing grabs it again, and its folder goes to the recycle bin as one entry you can restore (thanks PapaBearDoes).
 
-When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, SoulSync now blocklists that release and grabs the next one your quality profile ranks right away, instead of waiting for the next wishlist pass. You only get the failed notification when nothing else could be taken. It's on by default, with a switch on the usenet client card (thanks @SeadogsBooty). Cancel also takes a torrent or usenet download out of the client now, and the Downloads menu has Block and retry failed to replace every failed release at once (thanks c5pie).
+Own-library profiles now work on Navidrome 0.58+ (thanks mirlooun). Every profile can hide the pages and jobs it doesn't use, and the Playlists and Watchlist pages have been redesigned.
 
-After downloads, Plex and Jellyfin now scan only the album folders that changed instead of the whole library (#1978). Jellyfin on localhost no longer costs two seconds per connection on Windows, Discover's decades, labels and undiscovered albums shelves are much faster, and MusicBrainz lookups stop paying a wasted request per album.
+Download Discography now uses the artist's quality profile (thanks Foxxify). You can follow a YouTube channel without downloading its new uploads (thanks JuanVqz), Library Health has per-artist cleanup checks (thanks QT3496), and mirrored playlists can be exported as M3U (thanks TaunGadd).
 
-Admins can also tag every song on a Plex playlist with a mood from the server playlist editor, to build a Plex smart playlist on it (thanks wolf39us).
+Everything Library v2 touched was reviewed five times end to end. Every finding was fixed with a test, covering the 3.6.1 upgrade, household and own-library separation, tags, artwork, repair jobs and downloads. The library pages, reports and startup are much faster on large libraries.
 
-Anime that TMDB lumps into one season is split by AniList when you have no TVDB key, search previews of anime get the AniList layer (thanks Thibs), and imported episodes carry their title in the file name.
+Playlists can now be rotating: a song the playlist downloaded is removed once it leaves the playlist, unless you played it, favourited it or still have it in another playlist (#2039).
 
-Manual search results can be filtered, sorted and saved as named filters, a failed grab shows which release replaced it, and a colon in a title can become " - " in file names instead of being dropped (thanks SeadogsBooty).
+Library scans no longer get flagged as stuck while an own-library profile's scan is still working (#2036).
 
-Fixes: the library upgrade no longer sits paused forever (thanks Skowl), downloaded episodes stop showing as missing (thanks c5pie), a retried release keeps its quality profile and an episode's manual search stays inside the panel (thanks SeadogsBooty), a few failed playlist syncs no longer put a wished song on the week-long retry wait (thanks TheHomeGuy), a failing wishlist sync waits before retrying instead of using up its tries in a second, Bandcamp's bot check no longer marks albums as not found, a blocked audiobook release stays out of that profile's searches, and Settings > MetaSync says whether your install is being counted.
+Thanks also to nick2000713, splitsec2, lozog, Eric-sson, cremonies and jdfrye2 for fixes and reports.
 
 Full notes on GitHub.

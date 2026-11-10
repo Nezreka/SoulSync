@@ -182,9 +182,15 @@ def _match_liked_artists_to_all_sources(database, profile_id: int):
             row = cursor.fetchone()
             if row:
                 r = dict(row)
+                # review 5 R5-C-3: ARTIST_IDS_SQL names these three deezer_id,
+                # discogs_id and musicbrainz_id, so read them by those names
+                lib_names = {'deezer_artist_id': 'deezer_id',
+                             'discogs_artist_id': 'discogs_id',
+                             'musicbrainz_artist_id': 'musicbrainz_id'}
                 for col in id_cols:
-                    if r.get(col) and col not in harvested_ids:
-                        harvested_ids[col] = str(r[col])
+                    value = r.get(col) or r.get(lib_names.get(col, col))
+                    if value and col not in harvested_ids:
+                        harvested_ids[col] = str(value)
                 if _valid_image(r.get('thumb_url')):
                     best_image = r['thumb_url']
         except Exception as e:

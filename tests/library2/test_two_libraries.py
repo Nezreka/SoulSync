@@ -537,6 +537,39 @@ class TestJobsWorkInOneLibrary:
                     f"SELECT title FROM repair_findings WHERE {clause}")}
                 assert titles == expected
 
+    def test_an_album_finding_with_no_file_shows_where_its_album_lives(self, lib):
+        """completeness, tag consistency, genres and discography findings name
+        an album or artist, not a file. they counted as the shared library's,
+        so kim never saw a finding about her own album."""
+        from core.repair_worker import _findings_library_clause
+        k_artist, k_album, k_track = _album_with_file(
+            lib.db, artist="Kims Band", album="Mine", title="K",
+            path=os.path.join(lib.kim_root, "Kims Band", "Mine", "01.flac"), key="k")
+        s_artist, s_album, _ = _album_with_file(
+            lib.db, artist="House Band", album="House", title="H",
+            path=os.path.join(lib.shared, "House Band", "House", "01.flac"), key="h")
+        with lib.db._get_connection() as conn:
+            empty = seed_album(conn, server_id="al-empty", title="Wanted",
+                               artist_id=s_artist, server_source="soulsync")
+            conn.executemany(
+                "INSERT INTO repair_findings (job_id, finding_type, severity, status, "
+                " entity_type, entity_id, file_path, title, description) "
+                "VALUES ('j', 't', 'info', 'pending', ?, ?, NULL, ?, '')",
+                [("album", f"lib2:{k_album}", "kim album"),
+                 ("artist", f"lib2:{k_artist}", "kim artist"),
+                 ("track", f"lib2:{k_track}", "kim track"),
+                 ("album", f"lib2:{s_album}", "house album"),
+                 ("album", f"lib2:{empty}", "nobody's yet")])
+            conn.commit()
+            for scope, expected in (
+                    (lib.kim, {"kim album", "kim artist", "kim track", "nobody's yet"}),
+                    ("shared", {"house album", "nobody's yet"})):
+                with library_scope.library_scope(scope):
+                    clause = _findings_library_clause()
+                titles = {r[0] for r in conn.execute(
+                    f"SELECT title FROM repair_findings WHERE {clause}")}
+                assert titles == expected
+
     def test_the_findings_badges_count_the_library_on_screen(self, two):
         from core.repair_worker import RepairWorker
         with two.db._get_connection() as conn:
@@ -556,6 +589,54 @@ class TestJobsWorkInOneLibrary:
                 counts = worker.get_findings_counts()
             assert counts["pending"] == pending
             assert counts["by_job"]["j"]["total"] == pending
+
+    def _group_worker(self, two):
+        from core.repair_worker import RepairWorker
+        with two.db._get_connection() as conn:
+            conn.executemany(
+                "INSERT INTO repair_findings (job_id, finding_type, severity, status, "
+                " entity_type, entity_id, file_path, title, description) "
+                "VALUES ('j', 'library_retag', 'info', ?, 'track', '1', ?, ?, '')",
+                [("pending", os.path.join(two.kim_root, "x.flac"), "kim"),
+                 ("pending", os.path.join(two.shared, "x.flac"), "shared"),
+                 ("pending", os.path.join(two.shared, "y.flac"), "shared"),
+                 ("dismissed", os.path.join(two.kim_root, "d.flac"), "kim"),
+                 ("dismissed", os.path.join(two.shared, "d.flac"), "shared")])
+            conn.commit()
+        worker = RepairWorker.__new__(RepairWorker)
+        worker.db = two.db
+        return worker
+
+    def _statuses(self, two):
+        with two.db._get_connection() as conn:
+            return sorted(tuple(r) for r in conn.execute(
+                "SELECT title, status FROM repair_findings"))
+
+    def test_the_inbox_group_counts_the_library_on_screen(self, two):
+        """review 5 W3-TT-1: the group row's "Fix all (N)" counted every library"""
+        worker = self._group_worker(two)
+        for scope, pending, dismissed in ((two.kim, 1, 1), ("shared", 2, 1), (None, 3, 2)):
+            with library_scope.library_scope(scope):
+                group = {g["finding_type"]: g for g in worker.get_finding_groups()}
+            assert group["library_retag"]["pending"] == pending
+            assert group["library_retag"]["dismissed"] == dismissed
+
+    def test_dismiss_all_stays_in_the_library_on_screen(self, two):
+        """review 5 W3-TT-1: dismissing a type in kim's library silenced the
+        shared library's findings of that type too"""
+        worker = self._group_worker(two)
+        with library_scope.library_scope(two.kim):
+            assert worker.dismiss_findings_by_type("library_retag") == 1
+        assert ("shared", "pending") in self._statuses(two)
+        assert ("kim", "pending") not in self._statuses(two)
+
+    def test_reopen_all_stays_in_the_library_on_screen(self, two):
+        """review 5 W3-TT-1: reopen all brought back every library's dismissed rows"""
+        worker = self._group_worker(two)
+        with library_scope.library_scope(two.kim):
+            assert worker.reopen_findings_bulk(finding_type="library_retag") == 1
+        assert ("shared", "dismissed") in self._statuses(two)
+        assert ("kim", "dismissed") not in self._statuses(two)
 
     def test_a_reorganize_queued_for_all_libraries_runs_in_each_folder(self, two):
         from core.reorganize_runner import _libraries_for

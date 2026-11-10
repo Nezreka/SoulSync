@@ -260,12 +260,13 @@ class TestDeezer:
         assert row['expected_track_count'] == 12
 
     def test_the_record_type_goes_to_the_payload(self, deezer):
-        """lib2_albums.album_type always carries a classification the importer and
-        MB reconcile own, so there is no empty state for a provider to fill."""
+        """deezer's word lands in the payload, and fills a kind nobody knew yet
+        (album_type_known=0, the schema's 'album' default), as 3.6.1's worker
+        filled an empty record_type. a known kind is never reclassified."""
         deezer._update_album(1, {'id': 7}, {'id': 7, 'record_type': 'ep'})
 
         assert _payload(deezer, 'lib2_albums', 'deezer')['record_type'] == 'ep'
-        assert _row(deezer, 'lib2_albums')['album_type'] == 'album'
+        assert _row(deezer, 'lib2_albums')['album_type'] == 'ep'
 
     def test_bpm_only_arrives_from_the_detail_fetch(self, deezer):
         deezer._update_track(1, {'id': 3}, {'id': 3, 'bpm': 128.5,

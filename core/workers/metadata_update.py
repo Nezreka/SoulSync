@@ -224,6 +224,40 @@ class WebMetadataUpdateWorker:
             logger.debug("lib2 artist lookup failed for %r: %s", artist_name, e)
             return None, False, None
 
+    def _db_artist_bio(self, db_artist):
+        """the biography enrichment stored for this artist (last.fm first), as
+        plain text. None when there's nothing to give the media server (#1993)"""
+        if not self._db or not db_artist:
+            return None
+        try:
+            import re as _re
+            from core.library2.summary_markers import clean_summary
+            conn = self._db._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT json_extract(enrichment, '$.lastfm.bio'), summary "
+                    "FROM lib2_artists WHERE id = ?", (db_artist["id"],)).fetchone()
+            finally:
+                conn.close()
+            for text in (row or ()):
+                if not isinstance(text, str):
+                    continue
+                # last.fm ends its bio with a "Read more on Last.fm" link
+                text = _re.sub(r"<a [^>]*>.*?</a>\.?", "", text, flags=_re.S)
+                text = _re.sub(r"<[^>]+>", "", text)
+                text = clean_summary(text)
+                if text:
+                    return text
+        except Exception as e:  # noqa: BLE001 - a bio is a nice to have
+            logger.debug("artist bio lookup failed: %s", e)
+        return None
+
+    def _update_biography(self, artist):
+        bio = getattr(self, "_current_bio", None)
+        if bio and self.server_type == "plex":
+            return self.media_client.update_artist_biography(artist, biography=bio)
+        return self.media_client.update_artist_biography(artist)
+
     def update_artist_metadata(self, artist):
         """Update a single artist's metadata. Checks SoulSync DB first to avoid unnecessary API calls.
 
@@ -242,6 +276,7 @@ class WebMetadataUpdateWorker:
 
             # DB-first: check what we already have cached
             db_artist, db_has_genres, db_spotify_id = self._check_db_artist(artist_name)
+            self._current_bio = self._db_artist_bio(db_artist)
 
             # Check what the media server artist is currently missing
             needs_photo = not self.artist_has_valid_photo(artist) if self.server_type != "jellyfin" else True
@@ -251,7 +286,7 @@ class WebMetadataUpdateWorker:
 
             # If media server already has valid photo + genres + album art, skip entirely
             if not needs_photo and not needs_background and not needs_genres and not needs_album_art:
-                self.media_client.update_artist_biography(artist)
+                self._update_biography(artist)
                 return True, "Already up to date"
 
             changes_made = []
@@ -297,7 +332,7 @@ class WebMetadataUpdateWorker:
                             if self._apply_db_genres(artist, db_artist["genres"]):
                                 changes_made.append("genres (DB)")
                         if changes_made:
-                            self.media_client.update_artist_biography(artist)
+                            self._update_biography(artist)
                             return True, f"Updated {', '.join(changes_made)} (Spotify unavailable)"
                         return False, "Not found on Spotify"
 
@@ -318,7 +353,7 @@ class WebMetadataUpdateWorker:
                             if self._apply_db_genres(artist, db_artist["genres"]):
                                 changes_made.append("genres (DB)")
                         if changes_made:
-                            self.media_client.update_artist_biography(artist)
+                            self._update_biography(artist)
                             return True, f"Updated {', '.join(changes_made)} (no Spotify match)"
                         return False, f"No confident match found (best: '{getattr(best_match, 'name', 'N/A')}', score: {highest_score:.2f})"
 
@@ -355,7 +390,7 @@ class WebMetadataUpdateWorker:
                 logger.info(f"Skipping album artwork updates for Jellyfin artist: {artist.title}")
 
             if changes_made:
-                biography_updated = self.media_client.update_artist_biography(artist)
+                biography_updated = self._update_biography(artist)
                 if biography_updated:
                     changes_made.append("timestamp")
 
@@ -364,7 +399,7 @@ class WebMetadataUpdateWorker:
                 details = f"Updated {', '.join(changes_made)} ({source})"
                 return True, details
             else:
-                self.media_client.update_artist_biography(artist)
+                self._update_biography(artist)
                 return True, "Already up to date"
 
         except Exception as e:

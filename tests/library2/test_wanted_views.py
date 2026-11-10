@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 import pytest
@@ -190,6 +191,66 @@ class TestListMissing:
         assert len(rows2) == 1
 
 
+
+class TestMissingKeepsItsFilelessIds:
+    """review 5 perf: finding the fileless wanted tracks read every wanted row
+    (every imported file is wanted), ~0.8 s a pass on 310k tracks and two
+    passes a page. the ids are kept until the member counter moves"""
+
+    @staticmethod
+    def _seed(tmp_path):
+        from core.library2 import member_version
+        member_version.clear()
+        conn = _make_conn(tmp_path)
+        album = _album(conn, _artist(conn, "Drake"), "Views")
+        tracks = [_track(conn, album, f"Song {i}", track_number=i + 1) for i in range(6)]
+        for t in tracks:
+            _want(conn, t)
+        for t in tracks[:4]:
+            _file(conn, t)
+        conn.commit()
+        return conn, tracks
+
+    def test_a_page_reads_only_the_fileless_rows(self, tmp_path):
+        conn, tracks = self._seed(tmp_path)
+        assert list_missing(conn)[1] == 2
+        seen: list = []
+        conn.set_trace_callback(seen.append)
+        rows, total = list_missing(conn)
+        conn.set_trace_callback(None)
+        assert total == 2 and [r["track_id"] for r in rows] == tracks[4:]
+        # served from the kept ids: no statement walks every wanted row
+        reads = [s for s in seen if s.lstrip().upper().startswith(("SELECT", "WITH"))]
+        assert reads
+        for sql in reads:
+            plan = " | ".join(r[-1] for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
+            assert "idx_lib2_wanted_tracks_wanted" not in plan, plan
+            assert not re.search(r"SCAN (w|t|tf|lib2_wanted_tracks)\b", plan), plan
+
+    def test_a_file_coming_or_going_shows_on_the_next_page(self, tmp_path):
+        conn, tracks = self._seed(tmp_path)
+        assert list_missing(conn)[1] == 2
+        _file(conn, tracks[4])
+        conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE track_id=?",
+                     (tracks[0],))
+        conn.commit()
+        rows, total = list_missing(conn)
+        assert total == 2
+        assert [r["track_id"] for r in rows] == [tracks[0], tracks[5]]
+
+    def test_another_library_scope_has_its_own_ids(self, tmp_path, monkeypatch):
+        from core import library_scope
+        conn, tracks = self._seed(tmp_path)
+        conn.execute("UPDATE lib2_track_files SET owner_profile_id=2 WHERE track_id=?",
+                     (tracks[0],))
+        conn.commit()
+        assert list_missing(conn)[1] == 2
+        monkeypatch.setattr(library_scope, "SCOPE_PARKED", False)
+        monkeypatch.setattr(library_scope, "any_own_library_exists", lambda: True)
+        monkeypatch.setattr(library_scope, "current_library_scope", lambda: "shared")
+        # the shared library does not have the file profile 2 owns
+        assert list_missing(conn)[1] == 3
+
 class TestListCutoffUnmet:
     """the evaluated list is kept between pages while nothing it reads changed"""
 
@@ -231,6 +292,40 @@ class TestListCutoffUnmet:
         assert list_cutoff_unmet(conn, page=1)[1] == 1
         assert list_cutoff_unmet(conn, page=2)[1] == 1
         assert len(runs) == 1
+
+    def test_the_change_check_reads_only_indexes(self, tmp_path):
+        """review 5 R5-G-2: the file part of the fingerprint was one statement
+        that scanned every file row (4.5 s at 300k) on every page"""
+        conn, _track_id = self._seed_unmet(tmp_path)
+        assert list_cutoff_unmet(conn, page=1)[1] == 1
+        seen = []
+        conn.set_trace_callback(seen.append)
+        assert list_cutoff_unmet(conn, page=2)[1] == 1
+        conn.set_trace_callback(None)
+        reads = [q for q in seen if "FROM lib2_track_files" in q]
+        assert reads
+        for q in reads:
+            plan = " ".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + q))
+            assert "SCAN lib2_track_files" not in plan or "INDEX" in plan, (q, plan)
+            assert "USING TEMP" not in plan, (q, plan)
+        max_updated = " ".join(r[3] for r in conn.execute(
+            "EXPLAIN QUERY PLAN SELECT MAX(updated_at) FROM lib2_track_files"))
+        assert "idx_lib2_track_files_updated" in max_updated, max_updated
+
+    def test_songs_could_be_better_reuses_the_evaluated_list(self, tmp_path, monkeypatch):
+        """review 5 R5-G-2: the Songs "could be better" filter evaluated the
+        whole library for every page, sort and letter"""
+        import core.library2.wanted_views as wv
+        from core.library2.queries import list_songs
+        conn, _track_id = self._seed_unmet(tmp_path)
+        runs = []
+        real = wv.iter_cutoff_unmet
+        monkeypatch.setattr(wv, "iter_cutoff_unmet", lambda *a, **k: runs.append(1) or real(*a, **k))
+
+        first = list_songs(conn, quality="upgradable", page=1)
+        list_songs(conn, quality="upgradable", page=2)
+        assert len(runs) == 1
+        assert first["pagination"]["total_count"] == 1
 
     def test_an_upgraded_file_drops_off_at_once(self, tmp_path):
         conn, track = self._seed_unmet(tmp_path)

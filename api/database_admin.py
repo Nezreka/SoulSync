@@ -129,6 +129,9 @@ def _db_update_phase_callback(phase):
     _update_automation_progress(_db_update_automation_id, phase=phase)
 
 def _db_update_artist_callback(artist_name, success, details, album_count, track_count):
+    # a finished artist is progress, whatever else the worker reported
+    with db_update_lock:
+        db_update_state["last_progress_at"] = time.time()
     if success:
         # Use the details string from the worker — it includes context like "0 new tracks (150 existing updated)"
         log_msg = f'{artist_name} — {details}' if details else f'{artist_name} — {album_count} albums, {track_count} tracks'
@@ -381,6 +384,32 @@ def _resume_workers_after_scan():
     _background_pause.release("database scan")
 
 
+def _file_key(path):
+    try:
+        return os.path.normcase(os.path.realpath(path))
+    except Exception:  # noqa: BLE001
+        return os.path.normcase(str(path))
+
+
+def _known_library_files(db):
+    """every file row the library holds, by its real path: (id, state).
+    review 4 R4-D-3: a 'deleted' row is not a known file. a file back at that
+    path falls through to autolink, which re-activates the row"""
+    from core.library2.paths import resolve_lib2_path
+    known = {}
+    with db._get_connection() as conn:
+        rows = conn.execute("SELECT id, path, COALESCE(file_state,'active') FROM lib2_track_files "
+                            "WHERE path IS NOT NULL AND path<>'' "
+                            "AND COALESCE(file_state,'active') <> 'deleted'").fetchall()
+    for file_id, path, state in rows:
+        for candidate in {path, resolve_lib2_path(path, config_manager=config_manager) or path}:
+            key = _file_key(candidate)
+            # an active row wins over a retired one for the same file
+            if key not in known or known[key][1] != 'active':
+                known[key] = (int(file_id), state)
+    return known
+
+
 def _run_soulsync_full_refresh():
     """Re-index the standalone output folder through the native import writer.
 
@@ -412,8 +441,29 @@ def _run_soulsync_full_refresh():
         _db_update_phase_callback(f'Importing local index from {total} files...')
         successful = 0
         failed = 0
+        # a file the library already holds is re-indexed in place, never
+        # imported again: autolink on a known file made a second file row on
+        # the same path, under its track-artist tag (a compilation split into
+        # one album per performer). 3.6.1 rebuilt one row per file.
+        known = _known_library_files(db)
+        reactivated = kept = 0
         from core.library2.autolink import link_download_into_library_v2
         for index, file_path in enumerate(audio_files, 1):
+            existing = known.get(_file_key(file_path))
+            if existing is not None:
+                file_row_id, state = existing
+                if state in ('missing_suspected', 'missing_confirmed'):
+                    with db._get_connection() as conn:
+                        conn.execute("UPDATE lib2_track_files SET file_state='active', "
+                                     "updated_at=CURRENT_TIMESTAMP WHERE id=?", (file_row_id,))
+                        conn.commit()
+                    reactivated += 1
+                else:
+                    kept += 1
+                successful += 1
+                if index % 50 == 0:
+                    _db_update_phase_callback(f'Importing local index... {index}/{total}')
+                continue
             try:
                 file_id = link_download_into_library_v2(
                     {
@@ -431,6 +481,9 @@ def _run_soulsync_full_refresh():
                 logger.error("[SoulSync Full Refresh] Could not import %s: %s", file_path, exc)
             if index % 50 == 0:
                 _db_update_phase_callback(f'Importing local index... {index}/{total}')
+
+        logger.info("[SoulSync Full Refresh] %d already indexed, %d back from missing, %d new",
+                    kept, reactivated, successful - kept - reactivated)
 
         # Existing rows that disappeared enter the normal two-scan missing
         # lifecycle.  They are never hard-deleted by this recovery scan.
@@ -595,11 +648,19 @@ def _run_soulsync_deep_scan():
             add_activity_item("", "SoulSync Deep Scan — move blocked", warn, "Now")
         elif untracked and os.path.isdir(staging_path):
             _db_update_phase_callback('moving_untracked')
+            # G03-6: the walk's paths are realpaths, so the root they're made
+            # relative to must be too. against a symlinked Transfer each one
+            # came out "../../mnt/disk1/..." and the move left Staging
+            real_transfer = os.path.realpath(transfer_path)
+            real_staging = os.path.realpath(staging_path)
             for file_path in untracked:
                 try:
                     # Preserve relative folder structure from Transfer
-                    rel_path = os.path.relpath(file_path, transfer_path)
+                    rel_path = os.path.relpath(file_path, real_transfer)
                     dest_path = os.path.join(staging_path, rel_path)
+                    if os.path.commonpath((real_staging, os.path.realpath(dest_path))) != real_staging:
+                        logger.warning(f"[SoulSync Deep Scan] Not moving {file_path}: it would land outside Staging")
+                        continue
                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                     shutil.move(file_path, dest_path)
                     moved_count += 1
@@ -677,19 +738,20 @@ def _run_soulsync_deep_scan():
 def _own_library_scan_clients(server_type):
     """(profile, client) for every profile with a library of its own (#1199):
     the media client connected as that profile, on that profile's server
-    library. plex and jellyfin only; navidrome has one music folder per
-    server, so an own library there is a second server and stays shared."""
+    library. plex, jellyfin, and navidrome 0.58+ (one navidrome library per
+    profile, read as their own navidrome user, #2031). an older navidrome
+    has one library per server, so an own library there stays shared."""
     db = get_database()
     profiles = db.get_own_library_profiles()
     if not profiles:
         return []
-    from core.media_server import specs
-    _descriptor = specs.describe(server_type)
-    if not (_descriptor and _descriptor.supports_own_libraries):
+    from core.library_scope import own_library_unsupported_reason
+    _reason = own_library_unsupported_reason(server_type)
+    if _reason:
         logger.info(
-            "[Own Library] Active media server '%s' does not support per-profile libraries; "
+            "[Own Library] Active media server '%s' does not support per-profile libraries (%s); "
             "skipping own-library scans for %d profile(s)",
-            server_type, len(profiles)
+            server_type, _reason, len(profiles)
         )
         return []
     base = media_server_engine.client(server_type) if media_server_engine else None
@@ -706,6 +768,10 @@ def _own_library_scan_clients(server_type):
                     logger.warning(f"[Own Library] profile {prof['name']} has no Jellyfin library picked; skipping its scan")
                     continue
                 client = base.as_user(libs.get('jellyfin_user_id') or base.user_id, library_id)
+            elif server_type == 'navidrome':
+                client = _navidrome_own_library_client(db, base, prof, libs)
+                if client is None:
+                    continue
             else:
                 library_name = libs.get('plex_library_id')
                 if not library_name:
@@ -733,6 +799,32 @@ def _own_library_scan_clients(server_type):
     return out
 
 
+def _navidrome_own_library_client(db, base, prof, libs):
+    """the navidrome client for one own-library profile's scan (#2031): a
+    view on its picked library (musicFolderId on every listing), as its own
+    navidrome user when it saved a login, never a change to the shared
+    client. None (and why, logged) when there is nothing safe to scan."""
+    folder = libs.get('navidrome_library_id')
+    if not folder:
+        logger.warning(f"[Own Library] profile {prof['name']} has no Navidrome library picked; skipping its scan")
+        return None
+    if not base.ensure_connection():
+        return None
+    shared = str(getattr(base, 'music_folder_id', None) or '')
+    if not shared:
+        logger.warning(f"[Own Library] the shared Navidrome scan reads every library (no music folder picked "
+                       f"in settings), so {prof['name']}'s library is in it too; pick the shared folder")
+    elif shared == str(folder):
+        logger.warning(f"[Own Library] {prof['name']}'s Navidrome library is the shared one; skipping its scan")
+        return None
+    login = db.get_profile_navidrome_login(prof['id'])
+    if login:
+        return base.as_user(login[0], login[1], music_folder_id=folder)
+    logger.info(f"[Own Library] {prof['name']} has no Navidrome login of their own; "
+                f"scanning their library with the app account")
+    return base.as_user(None, None, music_folder_id=folder)
+
+
 def _run_own_library_scans(server_type, deep):
     """scan every own-library profile's server library, rows stamped with the
     profile. runs as the final phase of the shared scan (its post-scan hook)
@@ -751,6 +843,13 @@ def _run_own_library_scans(server_type, deep):
                 media_client=client, full_refresh=False, server_type=server_type,
                 force_sequential=True, owner_profile_id=prof['id'])
             worker.connect_callback('phase_changed', _db_update_phase_callback)
+            # progress has to reach the shared state too. without it the
+            # watchdog saw no ticks for the whole profile scan and called any
+            # own library that took over 5 minutes stuck (#2036)
+            worker.connect_callback(
+                'progress_updated',
+                lambda item, done, total, pct, _p=prof: _db_update_progress_callback(
+                    f"{_p['name']}: {item}", done, total, pct))
             worker.connect_callback('artist_processed', _db_update_artist_callback)
             worker.connect_callback('error', lambda msg, _p=prof: logger.error(f"[Own Library] {_p['name']}: {msg}"))
             if deep:

@@ -122,19 +122,26 @@ class ArtistNfoBackfillJob(RepairJob):
         from core.library2.sql_util import owner_clause
         try:
             with closing(context.db._get_connection()) as conn:
+                # an alias row (another spelling, merged under a canonical
+                # artist) still has its own folder. 3.6.1 gave every artist
+                # row one; skipping aliases left those folders without. the
+                # alias's name is what its folder carries, the mbid comes
+                # from the canonical artist when the alias has none
                 return conn.execute(f"""
-                    SELECT a.id, a.name, a.musicbrainz_id, MIN(f.path)
-                    FROM lib2_artists a
+                    SELECT a.id, a.name, mbid, MIN(f.path)
+                    FROM (SELECT a.id, a.name,
+                                 COALESCE(NULLIF(TRIM(a.musicbrainz_id), ''),
+                                          NULLIF(TRIM(c.musicbrainz_id), '')) AS mbid
+                            FROM lib2_artists a
+                            LEFT JOIN lib2_artists c ON c.id = a.canonical_artist_id) a
                     JOIN lib2_albums al ON al.primary_artist_id = a.id
                     JOIN lib2_tracks t ON t.album_id = al.id
                     JOIN lib2_track_files f ON f.track_id = t.id
-                    WHERE a.canonical_artist_id IS NULL
-                      AND a.musicbrainz_id IS NOT NULL
-                      AND TRIM(a.musicbrainz_id) != ''
+                    WHERE a.mbid IS NOT NULL
                       AND f.path IS NOT NULL AND TRIM(f.path) != ''
                       AND COALESCE(f.file_state, 'active') = 'active'
                       {owner_clause(column="f.owner_profile_id")}
-                    GROUP BY a.id, a.name, a.musicbrainz_id
+                    GROUP BY a.id, a.name, a.mbid
                 """).fetchall()
         except Exception as exc:  # noqa: BLE001 — old schema etc.
             logger.debug("Artist NFO backfill candidates unavailable: %s", exc)

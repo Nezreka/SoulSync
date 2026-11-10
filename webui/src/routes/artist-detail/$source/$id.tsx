@@ -51,6 +51,13 @@ export const Route = createFileRoute('/artist-detail/$source/$id')({
             replace: true,
           });
         }
+        // no provider page can open this artist (only tidal, qobuz or audiodb
+        // know it): search for the name rather than a library page this
+        // profile may not open
+        const name = (identity?.name || search.name || '').trim();
+        if (name) {
+          throw redirect({ href: `/search?q=${encodeURIComponent(name)}`, replace: true });
+        }
       }
       return;
     }

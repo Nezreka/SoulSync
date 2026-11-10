@@ -995,6 +995,22 @@ function StatsSectionCard({
   );
 }
 
+/** a timeline date as people read it: 2026-10-29 is "Oct 29", a month
+ *  bucket 2026-10 is "Oct 2026". anything else passes through. */
+export function statsDateLabel(value: string): string {
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (day) {
+    const d = new Date(+day[1], +day[2] - 1, +day[3]);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+  const month = /^(\d{4})-(\d{2})$/.exec(value);
+  if (month) {
+    const d = new Date(+month[1], +month[2] - 1, 1);
+    return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+  }
+  return value;
+}
+
 function StatsActivityChart({
   onDateSelect,
   timeline,
@@ -1004,7 +1020,9 @@ function StatsActivityChart({
 }) {
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={timeline} margin={{ top: 8, right: 6, bottom: 0, left: -10 }}>
+      {/* left 0 and a 40px axis: at -10 / 30px a three-digit count lost its
+          first digit, so 180 and 135 read as 80 and 35 above 90 */}
+      <BarChart data={timeline} margin={{ top: 8, right: 6, bottom: 0, left: 0 }}>
         <defs>
           <linearGradient id="statsPlaysBarGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="rgb(var(--accent-rgb))" stopOpacity={0.9} />
@@ -1017,15 +1035,17 @@ function StatsActivityChart({
           tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
+          tickFormatter={statsDateLabel}
         />
         <YAxis
           tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
           allowDecimals={false}
-          width={30}
+          width={40}
         />
         <Tooltip
+          labelFormatter={(label) => statsDateLabel(String(label))}
           contentStyle={STATS_TOOLTIP_STYLE}
           wrapperStyle={STATS_TOOLTIP_WRAPPER_STYLE}
           cursor={STATS_CHART_CURSOR}
@@ -1589,9 +1609,13 @@ function StatsDiskUsage({
                   ? ` (+${tracksWithoutSize.toLocaleString()} pending next Deep Scan)`
                   : ''
               }`
-            : tracksWithoutSize > 0
-              ? `Run a Deep Scan to populate (${tracksWithoutSize.toLocaleString()} tracks pending)`
-              : 'No tracks in library yet'}
+            : payload?.refreshing
+              ? 'Measuring your library…'
+              : payload?.report_failed
+                ? 'Couldn’t measure your library just now. Try again in a minute.'
+                : tracksWithoutSize > 0
+                  ? `Run a Deep Scan to populate (${tracksWithoutSize.toLocaleString()} tracks pending)`
+                  : 'No tracks in library yet'}
         </div>
       </div>
       <div className={styles.statsDiskFormats}>
@@ -1653,7 +1677,13 @@ function StatsDbStorage({
           <div className={styles.statsDbTotalValue}>
             {formatDbStorageValue(payload?.total_file_size || 0, method)}
           </div>
-          <div className={styles.statsDbTotalLabel}>Total Size</div>
+          <div className={styles.statsDbTotalLabel}>
+            {payload?.refreshing && !tables.length
+              ? 'Measuring tables…'
+              : payload?.report_failed && !tables.length
+                ? 'Couldn’t measure tables'
+                : 'Total Size'}
+          </div>
         </div>
       </div>
       <div className={styles.statsDbLegend}>

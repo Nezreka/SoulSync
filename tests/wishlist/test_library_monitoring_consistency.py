@@ -206,3 +206,108 @@ def test_unresolvable_identity_keeps_the_add_and_does_not_abort_reconcile(db, mo
     result = reconcile_track_wishlist(db)
     assert result['intent_failed'] == 1 and result['intent_repaired'] == 1
     assert len(db.get_wishlist_tracks()) == 2 and len(state(db)) == 1
+
+
+def _downloaded_then_deleted(db, tmp_path, release_wish):
+    """a playlist song lands, then the user deletes it from download origins"""
+    db.add_to_wishlist(track(), source_type='playlist')
+    track_id = state(db)[0]['id']
+    path = str(tmp_path / 'song.flac')
+    with db._get_connection() as conn:
+        conn.execute('INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)', (track_id, path))
+        conn.execute('DELETE FROM wishlist_tracks')  # a finished download leaves the queue
+        conn.commit()
+    assert db.delete_track_by_file_path(path, release_wish=release_wish) == 1
+    return track_id
+
+
+def test_a_deleted_download_is_queued_again_when_the_wish_stays(db, tmp_path):
+    """the review reject wants a better copy, so the reconcile re-queues it"""
+    from core.library2.monitor_sync import reconcile_track_wishlist
+    _downloaded_then_deleted(db, tmp_path, release_wish=False)
+    assert reconcile_track_wishlist(db)['added'] == 1
+
+
+def test_a_deleted_download_stays_gone_when_the_wish_is_released(db, tmp_path):
+    """deleting from download origins came back on the wishlist the next hour
+    and downloaded again overnight, with the playlist long gone"""
+    from core.library2.monitor_sync import reconcile_track_wishlist
+    track_id = _downloaded_then_deleted(db, tmp_path, release_wish=True)
+    assert state(db) == [{'id': track_id, 'monitored': 0, 'wanted': 0, 'rule': 0}]
+    assert reconcile_track_wishlist(db)['added'] == 0
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM wishlist_tracks').fetchone()[0] == 0
+
+
+def test_releasing_a_deleted_download_also_drops_its_requeued_wishlist_row(db, tmp_path):
+    from core.library2.monitor_sync import reconcile_track_wishlist
+    path = str(tmp_path / 'song.flac')
+    db.add_to_wishlist(track(), source_type='playlist')
+    with db._get_connection() as conn:
+        conn.execute('INSERT INTO lib2_track_files(track_id,path) VALUES(?,?)', (state(db)[0]['id'], path))
+        conn.commit()
+    assert db.delete_track_by_file_path(path, release_wish=True) == 1
+    reconcile_track_wishlist(db)
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT COUNT(*) FROM wishlist_tracks').fetchone()[0] == 0
+
+
+def test_an_own_library_download_is_released_for_the_profile_that_wanted_it(db, tmp_path, monkeypatch):
+    """third #1062 review G11-1: the Expired Download Cleaner released the
+    wish under profile 1 only; an own library's download was wanted by its
+    owner, so the sync put it straight back on their wishlist (a loop)"""
+    db.add_to_wishlist(track(), source_type='playlist')
+    track_id = state(db)[0]['id']
+    path = str(tmp_path / 'own.flac')
+    with db._get_connection() as conn:
+        conn.execute('INSERT INTO lib2_track_files(track_id,path,owner_profile_id) VALUES(?,?,3)',
+                     (track_id, path))
+        conn.commit()
+    released = []
+    monkeypatch.setattr(db, '_release_deleted_tracks',
+                        lambda _conn, track_ids, profile_id: released.append((profile_id, track_ids)))
+
+    assert db.delete_track_by_file_path(path, release_wish=True) == 1
+
+    assert sorted(p for p, _ in released) == [1, 3]
+    assert all(ids == [track_id] for _, ids in released)
+
+
+def _track_profile(db):
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT quality_profile_id, quality_profile_explicit FROM lib2_tracks').fetchone()
+        return row[0], row[1]
+
+
+def test_a_default_profile_wish_leaves_the_track_inheriting(db):
+    # review 5 W2-WD-1: the row stores the default id when nobody chose one;
+    # that must not pin the catalogue track, or a later artist change never reaches it
+    assert db.add_to_wishlist(track(), source_type='watchlist', quality_profile_id=None)
+    assert _track_profile(db)[1] == 0
+    # a watchlist/playlist profile is a choice for the group, not this track
+    with db._get_connection() as conn:
+        qp = conn.execute('SELECT id FROM quality_profiles ORDER BY id LIMIT 1').fetchone()[0]
+    assert db.add_to_wishlist(track(2), source_type='watchlist', quality_profile_id=qp)
+    with db._get_connection() as conn:
+        assert conn.execute('SELECT MAX(quality_profile_explicit) FROM lib2_tracks').fetchone()[0] == 0
+
+
+def test_a_profile_picked_for_the_wish_pins_the_track_and_survives_a_group_refresh(db):
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO quality_profiles(name) VALUES('Picked')")
+        picked = conn.execute("SELECT id FROM quality_profiles WHERE name='Picked'").fetchone()[0]
+        conn.commit()
+    assert db.add_to_wishlist(track(), source_type='manual', quality_profile_id=picked,
+                              quality_profile_explicit=True)
+    assert _track_profile(db) == (picked, 1)
+    # a later watchlist pass naming another profile does not overwrite the pick
+    with db._get_connection() as conn:
+        other = conn.execute('SELECT id FROM quality_profiles WHERE id<>? ORDER BY id LIMIT 1',
+                             (picked,)).fetchone()[0]
+    db.add_to_wishlist(track(), source_type='watchlist', quality_profile_id=other)
+    with db._get_connection() as conn:
+        row = conn.execute('SELECT quality_profile_id, quality_profile_explicit FROM wishlist_tracks').fetchone()
+    assert (row[0], row[1]) == (picked, 1)
+    assert _track_profile(db) == (picked, 1)
+    rows = db.get_wishlist_tracks()
+    assert rows[0]['quality_profile_explicit'] is True

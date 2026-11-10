@@ -681,13 +681,13 @@ const HELPER_CONTENT = {
         tips: ['Supports CSV, TSV, M3U/M3U8, and plain text (one track per line)', 'M3U/M3U8 is read automatically (artist, title, duration from #EXTINF)', 'Column mapping for CSV/TSV files', 'Creates a mirrored playlist for persistent state'],
         docsId: 'sync-import-file'
     },
-    '.sync-tab-button[data-tab="mirrored"]': {
+    '.pl-collection[data-tab="mirrored"]': {
         title: 'Mirrored Playlists',
         description: 'All imported playlists from every source, saved persistently. Shows identification status, download progress, and allows re-syncing.',
         tips: ['Every parsed playlist is automatically mirrored here', 'Cards show live state: Discovering, Discovered, Syncing, Complete', 'Re-parsing the same URL updates the existing mirror'],
         docsId: 'sync-mirrored'
     },
-    '.sync-tab-button[data-tab="server"]': {
+    '.pl-collection[data-tab="server"]': {
         title: 'Server Playlists',
         description: 'View and manage playlists from your connected media server (Plex, Jellyfin, or Navidrome). Compare server-side playlists with source playlists to find differences.',
         tips: [
@@ -708,7 +708,11 @@ const HELPER_CONTENT = {
         description: 'View a log of all sync operations — playlist syncs, album downloads, and wishlist processing. Shows timestamps, track counts, and completion status.',
         docsId: 'sync-history'
     },
-    '.sync-header': {
+    '.pl-tools-btn': {
+        title: 'More tools',
+        description: 'Bulk scheduling, match review, the Wing It pool, linking a track by hand, activity and download origins.',
+    },
+    '.pl-header': {
         title: 'Playlist Sync',
         description: 'Import and sync playlists from multiple sources. Select playlists, match tracks to your library, and download what\'s missing.',
         docsId: 'sync-overview'
@@ -1894,8 +1898,8 @@ const HELPER_CONTENT = {
 
     // Save Button
     '.save-settings': {
-        title: 'Save Settings',
-        description: 'Save all settings changes. Some changes take effect immediately; others require a restart.',
+        title: 'Saved as you go',
+        description: 'Settings save themselves a moment after you change them. Click to save right away. A few changes need a restart to take effect.',
     },
 
     // ─── DASHBOARD: ENRICHMENT SERVICES ────────────────────────────
@@ -2325,18 +2329,12 @@ const HELPER_TOURS = {
         icon: '🔄',
         steps: [
             // Header
-            { page: 'sync', selector: '.sync-header', title: 'Playlist Sync', description: 'Import playlists from any streaming service, match tracks to your download sources, and sync them to your media server. Everything happens from this page.' },
-            { page: 'sync', selector: '.sync-history-btn', title: 'Sync History', description: 'View a log of all past sync operations — when they ran, how many tracks matched, and which ones failed. Useful for tracking down missing tracks.' },
+            { page: 'sync', selector: '.pl-header', title: 'Playlist Sync', description: 'Import playlists from any streaming service, match tracks to your download sources, and sync them to your media server. Everything happens from this page.' },
+            { page: 'sync', selector: '.pl-tools-btn', title: 'More tools', description: 'Bulk scheduling, match review, the Wing It pool, linking a track by hand, activity and download origins. Each one says what it is for.' },
 
-            // Source tabs (left to right)
-            { page: 'sync', selector: '.sync-tab-button[data-tab="spotify"]', title: 'Spotify Playlists', description: 'If Spotify is connected, click "Refresh" to load all your playlists. Select ones you want, then hit Start Sync in the sidebar.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="spotify-public"]', title: 'Spotify Link', description: 'Don\'t have a Spotify account? Paste any public Spotify playlist or album URL here to import it without authentication.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="tidal"]', title: 'Tidal Playlists', description: 'Same as Spotify — connect Tidal in Settings, refresh to load your playlists, then sync.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="deezer"]', title: 'Deezer', description: 'Paste a Deezer playlist URL to import. No account needed — just the public URL.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="youtube"]', title: 'YouTube Music', description: 'Paste a YouTube Music playlist URL. The parser extracts track titles and artists, then matches them against your metadata source.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="beatport"]', title: 'Beatport', description: 'For electronic music — paste a Beatport playlist URL to import DJ sets and charts.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="import-file"]', title: 'File Import', description: 'Import a playlist from a local file — M3U, CSV, or plain text. Map columns to track/artist/album fields.' },
-            { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Match Review for unmatched tracks.' },
+            // Add (every source opens from it) and the library
+            { page: 'sync', selector: '.pl-add-btn', title: 'Add a playlist', description: 'Paste a link from Spotify, Apple Music, Deezer or YouTube, or open one of your sources: Spotify, Tidal, Qobuz, Deezer, YouTube Music, ListenBrainz, Last.fm, SoulSync Discovery, Beatport, or a file. What you import lands in Mirrored.' },
+            { page: 'sync', selector: '.pl-collection[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Match Review for unmatched tracks.' },
 
         ]
     },
@@ -2481,7 +2479,7 @@ const HELPER_TOURS = {
             { page: 'settings', selector: '.stg-tab[data-tab="advanced"]', title: 'Advanced Tab', description: 'Power-user settings, logging configuration, and system-level options. Most users won\'t need to touch this.' },
 
             // Save
-            { page: 'settings', selector: '.save-button', title: 'Save Settings', description: 'Don\'t forget to save! Changes aren\'t applied until you click this button. Some settings (like download source changes) take effect immediately after saving. 🎉' },
+            { page: 'settings', selector: '.save-button', title: 'Saved as you go', description: 'Settings save themselves a moment after you change them. This shows when they\'re saved, and clicking it saves right away.' },
         ]
     },
     'issues-tour': {
@@ -3442,47 +3440,23 @@ function closeHelperSearch() {
 // release time and add a real `date:` line at the top of the version block.
 const WHATS_NEW = {
     // Keep the current release and one brief Earlier versions summary.
-    '3.6.3': [
-        { date: 'November 2026 · 3.6.3' },
-        { title: 'The Library page loads again', desc: 'On a big library the artist list could time out with "Could not load your library". It loads in a second or two now, and the first visit after a restart is warmed in the background.', page: 'library' },
-        { title: 'A failed download is replaced', desc: 'When SABnzbd or the torrent client fails a movie or episode, or a torrent stalls, that release is blocklisted and the next one your quality profile ranks is grabbed right away. You only hear about it when nothing else could be taken, and the replacement is ranked by the same quality profile as the one that failed. Switch it off on the usenet client card (thanks @SeadogsBooty).' },
-        { title: 'Anime seasons from AniList', desc: 'When TMDB lumps an anime into one long season (Jujutsu Kaisen\'s 59 episodes), the episode list is split into the seasons your server and release names use, from AniList when there\'s no TVDB key. Search previews of anime show AniList\'s score, other names and season links too (thanks Thibs).' },
-        { title: 'Filter and sort manual searches', desc: 'Every movie, show, season and episode search has a bar to narrow results by name, group or indexer, sort by size, age, quality, format score and more, and build filters (resolution, codec, group, size, age...) you can save and reuse. A failed grab also shows which release replaced it, and Settings can turn a colon in a title into " - " instead of dropping it (thanks @SeadogsBooty).' },
-        { title: 'Episode titles in file names', desc: 'Imported episodes are named with their episode title when your naming template has $episodetitle. It was always empty before (thanks @SeadogsBooty).' },
-        { title: 'Cancel means cancel', desc: 'Cancelling a torrent or usenet video download takes it out of the client too, instead of letting it download to the end for nothing. The Downloads menu also has Block and retry failed, which blocks every failed release and grabs the next best one for each (thanks c5pie).' },
-        { title: 'Browse what\'s charting', desc: 'The Search page\'s browse tiles show what\'s charting on Deezer in each genre right now, and fall back to your own metadata when Deezer has nothing (thanks cremonies, #1984).', page: 'search' },
-        { title: 'Tag a playlist in Plex', desc: 'The server playlist editor can add a Plex mood to every song on a playlist, so a Plex smart playlist can be built on it (thanks wolf39us).', page: 'sync' },
-        { title: 'Faster', desc: 'After downloads, Plex and Jellyfin scan only the album folders that changed instead of the whole library (#1978). Jellyfin on localhost no longer costs two seconds per connection on Windows, Discover\'s decades, labels and undiscovered albums shelves are much faster, and MusicBrainz lookups stop wasting a request per album.' },
-        { title: 'Fixes', desc: 'The artist page stops jumping on phones, artist bios stop showing "-updatedAt" stamps, interactive search labels wrong artists and shows the closest misses first (#1980), a running wishlist batch opens with its songs (#1982), a deleted mirror stops showing as In SoulSync (#1979), a failing wishlist sync waits before retrying, the library upgrade no longer sits paused forever (thanks Skowl), downloaded episodes stop showing as missing (thanks c5pie), a few failed playlist syncs no longer put a wished song on the week-long retry wait (thanks TheHomeGuy), an episode\'s manual search results stay inside the panel, Bandcamp\'s bot check no longer marks albums as not found, a blocked audiobook release stays out of that profile\'s searches, and Settings > MetaSync says whether your install is counted.' },
-        { title: 'Earlier versions', desc: '3.6.2 brought Library v2, built by @nick2000713: SoulSync keeps its own library now. Open Older Versions for everything in it.' },
-    ],
-    '3.6.2': [
-        { date: 'November 2026 · 3.6.2' },
-        { title: 'Library v2', desc: 'SoulSync keeps its own library now instead of mirroring your media server. Watchlist any artist, wishlist any album or single song, and see the songs you\'re missing as real rows. Built by @nick2000713, thank you.', page: 'library' },
-        { title: 'Interactive search', desc: 'Search every source for one artist, album or song and pick the result yourself. Every row shows its source, the numbers that decide whether it finishes, its age, and your quality profile\'s verdict before you grab.', page: 'library' },
-        { title: 'Live state and one history', desc: 'Rows say queued, searching, downloading or processing, and albums roll their songs up. Every artist, album and song has one history of grabs, checks, retries, imports, moves and deletes.', page: 'library' },
-        { title: 'Your edits win', desc: 'A field you edit is marked as yours. Refresh skips it and re-tag lets you pick per field. A song can keep a FLAC and an MP3, and your quality profile picks the primary one.', page: 'library' },
-        { title: 'Safe delete and repair', desc: 'Delete removes the real files, with a preview first, into the deleted-files folder. Every Tools job writes to the library and can be scoped to one artist, and Re-tag is back.', page: 'library' },
-        { title: 'View settings and mobile', desc: 'Drag columns into place, choose which toolbar buttons show and how an artist opens, per profile. The library works on a phone and a tablet now (thanks @nick2000713).', page: 'library' },
-        { title: 'One artist page', desc: 'Every artist opens the same artist page, and My Library shows only when you have something of theirs. Browsing an artist you don\'t have writes nothing to your library.', page: 'library' },
-        { title: 'Unmatched files get matched', desc: 'Unmatched imports open a review where each file is fingerprinted and matched. Matching also runs in the background, three at a time.', page: 'library' },
-        { title: 'Music Assistant', desc: 'Music Assistant joins as a fifth media server, in first-run setup and Settings (thanks @splitsec2) (#1050).', page: 'settings' },
-        { title: 'HD artist photos', desc: 'Plex and Jellyfin get a square HD photo and a wide background for each artist from fanart.tv, TheAudioDB and Deezer, matched by id (#1957).', page: 'settings' },
-        { title: 'Per-profile listening', desc: 'A profile linked to its own Jellyfin user gets its own plays and stats, and any profile can scrobble to its own ListenBrainz or Last.fm.', page: 'settings' },
-        { title: 'Editor before the first sync', desc: 'Open editor on a playlist that hasn\'t synced shows what each song will sync as, and lets you swap or pick a version. You can also adopt a server playlist into My Playlists (#1958).', page: 'sync' },
-        { title: 'Wishlist export', desc: 'Export the music or video wishlist as CSV or JSON, all of it or one slice, with a preview first.', page: 'wishlist' },
-        { title: 'Tidal AAC and the Zero-Length AAC Fixer', desc: 'Tidal AAC downloads no longer show 0:00 in Navidrome and Feishin. A new Tools job fixes the ones already in your library, no re-download, every tag kept.', page: 'tools' },
-        { title: 'Imports and downloads', desc: 'Bulk imports keep one artist in one folder (#1953, #1954), the inbox stops timing out (#1955), failed downloads can be cleared without retrying, and a finished usenet job leaves SAB once it\'s imported (thanks @PapaBearDoes, #1970). An approved quarantined playlist song now reaches the server playlist (#1976).', page: 'downloads' },
-        { title: 'Your own watch state', desc: 'A profile linked to its own Plex account keeps its own watched marks and resume points: Continue Watching, Next Up and the detail pages show your own plays, and marking something watched marks it on your own Plex (thanks @PapaBearDoes) (#1941).' },
-        { title: 'Watched Cleanup waits for everyone', desc: 'Once profiles keep their own watch state, a movie is only cleaned up when everyone who watched anything in the last 90 days has watched it, and anyone part way through holds it back.', page: 'tools' },
-        { title: 'Video', desc: 'Manual searches use the title\'s profile and ids, Search now files anime and 4K like the drain, and SABnzbd jobs stop downloading twice on a busy SAB (thanks @PapaBearDoes). Every file shows its audio and subtitle languages, and AniList joins as an anime layer.' },
-        { title: 'Faster everywhere', desc: 'Playlist syncs match about 15x faster and keep their matches across scans, Discover\'s For you builds in 1.6s, startup repairs stop holding the database\'s write lock, and a big wishlist sync backlog no longer stalls every page.' },
-        { title: 'Fixes', desc: 'AIFF and WAV tags read in scans and ISRCs kept (thanks @TaunGadd), album-bundle staging publishes atomically (thanks @SimpleSimonLA), a live version no longer counts as the studio song you own, Plex Home links are admin only in login mode, a database hang that could freeze every page after a while is gone, and "Library upgrade in progress" no longer sits for hours on an upgraded library.' },
-        { title: 'Your back catalogue', desc: 'Discography Refresh set to library walks every artist you have a release by and finds the releases you\'re missing, with Auto add to wishlist like 3.6.1\'s Discography Backfill (thanks @nick2000713, #1972).', page: 'tools' },
-        { title: 'Checked against 3.6.1', desc: 'Library v2 was checked against everything 3.6.1 did and the gaps were closed: reorganize keeps a release\'s MusicBrainz folder suffix, the Songs tab sorts in a fraction of a second, a rematch drops the old guest artists, issues and genre cleanups from before the upgrade carry over, Single/Album Dedup users keep a dedup, and Re-tag\'s Auto Apply turns on again.', page: 'library' },
-        { title: 'Pick a profile when you get a title', desc: 'Get and Manual search have a Profile picker, even for a movie or show that isn\'t in your library yet: the pick judges that search, sticks to its wishlist entries and the title keeps it when it lands. Settings > Quality sets which profile new movies and new shows use (thanks @SeadogsBooty for the idea).' },
-        { title: 'Every rating opens its site', desc: 'A title\'s ratings row links each score to its site and adds IMDb, TMDB, TVDB and Letterboxd, on preview pages too.' },
-        { title: 'Earlier versions', desc: '3.6.1 moved the video side onto React and added 4K libraries, folders that check themselves, the Songs tab and rebuilt daily mixes.' },
+    '3.6.4': [
+        { date: 'November 2026 · 3.6.4' },
+        { title: 'Your own video libraries', desc: 'Make your own movie and TV libraries and pick what goes in each by hand, by rules or by default. Each library has its own quality profile, download sources in order, client category, Prowlarr indexers and automatic search and upgrades, and the same movie can sit in two libraries as two copies. Movies, Wanted and Downloads get a library filter (thanks SeadogsBooty, #2029).' },
+        { title: 'One release ranking', desc: 'Releases are ranked one way everywhere: quality, then custom formats, then tie-breaks. Every search result says why it ranked where it did, and a preferred size setting breaks ties toward the size you want (thanks SeadogsBooty, #2033).' },
+        { title: 'NZB files, not links', desc: 'SABnzbd and NZBGet get the NZB file itself instead of a Prowlarr link, so the client never needs to reach Prowlarr (thanks SeadogsBooty, #2030).' },
+        { title: 'Delete a show or movie for good', desc: 'Admins can delete a whole show or movie from its More menu. Follows, wishlist rows, downloads, requests and repair findings are cleared for every profile so nothing grabs it again, the folder goes to the recycle bin as one entry you can restore, and torrents still seeding stay in your client (thanks PapaBearDoes, #2020).' },
+        { title: 'The right show', desc: 'A grab checks the release is the show you wanted, so Grab season stops taking episodes of a similar series, and the search tries the show\'s English and original names (thanks SeadogsBooty and Thibs, #2027, #2021). A cropped Blu-ray reads as 1080p (thanks Thibs, #2025).' },
+        { title: 'Specials and languages', desc: 'A Monitor Specials setting, specials can be hidden on a show page and left out of a whole-show grab, and search results can be filtered by language.' },
+        { title: 'Own libraries on Navidrome', desc: 'Own-library profiles work on Navidrome 0.58+ through its multi-library support (thanks mirlooun, #2031).', page: 'settings' },
+        { title: 'Redesigned Playlists and Watchlist', desc: 'The Playlists page is built around the covers with one main button and one filter row, and the Watchlist page says where each artist stands and what it found.', page: 'sync' },
+        { title: 'Rotating playlists', desc: 'Turn on Rotating in a playlist\'s Settings and a song it downloaded is removed once it leaves the playlist. Anything you played, favourited, rated or still have in another playlist is kept, and removals wait for your approval unless you turn dry run off (#2039).', page: 'sync' },
+        { title: 'Discography uses the artist\'s profile', desc: 'Download Discography uses the quality profile on the artist\'s watchlist rules, with track, album and artist profiles in the library counting first (thanks Foxxify, #2022).', page: 'library' },
+        { title: 'More', desc: 'Follow a YouTube channel without downloading its new uploads (thanks JuanVqz, #2008), per-artist cleanup checks in Library Health (thanks QT3496, #2004), M3U export for mirrored playlists (thanks TaunGadd), the quarantine badge and length check (thanks lozog, #2001), and empty Plex artist bios filled (thanks Eric-sson, #1993).' },
+        { title: 'Library v2, reviewed five times', desc: 'Everything Library v2 touched was reviewed end to end five times, and every finding was fixed with a test: the 3.6.1 upgrade brings everything over, household members and own libraries stay separate, tags, artwork, repair jobs and downloads behave, and album folders never land at the library root (thanks SeadogsBooty, #2023).', page: 'library' },
+        { title: 'Faster', desc: 'The library pages read their page off indexes, whole-library reports answer from their last result, the integrity report runs as a job, cache health opens in under a second, and startup skips scans it ran every time.' },
+        { title: 'Fixes', desc: 'Release counts stay "X of all" (thanks QT3496, #2012), reorganize keeps the explicit flag (#2009), SoulSync shows up as one Navidrome player (thanks cremonies, #2005), liked music imports with cookies again (thanks jdfrye2, #2013), a scan is no longer flagged as stuck while an own library is still scanning (thanks QT3496, #2036), the Sources tab shows video and audiobook sources as in use (#2026), and video fixes from PapaBearDoes (#2015, #2017, #2018, #2019).' },
+        { title: 'Earlier versions', desc: '3.6.3 was a hot fix for the Library page on big libraries, and 3.6.2 brought Library v2, built by @nick2000713.' },
     ],
 };
 
@@ -3512,53 +3486,23 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: '3.6.3: hot fix',
-        description: 'A fix for the Library page timing out on big libraries in 3.6.2, plus a round of speedups and fixes.',
+        title: '3.6.4: your own video libraries',
+        description: 'Video libraries with their own sources and profiles, one release ranking, delete a show or movie for good, own libraries on Navidrome, redesigned Playlists and Watchlist pages, and five full reviews of everything Library v2 touched.',
         features: [
-            'The Library page loads in a second or two on a big library again, and is warmed after a restart.',
-            'A release SABnzbd or the torrent client fails is blocklisted and replaced by the next one your profile ranks, with a notification only when nothing else could be taken, ranked by the same quality profile (thanks @SeadogsBooty).',
-            'Manual search results can be filtered, sorted and saved as filters, a failed grab shows which release replaced it, and a colon in a title can become " - " in file names (thanks @SeadogsBooty).',
-            'Anime TMDB lumps into one season is split by AniList without a TVDB key, search previews get the anime layer (thanks Thibs), and imported episodes carry their title in the file name.',
-            'Cancel takes a torrent or usenet video download out of the client, and Block and retry failed replaces every failed release at once (thanks c5pie).',
-            'After downloads Plex and Jellyfin scan only the folders that changed (#1978), Jellyfin on localhost stops costing two seconds per connection on Windows, and Discover\'s decades, labels and undiscovered albums are much faster.',
-            'The library upgrade no longer sits paused forever (thanks Skowl), downloaded episodes stop showing as missing (thanks c5pie), and a few failed playlist syncs no longer put a wished song on the week-long retry wait (thanks TheHomeGuy).',
-            'Wishlist sync retries wait their turn, Bandcamp\'s bot check stops marking albums as not found, and audiobook blocklists apply per profile.',
+            'Your own movie and TV libraries, each with its own quality profile, download sources, client category, Prowlarr indexers and automatic search, and the same movie in two libraries as two copies (thanks SeadogsBooty, #2029).',
+            'One release ranking (quality, then custom formats, then tie-breaks), with why on every search result and a preferred size setting (thanks SeadogsBooty, #2033).',
+            'Delete a show or movie and it stays deleted: nothing grabs it again, and the folder goes to the recycle bin as one entry (thanks PapaBearDoes, #2020).',
+            'SABnzbd and NZBGet get the NZB file itself (#2030), a grab checks it has the right show and searches its English and original names (thanks SeadogsBooty and Thibs, #2027, #2021), and a cropped Blu-ray reads as 1080p (#2025).',
+            'Own-library profiles on Navidrome 0.58+ (thanks mirlooun, #2031).',
+            'Every profile can hide what it doesn\'t use, and the Playlists and Watchlist pages are redesigned.',
+            'Rotating playlists: a song a playlist downloaded is removed once it leaves the playlist, unless you played it, favourited it or still have it in another playlist (#2039).',
+            'Download Discography uses the artist\'s quality profile (thanks Foxxify, #2022), YouTube channels can be followed without downloading (thanks JuanVqz), and Library Health has per-artist checks (thanks QT3496).',
+            'Library v2 reviewed end to end five times, every finding fixed with a test, and the library pages, reports and startup much faster on big libraries.',
         ],
     },
     {
-        title: '3.6.2: Library v2',
-        description: 'SoulSync keeps its own library now instead of mirroring your media server. It runs on the same search, download, quality and tagging pipeline, so your watchlist and wishlist work the way they always did, with a lot more on top. Library v2 was built by @nick2000713. Thank you, Nick.',
-        features: [
-            'Watchlist any artist and wishlist any album or single song. Songs you don\'t own are real rows, so you can see what\'s missing.',
-            'Interactive search across every source, with each hit judged against your quality profile before you grab.',
-            'Live download state per row and per album, and one history feed for every artist, album and song.',
-            'Your manual edits are marked as yours and survive refreshes. Re-tag lets you pick per field.',
-            'A song can keep several files, and your quality profile picks the primary one. Album and pressing are separate.',
-            'Delete removes the real files with a preview first. Every Tools job writes to the library and can be scoped to one artist.',
-            'View settings per profile, a library page that works on a phone, and a library per profile that an admin can switch between.',
-            'Your existing library is upgraded on the first start, in the background, with progress shown until it\'s done.',
-        ],
-        usage_note: 'The upgrade runs once on the first start. A copy of database/music_library.db before updating doesn\'t hurt.',
-    },
-    {
-        title: 'Also in 3.6.2',
-        description: 'One artist page for every artist, new media server support and per-profile listening.',
-        features: [
-            'Every artist opens one artist page, and browsing an artist you don\'t have writes nothing. Unmatched files are fingerprinted and matched in the background.',
-            'Music Assistant as a fifth media server (thanks @splitsec2), and HD artist photos and wide backgrounds for Plex and Jellyfin (#1957).',
-            'Per-profile Jellyfin plays and stats, and per-profile ListenBrainz and Last.fm scrobbling.',
-            'Open editor before a playlist\'s first sync (#1958), adopt a server playlist, and export the wishlist as CSV or JSON.',
-            'Tidal AAC no longer shows 0:00, and the Zero-Length AAC Fixer repairs the files you already have.',
-            'Bulk imports keep one artist in one folder (#1953, #1954), the import inbox stops timing out (#1955), and failed downloads clear without retrying (thanks @PapaBearDoes).',
-            'Every profile linked to its own Plex account keeps its own watch state, and Watched Cleanup waits for every active viewer (thanks @PapaBearDoes) (#1941).',
-            'Video: manual searches use the title\'s profile and ids, anime and 4K grabs file correctly, SABnzbd jobs stop downloading twice on a busy SAB (thanks @PapaBearDoes), audio and subtitle languages on every file, and an AniList anime layer.',
-            'Syncs, Discover, the library and the dashboard are much faster on big libraries.',
-            'Fixes from @TaunGadd (AIFF and WAV tags, ISRCs) and @SimpleSimonLA (atomic publish for album-bundle staging).',
-        ],
-    },
-    {
-        title: 'Earlier in 3.6.1',
-        description: 'The video side moved onto React with a new dashboard, calendar, tools and detail pages, plus optional 4K libraries, folders that check themselves, every playlist source importing into SoulSync, a Songs tab and rebuilt daily mixes.',
+        title: 'Earlier in 3.6.3',
+        description: 'A hot fix for the Library page timing out on big libraries, failed downloads replaced by the next release automatically, manual search filters, AniList anime seasons and faster post-download scans.',
         features: [],
     },
 ];
@@ -3918,7 +3862,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // First-launch welcome prompt
         const hasSetup = localStorage.getItem('soulsync_setup');
         const hasDismissed = localStorage.getItem('soulsync_setup_welcome_dismissed');
-        if (!hasSetup && !hasDismissed) {
+        // the flag above is per browser, so a set-up install still greeted
+        // every new browser (and every household member) with "new here?".
+        // the server knows whether setup is done, ask it (#1909)
+        const showWelcomeTip = () => {
             const floatBtn = document.getElementById('helper-float-btn');
             if (floatBtn) {
                 floatBtn.classList.add('first-launch-pulse');
@@ -3942,6 +3889,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }, 12000);
             }
+        };
+        if (!hasSetup && !hasDismissed) {
+            fetch('/api/setup/status')
+                .then(r => (r.ok ? r.json() : null))
+                .then(d => { if (d && d.setup_complete === false) showWelcomeTip(); })
+                .catch(() => { /* no answer, no nag */ });
         }
 
         // What's New badge

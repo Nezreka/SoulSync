@@ -2524,6 +2524,10 @@
     filter: blur(60px) saturate(1.3);
     opacity: 0.22;
     pointer-events: none;
+    /* the fade can't lean on the blur alone: Reduce visual effects turns
+       every filter off, and the art then stopped dead at a hard edge */
+    -webkit-mask-image: linear-gradient(to right, transparent 30%, var(--bg-primary) 60%);
+    mask-image: linear-gradient(to right, transparent 30%, var(--bg-primary) 60%);
 }
 
 .dsc-week-main,

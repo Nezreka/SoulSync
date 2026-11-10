@@ -14,6 +14,14 @@ from core.library2.validation import finding_summary, finding_verified
 from tests.lib2_seed import RowDb
 
 
+@pytest.fixture(autouse=True)
+def _no_cover_art_artist_name_search(monkeypatch):
+    """the cover art job's artist name search talks to real clients"""
+    monkeypatch.setattr('core.repair_jobs.missing_cover_art._artist_art_by_name',
+                        lambda *a, **k: (None, None))
+
+
+
 @pytest.fixture
 def library(tmp_path, monkeypatch):
     path = tmp_path / '07 - Track 7.flac'
@@ -180,6 +188,47 @@ def test_retag_and_organize_previews_share_edition_and_manual_reference(library,
     assert preview['track_number'] == plan['tracks'][0]['track_number'] == (9 if manual else 7)
     assert preview['album_title'] == seen[0]['spotify_album']['name'] == 'Album Deluxe'
     assert path.read_bytes() == before
+
+
+def test_organize_moves_a_track_with_no_number_by_its_title(library):
+    """third #1062 review G08-1: an upgraded track with no number (kept as 0)
+    was refused as "unknown release position" and never moved. 3.6.1 matched
+    the title against the release's tracklist and moved it"""
+    from core.library2.reorganize_plan import plan_album_reorganize
+    db, path, _ = library
+    seen = []
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('UPDATE lib2_tracks SET track_number=0 WHERE id=7')
+        conn.execute('UPDATE lib2_release_tracks SET track_id=NULL WHERE track_id=7')
+
+        def build(context, artist, album, extension, **kwargs):
+            seen.append(context['track_info']['track_number'])
+            return str(path.parent / f"{context['track_info']['track_number']:02d} - Song{extension}"), True
+        plan = plan_album_reorganize(conn, 1, build_final_path_fn=build, transfer_dir=str(path.parent),
+                                     resolve_file_path_fn=lambda p: p)
+    assert plan['tracks'][0]['matched'] and plan['tracks'][0]['track_number'] == 7
+    assert seen == [7]
+
+
+def test_organize_keeps_an_unbound_tracks_own_number(library):
+    """review 4 R4-B-1: a track bound to no edition, whose title the
+    tracklist spells differently, was planned as track 1 though its row
+    holds 7, and renamed "01 - ..." """
+    from core.library2.reorganize_plan import plan_album_reorganize
+    db, path, _ = library
+    seen = []
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute('UPDATE lib2_tracks SET track_number=7 WHERE id=7')
+        conn.execute("UPDATE lib2_tracks SET title='Song (Bonus Mix)' WHERE id=7")
+        conn.execute('UPDATE lib2_release_tracks SET track_id=NULL WHERE track_id=7')
+
+        def build(context, artist, album, extension, **kwargs):
+            seen.append(context['track_info']['track_number'])
+            return str(path.parent / f"{context['track_info']['track_number']:02d} - Song{extension}"), True
+        plan = plan_album_reorganize(conn, 1, build_final_path_fn=build, transfer_dir=str(path.parent),
+                                     resolve_file_path_fn=lambda p: p)
+    assert plan['tracks'][0]['track_number'] == 7
+    assert seen == [7]
 
 
 def test_organize_does_not_guess_an_ambiguous_edition_position(library):
@@ -361,6 +410,8 @@ def test_number_apply_rechecks_manual_override(library):
 
 
 def test_number_scan_retries_after_catalogue_becomes_complete(library, monkeypatch):
+    # this test is about what an inspected album does; the anomaly gate has its own tests
+    monkeypatch.setattr("core.repair_jobs.track_number_repair._album_has_number_anomaly", lambda *_a, **_k: True)
     from core.repair_jobs.base import JobContext
     from core.repair_jobs.track_number_repair import TrackNumberRepairJob
     db, path, cfg = library
@@ -628,3 +679,49 @@ def test_tag_preview_shows_what_the_write_changes_in_a_sibling_file(library):
     # the other file's rows say which file they are about
     assert any(row.get('file_value') == 'Wrong Title' for row in rows)
     assert any(row['field'].endswith('.flac)') and row.get('file_id') for row in rows)
+
+
+def test_a_hand_tagged_albums_other_findings_still_close(library):
+    """review 4 R4-B-8: on a hand-tagged album with tag issues the check
+    returned early, so a fixed track number finding stayed open forever"""
+    db, path, _ = library
+    from database.music_database import MusicDatabase
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS manual_metadata_files (path_key TEXT PRIMARY KEY, "
+                     "file_path TEXT, album_title TEXT, album_artist TEXT)")
+        conn.execute("INSERT INTO manual_metadata_files(path_key, file_path) VALUES(?,?)",
+                     (MusicDatabase.manual_path_key(str(path)), str(path)))
+        conn.execute("INSERT INTO repair_findings(job_id,finding_type,entity_type,entity_id,file_path,title,details_json) "
+                     "VALUES('track_number_repair','track_number_mismatch','track','lib2:7',?,'Wrong number',"
+                     "'{\"current_track_num\":3,\"correct_track_num\":7,\"total_tracks\":13,\"tag_ok\":false,\"disc_ok\":true}')",
+                     (str(path),))
+    observe(library, {**read_tag_snapshot(str(path)), 'title': 'Something the user typed'})
+    with closing(db._get_connection()) as conn:
+        assert conn.execute("SELECT status FROM repair_findings WHERE finding_type='track_number_mismatch'"
+                            ).fetchone()[0] == 'resolved'
+
+
+def test_a_hand_tagged_album_gets_no_retag_findings(library):
+    """third #1062 review G09-2: one hand-tagged file locked its album in
+    3.6.1. the scan filed "Metadata issues" for the other files, and Apply
+    wrote the studio tags over the release the user typed"""
+    db, path, _ = library
+    observe(library, {**read_tag_snapshot(str(path)), 'track_number': 3})
+    with closing(db._get_connection()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM repair_findings WHERE status='pending'").fetchone()[0] == 1
+        sibling = str(path.with_name('08 - Track 8.flac'))
+        conn.execute("INSERT INTO lib2_track_files(track_id,path,format) VALUES(8,?,'flac')", (sibling,))
+        # the user hand-tagged track 8's file
+        from database.music_database import MusicDatabase
+        conn.execute("CREATE TABLE IF NOT EXISTS manual_metadata_files (path_key TEXT PRIMARY KEY, "
+                     "file_path TEXT, album_title TEXT, album_artist TEXT)")
+        conn.execute("INSERT INTO manual_metadata_files(path_key, file_path) VALUES(?,?)",
+                     (MusicDatabase.manual_path_key(sibling), sibling))
+        conn.commit()
+
+    observe(library, {**read_tag_snapshot(str(path)), 'track_number': 4})
+
+    with closing(db._get_connection()) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM repair_findings WHERE status='pending'").fetchone()[0] == 0
+    from core.library2.retag import repair_field_protection
+    assert repair_field_protection(db, str(path), {'title': 'Studio'}, track_id=7) == {}

@@ -9,10 +9,11 @@ import {
 import { InteractiveSearchModal } from './interactive-search';
 
 /**
- * The library's Interactive Search, opened from outside the library (the
- * wishlist, a failed download). One window for the whole app: anything linked
- * to a library track gets the same search the library uses; the rest falls
- * back to the candidate inspector.
+ * The library's Interactive Search, opened from the wishlist. A row linked to
+ * a library track gets the search the library uses when this profile may grab
+ * from it (the admin, or a profile in a library of its own); everyone else,
+ * and every row without a library track, gets the wishlist inspector, which
+ * only needs download permission (3.6.1).
  */
 
 interface LibrarySearchTarget {
@@ -36,14 +37,23 @@ function closeLibrarySearch() {
   for (const listener of listeners) listener();
 }
 
-export function openWishlistSearch(track: {
+async function mayGrabFromLibrarySearch(): Promise<boolean> {
+  try {
+    const payload = await readJson<{ can_grab?: boolean }>(apiClient.get('library/v2/enabled'));
+    return payload.can_grab === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function openWishlistSearch(track: {
   id: string;
   track: string;
   artist: string;
   album: string;
   lib2TrackId?: number;
-}): void {
-  if (!track.lib2TrackId) {
+}): Promise<void> {
+  if (!track.lib2TrackId || !(await mayGrabFromLibrarySearch())) {
     openWishlistInspector({
       id: track.id,
       name: track.track,
@@ -55,29 +65,15 @@ export function openWishlistSearch(track: {
   openLibrarySearch({ trackId: track.lib2TrackId, label: `${track.artist} ${track.track}` });
 }
 
-/** A failed or not-found download: the library search when the task is for a
- *  library track, the inspector otherwise. */
+/** A failed or not-found download: its own task inspector, always. Its pick
+ *  retries that task inside its batch (playlist folder, batch totals, the
+ *  wishlist cleanup tied to it); a grab from the library search was a
+ *  separate download the batch never saw (3.6.1 opened the inspector). */
 export async function openDownloadTaskSearch(
   taskId: string,
   track: { name?: string; artist?: string; album?: string },
 ): Promise<void> {
-  let trackId: number | null = null;
-  try {
-    const payload = await readJson<{ track_id?: number | null }>(
-      apiClient.get(`downloads/task/${encodeURIComponent(taskId)}/library-track`),
-    );
-    trackId = payload.track_id ?? null;
-  } catch {
-    // an unknown or finished task still gets the inspector
-  }
-  if (!trackId) {
-    openDownloadTaskInspector(taskId, track);
-    return;
-  }
-  openLibrarySearch({
-    trackId,
-    label: [track.artist, track.name].filter(Boolean).join(' '),
-  });
+  openDownloadTaskInspector(taskId, track);
 }
 
 /** Render once inside the app's providers. */

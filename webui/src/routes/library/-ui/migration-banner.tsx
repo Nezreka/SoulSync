@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   LIBRARY_V2_QUERY_KEY,
+  libraryV2EnabledQueryOptions,
   libraryV2ImportStatusQueryOptions,
   startLibraryV2Import,
 } from '../-library-v2.api';
@@ -40,6 +41,9 @@ export function MigrationBanner() {
         ? 30_000
         : false,
   });
+  // G15-7: only the admin can restart it; anyone else got a button that did nothing
+  const access = useQuery(libraryV2EnabledQueryOptions());
+  const canRetry = access.data?.canWrite === true;
   const retry = useMutation({
     mutationFn: () => startLibraryV2Import(false, false),
     onSettled: () =>
@@ -100,7 +104,12 @@ export function MigrationBanner() {
           </span>
         ) : null}
       </span>
-      {failed ? (
+      {failed && retry.isError ? (
+        <span className={styles.detail}>
+          {retry.error instanceof Error ? retry.error.message : 'Retry failed'}
+        </span>
+      ) : null}
+      {failed && canRetry ? (
         <button
           type="button"
           className={styles.action}
@@ -109,6 +118,8 @@ export function MigrationBanner() {
         >
           {retry.isPending ? 'Retrying…' : 'Retry now'}
         </button>
+      ) : failed && access.data ? (
+        <span className={styles.detail}>Ask an admin to retry it.</span>
       ) : null}
     </div>
   );

@@ -156,6 +156,8 @@ Retagging is now part of the **Tools** page findings workflow. When a repair sca
 
 The retag operation writes title, artist, album artist, album, track number, disc number, year, and genre. Cover art can optionally be re-embedded.
 
+From an artist or album page, **Write Tags** previews the same diff. With Plex or Jellyfin as your server, tick **Sync to Plex** / **Sync to Jellyfin** to push the new title, artist, album and year to Plex right away (Jellyfin gets a library scan). Navidrome reads tag changes on its own.
+
 ![Retag tool interface](dash-retag.jpg)
 
 > [!TIP]
@@ -233,9 +235,9 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Cache Maintenance | Cleans expired metadata cache entries |
 | Corrupt File Detector | Decode-tests every library FLAC (\`flac -t\`, falling back to ffmpeg) and flags physically damaged files — the only cure is a fresh download |
 | Comma Artist Splitter | Finds dummy artists that are really several artists joined by separators ("Camellia, Toby Fox") and splits their tags — verifies against metadata APIs first so real separator-named acts like "Tyler, The Creator" are never split |
-| Monitoring List Reconcile | Reconciles monitored artists with the Watchlist and missing or upgrade-eligible tracks with the Wishlist |
+| Watchlist & Wishlist Reconcile | Reconciles monitored artists with the Watchlist and missing or upgrade-eligible tracks with the Wishlist |
 | Empty Folder Cleaner | Finds truly-empty folders (or folders holding only OS junk like .DS_Store) in the library root — never touches a folder containing audio or cover art |
-| Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete) |
+| Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete). Also cleans up after **Rotating** playlists: a song the playlist downloaded goes once it has left the playlist, with no retention window |
 | Genre Tag Cleanup | Re-applies the strict genre whitelist to genres stored before it was enabled — one finding per artist/album with off-whitelist genres |
 | Genre Enrichment | Adds conservatively translated genres from stored metadata and caches |
 | Library Re-tag | Rewrites tags + cover art from a fresh metadata-source pull, in place (no moves, renames, or re-matching) — dry-run findings show old → new for every track |
@@ -245,12 +247,16 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | ReplayGain Filler | Finds tracks with no ReplayGain loudness tag, analyzes them, and writes the tags |
 | Zero-Length AAC Fixer | Finds AAC files that play but show 0:00 and can't seek (Tidal AAC saved by older versions), and fixes them in place: the audio is copied, not re-encoded, and every tag is kept. Fix All does the whole library; rescan your media server after |
 | Preview Clip Cleanup | Detects ~30s preview clips (some sources deliver samples instead of full songs), compares against the expected length from the metadata source, and re-fetches the full track |
-| Discography Backfill | Walks every artist you own a release by, fetches their full discography and files a finding for each song you don't have (Add to Wishlist on each, or turn on auto add). Release types, live/remix/acoustic/compilation/instrumental filters, and a per-run artist limit that rotates through the library |
-| Watchlist Discography Refresh | Re-fetches watchlist artists' discographies so new releases go on the Wishlist |
+| Discography Refresh | Re-fetches watchlist artists' discographies so new releases go on the Wishlist. With **Artists** set to library it also walks every artist you own a release by (the old Discography Backfill) and files a finding for each release you don't have (Add to Wishlist on each, or turn on auto add) |
 | Album Completeness | Finds albums you mostly own and wishlists the missing tracks (Fill Album). A song you already have on its single is never downloaded again |
-| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's |
+| Duplicate Detector | Groups copies of the same song and recommends one to keep: playlist copies first, then your manual pick, then the best quality. Between two copies of the same quality the album's copy is kept over the single's. It also finds a release listed twice (once per media server): **auto merge catalogue** merges the pairs it can prove are the same release and leaves the rest for you |
+| Quality Profile Audit | Flags library tracks below their quality profile, including ones not on the Wishlist. You decide per finding: **Wishlist & Upgrade**, or leave it. Changes nothing on its own |
+| Fix Unknown Artists | Finds tracks tagged "Unknown Artist", resolves the correct artist/album/track from file tags or the metadata API, then re-tags, moves the file to the correct folder, and updates the database |
+| Album Edition Review | Suggests the release edition that best matches the tracks you own |
 
-Library v2 handles catalogue identity and wanted quality upgrades directly. The retired Quality Upgrade Finder and Quality Check jobs are not offered, and Single/Album Dedup lives on as the Duplicate Detector's album-first keeper. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Monitoring List Reconcile**; there is no **Apply Quality Upgrades** automation action.
+Library v2 handles catalogue identity and wanted quality upgrades directly. Quality Check is now **Quality Profile Audit** (a weekly Quality Check keeps its schedule there), the Quality Upgrade Finder is retired, and Single/Album Dedup lives on as the Duplicate Detector's album-first keeper. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Watchlist & Wishlist Reconcile**; there is no **Apply Quality Upgrades** automation action.
+
+An upgrade from 3.6.1 merges each release your older media servers listed twice into one, once, right after the import (only pairs it can prove are the same release; your files and each server's link stay). Anything it can't prove waits in the Duplicate Detector.
 
 > [!WARNING]
 > **Mass orphan safety:** when the orphan detector's mass-orphan guard trips (over half the scanned files look like orphans — usually a DB↔filesystem path mismatch, not real orphans), the scan refuses to create any findings at all, so there's nothing to bulk-delete. The **"Witness Me"** type-the-phrase confirmation exists for bulk orphan deletes, but it can't trigger while the guard refuses findings.
@@ -695,6 +701,7 @@ The **\<Server\> Metadata Updater** card (e.g. "Plex Metadata Updater") is shown
 - **Artist photo**: a big square photo for artists without one. fanart.tv first, then TheAudioDB, then Deezer, with Spotify's 640px photo as the last resort.
 - **Artist background**: the wide picture Plexamp and the Plex web app (and Jellyfin's backdrop) show behind an artist page, for artists without one. From fanart.tv, then TheAudioDB.
 - Genres from your library, and on Plex, album art.
+- **Biography** (Plex only): an artist with an empty summary gets the Last.fm bio your library already has. A summary with any text in it is left alone.
 
 Pictures are tied to the artist by its MusicBrainz or Deezer id (TheAudioDB by name only on an exact match), so a namesake's photo never lands on the wrong artist, and art the server already has is never replaced. fanart.tv needs a free key: **Settings → Connections → fanart.tv** (the video side's fanart.tv key is used when that's empty). Spotify is optional.
 

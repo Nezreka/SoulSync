@@ -20,7 +20,7 @@
 
 /* ── Destinations (the four .pl-export-choice buttons, 669-684) ───────────── */
 
-export type ExportMode = 'push' | 'download' | 'spotify' | 'deezer';
+export type ExportMode = 'push' | 'download' | 'spotify' | 'deezer' | 'm3u';
 
 export interface ExportDestination {
   mode: ExportMode;
@@ -31,6 +31,12 @@ export interface ExportDestination {
 }
 
 export const EXPORT_DESTINATIONS: readonly ExportDestination[] = [
+  {
+    mode: 'm3u',
+    title: 'Download .m3u file',
+    detail:
+      'Export local library file paths. No media server needed; unavailable tracks are marked as missing.',
+  },
   {
     mode: 'push',
     title: 'Sync to ListenBrainz',

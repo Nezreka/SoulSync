@@ -222,3 +222,22 @@ def test_unassigned_track_preserves_live_default_pointer(
     details = findings[0]["details"]
     assert details["quality_profile_id"] is None
     assert details["quality_profile_name"] == "Current Default"
+
+
+def test_a_file_the_library_never_imported_is_left_alone(tmp_path: Path):
+    """3.6.1 converted library tracks. v2 also walked the disk and converted
+    loose files the library never imported, deleting the original when the
+    profile said so. a loose file is the orphan detector's and import's."""
+    tracked = tmp_path / "Artist" / "Album" / "01 - Song.flac"
+    tracked.parent.mkdir(parents=True)
+    tracked.write_bytes(b"x")
+    loose = tmp_path / "loose" / "Unimported.flac"
+    loose.parent.mkdir()
+    loose.write_bytes(b"x")
+    ctx, findings, _ = _context([_row(1, "Song", str(tracked))], tmp_path)
+
+    LossyConverterJob().scan(ctx)
+
+    paths = {f.get("file_path") for f in findings}
+    assert str(tracked) in paths
+    assert str(loose) not in paths

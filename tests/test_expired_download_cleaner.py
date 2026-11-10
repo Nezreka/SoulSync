@@ -131,6 +131,17 @@ def test_scan_creates_findings_for_expired():
     assert findings[0]['finding_type'] == 'expired_download'
 
 
+def test_an_expired_finding_is_filed_as_a_download_not_a_track():
+    """third #1062 review G08-3: the id is a download-history id; as a
+    'track' the finding annotation read it as a 3.6.1 track id"""
+    db = _DB([_cand(1, created=OLD, play_count=0)])
+    findings = []
+    ExpiredDownloadCleanerJob().scan(_ctx(
+        db, {'playlist_retention': '2mo', 'keep_if_played_at_least': 2}, findings))
+    assert findings[0]['entity_type'] == 'download'
+    assert findings[0]['entity_id'] == '1'
+
+
 def test_scan_protects_actively_mirrored_playlist():
     # track still in the mirror's current track list → protected by
     # membership, not merely by the playlist name.
@@ -471,3 +482,24 @@ def test_a_playlist_synced_long_ago_ages_out_once_history_forgets_it():
     findings = []
     ExpiredDownloadCleanerJob().scan(_ctx(db, {'playlist_retention': '1w'}, findings))
     assert len(findings) == 1
+
+
+def test_a_finding_filed_as_a_track_before_the_fix_becomes_a_download(tmp_path):
+    """review 4 R4-C-4: findings filed before G08-3 kept entity_type 'track'
+    (the pending refresh never touches it), so fixing one recomputed the
+    unrelated track its download-history id happened to name"""
+    import sqlite3
+    path = str(tmp_path / "f.db")
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE repair_findings(id INTEGER PRIMARY KEY, finding_type TEXT, entity_type TEXT)")
+    conn.execute("INSERT INTO repair_findings(finding_type, entity_type) VALUES('expired_download','track')")
+    conn.execute("INSERT INTO repair_findings(finding_type, entity_type) VALUES('missing_file','track')")
+    conn.commit()
+    conn.close()
+    db = _DB([])
+    db._get_connection = lambda: sqlite3.connect(path)
+    ExpiredDownloadCleanerJob().scan(_ctx(db, {}, []))
+    conn = sqlite3.connect(path)
+    got = dict(conn.execute("SELECT finding_type, entity_type FROM repair_findings"))
+    conn.close()
+    assert got == {"expired_download": "download", "missing_file": "track"}

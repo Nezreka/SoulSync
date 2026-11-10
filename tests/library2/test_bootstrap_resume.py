@@ -22,7 +22,7 @@ from contextlib import closing
 import pytest
 
 from core.library2 import bootstrap as lib2_bootstrap
-from core.library2.importer import ResumePoint, import_legacy_library
+from core.library2.importer import FINALIZE_STAGE, ResumePoint, import_legacy_library
 
 
 def _enabled(_key, _default=None):
@@ -77,6 +77,14 @@ def _clear_lib2_durations(db):
     with closing(db._get_connection()) as conn:
         conn.execute("UPDATE lib2_tracks SET duration=NULL")
         conn.commit()
+
+
+def _rowid_of(db, legacy_id):
+    """the walk checkpoints by the legacy table's own rowid. 3.6.1's ids are
+    TEXT, so a track's rowid is not its id (the fixture has the real shape)"""
+    with closing(db._get_connection()) as conn:
+        return int(conn.execute("SELECT rowid FROM tracks WHERE id=?",
+                                (str(legacy_id),)).fetchone()[0])
 
 
 def _set_legacy_duration(db, track_id, duration):
@@ -186,7 +194,7 @@ def test_resume_continues_the_walk_after_the_checkpoint_rowid(legacy_db):
 
     import_legacy_library(
         legacy_db,
-        resume=ResumePoint(stage="tracks", rowid=100, run_id=first.run_id),
+        resume=ResumePoint(stage="tracks", rowid=_rowid_of(legacy_db, 100), run_id=first.run_id),
     )
 
     assert _duration_of_legacy_track(legacy_db, 100) is None
@@ -201,7 +209,7 @@ def test_resume_reports_absolute_progress(legacy_db):
     import_legacy_library(
         legacy_db,
         progress=resumed,
-        resume=ResumePoint(stage="tracks", rowid=100, run_id=first.run_id),
+        resume=ResumePoint(stage="tracks", rowid=_rowid_of(legacy_db, 100), run_id=first.run_id),
     )
 
     track_calls = [call for call in resumed.calls if call["stage"] == "tracks"]
@@ -221,7 +229,7 @@ def test_reset_ignores_a_resume_point(legacy_db):
         legacy_db,
         reset=True,
         progress=rebuilt,
-        resume=ResumePoint(stage="tracks", rowid=100, run_id=first.run_id),
+        resume=ResumePoint(stage="tracks", rowid=_rowid_of(legacy_db, 100), run_id=first.run_id),
     )
 
     assert "artists" in rebuilt.stages
@@ -335,6 +343,54 @@ def test_run_bootstrap_resumes_a_crashed_attempt(legacy_db, monkeypatch):
 
     assert result["success"] is True
     assert seen["resume"] == ResumePoint(stage="tracks", rowid=101, run_id="run-abc")
+
+
+def test_resume_clears_the_text_numbers_an_attempt_wrote_before_it_stopped(legacy_db):
+    """#1989: the walk had already written them, a resume doesn't visit those
+    rows again, and the finalize reads the counts with int(). The retry after
+    the update would have stopped there instead."""
+    spy = _ProgressSpy()
+    import_legacy_library(legacy_db, progress=spy)
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET track_count='N/A', expected_track_count='N/A', "
+                     "year='N/A', art_locked='N/A'")
+        conn.execute("UPDATE lib2_tracks SET duration='3:45', track_number='1/12', "
+                     "disc_number='N/A', play_count='N/A'")
+        conn.execute("UPDATE lib2_track_files SET bitrate='320kbps'")
+        conn.commit()
+
+    import_legacy_library(
+        legacy_db, progress=_ProgressSpy(),
+        resume=ResumePoint(stage=FINALIZE_STAGE, rowid=0, run_id=spy.run_id),
+    )
+
+    with closing(legacy_db._get_connection()) as conn:
+        for table, column in (("lib2_albums", "track_count"), ("lib2_albums", "year"),
+                              ("lib2_tracks", "duration"), ("lib2_tracks", "track_number"),
+                              ("lib2_track_files", "bitrate")):
+            assert conn.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE typeof({column})='text'").fetchone()[0] == 0
+        assert conn.execute("SELECT MIN(art_locked) FROM lib2_albums").fetchone()[0] == 0
+        assert tuple(conn.execute("SELECT MIN(disc_number), MIN(play_count) FROM lib2_tracks"
+                                  ).fetchone()) == (1, 0)
+
+
+def test_failed_migration_runs_again_on_the_next_start_and_finishes(legacy_db, monkeypatch):
+    """What an update does for someone stuck on #1989: nothing to click, the new
+    process sees the failed state and the import runs again."""
+    def stopped(*_args, **_kwargs):
+        raise TypeError("'<=' not supported between instances of 'str' and 'int'")
+
+    monkeypatch.setattr(lib2_bootstrap, "_import_legacy_library", stopped)
+    assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)["success"] is False
+    assert lib2_bootstrap.get_state(legacy_db)["status"] == "failed"
+    monkeypatch.undo()
+
+    assert lib2_bootstrap.run_bootstrap_if_needed(legacy_db, _enabled)["success"] is True
+    state = lib2_bootstrap.get_state(legacy_db)
+    assert state["status"] == "done"
+    assert state["last_error"] is None
+    assert _counts(legacy_db)["lib2_albums"] == 2
 
 
 def test_run_bootstrap_starts_clean_when_the_source_changed_since_the_crash(

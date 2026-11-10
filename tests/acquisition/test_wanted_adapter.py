@@ -148,3 +148,27 @@ def test_non_admin_projection_is_rejected(legacy_db):
             raise AssertionError("non-admin wanted request unexpectedly accepted")
     finally:
         conn.close()
+
+
+def test_a_household_members_copy_does_not_satisfy_the_admins_want(legacy_db, monkeypatch):
+    """third #1062 review G04-5: the admin's wants are the shared library's.
+    a member's own copy of the track dropped the admin's want silently"""
+    from core import library_scope
+    monkeypatch.setattr(library_scope, "any_own_library_exists", lambda: True)
+    conn, track_id = _wanted_missing_track(legacy_db)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(lib2_track_files)")}
+        assert "owner_profile_id" in cols
+        conn.execute("INSERT INTO lib2_track_files(track_id, path, owner_profile_id) VALUES(?, ?, 2)",
+                     (track_id, "/members/2/song.flac"))
+        conn.commit()
+        results = materialize_wanted_requests(conn, track_ids=[track_id])
+        assert [r.track_id for r in results] == [track_id]
+
+        # a shared copy does satisfy it
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)",
+                     (track_id, "/music/song.flac"))
+        conn.commit()
+        assert materialize_wanted_requests(conn, track_ids=[track_id]) == ()
+    finally:
+        conn.close()

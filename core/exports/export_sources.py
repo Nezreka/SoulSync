@@ -499,18 +499,23 @@ def mbid_flagged_by_repair_finding(track_id: Optional[str], file_path: Optional[
         conn = db._get_connection()
         try:
             cur = conn.cursor()
+            # the detector files the track as 'lib2:<id>'; the export knows the
+            # bare id, so the id half never matched and a flagged second copy
+            # of the track slipped through (review 5 R5-D-2)
+            bare = str(track_id) if track_id is not None else None
+            prefixed = f"lib2:{bare}" if bare is not None and not bare.startswith("lib2:") else bare
             if file_path:
                 cur.execute(
                     "SELECT 1 FROM repair_findings WHERE finding_type = 'mbid_mismatch' "
                     "AND status = 'pending' AND "
-                    "((entity_type = 'track' AND entity_id = ?) OR file_path = ?) LIMIT 1",
-                    (str(track_id) if track_id is not None else None, file_path),
+                    "((entity_type = 'track' AND entity_id IN (?, ?)) OR file_path = ?) LIMIT 1",
+                    (bare, prefixed, file_path),
                 )
             else:
                 cur.execute(
                     "SELECT 1 FROM repair_findings WHERE finding_type = 'mbid_mismatch' "
-                    "AND status = 'pending' AND entity_type = 'track' AND entity_id = ? LIMIT 1",
-                    (str(track_id),),
+                    "AND status = 'pending' AND entity_type = 'track' AND entity_id IN (?, ?) LIMIT 1",
+                    (bare, prefixed),
                 )
             return cur.fetchone() is not None
         finally:

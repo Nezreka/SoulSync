@@ -262,7 +262,10 @@ def test_an_inner_failure_also_releases_the_temporary_batch_context(monkeypatch)
     assert '_owning_batch_id' not in context
 
 
-def test_adoption_does_not_clear_an_album_tag_disabled_in_settings(tmp_path, monkeypatch):
+def test_adoption_drops_a_wrong_release_tag_even_when_its_embed_is_off(tmp_path, monkeypatch):
+    """331918d94: embed off means don't write the album's barcode, not keep
+    the single's barcode on a track that joined the album (it names the
+    wrong release)"""
     from types import SimpleNamespace
     folder = _folder_with_siblings(tmp_path)
     new = folder / '11.flac'
@@ -270,5 +273,5 @@ def test_adoption_does_not_clear_an_album_tag_disabled_in_settings(tmp_path, mon
     monkeypatch.setattr('core.metadata.common.get_config_manager',
                         lambda: SimpleNamespace(get=lambda key, default=None: False if key == 'musicbrainz.tags.barcode' else default))
     ac.adopt_sibling_tags_for_loose_tracks([{'path': str(new)}])
-    assert FLAC(str(new))['barcode'] == ['6417']
+    assert 'barcode' not in FLAC(str(new))
     assert FLAC(str(new))['musicbrainz_albumid'] == [OURS]

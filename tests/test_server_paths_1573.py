@@ -264,3 +264,20 @@ def test_mapping_schema_upgrade_keeps_existing_identities(tmp_path):
     ensure_media_mapping_schema(conn)
     assert tuple(conn.execute('SELECT server_id, server_path FROM lib2_media_server_mappings').fetchone()) == ('nd-old', None)
     conn.close()
+
+
+def test_a_namespace_that_never_resolves_stops_probing(tmp_path, monkeypatch):
+    """3.6.1 stopped after a run of misses. v2 kept the cheap probes going
+    for every track of an unmounted library: stats per root per track."""
+    from core.library import path_resolver
+    calls = []
+    monkeypatch.setattr(path_resolver, 'resolve_library_file_path',
+                        lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(server_paths, '_STOP_AFTER', 30)
+    config = _Config([str(tmp_path)])
+    for i in range(60):
+        assert server_paths.local_path_for(f'/nas/A/B/{i}.flac', config) is None
+    assert len(calls) == 30
+    # another namespace still gets its own budget
+    server_paths.local_path_for('/other/A/B/x.flac', config)
+    assert len(calls) == 31

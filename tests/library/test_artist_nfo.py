@@ -403,6 +403,26 @@ class TestArtistNfoBackfillJob:
         assert len(rows) == 1
         assert rows[0][1] == "Mammoth" and rows[0][2] == MBID
 
+    def test_candidates_include_an_alias_artists_folder(self, tmp_path, monkeypatch):
+        """3.6.1 gave every artist row its nfo. v2 skipped alias rows (a
+        second spelling merged under a canonical artist), so the folder filed
+        under that spelling never got one."""
+        from core.repair_jobs.artist_nfo_backfill import ArtistNfoBackfillJob
+        from database.music_database import MusicDatabase
+        from tests import lib2_seed
+        db = MusicDatabase(str(tmp_path / "alias.db"))
+        with db._get_connection() as conn:
+            canonical = lib2_seed.artist(conn, 'Mammoth WVH', musicbrainz_id=MBID)
+            lib2_seed.track(conn, 'Mammoth WVH', 'Mammoth II', 'A', path='/m/Mammoth WVH/II/01.mp3')
+            alias = lib2_seed.artist(conn, 'Mammoth', canonical_artist_id=canonical)
+            lib2_seed.track(conn, 'Mammoth', 'Mammoth', 'B', path='/m/Mammoth/I/01.mp3')
+            conn.commit()
+        rows = ArtistNfoBackfillJob()._candidates(self._context(db, tmp_path))
+        by_name = {r[1]: (r[2], r[3]) for r in rows}
+        assert by_name['Mammoth'] == (MBID, '/m/Mammoth/I/01.mp3')
+        assert by_name['Mammoth WVH'][0] == MBID
+        assert alias != canonical
+
     def test_backfill_uses_db_mbid_when_tags_lack_it(self, tmp_path, monkeypatch):
         """Files predating MB tag embedding: the DB row's musicbrainz_id
         backfills them (this is the backfill's core audience)."""

@@ -282,6 +282,7 @@ class AudioCorruptionDetectorJob(RepairJob):
         cutoff_mtime = (time.time() - within_days * 86400) if within_days > 0 else None
 
         rows = []
+        enumeration_failed = False
         try:
             from core.library2.maintenance_subjects import active_file_subjects
 
@@ -297,7 +298,12 @@ class AudioCorruptionDetectorJob(RepairJob):
                     'subject': subject,
                 })
         except Exception as e:
-            logger.warning("[Corrupt File Detector] V2 subject enumeration failed: %s", e)
+            # 3.6.1 counted this as an error. the walk below still runs, but
+            # the run never saw the catalogue, so it isn't a full pass
+            logger.error("[Corrupt File Detector] V2 subject enumeration failed: %s", e,
+                         exc_info=True)
+            result.errors += 1
+            enumeration_failed = True
         from core.repair_jobs.filesystem_subjects import filesystem_audio_files
 
         for file_path in filesystem_audio_files(
@@ -327,13 +333,14 @@ class AudioCorruptionDetectorJob(RepairJob):
         memory = _IntegrityMemory.open(context.db)
         try:
             return self._scan_files(context, result, rows, total, cutoff_mtime,
-                                    recheck_days, workers, memory)
+                                    recheck_days, workers, memory,
+                                    full_pass=not enumeration_failed)
         finally:
             if memory:
                 memory.close()
 
     def _scan_files(self, context, result, rows, total, cutoff_mtime,
-                    recheck_days, workers, memory) -> JobResult:
+                    recheck_days, workers, memory, full_pass=True) -> JobResult:
         remembered_rows = memory.load() if memory else {}
 
         # Pass 1, cheap: resolve, stat, and decide what actually needs a decode.
@@ -428,7 +435,7 @@ class AudioCorruptionDetectorJob(RepairJob):
         # Nor when the run saw one library or one artist: the files it did not
         # see are still there.
         if (memory and not stopped and cutoff_mtime is None and unresolved * 100 <= total
-                and _whole_library(context)):
+                and full_pass and _whole_library(context)):
             memory.prune(seen_paths, remembered_rows)
         if stopped:
             return result

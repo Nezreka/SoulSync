@@ -43,7 +43,7 @@ describe('the ring — what a healthy card does NOT show', () => {
     // A ring on every card is forty of them announcing nothing is wrong.
     const { container } = renderCard({ total_count: 140, discovered_count: 140 });
     expect(container.querySelector('.pl-ring')).toBeNull();
-    expect(container.querySelector('.pl-card')?.getAttribute('data-state')).toBe('ok');
+    expect(container.querySelector('.plc')?.getAttribute('data-state')).toBe('ok');
   });
 
   it('a never-touched playlist also gets no ring', () => {
@@ -51,30 +51,39 @@ describe('the ring — what a healthy card does NOT show', () => {
     expect(container.querySelector('.pl-ring')).toBeNull();
   });
 
-  it('a short playlist rings with its coverage', () => {
+  it('a short playlist says how short, in the warning tone, with no ring', () => {
     const { container } = renderCard({ total_count: 86, discovered_count: 62 });
-    const ring = container.querySelector('.pl-ring') as HTMLElement;
-    expect(ring).not.toBeNull();
-    expect(ring.getAttribute('data-pct')).toBe('72%');
-    expect(ring.className).toContain('pl-ring--short');
-    expect(ring.style.getPropertyValue('--pct')).toBe('72');
+    expect(container.querySelector('.pl-ring')).toBeNull();
+    expect(container.querySelector('.plc')?.getAttribute('data-state')).toBe('short');
+    expect(container.querySelector('.plc-status')?.textContent).toBe('86 tracks · 24 not found');
   });
 
-  it('a failed run rings in the error tone', () => {
+  it('a failed run says so on its status line', () => {
     const { container } = renderCard({ pipeline_state: { status: 'error' } });
-    expect(container.querySelector('.pl-ring--error')).not.toBeNull();
+    expect(container.querySelector('.plc-status')?.textContent).toContain('Last run failed');
   });
 
-  it('a run in flight rings in the working tone', () => {
-    const { container } = renderCard({ pipeline_state: { status: 'running' } });
-    expect(container.querySelector('.pl-ring--working')).not.toBeNull();
-  });
-
-  it('describes itself to assistive tech, since the arc is visual only', () => {
-    const { container } = renderCard({ total_count: 10, discovered_count: 5 });
-    expect(container.querySelector('.pl-ring')?.getAttribute('aria-label')).toBe(
-      '50% of tracks discovered',
+  it('a run in flight shows its progress along the cover', () => {
+    const r = row({ pipeline_state: { status: 'running', phase: 'Discovering' } });
+    const { container } = render(
+      <PlaylistCard
+        row={r}
+        name="Road Trip"
+        when="x"
+        schedule="Every 6 hours"
+        onOpen={vi.fn()}
+        onMore={vi.fn()}
+        progress={42}
+      />,
     );
+    const bar = container.querySelector('.pl-card-progress') as HTMLElement;
+    expect(bar.getAttribute('aria-valuenow')).toBe('42');
+    expect(container.querySelector('.plc-status')?.textContent).toBe('140 tracks · discovering');
+  });
+
+  it('a resting card carries no progress bar', () => {
+    const { container } = renderCard({ total_count: 10, discovered_count: 5 });
+    expect(container.querySelector('.pl-card-progress')).toBeNull();
   });
 });
 
@@ -124,14 +133,14 @@ describe('the primary action', () => {
 
   it('fires without also opening the card behind it', () => {
     const { container, onClick, onOpen } = renderCard({ total_count: 10, discovered_count: 4 });
-    fireEvent.click(container.querySelector('.pl-card-fix') as HTMLElement);
+    fireEvent.click(container.querySelector('.plc-primary') as HTMLElement);
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(onOpen).not.toHaveBeenCalled();
   });
 
   it('the overflow trigger does not open the card either', () => {
     const { container, onMore, onOpen } = renderCard();
-    fireEvent.click(container.querySelector('.pl-card-more') as HTMLElement);
+    fireEvent.click(container.querySelector('.plc-more') as HTMLElement);
     expect(onMore).toHaveBeenCalledTimes(1);
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -140,18 +149,19 @@ describe('the primary action', () => {
 describe('the card body', () => {
   it('opens from a click and from the keyboard', () => {
     const { container, onOpen } = renderCard();
-    fireEvent.click(container.querySelector('.pl-card') as HTMLElement);
+    fireEvent.click(container.querySelector('.plc') as HTMLElement);
     expect(onOpen).toHaveBeenCalledTimes(1);
-    fireEvent.keyDown(container.querySelector('.pl-card') as HTMLElement, { key: 'Enter' });
+    fireEvent.keyDown(container.querySelector('.plc') as HTMLElement, { key: 'Enter' });
     expect(onOpen).toHaveBeenCalledTimes(2);
   });
 
-  it('shows the source brand mark beside the name, and the schedule', () => {
+  it('falls back to the source brand mark on the cover, and shows the schedule', () => {
     const { container } = renderCard();
-    expect(container.querySelector('.pl-card-name .spotify-icon')).not.toBeNull();
+    // the brand mark is the cover's fallback when there is no art
+    expect(container.querySelector('.pl-card-art-img .spotify-icon')).not.toBeNull();
     // With no onSchedule the pill is inert, and says so rather than claiming
     // "Not scheduled" — which would imply you could schedule it.
-    expect(container.querySelector('.pl-card-pill--inert')?.textContent).toBe(
+    expect(container.querySelector('.plc-schedule--inert')?.textContent).toBe(
       'Can\u2019t be scheduled',
     );
   });
@@ -171,7 +181,7 @@ describe('the card body', () => {
         onSchedule={onSchedule}
       />,
     );
-    const pill = container.querySelector('.pl-card-pill') as HTMLElement;
+    const pill = container.querySelector('.plc-schedule') as HTMLElement;
     expect(pill.tagName).toBe('BUTTON');
     expect(pill.textContent).toBe('Every 6 hours');
   });
@@ -194,7 +204,7 @@ describe('the card body', () => {
         onSchedule={onSchedule}
       />,
     );
-    fireEvent.click(container.querySelector('.pl-card-pill') as HTMLElement);
+    fireEvent.click(container.querySelector('.plc-schedule') as HTMLElement);
     expect(onSchedule).toHaveBeenCalledTimes(1);
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -220,17 +230,17 @@ describe('the pill only speaks up when it has something to say', () => {
         onSchedule={vi.fn()}
       />,
     );
-    return container.querySelector('.pl-card-pill') as HTMLElement;
+    return container.querySelector('.plc-schedule') as HTMLElement;
   }
 
   it('a scheduled playlist wears its cadence at rest', () => {
-    expect(pillOf(true, 'Every 1 day').className).not.toContain('pl-card-pill--quiet');
+    expect(pillOf(true, 'Every 1 day').className).toContain('plc-schedule--set');
   });
 
   it('an unscheduled one goes quiet, so the scheduled few stand out', () => {
     // 24 of 37 cards reading "Not scheduled" made the most-repeated element on
     // the page the one carrying no information.
-    expect(pillOf(false, 'Not scheduled').className).toContain('pl-card-pill--quiet');
+    expect(pillOf(false, 'Not scheduled').className).not.toContain('plc-schedule--set');
   });
 
   it('quiet is a STYLE, not a removal — it still opens the picker', () => {
@@ -250,7 +260,7 @@ describe('the pill only speaks up when it has something to say', () => {
         onSchedule={onSchedule}
       />,
     );
-    const pill = container.querySelector('.pl-card-pill') as HTMLElement;
+    const pill = container.querySelector('.plc-schedule') as HTMLElement;
     expect(pill.tagName).toBe('BUTTON');
     expect(pill.textContent).toBe('Not scheduled');
     fireEvent.click(pill);
@@ -259,9 +269,9 @@ describe('the pill only speaks up when it has something to say', () => {
 
   it('"Can’t be scheduled" is quiet too — it is rare, and it is not news', () => {
     const { container } = renderCard();
-    expect((container.querySelector('.pl-card-pill--inert') as HTMLElement).className).toContain(
-      'pl-card-pill--quiet',
-    );
+    const inert = container.querySelector('.plc-schedule--inert') as HTMLElement;
+    expect(inert.tagName).toBe('SPAN');
+    expect(inert.className).not.toContain('plc-schedule--set');
   });
 });
 
@@ -282,77 +292,37 @@ describe('when there is nothing honest to offer', () => {
         onMore={onMore}
       />,
     );
-    expect(container.querySelector('.pl-card-fix')).toBeNull();
+    expect(container.querySelector('.plc-primary')).toBeNull();
     // The overflow still works, so rename/export/delete stay reachable.
-    expect(container.querySelector('.pl-card-more')).not.toBeNull();
+    expect(container.querySelector('.plc-more')).not.toBeNull();
   });
 });
 
 /**
- * These live in the vanilla stylesheet, so jsdom cannot hit-test them — it has
- * no layout engine, and every button here "works" in a rendered test whether or
- * not something is sitting on top of it in a real browser. The stacking rules
- * get asserted as TEXT instead, because both of these have now broken once.
+ * The card's stacking lives in its stylesheet, which jsdom cannot hit-test, so
+ * the rules that keep every control reachable are asserted as TEXT.
  */
-describe('the hover veil, as the stylesheet actually declares it', () => {
-  // Comments stripped first: they discuss the very properties being asserted,
-  // and a prose mention of z-index is not a declaration of one.
-  const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8').replace(
-    /\/\*[\s\S]*?\*\//g,
-    '',
-  );
-  const block = (selector: string) => {
-    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const found = new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(css);
-    expect(found, `${selector} is not in static/style.css`).not.toBeNull();
-    return found?.[1] ?? '';
-  };
-
-  it('the veil takes NO pointer events, so the pill under it stays clickable', () => {
-    // The original bug: an inset:0 layer that swallowed every click meant for
-    // the schedule pill, exactly when hovering revealed the controls.
-    expect(block('.pl-card-hover')).toMatch(/pointer-events:\s*none/);
-  });
-
-  it('its children DO, or Sync now and the overflow menu are inert', () => {
-    expect(block('.pl-card-hover > *')).toMatch(/pointer-events:\s*auto/);
-  });
-
+describe('the card stylesheet, as it actually declares it', () => {
+  const css = readFileSync(
+    resolve(process.cwd(), 'src/routes/sync/-ui/playlists.module.css'),
+    'utf8',
+  ).replace(/\/\*[\s\S]*?\*\//g, '');
   /** Any @media whose condition list mentions `hover: none`. */
   const touchBlocks = () =>
     [...css.matchAll(/@media[^{]*\(hover:\s*none\)[^{]*\{([\s\S]*?)\n\}/g)].map((m) => m[1]);
 
-  it('takes the action layer OUT of the overlay on touch', () => {
-    // The layer is inset:0 and holds Sync now and the overflow menu. That works
-    // on a wide card because the buttons sit in empty space right of the text.
-    // Simply revealing it on touch — which the page must do, since :hover never
-    // fires there — drops those buttons straight onto the playlist name and the
-    // schedule pill. Visible and overlapping is worse than invisible; it has to
-    // stop being an overlay, not just become opaque.
-    const veil = touchBlocks().find((b) => b.includes('.pl-card-hover'));
-    expect(veil, 'no (hover: none) rule handles .pl-card-hover').toBeTruthy();
-    expect(veil).toMatch(/position:\s*static/);
-    expect(veil).toMatch(/opacity:\s*1/);
+  it('reveals the hover controls on touch, where :hover never fires', () => {
+    const block = touchBlocks().join('\n');
+    for (const cls of ['.fab', '.prim', '.kebab']) expect(block).toContain(cls);
+    expect(block).toMatch(/opacity:\s*1/);
   });
 
-  it('spans the layer across the card once it is in flow', () => {
-    // Without an explicit span it auto-places into one grid cell beside the
-    // artwork, which is narrower than the buttons.
-    const veil = touchBlocks().find((b) => b.includes('.pl-card-hover'));
-    expect(veil).toMatch(/grid-column:\s*1\s*\/\s*-1/);
-  });
-
-  it('reveals the quiet schedule pill on touch too', () => {
-    expect(touchBlocks().some((b) => b.includes('.pl-card-pill--quiet'))).toBe(true);
-  });
-
-  it('the card body is NOT lifted above the veil', () => {
-    // The second bug, caused by fixing the first: z-index on the body puts its
-    // box over Sync now and the overflow menu, which stretch to the same right
-    // edge, so their clicks landed on the card and opened the detail modal.
-    // pointer-events is what protects the pill; a z-index here only breaks the
-    // buttons.
-    expect(block('.pl-card-body')).not.toMatch(/z-index/);
+  it('lifts every control on the cover above the art', () => {
+    // the controls sit ON the cover; without a z-index the art paints over them
+    for (const cls of ['fab', 'prim', 'kebab']) {
+      const found = new RegExp(`\\.${cls}\\s*\\{([^}]*)\\}`).exec(css);
+      expect(found?.[1], cls).toMatch(/z-index:\s*2/);
+    }
   });
 });
 
@@ -441,12 +411,12 @@ describe('the organize-by-playlist marker', () => {
         onMore={vi.fn()}
       />,
     );
-    expect(container.querySelector('.pl-card-organize')).not.toBeNull();
+    expect(container.querySelector('.plc-organize')).not.toBeNull();
   });
 
   it('is absent otherwise, so it marks a mode rather than decorating every card', () => {
     const { container } = renderCard();
-    expect(container.querySelector('.pl-card-organize')).toBeNull();
+    expect(container.querySelector('.plc-organize')).toBeNull();
   });
 
   it('its tooltip names the WISHLIST effect, which the setting’s name does not imply', () => {
@@ -462,7 +432,7 @@ describe('the organize-by-playlist marker', () => {
         onMore={vi.fn()}
       />,
     );
-    expect(container.querySelector('.pl-card-organize')?.getAttribute('title')).toMatch(/wishlist/);
+    expect(container.querySelector('.plc-organize')?.getAttribute('title')).toMatch(/wishlist/);
   });
 });
 
@@ -491,9 +461,7 @@ describe('the name it syncs under', () => {
         onMore={vi.fn()}
       />,
     );
-    expect(document.querySelector('.pl-card-syncs-as')).toBeNull();
-    const css = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
-    expect(css).toContain('.pl-card-syncs-as {');
+    expect(document.querySelector('.plc-syncs-as')).toBeNull();
   });
 });
 
@@ -551,5 +519,38 @@ describe('play from the card', () => {
       'Liked Songs',
     );
     expect(own.container.querySelector('.playlist-liked-art')).toBeNull();
+  });
+});
+
+describe('the all-good check', () => {
+  it('marks a playlist that is discovered and downloaded', () => {
+    const { container } = renderCard({ total_count: 25, discovered_count: 25 });
+    expect(container.querySelector('.plc-ok')).not.toBeNull();
+  });
+
+  it('stays off when the line says tracks are not downloaded', () => {
+    // a check beside "23 not downloaded" contradicts its own words
+    const { container } = renderCard({
+      total_count: 25,
+      discovered_count: 25,
+      library_checked_count: 25,
+      in_library_count: 2,
+    });
+    expect(container.querySelector('.plc-status')?.textContent).toContain('23 not downloaded');
+    expect(container.querySelector('.plc-ok')).toBeNull();
+  });
+});
+
+describe('the rotating label (#2039)', () => {
+  it('shows on a rotating playlist and says what is kept', () => {
+    const { container } = renderCard({ rotating: true });
+    const label = container.querySelector('.plc-rotating');
+    expect(label?.textContent).toBe('rotating');
+    expect(label?.getAttribute('title')).toMatch(/kept/);
+  });
+
+  it('is absent otherwise', () => {
+    const { container } = renderCard();
+    expect(container.querySelector('.plc-rotating')).toBeNull();
   });
 });

@@ -111,3 +111,52 @@ def test_persisted_id_wins_over_later_metadata_edits(imported_conn):
     # rows already reference.
     assert ensure_track_stable_id(conn, track_id) == minted
     assert ensure_album_stable_id(conn, album_id) == minted_album
+
+
+def test_two_same_named_providerless_releases_get_their_own_ids(imported_conn):
+    """third #1062 review G09-4: "Greatest Hits" 2004 and 2017 by one artist,
+    neither with a provider id, minted one id, and a wish for the 2017 track 1
+    could resolve to the owned 2004 copy"""
+    conn = imported_conn
+    artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('Hits Band')").lastrowid
+    albums, tracks = [], []
+    for year in (2004, 2017):
+        album = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, album_type, year, release_date)"
+            " VALUES(?, 'Greatest Hits', 'compilation', ?, ?)", (artist, year, f"{year}-01-01")).lastrowid
+        albums.append(album)
+        tracks.append(conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Intro', 1)",
+            (album,)).lastrowid)
+    album_ids = [ensure_album_stable_id(conn, a) for a in albums]
+    track_ids = [ensure_track_stable_id(conn, t) for t in tracks]
+    assert album_ids[0] != album_ids[1]
+    assert track_ids[0] != track_ids[1]
+    # the first keeps the plain id, so nothing minted before changes
+    assert album_ids[0] == compute_album_stable_id("Hits Band", "Greatest Hits", "compilation")
+
+
+def test_an_id_two_rows_already_share_resolves_to_neither(imported_conn):
+    """G09-4: rows minted before the tiebreak may still share one id; the
+    wishlist lookup must not pick whichever sqlite returns first"""
+    import json
+    import pytest
+    from core.library2.materialize import materialize_wishlist_row
+    conn = imported_conn
+    artist = conn.execute("INSERT INTO lib2_artists(name) VALUES('Twin Band')").lastrowid
+    for _ in range(2):
+        album = conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Same')",
+                             (artist,)).lastrowid
+        conn.execute("INSERT INTO lib2_tracks(album_id, title, stable_id) VALUES(?, 'Song', 'shared-sid')",
+                     (album,))
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(wishlist_tracks)")}
+    if not cols:
+        conn.execute("""CREATE TABLE wishlist_tracks(id INTEGER PRIMARY KEY, spotify_track_id TEXT,
+            spotify_data TEXT, source_info TEXT, profile_id INTEGER DEFAULT 1, quality_profile_id INTEGER)""")
+    row_id = conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_info, profile_id)"
+        " VALUES('lib2-track:shared-sid', ?, '{}', 1)",
+        (json.dumps({"id": "lib2-track:shared-sid", "name": "Song",
+                     "artists": [{"name": "Twin Band"}], "album": {"name": "Same"}}),)).lastrowid
+    with pytest.raises(ValueError, match="multiple"):
+        materialize_wishlist_row(conn, row_id)

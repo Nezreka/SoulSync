@@ -89,8 +89,10 @@ def _all_source_search(item: Dict[str, Any], media_type: str):
             skips.append("%s skipped — %s" % (src, err or "search didn't run"))
             continue
         out.extend(cands or [])
-    out.sort(key=lambda c: (1 if c.get("accepted") else 0, int(c.get("score") or 0), c.get("_avail") or 0),
-             reverse=True)
+    # the same rank every picker uses (#2033). this sort read the flat score
+    # and an _avail that _evaluate_hits had already dropped
+    from core.video.release_rank import sort_ranked
+    out = sort_ranked(out)
     if out:
         return out, "; ".join(skips) or None
     if len(skips) == len(chain):
@@ -188,7 +190,8 @@ def _run_batch(todo: List[Dict[str, Any]], media_type: str, *, all_sources: bool
 
 def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
                   *, all_sources: bool = False, profile_id: int = 1,
-                  wait: bool = False, quality_profile_id=None) -> Dict[str, Any]:
+                  wait: bool = False, quality_profile_id=None,
+                  video_library_id=None) -> Dict[str, Any]:
     """Kick a background search for one wished item (or a season/show of
     episodes). Returns immediately: {queued, skipped, total}. 'skipped' =
     already downloading / already being searched.
@@ -201,10 +204,14 @@ def manual_search(scope: str, tmdb_id, season_number=None, episode_number=None,
     wishlist row says: the next-release retry keeps the profile the failed
     grab was ranked by (SeadogsBooty's retry fell back to Default)."""
     from api.video import get_video_db
+    from database.video_database import ANY_LIBRARY
     media_type = "movie" if scope == "movie" else "episode"
+    # ``video_library_id``: one copy's row (#2029; 0 = the title's own one).
+    # None searches every library's row of the title
     items = get_video_db().wishlist_manual_search_items(
         scope, tmdb_id, season_number=season_number, episode_number=episode_number,
-        profile_id=profile_id)
+        profile_id=profile_id,
+        video_library_id=ANY_LIBRARY if video_library_id is None else video_library_id)
     if media_type == "episode":
         from core.video.numbering import annotate
         items = annotate(items)

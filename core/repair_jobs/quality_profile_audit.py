@@ -55,17 +55,19 @@ class QualityProfileAuditJob(RepairJob):
         result = JobResult()
         subjects = self._subjects(context)
         total = len(subjects)
-        profiles, skips = {}, {}
+        profiles, skips = {}, None
         with closing(context.db._get_connection()) as conn:
             for index, row in enumerate(subjects):
                 if context.check_stop() or context.wait_if_paused():
                     result.stopped_early = f"Quality audit interrupted at file {index + 1} of {total}."
                     return result
                 result.scanned += 1
-                owner = int(row.get("owner_profile_id") or 1)
-                if owner not in skips:
-                    skips[owner] = active_skip_paths(conn, ("quality", "bit_depth"), profile_id=owner)
-                if row["path"] in skips[owner]:
+                if skips is None:
+                    # an override protects the file whoever made it; a shared
+                    # file's owner is 1 even when profile 2 forced it in
+                    # (review 5 R5-I-2)
+                    skips = active_skip_paths(conn, ("quality", "bit_depth"), profile_id=None)
+                if row["path"] in skips:
                     result.skipped += 1
                     continue
                 tid = int(row["track_id"])

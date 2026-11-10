@@ -21,6 +21,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
+
 import type { FindingAlbumGroup } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
@@ -36,7 +38,6 @@ import {
   fetchBulkFixStatus,
   fetchFindingGroups,
   fetchFindingTypes,
-  fixFinding,
   reopenFinding,
   runRepairJob,
   setRepairJobEnabled,
@@ -49,6 +50,8 @@ import { healthBandLabel, isSafeType, libraryHealth } from '../-tools.groups';
 import { useToolsMedia, type ToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray } from './album-inspection-tray';
+import { ReidentifyFindingModal, useFindingFix } from './finding-fix';
+import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
 
 function toast(message: string, type = 'info') {
@@ -180,15 +183,23 @@ export const PLAYBOOK_PRESETS: readonly PlaybookPreset[] = [
       'album_tag_consistency',
       'missing_lyrics',
       'missing_cover_art',
+      // the duplicates the subtitle promises (3.6.1's duplicate_detector)
+      'native_duplicate_detector',
       'empty_folder_cleaner',
     ],
   },
   {
     id: 'audio_sweep',
     title: 'Audio Fidelity Sweep',
-    subtitle: 'Broken files, fake FLAC and preview clips',
+    subtitle: 'Broken files, fake FLAC, preview clips and tracks below your quality profile',
     icon: '🎵',
-    jobIds: ['audio_corruption_detector', 'fake_lossless_detector', 'short_preview_track'],
+    jobIds: [
+      'audio_corruption_detector',
+      'fake_lossless_detector',
+      'short_preview_track',
+      // 3.6.1's quality check (quality_upgrade_scanner) lives on as this
+      'quality_profile_audit',
+    ],
   },
   {
     id: 'metadata_polish',
@@ -442,6 +453,7 @@ export function OperationsStudio({
   const [catalog, setCatalog] = useState<Record<string, FindingTypeInfo>>({});
   const [bulkStatus, setBulkStatus] = useState<BulkFixStatus | null>(null);
   const [selectedAlbum, setSelectedAlbum] = useState<FindingAlbumGroup | null>(null);
+  const [albumGridToken, setAlbumGridToken] = useState(0);
   const [redownloadFinding, setRedownloadFinding] = useState<RepairFinding | null>(null);
   const redownloadTrackId = redownloadFinding ? findingRedownloadTrackId(redownloadFinding) : null;
   const bulkTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -468,6 +480,18 @@ export function OperationsStudio({
   useEffect(() => {
     void loadData();
   }, [loadData, jobs]);
+
+  // G16-4: another library picked in the header; its findings, not these
+  useEffect(() => {
+    const switched = () => {
+      setSelectedAlbum(null);
+      // review 4 R4-E-1: the album grid loads on its own token
+      setAlbumGridToken((token) => token + 1);
+      void loadData();
+    };
+    window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
+    return () => window.removeEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
+  }, [loadData]);
 
   // a fix-all started elsewhere (advanced, another tab) shows its progress here too
   useEffect(() => {
@@ -510,6 +534,40 @@ export function OperationsStudio({
       }
     };
   }, [bulkStatus?.running, onChanged, loadData]);
+
+  // ── The album tray's per-row fix and dismiss ───────────────────────────────
+
+  const prompts = useFindingPrompts();
+  const [reidentifyingFinding, setReidentifyingFinding] = useState<RepairFinding | null>(null);
+  const studioTypeInfo = useCallback((findingType: string) => catalog[findingType], [catalog]);
+  const refreshAfterFix = useCallback(() => {
+    onChanged();
+    void loadData();
+  }, [loadData, onChanged]);
+  const dismissOne = useCallback(
+    async (id: number) => {
+      try {
+        await dismissFinding(id);
+      } catch (error) {
+        toast(`Could not dismiss finding: ${(error as Error).message}`, 'error');
+        return;
+      }
+      refreshAfterFix();
+    },
+    [refreshAfterFix],
+  );
+  /** the same fix Advanced mode runs: its per-type question, the confirm
+   *  before a subjectless Delete File, and a toast with the result. this
+   *  used to be a bare fixFinding(id) that dropped the answer (review 5
+   *  W3-TT-3). */
+  const fixOne = useFindingFix({
+    video: media === 'video',
+    typeInfo: studioTypeInfo,
+    prompts,
+    dismiss: dismissOne,
+    refresh: refreshAfterFix,
+    onReidentify: setReidentifyingFinding,
+  });
 
   const jobMap = useMemo(() => {
     const map = new Map<string, RepairJob>();
@@ -1073,16 +1131,8 @@ export function OperationsStudio({
               group={selectedAlbum}
               status="pending"
               onClose={() => setSelectedAlbum(null)}
-              onFixFinding={async (f) => {
-                await fixFinding(f.id);
-                onChanged();
-                void loadData();
-              }}
-              onDismissFinding={async (id) => {
-                await dismissFinding(id);
-                onChanged();
-                void loadData();
-              }}
+              onFixFinding={fixOne}
+              onDismissFinding={dismissOne}
               onInspectRedownload={(f) => {
                 setRedownloadFinding(f);
               }}
@@ -1099,12 +1149,28 @@ export function OperationsStudio({
           ) : null}
 
           <FindingsAlbumGrid
+            refreshToken={albumGridToken}
             groupBy="album"
             status="pending"
             selectedGroupKey={selectedAlbum?.key}
             onOpen={(group) => setSelectedAlbum(group)}
           />
         </div>
+      ) : null}
+
+      {prompts.promptNode}
+
+      {reidentifyingFinding ? (
+        <ReidentifyFindingModal
+          finding={reidentifyingFinding}
+          onApplied={async () => {
+            await dismissOne(reidentifyingFinding.id);
+          }}
+          onClose={() => {
+            setReidentifyingFinding(null);
+            refreshAfterFix();
+          }}
+        />
       ) : null}
 
       {/* ── Redownload Modal ──────────────────────────────────────────────── */}

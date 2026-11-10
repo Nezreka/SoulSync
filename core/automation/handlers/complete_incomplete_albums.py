@@ -22,43 +22,78 @@ def _native_target(target: str, deps):
     (never read as a coincident native id), or None."""
     if target.startswith('lib2:') and target[5:].isdigit():
         return target
-    if not target.isdigit():
-        return None
     get_db = getattr(deps, 'get_database', None)
     if not callable(get_db):
         return None
     try:
         with closing(get_db()._get_connection()) as conn:
+            # review 5 R5-C-2: a navidrome or jellyfin 3.6.1 album id is a hash
+            # or guid, kept as TEXT in legacy_album_id. look it up as given;
+            # only an all-digit id is an int
             row = conn.execute("SELECT id FROM lib2_albums WHERE legacy_album_id=? LIMIT 1",
-                               (int(target),)).fetchone()
+                               (int(target) if target.isdigit() else target,)).fetchone()
     except Exception:  # noqa: BLE001 - an unreadable mapping selects nothing
         return None
     return f"lib2:{row[0]}" if row else None
 
 
 def _apply_pending_findings(deps, limit, target):
-    bulk_fix = getattr(deps, 'bulk_fix_repair_findings', None)
+    """Apply up to ``limit`` pending incomplete-album findings, oldest first.
+
+    3.6.1's rules, both of which the first v2 cut lost:
+    * ``limit`` caps what gets FIXED, not what gets looked at. findings this
+      path can't apply (only other artists' songs missing, which wait for the
+      user's own click; or stale ones) stayed pending and, taken first, held
+      every slot on every run, so the real incomplete albums never got done.
+    * only the library the automation runs for (the scheduled path's
+      current_library_scope): another profile's own library is theirs to
+      approve, 3.6.1 completed shared albums only.
+    """
+    fix_one = getattr(deps, 'bulk_fix_repair_findings', None)
     get_db = getattr(deps, 'get_database', None)
-    if not callable(bulk_fix) or not callable(get_db):
+    if not callable(fix_one) or not callable(get_db):
         return {'status': 'skipped', 'reason': 'Library maintenance is unavailable'}
+    from core.library_scope import current_library_scope
+    scope = current_library_scope()
     sql = ("SELECT id FROM repair_findings WHERE job_id='album_completeness' "
-           "AND finding_type='incomplete_album' AND status='pending'")
+           "AND finding_type='incomplete_album' AND status='pending' "
+           # guest-only: nothing the automatic path may wishlist
+           "AND json_array_length(COALESCE(json_extract(details_json,'$.track_ids'),'[]')) > 0")
     args = []
+    if isinstance(scope, int) and not isinstance(scope, bool):
+        sql += " AND CAST(json_extract(details_json,'$.profile_id') AS INTEGER)=?"
+        args.append(int(scope))
+    else:
+        sql += " AND COALESCE(json_extract(details_json,'$.profile_id'), 1) = 1"
     if target:
         sql += " AND entity_id=?"
         args.append(target)
-    sql += " ORDER BY id LIMIT ?"
-    args.append(limit)
     try:
         with closing(get_db()._get_connection()) as conn:
+            # review 4 R4-C-6: ones that never failed first; a stuck finding
+            # no longer holds the front of the queue on every run
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(repair_findings)")}
+            sql += (" ORDER BY (COALESCE(last_error, '') <> ''), id" if "last_error" in cols
+                    else " ORDER BY id")
             ids = [int(row[0]) for row in conn.execute(sql, args)]
     except Exception:  # noqa: BLE001
         return {'status': 'skipped', 'reason': 'Album Completeness findings are unavailable'}
     if not ids:
         return {'status': 'completed', 'applied': 0, 'reason': 'No incomplete albums to complete'}
-    result = bulk_fix(ids) or {}
-    return {'status': 'completed', 'applied': int(result.get('fixed') or 0),
-            'failed': int(result.get('failed') or 0),
+    applied = failed = skipped = 0
+    # review 4 R4-C-6: a bounded number of tries per run, so stuck findings
+    # can't make a run's cost grow with how many there are
+    for finding_id in ids[:limit * 3]:
+        if applied >= limit:
+            break
+        result = fix_one([finding_id]) or {}
+        if int(result.get('fixed') or 0):
+            applied += 1
+        elif int(result.get('skipped') or 0):
+            skipped += 1      # held back by design, not a failure
+        else:
+            failed += 1
+    return {'status': 'completed', 'applied': applied, 'failed': failed, 'skipped': skipped,
             'reason': 'Missing tracks went on the Wishlist'}
 
 

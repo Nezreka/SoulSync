@@ -28,7 +28,9 @@ export function AlbumUpgradeButton({
   const artistId = typeof search.artist === 'number' ? search.artist : null;
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const canWish = useQuery(libraryV2EnabledQueryOptions()).data?.canWish === true;
+  const enabled = useQuery(libraryV2EnabledQueryOptions()).data;
+  const canWish = enabled?.canWish === true;
+  const canWrite = enabled?.canWrite === true;
   const enhance = useQuery({
     ...libraryV2EnhanceQueryOptions('artists', artistId ?? 0),
     enabled: artistId != null && canWish,
@@ -53,11 +55,13 @@ export function AlbumUpgradeButton({
         <EnhanceQualityModal
           title={albumTitle}
           tracks={tracks}
+          scope={artistId != null ? { entity: 'artists', id: artistId, albumId } : undefined}
+          canChooseTarget={canWrite}
           onClose={() => setOpen(false)}
-          onEnhance={(trackIds) => {
+          onEnhance={(trackIds, targetProfileId) => {
             setOpen(false);
             setBusy(true);
-            void startLibraryV2Enhance('albums', albumId, trackIds)
+            void startLibraryV2Enhance('albums', albumId, trackIds, targetProfileId)
               .then(() => {
                 window.showToast?.(
                   `Upgrading ${trackIds.length} track(s) on ${albumTitle}`,

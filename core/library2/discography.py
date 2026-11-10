@@ -138,13 +138,17 @@ def _link_release_artists(
         (album_id, primary_artist_id),
     )
     for name, key, provider_id in names:
-        resolved_id = find_or_create_artist(
+        # the primary credit is primary_artist_id already: resolving it was
+        # a lookup (and maybe a stray artist row) thrown away, inside the
+        # write transaction. review 5 R5-E-3
+        if key == primary_key:
+            continue
+        credited_id = find_or_create_artist(
             conn,
             name,
             spotify_id=provider_id,
             source=source,
         )
-        credited_id = primary_artist_id if key == primary_key else resolved_id
         if credited_id is None or int(credited_id) == int(primary_artist_id):
             continue
         conn.execute(
@@ -869,17 +873,27 @@ def approve_release(db, config_manager, album_id: int, *, profile_id: int = 1) -
     Returns the tracks mirrored; raises LookupError when the album is gone."""
     from contextlib import closing as _closing
 
+    from core.library2 import ADMIN_PROFILE_ID
+    profile = int(profile_id or ADMIN_PROFILE_ID)
     with _closing(db._get_connection()) as conn:
+        # third #1062 review P2D-6: the monitored column is the shared
+        # library's (the admin's). an own library's approval is that
+        # profile's album rule; setting the column made a failed tracklist
+        # retry into the admin's wishlist and download into the shared library
         cursor = conn.execute(
             """UPDATE lib2_albums
-                  SET monitored=1, tracklist_status='pending',
+                  SET monitored=CASE WHEN ? THEN 1 ELSE monitored END,
+                      tracklist_status='pending',
                       tracklist_error=NULL, tracklist_retry_at=NULL,
                       updated_at=CURRENT_TIMESTAMP
                 WHERE id=?""",
-            (int(album_id),),
+            (profile == ADMIN_PROFILE_ID, int(album_id)),
         )
         if cursor.rowcount == 0:
             raise LookupError("Library-v2 album no longer exists")
+        if profile != ADMIN_PROFILE_ID:
+            from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+            record_rule(conn, "album", int(album_id), True, PROVENANCE_USER, profile_id=profile)
         conn.commit()
     return auto_monitor_releases(db, config_manager, [int(album_id)],
                                  wishlist_profile_id=int(profile_id or 1))
@@ -1011,12 +1025,28 @@ def auto_monitor_releases(db, config_manager, album_ids: List[int],
                 if r["id"] not in vetoed
                 and not _track_content_excluded(r["title"] or "", album_title, filters)
             ]
-            if auto_monitor_ids:
-                marks = ",".join("?" for _ in auto_monitor_ids)
-                conn.execute(
-                    f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
-                    auto_monitor_ids,
-                )
+            from core.library2 import ADMIN_PROFILE_ID
+            if int(wishlist_profile_id) == ADMIN_PROFILE_ID:
+                if auto_monitor_ids:
+                    marks = ",".join("?" for _ in auto_monitor_ids)
+                    conn.execute(
+                        f"UPDATE lib2_tracks SET monitored=1 WHERE id IN ({marks})",
+                        auto_monitor_ids,
+                    )
+            else:
+                # P2D-6: lib2_tracks.monitored is the shared library's. another
+                # profile's want is its own track rules, and what its filters
+                # leave out is a rule too (the column flip's veto, per profile)
+                marks = ",".join("?" for _ in album_track_ids) or "NULL"
+                user_set = {r[0] for r in conn.execute(
+                    f"SELECT entity_id FROM lib2_monitor_rules WHERE entity_type='track' "
+                    f"AND profile_id=? AND provenance='user_explicit' AND entity_id IN ({marks})",
+                    (int(wishlist_profile_id), *album_track_ids))}
+                for track_id in album_track_ids:
+                    if track_id in user_set:  # the user's own choice stands
+                        continue
+                    record_rule(conn, "track", track_id, track_id in auto_monitor_ids,
+                                PROVENANCE_NEW_RELEASE, profile_id=wishlist_profile_id)
             explicit = conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='album' AND entity_id=? AND profile_id=? AND provenance='user_explicit'", (album_id, wishlist_profile_id)).fetchone()
             if not explicit:
                 record_rule(conn, "album", album_id, True, PROVENANCE_NEW_RELEASE,
@@ -1130,6 +1160,34 @@ def repair_incomplete_library_tracklists(
     return repaired
 
 
+def _owner_retry_albums(database, artist_id: int) -> Dict[int, List[int]]:
+    """{profile: album ids} for this artist's releases another profile
+    approved whose tracklist is still pending or failed and due"""
+    out: Dict[int, List[int]] = {}
+    try:
+        with closing(database._get_connection()) as conn:
+            for album_id, profile in conn.execute(
+                    """SELECT DISTINCT al.id, r.profile_id
+                         FROM lib2_albums al
+                         JOIN lib2_monitor_rules r
+                           ON r.entity_type='album' AND r.entity_id=al.id
+                          AND r.monitored=1 AND r.profile_id<>1
+                        WHERE al.id IN (SELECT album_id FROM lib2_album_artists WHERE artist_id=?
+                                        UNION SELECT id FROM lib2_albums WHERE primary_artist_id=?)
+                          AND al.origin='discography'
+                          AND (al.tracklist_status='pending'
+                               OR (al.tracklist_status='failed' AND (
+                                   al.tracklist_retry_at IS NULL
+                                   OR al.tracklist_retry_at <= CURRENT_TIMESTAMP))
+                               OR (al.tracklist_status='idle' AND NOT EXISTS (
+                                   SELECT 1 FROM lib2_tracks t WHERE t.album_id=al.id)))
+                        ORDER BY al.id""", (int(artist_id), int(artist_id))):
+                out.setdefault(int(profile), []).append(int(album_id))
+    except Exception as exc:  # noqa: BLE001 - the next sweep retries
+        logger.debug("owner retry lookup failed for artist %s: %s", artist_id, exc)
+    return out
+
+
 def _refresh_one_artist(
     database, artist_id: int, config_manager, *, wishlist_profile_id: int,
     auto_monitor: bool = True,
@@ -1149,6 +1207,12 @@ def _refresh_one_artist(
                 album_ids,
                 wishlist_profile_id=wishlist_profile_id,
             )
+        if auto_monitor:
+            # P2D-6: an own library's approved release whose tracklist failed
+            # retries for that library, not the admin's
+            for profile, owner_ids in _owner_retry_albums(database, artist_id).items():
+                mirrored += auto_monitor_releases(database, config_manager, owner_ids,
+                                                  wishlist_profile_id=profile)
         stats["repaired_track_number_collisions"] = repair_track_number_collisions(
             database, config_manager, artist_id)
         stats["repaired_incomplete_tracklists"] = repair_incomplete_library_tracklists(

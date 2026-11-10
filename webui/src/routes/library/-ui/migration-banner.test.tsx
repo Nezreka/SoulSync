@@ -35,12 +35,30 @@ describe('MigrationBanner', () => {
         started = true;
         return HttpResponse.json({ success: true });
       }),
+      http.get('/api/library/v2/enabled', () =>
+        HttpResponse.json({ success: true, enabled: true, can_write: true }),
+      ),
     );
     renderBanner();
     expect(await screen.findByText(/library upgrade failed/)).toBeInTheDocument();
     expect(screen.getByText('disk full')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Retry now' }));
     await waitFor(() => expect(started).toBe(true));
+  });
+
+  it('tells a household member to ask an admin instead of a retry that can only fail', async () => {
+    // third #1062 review G15-7: the import route refuses a non-admin
+    server.use(
+      http.get('/api/library/v2/import/status', () =>
+        HttpResponse.json(status({ status: 'failed', last_error: 'disk full' })),
+      ),
+      http.get('/api/library/v2/enabled', () =>
+        HttpResponse.json({ success: true, enabled: true, can_write: false }),
+      ),
+    );
+    renderBanner();
+    expect(await screen.findByText('Ask an admin to retry it.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry now' })).toBeNull();
   });
 
   it('shows progress while running and nothing once done', async () => {

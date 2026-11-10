@@ -451,13 +451,18 @@ def _lib2_artists_by_name(conn, names: list[str]) -> dict[str, tuple[int, Any]]:
     for chunk in _chunked(names):
         marks = ','.join('?' * len(chunk))
         if has_name_key:
-            rows = conn.execute(
-                f"""SELECT id, name, name_key, image_url
-                      FROM lib2_artists
-                     WHERE LOWER(name) IN ({marks})
-                        OR COALESCE(name_key, '') IN ({marks})""",
-                chunk + chunk,
-            ).fetchall()
+            # two indexed lookups, merged. third #1062 review G13-5: one OR
+            # over LOWER(name) and COALESCE(name_key,'') scanned every artist
+            # per 400 names (the COALESCE side has no index)
+            seen_ids: set = set()
+            rows = []
+            for where in (f"LOWER(name) IN ({marks})", f"name_key IN ({marks})"):
+                for row in conn.execute(
+                        f"SELECT id, name, name_key, image_url FROM lib2_artists WHERE {where}",
+                        chunk).fetchall():
+                    if row['id'] not in seen_ids:
+                        seen_ids.add(row['id'])
+                        rows.append(row)
             keys_of = lambda row: (row['name_key'], row['name'])  # noqa: E731
         else:
             rows = conn.execute(
@@ -786,8 +791,14 @@ def remove_album_from_wishlist(
     *,
     album_id: str | None = None,
     album_name_filter: str | None = None,
+    artist_name_filter: str | None = None,
 ) -> tuple[Dict[str, Any], int]:
-    """Remove every wishlist track that belongs to the selected album."""
+    """Remove every wishlist track that belongs to the selected album.
+
+    artist_name_filter scopes a name match to one artist. the page files an
+    album card under its artist, and a bare name took every artist's
+    "Greatest Hits" and ignore-listed their tracks too (review 5 R5-X1-2).
+    """
     try:
         if not album_id and not album_name_filter:
             return {"success": False, "error": "No album_id or album_name provided"}, 400
@@ -809,6 +820,10 @@ def remove_album_from_wishlist(
                     track_album_name = spotify_data["album"]
                 if track_album_name and track_album_name.lower().strip() == album_name_filter.lower().strip():
                     matched = True
+                # same default the page groups an artist-less row under
+                if matched and artist_name_filter is not None:
+                    track_artist = _primary_artist_name(spotify_data) or "Unknown Artist"
+                    matched = track_artist.lower().strip() == artist_name_filter.lower().strip()
 
             if matched:
                 spotify_track_id = track.get("track_id") or track.get("spotify_track_id") or track.get("id")
@@ -890,11 +905,17 @@ def remove_artist_from_wishlist(
         _db = getattr(wishlist_service, "database", None)
         removed_count = 0
         pid = runtime.profile_id
+        removed_descriptors = []
         for spotify_track_id, track_spotify_data in tracks_to_remove:
             if wishlist_service.remove_track_from_wishlist(spotify_track_id, profile_id=pid):
                 removed_count += 1
                 ignore_wishlist_track(_db, pid, spotify_track_id, REASON_REMOVED,
                                       spotify_data=track_spotify_data)
+                removed_descriptors.append({"spotify_track_id": spotify_track_id,
+                                            "spotify_data": track_spotify_data or {}})
+        # the wish goes too, like every other removal: left behind, the
+        # hourly reconcile put the artist's tracks back once the ignore aged out
+        _sync_user_wishlist_removal(runtime, wishlist_service, removed_descriptors)
 
         if removed_count > 0:
             runtime.logger.info("Removed %s wishlist track(s) for artist %r",
@@ -922,15 +943,10 @@ def remove_batch_from_wishlist(
         from core.wishlist.ignore import ignore_wishlist_track, REASON_REMOVED
         service = get_wishlist_service()
         _db = getattr(service, "database", None)
-        descriptors_by_id = {
-            _bare_wishlist_track_id(
-                descriptor.get("spotify_track_id")
-                or descriptor.get("track_id")
-                or descriptor.get("id")
-            ): descriptor
-            for descriptor in _load_wishlist_descriptors(service, runtime.profile_id)
-            if isinstance(descriptor, dict)
-        }
+        # matched per requested id, exactly for a composite track::album key:
+        # a map keyed by the bare id let a sibling release's row win, and the
+        # reverse sync released the release still wanted (review 5 R5-J-4)
+        loaded = _load_wishlist_descriptors(service, runtime.profile_id)
         removed = 0
         removed_descriptors = []
         pid = runtime.profile_id
@@ -944,11 +960,11 @@ def remove_batch_from_wishlist(
                 _data = None
             if service.remove_track_from_wishlist(track_id, profile_id=pid):
                 removed += 1
-                removed_descriptors.append(
-                    descriptors_by_id.get(_bare_wishlist_track_id(track_id)) or {
+                removed_descriptors.extend(
+                    _wishlist_descriptors_for_ids(loaded, [track_id]) or [{
                         "spotify_track_id": track_id,
                         "spotify_data": _data or {},
-                    }
+                    }]
                 )
                 ignore_wishlist_track(_db, pid, track_id, REASON_REMOVED, spotify_data=_data)
 
@@ -1063,6 +1079,7 @@ def _bulk_skip(runtime: WishlistRouteRuntime, ids):
     _db = getattr(service, "database", None)
     pid = runtime.profile_id
     outcomes = {}
+    removed_descriptors = []
     for tid in ids:
         # Capture label before the row is deleted (#874).
         _data = None
@@ -1077,9 +1094,12 @@ def _bulk_skip(runtime: WishlistRouteRuntime, ids):
             removed = False
         if removed:
             ignore_wishlist_track(_db, pid, tid, REASON_SKIPPED, spotify_data=_data)
+            removed_descriptors.append({"spotify_track_id": tid, "spotify_data": _data or {}})
             outcomes[tid] = (True, "Skipped")
         else:
             outcomes[tid] = (False, "Not in wishlist")
+    # a skip drops the wish too, or the reconcile re-adds it after the ignore
+    _sync_user_wishlist_removal(runtime, service, removed_descriptors)
     runtime.logger.info(
         "Bulk skipped %s of %s wishlist track(s)",
         sum(1 for ok, _ in outcomes.values() if ok), len(ids))
@@ -1118,6 +1138,28 @@ def _bulk_retry(runtime: WishlistRouteRuntime, ids):
         runtime.logger.info(
             "Bulk retry cleared backoff on %s wishlist track(s)", changed)
     return _bulk_results(ids, outcomes)
+
+
+# what the server writes on a wish to make it an upgrade of a library file.
+# a client never gets to say it (review 5 W2-WD-2)
+_SERVER_SOURCE_KEYS = frozenset({
+    "job", "original_file_path", "original_file_id", "original_quality",
+    "quality_evaluation", "upgrade_policy", "quality_profile_name",
+    "quality_profile_source", "quality_profile_source_id",
+})
+
+
+def _client_source_context(source_context: Any) -> Dict[str, Any]:
+    """the provenance a client may give a wish: never the upgrade authority
+    the download master turns into a sealed intent (review 5 W2-WD-2)"""
+    from core.imports.upgrade_intent import sanitize_client_import_metadata
+    if not isinstance(source_context, dict):
+        return {}
+    context = {key: value for key, value in sanitize_client_import_metadata(source_context).items()
+               if key not in _SERVER_SOURCE_KEYS}
+    if context.get("source") == "library_v2":
+        context.pop("source")
+    return context
 
 
 def add_album_track_to_wishlist(
@@ -1177,7 +1219,7 @@ def add_album_track_to_wishlist(
             runtime.logger.debug("Wishlist add ownership check failed (adding anyway): %s", _own_err)
 
         enhanced_source_context = {
-            **(source_context or {}),
+            **_client_source_context(source_context),
             "artist_id": artist.get("id"),
             "artist_name": artist.get("name"),
             "album_id": album.get("id"),
@@ -1196,6 +1238,8 @@ def add_album_track_to_wishlist(
             # (otherwise the add is silently dropped — carlosjfcasero, #897).
             user_initiated=True,
             quality_profile_id=quality_profile_id,
+            # picked in the dialog for this track, so it may pin it (review 5 W2-WD-1)
+            quality_profile_explicit=quality_profile_id is not None,
         )
 
         if success:

@@ -9,9 +9,13 @@ import {
   fetchStatsListeningEvents,
   fetchStatsDbStorage,
   fetchStatsLibraryDiskUsage,
+  REPORT_MAX_POLLS,
+  reportRefetchInterval,
   resolveStatsTrack,
   runLastfmListeningImport,
   runListenbrainzListeningImport,
+  statsDbStorageQueryOptions,
+  statsLibraryDiskUsageQueryOptions,
   streamStatsTrack,
   triggerListeningStatsSync,
 } from './-stats.api';
@@ -94,6 +98,41 @@ describe('stats api', () => {
 
     await expect(fetchStatsDbStorage()).rejects.toThrow('db unavailable');
     await expect(fetchStatsLibraryDiskUsage()).rejects.toThrow('disk unavailable');
+  });
+
+  it('asks again while a whole-library report is being refreshed', () => {
+    for (const options of [statsDbStorageQueryOptions(), statsLibraryDiskUsageQueryOptions()]) {
+      const interval = options.refetchInterval as (query: {
+        state: { data?: { refreshing?: boolean } };
+      }) => number | false;
+      expect(interval({ state: { data: { refreshing: true } } })).toBe(3000);
+      expect(interval({ state: { data: {} } })).toBe(false);
+      expect(interval({ state: {} })).toBe(false);
+    }
+  });
+
+  // review 5 W3-TU-2: a report that never settles must not poll forever
+  it('stops asking after a failed fetch or too many refreshing answers', () => {
+    const interval = statsLibraryDiskUsageQueryOptions()
+      .refetchInterval as typeof reportRefetchInterval;
+    expect(interval({ state: { data: { refreshing: true }, status: 'error' } })).toBe(false);
+
+    const query = { state: { data: { refreshing: true }, status: 'success', dataUpdatedAt: 0 } };
+    const answers: Array<number | false> = [];
+    for (let n = 1; n <= REPORT_MAX_POLLS + 1; n += 1) {
+      query.state.dataUpdatedAt = n;
+      answers.push(interval(query));
+      // a re-render between answers is not another answer
+      answers.push(interval(query));
+    }
+    expect(answers.slice(0, REPORT_MAX_POLLS * 2).every((a) => a === 3000)).toBe(true);
+    expect(answers.slice(-2)).toEqual([false, false]);
+    // a settled answer resets the streak
+    query.state.data = { refreshing: false };
+    expect(interval(query)).toBe(false);
+    query.state.data = { refreshing: true };
+    query.state.dataUpdatedAt = 999;
+    expect(interval(query)).toBe(3000);
   });
 
   it('reads listening status and triggers manual sync', async () => {

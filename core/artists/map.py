@@ -72,7 +72,10 @@ def _artmap_cache_invalidate(profile_id=None):
     """Invalidate artist map cache (call after watchlist changes, scans, etc.)."""
     if profile_id:
         _artist_map_cache.pop(f'watchlist_{profile_id}', None)
-        _artist_map_cache.pop(f'genres_{profile_id}', None)
+        # the genre map is cached per library scope too (review 5 R5-C-4)
+        for key in [k for k in _artist_map_cache if k == f'genres_{profile_id}'
+                    or k.startswith(f'genres_{profile_id}:')]:
+            _artist_map_cache.pop(key, None)
     _artist_map_cache.pop('genre_list', None)
 
 
@@ -352,7 +355,11 @@ def get_artist_map_genres():
         database = get_database()
         profile_id = get_current_profile_id()
 
-        cached = _artmap_cache_get(f'genres_{profile_id}')
+        # review 5 R5-C-4: the library step reads the caller's library, so
+        # the cache can't be shared across a header library switch
+        from core.library_scope import current_library_scope
+        cache_key = f'genres_{profile_id}:{current_library_scope()}'
+        cached = _artmap_cache_get(cache_key)
         if cached:
             return jsonify(cached)
 
@@ -441,8 +448,14 @@ def get_artist_map_genres():
                  spotify_id=r['spotify_artist_id'], itunes_id=r['itunes_artist_id'],
                  deezer_id=r['deezer_artist_id'], discogs_id=r['discogs_artist_id'], source='watchlist')
 
-        # 4. Library artists
-        cursor.execute("SELECT name, image_url AS thumb_url, genres FROM lib2_artists")
+        # 4. Library artists. review 5 R5-C-4: lib2_artists also holds
+        # discography, watchlist and catalogue-only artists and other
+        # profiles' own libraries; 3.6.1 read only the library's artists.
+        # review 5 W2-WC-3: artists with a release of their own on disk, not
+        # every featured credit ('artist' counts those: 29.6k of 29.8k live)
+        from core.library2.sql_util import owned_sql
+        cursor.execute("SELECT ar.name, ar.image_url AS thumb_url, ar.genres "
+                       f"FROM lib2_artists ar WHERE {owned_sql('release_artist', 'ar')}")
         for r in cursor.fetchall():
             genres = []
             if r['genres']:
@@ -593,7 +606,7 @@ def get_artist_map_genres():
             'total_artists': len(nodes),
             'total_genres': len(sorted_genres),
         }
-        _artmap_cache_set(f'genres_{profile_id}', result)
+        _artmap_cache_set(cache_key, result)
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error getting genre map data: {e}")

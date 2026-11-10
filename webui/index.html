@@ -167,7 +167,7 @@
                 <div class="launch-pin-icon">🔒</div>
                 <h2 class="launch-pin-title">SoulSync is Locked</h2>
                 <p class="launch-pin-subtitle">Enter your PIN to continue</p>
-                <input type="password" id="launch-pin-input" class="launch-pin-input" maxlength="20" placeholder="PIN"
+                <input type="password" id="launch-pin-input" class="launch-pin-input" maxlength="20" placeholder="PIN" inputmode="numeric"
                     autocomplete="off">
                 <button id="launch-pin-submit" class="launch-pin-submit">Unlock</button>
                 <p id="launch-pin-error" class="launch-pin-error" style="display: none;"></p>
@@ -790,6 +790,54 @@
                     </a>
                 </nav>
 
+                <!-- what this profile chose to see (#1909). the full rule and the
+                     server's answer live in shell/features.ts; this only replays the
+                     last cached answer before paint so the sidebar doesn't flash
+                     every item and then shrink. -->
+                <script>
+                    (function () {
+                        var c = null;
+                        try { c = JSON.parse(localStorage.getItem('ss_features') || 'null'); } catch (e) { }
+                        if (!c || !Array.isArray(c.pages)) return;
+                        document.documentElement.setAttribute('data-features-off', (c.off || []).join(' '));
+                        var pages = {};
+                        c.pages.forEach(function (p) { pages[p] = true; });
+                        document.querySelectorAll('.sidebar-nav .nav-button').forEach(function (b) {
+                            var id = b.getAttribute('data-page') || b.getAttribute('data-video-page');
+                            if (pages[id]) b.classList.add('nav-feature-hidden');
+                        });
+                        document.querySelectorAll('.sidebar-nav .nav-section-label').forEach(function (label) {
+                            var el = label.nextElementSibling, any = false;
+                            while (el && !el.classList.contains('nav-section-label')) {
+                                if (el.classList.contains('nav-button') && !el.classList.contains('nav-feature-hidden')
+                                    && el.style.display !== 'none') { any = true; break; }
+                                el = el.nextElementSibling;
+                            }
+                            if (!any) label.classList.add('nav-feature-hidden');
+                        });
+                        if (Array.isArray(c.off) && c.off.indexOf('video') !== -1) {
+                            var t = document.querySelector('.side-toggle');
+                            if (t) t.classList.add('nav-feature-hidden');
+                        }
+                    })();
+                </script>
+
+                <!-- one place to choose what shows, for every profile (#1909) -->
+                <div class="sidebar-customize">
+                    <button type="button" class="sidebar-customize-btn" id="sidebar-customize-btn"
+                        onclick="window.openFeaturePicker && window.openFeaturePicker()"
+                        title="Choose what shows in SoulSync" aria-label="Customize SoulSync">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <line x1="4" y1="7" x2="20" y2="7" />
+                            <line x1="4" y1="17" x2="20" y2="17" />
+                            <circle cx="9" cy="7" r="2.2" fill="currentColor" stroke="none" />
+                            <circle cx="15" cy="17" r="2.2" fill="currentColor" stroke="none" />
+                        </svg>
+                        <span class="nav-text">Customize</span>
+                    </button>
+                </div>
+
                 <!-- Spacer -->
                 <div class="sidebar-spacer"></div>
 
@@ -954,6 +1002,9 @@
                                         <option value="watched">Watched</option>
                                         <option value="unwatched">Unwatched</option>
                                     </select>
+                                    <select class="library-source-filter-select" data-video-lib-vlib title="Library" hidden>
+                                        <option value="">All Libraries</option>
+                                    </select>
                                     <select class="library-source-filter-select" data-video-lib-res title="Quality">
                                         <option value="">Any Quality</option>
                                     </select>
@@ -1000,12 +1051,18 @@
                             <h1 class="vsr-hero-title">Search</h1>
                             <p class="vsr-hero-sub">Movies, TV shows &amp; people &mdash; everything stays in-app</p>
                             <div class="vsr-tabs" role="tablist" aria-label="Search mode">
+                                <!-- named for what each searches (#1909). "enhanced" and
+                                     "basic" said nothing about that; data-vsr-tab keeps the
+                                     old ids so the code is unchanged -->
                                 <button class="vsr-tab active" type="button" role="tab" aria-selected="true"
-                                    data-vsr-tab="enhanced" aria-controls="vsr-enhanced-panel">Enhanced</button>
+                                    data-vsr-tab="enhanced" aria-controls="vsr-enhanced-panel"
+                                    title="Movies, shows and people, by title">Titles</button>
                                 <button class="vsr-tab" type="button" role="tab" aria-selected="false"
-                                    data-vsr-tab="basic" aria-controls="vsr-basic-panel">Basic</button>
+                                    data-vsr-tab="basic" aria-controls="vsr-basic-panel"
+                                    title="Search your indexers for exact releases">Releases</button>
                                 <button class="vsr-tab" type="button" role="tab" aria-selected="false"
-                                    data-vsr-tab="fresh" aria-controls="vsr-fresh-panel">Fresh Releases</button>
+                                    data-vsr-tab="fresh" aria-controls="vsr-fresh-panel"
+                                    title="The newest releases going around">Fresh</button>
                             </div>
                             <div class="vsr-panel active" data-vsr-panel="enhanced" id="vsr-enhanced-panel"
                                 role="tabpanel">
@@ -1552,6 +1609,9 @@
                                 <div class="vd-toolbar-right">
                                     <button class="vd-missing-toggle" type="button" data-vd-missing-toggle
                                         hidden>Missing only</button>
+                                    <button class="vd-missing-toggle" type="button" data-vd-specials-toggle
+                                        aria-pressed="false" title="Only hides them here, they can still be grabbed"
+                                        hidden>Hide specials</button>
                                     <div class="vd-view-toggle" data-vd-view-toggle></div>
                                 </div>
                             </div>
@@ -2108,12 +2168,16 @@
                                         API keys SoulSync connects to</span>
                                 </div>
                                 <div class="header-actions">
-                                    <button class="save-button" id="save-settings">
-                                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                                            <path
-                                                d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-4-4zm2 16H5V5h11.17L19 7.83V19zm-7-7c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zM6 6h9v4H6z" />
+                                    <!-- settings save as you go; this is their status and a
+                                         save-now (settings.js setSettingsSaveState, #1909) -->
+                                    <button class="save-button" id="save-settings" data-state="idle"
+                                        aria-live="polite" title="Settings save as you go. Click to save again now.">
+                                        <svg class="save-state-icon" viewBox="0 0 24 24" width="16" height="16"
+                                            fill="none" stroke="currentColor" stroke-width="2.4"
+                                            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <path d="M5 12.5l4.5 4.5L19 7.5" />
                                         </svg>
-                                        <span>Save Settings</span>
+                                        <span>All changes saved</span>
                                     </button>
                                 </div>
                             </div>
@@ -3543,6 +3607,14 @@
                                                 <div class="setting-help-text">The Local files source whose tracks
                                                     SoulSync scans. Save the URL and token first, then pick one.</div>
                                             </div>
+                                            <div class="form-group">
+                                                <label>Source folder:</label>
+                                                <input type="text" id="music_assistant-source-folder"
+                                                    placeholder="/media/music">
+                                                <div class="setting-help-text">Only needed when Music Assistant
+                                                    doesn't share it (2.10.9 doesn't). The folder your source reads, as
+                                                    Music Assistant sees it.</div>
+                                            </div>
                                             <div class="form-actions">
                                                 <button class="test-button" type="button"
                                                     onclick="loadMusicAssistantSources()">Load sources</button>
@@ -3816,6 +3888,26 @@
                                                                 id="vq-episode-label">No limit</span></div>
                                                         <input type="range" id="vq-episode-size" class="vq-slider"
                                                             min="0" max="200" step="1" value="0">
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="vq-block">
+                                                <div class="vq-label">Preferred size <span class="vq-hint">a
+                                                        tie-break only: among releases equal on quality and custom
+                                                        formats, the one closest to this size ranks first. off at 0,
+                                                        never past the max size</span></div>
+                                                <div class="vq-grid">
+                                                    <div class="vq-block" style="margin:0;">
+                                                        <div class="vq-label">Movie <span class="vq-hint"
+                                                                id="vq-movie-pref-label">Off</span></div>
+                                                        <input type="range" id="vq-movie-pref" class="vq-slider" min="0"
+                                                            max="100" step="0.5" value="0">
+                                                    </div>
+                                                    <div class="vq-block" style="margin:0;">
+                                                        <div class="vq-label">TV episode <span class="vq-hint"
+                                                                id="vq-episode-pref-label">Off</span></div>
+                                                        <input type="range" id="vq-episode-pref" class="vq-slider"
+                                                            min="0" max="10" step="0.1" value="0">
                                                     </div>
                                                 </div>
                                             </div>
@@ -5738,7 +5830,7 @@
                                             </p>
                                             <div class="qp-editing-banner" id="qp-editing-banner" style="display:none">
                                                 Editing <strong class="qp-editing-banner-name">this profile</strong> —
-                                                not the active default. Changes autosave to this profile; Save Settings saves it too.
+                                                not the active default. Changes autosave to this profile; the save status at the top saves it right away too.
                                             </div>
                                             <div class="qp-profile-list" id="qp-profile-list">
                                                 <!-- rows injected by renderCustomQualityProfiles() -->
@@ -6512,6 +6604,24 @@
                                                     <div class="setting-help-text">Anime keeps its own folder when one
                                                         is set, whatever the profile.</div>
                                                 </div>
+                                            </div>
+
+                                            <div class="settings-group" data-stg="library">
+                                                <h3>More libraries</h3>
+                                                <div class="setting-help-text">
+                                                    Your own movie and TV libraries, each with its own folder, like a
+                                                    Stand-Up, Documentaries or Kids library in Plex. A new title files
+                                                    into the library picked for it (in its Get or Manual search window),
+                                                    else the 4K one when its quality profile says so, else the first
+                                                    library whose rules match its genres or TMDB keywords, else the
+                                                    default library for its kind. Titles you already have stay where
+                                                    they are. The main and 4K libraries are here too: their folders are
+                                                    the ones above.
+                                                </div>
+                                                <div id="video-libraries-list" class="video-libraries"></div>
+                                                <datalist id="video-library-genre-list"></datalist>
+                                                <button type="button" class="test-button" id="video-library-add">+ Add
+                                                    library</button>
                                             </div>
 
                                             <div class="settings-group" data-stg="library">
@@ -8872,6 +8982,30 @@
                                                     </label>
                                                 </div>
                                             </div>
+
+                                            <!-- Specials (season 0): hunt them or not. Saves on change
+                                                 to the video downloads config (monitor_specials in the
+                                                 video db; VideoDatabase._apply_specials_policy). -->
+                                            <div class="api-service-frame stg-service" data-video-service="monitoring">
+                                                <div class="stg-service-header" onclick="toggleStgService(this)">
+                                                    <span class="stg-service-dot" style="color: #38bdf8;"></span>
+                                                    <h4 class="service-title">Monitoring</h4>
+                                                    <span class="stg-service-chevron">›</span>
+                                                </div>
+                                                <div class="stg-service-body">
+                                                    <label class="vid-pref-row">
+                                                        <input type="checkbox" id="video-monitor-specials" checked>
+                                                        <span>Monitor Specials (season 0)</span>
+                                                    </label>
+                                                    <div class="callback-info">
+                                                        <div class="callback-help">Off: every show's Specials season is
+                                                            unmonitored, so its episodes are never searched or added to the
+                                                            wishlist. A show that is nothing but specials keeps them, and a
+                                                            Specials season you switch on by hand on a show's page stays on.
+                                                            Turning this back on monitors the ones it switched off.</div>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                     <!-- end Paths & Organization body -->
@@ -9320,6 +9454,20 @@
 
                                 <!-- Third Column - Database, Metadata, Playlist Sync, Logging -->
                                 <div class="settings-third-column">
+                                    <!-- what shows in the app (#1909). per profile, so it lives in
+                                         the picker, this is just a door to it -->
+                                    <div class="settings-group" data-stg="appearance">
+                                        <h3>Show only what you use</h3>
+                                        <div class="form-group">
+                                            <small class="settings-hint">Hide the parts of SoulSync you don't use,
+                                                like podcasts, audiobooks or the video side. They keep working and
+                                                come back with one switch. Each profile picks its own.</small>
+                                            <button type="button" class="test-button" id="settings-open-feature-picker"
+                                                onclick="window.openFeaturePicker && window.openFeaturePicker()">Customize
+                                                SoulSync</button>
+                                        </div>
+                                    </div>
+
                                     <!-- UI Appearance -->
                                     <div class="settings-group" data-stg="appearance">
                                         <h3>UI Appearance</h3>

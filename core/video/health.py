@@ -295,6 +295,13 @@ def collect(db) -> dict:
     from core.video.library_roots import four_k_path
     roots = [(key, label, str(db.get_setting(key) or "").strip()) for key, label in _ROOTS]
     roots += [(key, label, four_k_path(db, kind)) for kind, key, label in _FOUR_K_ROOTS]
+    # custom libraries (#2029): each one's folder is checked like the main ones
+    try:
+        from core.video.libraries import list_libraries
+        roots += [("library_%d" % lib["id"], "%s library" % lib["name"], lib["path"])
+                  for lib in list_libraries(db) if not lib["builtin"] and lib["usable"]]
+    except Exception:   # noqa: BLE001 - a bad row never hides the main checks
+        pass
     for key, label, path in roots:
         if not path:
             continue

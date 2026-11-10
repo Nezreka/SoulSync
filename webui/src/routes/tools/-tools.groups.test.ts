@@ -228,6 +228,34 @@ describe('visibleGroups', () => {
     ).toEqual(['dead_file']);
   });
 
+  // review 5 R5-L-3: the payload's per-status severity counts, not the worst
+  // pending row, decide what a severity filter shows
+  it('finds resolved errors and pending warnings under an error', () => {
+    const real = [
+      group({
+        finding_type: 'corrupt_audio',
+        resolved: 5,
+        total: 5,
+        severities: { resolved: { error: 5 } },
+      }),
+      group({
+        finding_type: 'metadata_gap',
+        pending: 301,
+        total: 301,
+        severity_max: 'error',
+        severities: { pending: { warning: 300, error: 1 } },
+      }),
+    ];
+    const types = (f: { status?: string; severity?: string }) =>
+      visibleGroups(real, f).map((g) => g.finding_type);
+    expect(types({ status: 'resolved', severity: 'error' })).toEqual(['corrupt_audio']);
+    expect(types({ status: 'resolved', severity: 'info' })).toEqual([]);
+    expect(types({ status: 'pending', severity: 'warning' })).toEqual(['metadata_gap']);
+    expect(types({ status: '', severity: 'error' })).toEqual(['corrupt_audio', 'metadata_gap']);
+    expect(groupCountForStatus(real[1], 'pending', 'warning')).toBe(300);
+    expect(groupCountForStatus(real[1], '', 'error')).toBe(1);
+  });
+
   it('an empty status means every status, using the total', () => {
     expect(visibleGroups(groups, {}).map((g) => g.finding_type)).toEqual([
       'orphan_file',

@@ -139,7 +139,8 @@ describe('Library V2 artist detail — All Releases views', () => {
     },
   );
 
-  // the whole artist page and the whole View Settings: slow on a loaded run
+  // the whole artist page and the whole View Settings: about 30s on a dev
+  // machine before the v2 review too, so a 30s limit failed on its own
   it('hides the toolbar buttons this profile switched off and opens View Settings from Tools', async () => {
     const saved: unknown[] = [];
     server.use(
@@ -186,7 +187,7 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(
       await screen.findByRole('button', { name: 'History' }, { timeout: 5000 }),
     ).toBeInTheDocument();
-  }, 30_000);
+  }, 60_000);
 
   it.each(['cards', 'table'])(
     'reads the discography of an artist the library does not hold, writing nothing (%s)',
@@ -459,6 +460,31 @@ describe('Library V2 artist detail — All Releases views', () => {
       ),
     );
   });
+
+  it('#2012: the collection counts take the releases "+ Other sources" puts on the page', async () => {
+    inLibrary();
+    server.use(
+      http.get('/api/artist/sp-1/discography/gap-fill', () =>
+        HttpResponse.json({
+          success: true,
+          gaps: {
+            albums: [
+              { id: 'dz-a', name: 'Third', album_type: 'album', release_date: '2008' },
+              { id: 'dz-b', name: 'Glory Times', album_type: 'album', release_date: '1995' },
+            ],
+          },
+        }),
+      ),
+    );
+    const { container } = renderArtist('/library?artist=1&header=rich&releases=all');
+    const albumsStats = () =>
+      [...container.querySelectorAll('.collection-category')]
+        .find((el) => el.querySelector('.category-label')?.textContent === 'Albums')
+        ?.querySelector('.category-stats')?.textContent;
+    await waitFor(() => expect(albumsStats()).toBe('0/2'), { timeout: 10_000 });
+    fireEvent.click(await screen.findByRole('button', { name: /Other sources/ }));
+    await waitFor(() => expect(albumsStats()).toBe('0/4'), { timeout: 10_000 });
+  }, 30_000);
 
   it('uses the existing rich header for immersive arrivals and keeps the artist tools on show', async () => {
     inLibrary();
@@ -1234,7 +1260,8 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(
       await screen.findByRole('button', { name: /Watching/ }, { timeout: 5000 }),
     ).toBeInTheDocument();
-    expect(checks).toEqual([{ artist_id: 'sp-1' }]);
+    // G02-4: the provider the id is from, so the server never reads it as a library row
+    expect(checks).toEqual([{ artist_id: 'sp-1', source: 'spotify' }]);
   });
 
   it('lets a read-only profile browse the full provider discography without writing', async () => {

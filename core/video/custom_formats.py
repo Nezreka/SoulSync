@@ -11,7 +11,8 @@ the sharp edge and drops the ceremony:
   · a format matches when ALL include terms hit and NO exclude term does
     (synonyms go inside one regex term: /x265|hevc/)
   · matching formats ADD their score to the release's rank (negative scores
-    bury without rejecting)
+    bury without rejecting). the summed format score ranks right after the
+    quality tier and before every tie-break (core/video/release_rank, #2033)
   · per-profile overrides: profile["format_scores"][str(id)] replaces the
     format's default score — 4K profile can love what the TV profile hates
   · profile["min_format_score"] (default 0 = off) HARD-rejects accepted
@@ -133,18 +134,24 @@ def matching_formats(name: Any, formats: List[Dict[str, Any]]) -> List[Dict[str,
     return out
 
 
-def format_score(name: Any, formats: List[Dict[str, Any]],
-                 profile: Optional[Dict[str, Any]]) -> Tuple[int, List[str]]:
-    """(summed score, matched names) for a release under a profile — per-profile
-    overrides in profile['format_scores'] replace each format's default."""
+def format_matches(name: Any, formats: List[Dict[str, Any]],
+                   profile: Optional[Dict[str, Any]]) -> List[Tuple[str, int]]:
+    """[(format name, score under this profile)] for every format the name
+    matches, so the ranking can show what each one added."""
     overrides = (profile or {}).get("format_scores") or {}
-    total = 0
-    names: List[str] = []
+    out: List[Tuple[str, int]] = []
     for f in matching_formats(name, formats):
         try:
             sc = int(overrides.get(str(f["id"]), f["score"]))
         except (TypeError, ValueError):
             sc = f["score"]
-        total += sc
-        names.append(f["name"])
-    return total, names
+        out.append((f["name"], sc))
+    return out
+
+
+def format_score(name: Any, formats: List[Dict[str, Any]],
+                 profile: Optional[Dict[str, Any]]) -> Tuple[int, List[str]]:
+    """(summed score, matched names) for a release under a profile — per-profile
+    overrides in profile['format_scores'] replace each format's default."""
+    hits = format_matches(name, formats, profile)
+    return sum(sc for _, sc in hits), [n for n, _ in hits]

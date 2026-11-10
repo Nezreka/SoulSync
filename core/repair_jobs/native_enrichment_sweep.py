@@ -126,8 +126,11 @@ class NativeEnrichmentSweepJob(RepairJob):
         """Native artists still short of a catalog provider id."""
         from core.library2.native_enrich import _pending_unmapped_artists
 
+        # oldest attempt first: a batch full of names no provider knows would
+        # otherwise be retried every run and nothing behind it ever asked
+        # (review 5 R5-I-7)
         return [
-            row for row in _pending_unmapped_artists(conn, None)
+            row for row in _pending_unmapped_artists(conn, None, oldest_attempt_first=True)
             if row.get("legacy_artist_id") is None
         ][:limit]
 
@@ -156,7 +159,8 @@ class NativeEnrichmentSweepJob(RepairJob):
 
         backfilled = None
         try:
-            from core.library2.native_enrich import enrich_native_entity_all_services
+            from core.library2.native_enrich import (
+                _mark_reconcile_attempted, enrich_native_entity_all_services)
 
             for i, row in enumerate(pending):
                 if context.check_stop():
@@ -171,6 +175,9 @@ class NativeEnrichmentSweepJob(RepairJob):
                     logger.debug("native enrich of artist %s failed: %s", artist_id, e)
                     result.errors += 1
                     resolved = {}
+                # the turn is taken either way: it moves to the back of the line
+                _mark_reconcile_attempted(conn, artist_id)
+                conn.commit()
                 result.scanned += 1
                 if resolved:
                     result.auto_fixed += 1

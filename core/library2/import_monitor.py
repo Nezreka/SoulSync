@@ -13,8 +13,10 @@ def monitor_imported_extra(conn, track_id: int, context: dict) -> None:
     if existing and existing['provenance'] == PROVENANCE_USER:
         # Including a deliberate opt-in: keep the stronger provenance intact.
         return
-    qp = (context.get('track_info') or {}).get('quality_profile_id')
-    if qp is not None:
+    track_info = context.get('track_info') or {}
+    qp = track_info.get('quality_profile_id')
+    # a concrete id is not a choice (review 5 W2-WD-1): only a picked one pins
+    if qp is not None and track_info.get('quality_profile_explicit') is True:
         assign_quality_profile(conn, 'tracks', track_id, int(qp))
     record_rule(conn, 'track', track_id, True, PROVENANCE_FILE, profile_id=profile_id)
     if profile_id == 1:

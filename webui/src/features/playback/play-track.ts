@@ -22,6 +22,10 @@ export interface LibraryTrackPayload {
   bitrate?: string | number | null;
   artist_id?: string | number | null;
   album_id?: string | number | null;
+  /** v2 ids by their own names: Now Playing's "Report issue" and "Go to
+   *  artist" need them, and a v2 row's `id` alone doesn't say which it is. */
+  lib2_track_id?: string | number | null;
+  lib2_artist_id?: string | number | null;
   _stats_image: string | null;
   album: string;
   artist: string;
@@ -53,6 +57,8 @@ export async function resolveLibraryTrack(
       bitrate: track.bitrate,
       artist_id: track.artist_id,
       album_id: track.album_id,
+      lib2_track_id: track.lib2_track_id ?? null,
+      lib2_artist_id: track.lib2_artist_id ?? null,
       _stats_image: track.image_url || null,
       album: track.album_title || album || '',
       artist: track.artist_name || artist || '',

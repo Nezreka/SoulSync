@@ -9,6 +9,7 @@ from contextlib import closing
 import pytest
 
 from core.library2.importer import (
+    _legacy_number,
     _legacy_projection,
     _legacy_rows,
     featured_from_title,
@@ -1016,6 +1017,205 @@ def test_import_prefers_explicit_album_type_over_one_track_heuristic(legacy_db):
     assert row[0] == "album"
 
 
+# --- numbers that are text (#1989) -------------------------------------------
+
+@pytest.mark.parametrize("value,expected", [
+    (12, 12), ("12", 12), (" 12 ", 12), ("12.0", 12), ("128.5", 128.5), (128.5, 128.5), (0, 0),
+    (None, None), ("", None), ("N/A", None), ("1/12", None), ("3:45", None),
+    ("inf", None), ("nan", None), ([], None),
+])
+def test_legacy_number(value, expected):
+    assert _legacy_number(value) == expected
+
+
+def text_in_lib2_numbers(database):
+    """Every numeric lib2 value that holds text. The ids are left out, a legacy
+    id can be real text in an INTEGER column."""
+    found = []
+    with closing(database._get_connection()) as conn:
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'lib2_%'").fetchall()]
+        for table in tables:
+            for column in conn.execute(f'PRAGMA table_info("{table}")').fetchall():
+                name, declared = column[1], (column[2] or "").upper()
+                if name.endswith("_id") or not declared.startswith(("INT", "REAL")):
+                    continue
+                if conn.execute(
+                        f"""SELECT 1 FROM "{table}" WHERE typeof("{name}")='text' LIMIT 1"""
+                ).fetchone():
+                    found.append(f"{table}.{name}")
+    return found
+
+
+def _lib2_album_counts(legacy_db):
+    with closing(legacy_db._get_connection()) as conn:
+        return {r["title"]: (r["album_type"], r["track_count"], r["expected_track_count"])
+                for r in conn.execute(
+                    "SELECT title, album_type, track_count, expected_track_count FROM lib2_albums")}
+
+
+@pytest.mark.parametrize("value", ["N/A", "1/12"])
+def test_text_track_count_falls_back_to_the_tracks_the_album_has(legacy_db, value):
+    """sqlite keeps this as text in an INTEGER column. It stopped the migration
+    at the single detection, and every retry stopped at the same row."""
+    _on_legacy(legacy_db.path, ("UPDATE albums SET track_count=?", (value,)))
+
+    stats = import_legacy_library(legacy_db)
+
+    assert stats["albums"] == 2
+    assert _lib2_album_counts(legacy_db) == {
+        "Views": ("album", None, 2),
+        "One Dance": ("single", None, 1),
+    }
+
+
+def test_text_count_with_an_explicit_type_reaches_neither_lib2_nor_the_monitor_check(legacy_db):
+    """An explicit type skips the single detection, so without a number here the
+    same value stopped the walk one step later, at the monitored flag."""
+    _on_legacy(legacy_db.path,
+               "ALTER TABLE albums ADD COLUMN album_type TEXT",
+               "ALTER TABLE albums ADD COLUMN api_track_count INTEGER",
+               "UPDATE albums SET album_type='album', track_count='N/A', api_track_count='N/A'")
+
+    import_legacy_library(legacy_db)
+
+    assert _lib2_album_counts(legacy_db) == {
+        "Views": ("album", None, 2),
+        "One Dance": ("album", None, 1),
+    }
+    with closing(legacy_db._get_connection()) as conn:
+        monitored = {r["title"]: r["monitored"]
+                     for r in conn.execute("SELECT title, monitored FROM lib2_albums")}
+    assert monitored == {"Views": 0, "One Dance": 1}
+
+
+def test_text_count_in_the_copied_album_scan_does_not_stop_the_import(legacy_db):
+    """The scan for an album's copies runs ahead of the walk and asks the same question."""
+    from core.library2.importer import _legacy_album_copies
+
+    _on_legacy(legacy_db.path,
+               "ALTER TABLE albums ADD COLUMN owner_profile_id INTEGER",
+               "UPDATE albums SET track_count='N/A', owner_profile_id=2")
+    with closing(legacy_db._get_connection()) as conn:
+        copies, _repeated = _legacy_album_copies(
+            conn.cursor(), {"10": 2, "11": 1}, {2}, {})
+    assert copies == {}
+
+
+def test_text_in_any_legacy_number_column_stays_out_of_lib2(legacy_db):
+    """Most of these didn't stop the migration, they sat in lib2 as text for
+    whatever reads the number next. Duration did, at the single-to-album link."""
+    columns = {
+        "artists": ("art_locked",),
+        "albums": ("track_count", "api_track_count", "year", "explicit", "art_locked",
+                   "canonical_score", "canonical_locked"),
+        "tracks": ("track_number", "disc_number", "duration", "bpm", "explicit", "play_count",
+                   "file_size", "bitrate", "sample_rate", "bit_depth"),
+    }
+    with closing(sqlite3.connect(legacy_db.path)) as conn:
+        for table, names in columns.items():
+            have = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            for name in names:
+                if name not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} INTEGER")
+                conn.execute(f"UPDATE {table} SET {name}='N/A'")
+        conn.commit()
+
+    stats = import_legacy_library(legacy_db)
+
+    assert (stats["albums"], stats["tracks"]) == (2, 3)
+    assert text_in_lib2_numbers(legacy_db) == []
+    with closing(legacy_db._get_connection()) as conn:
+        row = conn.execute(
+            "SELECT track_number, disc_number, duration, play_count FROM lib2_tracks "
+            "WHERE legacy_track_id=100").fetchone()
+    assert tuple(row) == (None, 1, None, 0)
+
+
+def test_a_legacy_year_of_zero_imports_as_unknown(legacy_db):
+    """third #1062 review G02-3: 3.6.1's 0 meant unknown; lib2 says NULL, so
+    the workers fill it and nothing shows year 0"""
+    with closing(sqlite3.connect(legacy_db.path)) as conn:
+        conn.execute("UPDATE albums SET year=0")
+        conn.commit()
+    import_legacy_library(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        years = {r[0] for r in conn.execute("SELECT year FROM lib2_albums")}
+    assert years == {None}
+
+
+def test_text_numbers_in_a_wishlist_payload_do_not_stop_the_import(legacy_db):
+    """``int(total_tracks)`` stopped the migration the same way as #1989, out of
+    the json this time."""
+    _on_legacy(legacy_db.path, """
+        CREATE TABLE wishlist_tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT UNIQUE NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT,
+            date_added TIMESTAMP
+        )""", ("INSERT INTO wishlist_tracks(spotify_track_id, spotify_data) VALUES(?,?)", (
+        "wish1",
+        json.dumps({"id": "wish1", "name": "Wished", "track_number": "1/12", "disc_number": "N/A",
+                    "duration_ms": "3:45", "artists": [{"name": "Wish Artist"}],
+                    "album": {"id": "walbum", "name": "Wish Album", "total_tracks": "N/A",
+                              "album_type": "album"}}),
+    )))
+
+    assert import_legacy_library(legacy_db)["wishlist_tracks"] == 1
+
+    assert text_in_lib2_numbers(legacy_db) == []
+    with closing(legacy_db._get_connection()) as conn:
+        row = conn.execute("SELECT track_number, disc_number, duration FROM lib2_tracks "
+                           "WHERE title='Wished'").fetchone()
+    assert tuple(row) == (None, 1, None)
+
+
+def test_a_deezer_wishlist_rows_featured_artist_id_is_not_a_spotify_id(legacy_db):
+    """third #1062 review P2A-5: every credited artist's payload id went in
+    as spotify_id whatever the provider said; only the primary was namespaced"""
+    _on_legacy(legacy_db.path, """
+        CREATE TABLE wishlist_tracks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT UNIQUE NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT,
+            source_info TEXT,
+            date_added TIMESTAMP
+        )""", ("INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_info) VALUES(?,?,?)", (
+        "dz-track-1",
+        json.dumps({"id": "dz-track-1", "name": "Feature Song", "source": "deezer",
+                    "artists": [{"name": "Deezer Lead", "id": "111"}, {"name": "Deezer Guest", "id": "222"}],
+                    "album": {"id": "dz-album", "name": "Deezer LP", "total_tracks": 10,
+                              "album_type": "album", "artists": [{"name": "Deezer Lead", "id": "111"}]}}),
+        json.dumps({"metadata_source": "deezer"}))))
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        guest = conn.execute("SELECT spotify_id, external_ids FROM lib2_artists WHERE name='Deezer Guest'").fetchone()
+    assert guest is not None
+    assert guest["spotify_id"] in (None, "")
+    assert json.loads(guest["external_ids"] or "{}").get("deezer") == "222"
+
+
+def test_a_manual_import_does_not_run_the_whole_library_backfills_first(legacy_db, monkeypatch):
+    """third #1062 review P2C-8: the import's schema call ran every backfill
+    uncommitted inside its own transaction, right before a reset threw the
+    work away; the deferred runner converges after the import"""
+    from core.library2 import importer, schema
+    calls = []
+    real = schema.ensure_library_v2_schema
+
+    def spy(conn, **kw):
+        calls.append(kw)
+        return real(conn, **kw)
+
+    monkeypatch.setattr(importer, "ensure_library_v2_schema", spy)
+    import_legacy_library(legacy_db)
+    assert calls and all(kw.get("run_backfills") is False for kw in calls)
+
+
 def test_multi_artist_split(imported_conn):
     # Track 100 ("One Dance" on Views) credits Drake + featured Wizkid.
     names = [r["name"] for r in _q(
@@ -1731,6 +1931,30 @@ def test_title_feature_list_splits_when_track_credit_supplies_a_known_anchor(leg
     assert "Wizkid & Kyla" not in names
 
 
+def test_watchlist_import_does_not_watch_a_namesake(imported_conn):
+    """review 5 W2-WF-2: the import's watchlist adoption takes the reconcile's
+    narrowed name fallback, so the UK Nirvana is not watched because the US
+    one (which holds the entry's spotify id) is"""
+    from core.library2.importer import apply_monitoring_from_watchlist_wishlist
+
+    conn = imported_conn
+    conn.execute("DROP TABLE IF EXISTS watchlist_artists")
+    conn.execute("CREATE TABLE watchlist_artists(id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                 "artist_name TEXT NOT NULL, spotify_artist_id TEXT, musicbrainz_artist_id TEXT)")
+    conn.execute("INSERT INTO watchlist_artists(artist_name, spotify_artist_id) "
+                 "VALUES('Nirvana', 'sp-us')")
+    us = conn.execute("INSERT INTO lib2_artists(name, spotify_id) "
+                      "VALUES('Nirvana', 'sp-us')").lastrowid
+    uk = conn.execute("INSERT INTO lib2_artists(name, external_ids) "
+                      "VALUES('Nirvana', '{\"musicbrainz\":\"mb-uk\"}')").lastrowid
+
+    apply_monitoring_from_watchlist_wishlist(conn.cursor())
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)",
+                               (us, uk)).fetchall())
+    assert states == {us: 1, uk: 0}
+
+
 def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_db):
     conn = sqlite3.connect(legacy_db.path)
     conn.execute("""
@@ -2425,6 +2649,39 @@ def test_reimport_keeps_provider_genres_a_legacy_row_does_not_carry(legacy_db):
             "SELECT genres, summary FROM lib2_artists WHERE name='Drake'").fetchone()
         assert artist["genres"] == '["rap"]'
         assert artist["summary"] == 'Bio.'
+
+
+def test_reimport_does_not_fill_genres_the_cleanup_locked_empty(legacy_db):
+    """review 5 W2-WF-1: a cleanup that removed every genre leaves a locked
+    []. that is its answer, not a hole for the legacy snapshot to fill."""
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE artists SET genres='[\"seen live\"]' WHERE name='Drake'")
+        conn.execute("UPDATE albums SET genres='[\"seen live\"]' WHERE title='Views'")
+        conn.commit()
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        conn.execute("UPDATE lib2_albums SET genres='[]', genres_locked=1 WHERE title='Views'")
+        conn.execute("UPDATE lib2_artists SET genres='[]', genres_locked=1 WHERE name='Drake'")
+        conn.commit()
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute(
+            "SELECT genres FROM lib2_albums WHERE title='Views'").fetchone()[0] == "[]"
+        assert conn.execute(
+            "SELECT genres FROM lib2_artists WHERE name='Drake'").fetchone()[0] == "[]"
+        # unlocked, the same hole fills
+        conn.execute("UPDATE lib2_artists SET genres_locked=0 WHERE name='Drake'")
+        conn.commit()
+
+    import_legacy_library(legacy_db)
+
+    with closing(legacy_db._get_connection()) as conn:
+        assert conn.execute(
+            "SELECT genres FROM lib2_artists WHERE name='Drake'").fetchone()[0] \
+            == '["seen live"]'
 
 
 def test_the_plex_updaters_marker_is_not_imported_as_a_biography(legacy_db):

@@ -228,7 +228,7 @@ def _default_add_videos(channel: Dict[str, Any], videos: List[Dict[str, Any]]) -
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
     return get_video_db().add_videos_to_wishlist(
-        channel, videos, server_source=resolve_video_server(), profile_id=_profile())
+        channel, videos, server_source=resolve_video_server(), profile_id=_profile(), auto=True)
 
 
 def _default_backfill_count() -> int:
@@ -390,6 +390,16 @@ def auto_video_scan_watchlist_channels(
                                  log_line="Checking %s for new videos" % ctitle, log_type='info')
             if not cid:
                 continue
+            # #2008: followed to keep an eye on, not to download. nothing is
+            # wished; picks from the channel page work as always
+            try:
+                hands_off = (channel_settings(cid) or {}).get("auto_download") is False
+            except Exception:   # noqa: BLE001 - unreadable settings scan as before
+                hands_off = False
+            if hands_off:
+                deps.update_progress(automation_id, log_line="%s: new uploads aren't downloaded, skipping" % ctitle,
+                                     log_type='info')
+                continue
             try:
                 uploads = fetch_uploads(cid, limit) or []
             except Exception:   # noqa: BLE001 - one flaky channel shouldn't abort the scan
@@ -398,6 +408,15 @@ def auto_video_scan_watchlist_channels(
                 continue
 
             baseline = _day(ch.get('date_added')) or today
+            # review 4 R4-C-1: downloads switched back on count from then,
+            # and the follow's safety net doesn't reach behind it
+            channel_backfill = backfill
+            try:
+                since = _day((channel_settings(cid) or {}).get("auto_download_since"))
+            except Exception:   # noqa: BLE001
+                since = None
+            if since and since > baseline:
+                baseline, channel_backfill = since, 0
             # Read the dedup sets once — used by both the gap-fill (break-on-existing) and
             # the final selection, so we never call the seams twice per channel.
             wl = list(wishlisted_ids(cid) or [])
@@ -415,7 +434,7 @@ def auto_video_scan_watchlist_channels(
             except Exception:   # noqa: BLE001 - filters are an assist, never abort a channel
                 logger.exception("channel filters failed for %s", cid)
             gaps = select_channel_video_gaps(
-                uploads, baseline_date=baseline, backfill_count=backfill,
+                uploads, baseline_date=baseline, backfill_count=channel_backfill,
                 wishlisted_ids=wl, dismissed_ids=di,
                 downloaded_ids=dl, today=today, min_seconds=min_seconds)
             if gaps:

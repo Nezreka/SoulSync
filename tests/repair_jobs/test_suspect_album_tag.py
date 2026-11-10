@@ -359,6 +359,38 @@ def test_library_v2_wanted_tracks_without_files_are_not_owned(tmp_path):
     assert findings == []
 
 
+def test_library_v2_singles_never_crowd_out_real_candidates(tmp_path):
+    """review 5 R5-I-3: the lone-track query took the first 2000 by title and
+    then skipped singles, so 2000 singles that sort first hid every album"""
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    with db._get_connection() as conn:
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists (name, name_key) VALUES ('Solo', 'solo')").lastrowid
+        for n in range(2001):
+            album_id = conn.execute(
+                "INSERT INTO lib2_albums (primary_artist_id, title, album_type, image_url, origin) "
+                "VALUES (?, ?, 'single', 'http://art.jpg', 'library')",
+                (artist_id, f"A Single {n:04d}")).lastrowid
+            track_id = conn.execute(
+                "INSERT INTO lib2_tracks (album_id, title, track_number) VALUES (?, ?, 1)",
+                (album_id, f"A Single {n:04d}")).lastrowid
+            conn.execute("INSERT INTO lib2_track_files (track_id, path, is_primary) VALUES (?, ?, 1)",
+                         (track_id, f"/music/Solo/{n}.flac"))
+        conn.commit()
+    lone = _lib2_album(db, "Various Artists", "Zz Hitzone 43", owned_tracks=1,
+                       catalogue_tracks=20, image="http://art.jpg", track_count=20,
+                       credit="Daughtry")
+    findings = []
+    ctx = JobContext(db=db, transfer_folder="/music", config_manager=None,
+                     create_finding=lambda **kw: findings.append(kw) or True)
+
+    SuspectAlbumTagDetector().scan(ctx)
+
+    assert [f["entity_id"] for f in findings] == [f"lib2:{lone[0]}"]
+
+
 # ---------------------------------------------------------------------------
 # Signal 4 (#1567): multi-track poisoned batches.
 
@@ -739,3 +771,18 @@ def test_1567_r4_signal4_counts_track_artist_not_batch_artist_id():
     assert f["details"]["artist_id"] == 1
     assert f["details"]["distinct_artists"] == 9
     assert any("duplicate track numbers" in r for r in f["details"]["reasons"])
+
+
+def test_a_hand_tagged_track_anywhere_protects_its_album():
+    """third #1062 review G12-4: only the album's first file was checked, so a
+    mix the user assembled and hand-tagged on track 07 was flagged as a
+    poisoned batch and sent to Re-identify"""
+    from database.music_database import MusicDatabase
+    paths = [f"/music/Mix/Music/{n:02d} - Song.flac" for n in range(1, 12)]
+    ctx, findings = _context([], multi_rows=[_multi_row(rep_path=paths[0],
+                                                        all_paths="\x1f".join(paths))])
+    ctx.db.manual_path_keys = lambda: {MusicDatabase.manual_path_key(paths[6])}
+
+    result = SuspectAlbumTagDetector().scan(ctx)
+
+    assert result.findings_created == 0 and findings == []

@@ -682,6 +682,79 @@ def test_track_download_history_accepts_text_legacy_id(imported_conn):
         drake["track_id"]]
 
 
+def _kinded_downloads(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS track_downloads(
+               id INTEGER PRIMARY KEY AUTOINCREMENT, track_id TEXT, file_path TEXT,
+               source_service TEXT, track_title TEXT, track_album TEXT,
+               status TEXT DEFAULT 'completed', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+               track_id_kind TEXT)"""
+    )
+
+
+def _downloads_on(conn, track_id):
+    return [e["detail"] for e in scoped_history(conn, scope="track", entity_id=track_id)
+            if e["event_type"] == "downloaded"]
+
+
+def test_track_history_reads_downloads_in_their_own_id_space(imported_conn):
+    """review 5 R5-E-2: after the upgrade carry, track_downloads.track_id is a
+    catalogue id ('lib2'), or a 3.6.1 id the carry couldn't map ('legacy').
+    a legacy-only lookup lost a track's own download and showed another
+    track's whose catalogue id equals this track's legacy id."""
+    drake = _drake_ids(imported_conn)
+    other = _second_artist(imported_conn)
+    # plex ratingKeys: drake's legacy id equals rihanna's catalogue id
+    imported_conn.execute("UPDATE lib2_tracks SET legacy_track_id=? WHERE id=?",
+                          (other["track_id"], drake["track_id"]))
+    imported_conn.execute("UPDATE lib2_tracks SET legacy_track_id=48213 WHERE id=?",
+                          (other["track_id"],))
+    _kinded_downloads(imported_conn)
+    imported_conn.executemany(
+        "INSERT INTO track_downloads(track_id, file_path, source_service, track_title, "
+        "track_id_kind) VALUES(?, ?, 'soulseek', ?, ?)",
+        [
+            # rihanna's download carried to her catalogue id
+            (str(other["track_id"]), "/downloads/Work.flac", "Work", "lib2"),
+            # drake's own new download, keyed on his catalogue id
+            (str(drake["track_id"]), "/downloads/One Dance.flac", "One Dance", "lib2"),
+            # a 3.6.1 row on rihanna's legacy id the carry couldn't map
+            ("48213", "/downloads/Work (old).flac", "Work old", "legacy"),
+        ],
+    )
+    imported_conn.commit()
+
+    assert _downloads_on(imported_conn, drake["track_id"]) == ["One Dance (soulseek)"]
+    assert sorted(_downloads_on(imported_conn, other["track_id"])) == [
+        "Work (soulseek)", "Work old (soulseek)"]
+    artist = scoped_history(imported_conn, scope="artist", entity_id=drake["artist_id"])
+    assert [e["track_id"] for e in artist if e["event_type"] == "downloaded"] == [
+        drake["track_id"]]
+
+
+def test_path_fallback_skips_another_tracks_catalogue_row(imported_conn):
+    """review 5 R5-E-2: a 'lib2' row at this track's path but keyed on a
+    different catalogue track is that track's download, not this one's."""
+    drake = _drake_ids(imported_conn)
+    other = _second_artist(imported_conn)
+    path = imported_conn.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id=? AND is_primary=1",
+        (drake["track_id"],),
+    ).fetchone()[0]
+    _kinded_downloads(imported_conn)
+    imported_conn.executemany(
+        "INSERT INTO track_downloads(track_id, file_path, source_service, track_title, "
+        "track_id_kind) VALUES(?, ?, 'soulseek', ?, ?)",
+        [
+            (str(other["track_id"]), path, "Work", "lib2"),
+            (None, path, "One Dance", None),
+        ],
+    )
+    imported_conn.commit()
+
+    assert _downloads_on(imported_conn, drake["track_id"]) == ["One Dance (soulseek)"]
+
+
 def test_unsupported_scope_raises(imported_conn):
     with pytest.raises(ValueError):
         scoped_history(imported_conn, scope="playlist", entity_id=1)

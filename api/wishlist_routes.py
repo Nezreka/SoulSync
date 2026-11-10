@@ -553,11 +553,15 @@ def remove_album_from_wishlist():
         data = request.get_json()
         album_id = data.get('album_id')
         album_name_filter = data.get('album_name')
+        # the album card's artist, so a shared album name stays one artist's
+        # (review 5 R5-X1-2)
+        artist_name_filter = data.get('artist_name')
         runtime = _build_wishlist_route_runtime()
         payload, status_code = _wishlist_remove_album_from_wishlist(
             runtime,
             album_id=album_id,
             album_name_filter=album_name_filter,
+            artist_name_filter=artist_name_filter,
         )
         return jsonify(payload), status_code
     except Exception as e:

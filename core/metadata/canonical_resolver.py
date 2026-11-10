@@ -403,6 +403,13 @@ def _catalogue_album_and_tracks(db, album_id):
                         ON f.track_id = t.id AND f.is_primary = 1
                        AND COALESCE(f.file_state, 'active') <> 'deleted'
                 WHERE t.album_id = ?
+                  -- the user's files only, as 3.6.1 scored its scanned tracks:
+                  -- the fileless slots a previous pin (or a wish) added are
+                  -- that pin's own tracklist, and scoring them re-elected it
+                  AND EXISTS (SELECT 1 FROM lib2_track_files owned
+                               WHERE owned.track_id = t.id
+                                 AND COALESCE(owned.file_state, 'active') = 'active'
+                                 AND TRIM(COALESCE(owned.path, '')) <> '')
                 ORDER BY t.track_number""",
             (str(album_id),)).fetchall()]
         return dict(album_row), tracks

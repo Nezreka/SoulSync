@@ -148,12 +148,42 @@ function debouncedAutoSaveSettings(event) {
     if (document.querySelector('.stg-tab.active')?.dataset.tab === 'logs') return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     settingsAutoSaveTimer = setTimeout(() => saveSettings(true), 2000);
+    setSettingsSaveState('pending');
 }
 
 function handleManualSaveClick() {
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
     saveSettings(false);
+}
+
+// settings save themselves (#1909). the old Save Settings button and an
+// "auto-saved" toast after every keystroke told two stories, and the tour
+// still said nothing applied until you clicked. the button is now the one
+// quiet status, and still saves right away when clicked (the video side
+// hangs its own saves on that click).
+const SETTINGS_SAVE_LABELS = {
+    idle: 'All changes saved',
+    pending: 'Save now',
+    saving: 'Saving…',
+    saved: 'Saved',
+    error: 'Retry save',
+};
+let _settingsSavedTimer = null;
+
+function setSettingsSaveState(state) {
+    const btn = document.getElementById('save-settings');
+    if (!btn || !SETTINGS_SAVE_LABELS[state]) return;
+    if (_settingsSavedTimer) { clearTimeout(_settingsSavedTimer); _settingsSavedTimer = null; }
+    btn.dataset.state = state;
+    const label = btn.querySelector('span');
+    if (label) label.textContent = SETTINGS_SAVE_LABELS[state];
+    btn.title = state === 'idle' || state === 'saved'
+        ? 'Settings save as you go. Click to save again now.'
+        : '';
+    if (state === 'saved') {
+        _settingsSavedTimer = setTimeout(() => setSettingsSaveState('idle'), 2000);
+    }
 }
 
 function syncMetadataSourceSelection(source) {
@@ -1212,6 +1242,7 @@ function switchSettingsTab(tab) {
     // the same one-shot probe fill the dots in.
     if (tab === 'sources') {
         try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
+        try { _loadVideoChainForTiles(); } catch (e) { /* tiles are cosmetic */ }
         if (typeof autoTestSourcesOnce === 'function') autoTestSourcesOnce();
     }
     // Initialize live log viewer when switching to Logs tab
@@ -1691,16 +1722,6 @@ async function _stgRefreshAfterSave() {
         if (expandedServices.length > 0) {
             _stgVerifyServices(expandedServices, { force: true });
         }
-        const btn = document.getElementById('save-settings');
-        if (btn) {
-            const origHTML = btn.innerHTML;
-            btn.classList.add('is-saved');
-            btn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg><span>Saved</span>';
-            setTimeout(() => {
-                btn.classList.remove('is-saved');
-                btn.innerHTML = origHTML;
-            }, 2000);
-        }
     } catch (e) {
         console.warn('[Settings Status] Post-save refresh failed:', e);
     }
@@ -1840,6 +1861,9 @@ const DLCHAIN_KINDS = {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(patch),
             });
+            // the Sources tiles show the video chain too (#2026)
+            _videoChainOrder = order.slice();
+            try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
         },
     },
     audiobooks: {
@@ -2057,6 +2081,10 @@ async function _dlchainLoad() {
     try {
         const state = await spec.read();
         _dlchainOrder = (state && Array.isArray(state.order)) ? state.order.slice() : [];
+        if (_dlchainKind === 'video') {
+            _videoChainOrder = _dlchainOrder.slice();
+            try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
+        }
     } catch (e) {
         _dlchainOrder = [];
     }
@@ -2337,12 +2365,49 @@ function toggleSourceCard(header) {
 }
 window.toggleSourceCard = toggleSourceCard;
 
+// The video chain lives in video.db behind its own endpoint, so it is cached
+// here for the tiles and refreshed when the Sources tab opens or the video
+// chain is edited. null means not read yet.
+let _videoChainOrder = null;
+
+async function _loadVideoChainForTiles() {
+    try {
+        const state = await DLCHAIN_KINDS.video.read();
+        _videoChainOrder = (state && Array.isArray(state.order)) ? state.order.slice() : [];
+    } catch (e) {
+        // leave the last known order; a failed read must not empty the tiles
+    }
+    try { buildSourceTiles(); } catch (e) { /* tiles are cosmetic */ }
+}
+window.loadVideoChainForTiles = _loadVideoChainForTiles;
+
+// Every download chain a source can sit in. A source in any of them is in use.
+function _srcAllChains() {
+    const music = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
+    let books = [];
+    try { books = _audiobookActiveSources(); } catch (e) { /* no audiobook settings on this page */ }
+    return [
+        { label: 'Music', order: music },
+        { label: 'Video', order: _videoChainOrder || [] },
+        { label: 'Audiobooks', order: books },
+    ];
+}
+
+function _srcChainUses(id, chains) {
+    const uses = [];
+    for (const c of chains) {
+        const i = c.order.indexOf(id);
+        if (i !== -1) uses.push({ label: c.label, pos: i + 1 });
+    }
+    return uses;
+}
+
 // One tile per source: logo, name under it, and the state that matters at a
 // glance. Rendered from HYBRID_SOURCES so the tiles and the chain rows on the
 // Downloads tab cannot disagree about a name or a logo.
-function _srcTileMarkup(src, order) {
-    const pos = order.indexOf(src.id);
-    const inChain = pos !== -1;
+function _srcTileMarkup(src, chains) {
+    const uses = _srcChainUses(src.id, chains);
+    const inChain = uses.length > 0;
     const state = (_hybridSourceStatus && _hybridSourceStatus[src.id]) || 'unknown';
     const unready = _hybridSourceUnready && _hybridSourceUnready[src.id];
     const said = _ssLastTestMessage[src.id];
@@ -2365,8 +2430,10 @@ function _srcTileMarkup(src, order) {
         : (unready || state === 'warn')
         ? '<span class="src-tile-chip src-tile-chip--warn">needs setup</span>'
         : inChain
-            ? `<span class="src-tile-chip src-tile-chip--on">#${pos + 1}</span>`
-            : '<span class="src-tile-chip">not in chain</span>';
+            ? `<span class="src-tile-chips">${uses.map(u =>
+                `<span class="src-tile-chip src-tile-chip--on" title="${escapeHtml(u.label)} chain, tried ${u.pos === 1 ? 'first' : '#' + u.pos}">`
+                + `${escapeHtml(u.label)} #${u.pos}</span>`).join('')}</span>`
+            : '<span class="src-tile-chip">not in a chain</span>';
     return `<button type="button" class="src-tile${inChain ? ' is-active' : ''}" `
          + `data-source-id="${src.id}" onclick="openSourceModal('${src.id}')" `
          + `title="Configure ${escapeHtml(src.name)}">`
@@ -2384,7 +2451,7 @@ function _srcTileMarkup(src, order) {
 function buildSourceTiles() {
     const grid = document.getElementById('source-tile-grid');
     if (!grid) return;
-    const order = (typeof getHybridOrder === 'function' ? getHybridOrder() : []) || [];
+    const chains = _srcAllChains();
 
     // Only sources that own a config panel get a tile. No side filtering: this
     // tab is shared and shows the same thing on both sides.
@@ -2396,7 +2463,7 @@ function buildSourceTiles() {
           + `<span class="src-group-label">${label}</span>`
           + `<span class="src-group-count">${list.length}</span>`
           + `<span class="src-group-hint">${hint}</span></div>`
-          + `<div class="src-tile-row">${list.map(src => _srcTileMarkup(src, order)).join('')}</div></div>`
+          + `<div class="src-tile-row">${list.map(src => _srcTileMarkup(src, chains)).join('')}</div></div>`
         : '';
 
     // Indexers are their own kind of thing: not a source you pick, but the
@@ -2406,13 +2473,20 @@ function buildSourceTiles() {
     const indexers = configurable.filter(isIndexer);
     const sources = configurable.filter(src => !isIndexer(src));
 
+    // in use means in ANY chain, music, video or audiobooks (#2026: usenet
+    // driving every video download read "not in chain" because only the music
+    // chain was looked at). music order first, then video, then audiobooks.
+    const rank = (src) => {
+        const u = _srcChainUses(src.id, chains)[0];
+        return u ? chains.findIndex(c => c.label === u.label) * 1000 + u.pos : Infinity;
+    };
     const inChain = sources
-        .filter(src => order.includes(src.id))
-        .sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
-    const available = sources.filter(src => !order.includes(src.id));
+        .filter(src => _srcChainUses(src.id, chains).length)
+        .sort((a, b) => rank(a) - rank(b));
+    const available = sources.filter(src => !_srcChainUses(src.id, chains).length);
 
     grid.innerHTML =
-        section('In your chain', 'tried in this order', inChain) +
+        section('In use', 'the chains each source is in, and where it is tried', inChain) +
         section('Available', 'configure now, add to the chain when you want it', available) +
         section('Indexers', 'searched by torrent and usenet', indexers);
 }
@@ -2719,6 +2793,12 @@ async function testAllSources(opts = {}) {
     // torrent but whose music never does saw a grey torrent tile forever,
     // because only the music chain got probed.
     for (const id of _audiobookActiveSources()) sources.add(id);
+    // and the video chain (#2026): usenet carrying every video download kept a
+    // grey dot because nothing ever tested it.
+    if (_videoChainOrder === null) await _loadVideoChainForTiles();
+    for (const id of (_videoChainOrder || [])) {
+        if (HYBRID_SOURCE_PROBE[id]) sources.add(id);
+    }
 
     // Torrent/Usenet downloads go through Prowlarr — its connection must be
     // established first or those source tests fail. Probe Prowlarr up front.
@@ -3247,6 +3327,8 @@ async function loadSettingsData() {
         const maToken = document.getElementById('music_assistant-token');
         if (maUrl) maUrl.value = settings.music_assistant?.base_url || '';
         if (maToken) maToken.value = settings.music_assistant?.token || '';
+        const maFolder = document.getElementById('music_assistant-source-folder');
+        if (maFolder) maFolder.value = settings.music_assistant?.source_folder || '';
         if (maUrl && maUrl.value && maToken && maToken.value) loadMusicAssistantSources(true);
 
         // Set active server and toggle visibility
@@ -6814,7 +6896,8 @@ async function saveSettings(quiet = false) {
         music_assistant: {
             base_url: _cfgStr('music_assistant-url', { trim: true }),
             token: _cfgStr('music_assistant-token', { trim: true }),
-            source_instance: _cfgStr('music_assistant-source')
+            source_instance: _cfgStr('music_assistant-source'),
+            source_folder: _cfgStr('music_assistant-source-folder', { trim: true })
         },
         navidrome: {
             base_url: document.getElementById('navidrome-url').value,
@@ -7324,6 +7407,7 @@ async function saveSettings(quiet = false) {
 
     try {
         if (!quiet) showLoadingOverlay('Saving settings...');
+        setSettingsSaveState('saving');
 
         // Save main settings
         const response = await fetch(API.settings, {
@@ -7366,22 +7450,27 @@ async function saveSettings(quiet = false) {
         }
 
         if (result.success && qualityProfileSaved && lookbackSaved) {
-            showToast(quiet ? 'Settings auto-saved' : 'Settings saved successfully', 'success');
+            // the button says Saved, a toast on every keystroke was noise
+            setSettingsSaveState('saved');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else if (result.success && qualityProfileSaved && !lookbackSaved) {
+            setSettingsSaveState('saved');
             showToast('Settings saved, but discovery lookback period failed to save', 'warning');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else if (result.success && !qualityProfileSaved) {
+            setSettingsSaveState('saved');
             showToast('Settings saved, but quality profile failed to save', 'warning');
             _forceServiceStatusRefresh();
             _stgRefreshAfterSave();
         } else {
+            setSettingsSaveState('error');
             showToast(`Failed to save settings: ${result.error}`, 'error', 'set-services');
         }
     } catch (error) {
         console.error('Error saving settings:', error);
+        setSettingsSaveState('error');
         showToast('Failed to save settings', 'error', 'set-services');
     } finally {
         if (!quiet) hideLoadingOverlay();

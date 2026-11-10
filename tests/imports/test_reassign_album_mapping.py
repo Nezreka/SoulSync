@@ -350,3 +350,26 @@ def test_a_non_latin_album_maps_by_title():
 
     assert pairings[0].target_id == 'T5'
     assert pairings[0].matched_by == 'title'
+
+
+def test_a_copy_that_cannot_be_put_in_place_leaves_no_hint(tmp_path, cursor, monkeypatch):
+    """review 5 R5-D-3: the copy lands under a hidden name, the hint is
+    committed, then the copy is renamed into place. a failed rename takes the
+    hint back out so nothing sits pending forever."""
+    library = tmp_path / 'library'
+    library.mkdir()
+    original = library / '1.flac'
+    original.write_bytes(b'audio')
+    staging = tmp_path / 'staging'
+    import core.imports.reassign_album as ra_mod
+
+    def refuse(*_a, **_k):
+        raise OSError('disk full')
+    monkeypatch.setattr(ra_mod.os, 'replace', refuse)
+
+    plan = build_reassign_plan([_local(1, 'One', path=str(original))], [_target(1, 'One')])
+    result = _apply(plan, cursor, staging)
+
+    assert result['staged'] == [] and 'could not stage' in result['failed'][0]['error']
+    assert cursor.execute("SELECT COUNT(*) FROM rematch_hints").fetchone()[0] == 0
+    assert list(staging.glob('*')) == []

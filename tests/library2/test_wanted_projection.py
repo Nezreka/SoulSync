@@ -286,3 +286,34 @@ def test_projection_status_separates_completeness_from_flag_drift(imported_conn)
     conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id=?", (track,))
     status = wanted_projection_status(conn)
     assert status["consumer_ready"] is False and status["missing"] == 1
+
+
+def test_projection_status_is_kept_until_a_track_or_wanted_row_changes(imported_conn):
+    """review 5 perf: the status read every track (~1.3 s on 310k) on each
+    call. it is kept until the member counter moves, which every input bumps"""
+    from core.library2 import member_version
+    member_version.clear()
+    conn = imported_conn
+    _artist, _album, track = _seed_chain(conn)
+    recompute_wanted(conn, track_ids=[track])
+    conn.commit()
+    first = wanted_projection_status(conn)
+
+    seen: list = []
+    conn.set_trace_callback(seen.append)
+    again = wanted_projection_status(conn)
+    conn.set_trace_callback(None)
+    assert again == first
+    assert not [s for s in seen if "lib2_tracks" in s]
+
+    # each input moves the answer on the next call
+    conn.execute("UPDATE lib2_tracks SET monitored = 1 - monitored WHERE id = ?", (track,))
+    conn.commit()
+    flipped = wanted_projection_status(conn)
+    assert flipped["flag_mismatches"] == first["flag_mismatches"] + 1
+    conn.execute("DELETE FROM lib2_wanted_tracks WHERE track_id = ?", (track,))
+    conn.commit()
+    assert wanted_projection_status(conn)["missing"] == first["missing"] + 1
+    _seed_chain(conn, title="Another")
+    conn.commit()
+    assert wanted_projection_status(conn)["tracks"] == first["tracks"] + 1

@@ -28,6 +28,13 @@ _FOLLOW_COUNT_DEFAULT = 5
 _RESOLVE_LIMIT = 24
 
 
+def auto_download_off(db, channel_id) -> bool:
+    """#2008: the channel is followed to keep an eye on, not to download"""
+    try:
+        return (db.get_channel_settings(channel_id) or {}).get("auto_download") is False
+    except Exception:  # noqa: BLE001 - unreadable settings download as before
+        return False
+
 def _follow_count(db) -> int:
     """The configured number of recent videos a follow backfills (Settings → Library)."""
     try:
@@ -117,8 +124,11 @@ def register_routes(bp):
 
             followed = db.add_channel_to_watchlist(channel, profile_id=_profile())
             # Wishlist only the configured recent slice (the resolve/preview may carry more).
-            recent = (channel.get("videos") or [])[:count]
-            added = db.add_videos_to_wishlist(channel, recent, server_source=_server(), profile_id=_profile())
+            # #2008: none for a channel set to not download new uploads (a re-follow)
+            recent = ([] if auto_download_off(db, channel.get("youtube_id"))
+                      else (channel.get("videos") or [])[:count])
+            added = db.add_videos_to_wishlist(channel, recent, server_source=_server(),
+                                              profile_id=_profile(), auto=True)
             if followed:   # followed channels get their full upload-date catalog in the background
                 try:
                     from core.video.youtube_enrichment import get_youtube_date_enricher
@@ -163,8 +173,12 @@ def register_routes(bp):
             if db.channel_watch_state([ch["youtube_id"]], profile_id=_profile()):
                 return False          # → counted as 'skipped'
             db.add_channel_to_watchlist(ch, profile_id=_profile())
-            db.add_videos_to_wishlist(ch, (ch.get("videos") or [])[:count], server_source=_server(),
-                                    profile_id=_profile())
+            # review 4 R4-D-7: the same rule as the follow route; a channel set
+            # to not download new uploads gets none through an import either
+            recent = ([] if auto_download_off(db, ch.get("youtube_id"))
+                      else (ch.get("videos") or [])[:count])
+            db.add_videos_to_wishlist(ch, recent, server_source=_server(),
+                                    profile_id=_profile(), auto=True)
             try:
                 from core.video.youtube_enrichment import get_youtube_date_enricher
                 get_youtube_date_enricher().enqueue(ch.get("youtube_id"), ch.get("title"))
@@ -325,6 +339,10 @@ def register_routes(bp):
             keep = str(body.get("retention") or "").strip()
             if keep and keep != "all":    # blank/'all' → no policy (keep everything)
                 out["retention"] = keep
+            # #2008: follow without downloading. saved only when off, like the
+            # other overrides; on is the default and stores nothing
+            if body.get("auto_download") is False:
+                out["auto_download"] = False
         retry = str(body.get("retry_policy") or "").strip().lower()
         if retry in ("aggressive", "manual"):
             out["retry_policy"] = retry
@@ -334,11 +352,24 @@ def register_routes(bp):
             days = 0
         if days > 0:
             out["archive_recheck_days"] = max(1, min(days, 365))
+        dropped = 0
         if kind == "playlist":
             db.set_playlist_settings(channel_id, out)
         else:
+            was_off = auto_download_off(db, channel_id)
+            if out.get("auto_download") is not False:
+                # review 4 R4-C-1: switched back on, new uploads count from
+                # today, not from the follow (a backlog of every upload since)
+                from datetime import datetime, timezone
+                previous = (db.get_channel_settings(channel_id) or {}).get("auto_download_since")
+                since = (datetime.now(timezone.utc).strftime("%Y-%m-%d") if was_off else previous)
+                if since:
+                    out["auto_download_since"] = since
             db.set_channel_settings(channel_id, out)
-        return jsonify({"success": True, "settings": out})
+            if out.get("auto_download") is False and not was_off:
+                # the follow's batch would otherwise download an hour later
+                dropped = db.drop_auto_wished_videos(channel_id)
+        return jsonify({"success": True, "settings": out, "dropped": dropped})
 
     @bp.route("/youtube/wishlist", methods=["GET"])
     def video_youtube_wishlist():

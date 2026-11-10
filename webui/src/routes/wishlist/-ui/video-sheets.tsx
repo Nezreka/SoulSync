@@ -26,6 +26,7 @@ import {
   initials,
   isFailingItem,
   liveStatus,
+  movieTarget,
   rowZone,
   showEpisodes,
   sized,
@@ -169,12 +170,13 @@ export function VideoMovieSheet({
   onClose: () => void;
 }) {
   const [showDiag, setShowDiag] = useState(false);
-  const target: VideoActionTarget = { scope: 'movie', tmdb_id: movie.tmdb_id };
+  const target = movieTarget(movie);
   const st = liveStatus(movie);
   const desc = describeVideoRow(movie);
   const stuck = VIDEO_STUCK_ZONES.has(desc.zone);
   const owned = movie.library_id != null;
   const meta = [
+    movie.video_library_name,
     movie.year,
     movie.upgrade_from ? `⇪ from ${movie.upgrade_from}` : owned ? 'In library' : null,
     VIDEO_STATUS[st],

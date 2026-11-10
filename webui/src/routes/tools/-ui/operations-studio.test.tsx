@@ -150,6 +150,26 @@ afterEach(() => {
 });
 
 describe('OperationsStudio (Simple Mode)', () => {
+  it('a header library switch reloads the album grid too (review 4 R4-E-1)', async () => {
+    routes({ '/api/repair/findings/albums': { albums: [] } });
+    const albumCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/findings/albums')).length;
+    render(
+      <OperationsStudio
+        jobs={testJobs}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(albumCalls()).toBeGreaterThan(0));
+    const before = albumCalls();
+    window.dispatchEvent(new CustomEvent('ss:webui-library-scope-changed'));
+    await waitFor(() => expect(albumCalls()).toBeGreaterThan(before));
+  });
+
   it('renders all 4 Strategic Pillars and their titles', () => {
     const onShowFindings = vi.fn();
     const onSwitchToAdvanced = vi.fn();
@@ -513,5 +533,108 @@ describe('Operations component mode switcher', () => {
     // Advanced mode reveals the repair families container
     const families = container.querySelector('.repair-families') as HTMLElement;
     expect(families.hidden).toBe(false);
+  });
+});
+
+// ── the album tray fixes like Advanced mode does (review 5 W3-TT-3) ──────────
+
+describe('Simple mode album tray fixes', () => {
+  const card = {
+    group_by: 'album',
+    key: 'band|record',
+    artist: 'Band',
+    album: 'Record',
+    count: 1,
+    worst_score: null,
+    best_score: null,
+    worst_quality: '',
+    best_quality: '',
+    album_thumb_url: null,
+    artist_thumb_url: null,
+    artist_id: null,
+    first_seen: null,
+    last_seen: null,
+  };
+  const row = (over: Record<string, unknown>) => ({
+    id: 9,
+    job_id: 'audio_corruption_detector',
+    finding_type: 'corrupt_audio',
+    severity: 'error',
+    status: 'pending',
+    title: 'Broken track',
+    description: 'damaged',
+    file_path: '/music/Band/Record/01.flac',
+    entity_type: 'file',
+    entity_id: null,
+    created_at: '2026-11-01',
+    details: { artist: 'Band', album: 'Record' },
+    ...over,
+  });
+  const confirmSpy = vi.fn();
+
+  async function openTray(finding: Record<string, unknown>, fix: unknown = { success: true }) {
+    routes({
+      '/api/repair/findings/albums': { groups: [card] },
+      '/api/repair/findings?': { items: [finding], total: 1, page: 0 },
+      '/api/repair/findings/9/fix': fix,
+    });
+    Object.assign(window, { showConfirmDialog: confirmSpy });
+    render(
+      <OperationsStudio
+        jobs={testJobs}
+        progress={{}}
+        runs={[]}
+        onChanged={vi.fn()}
+        onShowFindings={vi.fn()}
+        onSwitchToAdvanced={vi.fn()}
+      />,
+    );
+    const cardButton = await waitFor(() => {
+      const node = document.querySelector('.repair-album-card');
+      expect(node).not.toBeNull();
+      return node as HTMLElement;
+    });
+    fireEvent.click(cardButton);
+  }
+
+  const fixCalls = () =>
+    fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/findings/9/fix'));
+
+  beforeEach(() => confirmSpy.mockReset());
+
+  it('asks before a Delete File moves an uncatalogued file away', async () => {
+    confirmSpy.mockResolvedValue(false);
+    await openTray(row({}));
+    fireEvent.click(await screen.findByText('Delete File'));
+    await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
+    expect(confirmSpy.mock.calls[0][0]).toMatchObject({
+      title: 'Delete File',
+      destructive: true,
+    });
+    expect(confirmSpy.mock.calls[0][0].message).toContain('deleted-files folder');
+    expect(fixCalls()).toHaveLength(0);
+  });
+
+  it('sends the delete it confirmed and shows the result', async () => {
+    confirmSpy.mockResolvedValue(true);
+    await openTray(row({}), { success: true, message: 'Moved to deleted files' });
+    fireEvent.click(await screen.findByText('Delete File'));
+    await waitFor(() => expect(fixCalls()).toHaveLength(1));
+    expect(JSON.parse(String(fixCalls()[0][1]?.body))).toEqual({ fix_action: 'delete' });
+    await waitFor(() => expect(toastSpy).toHaveBeenCalledWith('Moved to deleted files', 'success'));
+  });
+
+  it('asks the orphan question instead of posting a fix with no action', async () => {
+    await openTray(
+      row({ finding_type: 'orphan_file', severity: 'warning', job_id: 'orphan_file_detector' }),
+    );
+    const fixButton = await waitFor(() => {
+      const node = document.querySelector('.album-action-btn.btn--primary');
+      expect(node).not.toBeNull();
+      return node as HTMLElement;
+    });
+    fireEvent.click(fixButton);
+    await waitFor(() => expect(document.getElementById('_orphan-staging')).not.toBeNull());
+    expect(fixCalls()).toHaveLength(0);
   });
 });

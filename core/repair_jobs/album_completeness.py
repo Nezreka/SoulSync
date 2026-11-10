@@ -95,7 +95,8 @@ class AlbumCompletenessJob(RepairJob):
         from core.library2.completeness import load_album_catalogue
         from core.library2.editions import default_edition_id
         from core.library2.maintenance_subjects import active_file_subjects
-        from core.library2.monitor_rules import PROVENANCE_USER, record_rules
+        from core.library2.monitor_rules import (
+            PROVENANCE_USER, explicitly_unmonitored_track_ids, record_rules)
         from core.library2.mirror_outbox import drain, enqueue_projected_tracks
         from core.library2.wanted import recompute_wanted
         from core.library2.recording_links import owned_by_recording_sql
@@ -183,7 +184,12 @@ class AlbumCompletenessJob(RepairJob):
                     existing = {int(r[0]) for r in conn.execute(
                         "SELECT r.entity_id FROM lib2_monitor_rules r JOIN lib2_tracks t ON t.id=r.entity_id WHERE r.entity_type='track' "
                         'AND r.profile_id=? AND r.monitored=1 AND t.album_id=?', (profile_id, album_id))}
-                    gaps = [t for t in gaps if int(t['id']) not in existing]
+                    # a track the user set to unmonitored by hand stays that way:
+                    # same veto as discography (review 5 R5-I-1)
+                    vetoed = explicitly_unmonitored_track_ids(
+                        conn, [int(t['id']) for t in gaps], profile_id=profile_id)
+                    gaps = [t for t in gaps if int(t['id']) not in existing
+                            and int(t['id']) not in vetoed]
                     missing = [int(t['id']) for t in gaps if target or not t['other_artist']]
                     # other artists' songs (a compilation's, a soundtrack's):
                     # listed on the finding, filled only when that finding is

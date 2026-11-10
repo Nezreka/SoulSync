@@ -236,3 +236,23 @@ def test_a_move_in_another_profiles_library_stops_wanting_it_for_that_profile(im
                           (single,)).fetchone()
     assert wanted is not None and wanted[0] == 0
     assert conn.execute("SELECT monitored FROM lib2_tracks WHERE id=?", (single,)).fetchone()[0] == 1
+
+
+def test_a_move_in_one_library_moves_only_that_librarys_file(imported_conn, monkeypatch):
+    """third #1062 review G09-5: unscoped, a move in a profile's own library
+    re-homed the shared library's copy too, and the shared library's file on
+    the target refused the move"""
+    from core import library_scope
+    monkeypatch.setattr(library_scope, "any_own_library_exists", lambda: True)
+    conn = imported_conn
+    single, album = _seed_pair(conn)  # the shared library's file on the single
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, format, owner_profile_id) "
+                 "VALUES(?, '/kim/one-dance.flac', 'flac', 3)", (single,))
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, format) "
+                 "VALUES(?, '/m/views-04.flac', 'flac')", (album,))
+    conn.commit()
+    with library_scope.library_scope(3):
+        move_track_file(_NoWishlistDB(), conn, single, album, wishlist_profile_id=3)
+    homes = dict(conn.execute("SELECT path, track_id FROM lib2_track_files").fetchall())
+    assert homes["/kim/one-dance.flac"] == album
+    assert homes["/m/move-single.flac"] == single

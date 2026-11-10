@@ -86,14 +86,17 @@ def catalogue_preview_fn(
         )
 
 
-def preview_album_reorganize(db: Any, config_manager: Any, lib2_album_id: int) -> Dict[str, Any]:
-    """Preview the reorganize plan for one lib2 album (docs §50)."""
+def preview_album_reorganize(db: Any, config_manager: Any, lib2_album_id: int,
+                             transfer_dir: Any = None) -> Dict[str, Any]:
+    """Preview the reorganize plan for one lib2 album (docs §50).
+    ``transfer_dir``: the library root to plan into (the shared one when
+    omitted); the caller sets the library scope to match."""
     from core.imports.paths import build_final_path_for_track
 
     result = catalogue_preview_fn(
         album_id=lib2_album_id,
         db=db,
-        transfer_dir=_transfer_dir(config_manager),
+        transfer_dir=transfer_dir or _transfer_dir(config_manager),
         resolve_file_path_fn=_resolve_file_path_fn(config_manager),
         build_final_path_fn=build_final_path_for_track,
     )
@@ -101,6 +104,9 @@ def preview_album_reorganize(db: Any, config_manager: Any, lib2_album_id: int) -
         raise ReorganizeBridgeError("Album not found", status=404)
     if result.get("status") == "no_tracks":
         raise ReorganizeBridgeError("No tracks found for this album", status=404)
+    if result.get("status") == "placeholder_metadata":
+        raise ReorganizeBridgeError(result.get("error") or "Album has placeholder metadata",
+                                    status=409)
     return result
 
 

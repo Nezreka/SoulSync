@@ -169,3 +169,33 @@ def test_contents_counts_come_from_the_v2_catalogue(client):
     row = next(a for a in json.loads(r.data.decode()) if a['name'] == 'Export Counts Fixture')
     assert row['album_count'] == 1, "counted discography rows or read the empty legacy table"
     assert row['track_count'] == 1, "counted missing tracks or read the empty legacy table"
+
+
+def test_a_featured_credit_alone_is_not_an_exported_library_artist(client):
+    """review 5 W3-TD-3: the roster counted any artist featured on one owned
+    track as an artist you have. the release artist is exported, the guest
+    is not."""
+    db = web_server.get_database()
+    conn = db._get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("INSERT INTO lib2_artists (name) VALUES ('Export Lead Fixture')")
+        lead = cur.lastrowid
+        cur.execute("INSERT INTO lib2_artists (name) VALUES ('Export Guest Fixture')")
+        guest = cur.lastrowid
+        cur.execute("INSERT INTO lib2_albums (primary_artist_id, title) VALUES (?, 'Lead LP')", (lead,))
+        cur.execute("INSERT INTO lib2_tracks (album_id, title) VALUES (?, 'Lead Song')", (cur.lastrowid,))
+        track = cur.lastrowid
+        cur.execute("INSERT INTO lib2_track_files (track_id, path, file_state) "
+                    "VALUES (?, '/music/lead.flac', 'active')", (track,))
+        cur.execute("INSERT INTO lib2_track_artists (track_id, artist_id, role, position) "
+                    "VALUES (?, ?, 'featured', 1)", (track, guest))
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client.get('/api/library/artists/export?format=json')
+    assert r.status_code == 200
+    names = {a['name'] for a in json.loads(r.data.decode())}
+    assert 'Export Lead Fixture' in names
+    assert 'Export Guest Fixture' not in names

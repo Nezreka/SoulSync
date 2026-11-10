@@ -185,3 +185,49 @@ class TestOutrightColumnWrites:
             write_provider_enrichment(
                 conn, entity_type="track", entity_id=1, service="genius",
                 payload={}, columns={"nope": "x"})
+
+
+def test_a_worker_fills_an_unknown_release_kind_but_never_reclassifies(conn):
+    """3.6.1's workers filled an empty record_type from spotify/itunes/deezer,
+    and album completeness reads it to tell a 2-track album from its single.
+    v2 only kept the source's word in the payload."""
+    conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title, album_type, album_type_known)"
+                 " VALUES (10, 1, 'Unknown kind', 'album', 0)")
+    conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title, album_type, album_type_known)"
+                 " VALUES (11, 1, 'Known kind', 'album', 1)")
+    write_provider_enrichment(conn, entity_type='album', entity_id=10, service='deezer',
+                              payload={'record_type': 'single'})
+    write_provider_enrichment(conn, entity_type='album', entity_id=11, service='spotify',
+                              payload={'album_type': 'single'})
+    rows = dict(conn.execute("SELECT id, album_type || ':' || album_type_known FROM lib2_albums"))
+    assert rows[10] == 'single:1'
+    assert rows[11] == 'album:1'
+
+
+def test_a_year_of_zero_is_unknown_and_gets_filled(conn):
+    """third #1062 review G02-3: 3.6.1 stored an unknown year as 0 and its
+    workers filled `year = '0'`; v2 called 0 a real year and kept it"""
+    conn.execute("UPDATE lib2_albums SET year=0 WHERE id=1")
+    conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title, year) VALUES(12, 1, 'Dated', 1999)")
+    for album_id in (1, 12):
+        write_provider_enrichment(conn, entity_type="album", entity_id=album_id, service="spotify",
+                                  payload={}, backfill={"year": 2014})
+    assert _row(conn, "lib2_albums")["year"] == 2014
+    assert _row(conn, "lib2_albums", 12)["year"] == 1999
+
+
+# review 5 W2-WF-1: the genre cleanup's lock holds against provider workers too.
+# a row cleaned down to [] reads as a gap, and lastfm/deezer/... backfilled it
+@pytest.mark.parametrize("mode", ["backfill", "columns"])
+@pytest.mark.parametrize("entity_type, table", [("artist", "lib2_artists"),
+                                                ("album", "lib2_albums")])
+def test_a_provider_write_keeps_locked_genres(conn, mode, entity_type, table):
+    conn.execute(f"UPDATE {table} SET genres='[]', genres_locked=1 WHERE id=1")
+    write_provider_enrichment(conn, entity_type=entity_type, entity_id=1,
+                              service="lastfm", **{mode: {"genres": '["seen live"]'}})
+    assert conn.execute(f"SELECT genres FROM {table} WHERE id=1").fetchone()[0] == "[]"
+    # unlocked, the same write lands
+    conn.execute(f"UPDATE {table} SET genres_locked=0 WHERE id=1")
+    write_provider_enrichment(conn, entity_type=entity_type, entity_id=1,
+                              service="lastfm", **{mode: {"genres": '["seen live"]'}})
+    assert conn.execute(f"SELECT genres FROM {table} WHERE id=1").fetchone()[0] == '["seen live"]'

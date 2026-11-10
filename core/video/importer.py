@@ -180,6 +180,50 @@ def _unique_dest(dest: dict, names: list[str]) -> dict:
     return {**dest, "filename": candidate, "path": os.path.join(dest["dir"], candidate)}
 
 
+def _adopt_existing_case(dest: dict, root: str, list_dir: Callable) -> dict:
+    """Use a folder that already exists under ``root`` when it differs from the
+    rendered one only by letter case. Linux filesystems are case-sensitive, so a
+    grab titled 'YAGA' would otherwise start a second show folder beside an
+    existing 'Yaga'. Walks each folder below the root: an exact name is kept;
+    otherwise the ONE existing folder whose name matches case-insensitively is
+    used. No match, two or more, or a candidate that lists nothing (a file, or an
+    empty folder) keeps the rendered name. The filename is never changed."""
+    root = str(root or "")
+    d = str(dest.get("dir") or "")
+    if not root or not d:
+        return dest
+    try:
+        rel = os.path.relpath(d, root)
+    except ValueError:
+        return dest
+    if rel == "." or rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return dest
+    cur = root
+    changed = False
+    for seg in rel.split(os.sep):
+        try:
+            names = [str(n) for n in (list_dir(cur) or [])]
+        except Exception:   # noqa: BLE001 - adoption is best-effort
+            names = []
+        if seg not in names:
+            want = seg.casefold()
+            hits = [n for n in names if n.casefold() == want]
+            if len(hits) == 1:
+                cand = os.path.join(cur, hits[0])
+                try:
+                    usable = bool(list(list_dir(cand) or []))
+                except Exception:   # noqa: BLE001
+                    usable = False
+                if usable:
+                    seg = hits[0]
+                    changed = True
+        cur = os.path.join(cur, seg)
+    if not changed:
+        return dest
+    filename = str(dest.get("filename") or "")
+    return {**dest, "dir": cur, "path": os.path.join(cur, filename)}
+
+
 def _reject(reason: str, bad_release: bool = False) -> dict:
     """``bad_release=True`` marks rejects where the FILE ITSELF is junk (sample /
     corrupt / fake / not a video) — the monitor auto-blocklists those releases so
@@ -419,6 +463,10 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     if library_dir and not force:
         dest = {"dir": library_dir, "filename": dest["filename"],
                 "path": os.path.join(library_dir, dest["filename"])}
+    elif not force:
+        # not owned yet: a folder that exists already under another letter
+        # case is the same title, so it gets this file instead of a twin folder
+        dest = _adopt_existing_case(dest, root, list_dir)
     # Where poster.jpg goes: the movie folder, or the SHOW root for an episode
     # (parent of the Season folder) — so it isn't dropped per-season.
     artwork_dir = dest["dir"] if scope in ("movie", "youtube") else os.path.dirname(dest["dir"])

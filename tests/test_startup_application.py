@@ -31,16 +31,44 @@ def test_boot_does_not_block_http_and_hands_off_only_when_ready():
 
 
 def test_failed_backup_keeps_app_closed_and_reports_failure():
+    from core import startup_progress
     from core.startup_application import StartupApplication
+    exits = []
 
     def load():
+        # the protected upgrade's backup step was running
+        startup_progress.begin('Backing up the database', step=2, steps=4)
         raise RuntimeError('private database path')
 
-    app = StartupApplication(load)
+    app = StartupApplication(load, exit_fn=exits.append)
     assert app.wait(5)
     status, body = _request(app, '/api/startup-status')
     assert status == '503 Service Unavailable'
     assert b'"failed"' in body and b'private database path' not in body
+    # a restart would only repeat the upgrade: it stays up for a human
+    import time
+    time.sleep(0.2)
+    assert exits == []
+
+
+def test_an_ordinary_boot_failure_exits_so_the_container_restarts(monkeypatch):
+    """third #1062 review G02-1: 3.6.1's failed boot ended the process and
+    Docker's restart policy tried again (a share not mounted yet, a locked
+    database). staying up behind a 503 left a dead app nobody restarts"""
+    from core import startup_application, startup_progress
+    monkeypatch.setattr(startup_application, 'EXIT_DELAY', 0)
+    with startup_progress._lock:
+        startup_progress._state.update(label=None, step=None, steps=None)
+    exited = threading.Event()
+    codes = []
+
+    def load():
+        raise RuntimeError('database is locked')
+
+    app = startup_application.StartupApplication(
+        load, exit_fn=lambda code: (codes.append(code), exited.set()))
+    assert app.wait(5)
+    assert exited.wait(5) and codes == [3]
 
 
 def test_start_page_polls_under_reverse_proxy_prefix():
@@ -124,3 +152,24 @@ def test_url_base_set_the_page_polls_and_reloads_through_the_prefix(monkeypatch)
         assert json.loads(_request(app, path)[1])['status'] == 'ready'
     assert _request(app, '/soulsync/library') == ('200 OK', b'normal app')
 
+
+
+def test_a_wedged_app_turns_the_healthcheck_unhealthy():
+    """third #1062 review G02-2: after the boot the wrapper answered the probe
+    itself, so a hung or failing Flask still read healthy. 3.6.1's
+    healthcheck went through Flask"""
+    from core.startup_application import StartupApplication
+    state = {'ok': True}
+
+    def flask(environ, start):
+        if not state['ok']:
+            raise RuntimeError('wedged')
+        start('200 OK', [])
+        return [b'{}']
+
+    app = StartupApplication(lambda: flask)
+    assert app.wait(5)
+    assert _request(app, '/api/startup-status')[0] == '200 OK'
+    state['ok'] = False
+    status, body = _request(app, '/api/startup-status')
+    assert status == '503 Service Unavailable' and b'unresponsive' in body

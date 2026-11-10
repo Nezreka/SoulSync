@@ -168,7 +168,9 @@ def _staggered(items: List[Any], act: Callable[[Any], None], label: Callable[[An
         try:
             act(item)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("could not start deferred %s: %s", label(item), exc)
+            # G17-2: a deferred start that fails is a real failure (nothing
+            # of it runs), not noise
+            logger.error("could not start deferred %s: %s", label(item), exc, exc_info=True)
 
     if WORKER_STAGGER_SECONDS <= 0:
         for item in items:
@@ -197,7 +199,7 @@ def start_deferred_workers(database: Any) -> int:
             callback()
             started += 1
         except Exception as exc:  # noqa: BLE001
-            logger.debug("could not start deferred %s: %s", label, exc)
+            logger.error("could not start deferred %s: %s", label, exc, exc_info=True)
     if started:
         logger.info("Library v2 upgrade complete — started %d deferred worker(s)", started)
     return started

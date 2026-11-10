@@ -47,12 +47,15 @@ def test_same_size_legacy_edit_invalidates_resume(legacy_db):
 def test_resume_does_not_skip_changed_already_walked_path(legacy_db, monkeypatch):
     import core.library2.importer as importer
     monkeypatch.setattr(importer, "IMPORT_BATCH_SIZE", 1)
+    # the walk checkpoints by rowid, and 3.6.1's TEXT ids are not rowids
+    with legacy_db._get_connection() as conn:
+        rowid_100 = int(conn.execute("SELECT rowid FROM tracks WHERE id='100'").fetchone()[0])
     actual = bootstrap._import_legacy_library
     def interrupted(database, **kwargs):
         original_progress = kwargs['progress']
         def progress(stage, current, total, **details):
             original_progress(stage, current, total, **details)
-            if stage == 'tracks' and details.get('rowid') == 100:
+            if stage == 'tracks' and details.get('rowid') == rowid_100:
                 # Model a process dying after the checkpoint commit, rather
                 # than between its heartbeat UPDATE and the commit.
                 details['connection'].commit()
@@ -63,7 +66,7 @@ def test_resume_does_not_skip_changed_already_walked_path(legacy_db, monkeypatch
     monkeypatch.setattr(bootstrap, '_import_legacy_library', interrupted)
     first = bootstrap.run_bootstrap_if_needed(legacy_db, lambda key, default=None: default)
     assert first.get('success') is False, first
-    assert bootstrap.get_state(legacy_db)['resume_rowid'] == 100
+    assert bootstrap.get_state(legacy_db)['resume_rowid'] == rowid_100
     with legacy_db._get_connection() as conn:
         conn.execute("UPDATE tracks SET file_path='/new-mount/playlist/file.flac' WHERE id=100")
         conn.commit()

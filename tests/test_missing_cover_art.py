@@ -15,6 +15,7 @@ the decision to raise a finding at all: DB image, embedded art, and cover.jpg
 sidecar, each checked against the path the file actually lives at.
 """
 
+import pytest
 import sqlite3
 import sys
 import types
@@ -56,6 +57,15 @@ if 'core.settings' not in sys.modules:
 
 from core.library2.provider_adapters import ArtworkProviderResult
 from core.repair_jobs import missing_cover_art as mca
+
+
+_REAL_NAME_SEARCH = mca._artist_art_by_name
+
+
+@pytest.fixture(autouse=True)
+def _no_artist_name_search(monkeypatch):
+    """the name-search fallback talks to real clients; tests opt in"""
+    monkeypatch.setattr(mca, '_artist_art_by_name', lambda *a, **k: (None, None))
 
 
 def _found(url='https://img/found', source='spotify'):
@@ -323,3 +333,33 @@ def test_cover_art_download_off_stops_the_sidecar_flag(monkeypatch):
 
     assert result.findings_created == 0
     assert result.skipped == 1
+
+
+def test_an_artist_no_provider_id_reaches_is_found_by_name(monkeypatch):
+    """3.6.1 searched artist photos by name. v2 asked by provider id only, so
+    an artist with no ids never got a photo offered."""
+    conn = _make_db(file_path='/music/Album/01.flac')
+    context = _make_context(conn)
+    _patch_disk(monkeypatch, resolved=lambda raw: raw, embedded=False, sidecar=False)
+    _patch_artwork(monkeypatch, album=_found(), artist=None)
+    monkeypatch.setattr(mca, '_artist_art_by_name',
+                        lambda name, *a, **k: ('https://by-name/artist.jpg', 'deezer')
+                        if name == 'Artist' else (None, None))
+
+    mca.MissingCoverArtJob().scan(context)
+
+    details = context.findings[0]['details']
+    assert details['found_artist_url'] == 'https://by-name/artist.jpg'
+    assert details['artist_artwork_source'] == 'deezer'
+
+
+def test_the_name_search_takes_only_an_exact_name(monkeypatch):
+    class _Client:
+        def search_artists(self, name, limit=5):
+            return [{'name': 'Artistic Collective', 'image_url': 'https://wrong'},
+                    {'name': 'The Artist', 'image_url': 'https://right'}]
+
+    import core.metadata_service as ms
+    monkeypatch.setattr(ms, 'get_client_for_source', lambda source: _Client())
+    assert _REAL_NAME_SEARCH('Artist', ['deezer']) == ('https://right', 'deezer')
+    assert _REAL_NAME_SEARCH('Nobody', ['deezer']) == (None, None)

@@ -17,6 +17,9 @@ for whichever configured library root (movies/tv/youtube) contains the file.
 A file under NO known root falls back to a permanent delete (logged) — refusing
 to delete would silently wedge retention/cleanup semantics and fill the disk.
 
+A deleted TITLE goes in as one folder entry (:func:`discard_folder`), so the
+bin's purge, listing, restore and delete all take folder entries too.
+
 Failure discipline: if the trash move itself fails, the file is LEFT IN PLACE
 and ``{"ok": False}`` comes back — callers keep their existing "couldn't
 delete → retry later / non-fatal" behaviour. discard never half-deletes.
@@ -88,6 +91,12 @@ def discard(path: str, settings: Dict[str, Any], db, *, reason: str = "") -> Dic
     if not trash:
         logger.warning("recycle: %s is under no configured library root — deleting permanently", path)
         return _unlink(path)
+    return _move_to_trash(path, trash, settings, db, reason)
+
+
+def _move_to_trash(path: str, trash: str, settings: Dict[str, Any], db, reason: str) -> Dict[str, Any]:
+    """move a file or folder into ``trash`` as a stamped entry and record
+    where it came from. a failed move leaves it where it was."""
     try:
         os.makedirs(trash, exist_ok=True)
         stamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d_%H%M%S")
@@ -107,6 +116,82 @@ def discard(path: str, settings: Dict[str, Any], db, *, reason: str = "") -> Dic
     except Exception:   # noqa: BLE001 - the purge is housekeeping, never a failure
         logger.exception("recycle: purge pass failed")
     return {"ok": True, "recycled": True, "trash_path": dest}
+
+
+def discard_folder(path: str, settings: Dict[str, Any], db, *, reason: str = "") -> Dict[str, Any]:
+    """Delete-or-recycle a whole folder (a deleted title's own folder) as ONE
+    bin entry, so restoring the title is one step, not one per file.
+
+    Stricter than :func:`discard`: a folder under no library root, a library
+    root itself, or a folder the trash lives inside is refused and left in
+    place -- a folder is never deleted for good just because there was
+    nowhere to recycle it. With recycling turned off it IS deleted for good,
+    the same as every other delete under that setting.
+
+    Returns ``{"ok", "recycled", "trash_path"}`` plus ``error`` when refused."""
+    if not path or not os.path.lexists(path):
+        return {"ok": True, "recycled": False, "trash_path": None}   # already gone = done
+    if os.path.islink(path) or not os.path.isdir(path):
+        return {"ok": False, "recycled": False, "trash_path": None, "error": "not a folder"}
+    ap = os.path.abspath(path)
+    roots = [os.path.abspath(r) for r in _library_roots(db)]
+    if ap in roots or not _root_for(ap, roots):
+        return {"ok": False, "recycled": False, "trash_path": None,
+                "error": "not a title folder inside a library folder"}
+    if not (settings or {}).get("recycle_deletes", True):
+        try:
+            shutil.rmtree(ap)
+            return {"ok": True, "recycled": False, "trash_path": None}
+        except OSError:
+            logger.exception("recycle: permanent delete failed for folder %s", ap)
+            return {"ok": False, "recycled": False, "trash_path": None,
+                    "error": "couldn't delete the folder"}
+    trash = trash_dir_for(ap, settings, db)
+    if not trash:
+        return {"ok": False, "recycled": False, "trash_path": None,
+                "error": "no recycle bin for this folder"}
+    at = os.path.abspath(trash)
+    try:
+        inside = os.path.commonpath([at, ap]) == ap
+    except ValueError:   # different drives (Windows) → not inside
+        inside = False
+    if inside:
+        return {"ok": False, "recycled": False, "trash_path": None,
+                "error": "the recycle bin sits inside this folder"}
+    return _move_to_trash(ap, at, settings, db, reason)
+
+
+def _entry_size(fp: str) -> int:
+    """bytes held by one bin entry: a file, or everything under a folder."""
+    if os.path.islink(fp) or os.path.isfile(fp):
+        return os.path.getsize(fp) if os.path.isfile(fp) else 0
+    total = 0
+    for base, _dirs, files in os.walk(fp):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(base, name))
+            except OSError:
+                continue
+    return total
+
+
+def _remove_entry(fp: str) -> None:
+    """permanently remove one bin entry. a folder (a recycled title) goes
+    whole; a link is removed, never followed."""
+    if os.path.isdir(fp) and not os.path.islink(fp):
+        shutil.rmtree(fp)
+    else:
+        os.remove(fp)
+
+
+def _is_entry(fp: str) -> bool:
+    """a bin entry: any file, or a folder discard_folder put there (it carries
+    the stamp). an unstamped folder is someone else's -- recycle_path can
+    point at a folder that holds other things -- and is never listed, purged
+    or deleted as an entry."""
+    if os.path.isfile(fp) or os.path.islink(fp):
+        return True
+    return os.path.isdir(fp) and _stamp_epoch(os.path.basename(fp)) is not None
 
 
 def _unlink(path: str) -> Dict[str, Any]:
@@ -179,9 +264,10 @@ def purge_old_detailed(settings: Dict[str, Any], db, roots_hint=None):
             if age is None or age < keep_days * 86400:
                 continue
             try:
-                if os.path.isfile(fp):
-                    size = os.path.getsize(fp)
-                    os.remove(fp)
+                # a folder entry is a whole deleted title (discard_folder)
+                if _is_entry(fp):
+                    size = _entry_size(fp)
+                    _remove_entry(fp)
                     removed += 1
                     freed += size
                     dropped.append(name)
@@ -267,16 +353,17 @@ def list_entries(settings: Dict[str, Any], db) -> list:
             if name == _MANIFEST or name.endswith(".tmp"):
                 continue
             fp = os.path.join(trash, name)
-            if not os.path.isfile(fp):
+            if not _is_entry(fp):
                 continue
             meta = manifest.get(name) or {}
             try:
-                size = os.path.getsize(fp)
+                size = _entry_size(fp)
             except OSError:
                 size = 0
             items.append({
                 "name": name,
                 "trash_dir": trash,
+                "is_folder": os.path.isdir(fp) and not os.path.islink(fp),
                 "original_path": meta.get("original_path"),
                 "reason": meta.get("reason") or "",
                 "deleted_at": meta.get("deleted_at"),
@@ -299,7 +386,7 @@ def _checked_entry(trash_dir: str, name: str, settings: Dict[str, Any], db) -> O
     if trash_abs not in known:
         return None
     fp = os.path.join(trash_abs, name)
-    return fp if os.path.isfile(fp) else None
+    return fp if _is_entry(fp) else None
 
 
 def restore_entry(trash_dir: str, name: str, settings: Dict[str, Any], db) -> Dict[str, Any]:
@@ -336,7 +423,7 @@ def purge_entry(trash_dir: str, name: str, settings: Dict[str, Any], db) -> Dict
     if not fp:
         return {"success": False, "error": "No such bin entry."}
     try:
-        os.remove(fp)
+        _remove_entry(fp)
     except OSError as exc:
         logger.exception("recycle purge failed for %s", fp)
         return {"success": False, "error": str(exc)}

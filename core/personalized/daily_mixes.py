@@ -518,17 +518,23 @@ def _seed_edges(database, seed_names: List[str], profile_id: int,
     owned, seed_source_ids, seed_id_to_name = set(), [], {}
     with database._get_connection() as conn:
         cur = conn.cursor()
+        # owned = artists you have music by, as 3.6.1's server artists were.
+        # a featured guest or a watch-only artist is not one: seeding a mix
+        # with them made a cluster with nothing playable, and kept their
+        # songs out of every mix's discovery side (139ba4181, same bug)
+        from core.library2.sql_util import owned_sql
         cur.execute(
-            "SELECT name, spotify_id, "
-            "json_extract(external_ids, '$.itunes'), "
-            "json_extract(external_ids, '$.deezer'), "
-            "musicbrainz_id FROM lib2_artists "
-            "WHERE name IS NOT NULL AND name != ''")
+            "SELECT a.name, a.spotify_id, "
+            "json_extract(a.external_ids, '$.itunes'), "
+            "json_extract(a.external_ids, '$.deezer'), "
+            f"a.musicbrainz_id, ({owned_sql('artist', 'a')}) FROM lib2_artists a "
+            "WHERE a.name IS NOT NULL AND a.name != ''")
         wanted = set(seed_names)
         for row in cur.fetchall():
             nm = row[0]
             lname = _norm(nm)
-            owned.add(lname)
+            if row[5]:
+                owned.add(lname)
             if spellings is not None:
                 spellings.setdefault(lname, nm)
             if lname in wanted:

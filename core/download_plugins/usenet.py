@@ -65,6 +65,7 @@ from core.quality.release_format import (
     is_sample_release,
 )
 from core.usenet_clients import get_active_adapter as get_active_usenet_adapter
+from core.usenet_clients.nzb_fetch import NzbFetchError
 from utils.async_helpers import run_async
 from utils.logging_config import get_logger
 
@@ -210,6 +211,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         self._lock = threading.Lock()
         self.shutdown_check = None
         self._grabs_restored = False
+        # album grabs older than this belong to a worker a restart killed
+        from datetime import datetime, timezone
+        self._started_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
     # ------------------------------------------------------------------
     # Grab correlation (ADR-07): the client is the live queue; SoulSync
@@ -350,8 +354,10 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         recreated and a poll thread picks the job up again (the client kept
         downloading the whole time — P1-20). ``submitting`` rows never
         reached the client and their NZB URL is gone with the process, so
-        they become ``failed``. Album-bundle grabs stay untouched — their
-        synchronous worker is gone; the row itself remains as history.
+        they become ``failed``. Album-bundle grabs from before this process
+        are closed ``failed``: their synchronous worker died with it and
+        nothing else will ever settle them (review 5 W2-WC-7). The client's
+        job is left alone, its files stay there for a manual import.
         """
         with self._lock:
             if self._grabs_restored:
@@ -363,6 +369,7 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         try:
             from core.acquisition.grabs import (
                 STATUS_CANCEL_PENDING,
+                STATUS_FAILED,
                 ensure_acquisition_grabs_schema,
                 open_grabs,
                 update_grab,
@@ -375,6 +382,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 if grab.get("acquisition_request_id"):
                     continue
                 if (grab.get("context") or {}).get("flow") == "album_bundle":
+                    # an open row kept the acquisition monitor busy every
+                    # cycle; one this process started is still being worked
+                    if str(grab.get("created_at") or "") < self._started_at:
+                        update_grab(
+                            conn, grab["download_id"], status=STATUS_FAILED,
+                            error="Album download worker lost on restart")
                     continue
                 download_id = grab["download_id"]
                 job_id = grab.get("external_job_id")
@@ -678,6 +691,9 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 return
         try:
             job_id = run_async(adapter.add_nzb(nzb_url))
+        except NzbFetchError as e:
+            # #2030: the nzb could not be fetched, nothing reached the client
+            job_id, error = None, f"Usenet grab failed: {e}"
         except Exception as e:
             job_id, error = None, f"add_nzb failed: {e}"
         else:
@@ -1002,6 +1018,12 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         with self._lock:
             row = self.active_downloads.get(download_id)
             job_id = row.get('job_id') if row else None
+            # the submit thread hasn't heard the client's job id yet: it reads
+            # the flag below and retires the job itself (_download_thread).
+            # only an Initializing row is mid-submit; a later row that lost
+            # its job id has nobody left to retire the client's job
+            in_submission = (row is not None and not job_id
+                             and row.get('state') == 'Initializing')
             if row is not None:
                 # Upstream: the download thread may still be waiting for the
                 # client's job id; the flag tells it to retire the late job
@@ -1026,6 +1048,16 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         # the central monitor which checks it (client_monitor `removed = ...`).
         cancel_confirmed = False
         self._update_grab(download_id, status=STATUS_CANCEL_PENDING)
+        if in_submission and not job_id:
+            # pending is right: the submit thread confirms it once the late
+            # job is gone. 3.6.1 said yes here too
+            with self._lock:
+                row = self.active_downloads.get(download_id)
+                if remove:
+                    self.active_downloads.pop(download_id, None)
+                elif row is not None and row.get('state') != 'Cancelled':
+                    row['state'] = 'Cancelling'
+            return True
         if adapter and job_id:
             try:
                 cancel_confirmed = bool(
@@ -1185,17 +1217,22 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         _emit('queued', release=picked.title, size=picked.size, grabs=picked.grabs)
 
         job_id = None
+        fetch_error = None
         for source in release_sources(picked):
             if not source.download_url:
                 continue
             try:
                 job_id = run_async(adapter.add_nzb(source.download_url))
+            except NzbFetchError as e:
+                # #2030: this indexer's nzb could not be fetched; try the next
+                job_id, fetch_error = None, str(e)
             except Exception:  # endpoint unavailable; do not log signed URLs
                 job_id = None
             if job_id:
                 break
         if not job_id:
-            result['error'] = 'Usenet client refused the NZB on every indexer source'
+            result['error'] = (f'Usenet grab failed: {fetch_error}' if fetch_error
+                               else 'Usenet client refused the NZB on every indexer source')
             return result
 
         # Persistent correlation (ADR-07): the bundle worker itself is not

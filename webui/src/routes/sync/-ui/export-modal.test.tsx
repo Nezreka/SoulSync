@@ -46,15 +46,15 @@ async function open(props: Partial<Parameters<typeof ExportModal>[0]> = {}) {
   return { onClose, onChoose, onGated };
 }
 
-describe('ExportModal — the four choices', () => {
-  it('renders all four destinations under the vanilla heading', async () => {
+describe('ExportModal — export destinations', () => {
+  it('renders all five destinations', async () => {
     stubFetch();
     await open();
     expect(screen.getByText('Export playlist')).toBeInTheDocument();
-    // The subtitle is the vanilla's, stale service list and all (668).
-    expect(screen.getByText('Road Trip → ListenBrainz')).toBeInTheDocument();
+    expect(screen.getByText('Road Trip', { selector: '#pl-export-modal div' })).toBeInTheDocument();
     const choices = [...document.querySelectorAll('.pl-export-choice')];
     expect(choices.map((b) => b.getAttribute('data-mode'))).toEqual([
+      'm3u',
       'push',
       'download',
       'spotify',
@@ -66,7 +66,7 @@ describe('ExportModal — the four choices', () => {
   it('a live choice reports the mode and the backfill checkbox state', async () => {
     stubFetch();
     const { onChoose, onGated } = await open();
-    await waitFor(() => expect(document.querySelectorAll('.pl-export-choice')).toHaveLength(4));
+    await waitFor(() => expect(document.querySelectorAll('.pl-export-choice')).toHaveLength(5));
     fireEvent.click(document.querySelector('#pl-export-backfill')!);
     fireEvent.click(screen.getByText('Download .jspf file'));
     expect(onChoose).toHaveBeenCalledWith('download', true);
@@ -205,4 +205,12 @@ describe('ExportStatusSpan', () => {
     fireEvent.click(screen.getByText('view'));
     expect(onCard).not.toHaveBeenCalled();
   });
+});
+
+it('offers M3U without a connected service', async () => {
+  stubFetch();
+  const { onChoose, onGated } = await open();
+  fireEvent.click(screen.getByText('Download .m3u file'));
+  expect(onChoose).toHaveBeenCalledWith('m3u', false);
+  expect(onGated).not.toHaveBeenCalled();
 });

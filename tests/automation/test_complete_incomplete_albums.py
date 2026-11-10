@@ -44,13 +44,14 @@ class _Db:
         self.path = path
         conn = sqlite3.connect(path)
         conn.execute("CREATE TABLE repair_findings (id INTEGER PRIMARY KEY, job_id TEXT, "
-                     "finding_type TEXT, status TEXT, entity_id TEXT)")
+                     "finding_type TEXT, status TEXT, entity_id TEXT, details_json TEXT)")
         conn.execute("CREATE TABLE lib2_albums (id INTEGER PRIMARY KEY, legacy_album_id INTEGER)")
+        fillable = '{"track_ids": [1], "profile_id": 1}'
         for i, entity in enumerate(("lib2:5", "lib2:6", "lib2:7", "lib2:8"), start=1):
             conn.execute("INSERT INTO repair_findings VALUES (?, 'album_completeness', "
-                         "'incomplete_album', 'pending', ?)", (i, entity))
+                         "'incomplete_album', 'pending', ?, ?)", (i, entity, fillable))
         conn.execute("INSERT INTO repair_findings VALUES (9, 'album_completeness', "
-                     "'incomplete_album', 'resolved', 'lib2:9')")
+                     "'incomplete_album', 'resolved', 'lib2:9', ?)", (fillable,))
         conn.execute("INSERT INTO lib2_albums VALUES (7, 311)")
         conn.commit()
         conn.close()
@@ -75,7 +76,7 @@ def test_a_completed_scan_applies_its_pending_findings_like_361(tmp_path):
         run_repair_job_now=lambda *a, **kw: pytest.fail('never re-runs the job on its own event'))
     result = auto_complete_incomplete_albums({'_event_data': _DONE, 'max_albums': 2}, deps)
     assert result['status'] == 'completed' and result['applied'] == 2
-    assert fixed == [[1, 2]]
+    assert fixed == [[1], [2]]
 
 
 def test_a_saved_361_album_id_still_targets_its_album(tmp_path):
@@ -87,3 +88,89 @@ def test_a_saved_361_album_id_still_targets_its_album(tmp_path):
     result = auto_complete_incomplete_albums(
         {'_event_data': _DONE, 'target_album_id': '311'}, deps)
     assert result['applied'] == 1 and fixed == [[3]]  # legacy album 311 is lib2 album 7
+
+
+def test_a_saved_361_hash_album_id_still_targets_its_album(tmp_path):
+    """review 5 R5-C-2: on navidrome and jellyfin a 3.6.1 album id is a hash,
+    kept as TEXT in legacy_album_id. only all-digit ids were mapped, so a
+    saved automation aimed at one skipped every run"""
+    import sqlite3
+    fixed = []
+    db = _Db(str(tmp_path / 'm.db'))
+    conn = sqlite3.connect(db.path)
+    conn.execute("INSERT INTO lib2_albums VALUES (6, '0a407eeace67cdeef8eb7899dd190f0c')")
+    conn.commit()
+    conn.close()
+    deps = SimpleNamespace(
+        get_database=lambda: db,
+        bulk_fix_repair_findings=lambda ids: fixed.append(ids) or {'fixed': len(ids)})
+    result = auto_complete_incomplete_albums(
+        {'_event_data': _DONE, 'target_album_id': '0a407eeace67cdeef8eb7899dd190f0c'}, deps)
+    assert result['applied'] == 1 and fixed == [[2]]
+    missing = auto_complete_incomplete_albums(
+        {'_event_data': _DONE, 'target_album_id': 'ffffffffffffffffffffffffffffffff'}, deps)
+    assert missing['status'] == 'skipped'
+
+
+
+def test_findings_it_cannot_apply_never_hold_every_slot(tmp_path):
+    """third #1062 review G05-1: guest-only findings (only other artists'
+    songs missing) and ones whose fix fails stayed pending at the front and
+    took all max_albums slots on every run. 3.6.1 capped what got queued,
+    not what got looked at"""
+    import sqlite3
+    db = _Db(str(tmp_path / 'm.db'))
+    with sqlite3.connect(db.path) as conn:
+        conn.execute("UPDATE repair_findings SET details_json='{\"track_ids\": [], \"profile_id\": 1}' "
+                     "WHERE id=1")
+    fixed = []
+
+    def fix(ids):
+        fixed.append(ids)
+        return {'fixed': 0 if ids == [2] else 1}   # finding 2 is stale
+    deps = SimpleNamespace(get_database=lambda: db, bulk_fix_repair_findings=fix)
+    result = auto_complete_incomplete_albums({'_event_data': _DONE, 'max_albums': 2}, deps)
+    assert result['applied'] == 2 and result['failed'] == 1
+    assert fixed == [[2], [3], [4]]
+
+
+def test_another_profiles_own_library_is_never_completed_for_them(tmp_path):
+    """G05-3: 3.6.1 completed shared-library albums only; a member's own
+    library findings wait for the member"""
+    import sqlite3
+    db = _Db(str(tmp_path / 'm.db'))
+    with sqlite3.connect(db.path) as conn:
+        conn.execute("UPDATE repair_findings SET details_json='{\"track_ids\": [1], \"profile_id\": 3}' "
+                     "WHERE id IN (1, 2)")
+    fixed = []
+    deps = SimpleNamespace(get_database=lambda: db,
+                           bulk_fix_repair_findings=lambda ids: fixed.append(ids) or {'fixed': 1})
+    auto_complete_incomplete_albums({'_event_data': _DONE, 'max_albums': 5}, deps)
+    assert fixed == [[3], [4]]
+
+
+def test_stuck_findings_never_hold_the_queue_and_a_held_back_one_is_no_failure(tmp_path):
+    """review 4 R4-C-6: every run retried the stuck findings first, and a run
+    tried as many as there were; a held-back finding counted as failed"""
+    import sqlite3
+    db = _Db(str(tmp_path / 'm.db'))
+    conn = sqlite3.connect(db.path)
+    conn.execute("ALTER TABLE repair_findings ADD COLUMN last_error TEXT")
+    conn.execute("UPDATE repair_findings SET last_error='provider down' WHERE id IN (1, 2)")
+    for i in range(10, 30):
+        conn.execute("INSERT INTO repair_findings VALUES (?, 'album_completeness', 'incomplete_album', "
+                     "'pending', ?, '{\"track_ids\": [1], \"profile_id\": 1}', 'stuck')", (i, f"lib2:{i}"))
+    conn.commit()
+    conn.close()
+    tried = []
+
+    def fix(ids):
+        tried.append(ids[0])
+        return {'fixed': 0, 'skipped': 1} if ids[0] == 3 else {'fixed': 0}
+
+    deps = SimpleNamespace(get_database=lambda: db, bulk_fix_repair_findings=fix,
+                           run_repair_job_now=lambda *a, **kw: None)
+    result = auto_complete_incomplete_albums({'_event_data': _DONE, 'max_albums': 2}, deps)
+    assert tried[:2] == [3, 4]          # never failed before: first
+    assert len(tried) == 6              # limit * 3, not all 24
+    assert result['skipped'] == 1 and result['failed'] == 5

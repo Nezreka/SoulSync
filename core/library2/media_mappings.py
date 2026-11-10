@@ -12,6 +12,9 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 from core.media_server import specs
+from utils.logging_config import get_logger
+
+logger = get_logger("library2.media_mappings")
 
 # every server the media-server descriptors call external: a new server's ids
 # reach the mappings without another edit here (#1050)
@@ -138,6 +141,22 @@ def resolve_mapping(cursor: Any, entity_type: str, server_source: Any,
     return int(row[0]) if row else None
 
 
+def repoint_server_track_id(cursor: Any, server_source: str, old_id: str, new_id: str) -> None:
+    """the server re-keyed a track (navidrome after a rescan, plex after a
+    re-add): what remembers the old id follows it. third #1062 review G10-4:
+    the scan overwrote the mapping in place and sync_match_cache kept the
+    dead id, so every later playlist sync re-resolved those songs. 3.6.1
+    repointed it once after the scan. manual matches hold catalogue ids now
+    and don't move."""
+    try:
+        cursor.execute(
+            "UPDATE sync_match_cache SET server_track_id=? "
+            "WHERE server_source=? AND server_track_id=?",
+            (new_id, server_source, old_id))
+    except Exception as exc:  # noqa: BLE001 - a cache from before the table: nothing to move
+        logger.debug("sync cache repoint skipped: %s", exc)
+
+
 def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
                    server_source: Any, server_id: Any,
                    server_library_id: Any = "", *, compat: bool = True,
@@ -164,6 +183,11 @@ def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
         "  AND server_id=? AND entity_id<>?",
         (entity_type, source, library, sid, int(entity_id)),
     )
+    previous = cursor.execute(
+        "SELECT server_id FROM lib2_media_server_mappings "
+        "WHERE entity_type=? AND entity_id=? AND server_source=? AND server_library_id=?",
+        (entity_type, int(entity_id), source, library),
+    ).fetchone() if entity_type == "track" else None
     cursor.execute(
         """INSERT INTO lib2_media_server_mappings(
                entity_type,entity_id,server_source,server_library_id,server_id,server_path,match_status)
@@ -176,6 +200,8 @@ def upsert_mapping(cursor: Any, entity_type: str, entity_id: int,
                last_seen_at=CURRENT_TIMESTAMP""",
         (entity_type, int(entity_id), source, library, sid, server_path),
     )
+    if previous is not None and str(previous[0] or "") not in ("", sid):
+        repoint_server_track_id(cursor, source, str(previous[0]), sid)
     # Compatibility only.  New code reads the mapping table, so replacing this
     # snapshot cannot erase another server's durable mapping.
     if not compat:
@@ -221,13 +247,20 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
     changed = 0
     sources = sorted(MEDIA_SERVER_SOURCES)
     marks = ",".join("?" for _ in sources)
+    # review 5 R5-F-4: SQL TRIM strips spaces only, upsert_mapping's strip()
+    # also tabs and newlines, so a '\t' id was selected and skipped forever.
+    # trim the same set here, and walk by id so a row the write skips for any
+    # other reason is passed, never selected again
+    trimmed = "TRIM(old.server_id, ' ' || char(9) || char(10) || char(11) || char(12) || char(13))"
     for entity_type, table in ENTITY_TABLES.items():
+        last_id = 0
         while not (should_stop and should_stop()):
             rows = cursor.execute(
                 f"""SELECT id,server_source,server_id FROM {table} old
-                     WHERE old.server_source IN ({marks})
+                     WHERE old.id > ?
+                       AND old.server_source IN ({marks})
                        AND old.server_id IS NOT NULL
-                       AND TRIM(old.server_id) <> ''
+                       AND {trimmed} <> ''
                        AND NOT EXISTS (
                            SELECT 1 FROM lib2_media_server_mappings m
                             WHERE m.entity_type=? AND m.entity_id=old.id
@@ -236,14 +269,16 @@ def backfill_legacy_mappings(cursor: Any, *, connection: Any = None,
                            SELECT 1 FROM lib2_media_server_mappings h
                             WHERE h.server_source=old.server_source
                               AND h.entity_type=?
-                              AND h.server_id=TRIM(old.server_id)
+                              AND h.server_id={trimmed}
                               AND h.server_library_id=''
                               AND h.entity_id<>old.id)
+                     ORDER BY old.id
                      LIMIT ?""",
-                (*sources, entity_type, entity_type, max(1, int(batch_size))),
+                (last_id, *sources, entity_type, entity_type, max(1, int(batch_size))),
             ).fetchall()
             if not rows:
                 break
+            last_id = int(rows[-1][0])
             for row in rows:
                 upsert_mapping(cursor, entity_type, int(row[0]), row[1], row[2])
             changed += len(rows)

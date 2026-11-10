@@ -81,6 +81,7 @@ _save_sync_status_file = None
 _spotify_client = None
 _matching_engine = None
 _get_automation_deps = None
+_repair_worker = None
 
 
 def configure(**deps):
@@ -516,7 +517,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
     """Update per-playlist download preferences (e.g. organize by playlist folder)."""
     try:
         data = request.get_json() or {}
-        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode'} & set(data)):
+        if not ({'organize_by_playlist', 'quality_profile_id', 'sync_mode', 'rotating'} & set(data)):
             return jsonify({"error": "No supported preference supplied"}), 400
 
         database = get_database()
@@ -550,6 +551,17 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             else:
                 return jsonify({"error": "Invalid sync_mode"}), 400
 
+        # #2039: a rotating playlist's downloads go once the track leaves it
+        rotating = None
+        if 'rotating' in data:
+            rotating = parse_strict_bool(data.get('rotating'))
+            if rotating is None:
+                return jsonify({"error": "Invalid rotating"}), 400
+            if rotating:
+                refusal = _rotation_refusal(playlist)
+                if refusal:
+                    return jsonify({"error": refusal}), 400
+
         # Both fields are validated and written in ONE transaction: a rejected
         # Quality Profile used to leave the already-committed organize toggle
         # behind while the response said 400 (P2-02).
@@ -559,6 +571,7 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             organize_by_playlist=organize_by_playlist,
             quality_profile_id=quality_profile_id,
             sync_mode=sync_mode,
+            rotating=rotating,
         )
         if outcome == 'not_found':
             return jsonify({"error": "Playlist not found"}), 404
@@ -576,10 +589,61 @@ def update_mirrored_playlist_preferences_endpoint(playlist_id):
             _invalidate_mirror_sync_fingerprint(playlist_id)
 
         updated = _owned_mirrored_playlist(database, playlist_id) or {}
-        return jsonify({"success": True, "playlist": updated})
+        body = {"success": True, "playlist": updated}
+        if rotating:
+            # the toggle does nothing while the cleaner is off, so it comes on
+            # with it. its own dry run setting is left alone
+            body["cleaner_turned_on"] = _ensure_cleaner_enabled()
+        return jsonify(body)
     except Exception as e:
         logger.error(f"Error updating mirrored playlist preferences: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+def _rotation_refusal(playlist):
+    """why this playlist can't rotate, or None. a request list drops a track
+    the moment it downloads, and Liked Songs is not a rotation."""
+    if playlist.get('is_request_list'):
+        return "Request lists can't be rotating"
+    if _up.is_liked_playlist(playlist):
+        return "Liked Songs can't be rotating"
+    return None
+
+
+def _ensure_cleaner_enabled():
+    """turn the Expired Download Cleaner on if it's off. True when this call
+    is what turned it on."""
+    from core.repair_jobs.expired_download_cleaner import JOB_ID, cleaner_state
+    if cleaner_state(config_manager)['cleaner_enabled']:
+        return False
+    worker = _repair_worker() if callable(_repair_worker) else None
+    if worker is not None:
+        worker.set_job_enabled(JOB_ID, True)
+    elif config_manager is not None:
+        config_manager.set(f'repair.jobs.{JOB_ID}.enabled', True)
+    else:
+        return False
+    return True
+
+
+@bp.route('/api/mirrored-playlists/<int:playlist_id>/rotation', methods=['GET'])
+def mirrored_playlist_rotation_endpoint(playlist_id):
+    """what rotating does for this playlist right now (#2039): how many of
+    its downloads have left it, how many would be removed and why the rest
+    are kept. read-only."""
+    try:
+        database = get_database()
+        playlist = _owned_mirrored_playlist(database, playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+        from core.repair_jobs.expired_download_cleaner import rotation_preview
+        preview = rotation_preview(database, config_manager, playlist)
+        preview['rotating'] = bool(playlist.get('rotating'))
+        preview['allowed'] = _rotation_refusal(playlist) is None
+        return jsonify({"success": True, **preview})
+    except Exception as e:
+        logger.error(f"Error reading rotation for playlist {playlist_id}: {e}")
+        return jsonify({"error": "Couldn't read rotation"}), 500
 
 
 @bp.route('/api/mirrored-playlists/<int:playlist_id>/copy-to-request-list', methods=['POST'])

@@ -110,8 +110,33 @@ def test_lib2_native_entity_can_be_manually_matched_and_cleared(imported_conn):
     MS.set_library_v2_match(imported_conn, "artist", artist_id, "deezer", None)
     rows = MS.entity_match_status(imported_conn, "artist", artist_id)
     deezer = next(row for row in rows if row["service"] == "deezer")
-    assert deezer["status"] == "pending"
+    # P2B-3: the worker won't search a cleared match back, so "pending" lied
+    assert deezer["status"] == "cleared"
     assert deezer["external_id"] is None
+
+
+def test_chips_say_not_found_with_when_the_worker_tried(imported_conn):
+    """third #1062 review P2B-3: 3.6.1's chip said "not found, last tried";
+    v2 said pending forever though the ledger had the answer"""
+    from core.library2 import provider_attempts
+    album_id = imported_conn.execute(
+        "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(1, 'Nowhere')").lastrowid
+    track_id = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Lost')", (album_id,)).lastrowid
+    for kind, eid in (("album", album_id), ("track", track_id)):
+        provider_attempts.record_attempt(imported_conn, entity_type=kind, entity_id=eid,
+                                         service="deezer", status="not_found")
+    provider_attempts.record_attempt(imported_conn, entity_type="album", entity_id=album_id,
+                                     service="itunes", status="error")
+    imported_conn.commit()
+    bundle = MS.album_match_bundle(imported_conn, album_id)
+    album = {c["service"]: c for c in bundle["album"]}
+    assert album["deezer"]["status"] == "not_found"
+    assert album["deezer"]["last_attempted"]
+    assert album["itunes"]["status"] == "error"
+    assert album["spotify"]["status"] == "pending"
+    track = {c["service"]: c for c in bundle["tracks"][track_id]}
+    assert track["deezer"]["status"] == "not_found"
 
 
 @pytest.mark.parametrize("foreign", ["551515699", "693f1940-7107-46a4-acf2-1d487cf46e51"])
@@ -322,10 +347,16 @@ def test_artist_enrichment_coverage_counts_tracks_per_provider(imported_conn):
         "INSERT INTO lib2_albums(primary_artist_id, title) VALUES(?, 'Dummy')",
         (artist_id,),
     ).lastrowid
-    for spotify_id, external in (("sp-1", "{}"), ("sp-2", '{"deezer":"dz-2"}'), (None, "{}")):
-        conn.execute(
+    for n, (spotify_id, external) in enumerate(
+            (("sp-1", "{}"), ("sp-2", '{"deezer":"dz-2"}'), (None, "{}"))):
+        track_id = conn.execute(
             "INSERT INTO lib2_tracks(album_id, title, spotify_id, external_ids) "
-            "VALUES(?, 'T', ?, ?)", (album_id, spotify_id, external))
+            "VALUES(?, 'T', ?, ?)", (album_id, spotify_id, external)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?, ?)",
+                     (track_id, f"/m/portishead/{n}.flac"))
+    # P2B-4: a fileless discography slot isn't in the library; the worker
+    # never enriches it, so it must not hold the rings down
+    conn.execute("INSERT INTO lib2_tracks(album_id, title) VALUES(?, 'Wanted')", (album_id,))
 
     from core.library2.match_status import artist_enrichment_coverage
 
@@ -395,7 +426,10 @@ class TestManualMatchKeepsTheAttemptLedgerInStep:
         picked = next_pending(conn, "spotify", entity_types=("artist",))
         assert picked is None or picked["id"] != artist
 
-    def test_clearing_an_id_makes_the_entity_selectable_again(self, imported_conn):
+    def test_a_users_clear_stays_cleared(self, imported_conn):
+        """second #1062 review T2: a clear is the user saying the match was
+        wrong. 3.6.1 kept it cleared until the user matched it by hand; the
+        worker must not search the same wrong id back"""
         from core.library2.worker_queue import next_pending
 
         conn = imported_conn
@@ -403,6 +437,18 @@ class TestManualMatchKeepsTheAttemptLedgerInStep:
         MS.set_library_v2_match(conn, "artist", artist, "spotify", "sp-manual")
 
         MS.set_library_v2_match(conn, "artist", artist, "spotify", None)
+
+        picked = next_pending(conn, "spotify", entity_types=("artist",))
+        assert picked is None or picked["id"] != artist
+
+    def test_a_repair_that_drops_its_own_id_asks_again_at_once(self, imported_conn):
+        from core.library2.worker_queue import next_pending
+
+        conn = imported_conn
+        artist = self._owned_artist(conn)
+        MS.set_library_v2_match(conn, "artist", artist, "spotify", "sp-wrong")
+
+        MS.set_library_v2_match(conn, "artist", artist, "spotify", None, ask_again=True)
 
         assert conn.execute(
             "SELECT COUNT(*) FROM lib2_provider_attempts "
@@ -423,3 +469,20 @@ class TestManualMatchKeepsTheAttemptLedgerInStep:
         assert conn.execute(
             "SELECT spotify_id FROM lib2_artists WHERE id=?", (artist,),
         ).fetchone()[0] == "sp-1"
+
+
+def test_a_3_6_1_tag_it_yourself_status_is_not_read_as_cleared(imported_conn):
+    """review 4 R4-B-7: the ledger's 'manual' is both "the user cleared it"
+    and 3.6.1's "tag it yourself", seeded per service. the second read
+    "cleared, match it by hand" though nobody cleared anything"""
+    from core.library2.provider_attempts import ensure_provider_attempt_schema
+    ensure_provider_attempt_schema(imported_conn.cursor())
+    drake = _drake_lib2_id(imported_conn)
+    imported_conn.execute("INSERT INTO lib2_provider_attempts(entity_type, entity_id, service, status, attempts) "
+                          "VALUES('artist', ?, 'deezer', 'manual', 1)", (drake,))
+    imported_conn.execute("INSERT INTO lib2_provider_attempts(entity_type, entity_id, service, status, attempts, detail) "
+                          "VALUES('artist', ?, 'musicbrainz', 'manual', 1, 'cleared by user')", (drake,))
+    imported_conn.commit()
+    by_service = {r["service"]: r["status"] for r in MS.entity_match_status(imported_conn, "artist", drake)}
+    assert by_service["deezer"] == "not_found"
+    assert by_service["musicbrainz"] == "cleared"

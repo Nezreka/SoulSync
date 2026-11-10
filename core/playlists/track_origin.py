@@ -14,7 +14,9 @@ can only do worse than.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+import threading
+import time
+from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -57,6 +59,38 @@ def _extra(track: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+_FOLD_TTL_S = 600
+_fold_lock = threading.Lock()
+_fold_cache: Dict[str, Any] = {"at": 0.0, "db": None, "map": {}}
+
+
+def _accented_artist_keys(db: Any) -> Dict[str, List[str]]:
+    """{accent-folded key: [name_key, ...]} for the artists whose name has a
+    non-ASCII letter. third #1062 review G13-3: name_key only casefolds, so
+    "Beyonce" from a playlist no longer found the library's "Beyoncé" (3.6.1
+    compared unidecoded name_norm). only those names need the fold, a small
+    slice of the table, read at most every ten minutes"""
+    now = time.monotonic()
+    with _fold_lock:
+        if _fold_cache["db"] is db and now - _fold_cache["at"] < _FOLD_TTL_S:
+            return _fold_cache["map"]
+    from core.text.normalize import normalize_for_comparison
+    fold: Dict[str, List[str]] = {}
+    with db._get_connection() as conn:
+        for (key,) in conn.execute(
+                "SELECT DISTINCT name_key FROM lib2_artists WHERE name_key GLOB '*[^ -~]*'"):
+            if key:
+                fold.setdefault(normalize_for_comparison(key), []).append(key)
+    with _fold_lock:
+        _fold_cache.update(at=now, db=db, map=fold)
+    return fold
+
+
+def _fold_title(value: Any) -> str:
+    from core.text.normalize import normalize_for_comparison
+    return normalize_for_comparison(" ".join(str(value or "").split()))
+
+
 def library_ids(db: Any, title: str, artist: str) -> Dict[str, str]:
     """the ids the library has for this song, by its title and the artist the
     album or the track itself is credited to. empty when the library doesn't
@@ -69,7 +103,10 @@ def library_ids(db: Any, title: str, artist: str) -> Dict[str, str]:
         artist_key = normalize_name(artist or '')
         if not title or not artist_key:
             return {}
-        from core.library2.recording_links import normalize_title
+        from core.text.normalize import normalize_for_comparison
+        folded = normalize_for_comparison(artist_key)
+        keys = sorted({artist_key, folded, *_accented_artist_keys(db).get(folded, [])})
+        marks = ",".join("?" for _ in keys)
 
         # the artist narrows through the indexed name_key; the title compares
         # here with a real casefold. `LOWER(t.title) = LOWER(?)` read every
@@ -81,16 +118,17 @@ def library_ids(db: Any, title: str, artist: str) -> Dict[str, str]:
                 f"""SELECT t.title, {columns} FROM lib2_tracks t
                       JOIN lib2_albums al ON al.id = t.album_id
                       JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                     WHERE ar.name_key = ?
+                     WHERE ar.name_key IN ({marks})
                     UNION
                     SELECT t.title, {columns} FROM lib2_tracks t
                       JOIN lib2_track_artists ta ON ta.track_id = t.id
                       JOIN lib2_artists ar ON ar.id = ta.artist_id
-                     WHERE ar.name_key = ?""",
-                (artist_key, artist_key),
+                     WHERE ar.name_key IN ({marks})""",
+                (*keys, *keys),
             ).fetchall()
-        wanted = normalize_title(title)
-        matches = [row for row in rows if normalize_title(row[0]) == wanted][:5]
+        # accents folded on both sides, as 3.6.1's title_norm did
+        wanted = _fold_title(title)
+        matches = [row for row in rows if _fold_title(row[0]) == wanted][:5]
         for row in matches:
             for service, value in zip(LIBRARY_ID_COLUMNS, tuple(row)[1:], strict=True):
                 if value and service not in found:

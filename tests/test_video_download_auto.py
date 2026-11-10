@@ -41,9 +41,11 @@ def test_header_has_single_auto_best_button():
 def test_auto_best_picks_one_winner_across_all_sources():
     assert 'function _autoBest(' in _VIEW
     assert 'function _grabBestAcross(' in _VIEW
-    # it compares accepted+grabbable hits across every source by profile score…
+    # it compares accepted+grabbable hits across every source by profile rank…
     assert "r.accepted && r.username" in _VIEW
-    assert '(r.score || 0) > (best.score || 0)' in _VIEW
+    # the server's rank values now, not the flat score: the score let a tagged
+    # language or atmos outweigh a custom format (#2033)
+    assert 'rankCompare(r, best) > 0' in _VIEW
     # …and grabs exactly ONE (no per-source loop of grabs)
     assert _VIEW.count('beginTracking(') >= 3   # def + doGrab + _autoPick (+ _grabBestAcross)
 
@@ -102,5 +104,5 @@ def test_grab_whole_season_button_and_batch():
 def test_season_grab_reuses_the_single_grab_path():
     # each episode goes through the same searchInto + _autoPick as a manual Auto,
     # so the batch can't diverge from the single path
-    assert 'autoGrabEpisode(container, st, sn, eps[idx++], src)' in _VIEW
+    assert 'autoGrabEpisode(container, st, sn, en, src, tries === 0)' in _VIEW
     assert 'searchInto(container, panel,' in _VIEW

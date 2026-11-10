@@ -184,6 +184,41 @@ def report_blocked_writer(*, log: Optional[Callable[..., None]] = None) -> None:
         "database call, or inside a network/filesystem call it made after writing:\n"
         + format_thread_stacks()
     )
+    # the dump runs to hundreds of lines and reports get pasted in pieces, the
+    # piece with the answer usually missing (#2000). one short line says it
+    emit(summarize_holder())
+
+
+def _innermost_app_frame(thread_name: str) -> str:
+    """the deepest frame of a SoulSync file in that thread's stack"""
+    idents = {t.name: t.ident for t in threading.enumerate() if t.ident}
+    frame = sys._current_frames().get(idents.get(thread_name))
+    if frame is None:
+        return "its stack is gone"
+    for entry in reversed(traceback.extract_stack(frame)):
+        path = entry.filename.replace("\\", "/")
+        if "/site-packages/" in path or "/lib/python" in path:
+            continue
+        if path.endswith("connection_pool.py"):
+            continue
+        short = path.split("/app/", 1)[-1].rsplit("SoulSync/", 1)[-1]
+        return f"{short}:{entry.lineno} in {entry.name}"
+    return "no SoulSync frame"
+
+
+def summarize_holder() -> str:
+    """One line: the oldest open transaction, its thread and where it is."""
+    try:
+        from database.connection_pool import open_transactions
+        holders = open_transactions()
+    except Exception as exc:  # noqa: BLE001 - diagnostics never break the app
+        return f"Write lock holder: unknown ({exc})"
+    if not holders:
+        return ("Write lock holder: not on a pooled connection (a dedicated "
+                "connection or another process has the file)")
+    oldest = holders[0]
+    return (f"Write lock holder, most likely: {oldest['thread']} (transaction open "
+            f"{oldest['age_s']}s) at {_innermost_app_frame(oldest['thread'])}")
 
 
 def format_open_transactions() -> str:

@@ -29,46 +29,76 @@ import {
   detectPlaylistUrl,
   isDetected,
 } from '../-sync.url-detect';
+import styles from './playlists.module.css';
+import { SourceIcon } from './source-icon';
 import { usePopoverDismiss } from './use-popover-dismiss';
-import { usePopoverPosition } from './use-popover-position';
+
+interface AddSource {
+  /** the tab it opens, which is also the key for its logo (SourceIcon) */
+  tab: string;
+  label: string;
+  desc: string;
+}
 
 /** The account tabs this sheet can send you to, in the order they read best. */
-export const ADD_PLAYLIST_ACCOUNTS: readonly { tab: string; label: string; glyph: string }[] = [
-  { tab: 'spotify', label: 'Spotify', glyph: '🎵' },
-  { tab: 'tidal', label: 'Tidal', glyph: '🌊' },
-  { tab: 'qobuz', label: 'Qobuz', glyph: '♫' },
-  { tab: 'deezer', label: 'Deezer', glyph: '🎧' },
-  { tab: 'ytmusic', label: 'YouTube Music', glyph: '▶️' },
-  { tab: 'listenbrainz-sync', label: 'ListenBrainz', glyph: '🧠' },
-  { tab: 'lastfm-sync', label: 'Last.fm', glyph: '📻' },
-  { tab: 'soulsync-discovery-sync', label: 'SoulSync Discovery', glyph: '✨' },
+export const ADD_PLAYLIST_ACCOUNTS: readonly AddSource[] = [
+  { tab: 'spotify', label: 'Spotify', desc: 'Your Spotify playlists' },
+  { tab: 'tidal', label: 'Tidal', desc: 'Your Tidal playlists' },
+  { tab: 'qobuz', label: 'Qobuz', desc: 'Your Qobuz playlists' },
+  { tab: 'deezer', label: 'Deezer', desc: 'Your Deezer playlists' },
+  {
+    tab: 'ytmusic',
+    label: 'YouTube Music',
+    desc: 'Your YouTube Music playlists',
+  },
+  {
+    tab: 'listenbrainz-sync',
+    label: 'ListenBrainz',
+    desc: 'Your ListenBrainz playlists',
+  },
+  {
+    tab: 'lastfm-sync',
+    label: 'Last.fm',
+    desc: 'Your Last.fm radio playlists',
+  },
+  {
+    tab: 'soulsync-discovery-sync',
+    label: 'SoulSync Discovery',
+    desc: 'SoulSync Discovery playlists',
+  },
+];
+
+/** Charts and files: not an account, still a source. */
+export const ADD_PLAYLIST_OTHER: readonly AddSource[] = [
+  {
+    tab: 'beatport',
+    label: 'Beatport',
+    desc: 'Browse by genre, top 100s',
+  },
+  {
+    tab: 'import-file',
+    label: 'Import a file',
+    desc: 'CSV, TSV, TXT or M3U',
+  },
 ];
 
 export interface AddPlaylistSheetProps {
-  /**
-   * Where the button that opened it sits, so it pops in AT the control rather
-   * than dimming the page and taking over the middle of it. Same idiom as the
-   * card's overflow menu — adding a playlist is a small act and a full-screen
-   * dialog overstates it.
-   */
-  anchor: { top: number; left: number };
-  /** The trigger, so clicking "+ Add playlist" again closes rather than rebuilds. */
-  anchorEl?: HTMLElement | null;
   /**
    * Open a tab and hand it a URL to load. `url` is omitted for the account and
    * file routes, which have nothing to parse.
    */
   onRoute: (tab: string, url?: string) => void;
+  /** Start fresh: a new playlist made here, or a new request list. */
+  onNew?: (kind: 'user' | 'requests') => void;
   onClose: () => void;
 }
 
-export function AddPlaylistSheet({ anchor, anchorEl, onRoute, onClose }: AddPlaylistSheetProps) {
+export function AddPlaylistSheet({ onRoute, onNew, onClose }: AddPlaylistSheetProps) {
   const [input, setInput] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const pos = usePopoverPosition(anchor, ref);
 
-  usePopoverDismiss({ ref, anchor: anchorEl, onClose });
+  usePopoverDismiss({ ref, onClose });
 
   const trimmed = input.trim();
   const detection = detectPlaylistUrl(trimmed);
@@ -93,32 +123,82 @@ export function AddPlaylistSheet({ anchor, anchorEl, onRoute, onClose }: AddPlay
     onClose();
   };
 
-  return (
-    <div
-      className="add-playlist-sheet"
-      ref={ref}
-      role="dialog"
-      aria-label="Add a playlist"
-      style={{ top: `${pos.top}px`, left: `${pos.left}px` }}
+  const tile = (source: AddSource) => (
+    <button
+      key={source.tab}
+      type="button"
+      className={styles.tile}
+      onClick={() => {
+        onRoute(source.tab);
+        onClose();
+      }}
     >
-      <div className="add-playlist-head">
-        <h3>Add a playlist</h3>
-        <button type="button" className="add-playlist-close" aria-label="Close" onClick={onClose}>
-          &times;
-        </button>
-      </div>
+      <span className={`${styles.badge} ${styles.badgeLogo}`} aria-hidden="true">
+        <SourceIcon source={source.tab} />
+      </span>
+      <span>
+        <span className={styles.tileName}>{source.label}</span>
+        <span className={styles.tileDesc}>{source.desc}</span>
+      </span>
+    </button>
+  );
 
-      <div className="add-playlist-section">
-        <label className="add-playlist-label" htmlFor="add-playlist-url">
-          Paste a link
-        </label>
-        <div className="add-playlist-row">
+  return (
+    <>
+      <div className={styles.scrim} aria-hidden="true" />
+      <div
+        className={`pl-add-sheet ${styles.sheet}`}
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add a playlist"
+      >
+        <div className={styles.sheetHead}>
+          <h3 className={styles.sheetTitle}>Add a playlist</h3>
+          <button
+            type="button"
+            className={`${styles.iconBtn} ${styles.iconBtnSm}`}
+            aria-label="Close"
+            onClick={onClose}
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M6 6l12 12" />
+              <path d="M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <label className={styles.linkBox}>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" />
+            <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" />
+          </svg>
           <input
             id="add-playlist-url"
             type="text"
             autoFocus
+            aria-label="Paste a link"
             value={input}
-            placeholder="A playlist or album link from Spotify, Apple Music, Deezer or YouTube"
+            placeholder="Paste a playlist or album link"
             onChange={(e) => {
               setInput(e.target.value);
               setSubmitted(false);
@@ -129,52 +209,68 @@ export function AddPlaylistSheet({ anchor, anchorEl, onRoute, onClose }: AddPlay
           />
           <button
             type="button"
-            className="add-playlist-submit"
+            className={styles.go}
             // Never disabled: a disabled button explains nothing, and the
             // whole point here is to SAY what is wrong with the link.
             onClick={submit}
           >
             Add
           </button>
-        </div>
-        {hint && (
-          <p className={`add-playlist-hint${recognised ? ' add-playlist-hint--ok' : ''}`}>{hint}</p>
-        )}
-      </div>
-
-      <div className="add-playlist-section">
-        <span className="add-playlist-label">Or from a connected account</span>
-        <div className="add-playlist-accounts">
-          {ADD_PLAYLIST_ACCOUNTS.map((account) => (
-            <button
-              key={account.tab}
-              type="button"
-              className="add-playlist-account"
-              onClick={() => {
-                onRoute(account.tab);
-                onClose();
-              }}
-            >
-              <span aria-hidden="true">{account.glyph}</span>
-              {account.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="add-playlist-section">
-        <span className="add-playlist-label">Or from a file</span>
-        <button
-          type="button"
-          className="add-playlist-file"
-          onClick={() => {
-            onRoute('import-file');
-            onClose();
-          }}
+        </label>
+        <p
+          className={`${styles.hint}${
+            recognised ? ` ${styles.hintOk}` : hint ? ` ${styles.hintBad}` : ''
+          }`}
         >
-          📄 Import CSV, TSV, TXT or M3U
-        </button>
+          {hint ?? ''}
+        </p>
+
+        <div className={styles.groupLabel}>From your accounts</div>
+        <div className={styles.tiles}>{ADD_PLAYLIST_ACCOUNTS.map(tile)}</div>
+
+        <div className={styles.groupLabel}>Charts and files</div>
+        <div className={styles.tiles}>{ADD_PLAYLIST_OTHER.map(tile)}</div>
+
+        {onNew ? (
+          <>
+            <div className={styles.groupLabel}>Start fresh</div>
+            <div className={styles.tiles}>
+              <button
+                type="button"
+                className={styles.tile}
+                onClick={() => {
+                  onNew('user');
+                  onClose();
+                }}
+              >
+                <span className={styles.badge} aria-hidden="true">
+                  +
+                </span>
+                <span>
+                  <span className={styles.tileName}>New playlist</span>
+                  <span className={styles.tileDesc}>Yours to edit, in My Playlists</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={styles.tile}
+                onClick={() => {
+                  onNew('requests');
+                  onClose();
+                }}
+              >
+                <span className={styles.badge} aria-hidden="true">
+                  +
+                </span>
+                <span>
+                  <span className={styles.tileName}>New request list</span>
+                  <span className={styles.tileDesc}>Downloads tracks, no server playlist</span>
+                </span>
+              </button>
+            </div>
+          </>
+        ) : null}
       </div>
-    </div>
+    </>
   );
 }

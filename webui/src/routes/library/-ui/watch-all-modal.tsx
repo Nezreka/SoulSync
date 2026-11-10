@@ -35,6 +35,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
   const [data, setData] = useState<{
     eligible: WatchAllArtist[];
     ineligible: WatchAllArtist[];
+    otherSource: number;
   } | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [filter, setFilter] = useState('');
@@ -121,7 +122,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
             <div>
               <h2 className="watch-all-title">Watch All Unwatched</h2>
               <p className="watch-all-subtitle">
-                Add every unwatched artist that has a {sourceName} ID to your Watchlist
+                Add every unwatched artist that has a provider ID to your Watchlist
               </p>
             </div>
           </div>
@@ -184,7 +185,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
                 </div>
                 <div className="watch-all-stat-card ineligible">
                   <div className="watch-all-stat-value">{data.ineligible.length}</div>
-                  <div className="watch-all-stat-label">No {sourceName} ID</div>
+                  <div className="watch-all-stat-label">No provider ID</div>
                 </div>
                 <div className="watch-all-stat-card total">
                   <div className="watch-all-stat-value">
@@ -193,6 +194,13 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
                   <div className="watch-all-stat-label">Total unwatched</div>
                 </div>
               </div>
+
+              {data.otherSource > 0 ? (
+                <div className="watch-all-empty-hint">
+                  {data.otherSource} of them {data.otherSource === 1 ? 'uses' : 'use'} another
+                  source&apos;s ID, not {sourceName}&apos;s
+                </div>
+              ) : null}
 
               {data.eligible.length > 10 ? (
                 <div className="watch-all-search-wrap">
@@ -219,7 +227,7 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
               ) : (
                 <div className="watch-all-empty-state">
                   <div className="watch-all-empty-icon">🔌</div>
-                  <div>None of the artists off your Watchlist have a {sourceName} ID yet</div>
+                  <div>None of the artists off your Watchlist have a provider ID yet</div>
                   <div className="watch-all-empty-hint">
                     The background enrichment worker will match them over time.
                   </div>
@@ -236,14 +244,14 @@ export function WatchAllModal({ onClose }: { onClose: () => void }) {
                       <span className="watch-all-ineligible-icon">⚠</span>
                       <span>
                         {data.ineligible.length} artist
-                        {data.ineligible.length !== 1 ? 's' : ''} without {sourceName} ID
+                        {data.ineligible.length !== 1 ? 's' : ''} without a provider ID
                       </span>
                     </div>
                     <span className="watch-all-chevron">▼</span>
                   </div>
                   <div className="watch-all-ineligible-body">
                     <div className="watch-all-ineligible-hint">
-                      These artists haven't been matched to {sourceName} yet. The background
+                      These artists haven't been matched to any source yet. The background
                       enrichment worker will match them over time.
                     </div>
                     <div className="watch-all-grid" id="watch-all-ineligible-grid">

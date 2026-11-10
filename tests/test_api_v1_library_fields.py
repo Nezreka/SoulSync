@@ -762,3 +762,25 @@ def test_album_copyright_comes_from_the_tidal_or_qobuz_payload(client, db):
     conn.close()
     album = client.get("/api/v1/library/albums/al1::soulsync").get_json()["data"]["album"]
     assert album["copyright"] == "(P) 1999 Test Label"
+
+
+def test_lookup_finds_an_id_stored_as_a_json_number(db, client):
+    conn = db._get_connection()
+    conn.execute("UPDATE lib2_tracks SET external_ids=json_set(COALESCE(external_ids,'{}'),"
+                 " '$.deezer', 3135556) WHERE id=1")
+    conn.commit()
+    conn.close()
+    resp = client.get("/api/v1/library/lookup?type=track&provider=deezer&id=3135556")
+    assert resp.status_code == 200
+
+
+def test_lookup_never_returns_a_wanted_row_you_do_not_have(db, client):
+    """3.6.1's tables held owned rows only; v2 also holds wanted, discography
+    and wishlist rows, which the lookup returned as the library's track."""
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_tracks (id, album_id, title, external_ids)"
+                 " VALUES (500, 1, 'Wanted Song', '{\"deezer\": \"999\"}')")
+    conn.commit()
+    conn.close()
+    resp = client.get("/api/v1/library/lookup?type=track&provider=deezer&id=999")
+    assert resp.status_code == 404

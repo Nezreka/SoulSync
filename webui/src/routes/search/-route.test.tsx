@@ -354,6 +354,28 @@ describe('the dropdown state machine', () => {
     return 'none';
   }
 
+  it('a ?q= url arrives with its search already run', async () => {
+    // an artist page with no provider page to open sends its name here
+    const asked: string[] = [];
+    server.use(
+      http.post('/api/enhanced-search', async ({ request }) => {
+        const body = (await request.json()) as { query?: string };
+        asked.push(body.query ?? '');
+        return HttpResponse.json({ spotify_albums: [{ id: 'a1', name: 'Kyougen' }] });
+      }),
+      http.post('/api/labels/search', () => HttpResponse.json({ labels: [] })),
+      http.post('/api/enhanced-search/library-check', () => HttpResponse.json({})),
+    );
+
+    renderRoute('/search?q=Ado');
+
+    await waitFor(() => expect(asked).toContain('Ado'), { timeout: 3000 });
+    expect((await screen.findAllByText('Kyougen')).length).toBeGreaterThan(0);
+    expect((document.getElementById('enhanced-search-input') as HTMLInputElement).value).toBe(
+      'Ado',
+    );
+  });
+
   it('names the source it is searching while the request is in flight', async () => {
     let settle: (() => void) | null = null;
     server.use(

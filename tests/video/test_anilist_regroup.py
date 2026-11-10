@@ -253,3 +253,79 @@ def test_anilist_down_never_breaks_a_preview(db, monkeypatch):
     d = {"tvdb_id": 377543}
     engine._fill_preview_anime("show", 95479, d)
     assert "anime" not in d
+
+
+# -- a preview splits its seasons too (Thibs: Frieren from search showed one) ---
+
+def test_the_preview_season_list_splits_like_the_library():
+    seasons = [{"season_number": 0, "episode_total": 3},
+               {"season_number": 1, "episode_total": 38, "poster_url": "p.jpg"}]
+    out, source = numbering.split_preview_seasons(seasons, FRIEREN)
+    assert [(s["season_number"], s["episode_total"]) for s in out] == [(0, 3), (1, 28), (2, 10)]
+    assert source == {1: 1, 2: 1}
+    assert out[2]["poster_url"] == "p.jpg" and out[2]["episodes"] == []
+
+
+def test_a_preview_split_never_lands_on_a_season_tmdb_has():
+    """two different season 2s on one page would be worse than one lump."""
+    seasons = [{"season_number": 1, "episode_total": 38}, {"season_number": 2, "episode_total": 12}]
+    out, source = numbering.split_preview_seasons(seasons, FRIEREN)
+    assert out == seasons and source == {}
+
+
+def test_without_entries_a_preview_is_untouched():
+    seasons = [{"season_number": 1, "episode_total": 59}]
+    assert numbering.split_preview_seasons(seasons, []) == (seasons, {})
+
+
+class _Cache:
+    def __init__(self):
+        self.d = {}
+
+    def get(self, k):
+        return self.d.get(k)
+
+    def put(self, k, v, ttl=0):
+        self.d[k] = v
+
+
+def test_a_split_preview_season_loads_its_slice_renumbered(monkeypatch):
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    engine = VideoEnrichmentEngine.__new__(VideoEnrichmentEngine)
+    engine._cache = _Cache()
+    engine._cache_put(("anime_split", 209867), {"source": {1: 1, 2: 1}, "rows": FRIEREN})
+    fetched = []
+
+    def raw(tv_id, n):
+        fetched.append(n)
+        return {"season_number": n, "episodes": _season(38)} if n == 1 else None
+    monkeypatch.setattr(engine, "_tmdb_season_raw", raw)
+
+    s2 = engine.tmdb_season(209867, 2)
+    assert s2["season_number"] == 2
+    assert [e["episode_number"] for e in s2["episodes"]] == list(range(1, 11))
+    assert s2["episodes"][0]["title"] == "Ep 29", "TMDB's 29th episode is season 2's first"
+    s1 = engine.tmdb_season(209867, 1)
+    assert len(s1["episodes"]) == 28
+    # a season the split didn't touch goes straight to TMDB
+    assert engine.tmdb_season(209867, 0) is None and fetched[-1] == 0
+
+
+def test_the_preview_detail_comes_back_split(db, monkeypatch):
+    from core.video import anilist
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    db.set_setting("anilist_enabled", "1")
+    keys = ("anilist_id", "tvdb_season", "tvdb_offset", "tmdb_season", "tmdb_offset")
+    monkeypatch.setattr(db, "anime_map_entries",
+                        lambda kind, **kw: [{k: e[k] for k in keys} for e in FRIEREN])
+    monkeypatch.setattr(anilist, "by_ids", lambda post, ids: {
+        e["anilist_id"]: {"episodes": e["episodes"], "format": e["format"] or "TV", "score": 90}
+        for e in FRIEREN})
+    engine = VideoEnrichmentEngine.__new__(VideoEnrichmentEngine)
+    engine.db = db
+    engine._cache = _Cache()
+    d = {"tvdb_id": 424536, "seasons": [{"season_number": 1, "episode_total": 38}], "season_count": 1}
+    engine._fill_preview_anime("show", 209867, d)
+    assert [(s["season_number"], s["episode_total"]) for s in d["seasons"]] == [(1, 28), (2, 10)]
+    assert d["season_count"] == 2
+    assert engine._cache_get(("anime_split", 209867))["source"] == {1: 1, 2: 1}

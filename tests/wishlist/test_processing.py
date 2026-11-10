@@ -2,6 +2,8 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from core.wishlist import processing
 
 
@@ -218,6 +220,944 @@ def test_build_wishlist_source_context_preserves_album_context_for_album_batches
     assert context["is_album_download"] is True
     assert context["album_context"] == {"id": "alb-1", "name": "GNX", "total_tracks": 12}
     assert context["artist_context"] == {"id": "art-1", "name": "Kendrick Lamar"}
+
+
+_ALBUM_BATCH = {
+    "playlist_name": "Wishlist (Album: Jam)",
+    "playlist_id": "wishlist",
+    "is_album_download": True,
+    "album_context": {"id": "alb-1", "name": "Jam", "total_tracks": 10},
+    "artist_context": {"id": "art-1", "name": "Some Artist"},
+}
+
+
+def test_requeue_provenance_keeps_playlist_origin_inside_an_album_batch():
+    """#1981: a playlist-origin track that fails inside a wishlist album
+    batch must be re-added AS a playlist track with its real playlist
+    ref/name — the batch label ('Wishlist (Album: Jam)' / 'wishlist')
+    overwriting the row is what later stops the playlist re-syncing."""
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+    # the batch's album flags are NOT kept alongside: they describe
+    # the batch the track failed in, and derive_download_origin reads
+    # source_info['is_album_download'] — keeping it would reclassify
+    # this restored playlist track as a hand-picked download.
+    assert "is_album_download" not in context
+    assert "album_context" not in context
+    assert "artist_context" not in context
+
+
+def test_requeue_provenance_restored_row_derives_playlist_origin():
+    """Gate pass 4: the restored row, fed through the real
+    derive_download_origin as its source_info, must come back as a
+    playlist download — the origin the #1981 tracks lose."""
+    from core.downloads.origin import derive_download_origin
+
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert source_type == "playlist"
+    origin, origin_context = derive_download_origin(
+        {"track_info": {"source_info": context}})
+    assert origin == "playlist"
+    assert origin_context == "Jam Skatin"
+
+
+def test_requeue_provenance_reads_a_json_string_source_info():
+    track = {
+        "source_type": "playlist",
+        "source_info": '{"playlist_id": "dz-7", "playlist_name": "Road Trip"}',
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "dz-7"
+    assert context["playlist_name"] == "Road Trip"
+
+
+def test_requeue_provenance_name_only_when_the_ref_is_the_wishlist_sentinel():
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "wishlist", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_name"] == "Jam Skatin"
+    # The dead key is REMOVED, not left holding the batch sentinel:
+    # grouping/registration read the pair together and take the first
+    # truthy value, so a leftover 'wishlist' ref would poison both.
+    assert "playlist_id" not in context
+
+
+def test_requeue_provenance_ref_only_drops_the_batch_label_name():
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995",
+                        "playlist_name": "Wishlist (Auto - Album: Jam)"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert "playlist_name" not in context
+
+
+@pytest.mark.parametrize("source_info", [
+    pytest.param(
+        {"playlist_id": " wishlist ", "playlist_name": "Wishlist "},
+        id="padded-wishlist-sentinel"),
+    pytest.param(
+        {"playlist_id": "WISHLIST", "playlist_name": "wishlist (album: jam)"},
+        id="casefolded-sentinel-and-label-name"),
+    pytest.param(
+        {"playlist_id": None, "playlist_name": "Unknown Playlist"},
+        id="unknown-playlist-placeholder-name"),
+    pytest.param(
+        {"playlist_id": ["908622995"], "playlist_name": {"name": "Jam Skatin"}},
+        id="non-scalar-ref-and-name"),
+    pytest.param(
+        {"playlist_id": True, "playlist_name": 42},
+        id="bool-ref-and-int-name"),
+])
+def test_requeue_provenance_rejects_padded_and_placeholder_provenance(source_info):
+    """Sentinels must not slip past with padding/case tricks, the
+    'Unknown Playlist' placeholder is not a name, and non-string values
+    are never stored verbatim."""
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH,
+        {"source_type": "playlist", "source_info": source_info})
+
+    assert source_type == "album"
+    assert context["playlist_name"] == "Wishlist (Album: Jam)"
+    assert context["playlist_id"] == "wishlist"
+
+
+def test_requeue_provenance_keeps_a_real_ref_for_a_wishlist_named_playlist():
+    """Documented trade-off: a playlist genuinely named 'Wishlist
+    (2024)' is indistinguishable from a batch label, so its name is not
+    preserved — but its real ref is, and registration resolves by ref."""
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995",
+                        "playlist_name": "Wishlist (2024)"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert "playlist_name" not in context
+
+
+def test_requeue_provenance_int_ref_is_preserved_as_an_int():
+    """A positive int ref is stored AS an int, not stringified:
+    register_completed_playlist_batch treats an int ref as a
+    mirrored-playlist PK and a digit string as an upstream id, so the
+    string form would resolve to a different (or no) playlist."""
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": 908622995, "playlist_name": "Jam Skatin"},
+    }
+
+    _, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert context["playlist_id"] == 908622995
+    assert isinstance(context["playlist_id"], int)
+
+
+def test_requeue_provenance_survives_a_pathological_json_source_info():
+    """A deeply nested JSON string raises RecursionError in json.loads;
+    that must degrade to the batch pair, not skip the re-add."""
+    track = {
+        "source_type": "playlist",
+        "source_info": "[" * 3000 + "]" * 3000,
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert source_type == "album"
+    assert context["playlist_id"] == "wishlist"
+
+
+def test_requeue_provenance_does_not_let_a_track_override_a_playlist_batch():
+    """A playlist-named residual batch carries a FRESH resolution from
+    dispatch (grouped by playlist, mirrored id resolved then); a track's
+    older stored provenance must not override it, and the track's stale
+    mirrored id never replaces the batch's fresher one."""
+    playlist_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Jam Skatin",
+        "is_playlist_batch": True,
+        "source_playlist_id": "908622995",
+        "mirrored_playlist_id": 7,
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "stale-1", "playlist_name": "Old Name",
+                        "mirrored_playlist_id": 3},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        playlist_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_name"] == "Jam Skatin"
+    # The batch's real ref must reach the context: the builder reads
+    # source_playlist_ref / playlist_id only, so without the resolver
+    # writing source_playlist_id in, this was the sentinel 'wishlist'
+    # beside the real name — the poisoned pairing.
+    assert context["playlist_id"] == "908622995"
+    assert context["mirrored_playlist_id"] == 7
+
+
+def test_requeue_provenance_residual_batch_recovers_its_source_playlist_id():
+    """Dedicated pin for the residual-batch shape: dispatch sets ONLY
+    source_playlist_id (scanned from the grouped tracks' source_info)
+    on a playlist-named batch whose playlist_id is the 'wishlist'
+    sentinel. Batch-wins must requeue with that cleaned ref, not the
+    sentinel paired with the batch's real name."""
+    residual_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Jam Skatin",
+        "is_playlist_batch": True,
+        "source_playlist_name": "Jam Skatin",
+        "source_playlist_id": "908622995",
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "stale-1", "playlist_name": "Old Name"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        residual_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_batch_with_only_a_real_source_ref_suppresses():
+    """Organize-download shape: the batch sets ONLY source_playlist_ref
+    (no is_playlist_batch / source_playlist_id). A real ref is a fresh
+    resolution, so the batch pair stands over a track's older one."""
+    organize_batch = {
+        "playlist_name": "Summer Mix",
+        "playlist_id": "42",
+        "source_playlist_ref": "spotifyPlaylistId123",
+        "mirrored_playlist_id": 42,
+        "organize_by_playlist": True,
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        organize_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "spotifyPlaylistId123"
+    assert context["playlist_name"] == "Summer Mix"
+    assert context["mirrored_playlist_id"] == 42
+
+
+def test_requeue_provenance_sentinel_source_ref_does_not_suppress():
+    """A batch whose source_playlist_ref is only the 'wishlist'
+    sentinel carries no fresh resolution — the cleaner turns it into
+    nothing — so a track's legit provenance must still win."""
+    batch = {**_ALBUM_BATCH, "source_playlist_ref": "wishlist"}
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_direct_playlist_batch_ref_suppresses():
+    """Direct playlist download shape (start-missing-process for a
+    playlist the user opened): the batch's ONLY playlist ref is
+    playlist_id — no source_playlist_ref, no is_playlist_batch. That
+    is still a fresh batch resolution, so a track's older provenance
+    must not override the batch's own playlist."""
+    direct_batch = {
+        "playlist_id": "908622995",
+        "playlist_name": "Jam Skatin",
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "stale-1", "playlist_name": "Old Name"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        direct_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_synthetic_batch_playlist_id_does_not_suppress():
+    """Hand-picked downloads park a MADE-UP id in playlist_id (an
+    album/song picked by hand, a library redownload, the playback
+    queue). Those name no playlist, so they are not a fresh batch
+    resolution — a playlist track's real provenance still wins, the
+    same #1981 shape as the 'wishlist' sentinel album batch."""
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+    for synthetic_id in ("artist_album_55", "enhanced_search_9",
+                         "redownload_12", "playback_queue"):
+        batch = {**_ALBUM_BATCH, "playlist_id": synthetic_id}
+
+        source_type, context = processing.resolve_failed_track_requeue_provenance(
+            batch, track)
+
+        assert source_type == "playlist", synthetic_id
+        assert context["playlist_id"] == "908622995", synthetic_id
+        assert context["playlist_name"] == "Jam Skatin", synthetic_id
+
+
+@pytest.mark.parametrize("synthetic_id", [
+    pytest.param("beatport_release_1700000000000_ab12cd", id="beatport-release"),
+    pytest.param("lbl_album_sp-1", id="label-release-modal"),
+    pytest.param("resync_42", id="history-resync-fallback"),
+    pytest.param("resync_album_42", id="history-resync-album-context"),
+    pytest.param("ituneslink_ab12cd", id="ituneslink-state-key"),
+    pytest.param("legacy_modal", id="legacy-modal-endpoint"),
+    pytest.param("spotify_library_42", id="spotify-library-album"),
+    pytest.param("issue_download_7", id="issue-download-album"),
+    pytest.param("discover_cache_9", id="discover-cache-album"),
+    pytest.param("wing_it_1700000000000", id="wing-it-virtual-playlist"),
+    pytest.param("library_v2_search", id="library-v2-search"),
+])
+def test_requeue_provenance_new_synthetic_batch_ids_do_not_suppress(synthetic_id):
+    """Gate pass 3: the deny-list missed server/webui-made album ids.
+    These batches are NOT album-flagged (the label modal's id never
+    trips the client's isAlbumContextPlaylistId list, so its batch
+    arrives with is_album_download unset), so the prefix list itself
+    must catch them — each names no playlist, so a playlist track's
+    real provenance still wins."""
+    batch = {"playlist_id": synthetic_id, "playlist_name": "Some Album"}
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert source_type == "playlist", synthetic_id
+    assert context["playlist_id"] == "908622995", synthetic_id
+    assert context["playlist_name"] == "Jam Skatin", synthetic_id
+
+
+def test_requeue_provenance_album_batch_real_playlist_id_does_not_suppress():
+    """The is_album_download gate: an album batch's playlist_id never
+    counts as a fresh playlist resolution, even when it is a real-
+    looking id no deny-list could enumerate (a per-release id, a
+    history-entry id). is_hand_picked makes the same call for origin
+    derivation. The same id on a NON-album batch still suppresses —
+    pinned by test_requeue_provenance_direct_playlist_batch_ref_suppresses."""
+    batch = {**_ALBUM_BATCH, "playlist_id": "908622995"}
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "777", "playlist_name": "Other Mix"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "777"
+    assert context["playlist_name"] == "Other Mix"
+    # the track override won, so the batch's album flag is dropped
+    # with it (gate pass 4: derive_download_origin would otherwise
+    # reclassify the restored track as hand-picked)
+    assert "is_album_download" not in context
+
+
+def test_requeue_provenance_residual_batch_keeps_its_own_wishlist_looking_name():
+    """Gate pass 3: a real playlist named 'Wishlist (2024)' groups its
+    residual tracks under that name, and dispatch stamps the name on
+    the batch as source_playlist_name — the batch's OWN name, taken
+    verbatim from the tracks' provenance, not a generated label. With
+    a usable batch ref the name must survive beside it: popping it
+    (the batch-label cleaning) requeued the row ref-only, and the
+    next cycle's name-only grouping lost the playlist-named batch."""
+    residual_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Wishlist (2024)",
+        "is_playlist_batch": True,
+        "source_playlist_name": "Wishlist (2024)",
+        "source_playlist_id": "908622995",
+        "mirrored_playlist_id": 7,
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "stale-1", "playlist_name": "Old Name"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        residual_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Wishlist (2024)"
+    assert context["mirrored_playlist_id"] == 7
+
+
+def test_requeue_provenance_residual_batch_name_only_keeps_its_own_wishlist_looking_name():
+    """The name-only half of the same pin: no usable batch ref, but
+    the batch's own 'Wishlist (2024)' name is still a fresh resolution
+    (dispatch resolved the mirrored id by it), so the batch pair
+    stands — name kept, dead ref popped, mirrored id carried."""
+    residual_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Wishlist (2024)",
+        "is_playlist_batch": True,
+        "source_playlist_name": "Wishlist (2024)",
+        "source_playlist_id": None,
+        "mirrored_playlist_id": 7,
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "stale-1", "playlist_name": "Old Name"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        residual_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_name"] == "Wishlist (2024)"
+    assert "playlist_id" not in context
+    assert context["mirrored_playlist_id"] == 7
+
+
+def test_requeue_provenance_batch_repair_applies_to_non_playlist_tracks():
+    """Gate pass 3: the batch-side repair describes the BATCH, so it
+    applies to every track in it. A track whose payload carries no
+    source_type (its provenance was lost upstream, or it never had
+    any) must not requeue with the builder's unrepaired pair — the
+    'wishlist' sentinel beside the real name, where its playlist
+    batch-mates requeue with the batch's real ref — nor with the
+    sentinel left beside the name in the name-only shape."""
+    residual_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Jam Skatin",
+        "is_playlist_batch": True,
+        "source_playlist_name": "Jam Skatin",
+        "source_playlist_id": "908622995",
+        "mirrored_playlist_id": 7,
+    }
+    plain_track = {"id": "sp-1", "name": "Plain Song"}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        residual_batch, plain_track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+    assert context["mirrored_playlist_id"] == 7
+
+    name_only_batch = {**residual_batch, "source_playlist_id": None}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        name_only_batch, plain_track)
+
+    assert source_type == "playlist"
+    assert context["playlist_name"] == "Jam Skatin"
+    assert "playlist_id" not in context
+    assert context["mirrored_playlist_id"] == 7
+
+
+def test_requeue_provenance_batch_ref_with_a_label_name_pops_the_name():
+    """Batch-wins name cleaning: a batch with a real ref but only a
+    placeholder / batch-label name must not store the 'real ref +
+    batch label' pairing — the unusable name is popped (all-or-clean),
+    mirroring the name-only branch's ref pop. A usable batch name
+    stands (pinned by the residual / organize batch tests above)."""
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "stale-1", "playlist_name": "Old Name"},
+    }
+    for batch in (
+        {**_ALBUM_BATCH, "source_playlist_ref": "dz-9"},
+        {"playlist_id": "wishlist", "playlist_name": "Unknown Playlist",
+         "source_playlist_ref": "dz-9"},
+    ):
+        source_type, context = processing.resolve_failed_track_requeue_provenance(
+            batch, track)
+
+        assert context["playlist_id"] == "dz-9"
+        assert "playlist_name" not in context
+
+
+def test_requeue_provenance_source_playlist_ref_wins_over_source_playlist_id():
+    """A batch carrying BOTH source fields: source_playlist_ref wins
+    in the stored context. build_wishlist_source_context prefers
+    source_playlist_ref for the context ref, and the resolver only
+    REPAIRS an unusable built ref — with the first cleaned candidate,
+    source_playlist_id — so a usable source_playlist_ref stands and
+    source_playlist_id is the fallback, not the winner."""
+    batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Jam Skatin",
+        "is_playlist_batch": True,
+        "source_playlist_id": "dz-111",
+        "source_playlist_ref": "sp-222",
+        "mirrored_playlist_id": 7,
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "stale-1", "playlist_name": "Old Name"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "sp-222"
+    assert context["playlist_name"] == "Jam Skatin"
+    assert context["mirrored_playlist_id"] == 7
+
+
+def test_requeue_provenance_wishlist_manual_sentinel_on_the_track_side():
+    """'wishlist_manual' is in the sentinel set alongside 'wishlist':
+    as a track's ref it cleans to nothing, so a real name survives as
+    a name-only row and the dead key is removed."""
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "wishlist_manual",
+                        "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_name"] == "Jam Skatin"
+    assert "playlist_id" not in context
+
+
+def test_requeue_provenance_wishlist_manual_sentinel_on_the_batch_side():
+    """The sentinel set applies to the batch-ref candidates too: a
+    'wishlist_manual' source_playlist_ref or playlist_id carries no
+    fresh resolution, so the track's provenance still wins."""
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+    for batch in (
+        {**_ALBUM_BATCH, "source_playlist_ref": "wishlist_manual"},
+        {"playlist_id": "wishlist_manual",
+         "playlist_name": "Wishlist (Residual)"},
+    ):
+        source_type, context = processing.resolve_failed_track_requeue_provenance(
+            batch, track)
+
+        assert source_type == "playlist"
+        assert context["playlist_id"] == "908622995"
+        assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_json_source_info_decoding_to_a_non_dict_falls_back():
+    """A JSON-string source_info that decodes to a list or a number
+    carries no playlist pair — the track falls back to the batch pair
+    instead of crashing or storing the decoded scalar."""
+    for raw in ("[1, 2, 3]", "42"):
+        track = {"source_type": "playlist", "source_info": raw}
+
+        source_type, context = processing.resolve_failed_track_requeue_provenance(
+            _ALBUM_BATCH, track)
+
+        assert source_type == "album", raw
+        assert context["playlist_name"] == "Wishlist (Album: Jam)", raw
+        assert context["playlist_id"] == "wishlist", raw
+
+
+def test_requeue_provenance_playlist_batch_with_usable_name_only_suppresses():
+    """is_playlist_batch with source_playlist_id=None but a usable
+    source_playlist_name is still a fresh resolution: at dispatch the
+    mirrored id was resolved by that name (it is on the batch), and
+    build_wishlist_source_context carries the batch's playlist_name —
+    the same name — as the context name, so the batch pair stands.
+    Playlist_id pin: no usable batch ref exists, so the dead key is
+    REMOVED rather than left holding the 'wishlist' sentinel beside
+    the real name (all-or-clean, same as the track path); the name
+    and the mirrored id carry the resolution."""
+    playlist_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Jam Skatin",
+        "is_playlist_batch": True,
+        "source_playlist_id": None,
+        "source_playlist_name": "Jam Skatin",
+        "mirrored_playlist_id": 7,
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "stale-1", "playlist_name": "Old Name"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        playlist_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_name"] == "Jam Skatin"
+    assert "playlist_id" not in context
+    assert context["mirrored_playlist_id"] == 7
+
+
+def test_requeue_provenance_playlist_batch_without_usable_id_or_name_falls_through():
+    """The other half of the name-only scoping: a playlist batch whose
+    id is None and whose names are only batch labels has no usable
+    fresh resolution, so the track's own provenance wins instead."""
+    playlist_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Wishlist (Residual)",
+        "is_playlist_batch": True,
+        "source_playlist_id": None,
+        "source_playlist_name": "Wishlist (Residual)",
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        playlist_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_auto_generic_label_is_not_a_batch_own_name():
+    """The auto cycle's generated generic label ('Wishlist (Auto -
+    Singles)') is the other name dispatch stamps on the non-playlist
+    residual group: like 'Wishlist (Residual)' it is never a batch's
+    own playlist name, even on a batch flagged is_playlist_batch, so
+    the track's own provenance wins."""
+    playlist_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Wishlist (Auto - Singles)",
+        "is_playlist_batch": True,
+        "source_playlist_id": None,
+        "source_playlist_name": "Wishlist (Auto - Singles)",
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        playlist_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_album_label_is_not_a_batch_own_name():
+    """Gate pass 4: rows stored before the batch-type split can carry
+    the album-batch label AS their playlist_name with source_type
+    'playlist', so residual grouping groups them under 'Wishlist
+    (Album: Jam)' and flags the batch is_playlist_batch. The label is
+    still a generated label, never the batch's own playlist name —
+    the track's real provenance must win."""
+    playlist_batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Wishlist (Album: Jam)",
+        "is_playlist_batch": True,
+        "source_playlist_id": None,
+        "source_playlist_name": "Wishlist (Album: Jam)",
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        playlist_batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_direct_batch_keeps_a_wishlist_looking_real_name():
+    """Gate pass 5: a DIRECT playlist download batch (not a wishlist
+    cycle batch) whose playlist is really named 'Wishlist (2024)'
+    carries its name and ref together from the same download origin —
+    the pair is corroborated, so the name stands beside the ref. Only
+    GENERATED labels are popped in the batch-ref branch. Dropping it
+    requeued every failed track ref-only, and the next cycle's
+    name-only grouping lost the playlist-named batch."""
+    batch = {"playlist_id": "37i9dQZF1DX", "playlist_name": "Wishlist (2024)"}
+    track = {"source_type": "single", "source_info": {}}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert context["playlist_id"] == "37i9dQZF1DX"
+    assert context["playlist_name"] == "Wishlist (2024)"
+
+
+def test_requeue_provenance_repair_replaces_a_synthetic_context_ref():
+    """Gate pass 6: the batch-ref repair must judge the built
+    context's ref by the direct-batch standard — a synthetic id the
+    builder took from batch['playlist_id'] is not a usable ref, so
+    the batch's real source_playlist_id replaces it instead of being
+    stored beside the real name."""
+    batch = {
+        "playlist_id": "enhanced_search_9",
+        "playlist_name": "Jam Skatin",
+        "is_playlist_batch": True,
+        "source_playlist_id": "908622995",
+        "source_playlist_name": "Jam Skatin",
+    }
+    track = {"source_type": "single", "source_info": {}}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert context["playlist_id"] == "908622995"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_none_batch_name_leaves_no_dead_key():
+    """Gate pass 6: a batch with an explicit playlist_name of None
+    and a real ref requeues with NO playlist_name key — a stored
+    None is a dead key, not a name."""
+    batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": None,
+        "source_playlist_ref": "dz-9",
+    }
+    track = {"source_type": "single", "source_info": {}}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert context["playlist_id"] == "dz-9"
+    assert "playlist_name" not in context
+
+
+def test_requeue_provenance_name_only_branch_stores_the_checked_name():
+    """Gate pass 6: the name-only branch is entered on
+    source_playlist_name, so when batch['playlist_name'] (what the
+    builder stores) differs and carries nothing real, the checked
+    name is stored instead of the placeholder."""
+    batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Unknown Playlist",
+        "is_playlist_batch": True,
+        "source_playlist_id": None,
+        "source_playlist_name": "Jam Skatin",
+        "mirrored_playlist_id": 7,
+    }
+    track = {"source_type": "single", "source_info": {}}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert context["playlist_name"] == "Jam Skatin"
+    assert "playlist_id" not in context
+
+
+def test_requeue_provenance_name_only_branch_pops_a_synthetic_context_ref():
+    """Gate pass 7: the name-only branch judges the built context's
+    ref by the same direct-batch standard as the batch-ref branch —
+    a synthetic batch playlist_id is not a usable ref and is popped,
+    not stored beside the real name."""
+    batch = {
+        "playlist_id": "enhanced_search_9",
+        "playlist_name": "Jam Skatin",
+        "is_playlist_batch": True,
+        "source_playlist_id": None,
+        "source_playlist_name": "Jam Skatin",
+        "mirrored_playlist_id": 7,
+    }
+    track = {"source_type": "single", "source_info": {}}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert context["playlist_name"] == "Jam Skatin"
+    assert "playlist_id" not in context
+
+
+def test_requeue_provenance_name_only_without_a_mirror_does_not_suppress():
+    """Gate pass 7: a name-only batch with NO mirrored id behind it
+    is not a fresh resolution — the track's own ref must survive
+    instead of being suppressed by the bare name."""
+    batch = {
+        "playlist_id": "wishlist",
+        "playlist_name": "Jam Skatin",
+        "is_playlist_batch": True,
+        "source_playlist_id": None,
+        "source_playlist_name": "Jam Skatin",
+        "mirrored_playlist_id": None,
+    }
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908", "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert source_type == "playlist"
+    assert context["playlist_id"] == "908"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_album_batch_source_ref_replaces_the_album_id():
+    """Gate pass 7: for an album batch the builder's ref comes from
+    the batch's own playlist_id, which never counts — a real
+    source_playlist_id replaces it even when the album id is not a
+    synthetic shape any deny-list could enumerate."""
+    batch = {**_ALBUM_BATCH, "playlist_id": "alb-777",
+             "source_playlist_id": "908"}
+    track = {"source_type": "single", "source_info": {}}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert context["playlist_id"] == "908"
+
+
+def test_requeue_provenance_batch_name_is_stored_stripped():
+    """Gate pass 7: a padded batch name is stored stripped, like
+    track-side names — the next cycle groups by the exact text."""
+    batch = {"playlist_id": "dz-9", "playlist_name": " Jam Skatin "}
+    track = {"source_type": "single", "source_info": {}}
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        batch, track)
+
+    assert context["playlist_id"] == "dz-9"
+    assert context["playlist_name"] == "Jam Skatin"
+
+
+def test_requeue_provenance_rejects_non_positive_int_refs():
+    """0 and negative ints are never a real playlist id — they must
+    clean to nothing instead of being stored as the refs '0' / '-5'."""
+    name_only = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": 0, "playlist_name": "Jam Skatin"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, name_only)
+
+    assert source_type == "playlist"
+    assert context["playlist_name"] == "Jam Skatin"
+    assert "playlist_id" not in context
+
+    nothing_real = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": -5,
+                        "playlist_name": "Wishlist (Album: Jam)"},
+    }
+
+    source_type, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, nothing_real)
+
+    assert source_type == "album"
+    assert context["playlist_name"] == "Wishlist (Album: Jam)"
+    assert context["playlist_id"] == "wishlist"
+
+
+def test_requeue_provenance_ignores_a_tracks_stale_mirrored_id():
+    """Nothing reads mirrored_playlist_id back from a wishlist row, so
+    the resolver does not copy the track's (possibly stale) value —
+    and when the track's own provenance wins, the BATCH's mirrored id
+    is dropped too: it was resolved for the batch's playlist, so
+    keeping it would pair the track's ref/name with a different
+    playlist's mirror."""
+    track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin",
+                        "mirrored_playlist_id": 3},
+    }
+
+    _, context = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, track)
+    assert "mirrored_playlist_id" not in context
+
+    _, context = processing.resolve_failed_track_requeue_provenance(
+        {**_ALBUM_BATCH, "mirrored_playlist_id": 7}, track)
+    assert "mirrored_playlist_id" not in context
+
+
+def test_requeue_provenance_shared_batch_context_is_copied_per_track():
+    """Callers may build the batch context once for a whole batch; one
+    track's preserved provenance must not leak into the next track's."""
+    batch_context = processing.build_wishlist_source_context(_ALBUM_BATCH)
+    playlist_track = {
+        "source_type": "playlist",
+        "source_info": {"playlist_id": "908622995", "playlist_name": "Jam Skatin"},
+    }
+
+    _, first = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, playlist_track, batch_context=batch_context)
+    _, second = processing.resolve_failed_track_requeue_provenance(
+        _ALBUM_BATCH, {"id": "sp-1"}, batch_context=batch_context)
+
+    assert first["playlist_id"] == "908622995"
+    assert second["playlist_id"] == "wishlist"
+    assert batch_context["playlist_id"] == "wishlist"
+
+
+def test_requeue_provenance_falls_back_to_the_batch_pair_without_track_provenance():
+    """Tracks that did not come from a playlist keep today's behaviour:
+    an album batch's failures requeue as 'album' with the batch context."""
+    for track in (
+        {"id": "sp-1", "name": "Plain"},
+        {"source_type": "album", "source_info": {"playlist_name": "Jam Skatin"}},
+        {"source_type": "playlist",
+         "source_info": {"playlist_id": "wishlist",
+                         "playlist_name": "Wishlist (Album: Jam)"}},
+        None,
+        "not-a-dict",
+    ):
+        source_type, context = processing.resolve_failed_track_requeue_provenance(
+            _ALBUM_BATCH, track)
+
+        assert source_type == "album"
+        assert context["playlist_name"] == "Wishlist (Album: Jam)"
+        assert context["playlist_id"] == "wishlist"
 
 
 def test_recover_uncaptured_failed_tracks_builds_entries():

@@ -73,6 +73,11 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
     # source with USER provenance on the strength of a file that is not there.
     # Every other read in this module family already applies this guard.
     live_files = "COALESCE(file_state,'active') <> 'deleted'"
+    # third #1062 review G09-5: the library the caller works in. unscoped, an
+    # admin moving a file in a profile's own library re-homed the shared
+    # library's copy too, and another library's file on the target refused it
+    from core.library2.sql_util import owner_clause
+    live_files += owner_clause(column="owner_profile_id")
     file_rows = conn.execute(
         f"SELECT id, path FROM lib2_track_files WHERE track_id=? AND {live_files} "
         f"ORDER BY {primary_order()}",
@@ -140,6 +145,10 @@ def move_track_file(db, conn, from_track_id: int, to_track_id: int,
     )
     # the profile acting: its wanted row is the one the mirror below reads
     recompute_wanted(conn, profile_id=wishlist_profile_id, track_ids=[from_track_id])
+    # the user put these files here: the start-up re-home leaves them be
+    from core.library2.recording_links import settle_file_home
+    for moved in file_rows:
+        settle_file_home(conn, int(moved["id"]))
     conn.commit()
 
     unmirrored = 0

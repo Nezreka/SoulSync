@@ -88,109 +88,35 @@ export const SYNC_TABS: readonly SyncTab[] = [
 export const SYNC_DEFAULT_TAB: SyncTabId = 'mirrored';
 
 /**
- * The tabs that earn a permanent place in the strip.
+ * The collections: the four pills along the top of the page.
  *
- * The other twelve are now reached through Add playlist, which detects the
- * service from the link rather than making you pick first. They are NOT gone —
- * every one still exists as a panel and is opened by routing — they simply do
- * not each need a chip in a strip that had fifteen of them, six of which were
- * duplicates of one another.
+ * Everything else (the fourteen source tabs and Beatport) is a way of ADDING a
+ * playlist, so it opens from Add as a panel over the page instead of sitting
+ * in the strip. Every one still exists as a panel with its own state; none of
+ * them is a place you live in.
  *
- * What is left is genuinely four different things:
- *   mirrored      the library — the page's subject
- *   my-playlists  the playlists people make here, with no service behind them
- *   server    the other direction: reading FROM Plex/Jellyfin/Navidrome
- *   beatport  a chart browser, a different page grafted into the strip
+ *   mirrored       the library: every playlist that came from somewhere
+ *   my-playlists   the playlists made here, with no service behind them
+ *   request-lists  download-only lists, no server playlist
+ *   server         the other direction: reading FROM Plex/Jellyfin/Navidrome
  */
 export const SYNC_PRIMARY_TAB_IDS: readonly SyncTabId[] = [
   'mirrored',
   'my-playlists',
   'request-lists',
   'server',
-  'beatport',
 ];
 
-/**
- * Which chips to render, given what is open.
- *
- * A routed tab appears when opened and STAYS for the session (and, via the
- * localStorage seed below, across reloads). The first cut dropped it the
- * moment you left — but the playlists a link tab loaded persist in
- * localStorage, so the cards survived while their only door vanished: the
- * Spotify Link chip "only shows if I do Add Playlist and paste a link
- * again" (user report, aug 25). Routed chips are appended after the three
- * permanent ones, in the order they were opened, so nothing moves under
- * the cursor.
- */
-export function syncStripTabs(
-  active: string,
-  openedRouted: Iterable<string> = [],
-): readonly SyncTab[] {
-  // Ordered by SYNC_PRIMARY_TAB_IDS, not by SYNC_TABS: a filter would hand
-  // them back in the old fifteen-tab order (server, beatport, mirrored) and
-  // quietly put the library last again, which is the whole thing being fixed.
-  const primary = SYNC_PRIMARY_TAB_IDS.map(
-    (id) => SYNC_TABS.find((t) => t.id === id) as SyncTab,
-  ).filter(Boolean);
-  const routedIds: string[] = [];
-  for (const id of openedRouted) {
-    if (!SYNC_PRIMARY_TAB_IDS.includes(id as SyncTabId) && !routedIds.includes(id)) {
-      routedIds.push(id);
-    }
-  }
-  if (!SYNC_PRIMARY_TAB_IDS.includes(active as SyncTabId) && !routedIds.includes(active)) {
-    routedIds.push(active);
-  }
-  const routed = routedIds
-    .map((id) => SYNC_TABS.find((t) => t.id === id))
-    .filter((t): t is SyncTab => Boolean(t));
-  return [...primary, ...routed];
+/** Whether a tab is a collection (a pill) rather than a source panel. */
+export function isPrimarySyncTab(id: string): boolean {
+  return SYNC_PRIMARY_TAB_IDS.includes(id as SyncTabId);
 }
 
-const OPENED_TABS_STORAGE_KEY = 'soulsync-sync-opened-tabs';
-
-/** Routed tabs remembered from earlier visits; [] when storage is empty or
- * unreadable. Only ids SYNC_TABS still knows survive the round-trip. */
-export function readRememberedRoutedTabs(): SyncTabId[] {
-  try {
-    const raw = window.localStorage.getItem(OPENED_TABS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (id): id is SyncTabId =>
-        typeof id === 'string' &&
-        !SYNC_PRIMARY_TAB_IDS.includes(id as SyncTabId) &&
-        SYNC_TABS.some((t) => t.id === id),
-    );
-  } catch {
-    return [];
-  }
-}
-
-export function rememberRoutedTab(id: string): void {
-  if (SYNC_PRIMARY_TAB_IDS.includes(id as SyncTabId)) return;
-  try {
-    const current = readRememberedRoutedTabs();
-    if (current.includes(id as SyncTabId)) return;
-    window.localStorage.setItem(OPENED_TABS_STORAGE_KEY, JSON.stringify([...current, id]));
-  } catch {
-    // storage unavailable - the chip still lives for this session
-  }
-}
-
-/** the chip's ×: drop a routed tab so it stays gone after a reload (#1402).
- *  opening that source again (Add playlist) brings it back. */
-export function forgetRoutedTab(id: string): void {
-  try {
-    const current = readRememberedRoutedTabs();
-    if (!current.includes(id as SyncTabId)) return;
-    window.localStorage.setItem(
-      OPENED_TABS_STORAGE_KEY,
-      JSON.stringify(current.filter((t) => t !== id)),
-    );
-  } catch {
-    // storage unavailable - it's gone for this session anyway
-  }
+/** The pills, in order. Source tabs never get one; they open as panels. */
+export function syncStripTabs(): readonly SyncTab[] {
+  return SYNC_PRIMARY_TAB_IDS.map((id) => SYNC_TABS.find((t) => t.id === id) as SyncTab).filter(
+    Boolean,
+  );
 }
 
 const IDS = new Set<string>(SYNC_TABS.map((t) => t.id));
@@ -211,6 +137,8 @@ export interface SyncHeaderAction {
   key: string;
   label: string;
   title: string;
+  /** the line under the name in the More menu: what it's for, in plain words */
+  desc: string;
 }
 
 /**
@@ -239,21 +167,25 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
     key: 'auto-sync',
     label: 'Bulk schedule',
     title: 'Schedule many mirrored playlists at once, and review the pipeline',
+    desc: 'Set when lots of playlists sync, in one place.',
   },
   {
     key: 'discovery-pool',
     label: 'Match Review',
     title: 'View matched and failed identification tracks',
+    desc: "Tracks that found a match, and the ones that didn't.",
   },
   {
     key: 'wing-it-pool',
     label: 'Wing It Pool',
     title: 'Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them',
+    desc: 'Tracks Wing It matched on a best guess. Confirm or fix them.',
   },
   {
     key: 'library-match',
     label: 'Library Match',
     title: 'Manually link source tracks to library tracks',
+    desc: 'Point a playlist track at the right song in your library.',
   },
   // One "what happened" surface. Syncs you ran and runs the schedule ran were
   // two buttons answering the same question, and you had to know which had run
@@ -262,10 +194,12 @@ export const SYNC_HEADER_ACTIONS: readonly SyncHeaderAction[] = [
     key: 'activity',
     label: 'Activity',
     title: 'Syncs you ran and scheduled pipeline runs',
+    desc: 'Syncs you ran, and the ones the schedule ran.',
   },
   {
     key: 'download-origins',
     label: 'Download Origins',
     title: 'See every track your playlist syncs downloaded',
+    desc: 'Every track your playlist syncs downloaded.',
   },
 ];

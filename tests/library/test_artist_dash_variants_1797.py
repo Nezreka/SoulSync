@@ -126,11 +126,49 @@ def test_a_variant_with_a_conflicting_provider_id_stays_separate(db):
     assert _artists(db) == {MB: UNICODE, DZ: ASCII}
 
 
-def test_exact_name_duplicates_merge_as_before(db):
-    """the provider guard is for variant spellings only; exact-name
-    duplicates keep the merge they always had."""
+def test_exact_name_duplicates_with_conflicting_ids_stay_separate(db):
+    """review 5 W2-WJ-1: this asserted a merge before. the importer keeps a
+    same-named artist with a different id apart on purpose, so a scan must
+    not fold it back."""
     _artist(db, MB, ASCII, musicbrainz_id='mbid-one')
     _artist(db, DZ, ASCII, musicbrainz_id='mbid-two')
 
+    assert db.merge_duplicate_artists()['artists_merged'] == 0
+    assert _artists(db) == {MB: ASCII, DZ: ASCII}
+    assert _album_owner(db, MB * 100) == MB and _album_owner(db, DZ * 100) == DZ
+
+
+def test_exact_name_duplicates_without_a_conflict_still_merge(db):
+    _artist(db, MB, ASCII, musicbrainz_id='mbid-one')
+    _artist(db, DZ, ASCII, deezer='1606315')
+
     assert db.merge_duplicate_artists()['artists_merged'] == 1
     assert len(_artists(db)) == 1
+
+
+def test_a_third_twin_is_checked_against_ids_the_keeper_took_over(db):
+    """review 5 W2-WJ-1: once the keeper takes a donor's spotify id, a third
+    row with another spotify id is a different artist."""
+    _artist(db, MB, ASCII, musicbrainz_id='mbid-one')
+    _artist(db, DZ, ASCII, spotify='sp-one')
+    _artist(db, OTHER, ASCII, spotify='sp-two')
+
+    assert db.merge_duplicate_artists()['artists_merged'] == 1
+    assert len(_artists(db)) == 2
+
+
+def test_a_merged_artists_dismissed_finding_follows_the_keeper(db):
+    """review 5 W2-WJ-4: a dismissal filed on the donor kept naming the
+    deleted id, so the next job run raised it again on the keeper."""
+    _artist(db, MB, ASCII, musicbrainz_id='mbid-one')
+    _artist(db, DZ, ASCII)
+    with db._get_connection() as conn:
+        conn.execute(
+            "INSERT INTO repair_findings(job_id, finding_type, status, entity_type, entity_id, title)"
+            " VALUES('artist_job', 'missing_art', 'dismissed', 'artist', ?, 't')", (f"lib2:{DZ}",))
+        conn.commit()
+
+    assert db.merge_duplicate_artists()['artists_merged'] == 1
+    with db._get_connection() as conn:
+        ids = [r[0] for r in conn.execute("SELECT entity_id FROM repair_findings")]
+    assert ids == [f"lib2:{MB}"]

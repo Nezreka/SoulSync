@@ -271,9 +271,33 @@ def _findings_library_clause() -> str:
     owner_of = ("(SELECT r.profile_id FROM lib2_library_roots r"
                 " WHERE substr(file_path, 1, length(r.prefix)) = r.prefix"
                 " ORDER BY length(r.prefix) DESC LIMIT 1)")
-    if scope == "shared":
-        return f"COALESCE({owner_of}, 0) = 0"
-    return f"{owner_of} = {int(scope)}"
+    owner = "IS NULL" if scope == "shared" else f"= {int(scope)}"
+    by_path = (f"COALESCE({owner_of}, 0) = 0" if scope == "shared"
+               else f"{owner_of} = {int(scope)}")
+    # album / artist findings name no file (completeness, tag consistency,
+    # discography, genres...). they used to count as the shared library's,
+    # so a profile with its own library never saw its albums' findings.
+    # place them by their lib2 entity: shown where it has a file, or
+    # everywhere when it has none yet. the cast is on the finding's id, the
+    # catalogue side stays on its index
+    entity = "CAST(substr(entity_id, 6) AS INTEGER)"
+    live = "COALESCE(ef.file_state,'active') = 'active'"
+    files_of = {
+        "track": f"FROM lib2_track_files ef WHERE ef.track_id = {entity} AND {live}",
+        "album": (f"FROM lib2_tracks et JOIN lib2_track_files ef ON ef.track_id = et.id"
+                  f" WHERE et.album_id = {entity} AND {live}"),
+        "artist": (f"FROM lib2_albums ea JOIN lib2_tracks et ON et.album_id = ea.id"
+                   f" JOIN lib2_track_files ef ON ef.track_id = et.id"
+                   f" WHERE ea.primary_artist_id = {entity} AND {live}"),
+    }
+    by_entity = " ".join(
+        f"WHEN '{kind}' THEN (EXISTS (SELECT 1 {sql} AND ef.owner_profile_id {owner})"
+        f" OR NOT EXISTS (SELECT 1 {sql}))"
+        for kind, sql in files_of.items())
+    return (f"(CASE WHEN COALESCE(file_path, '') <> '' THEN {by_path}"
+            f" WHEN entity_id LIKE 'lib2:%' THEN (CASE entity_type {by_entity} ELSE "
+            f"{'1' if scope == 'shared' else '0'} END)"
+            f" ELSE {'1' if scope == 'shared' else '0'} END)")
 
 
 def job_category(job_id: str) -> str:
@@ -502,6 +526,20 @@ def _path_mapping_hint(config_manager) -> str:
     return 'Check Settings -> Library -> Music Paths so SoulSync can map this path.'
 
 
+# details that change without the problem changing: a rescan's size and
+# bitrate, ids enrichment adds, a provider's art url or a replaygain read.
+_VOLATILE_FINDING_KEYS = frozenset({
+    'dedup_file', 'provider_ids', 'file_size', 'current_gain',
+    'found_artwork_url', 'artist_thumb_url', 'found_artist_url',
+    '_dedup_fingerprint', '_file_identity',
+})
+
+
+def _stable_finding_payload(details) -> dict:
+    """the fields of a finding's details that say what the problem is."""
+    return {k: v for k, v in dict(details or {}).items() if k not in _VOLATILE_FINDING_KEYS}
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -700,9 +738,63 @@ class RepairWorker:
             new_cfg = config_manager.get(f'repair.jobs.{new_id}', None)
             if isinstance(new_cfg, dict) and not new_cfg.get('enabled'):
                 config_manager.set(f'repair.jobs.{new_id}', {**new_cfg, 'enabled': True})
+                self._enable_successor_schedule(new_id, None)
                 logger.info("Repair job %s was on at 3.6.1: its successor %s is switched on",
                             old_id, new_id)
             config_manager.set(marker, new_id)
+
+        # 3.6.1's weekly Quality Check flagged every library track below its
+        # profile, wishlisted or not. Library v2's review of exactly that is
+        # quality_profile_audit, and it ships off: someone who had the check
+        # on lost it with no notice. switch the audit on once for them, with
+        # their interval. only ever on: a scanner that was off changes nothing.
+        marker = 'repair.job_migrations.quality_check_carried_to_audit'
+        if not config_manager.get(marker, None):
+            for old_id in ('quality_upgrade_scanner', 'quality_upgrade_scan', 'quality_upgrade'):
+                old_cfg = config_manager.get(f'repair.jobs.{old_id}', None)
+                if isinstance(old_cfg, dict) and old_cfg.get('enabled'):
+                    audit = config_manager.get('repair.jobs.quality_profile_audit', None)
+                    audit = dict(audit) if isinstance(audit, dict) else {}
+                    if not audit.get('enabled'):
+                        audit['enabled'] = True
+                        if old_cfg.get('interval_hours') and not audit.get('interval_hours'):
+                            audit['interval_hours'] = old_cfg['interval_hours']
+                        config_manager.set('repair.jobs.quality_profile_audit', audit)
+                        self._enable_successor_schedule('quality_profile_audit',
+                                                        old_cfg.get('interval_hours'))
+                        logger.info("Quality Check (%s) was on at 3.6.1: Quality Profile "
+                                    "Audit is switched on in its place", old_id)
+                    break
+            config_manager.set(marker, 'quality_profile_audit')
+
+    def _enable_successor_schedule(self, job_id, interval_hours):
+        """Switch on the successor's system schedule row, not only its config.
+
+        The rows are seeded before this migration runs, from the config as it
+        was (off). Config alone never scheduled anything (the worker is
+        drain-only), and the next start's toggle reconcile read the off row as
+        the newer intent and switched the config back off: a weekly Quality
+        Check user still got no review. The engine attaches later in startup,
+        so the row is scheduled from the next start on."""
+        try:
+            import json as _json
+            from core.automation.migrate_repair_jobs import _find_system_automation
+            auto = _find_system_automation(self.db, 1, job_id)
+            if not auto:
+                return
+            changes = {"enabled": 1}
+            try:
+                hours = float(interval_hours) if interval_hours else None
+            except (TypeError, ValueError):
+                hours = None
+            if hours and hours > 0:
+                changes["trigger_config"] = _json.dumps({"interval": hours, "unit": "hours"})
+            self.db.update_automation(auto["id"], **changes)
+            engine = getattr(self, "_automation_engine", None)
+            if engine is not None:
+                engine.schedule_automation(auto["id"])
+        except Exception as exc:  # noqa: BLE001 - the config switch already happened
+            logger.debug("successor schedule for %s not switched on: %s", job_id, exc)
 
     def set_metadata_enhancer(self, enhance_fn):
         """Inject the metadata enhancement function from web_server.py.
@@ -1724,7 +1816,12 @@ class RepairWorker:
                 # hide the repair issue itself.
                 logger.debug("Library-v2 finding annotation skipped: %s", e)
 
-            fingerprint_payload = dict(enriched_details)
+            # what changes on its own (a rescan's size and bitrate, a provider
+            # id enrichment adds, a provider's art url, a replaygain read) is
+            # not a new problem: hashing it brought dismissed findings back
+            # after any tag write or enrichment pass. 3.6.1 never did.
+            full_payload = dict(enriched_details)
+            fingerprint_payload = _stable_finding_payload(enriched_details)
             if finding_type == 'native_duplicate_releases' and enriched_details.get('pair_key'):
                 # One release pair is one decision; its catalogue rows change
                 # in the background and must not undo a dismissal.
@@ -1735,19 +1832,17 @@ class RepairWorker:
             # ReplayGain, lyrics or BPM pass on the same file brought every
             # dismissed finding back. the size/mtime form is still accepted
             # below for rows dismissed before this
-            legacy_payload = None
+            legacy_payloads = []
+            file_identity = None
             if file_path and os.path.isfile(file_path):
                 try:
                     stat = os.stat(file_path)
-                    legacy_payload = dict(fingerprint_payload)
-                    legacy_payload["_file_stat"] = {
-                        "size": stat.st_size,
-                        "mtime_ns": stat.st_mtime_ns,
-                    }
-                    fingerprint_payload["_file_stat"] = {
-                        "ino": stat.st_ino,
-                        "dev": stat.st_dev,
-                    }
+                    file_identity = {"ino": stat.st_ino, "dev": stat.st_dev}
+                    # rows dismissed under the earlier fingerprints still match
+                    legacy_payloads.append({**full_payload, "_file_stat": {
+                        "size": stat.st_size, "mtime_ns": stat.st_mtime_ns}})
+                    legacy_payloads.append({**full_payload, "_file_stat": dict(file_identity)})
+                    fingerprint_payload["_file_stat"] = dict(file_identity)
                 except OSError:
                     pass
 
@@ -1760,10 +1855,33 @@ class RepairWorker:
                 ).hexdigest()
             dedup_fingerprint = _fingerprint(fingerprint_payload)
             same_fingerprints = {dedup_fingerprint}
-            if legacy_payload is not None:
+            for legacy_payload in legacy_payloads:
                 same_fingerprints.add(_fingerprint(legacy_payload))
             enriched_details = dict(enriched_details)
             enriched_details["_dedup_fingerprint"] = dedup_fingerprint
+            if file_identity is not None:
+                enriched_details["_file_identity"] = file_identity
+
+            def _same_problem(old: dict) -> bool:
+                """the stored row and this one describe the same problem,
+                judged on the stable fields only. a row stored before this
+                rule is judged the same way from its details; the file
+                identity counts only when the stored row recorded one."""
+                if finding_type == 'native_duplicate_releases' and enriched_details.get('pair_key'):
+                    return old.get('pair_key') == enriched_details.get('pair_key')
+                mine = _stable_finding_payload(enriched_details)
+                theirs = _stable_finding_payload(old)
+                if finding_type == 'expired_download':
+                    # G08-3: its catalogue links were wrong (a history id read
+                    # as a track id); a dismissal made under them still holds
+                    for side in (mine, theirs):
+                        side.pop('library_v2', None)
+                        side.pop('library_owner_id', None)
+                if old.get('_file_identity') is not None:
+                    theirs["_file_stat"] = old['_file_identity']
+                    if file_identity is not None:
+                        mine["_file_stat"] = dict(file_identity)
+                return _fingerprint(mine) == _fingerprint(theirs)
 
             # A file finding is keyed by its concrete path, not merely by its
             # parent track: multiple active files for one track are independent
@@ -1841,14 +1959,16 @@ class RepairWorker:
                     # sides are fingerprinted, only the exact dismissed
                     # snapshot is suppressed; a new file/target may surface.
                     if (not old_fingerprint
-                            or old_fingerprint in same_fingerprints):
+                            or old_fingerprint in same_fingerprints
+                            or _same_problem(old_details)):
                         return False
                     continue
                 # A replaced file or changed target is new information and may
                 # surface immediately. An unchanged (or pre-fingerprint)
                 # resolved finding observes dev's recurrence grace, then may
                 # become pending again if the problem truly returned.
-                if (not old_fingerprint or old_fingerprint in same_fingerprints) \
+                if (not old_fingerprint or old_fingerprint in same_fingerprints
+                        or _same_problem(old_details)) \
                         and self._within_recurrence_grace(resolved_at):
                     return False
 
@@ -1939,7 +2059,8 @@ class RepairWorker:
     @staticmethod
     def _findings_filter(job_id: str = None, status: str = None,
                          severity: str = None, finding_type: str = None,
-                         q: str = None):
+                         q: str = None, group_by: str = None,
+                         group_artist=None, group_album=None):
         """Build the WHERE clause shared by listing and clearing findings.
 
         This is ONE function on purpose. "Clear findings matching current
@@ -1975,6 +2096,11 @@ class RepairWorker:
             # search box could not see them
             where_parts.append("(title LIKE ? OR file_path LIKE ? OR details_json LIKE ?)")
             params.extend([needle, needle, needle])
+        if group_by:
+            group_sql, group_params = RepairWorker._group_member_clause(
+                group_by, group_artist, group_album)
+            where_parts.append(group_sql)
+            params.extend(group_params)
         library = _findings_library_clause()
         if library:
             where_parts.append(library)
@@ -1985,7 +2111,8 @@ class RepairWorker:
     def get_findings(self, job_id: str = None, status: str = None,
                      severity: str = None, page: int = 0, limit: int = 50,
                      finding_type: str = None, sort: str = None,
-                     q: str = None) -> dict:
+                     q: str = None, group_by: str = None,
+                     group_artist=None, group_album=None) -> dict:
         """Get paginated findings with optional filters.
 
         ``finding_type`` is what the grouped inbox pages through: one type at
@@ -2001,7 +2128,8 @@ class RepairWorker:
 
             where, params = self._findings_filter(
                 job_id=job_id, status=status, severity=severity,
-                finding_type=finding_type, q=q)
+                finding_type=finding_type, q=q, group_by=group_by,
+                group_artist=group_artist, group_album=group_album)
             order_by = self._FINDING_SORTS.get(sort or 'newest',
                                                self._FINDING_SORTS['newest'])
 
@@ -2096,6 +2224,118 @@ class RepairWorker:
         'album': (_ARTIST_KEY, _ALBUM_KEY),
         'artist': (_ARTIST_KEY, "NULL"),
     }
+
+    @classmethod
+    def _group_member_clause(cls, group_by, artist, album):
+        """The rows of ONE album (or artist) group, by the grid's own key.
+
+        the album tray used to search the group's title as a substring and,
+        when its own rows were not in the first 100 hits, showed and fixed
+        the unrelated ones (review 5 W3-TU-1). this is the same expression
+        the grid groups by, so the tray and the grid agree by construction.
+        a group that can't be named exactly matches nothing.
+        """
+        artist = '' if artist is None else str(artist)
+        album = '' if album is None else str(album)
+        if group_by not in cls._GROUP_KEYS or not artist or (
+                group_by == 'album' and not album):
+            return "0", []
+        artist_expr, album_expr = cls._GROUP_KEYS[group_by]
+        # cast the json side: a numeric title ("1989") comes back as a number
+        # and must still equal the string the client sends
+        sql = f"CAST({artist_expr} AS TEXT) = ?"
+        params = [artist]
+        if group_by == 'album':
+            sql += f" AND CAST({album_expr} AS TEXT) = ?"
+            params.append(album)
+        return f"({sql})", params
+
+    def album_group_action(self, action: str, group_by: str, artist, album,
+                           finding_ids: List[int] = None, job_id: str = None,
+                           finding_type: str = None) -> dict:
+        """Fix or dismiss the pending findings of one album (or artist) group.
+
+        the server guard behind the tray's Resolve Album / Dismiss All: an id
+        the client sends that is not in this group is refused here, whatever
+        the client listed (review 5 W3-TU-1). ``finding_ids`` narrows to the
+        rows the tray showed; None means the whole group.
+        """
+        if action not in ('fix', 'dismiss'):
+            raise ValueError(f"unknown album action {action!r}")
+        where, params = self._findings_filter(
+            job_id=job_id, status='pending', finding_type=finding_type,
+            group_by=group_by, group_artist=artist, group_album=album)
+        requested = None
+        if finding_ids is not None:
+            requested = {int(i) for i in finding_ids}
+            where += f" AND id IN ({_JSON_IDS})"
+            params = params + [_json_ids(requested)]
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            ids = [row[0] for row in conn.execute(
+                f"SELECT id FROM repair_findings {where} ORDER BY id", params)]
+        finally:
+            if conn:
+                conn.close()
+        refused = len(requested - set(ids)) if requested is not None else 0
+        if refused:
+            logger.warning("Album action %s on %r / %r refused %d finding(s) "
+                           "outside the group", action, artist, album, refused)
+        result = {'action': action, 'total': len(ids), 'refused': refused}
+        # never hand an empty list on: bulk_fix_findings reads that as "no
+        # id filter" and would fix every pending finding
+        if not ids:
+            if action == 'fix':
+                result.update({'fixed': 0, 'failed': 0, 'skipped': 0,
+                               'other_artist_skipped': 0, 'errors': []})
+            else:
+                result['updated'] = 0
+            return result
+        if action == 'dismiss':
+            result['updated'] = self.bulk_update_findings(ids, 'dismiss')
+            return result
+        fixed = self.bulk_fix_findings(finding_ids=ids)
+        result.update({k: fixed.get(k, 0) for k in
+                       ('fixed', 'failed', 'skipped', 'other_artist_skipped')})
+        result['errors'] = fixed.get('errors', [])
+        if fixed.get('error'):
+            result['error'] = fixed['error']
+        return result
+
+    def ids_in_view(self, finding_ids, *, job_id: str = None, status: str = None,
+                    severity: str = None, finding_type: str = None, q: str = None,
+                    group_by: str = None, group_artist=None, group_album=None) -> List[int]:
+        """The ids out of ``finding_ids`` that the view the client describes
+        actually lists: the library picked in the header plus every filter.
+
+        Fix Selected and Dismiss Selected send what they listed; this is the
+        server's check that each id is still one of those rows, so a stale or
+        wrong selection can't reach another library, type, job or album
+        (review 5 W3-TT).
+        """
+        wanted = []
+        for fid in finding_ids or []:
+            try:
+                wanted.append(int(fid))
+            except (TypeError, ValueError):
+                continue
+        if not wanted:
+            return []
+        where, params = self._findings_filter(
+            job_id=job_id, status=status, severity=severity,
+            finding_type=finding_type, q=q, group_by=group_by,
+            group_artist=group_artist, group_album=group_album)
+        where = f"{where} AND id IN ({_JSON_IDS})" if where else f"WHERE id IN ({_JSON_IDS})"
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            return [row[0] for row in conn.execute(
+                f"SELECT id FROM repair_findings {where} ORDER BY id",
+                params + [_json_ids(wanted)])]
+        finally:
+            if conn:
+                conn.close()
 
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
                            status: str = 'pending', finding_type: str = None,
@@ -2211,7 +2451,7 @@ class RepairWorker:
                     conn.close()
         return out
 
-    def get_finding_groups(self) -> List[dict]:
+    def get_finding_groups(self, job_id: str = None, severity: str = None) -> List[dict]:
         """One row per finding TYPE — the unit the inbox works in.
 
         The flat list made a user page 30-at-a-time through thousands of rows
@@ -2221,22 +2461,39 @@ class RepairWorker:
         Counts every status in one GROUP BY (the type/status index carries
         it), so a group can show what is left AND what has already been dealt
         with without a second round trip.
+
+        ``job_id`` / ``severity`` are the inbox's filters: the row's count is
+        what its Fix all / Dismiss all / Reopen all act on, and those take the
+        same filters (review 5 W3-TT).
         """
+        # the library picked in the header, like the list and the badges:
+        # the row's "Fix all (N)" / "Dismiss all" count was every library's
+        # (review 5 W3-TT-1)
+        library = _findings_library_clause() or "1"
+        narrow, narrow_params = "", []
+        if job_id:
+            narrow += " AND job_id = ?"
+            narrow_params.append(job_id)
+        if severity:
+            narrow += " AND severity = ?"
+            narrow_params.append(severity)
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(f"""
                 SELECT finding_type, status, severity, COUNT(*), MAX(created_at)
                 FROM repair_findings
+                WHERE {library}{narrow}
                 GROUP BY finding_type, status, severity
-            """)
+            """, narrow_params)
             rows = cursor.fetchall()
 
             # Which jobs feed each type — a group shows its source without
             # the user having to cross-reference the jobs list.
             cursor.execute(
-                "SELECT DISTINCT finding_type, job_id FROM repair_findings")
+                f"SELECT DISTINCT finding_type, job_id FROM repair_findings "
+                f"WHERE {library}{narrow}", narrow_params)
             jobs_by_type: Dict[str, set] = {}
             for finding_type, job_id in cursor.fetchall():
                 jobs_by_type.setdefault(finding_type, set()).add(job_id)
@@ -2253,7 +2510,8 @@ class RepairWorker:
                     "SELECT finding_type, COUNT(*) FROM repair_findings "
                     "WHERE status = 'pending' "
                     "AND json_extract(details_json, '$.has_manual_conflict') = 1 "
-                    "GROUP BY finding_type")
+                    f"AND {library}{narrow} "
+                    "GROUP BY finding_type", narrow_params)
                 manual_by_type = {row[0]: row[1] for row in cursor.fetchall()}
             except Exception as e:  # noqa: BLE001 - a count is not worth a 500
                 logger.debug("manual-conflict count unavailable: %s", e)
@@ -2272,6 +2530,7 @@ class RepairWorker:
                 'pending': 0, 'resolved': 0, 'dismissed': 0, 'auto_fixed': 0,
                 'total': 0, 'manual_conflicts': 0,
                 'severity_max': 'info', 'last_seen': None, 'job_ids': [],
+                'severities': {},
             })
             # auto_fixed is its own STATUS, not a flavour of resolved — leaving
             # it out of the buckets made the inbox render an empty group for
@@ -2279,6 +2538,13 @@ class RepairWorker:
             if status in ('pending', 'resolved', 'dismissed', 'auto_fixed'):
                 group[status] += count
             group['total'] += count
+            # rows per status per severity, so the inbox's severity filter can
+            # ask "does this type have warnings in this status". severity_max
+            # alone hid resolved errors and pending warnings under an error
+            # (review 5 R5-L-3)
+            by_sev = group['severities'].setdefault(status or 'pending', {})
+            sev_key = severity or 'info'
+            by_sev[sev_key] = by_sev.get(sev_key, 0) + count
             # Severity of the group = the worst PENDING row in it. A cleared
             # error must not keep a group flagged red forever.
             if status == 'pending' and rank.get(severity, 2) < rank.get(group['severity_max'], 2):
@@ -2323,16 +2589,18 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-    def reopen_findings_bulk(self, job_id: str = None, finding_type: str = None) -> int:
+    def reopen_findings_bulk(self, job_id: str = None, finding_type: str = None,
+                             severity: str = None) -> int:
         """Reopen all dismissed findings, optionally filtered.
 
         The bulk undo for dismiss — e.g. reopening 10k+ dismissed BPM
         findings at once. Only touches dismissed rows; resolved findings
         represent completed work and are never reopened in bulk.
-        Returns the number of findings reopened.
+        Returns the number of findings reopened. ``severity`` is the inbox's
+        severity filter: reopen only what the row counted (review 5 W3-TT).
         """
         # Guard against empty-string filters silently becoming unfiltered
-        if job_id == "" or finding_type == "":
+        if job_id == "" or finding_type == "" or severity == "":
             logger.warning("Bulk reopen called with empty filter, refusing")
             return 0
         conn = None
@@ -2352,6 +2620,13 @@ class RepairWorker:
             if finding_type:
                 query += " AND finding_type = ?"
                 params.append(finding_type)
+            if severity:
+                query += " AND severity = ?"
+                params.append(severity)
+            # only the library picked in the header (review 5 W3-TT-1)
+            library = _findings_library_clause()
+            if library:
+                query += f" AND {library}"
             cursor.execute(query, params)
             conn.commit()
             count = cursor.rowcount
@@ -2705,6 +2980,12 @@ class RepairWorker:
             # in the stored finding, so a finding row cannot carry an
             # explicit request from one run into a later bulk run.
             details['_explicit_single_fix'] = bool(explicit)
+
+            # review 4 R4-C-4: an expired-download finding filed before G08-3
+            # says 'track' with a download-history id; read as a track, the
+            # bridge recomputed whichever unrelated song carries that id
+            if finding_type == 'expired_download' and entity_type == 'track':
+                entity_type = 'download'
 
             # Dispatch fix by finding type
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
@@ -3378,6 +3659,18 @@ class RepairWorker:
         }
         if not entry['id']:
             return {'success': False, 'error': 'No history id in finding'}
+        if details.get('rotated_out'):
+            # a rotating playlist's song can come back before the finding is
+            # approved (#2039). ask again before the file goes
+            from core.repair_jobs.expired_download_cleaner import rotation_still_due
+            if not rotation_still_due(self.db, self._config_manager, entry['id']):
+                return {
+                    'success': False,
+                    'action': 'deleted_expired',
+                    'error': ('Not deleted: this song is back in its playlist or is '
+                              'kept now (played, favourited or in another playlist). '
+                              'Dismiss this finding.'),
+                }
         outcome = delete_origin_download(self.db, entry, self._config_manager)
         if outcome.get('error'):
             return {
@@ -3614,7 +3907,8 @@ class RepairWorker:
                                                'fix this finding on its own to add them'}
         if album_id is None or not track_ids:
             return {'success': False, 'error': 'Nothing to fill on this finding; rerun Album Completeness'}
-        from core.library2.monitor_rules import PROVENANCE_USER, record_rules
+        from core.library2.monitor_rules import (
+            PROVENANCE_USER, explicitly_unmonitored_track_ids, record_rules)
         from core.library2.mirror_outbox import drain, enqueue_projected_tracks
         from core.library2.wanted import recompute_wanted
         conn = self.db._get_connection()
@@ -3623,6 +3917,10 @@ class RepairWorker:
             live = [int(r[0]) for r in conn.execute(
                 f"SELECT id FROM lib2_tracks WHERE album_id=? AND id IN ({marks})",
                 (album_id, *track_ids))]
+            # a track unmonitored by hand since the scan keeps the user's no
+            # (review 5 R5-I-1)
+            vetoed = explicitly_unmonitored_track_ids(conn, live, profile_id=profile_id)
+            live = [t for t in live if t not in vetoed]
             if not live:
                 return {'success': False, 'error': 'Those tracks are no longer on this album; rerun Album Completeness'}
             record_rules(conn, 'track', live, True, PROVENANCE_USER, profile_id=profile_id)
@@ -3701,7 +3999,8 @@ class RepairWorker:
                     return {'success': False, 'error': 'The primary file changed; rerun the audit'}
                 from core.library2.manual_skips import active_skip_paths
                 from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
-                if (row['path'] in active_skip_paths(conn, ('quality', 'bit_depth'), profile_id=owner)
+                # any profile's override, as the audit itself (review 5 R5-I-2)
+                if (row['path'] in active_skip_paths(conn, ('quality', 'bit_depth'), profile_id=None)
                         or is_hand_tagged_path(row['path'], hand_tagged_path_keys(self.db))):
                     return {'success': True, 'action': 'ignored', 'message': 'A manual quality choice protects this file'}
                 profile = effective_track_profile(conn, tid)
@@ -7017,7 +7316,8 @@ class RepairWorker:
         self._bulk_fix_stop_event.set()
         return True
 
-    def dismiss_findings_by_type(self, finding_type: str) -> int:
+    def dismiss_findings_by_type(self, finding_type: str, job_id: str = None,
+                                 severity: str = None) -> int:
         """Dismiss every PENDING finding of one type. Returns count updated.
 
         The inbox works a whole group at a time, and "dismiss this group" had
@@ -7027,19 +7327,33 @@ class RepairWorker:
         Pending only. A resolved row is a record of work that actually
         happened — rewriting it to 'dismissed' would falsify the history the
         recurrence grace and the run counters both read.
+
+        ``job_id`` / ``severity`` are the inbox's filters. without them a
+        filtered row's Dismiss all reached rows the filter hid (review 5
+        W3-TT).
         """
         if not finding_type:
             return 0
+        narrow, params = "", [finding_type]
+        if job_id:
+            narrow += " AND job_id = ?"
+            params.append(job_id)
+        if severity:
+            narrow += " AND severity = ?"
+            params.append(severity)
         conn = None
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
-            cursor.execute("""
+            # only the library picked in the header: dismissing a type in one
+            # library silenced it in every other one (review 5 W3-TT-1)
+            library = _findings_library_clause() or "1"
+            cursor.execute(f"""
                 UPDATE repair_findings
                 SET status = 'dismissed', resolved_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE finding_type = ? AND status = 'pending'
-            """, (finding_type,))
+                WHERE finding_type = ? AND status = 'pending' AND {library}{narrow}
+            """, params)
             conn.commit()
             count = cursor.rowcount
             logger.info("Dismissed %d pending findings of type %s", count, finding_type)
@@ -7083,13 +7397,17 @@ class RepairWorker:
 
     def clear_findings(self, job_id: str = None, status: str = None,
                        severity: str = None, finding_type: str = None,
-                       q: str = None) -> int:
+                       q: str = None, group_by: str = None,
+                       group_artist=None, group_album=None) -> int:
         """Delete findings matching the SAME filters the list view applies.
 
         Every argument here must be forwarded from the UI's current filter
         state. This deletes rows outright, so a filter the caller drops widens
         the blast radius silently — which is exactly how #1142 destroyed
         findings the user had filtered away.
+
+        ``group_by`` / ``group_artist`` / ``group_album`` are a drilled-in
+        album or artist card, by the grid's own key (review 5 W3-TT-2).
         """
         conn = None
         try:
@@ -7097,7 +7415,8 @@ class RepairWorker:
             cursor = conn.cursor()
             where, params = self._findings_filter(
                 job_id=job_id, status=status, severity=severity,
-                finding_type=finding_type, q=q)
+                finding_type=finding_type, q=q, group_by=group_by,
+                group_artist=group_artist, group_album=group_album)
             cursor.execute(f"SELECT COUNT(*) FROM repair_findings {where}", params)
             count = cursor.fetchone()[0]
             cursor.execute(f"DELETE FROM repair_findings {where}", params)

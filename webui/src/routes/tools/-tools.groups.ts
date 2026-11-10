@@ -34,6 +34,10 @@ export interface FindingGroup {
    *  edits" are two different requests, and the choice has to be made before
    *  the click — not after walking every finding's diff. */
   manual_conflicts?: number;
+  /** rows per status per severity, e.g. {pending: {warning: 3, error: 1}}.
+   *  what the severity filter reads: severity_max is the worst pending row
+   *  only, so it hid resolved errors and pending warnings (review 5 R5-L-3) */
+  severities?: Record<string, Record<string, number>>;
 }
 
 /** One row of `GET /api/repair/finding-types`. The backend owns this: the
@@ -268,7 +272,16 @@ export function sortInboxGroups(
 }
 
 /** Which count a group row shows, following the status segmented control. */
-export function groupCountForStatus(group: FindingGroup, status: string): number {
+export function groupCountForStatus(group: FindingGroup, status: string, severity = ''): number {
+  if (severity) {
+    const by = group.severities;
+    // an older payload has no breakdown: fall back to the worst pending row
+    if (!by) {
+      return (group.severity_max || 'info') === severity ? groupCountForStatus(group, status) : 0;
+    }
+    const statuses = status ? [status] : Object.keys(by);
+    return statuses.reduce((n, s) => n + (by[s]?.[severity] || 0), 0);
+  }
   if (status === 'resolved') return group.resolved || 0;
   if (status === 'dismissed') return group.dismissed || 0;
   if (status === 'pending') return group.pending || 0;
@@ -299,8 +312,8 @@ export function visibleGroups(
 ): FindingGroup[] {
   return groups.filter((group) => {
     if (filters.jobId && !(group.job_ids || []).includes(filters.jobId)) return false;
-    if (filters.severity && (group.severity_max || 'info') !== filters.severity) return false;
-    return groupCountForStatus(group, filters.status || '') > 0;
+    // the group has rows of this severity in this status (review 5 R5-L-3)
+    return groupCountForStatus(group, filters.status || '', filters.severity || '') > 0;
   });
 }
 

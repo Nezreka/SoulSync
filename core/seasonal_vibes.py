@@ -168,13 +168,19 @@ def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str
                     break
 
             # history rows carry joined credits ("Bad Bunny, Jhayco"); the
-            # library files under the primary artist, so look up both forms
+            # library files under the primary artist, so look up both forms.
+            # review 5 R5-A-1: keyed on the stored name_key fold and casefold
+            # titles, not sqlite's ascii-only LOWER(), so "Ólafur Arnalds"
+            # finds its library art and duration
+            from core.library2.importer import normalize_name
+            from core.library2.title_match import title_fold
+
             def _primary(name: str) -> str:
-                return name.split(",")[0].strip().lower()
+                return normalize_name(name.split(",")[0])
 
             artists = set()
             for r in plays_rows:
-                name = str(r["artist"]).lower()
+                name = normalize_name(str(r["artist"]))
                 artists.add(name)
                 artists.add(_primary(name))
             artists = sorted(artists)
@@ -182,17 +188,17 @@ def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str
             if artists:
                 marks = ",".join("?" for _ in artists)
                 cursor.execute(f"""
-                    SELECT LOWER(t.title) AS tt, LOWER(ar.name) AS an,
+                    SELECT t.title AS tt, ar.name_key AS an,
                            al.image_url AS thumb_url, t.duration
                     FROM lib2_tracks t
                     JOIN lib2_albums al ON al.id = t.album_id
                     JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                    WHERE LOWER(ar.name) IN ({marks})
+                    WHERE ar.name_key IN ({marks})
                       AND {owned_sql('track', 't')}
                 """, artists)
                 artist_art: Dict[str, Any] = {}
                 for row in cursor.fetchall():
-                    lib.setdefault((row["an"], row["tt"]), row)
+                    lib.setdefault((row["an"], title_fold(row["tt"])), row)
                     if row["thumb_url"] and row["an"] not in artist_art:
                         artist_art[row["an"]] = row["thumb_url"]
             else:
@@ -201,14 +207,15 @@ def rewind_tracks(database, months: List[int], limit: int = 60) -> List[Dict[str
             out = []
             for row in plays_rows:
                 artist, title, album, plays = row["artist"], row["title"], row["album"], row["plays"]
-                owned = (lib.get((artist.lower(), title.lower()))
-                         or lib.get((_primary(artist), title.lower())))
+                artist_key = normalize_name(str(artist))
+                owned = (lib.get((artist_key, title_fold(title)))
+                         or lib.get((_primary(artist_key), title_fold(title))))
                 # exact track first; any owned album by the artist beats a
                 # blank circle when the specific single is not in the library
                 art = _normalize_art(
                     (owned["thumb_url"] if owned and owned["thumb_url"] else None)
-                    or artist_art.get(artist.lower())
-                    or artist_art.get(_primary(artist)))
+                    or artist_art.get(artist_key)
+                    or artist_art.get(_primary(artist_key)))
                 # lib2 stores duration in MILLIseconds already (legacy was seconds).
                 duration = (owned["duration"] or 0) if owned else 0
                 out.append({
@@ -291,25 +298,28 @@ def vibe_library_albums(database, season_key: str, months: List[int], source: st
             """, months)
             played = cursor.fetchall()
 
-            artist_names = sorted({str(r["artist"]).lower() for r in played})
+            # review 5 R5-A-1: the stored name_key fold, not sqlite's
+            # ascii-only LOWER(), so an accented artist's albums are found
+            from core.library2.importer import normalize_name
+            artist_names = sorted({normalize_name(str(r["artist"])) for r in played})
             owned = {}
             if artist_names:
                 marks = ",".join("?" for _ in artist_names)
                 cursor.execute(f"""
-                    SELECT al.title, ar.name, al.image_url AS thumb_url,
+                    SELECT al.title, ar.name, ar.name_key, al.image_url AS thumb_url,
                            al.release_date, {id_sql} AS {id_col}
                     FROM lib2_albums al
                     JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                    WHERE LOWER(ar.name) IN ({marks})
+                    WHERE ar.name_key IN ({marks})
                       AND {owned_sql('album', 'al')}
                 """, artist_names)
                 for row in cursor.fetchall():
                     owned.setdefault(
-                        (str(row["name"]).lower(), str(row["title"]).lower()), row)
+                        (row["name_key"], str(row["title"]).casefold()), row)
 
             picked = 0
             for r in played:
-                row = owned.get((str(r["artist"]).lower(), str(r["album"]).lower()))
+                row = owned.get((normalize_name(str(r["artist"])), str(r["album"]).casefold()))
                 if not row:
                     continue
                 add(row, min(100, 60 + r["plays"]))

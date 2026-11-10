@@ -641,3 +641,82 @@ def test_another_tracks_file_is_never_carried_as_a_twin(imported_conn, monkeypat
         resolve_file_path_fn=lambda p: str(twin) if p.endswith(".opus") else str(song))
     first = next(t for t in plan["tracks"] if t["title"] == "One Dance")
     assert first["sibling_files"] == []
+
+
+def test_reorganize_dates_an_album_the_way_its_download_did():
+    """a download files under the album's year when its release_date is
+    another edition's (core.library2.release_dates). a reorganize preferring
+    the release_date moved those files to a second [year] folder."""
+    from core.library2.reorganize_plan import _as_provider_album
+
+    album = {"title": "Different Route", "year": 2017, "release_date": "2021-03-05"}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017"
+    album = {"title": "Different Route", "year": 2017, "release_date": "2017-08-25"}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017-08-25"
+    album = {"title": "Different Route", "year": 2017, "release_date": None}
+    assert _as_provider_album(album, 6, 1)["release_date"] == "2017"
+
+
+def test_reorganize_files_explicit_and_artist_identity_like_the_download(imported_conn):
+    """#1859/#1860: $explicit, $contentrating and $albumartistinfo. the catalogue
+    planner never handed the path builder the flags or the artist's mbid, so a
+    reorganize stripped [E] off a folder the next download put back."""
+    conn = imported_conn
+    artist_id, album_id, track_ids = _seed(conn)
+    conn.execute("UPDATE lib2_tracks SET explicit=1 WHERE id=?", (track_ids[0],))
+    conn.execute("UPDATE lib2_albums SET explicit=1 WHERE id=?", (album_id,))
+    conn.execute("UPDATE lib2_artists SET musicbrainz_id='mb-drake' WHERE id=?", (artist_id,))
+    conn.commit()
+    build, seen = _recorder()
+
+    _plan(conn, album_id, build)
+
+    context = seen[0]["context"]
+    assert context["track_info"]["explicit"] is True
+    assert context["spotify_album"]["explicit"] is True
+    assert context["spotify_artist"]["musicbrainz_id"] == "mb-drake"
+
+
+def test_reorganize_uses_an_explicit_flag_set_by_hand(imported_conn):
+    """#2009: the explicit flag a user set on the track or album page was
+    ignored; reorganize read the raw column, so $explicit rendered nothing"""
+    from core.library2.metadata_overrides import set_field_override
+    conn = imported_conn
+    _artist_id, album_id, track_ids = _seed(conn)
+    conn.execute("UPDATE lib2_tracks SET explicit=NULL WHERE id=?", (track_ids[0],))
+    conn.execute("UPDATE lib2_albums SET explicit=NULL WHERE id=?", (album_id,))
+    set_field_override(conn, entity_type="track", entity_id=track_ids[0], field_name="explicit", value=True)
+    set_field_override(conn, entity_type="release_group", entity_id=album_id, field_name="explicit", value=True)
+    conn.commit()
+    build, seen = _recorder()
+
+    _plan(conn, album_id, build)
+
+    context = seen[0]["context"]
+    assert context["track_info"]["explicit"] is True
+    assert context["spotify_album"]["explicit"] is True
+
+
+def test_reorganize_refuses_an_unknown_artist_album(imported_conn):
+    """3.6.1 refused placeholder metadata and pointed at Fix Unknown Artists.
+    planning it moved a hand-sorted folder into 'Unknown Artist/'."""
+    conn = imported_conn
+    artist_id, album_id, _ = _seed(conn, album_title="OK Computer")
+    conn.execute("UPDATE lib2_artists SET name='Unknown Artist' WHERE id=?", (artist_id,))
+    conn.commit()
+    build, seen = _recorder()
+
+    plan = _plan(conn, album_id, build)
+
+    assert plan["status"] == "placeholder_metadata"
+    assert "Fix Unknown Artists" in plan["error"]
+    assert seen == []
+
+
+def test_reorganize_refuses_an_album_titled_with_an_id(imported_conn):
+    conn = imported_conn
+    _, album_id, _ = _seed(conn, album_title="1234567890")
+    build, seen = _recorder()
+
+    assert _plan(conn, album_id, build)["status"] == "placeholder_metadata"
+    assert seen == []

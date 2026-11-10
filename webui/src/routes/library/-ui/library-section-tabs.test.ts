@@ -48,6 +48,13 @@ describe('library section switch', () => {
     ).toMatchObject({ artist: undefined, album: undefined, q: '' });
   });
 
+  it('keeps the search text between Artists, Albums and Songs', () => {
+    // third #1062 review G15-8: 3.6.1's switchView kept q
+    expect(
+      librarySectionSearch({ section: 'artists', q: 'beatles', page: 3 }, 'songs'),
+    ).toMatchObject({ section: 'songs', q: 'beatles', page: 1 });
+  });
+
   it('drops the song-only filters when leaving Songs', () => {
     expect(
       librarySectionSearch({ section: 'songs', dupes: true, quality: 'lossless' }, 'artists'),

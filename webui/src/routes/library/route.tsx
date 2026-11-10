@@ -34,7 +34,10 @@ export const Route = createFileRoute('/library')({
           search: { name: search.discoverName ?? '' },
           replace: true,
         });
-      if (search.artist && search.view === 'discovery' && search.immersive)
+      // any library artist link, not only the discovery one: Search's "In
+      // Your Library" card links /library?artist=<id> straight, and 3.6.1
+      // opened that artist for a profile allowed Search alone
+      if (search.artist && !search.album)
         throw redirect({
           to: '/artist-detail/$source/$id',
           params: { source: 'library', id: String(search.artist) },

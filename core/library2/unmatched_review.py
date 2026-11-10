@@ -72,6 +72,11 @@ UNKNOWN_ARTISTS_CTE = (
 
 def _unmatched_rows(conn, file_id: Optional[int] = None) -> List[Any]:
     one = "AND f.id = ?" if file_id is not None else ""
+    # the caller's library only: another library's files, paths and all, are
+    # not there for this profile (review 5 R5-B-4). the background matcher
+    # reads every library under an all-libraries scope
+    from core.library2.sql_util import owner_clause
+    owner = owner_clause(column="f.owner_profile_id")
     return conn.execute(
         f"""
         {UNKNOWN_ARTISTS_CTE}
@@ -83,7 +88,7 @@ def _unmatched_rows(conn, file_id: Optional[int] = None) -> List[Any]:
           JOIN lib2_tracks t ON t.album_id = al.id
           JOIN lib2_track_files f ON f.track_id = t.id
          WHERE f.path IS NOT NULL AND TRIM(f.path) <> ''
-           AND COALESCE(f.file_state, 'active') = 'active'
+           AND COALESCE(f.file_state, 'active') = 'active'{owner}
            {one}
          ORDER BY f.path
         """,

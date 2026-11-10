@@ -10,6 +10,14 @@ from core.repair_jobs.base import JobContext, JobResult
 from tests.lib2_seed import row_conn
 
 
+@pytest.fixture(autouse=True)
+def _no_cover_art_artist_name_search(monkeypatch):
+    """the cover art job's artist name search talks to real clients"""
+    monkeypatch.setattr('core.repair_jobs.missing_cover_art._artist_art_by_name',
+                        lambda *a, **k: (None, None))
+
+
+
 class _Config:
     def __init__(self, enabled: bool):
         self.enabled = enabled
@@ -152,6 +160,35 @@ def test_finding_annotation_attaches_stable_v2_subjects(legacy_db):
     assert details["library_v2"]["file_id"] is not None
     assert len(details["library_v2"]["track_ids"]) == 1
     assert len(details["library_v2"]["file_ids"]) == 1
+
+
+def test_legacy_backref_lookup_uses_the_legacy_index(legacy_db):
+    """third #1062 review G08-3: CAST(legacy_track_id AS TEXT)=? walked the
+    whole table, once per finding"""
+    from core.library2.maintenance_sync import _legacy_backref_ids
+
+    _import(legacy_db)
+    with closing(legacy_db._get_connection()) as conn:
+        seen = []
+        conn.set_trace_callback(seen.append)
+        assert len(_legacy_backref_ids(conn, "track", "100")) == 1
+        conn.set_trace_callback(None)
+        sql = next(q for q in seen if "legacy_track_id" in q)
+        plan = " ".join(str(tuple(r)) for r in conn.execute("EXPLAIN QUERY PLAN " + sql))
+    # a SEARCH on it, not a SCAN through it (a covering index scan names it too)
+    assert "SEARCH" in plan and "idx_lib2_tracks_legacy" in plan
+
+
+def test_an_expired_download_finding_names_no_unrelated_track(legacy_db, tmp_path):
+    """G08-3: the cleaner's id is a download-history id. filed as a track, the
+    annotation read it as 3.6.1 track 100 and linked an unrelated song"""
+    from core.library2.maintenance_sync import annotate_finding_details
+
+    _import(legacy_db)
+    details = annotate_finding_details(
+        legacy_db, _Config(True), entity_type="download", entity_id=100,
+        file_path=str(tmp_path / "Downloads" / "elsewhere.flac"), details={"history_id": 100})
+    assert "library_v2" not in details
 
 
 def test_deprecated_false_flag_cannot_silence_maintenance_sync(legacy_db):
@@ -363,6 +400,8 @@ def test_redownload_forces_wanted_even_for_unmonitored_track(legacy_db):
 def test_native_track_number_scan_uses_missing_tracks_in_canonical_album_list(
     legacy_db, tmp_path, monkeypatch
 ):
+    # this test is about what an inspected album does; the anomaly gate has its own tests
+    monkeypatch.setattr("core.repair_jobs.track_number_repair._album_has_number_anomaly", lambda *_a, **_k: True)
     from core.repair_jobs.track_number_repair import TrackNumberRepairJob
 
     _import(legacy_db)
@@ -1359,6 +1398,8 @@ def test_track_number_repair_reaches_v2_only_files(legacy_db, tmp_path, monkeypa
     the folder is now incidental — so the guarantee is stated against the file, which
     is what it was always about.
     """
+    # this test is about what an inspected album does; the anomaly gate has its own tests
+    monkeypatch.setattr("core.repair_jobs.track_number_repair._album_has_number_anomaly", lambda *_a, **_k: True)
     from core.repair_jobs.track_number_repair import TrackNumberRepairJob
 
     _import(legacy_db)

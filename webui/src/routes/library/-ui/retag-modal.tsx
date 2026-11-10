@@ -12,6 +12,36 @@ import {
 import styles from './library-v2-page.module.css';
 import { LibraryToolDialog } from './tool-dialog';
 
+export function offersServerSync(serverType: string | null): boolean {
+  return Boolean(serverType && serverType !== 'navidrome');
+}
+
+export function serverSyncLabel(serverType: string | null): string {
+  return `Sync to ${serverType === 'plex' ? 'Plex' : serverType === 'emby' ? 'Emby' : 'Jellyfin'}`;
+}
+
+export interface ServerSyncResult {
+  server: string | null;
+  synced: number;
+  failed: number;
+  skipped: number;
+  errors: { error?: string }[];
+}
+
+/** G15-5: what "Sync to Plex/Jellyfin" did, after the write's own counts */
+export function serverSyncNote(sync: ServerSyncResult | undefined): string {
+  if (!sync) return '';
+  if (!sync.server) return ' No media server was connected to sync.';
+  const name = serverSyncLabel(sync.server).replace('Sync to ', '');
+  if (sync.server !== 'plex') {
+    return sync.failed ? ` ${name} scan failed.` : ` ${name} is rescanning.`;
+  }
+  const parts = [`${sync.synced} updated on ${name}`];
+  if (sync.failed) parts.push(`${sync.failed} failed`);
+  if (sync.skipped) parts.push(`${sync.skipped} not on ${name}`);
+  return ` ${parts.join(', ')}.`;
+}
+
 function fieldValue(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—';
   if (Array.isArray(v)) return v.join(', ');
@@ -203,6 +233,8 @@ export function RetagModal({
   // Empty is the default and the safe answer: keep every one of them.
   const [released, setReleased] = useState<Set<string>>(new Set());
   const [phase, setPhase] = useState<'idle' | 'writing' | 'done' | 'error'>('idle');
+  const serverType = previewQuery.data?.server_type ?? null;
+  const [syncToServer, setSyncToServer] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   // Preselect every track that has changes once the preview lands.
@@ -244,7 +276,8 @@ export function RetagModal({
         // track the user then deselected is not a request to write it.
         if (field && chosen.has(trackId)) overwrite.push([trackId, field]);
       }
-      const jobId = await writeLibraryV2Tags(ids, true, overwrite, policy);
+      const sync = syncToServer && offersServerSync(serverType);
+      const jobId = await writeLibraryV2Tags(ids, true, overwrite, policy, sync);
       // Poll this write only; other background jobs have independent ids.
       for (let i = 0; i < 600; i += 1) {
         const state = await fetchLibraryV2JobStatus(jobId);
@@ -253,7 +286,8 @@ export function RetagModal({
           const r = state.result ?? {};
           setPhase('done');
           setMessage(
-            `Done: ${r.written ?? 0} written, ${r.skipped ?? 0} already correct, ${r.failed ?? 0} failed.`,
+            `Done: ${r.written ?? 0} written, ${r.skipped ?? 0} already correct, ${r.failed ?? 0} failed.` +
+              serverSyncNote(r.server_sync as unknown as ServerSyncResult | undefined),
           );
           await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
           return;
@@ -400,6 +434,17 @@ export function RetagModal({
             >
               Keep mine for all ({manualCount})
             </button>
+          ) : null}
+          {offersServerSync(serverType) ? (
+            <label className={styles.checkOption}>
+              <input
+                type="checkbox"
+                checked={syncToServer}
+                disabled={phase === 'writing' || phase === 'done'}
+                onChange={(e) => setSyncToServer(e.target.checked)}
+              />
+              {serverSyncLabel(serverType)}
+            </label>
           ) : null}
           <label className={styles.checkOption}>
             <input

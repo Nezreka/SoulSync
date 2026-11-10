@@ -11,14 +11,19 @@ imports only the sibling video ``quality_profile`` constants; nothing from music
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from core.video.quality_profile import TIERS as _QP_TIERS
 
 # Resolution ranking (higher = better). The loose cutoff and the owned-vs-target
 # check both compare on this rank, so "1920x1080", "1080p" and "1080" all agree.
-_RES_RANK = (("2160", 4), ("4k", 4), ("1440", 3), ("1080", 3),
+_RES_RANK = (("2160", 4), ("4k", 4), ("1440", 3), ("2k", 3), ("1080", 3),
              ("720", 2), ("576", 1), ("480", 1), ("sd", 1))
+# a bare frame height ('1038p', '800p', '1600p') a server stored for a cropped
+# film. bucketed the way a cropped frame sits under its full one: a 2.40 1080p
+# film is 800 tall, a 2.40 4K one 1600 (#2025)
+_BARE_HEIGHT = re.compile(r"^\s*(\d{3,4})\s*p?\s*$")
 _RES_LABEL = {4: "4K", 3: "1080p", 2: "720p", 1: "SD", 0: ""}
 
 
@@ -50,6 +55,16 @@ def resolution_rank(res: Any) -> int:
     for token, rank in _RES_RANK:
         if token in s:
             return rank
+    m = _BARE_HEIGHT.match(s)
+    if m:
+        h = int(m.group(1))
+        if h > 1200:
+            return 4
+        if h > 720:
+            return 3
+        if h > 576:
+            return 2
+        return 1 if h > 0 else 0
     return 0
 
 
@@ -124,8 +139,29 @@ def evaluate_owned(file: Any, profile: Any) -> dict:
 # Map a parsed source → the tier-key prefix used in the quality profile's ladder.
 _SRC_TIER = {"remux": "remux", "bluray": "bluray", "web-dl": "web",
              "webrip": "webrip", "hdtv": "hdtv", "dvd": "dvd"}
-_RES_SCORE = {"2160p": 400, "1080p": 300, "720p": 200, "480p": 100}
-_SRC_SCORE = {"remux": 90, "bluray": 70, "web-dl": 55, "webrip": 40, "hdtv": 25, "dvd": 10}
+# points per ladder SLOT, best slot first. a tier earns the points of the slot
+# it holds in the profile's own order, so moving web-1080p above bluray-1080p
+# in Settings really ranks it higher (the order used to be ignored, #2033).
+# the default ladder gets the same resolution + source points it always had.
+_SLOT_POINTS = (490, 470, 455, 440, 425, 390, 370, 355, 340, 325,
+                270, 255, 240, 225, 125, 110)
+_TIER_LABEL = {
+    "remux-2160p": "Remux 4K", "bluray-2160p": "BluRay 4K", "web-2160p": "WEB-DL 4K",
+    "webrip-2160p": "WEBRip 4K", "hdtv-2160p": "HDTV 4K",
+    "remux-1080p": "Remux 1080p", "bluray-1080p": "BluRay 1080p", "web-1080p": "WEB-DL 1080p",
+    "webrip-1080p": "WEBRip 1080p", "hdtv-1080p": "HDTV 1080p",
+    "bluray-720p": "BluRay 720p", "web-720p": "WEB-DL 720p", "webrip-720p": "WEBRip 720p",
+    "hdtv-720p": "HDTV 720p", "dvd": "DVD", "sdtv": "SDTV",
+}
+# the profile's prefer_audio choice -> the parsed audio tags that satisfy it.
+# the name collapses atmos-on-truehd to 'atmos', so atmos counts as lossless
+_AUDIO_PREF = {
+    "surround": frozenset({"atmos", "truehd", "dts-hd", "dts", "eac3", "ac3"}),
+    "lossless": frozenset({"atmos", "truehd", "dts-hd"}),
+    "atmos": frozenset({"atmos"}),
+}
+_LANG_NAME = {"en": "English", "fr": "French", "de": "German", "it": "Italian",
+              "es": "Spanish", "pt": "Portuguese", "ja": "Japanese", "ko": "Korean"}
 
 # Everything the release parser folds into "SD". ``release_parse`` normalises both
 # 480p and 576p to "480p", but the set is spelled out so a parser that later keeps
@@ -334,6 +370,9 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
         rejected = fam + " codec is on your reject list"
     if not rejected and parsed.get("three_d") and "3d" in rejects:
         rejected = "3D is on your reject list"
+    # a full disc image can never be imported, so it isn't a profile choice
+    if not rejected and parsed.get("disc_image"):
+        rejected = "Full disc image (ISO / BDMV), nothing in it SoulSync can import"
 
     # 2) must be an enabled ladder tier
     tier = tier_key(source, res)
@@ -348,11 +387,14 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
     if not rejected and profile.get("prefer_hdr") == "require" and not parsed.get("hdr"):
         rejected = "HDR required but this is SDR"
 
-    # 3b) audio language (dubbed / MULTI). a release with no tag is the
-    # original audio, so require skips it.
+    # 3b) audio language (dubbed / MULTI). require skips a release that names
+    # only other languages; no tag reads as english (see _language_hit)
     lang_hit = _language_hit(parsed, profile)
     if not rejected and lang_hit is False and profile.get("audio_language_mode") == "require":
-        rejected = "No " + "/".join(c.upper() for c in profile.get("audio_languages") or []) + " audio tag (or MULTI)"
+        want = "/".join(c.upper() for c in profile.get("audio_languages") or [])
+        tagged = parsed.get("languages") or []
+        rejected = (("Tagged " + "/".join(c.upper() for c in tagged) + " audio, you want " + want + " (or MULTI)")
+                    if tagged else ("No " + want + " audio tag (or MULTI)"))
 
     # 4) scope validation (episode vs season pack vs series pack; movie year match)
     if not rejected:
@@ -383,18 +425,51 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
         if cap and size_gb > cap:
             rejected = "Over your " + str(cap) + " GB size cap"
 
-    # score the keepers (higher = better)
-    score = _RES_SCORE.get(res, 0) + _SRC_SCORE.get(source, 0)
+    # score (higher = better). three groups, compared in this order and never
+    # summed across (#2033): quality (the ladder tier + the profile's own
+    # preferences), then custom formats (added by release_rank), then small
+    # tie-breaks. one flat sum let a tagged-english or bigger release outweigh
+    # a +100 custom format, so a group only matters when the one above ties.
+    breakdown: list = []
+
+    def _add(group, label, points):
+        breakdown.append({"group": group, "label": label, "points": points})
+
+    tier_pts = tier_points(tier, profile)
+    if tier_pts:
+        _add("quality", "%s tier (#%d on your ladder)" % (
+            _TIER_LABEL.get(tier, tier), tier_position(tier, profile) + 1), tier_pts)
     if profile.get("prefer_codec") not in (None, "any") and fam == profile.get("prefer_codec"):
-        score += 40
+        _add("quality", "Preferred codec (%s)" % fam.upper(), 40)
     if parsed.get("hdr") and profile.get("prefer_hdr") in ("prefer", "require"):
-        score += 30
-    if parsed.get("audio") in ("atmos", "truehd", "dts-hd"):
-        score += 15
+        _add("quality", "HDR (%s)" % str(parsed.get("hdr")).upper(), 30)
     if profile.get("prefer_repack") and (parsed.get("repack") or parsed.get("proper")):
-        score += 10
+        _add("quality", "Repack / proper", 10)
+    want_audio = profile.get("prefer_audio")
+    if want_audio in _AUDIO_PREF and parsed.get("audio") in _AUDIO_PREF[want_audio]:
+        _add("quality", "Preferred audio (%s)" % str(parsed.get("audio")).upper(), 30)
     if lang_hit:
-        score += 150    # the audio you asked for beats a resolution step
+        _add("quality", _language_label(parsed, profile), 150)  # the audio you asked for beats a resolution step
+    if parsed.get("audio") in ("atmos", "truehd", "dts-hd"):
+        _add("tiebreak", "Lossless / object audio (%s)" % str(parsed.get("audio")).upper(), 15)
+
+    # preferred size: a tie-break only, closer to the target ranks higher.
+    # movie/episode only, packs are cumulative (#2033)
+    size_fit = 0
+    pref = _preferred_gb(profile, scope)
+    if pref and size_gb:
+        try:
+            dist = abs(float(size_gb) - pref)
+        except (TypeError, ValueError):
+            dist = None
+        if dist is not None:
+            size_fit = -int(round(dist * 1000))
+            _add("tiebreak", "%s GB is %s GB from your %s GB preferred size" % (
+                _gb(size_gb), _gb(dist), _gb(pref)), 0)
+
+    quality = sum(b["points"] for b in breakdown if b["group"] == "quality")
+    tiebreak = sum(b["points"] for b in breakdown if b["group"] == "tiebreak")
+    score = quality + tiebreak
 
     res_lab = resolution_label(res)
     if inferred and res_lab:
@@ -402,19 +477,79 @@ def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
     label = " · ".join([x for x in [res_lab,
                         (source or "").upper() if source else "", fam.upper() if fam else ""] if x])
     return {"accepted": rejected is None, "score": score, "rejected": rejected,
-            "tier": tier, "quality_label": label}
+            "tier": tier, "quality_label": label, "breakdown": breakdown,
+            "parts": {"quality": quality, "formats": 0, "tiebreak": tiebreak,
+                      "size_fit": size_fit}}
+
+
+def tier_position(tier, profile) -> int:
+    """Where a tier sits on the profile's ladder, 0 = best. a ladder missing
+    tiers is completed in canonical order, the way normalize_tiers does."""
+    order = []
+    for t in (profile or {}).get("tiers") or []:
+        k = t.get("key") if isinstance(t, dict) else t
+        if k in _LADDER and k not in order:
+            order.append(k)
+    order += [k for k in _QP_TIERS if k not in order]
+    return order.index(tier) if tier in order else len(order)
+
+
+def tier_points(tier, profile) -> int:
+    """The quality points a tier earns from its slot on the profile's ladder."""
+    if not tier:
+        return 0
+    pos = tier_position(tier, profile)
+    return _SLOT_POINTS[pos] if pos < len(_SLOT_POINTS) else 0
+
+
+def _gb(v) -> str:
+    try:
+        return ("%.1f" % float(v)).rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _preferred_gb(profile, scope) -> float:
+    key = {"movie": "preferred_movie_gb", "episode": "preferred_episode_gb"}.get(scope)
+    try:
+        return max(0.0, float((profile or {}).get(key) or 0)) if key else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _lang_names(codes) -> str:
+    return "/".join(_LANG_NAME.get(c, str(c).upper()) for c in codes)
+
+
+def _language_label(parsed, profile) -> str:
+    if parsed.get("multi"):
+        return "MULTI / dual audio"
+    tagged = [c for c in parsed.get("languages") or [] if c in (profile.get("audio_languages") or [])]
+    if tagged:
+        return "%s audio" % _lang_names(tagged)
+    return "No language tag, read as English audio"
 
 
 def _language_hit(parsed, profile):
     """None when the profile doesn't care about audio language, else whether
-    the release carries one of its languages or a MULTI / dual audio tag."""
+    the release carries one of its languages or a MULTI / dual audio tag.
+
+    a release with no tag is the original audio, and the scene only tags
+    audio that isn't english (the arr apps' parser reads it the same way). so
+    for a profile that wants english, no tag is a match: it used to lose 150
+    points to a release that spelled out ENGLISH (#2033). a profile that
+    wants only other languages still skips untagged releases, they're the
+    english original."""
     mode = profile.get("audio_language_mode")
     wanted = set(profile.get("audio_languages") or [])
     if mode not in ("prefer", "require") or not wanted:
         return None
     if parsed.get("multi"):
         return True
-    return bool(wanted & set(parsed.get("languages") or []))
+    tagged = set(parsed.get("languages") or [])
+    if not tagged:
+        return "en" in wanted
+    return bool(wanted & tagged)
 
 
 def _infer_resolution(scope, size_gb):
@@ -447,4 +582,4 @@ def _infer_resolution(scope, size_gb):
 
 
 __all__ = ["resolution_rank", "resolution_label", "meets_cutoff", "evaluate_owned",
-           "tier_key", "evaluate_release"]
+           "tier_key", "tier_position", "tier_points", "evaluate_release"]

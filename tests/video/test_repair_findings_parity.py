@@ -189,6 +189,19 @@ def test_a_handled_critical_no_longer_colours_its_group(client):
     assert g["pending"] == 0 and g["severity_max"] == "info"
 
 
+def test_groups_count_severities_per_status(client):
+    # review 5 R5-L-3: severity_max alone hid a handled critical under
+    # Resolved + Critical, and pending warnings under one pending critical
+    c, db = client
+    _seed(db, "youtube_ghosts", "youtube_mass_missing", 2, severity="critical")
+    _seed(db, "youtube_ghosts", "youtube_mass_missing", 3, severity="warning", title="W")
+    fid = db.repair_get_findings(severity="critical")["items"][0]["id"]
+    db.repair_set_finding_status(fid, "resolved", action="flagged")
+    g = c.get("/api/video/repair/findings/groups").get_json()["groups"][0]
+    assert g["severities"] == {"pending": {"error": 1, "warning": 3},
+                               "resolved": {"error": 1}}
+
+
 # ── the type catalog ─────────────────────────────────────────────────────────
 
 def test_every_type_a_real_job_emits_is_described():
@@ -296,6 +309,38 @@ def test_dismiss_all_of_one_type_leaves_other_types_alone(client):
     bad = c.post("/api/video/repair/findings/bulk",
                  json={"finding_type": "broken_file", "action": "resolve"})
     assert bad.status_code == 400
+
+
+def test_inbox_bulk_actions_take_the_inbox_filters(client):
+    """review 5 W3-TT: with a job or severity picked, the row counted the
+    filtered rows but dismiss all reached every job and severity"""
+    c, db = client
+    _seed(db, "broken_files", "broken_file", 2, severity="warning")
+    _seed(db, "broken_files", "broken_file", 3, severity="info", title="Other")
+    g = c.get("/api/video/repair/findings/groups?severity=warning").get_json()["groups"][0]
+    assert g["pending"] == 2
+    r = c.post("/api/video/repair/findings/bulk", json={
+        "finding_type": "broken_file", "action": "dismiss", "severity": "warning"})
+    assert r.get_json()["updated"] == 2
+    assert db.repair_get_findings(status="pending")["total"] == 3
+    r = c.post("/api/video/repair/findings/reopen-all", json={
+        "finding_type": "broken_file", "severity": "info"}).get_json()
+    assert r["reopened"] == 0
+
+
+def test_dismiss_selected_refuses_ids_outside_the_view(client):
+    c, db = client
+    _seed(db, "broken_files", "broken_file", 1)
+    _seed(db, "wishlist_audit", "stale_wishlist", 1)
+    ids = [f["id"] for f in db.repair_get_findings(sort="oldest")["items"]]
+    r = c.post("/api/video/repair/findings/bulk", json={
+        "ids": ids, "action": "dismiss",
+        "scope": {"status": "pending", "finding_type": "broken_file"}}).get_json()
+    assert (r["updated"], r["refused"]) == (1, 1)
+    assert db.repair_get_finding(ids[1])["status"] == "pending"
+    r = c.post(f"/api/video/repair/findings/{ids[1]}/fix", json={
+        "bulk": True, "scope": {"finding_type": "broken_file"}})
+    assert r.status_code == 409
 
 
 def test_clear_only_deletes_what_the_filters_show(client):

@@ -310,6 +310,50 @@ def test_demonitor_matches_by_name_fallback(imported_conn):
                         ).fetchone()[0] == 0
 
 
+# review 5 R5-F-2: the removal endpoints send provider ids as a dict, and that
+# branch let a bare name match run alongside the id match, past the A9 rule
+
+def _monitored(conn, artist_id):
+    return conn.execute("SELECT monitored FROM lib2_artists WHERE id=?", (artist_id,)).fetchone()[0]
+
+
+def test_removing_one_namesake_by_its_id_keeps_the_other(imported_conn):
+    conn = imported_conn
+    us = _add_artist(conn, "Nirvana", monitored=1, spotify_id="sp-us")
+    uk = _add_artist(conn, "Nirvana", monitored=1, external_ids='{"musicbrainz":"mb-uk-1967"}')
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    result = sync_watchlist_removal(
+        db, None, {"name": "Nirvana", "provider_ids": {"spotify": "sp-us"}}, profile_id=1)
+
+    assert result["matched"] == 1
+    assert (_monitored(conn, us), _monitored(conn, uk)) == (0, 1)
+    assert conn.execute("SELECT 1 FROM lib2_monitor_rules WHERE entity_type='artist' "
+                        "AND entity_id=?", (uk,)).fetchone() is None
+
+
+def test_a_dict_descriptor_name_fallback_needs_exactly_one_namesake(imported_conn):
+    conn = imported_conn
+    one = _add_artist(conn, "Nirvana", monitored=1, external_ids='{"musicbrainz":"mb-1"}')
+    two = _add_artist(conn, "Nirvana", monitored=1, external_ids='{"musicbrainz":"mb-2"}')
+    solo = _add_artist(conn, "Solo Act", monitored=1)
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    # no id matches: two namesakes is ambiguous, nobody is touched
+    ambiguous = sync_watchlist_removal(
+        db, None, {"name": "Nirvana", "provider_ids": {"spotify": "sp-x"}}, profile_id=1)
+    assert ambiguous["matched"] == 0
+    assert (_monitored(conn, one), _monitored(conn, two)) == (1, 1)
+
+    # one namesake: the fallback still resolves it
+    single = sync_watchlist_removal(
+        db, None, {"name": "Solo Act", "provider_ids": {"spotify": "sp-y"}}, profile_id=1)
+    assert single["matched"] == 1
+    assert _monitored(conn, solo) == 0
+
+
 def test_demonitor_idempotent(imported_conn):
     conn = imported_conn
     _add_artist(conn, "Once", monitored=1, spotify_id="once-sp")
@@ -730,6 +774,112 @@ def test_watchlist_provider_ids_are_compared_with_their_namespace(imported_conn)
     ) is False
 
 
+def _two_nirvanas(conn):
+    _ensure_watchlist_table(conn)
+    us = _add_artist(conn, "Nirvana", monitored=1, spotify_id="sp-us")
+    uk = _add_artist(conn, "Nirvana", monitored=0,
+                     external_ids='{"musicbrainz":"mb-uk-1967"}')
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1)")
+    conn.commit()
+    return us, uk
+
+
+def test_reconcile_does_not_watch_a_namesake_of_the_watched_artist(imported_conn):
+    """review 5 W2-WF-2: R5-F-2's rule on the hourly reconcile. the watched
+    US Nirvana holds the entry's id, so the UK one is not it by name"""
+    conn = imported_conn
+    us, uk = _two_nirvanas(conn)
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    reconcile_artist_watchlist(db, profile_id=1)
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)",
+                               (us, uk)).fetchall())
+    assert states == {us: 1, uk: 0}
+    rule = conn.execute("SELECT monitored FROM lib2_monitor_rules WHERE entity_type='artist' "
+                        "AND entity_id=? AND profile_id=1", (uk,)).fetchone()
+    assert rule is None or rule[0] == 0
+
+
+def test_reconcile_name_fallback_needs_one_artist_of_that_name(imported_conn):
+    """two lib2 artists of the watched name and neither holds its id: a name
+    cannot say which one, so neither is watched by it"""
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    a = _add_artist(conn, "Nirvana", monitored=0, external_ids='{"musicbrainz":"mb-a"}')
+    b = _add_artist(conn, "Nirvana", monitored=0, external_ids='{"deezer":"dz-b"}')
+    alone = _add_artist(conn, "Mudhoney", monitored=0, external_ids='{"deezer":"dz-m"}')
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1), ('sp-mud', 'Mudhoney', 1)")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    reconcile_artist_watchlist(db, profile_id=1)
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?,?)",
+                               (a, b, alone)).fetchall())
+    # the only artist of a watched name still matches it across namespaces
+    assert states == {a: 0, b: 0, alone: 1}
+
+
+def test_reconcile_name_fallback_still_watches_an_alias_of_the_artist(imported_conn):
+    """an alias row (§40) is the same artist, not a namesake"""
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    main = _add_artist(conn, "Nirvana", monitored=0, external_ids='{"musicbrainz":"mb-a"}')
+    alias = _add_artist(conn, "Nirvana", monitored=0, external_ids='{"deezer":"dz-b"}')
+    conn.execute("UPDATE lib2_artists SET canonical_artist_id=? WHERE id=?", (main, alias))
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1)")
+    conn.commit()
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+
+    reconcile_artist_watchlist(db, profile_id=1)
+
+    states = dict(conn.execute("SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)",
+                               (main, alias)).fetchall())
+    assert states == {main: 1, alias: 1}
+
+
+def test_a_new_namesake_is_not_born_watched(imported_conn):
+    """review 5 W2-WF-2 at insert time (autolink)"""
+    from core.library2.monitor_sync import artist_is_watchlisted
+
+    conn = imported_conn
+    _two_nirvanas(conn)
+    assert artist_is_watchlisted(
+        conn, "Nirvana", {"musicbrainz": "mb-uk-1967"}, profile_id=1) is False
+    # the watched artist itself, by id, still is
+    assert artist_is_watchlisted(conn, "Nirvana", {"spotify": "sp-us"}, profile_id=1) is True
+
+
+def test_a_new_artist_is_not_watched_by_name_when_another_holds_the_id(imported_conn):
+    from core.library2.monitor_sync import artist_is_watchlisted
+
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    _add_artist(conn, "Nirvana (US)", monitored=1, spotify_id="sp-us")
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1)")
+    conn.commit()
+    assert artist_is_watchlisted(
+        conn, "Nirvana", {"musicbrainz": "mb-uk-1967"}, profile_id=1) is False
+
+
+def test_a_watched_artists_first_row_is_still_born_watched_by_name(imported_conn):
+    """the watchlist knows a spotify id, the first download came from deezer:
+    no lib2 artist of that name or id yet, so the name still says it"""
+    from core.library2.monitor_sync import artist_is_watchlisted
+
+    conn = imported_conn
+    _ensure_watchlist_table(conn)
+    conn.execute("INSERT INTO watchlist_artists(spotify_artist_id, artist_name, profile_id) "
+                 "VALUES('sp-us', 'Nirvana', 1)")
+    conn.commit()
+    assert artist_is_watchlisted(conn, "Nirvana", {"deezer": "dz-1"}, profile_id=1) is True
+
+
 def _stale_wishlist_row(conn, track_id: int, provider_id: str) -> None:
     conn.execute(
         """CREATE TABLE IF NOT EXISTS wishlist_tracks(
@@ -889,3 +1039,28 @@ def test_a_full_recompute_prunes_rows_of_deleted_tracks(imported_conn):
     assert 999999 not in rows and keep in rows
     # nothing left to prune: the next run writes no delete
     assert recompute_wanted(conn, profile_id=1)["pruned"] == 0
+
+
+def test_a_wishlist_removal_never_reads_the_whole_catalogue(imported_conn):
+    """review 5 R5-F-1: every removal loaded and parsed all tracks first (18 s
+    on a 316k library; Clear Wishlist held the write lock for it), even for a
+    row that names its lib2 track. each id is looked up through its index"""
+    from core.library2.monitor_sync import _descriptor_lib2_track_ids
+    conn = imported_conn
+    artist = _add_artist(conn, "Track Artist", monitored=0, spotify_id="ta-sp")
+    named = _add_track(conn, artist, "Named", spotify_id="named-sp")
+    by_deezer = _add_track(conn, artist, "Deezer", spotify_id=None)
+    conn.execute("UPDATE lib2_tracks SET external_ids='{\"deezer\": \"dz-9\"}' WHERE id=?", (by_deezer,))
+    conn.commit()
+    seen = []
+    conn.set_trace_callback(seen.append)
+    got = _descriptor_lib2_track_ids(conn, [
+        {"source_info": {"lib2_track_id": named}},
+        {"spotify_track_id": "dz-9"},                      # a bare id
+        {"track_data": {"id": "named-sp", "provider": "spotify"}},
+    ])
+    conn.set_trace_callback(None)
+    assert sorted(set(got)) == sorted({named, by_deezer})
+    flat = [" ".join(q.split()) for q in seen]
+    whole = [q for q in flat if "FROM lib2_tracks t JOIN lib2_albums" in q and "WHERE" not in q.upper()]
+    assert whole == []

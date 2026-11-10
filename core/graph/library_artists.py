@@ -38,13 +38,16 @@ def load_library_artists(conn) -> Tuple[Set[str], Dict[str, Dict[str, Any]],
     # owned: 3.6.1's set was the server's artists. lib2_artists also holds
     # featured credits, discography and wishlist rows and every watchlist add,
     # and calling those owned dropped them from the Discovery Web's
-    # suggestions and drew them as library nodes on the Taste Map
+    # suggestions and drew them as library nodes on the Taste Map. the
+    # release-artist set (a release of their own on disk), not 'artist':
+    # that one also counts a featured credit on one owned track, 29.6k
+    # "owned" on the live db against 3.6.1's 6.1k (review 5 W3-TD-3)
     from core.library2.sql_util import owned_sql
     for row in conn.execute(
         "SELECT a.id, a.name, a.image_url, a.genres FROM lib2_artists a "
         " WHERE a.canonical_artist_id IS NULL "
         "   AND a.name IS NOT NULL AND a.name <> '' "
-        f"  AND {owned_sql('artist', 'a')}"
+        f"  AND {owned_sql('release_artist', 'a')}"
     ):
         name, image_url, genres = row[1], row[2], row[3]
         key = str(name or "").strip().lower()

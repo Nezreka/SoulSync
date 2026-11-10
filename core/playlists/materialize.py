@@ -338,6 +338,57 @@ def _adoptable(real: str, dest: str, mode: str) -> bool:
     return _copy_is_current(real, dest)
 
 
+_LEGACY_TRACK_EXTS = frozenset({
+    ".flac", ".mp3", ".m4a", ".mp4", ".aac", ".ogg", ".oga", ".opus", ".wav",
+    ".wma", ".aiff", ".aif", ".ape", ".alac", ".dsf", ".dff", ".wv"})
+
+
+def _adopt_legacy_folder(pdir: str, owned: dict, wanted: dict, mode: str) -> None:
+    """A folder 3.6.1 built has no manifest. 3.6.1 relinked a broken link,
+    re-copied a stale copy and pruned what left the playlist; v2 only manages
+    what its manifest owns, so those entries failed every rebuild or stayed for
+    good. Once, the first time v2 sees such a folder: a symlink to an audio
+    file is adopted (3.6.1 only wrote links to tracks and copies here), and
+    in either mode a regular file that is byte for byte the member it is
+    named for, which proves it is a copy. A same-named file with other bytes may be
+    the user's only copy: it is never adopted, so never overwritten.
+
+    review 4 R4-D-8: every symlink used to be adopted, whatever it pointed at,
+    so a link the user put there (a cover, another folder) was pruned. one
+    that points at no audio file isn't 3.6.1's and stays. (two profiles'
+    same-named playlists share a 3.6.1 folder; 3.6.1 pruned each other's
+    links too, and v2 moves the second into its own folder.)"""
+    wanted_sources = {os.path.realpath(src) for src in wanted.values()}
+    try:
+        names = os.listdir(pdir)
+    except OSError:
+        return
+    for name in names:
+        full = os.path.join(pdir, name)
+        if name in owned:
+            continue
+        try:
+            if os.path.islink(full):
+                target = os.path.realpath(full)
+                is_track = os.path.splitext(target)[1].lower() in _LEGACY_TRACK_EXTS
+                if full in wanted or target in wanted_sources or (
+                        is_track and not os.path.isdir(target)):
+                    owned[name] = {"source": target,
+                                   "fingerprint": artifact_fingerprint(full)}
+            elif full in wanted and os.path.isfile(full):
+                # any mode: 3.6.1's symlink mode fell back to copy2 when the
+                # link failed (Windows, SMB, FAT), so its "symlink" folders
+                # hold copies too. skipped, each failed every rebuild and a
+                # departed member was never pruned (review 5 R5-J-3)
+                import filecmp
+                source = wanted[full]
+                if (os.path.isfile(source) and os.path.getsize(source) == os.path.getsize(full)
+                        and filecmp.cmp(source, full, shallow=False)):
+                    owned[name] = {"source": source, "fingerprint": artifact_fingerprint(full)}
+        except OSError:
+            continue
+
+
 def _rebuild_playlist_folder(
     playlists_root, playlist_name, real_paths, mode, *, dest_names, prune_stale,
     symlink_fn, copy_fn, playlist_identity,
@@ -354,6 +405,9 @@ def _rebuild_playlist_folder(
     entries = _desired_entries(pdir, real_paths, dest_names)
     keep = {dest for _real, dest in entries}
     sources = {real for real, _dest in entries}
+    if not owned and not manifest.get("legacy_adopted") and os.path.isdir(pdir):
+        _adopt_legacy_folder(pdir, owned, {dest: real for real, dest in entries}, mode)
+        manifest["legacy_adopted"] = True
 
     for real, dest in entries:
         name = os.path.basename(dest)

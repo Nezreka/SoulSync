@@ -223,3 +223,26 @@ def test_a_pinned_edition_is_never_overwritten_by_the_folder(tmp_path, monkeypat
     assert len(calls) == 2
 
 
+
+
+def test_a_stale_barcode_goes_even_with_barcode_embedding_off(tmp_path, monkeypatch):
+    """the barcode of the single a track was first tagged with names the wrong
+    release once it joins the album. 3.6.1 dropped it; v2 kept it whenever
+    the barcode tag's embedding was switched off, which means "don't write
+    one", not "keep the wrong one"."""
+    from core.metadata import common
+
+    class _Cfg:
+        def get(self, key, default=None):
+            return False if key == 'musicbrainz.tags.barcode' else default
+
+    monkeypatch.setattr(common, 'get_config_manager', lambda: _Cfg())
+    folder = _album_folder(tmp_path)
+    new = _new_track(folder, extra={'barcode': '0123456789012'})
+
+    out = adopt_sibling_tags_for_loose_tracks([{'path': str(new)}])
+
+    assert out['written'] == 1
+    tags = FLAC(str(new))
+    assert tags['musicbrainz_albumid'] == [REL_A]
+    assert 'barcode' not in tags

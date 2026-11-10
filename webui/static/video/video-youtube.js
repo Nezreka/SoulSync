@@ -233,6 +233,13 @@
         b = b || {};
         var noun = kind === 'playlist' ? 'playlist' : 'channel';
         return '' +
+            // #2008: follow without downloading (channels; a playlist mirror downloads by design)
+            (kind === 'playlist' ? '' :
+                '<label class="vyt-cset-toggle"><input type="checkbox" data-cset-auto' +
+                    (s.auto_download === false ? '' : ' checked') + '> Download new uploads</label>' +
+                '<div class="vyt-cset-hint">Off: the channel stays followed but nothing downloads on its own. ' +
+                    'Pick videos from the channel page. Turning it off also takes back the videos the follow ' +
+                    'and the scan added that haven’t downloaded yet.</div>') +
             '<label class="vyt-cset-lbl">Show name (folder)</label>' +
             '<input class="vyt-cset-in" data-cset-name type="text" value="' + esc(s.custom_name || '') +
                 '" placeholder="' + esc(title || '') + '">' +
@@ -313,6 +320,8 @@
         saveBtn.addEventListener('click', function () {
             var nameEl = body.querySelector('[data-cset-name]');
             var payload = { custom_name: (nameEl ? nameEl.value : '').trim() };
+            var autoEl = body.querySelector('[data-cset-auto]');
+            if (autoEl) payload.auto_download = autoEl.checked;
             var inc = body.querySelector('[data-cset-inc]');
             var exc = body.querySelector('[data-cset-exc]');
             var minm = body.querySelector('[data-cset-minm]');
@@ -342,8 +351,18 @@
                 { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                   body: JSON.stringify(payload) })
                 .then(function (r) { return r.json(); })
-                .then(function () {
-                    if (typeof showToast === 'function') showToast((kind === 'playlist' ? 'Playlist' : 'Channel') + ' settings saved', 'success');
+                .then(function (d) {
+                    // review 4 R4-E-6: a refused save is not "saved" (a failed
+                    // "download new uploads" off kept downloads coming)
+                    if (!d || d.success === false) {
+                        saveBtn.disabled = false;
+                        if (typeof showToast === 'function') showToast((d && d.error) || 'Save failed', 'error');
+                        return;
+                    }
+                    var dropped = (d && d.dropped) || 0;
+                    var msg = (kind === 'playlist' ? 'Playlist' : 'Channel') + ' settings saved' +
+                        (dropped ? '. ' + dropped + ' video' + (dropped === 1 ? '' : 's') + ' taken off your wishlist' : '');
+                    if (typeof showToast === 'function') showToast(msg, 'success');
                     close();
                 })
                 .catch(function () { saveBtn.disabled = false; if (typeof showToast === 'function') showToast('Save failed', 'error'); });

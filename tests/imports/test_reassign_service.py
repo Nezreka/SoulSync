@@ -165,6 +165,24 @@ def test_a_multi_file_track_is_listed_once(db):
     assert rows[0]['file_path'] == '/m/1.flac', 'the primary file is the one to move'
 
 
+def test_an_own_library_reassign_stages_that_librarys_copy(db, monkeypatch):
+    """review 5 W2-WD-3: a track's primary flag spans every library, so the
+    unscoped pick staged (and a replace then retired) the shared copy while
+    the admin worked in profile 3's library."""
+    import core.library_scope as library_scope
+    db._raw.execute("ALTER TABLE lib2_track_files ADD COLUMN owner_profile_id INTEGER")
+    _seed_track(db, 1, 'One', 1, '/music/1.flac')
+    db._raw.execute("INSERT INTO lib2_track_files (track_id, path, is_primary, owner_profile_id) "
+                    "VALUES (1, '/profiles/3/1.flac', 0, 3)")
+    db._raw.commit()
+    monkeypatch.setattr(library_scope, 'own_library_ids', lambda: frozenset({3}))
+
+    with library_scope.library_scope(3):
+        rows = svc.local_album_tracks(db, 'lib2:7')
+    own_id = db._raw.execute("SELECT id FROM lib2_track_files WHERE owner_profile_id=3").fetchone()[0]
+    assert [(r['file_path'], r['file_id']) for r in rows] == [('/profiles/3/1.flac', own_id)]
+
+
 def test_a_bare_id_is_refused(db):
     """The contract, enforced rather than trusted: an unprefixed id is a
     legacy row reference, and this flow can no longer act on one safely."""
@@ -319,8 +337,10 @@ def test_the_hint_names_the_library_v2_track_to_replace(monkeypatch, db, tmp_pat
         staging_dir=str(tmp_path / 'staging'))
 
     assert result['success'] is True, result.get('error')
-    stored = db._raw.execute("SELECT replace_track_id FROM rematch_hints").fetchall()
-    assert [row[0] for row in stored] == [4242]
+    stored = db._raw.execute("SELECT replace_track_id, replace_file_id FROM rematch_hints").fetchall()
+    file_id = db._raw.execute("SELECT id FROM lib2_track_files WHERE track_id=4242").fetchone()[0]
+    # and the exact file staged, so a replace retires only that copy (review 5 W2-WD-3)
+    assert [tuple(row) for row in stored] == [(4242, file_id)]
 
 
 # ── the same-release guard (#889 invariant) ──────────────────────────────────
@@ -386,3 +406,76 @@ def test_an_album_with_no_stored_source_id_is_not_blocked(monkeypatch, db):
     _use(monkeypatch, _Client(tracks=[{'id': 'T1', 'name': 'One', 'track_number': 1}]))
 
     assert svc.preview_reassign(db, 'spotify', 'lib2:7', 'AL9')['success'] is True
+
+
+# review 5 R5-D-3 ────────────────────────────────────────────────────────────
+
+import os
+
+import core.imports.rematch_apply as ra
+from core.imports.rematch_hints import find_hint_for_file
+
+_HINTS_SCHEMA = """CREATE TABLE rematch_hints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, staged_path TEXT, content_hash TEXT,
+  source TEXT, isrc TEXT, track_id TEXT, album_id TEXT, artist_id TEXT,
+  track_title TEXT, album_name TEXT, artist_name TEXT, album_type TEXT,
+  track_number INTEGER, disc_number INTEGER, replace_track_id INTEGER,
+  exempt_dedup INTEGER DEFAULT 1, replace_id_space TEXT,
+  status TEXT DEFAULT 'pending', created_at TIMESTAMP, consumed_at TIMESTAMP)"""
+
+
+def test_no_copy_runs_inside_an_open_hint_transaction(tmp_path, monkeypatch):
+    """review 5 R5-D-3: the first hint's INSERT held the write lock through
+    every later file copy, and a staged file had no hint anyone could read"""
+    dbfile = str(tmp_path / "lib.db")
+    con = sqlite3.connect(dbfile)
+    con.execute(_HINTS_SCHEMA)
+    con.commit()
+    con.close()
+    database = SimpleNamespace(_get_connection=lambda: sqlite3.connect(dbfile))
+
+    src = tmp_path / "lib"
+    src.mkdir()
+    locals_ = []
+    for n in (1, 2, 3):
+        p = src / f"{n:02d} Song {n}.flac"
+        p.write_bytes(b"x" * 100)
+        locals_.append({"id": n, "title": f"Song {n}", "track_number": n, "file_path": str(p)})
+    targets = [{"id": f"sp{n}", "name": f"Song {n}", "track_number": n, "disc_number": 1}
+               for n in (1, 2, 3)]
+    monkeypatch.setattr(svc, "local_album_tracks", lambda db, a: locals_)
+    monkeypatch.setattr(svc, "target_tracks", lambda s, a: targets)
+    monkeypatch.setattr(svc, "is_same_release", lambda *a, **k: False)
+
+    staging = tmp_path / "staging"
+    seen = []
+    real_stage = ra.stage_file_for_reidentify
+
+    def stage(real_path, staging_dir, track_id, **kw):
+        if seen:  # a file is already staged: what does the rest of the app see?
+            other = sqlite3.connect(dbfile, timeout=0.2)
+            visible = find_hint_for_file(other.cursor(), seen[0])
+            try:
+                other.execute("CREATE TABLE probe_write (x)")
+                other.execute("DROP TABLE probe_write")
+                other.commit()
+                locked = False
+            except sqlite3.OperationalError as e:
+                locked = "locked" in str(e)
+            other.close()
+            seen.append((visible is not None, locked))
+        out = real_stage(real_path, staging_dir, track_id, **kw)
+        if not seen:
+            seen.append(out["staged_path"])
+        return out
+
+    monkeypatch.setattr(ra, "stage_file_for_reidentify", stage)
+    res = svc.apply_reassign(database, source="spotify", local_album_id="lib2:7",
+                            album_id="alb", album_name="Album", artist_id="ar",
+                            artist_name="Artist", album_type="album",
+                            staging_dir=str(staging))
+    assert res["success"], res
+    assert os.path.exists(seen[0])
+    # each later copy: the first staged file's hint must be readable, and
+    # nobody else may be locked out while audio files are being copied
+    assert seen[1:] == [(True, False), (True, False)]

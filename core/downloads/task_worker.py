@@ -152,6 +152,45 @@ def _candidate_ordering(track_info: Optional[dict] = None):
     return False, None
 
 
+def _seed_from_preflight_pool(task_id, batch_id, track):
+    """A quarantine retry with nothing cached of its own takes its candidates
+    from what the batch's album search already found: the other files in the
+    same folder, other peers' copies. An album-bundle track never searched on
+    its own, so its retry went straight to fresh queries that found nothing,
+    while the right cut sat in the folder it came from (#2001)."""
+    from core.downloads.soulseek_identity import _duration_fit, match_track
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        batch = download_batches.get(batch_id) or {}
+        if not task or task.get('cached_candidates'):
+            return
+        pool = list(batch.get('preflight_pool') or [])
+    if not pool:
+        return
+    target = {'name': getattr(track, 'name', ''), 'artists': list(getattr(track, 'artists', None) or []),
+              'duration_ms': getattr(track, 'duration_ms', None)}
+    fits = [c for c in pool if match_track(target, c).matches]
+    fits.sort(key=lambda c: _duration_fit(target, c))
+    if not fits:
+        return
+    # the album search never scored these: the identity check above is their
+    # evidence. without a confidence the download path crashed on its log line
+    # and every retry failed ("'TrackResult' object has no attribute
+    # 'confidence'")
+    for candidate in fits:
+        if getattr(candidate, 'confidence', None) is None:
+            try:
+                candidate.confidence = 0.9
+            except AttributeError:
+                pass
+    with tasks_lock:
+        task = download_tasks.get(task_id)
+        if task is not None and not task.get('cached_candidates'):
+            task['cached_candidates'] = fits[:50]
+    logger.info("[Modal Worker] Retry: %d candidate(s) from the album search for task %s",
+                min(len(fits), 50), task_id)
+
+
 def _try_cached_candidates(task_id, batch_id, track, deps):
     """Retry fast path: attempt the already-found candidates before searching.
 
@@ -467,6 +506,13 @@ def _find_owning_sibling(task_id: str, track: SpotifyTrack):
         own_batch = own.get('batch_id')
         if not own_batch:
             return None, None
+        # a forced re-download or an upgrade asked for a new copy on purpose.
+        # another batch's copy is the one it's meant to replace.
+        if (download_batches.get(own_batch) or {}).get('force_download_all'):
+            return None, None
+        from core.imports.upgrade_intent import CONTEXT_KEY as _UPGRADE_INTENT_KEY
+        if own.get(_UPGRADE_INTENT_KEY):
+            return None, None
         mine = own.get('track_info')
         if not isinstance(mine, dict):
             mine = {
@@ -633,8 +679,10 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                     # Inherit the owner's outcome. Without this the row shows a
                     # blank quality and an empty verification badge, which reads
                     # as "this one failed" for a track that is present and fine.
+                    # final_file_path too: the playlist folder, its M3U and
+                    # the post-download sync read it for this playlist's track
                     for _field in ('verification_status', 'quality', 'file_path',
-                                   'download_source'):
+                                   'final_file_path', 'download_source'):
                         if _owner.get(_field) is not None:
                             _row[_field] = _owner[_field]
             if batch_id:
@@ -665,6 +713,11 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
             cached_first = is_quarantine_retry or bool(_t.get('_slow_fallback_source_key'))
             if not cached_first:
                 _t.pop('searched_queries', None)
+        if is_quarantine_retry:
+            try:
+                _seed_from_preflight_pool(task_id, batch_id, track)
+            except Exception as _seed_err:  # noqa: BLE001 - a missed seed just means a fresh search
+                logger.debug("preflight pool seed failed for %s: %s", task_id, _seed_err)
         if cached_first and _try_cached_candidates(task_id, batch_id, track, deps):
             if getattr(deps, 'evaluate_candidates', None) is not None:
                 from core.downloads import decision_log
@@ -1100,6 +1153,15 @@ def _download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWork
                 download_tasks[task_id]['status'] = 'not_found'
                 _diag_summary = ' | '.join(search_diagnostics) if search_diagnostics else 'no queries attempted'
                 download_tasks[task_id]['error_message'] = f'No match found for "{track_name}" by {artist_name or "Unknown"} after {len(search_queries)} queries. Breakdown: {_diag_summary}'
+                # a file DID download, it was quarantined, and the retry found no
+                # other copy. saying "no match found" hid the file waiting in
+                # quarantine (#2001)
+                _quarantined = download_tasks[task_id].get('last_quarantine_reason')
+                if _quarantined:
+                    download_tasks[task_id]['status'] = 'failed'
+                    download_tasks[task_id]['error_message'] = (
+                        f'Downloaded, but quarantined ({_quarantined}). No other copy passed, '
+                        f'the file is waiting in Downloads, Quarantine.')
                 # Store raw results so the user can review what Soulseek returned
                 if all_raw_results and not download_tasks[task_id].get('cached_candidates'):
                     download_tasks[task_id]['cached_candidates'] = all_raw_results

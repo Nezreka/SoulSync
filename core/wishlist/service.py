@@ -7,7 +7,7 @@ Wishlist Service - High-level service for managing failed download track wishlis
 from typing import Any, Dict, List, Optional
 
 from core.wishlist.payloads import extract_wishlist_track_from_modal_info
-from database.music_database import get_database
+from database.music_database import MusicDatabase, get_database
 from utils.logging_config import get_logger
 
 
@@ -35,7 +35,8 @@ class WishlistService:
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
         quality_profile_id: Optional[int] = None,
-    ) -> bool:
+        detailed: bool = False,
+    ):
         """
         Add a failed track from a download modal to the wishlist.
 
@@ -43,7 +44,15 @@ class WishlistService:
             track_info: Track info dictionary from modal's permanently_failed_tracks
             source_type: Type of source ('playlist', 'album', 'manual')
             source_context: Additional context (playlist name, album info, etc.)
+            detailed: return the ``add_to_wishlist_detailed`` outcome dict
+                instead of the legacy bool, so a caller can tell "already on
+                the wishlist" or "blocklisted" apart from a real failure.
         """
+        def _not_added(status: str, reason: str):
+            if detailed:
+                return MusicDatabase._wishlist_outcome(status, reason=reason)
+            return False
+
         try:
             # Reject podcasts from music wishlist
             _is_pod = False
@@ -72,13 +81,13 @@ class WishlistService:
                     "Skipping wishlist addition for podcast item: %s",
                     track_info.get("track_name") if isinstance(track_info, dict) else "",
                 )
-                return False
+                return _not_added("rejected", "podcast_not_eligible")
 
             # Extract track data from the modal structure.
             track_data = extract_wishlist_track_from_modal_info(track_info)
             if not track_data:
                 logger.error("Could not extract track data from modal info")
-                return False
+                return _not_added("rejected", "no track data")
 
             # Get failure reason from track_info if available
             failure_reason = track_info.get("failure_reason", "Download failed")
@@ -115,7 +124,9 @@ class WishlistService:
             }
 
             # Add to wishlist via database
-            return self.database.add_to_wishlist(
+            add = (self.database.add_to_wishlist_detailed if detailed
+                   else self.database.add_to_wishlist)
+            return add(
                 spotify_track_data=track_data,
                 failure_reason=failure_reason,
                 source_type=source_type,
@@ -126,7 +137,7 @@ class WishlistService:
 
         except Exception as e:
             logger.error(f"Error adding failed track to wishlist: {e}")
-            return False
+            return _not_added("error", str(e))
 
     def add_track_to_wishlist(
         self,
@@ -138,6 +149,7 @@ class WishlistService:
         profile_id: int = 1,
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
+        quality_profile_explicit: bool = False,
     ) -> bool:
         """
         Directly add a track to the wishlist.
@@ -166,6 +178,7 @@ class WishlistService:
             profile_id=profile_id,
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
+            quality_profile_explicit=quality_profile_explicit,
         )["created"]
 
     def add_track_to_wishlist_detailed(
@@ -178,6 +191,7 @@ class WishlistService:
         profile_id: int = 1,
         user_initiated: bool = False,
         quality_profile_id: Optional[int] = None,
+        quality_profile_explicit: bool = False,
     ) -> Dict[str, Any]:
         """Like :meth:`add_track_to_wishlist` but reports the full outcome.
 
@@ -200,6 +214,7 @@ class WishlistService:
             profile_id=profile_id,
             user_initiated=user_initiated,
             quality_profile_id=quality_profile_id,
+            quality_profile_explicit=quality_profile_explicit,
         )
         return outcome
 
@@ -303,6 +318,8 @@ class WishlistService:
             # settings LIVE via core/quality/selection.py::load_profile_by_id
             # when it needs them — this is only ever the pointer.
             "quality_profile_id": wishlist_track.get("quality_profile_id"),
+            # only a picked profile may pin the imported track (review 5 W2-WD-1)
+            "quality_profile_explicit": wishlist_track.get("quality_profile_explicit") is True,
             "id": track_id,
             "name": track_name,
             "artists": artists,

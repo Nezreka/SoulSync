@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import type { ArtApplyOutcome } from '../-library-v2.api';
 import type { LibraryV2ArtCandidate } from '../-library-v2.types';
 
 import {
@@ -25,6 +26,59 @@ function applyErrorMessage(caught: unknown, subject: 'cover' | 'photo'): string 
     return `The server is taking unusually long to apply this ${subject}. It may still complete — reopen this dialog in a moment to check before retrying.`;
   }
   return caught instanceof Error ? caught.message : `Failed to apply ${subject}`;
+}
+
+/** What the pick reached, in words (3.6.1's picker said so). */
+export function artAppliedMessage(outcome: ArtApplyOutcome, subject: 'cover' | 'photo'): string {
+  const reached = [`${subject === 'cover' ? 'Cover' : 'Photo'} updated in SoulSync`];
+  if (outcome.server_updated) reached.push('on your media server');
+  if (outcome.cover_written) reached.push('as cover.jpg in the album folder');
+  if (outcome.disk_written) reached.push('as artist.jpg in the artist folder');
+  let message = reached.join(', ');
+  if (outcome.disk_skipped) message += `. ${outcome.disk_skipped}`;
+  return message;
+}
+
+function announce(outcome: ArtApplyOutcome, subject: 'cover' | 'photo') {
+  window.showToast?.(artAppliedMessage(outcome, subject), 'success');
+  // the embed retag could not start: the pick stands, the files keep old art
+  if (outcome.embed_warning) window.showToast?.(outcome.embed_warning, 'warning');
+}
+
+/** Paste any image link: 3.6.1's picker had it, for the cover no provider
+ *  found. The server downloads and checks it like any candidate. */
+function PasteImageUrl({
+  subject,
+  disabled,
+  onApply,
+}: {
+  subject: 'cover' | 'photo';
+  disabled: boolean;
+  onApply: (url: string) => void;
+}) {
+  const [url, setUrl] = useState('');
+  const valid = /^https?:\/\/\S+$/i.test(url.trim());
+  return (
+    <form
+      className={styles.previewToolbar}
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (valid && !disabled) onApply(url.trim());
+      }}
+    >
+      <input
+        className={styles.searchInput}
+        type="url"
+        placeholder={`…or paste an image URL for the ${subject}`}
+        aria-label={`Image URL for the ${subject}`}
+        value={url}
+        onChange={(event) => setUrl(event.target.value)}
+      />
+      <button type="submit" className={styles.btnGhost} disabled={!valid || disabled}>
+        Use this URL
+      </button>
+    </form>
+  );
 }
 
 /** Legacy "Change cover" parity (docs §49): candidate covers from Cover Art
@@ -57,8 +111,9 @@ export function AlbumArtPickerModal({
     setBusyUrl(url);
     setError(null);
     try {
-      await applyLibraryV2AlbumArt(albumId, url);
+      const outcome = await applyLibraryV2AlbumArt(albumId, url);
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      announce(outcome, 'cover');
       onClose();
     } catch (caught) {
       // dd28-23: a client-side abort does not cancel the server-side apply —
@@ -85,7 +140,10 @@ export function AlbumArtPickerModal({
     }
   }
 
-  const candidates = optionsQuery.data ?? [];
+  // a candidate whose image never loads drops out (3.6.1 did) instead of
+  // sitting there as an empty tile
+  const [broken, setBroken] = useState<Set<string>>(new Set());
+  const candidates = (optionsQuery.data ?? []).filter((c) => !broken.has(c.url));
 
   return (
     <LibraryToolDialog
@@ -117,11 +175,20 @@ export function AlbumArtPickerModal({
           className={styles.btnGhost}
           title="Refresh — re-query every provider instead of the cached result"
           disabled={optionsQuery.isFetching}
-          onClick={() => setRefreshNonce((n) => n + 1)}
+          onClick={() => {
+            // review 4 R4-E-5: a fresh query gives a failed image another try
+            setBroken(new Set());
+            setRefreshNonce((n) => n + 1);
+          }}
         >
           {optionsQuery.isFetching ? 'Refreshing…' : 'Refresh images'}
         </button>
       </div>
+      <PasteImageUrl
+        subject="cover"
+        disabled={busyUrl !== null || releasing}
+        onApply={(url) => void apply(url)}
+      />
       {error ? <div className={styles.searchError}>{error}</div> : null}
 
       <div className={styles.resultsWrap}>
@@ -144,6 +211,7 @@ export function AlbumArtPickerModal({
                 busy={busyUrl === c.url}
                 disabled={busyUrl !== null || releasing}
                 onPick={() => void apply(c.url)}
+                onBroken={() => setBroken((prev) => new Set(prev).add(c.url))}
               />
             ))}
           </div>
@@ -181,8 +249,9 @@ export function ArtistImagePickerModal({
     setBusyUrl(url);
     setError(null);
     try {
-      await applyLibraryV2ArtistArt(artistId, url);
+      const outcome = await applyLibraryV2ArtistArt(artistId, url);
       await queryClient.invalidateQueries({ queryKey: LIBRARY_V2_QUERY_KEY });
+      announce(outcome, 'photo');
       onClose();
     } catch (caught) {
       // dd28-23: see the matching comment in AlbumArtPickerModal above.
@@ -206,7 +275,8 @@ export function ArtistImagePickerModal({
     }
   }
 
-  const candidates = optionsQuery.data ?? [];
+  const [broken, setBroken] = useState<Set<string>>(new Set());
+  const candidates = (optionsQuery.data ?? []).filter((c) => !broken.has(c.url));
 
   return (
     <LibraryToolDialog
@@ -245,11 +315,20 @@ export function ArtistImagePickerModal({
           className={styles.btnGhost}
           title="Refresh — re-query every provider instead of the cached result"
           disabled={optionsQuery.isFetching}
-          onClick={() => setRefreshNonce((n) => n + 1)}
+          onClick={() => {
+            // review 4 R4-E-5: a fresh query gives a failed image another try
+            setBroken(new Set());
+            setRefreshNonce((n) => n + 1);
+          }}
         >
           {optionsQuery.isFetching ? 'Refreshing…' : 'Refresh images'}
         </button>
       </div>
+      <PasteImageUrl
+        subject="photo"
+        disabled={busyUrl !== null || releasing}
+        onApply={(url) => void apply(url)}
+      />
       {error ? <div className={styles.searchError}>{error}</div> : null}
 
       <div className={styles.resultsWrap}>
@@ -273,6 +352,7 @@ export function ArtistImagePickerModal({
                 busy={busyUrl === c.url}
                 disabled={busyUrl !== null || releasing}
                 onPick={() => void apply(c.url)}
+                onBroken={() => setBroken((prev) => new Set(prev).add(c.url))}
               />
             ))}
           </div>
@@ -288,12 +368,14 @@ function ArtPickerCard({
   busy,
   disabled,
   onPick,
+  onBroken,
 }: {
   candidate: LibraryV2ArtCandidate;
   subject?: 'cover' | 'photo';
   busy: boolean;
   disabled: boolean;
   onPick: () => void;
+  onBroken?: () => void;
 }) {
   return (
     <button
@@ -308,6 +390,7 @@ function ArtPickerCard({
         src={candidate.url}
         alt={`${subject === 'photo' ? 'Photo' : 'Cover'} option from ${candidate.source}`}
         loading="lazy"
+        onError={onBroken}
       />
       <span className={styles.artPickerBadge}>{busy ? 'Applying…' : candidate.source}</span>
     </button>

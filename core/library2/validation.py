@@ -342,11 +342,47 @@ def linked_findings(conn, file):
     return linked_findings_many(conn, [file]).get(file['id'], []) if file else []
 
 
+def album_is_hand_tagged(conn, track_id) -> bool:
+    """one of this track's album's files is one the user tagged by hand.
+    3.6.1 locked the whole album then: the user typed the release, and the
+    service's studio tracklist must not be written over the rest of it"""
+    try:
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                            "AND name='manual_metadata_files'").fetchone():
+            return False
+        from database.music_database import MusicDatabase
+        paths = [r[0] for r in conn.execute(
+            """SELECT f.path FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id
+                WHERE t.album_id=(SELECT album_id FROM lib2_tracks WHERE id=?)
+                  AND COALESCE(f.file_state,'active')<>'deleted'""", (int(track_id),))]
+        keys = sorted({MusicDatabase.manual_path_key(p) for p in paths if p})
+        if not keys:
+            return False
+        return conn.execute(
+            f"SELECT 1 FROM manual_metadata_files WHERE path_key IN ({','.join('?' for _ in keys)}) LIMIT 1",
+            keys).fetchone() is not None
+    except Exception:  # noqa: BLE001 - an unreadable lock never blocks a scan
+        return False
+
+
 def persist_validation(conn, file_id, validation):
     """Called inside the same transaction as file observations; no file writes."""
     file = dict(conn.execute('SELECT * FROM lib2_track_files WHERE id=?', (file_id,)).fetchone())
     findings = linked_findings(conn, file)
     issues = {k: v for k, v in validation['checks'].items() if v in ('missing', 'mismatch')}
+    if issues and file.get('track_id') and album_is_hand_tagged(conn, file['track_id']):
+        # nothing to re-tag on a release the user typed: no finding, and one
+        # filed before goes away rather than wait to be applied
+        issues = {}
+        for finding in findings:
+            if finding.get('finding_type') == 'library_retag' and finding.get('status') == 'pending':
+                conn.execute("UPDATE repair_findings SET status='resolved', user_action='hand_tagged_album', "
+                             "resolved_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                             (finding['id'],))
+        # review 4 R4-B-8: no return here. with no issues left, the file's
+        # other verified findings (cover art, track numbers) still close
+        findings = [f for f in findings if not (
+            f.get('finding_type') == 'library_retag' and f.get('status') == 'pending')]
     current = [f for f in findings if f['details'].get('validation')]
     for finding in current:
         if not issues and finding_verified(conn, finding, [file]):

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .metadata_overrides import project_metadata, project_metadata_many
@@ -94,7 +95,7 @@ def _quality_profile_dict(row: Any) -> Optional[Dict[str, Any]]:
         "id": row["id"],
         "name": row["name"],
         "description": row["description"] if "description" in keys else None,
-        "upgrade_policy": row["upgrade_policy"] or "none",
+        "upgrade_policy": row["upgrade_policy"] or "acceptable",
         "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0) if "upgrade_cutoff_index" in keys else 0,
         "ranked_targets": _ranked(row["ranked_targets"] if "ranked_targets" in keys else None),
         "repair_job_id": row["repair_job_id"] if "repair_job_id" in keys else "quality_upgrade",
@@ -361,6 +362,55 @@ def _source_has_albums(source: str) -> bool:
     return True
 
 
+# the album grid's sorts, written the way an index can hand them back in
+# order: a page is then read off the index instead of sorting every release
+# (review 5 perf). built with the songs sort indexes, off the startup path
+ALBUM_SORT_INDEXES = {
+    "idx_lib2_albums_alpha_order":
+        "lib2_albums({key}, title COLLATE NOCASE, id)",
+    "idx_lib2_albums_year_desc_order":
+        "lib2_albums(COALESCE(year, 0) = 0, year DESC, title COLLATE NOCASE, id)",
+    "idx_lib2_albums_year_asc_order":
+        "lib2_albums(COALESCE(year, 0) = 0, year, title COLLATE NOCASE, id)",
+    "idx_lib2_albums_added_order": "lib2_albums(added_at DESC, id)",
+}
+
+
+def _album_membership(conn) -> str:
+    """The releases the album grid lists, as a WHERE body on ``al``: a live
+    file, or monitoring intent on the release or one of its tracks, inside
+    what this scope may see."""
+    from core.library2.sql_util import intent_profile_id, owned_sql
+    clauses = [f"({owned_sql('album', 'al')} OR {monitored_sql('album', 'al')}=1 OR EXISTS ("
+               "SELECT 1 FROM lib2_tracks wt JOIN lib2_wanted_tracks ww ON ww.track_id=wt.id "
+               f"AND ww.profile_id={intent_profile_id()} AND ww.wanted=1 WHERE wt.album_id=al.id))"]
+    visible = scope_visibility_sql("album", "al")
+    if visible:
+        clauses.append(visible)
+    return " AND ".join(clauses)
+
+
+def _album_page_ids(conn, members: set, frm: str, where: str, order: str,
+                    params: Dict[str, Any], offset: int, limit: int) -> List[int]:
+    """One page of member releases in ``order``, read off the sort index a
+    batch at a time and checked against the member set in Python. Nearly every
+    release is a member, so the first batch is usually the page."""
+    want = offset + limit
+    found: List[int] = []
+    skip, batch = 0, max(want, 100)
+    while len(found) < want:
+        rows = [r[0] for r in conn.execute(
+            f"SELECT al.id {frm}{' WHERE ' + where if where else ''}"
+            f" ORDER BY {order}, al.id LIMIT :batch OFFSET :skip",
+            {**params, "batch": batch, "skip": skip})]
+        found.extend(i for i in rows if i in members)
+        if len(rows) < batch:
+            break
+        skip += batch
+        batch *= 2
+    return found[offset:want]
+
+
 def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str = "all",
                 page: int = 1, limit: int = 75, letter: str = "all",
                 source_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
@@ -376,32 +426,28 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
     # Same membership as the artist list: a live file, or monitoring intent on
     # the release or one of its tracks. An empty release a cleared wish left
     # behind is not part of the library any more.
-    from core.library2.sql_util import intent_profile_id, owned_sql
-    clauses = [f"({owned_sql('album', 'al')} OR {album_monitored}=1 OR EXISTS ("
-               "SELECT 1 FROM lib2_tracks wt JOIN lib2_wanted_tracks ww ON ww.track_id=wt.id "
-               f"AND ww.profile_id={intent_profile_id()} AND ww.wanted=1 WHERE wt.album_id=al.id))"]
-    visible = scope_visibility_sql("album", "al")
-    if visible:
-        clauses.append(visible)
+    from core.library2.sql_util import intent_profile_id
+    membership = _album_membership(conn)
+    filters: List[str] = []
     params: Dict[str, Any] = {}
     if search:
         escaped = (str(search).replace("\\", "\\\\")
                    .replace("%", "\\%").replace("_", "\\_"))
         params["like"] = f"%{escaped}%"
-        clauses.append("(al.title LIKE :like ESCAPE '\\'"
+        filters.append("(al.title LIKE :like ESCAPE '\\'"
                        " OR ar.name LIKE :like ESCAPE '\\')")
     if monitored == "monitored":
-        clauses.append(f"{album_monitored} = 1")
+        filters.append(f"{album_monitored} = 1")
     elif monitored == "unmonitored":
-        clauses.append(f"{album_monitored} = 0")
+        filters.append(f"{album_monitored} = 0")
     if letter and letter != "all":
         # the alphabet bar, by the album's title, same rule as the artists
         from database.music_database import _library_stripped_sql
         stripped = _library_stripped_sql("al.title")
         if letter == "#":
-            clauses.append(f"SUBSTR(UPPER({stripped}),1,1) NOT GLOB '[A-Z]'")
+            filters.append(f"SUBSTR(UPPER({stripped}),1,1) NOT GLOB '[A-Z]'")
         else:
-            clauses.append(f"UPPER(SUBSTR({stripped},1,1)) = UPPER(:letter)")
+            filters.append(f"UPPER(SUBSTR({stripped},1,1)) = UPPER(:letter)")
             params["letter"] = str(letter)[:1]
     from .provider_ids import normalize_provider_name
     source = normalize_provider_name(str(source_filter or "").lstrip("!"))
@@ -416,29 +462,59 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
         if source in ("spotify", "musicbrainz"):
             parts.append(f"COALESCE(al.{source}_id,'') <> ''")
         predicate = "(" + " OR ".join(parts) + ")"
-        clauses.append(f"NOT {predicate}" if str(source_filter).startswith("!") else predicate)
-    where = " AND ".join(clauses)
-    base = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"
-            " ON ar.id = al.primary_artist_id WHERE " + where)
-    total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+        filters.append(f"NOT {predicate}" if str(source_filter).startswith("!") else predicate)
+    order = _ALBUM_SORTS.get(sort, _ALBUM_SORTS["title"])
+    offset = (page - 1) * limit
+    joined = ("FROM lib2_albums al LEFT JOIN lib2_artists ar"
+              " ON ar.id = al.primary_artist_id")
+    # membership walks every release (~0.7 s on a 71k-release library), and
+    # the count and the page each walked it. the member ids are kept until a
+    # table they come from changes (core.library2.member_version), so a page
+    # is a count of that list and a walk down the sort index (review 5 perf)
+    from core.library2.member_version import cached_member_ids
+    member_ids = cached_member_ids(conn, f"SELECT al.id FROM lib2_albums al WHERE {membership}")
+    if member_ids is not None:
+        members = set(member_ids)
+        # the artist join only when a filter reads it, so the walk stays on
+        # the album index
+        frm = joined if search else "FROM lib2_albums al"
+        where = " AND ".join(filters)
+        if where:
+            total = sum(1 for r in conn.execute(f"SELECT al.id {frm} WHERE {where}", params)
+                        if r[0] in members)
+        else:
+            total = len(members)
+        page_ids = _album_page_ids(conn, members, frm, where, order, params, offset, limit)
+        page_sql = (f"SELECT al.id, al.title, al.album_type, al.year, al.image_url, al.added_at,"
+                    f" al.spotify_id, al.musicbrainz_id, al.external_ids,"
+                    f" {album_monitored} AS monitored,"
+                    f" COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,"
+                    f" ar.name AS artist_name {joined}"
+                    f" WHERE al.id IN (SELECT value FROM json_each(:page_ids))")
+        page_params: Dict[str, Any] = {"page_ids": json.dumps(page_ids)}
+    else:
+        # no counter (a database without it): membership in the query, as before
+        base = f"{joined} WHERE " + " AND ".join([membership, *filters])
+        total = conn.execute(f"SELECT COUNT(*) {base}", params).fetchone()[0]
+        page_ids = None
+        page_sql = (f"SELECT al.id, al.title, al.album_type, al.year, al.image_url, al.added_at,"
+                    f" al.spotify_id, al.musicbrainz_id, al.external_ids,"
+                    f" {album_monitored} AS monitored,"
+                    f" COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,"
+                    f" ar.name AS artist_name {base}"
+                    f" ORDER BY {order}, al.id LIMIT :limit OFFSET :offset")
+        page_params = {**params, "limit": limit, "offset": offset}
     track_monitored = monitored_sql("track", "t")
     tf_owner = owner_clause(column="tf.owner_profile_id")
     rows = conn.execute(
         f"""
-        WITH page_albums AS MATERIALIZED (
-            SELECT al.id, al.title, al.album_type, al.year, al.image_url, al.added_at,
-                   al.spotify_id, al.musicbrainz_id, al.external_ids,
-                   {album_monitored} AS monitored,
-                   COALESCE(ar.canonical_artist_id, ar.id) AS artist_id,
-                   ar.name AS artist_name
-              {base}
-             ORDER BY {_ALBUM_SORTS.get(sort, _ALBUM_SORTS["title"])}, al.id
-             LIMIT :limit OFFSET :offset
-        ),
+        WITH page_albums AS MATERIALIZED ({page_sql}),
         stats AS (
             SELECT t.album_id,
                    COUNT(DISTINCT CASE
-                       WHEN COALESCE(w.wanted, {track_monitored})=1 OR tf.id IS NOT NULL
+                       WHEN COALESCE(w.wanted, {track_monitored})=1
+                         -- a file the user deleted is no longer part of the total
+                         OR (tf.id IS NOT NULL AND COALESCE(tf.file_state, 'active') <> 'deleted')
                        THEN t.id END) AS track_count,
                    COUNT(DISTINCT CASE
                        WHEN tf.id IS NOT NULL
@@ -456,8 +532,11 @@ def list_albums(conn, *, search: str = "", sort: str = "title", monitored: str =
                COALESCE(s.tracks_present, 0) AS tracks_present
           FROM page_albums pa LEFT JOIN stats s ON s.album_id = pa.id
         """,
-        {**params, "limit": limit, "offset": (page - 1) * limit},
+        page_params,
     ).fetchall()
+    if page_ids is not None:
+        position = {album_id: n for n, album_id in enumerate(page_ids)}
+        rows = sorted(rows, key=lambda r: position[r["id"]])
     albums = []
     for r in rows:
         count, present = int(r["track_count"] or 0), int(r["tracks_present"] or 0)
@@ -576,6 +655,26 @@ def ensure_song_sort_indexes(conn) -> int:
     return made
 
 
+def ensure_album_sort_indexes(conn) -> int:
+    """Create the album grid's sort indexes that are missing; how many were
+    made. Never raises: without them a page sorts every release, as before."""
+    from database.music_database import _library_sort_key_sql
+    made = 0
+    for name, target in ALBUM_SORT_INDEXES.items():
+        try:
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                            (name,)).fetchone():
+                continue
+            # replace, not format: the A-Z key's strip set holds braces
+            target = target.replace("{key}", _library_sort_key_sql("title"))
+            conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {target}")
+            conn.commit()
+            made += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("album sort index %s not built (retried next start): %s", name, exc)
+    return made
+
+
 def song_sort_indexes_ready(conn) -> bool:
     """Every Songs sort index exists in this database (kept once true)."""
     db_file = conn.execute("PRAGMA database_list").fetchone()[2]
@@ -665,9 +764,13 @@ def list_songs(conn, *, search: str = "", letter: str = "all", sort: str = "titl
         exts = " OR ".join(f"LOWER(owned_f.path) LIKE '%.{ext}'" for ext in _LOSSLESS_EXTS)
         where.append(f"EXISTS (SELECT 1 {_song_files_sql('t')} AND ({exts}))")
     elif quality == "upgradable":
-        from .wanted_views import iter_cutoff_unmet
+        # the Cutoff Unmet tab's cached list: evaluating the whole library
+        # (~19 s at 300k) for every page, sort and letter was the cost
+        # (review 5 R5-G-2)
+        from .wanted_views import _cutoff_unmet_cached
         params["unmet"] = json.dumps(sorted({
-            int(row["track_id"]) for row in iter_cutoff_unmet(conn, profile_id=profile_id)}))
+            int(row["track_id"])
+            for row in _cutoff_unmet_cached(conn, search="", profile_id=profile_id)}))
         where.append("t.id IN (SELECT value FROM json_each(:unmet))")
     order = _SONG_SORTS.get(sort, _SONG_SORTS["title"]).replace("{title}", _alpha_key("t.title"))
     q = str(search or "").strip()
@@ -766,6 +869,9 @@ def song_rows(conn, track_ids: List[int], *, per_file: bool = False) -> List[Dic
             "id": f"{r['id']}:{r['file_id']}" if per_file else r["id"],
             "track_id": r["id"],
             "file_ids": [r["file_id"]] if per_file else _json_list(r["file_ids"]),
+            # the file this row shows (a list row: the track's best file); a
+            # row's delete acts on it alone, as 3.6.1's one-row-one-file did
+            "file_id": r["file_id"],
             "title": r["title"] or "",
             # a compilation's row names its own artist; the album artist is the fallback
             "artist_name": r["track_artist"] or r["artist_name"] or "",
@@ -1139,6 +1245,9 @@ def _guest_track_counts(conn, group, album_ids) -> Dict[str, int]:
     if not album_ids:
         return {"guest_track_count": 0, "guest_release_count": 0}
     marks = ",".join("?" for _ in group)
+    # the caller's library, like every other file count on the page (#1199,
+    # review 5 W2-WF-3)
+    f_owner = owner_clause(column="f.owner_profile_id")
     row = conn.execute(
         f"""SELECT COUNT(DISTINCT t.id), COUNT(DISTINCT t.album_id)
               FROM lib2_track_artists x
@@ -1147,7 +1256,7 @@ def _guest_track_counts(conn, group, album_ids) -> Dict[str, int]:
                AND t.album_id IN (SELECT value FROM json_each(?))
                AND EXISTS (SELECT 1 FROM lib2_track_files f
                             WHERE f.track_id = t.id
-                              AND COALESCE(f.file_state, 'active') = 'active')""",
+                              AND COALESCE(f.file_state, 'active') = 'active'{f_owner})""",
         (*[int(g) for g in group], json.dumps([int(a) for a in album_ids])),
     ).fetchone()
     return {"guest_track_count": int(row[0] or 0), "guest_release_count": int(row[1] or 0)}
@@ -1162,8 +1271,9 @@ def _own_release_ids(conn, album_rows, group) -> set:
     The album junction can't tell: it files every track artist who isn't the
     release's main artist as "featured", the co-headliner of a collaboration
     and a one-verse guest alike. The track credits can. A release is theirs
-    when they are its main artist, or the lead credit on at least half its
-    tracks (a collaboration). One the library holds no tracks of yet (a
+    when they are its main artist, or the lead credit on more than half its
+    tracks (a collaboration). Exactly half is a split single: one side each,
+    and it stays with the artist credited first. One the library holds no tracks of yet (a
     provider discography entry) goes by its album credit."""
     group = [int(g) for g in group]
     own = {int(r["id"]) for r in album_rows if r["primary_artist_id"] in group}
@@ -1186,7 +1296,9 @@ def _own_release_ids(conn, album_rows, group) -> set:
         led[int(row["album_id"])] = (int(row["total"] or 0), int(row["led"] or 0))
     for album_id in rest:
         total, lead = led.get(album_id, (0, 0))
-        if total and lead * 2 >= total:
+        # more than half: a split single, one side each, belongs to the
+        # artist it is credited to first, and appears on the other (#2003)
+        if total and lead * 2 > total:
             own.add(album_id)
         elif not total and conn.execute(
                 f"SELECT 1 FROM lib2_album_artists WHERE album_id=? AND artist_id IN ({marks})",
@@ -1255,6 +1367,14 @@ def _track_artists_many(
             "user_overrides": overrides,
         })
     return result
+
+
+# a download's file name: what follows the last slash or backslash of its
+# path (rtrim drops every trailing character that is not one). indexed as
+# idx_td_file_name, so it must stay this exact expression
+TRACK_DOWNLOAD_FILE_NAME_SQL = (
+    "substr(file_path, length(rtrim(file_path,"
+    " replace(replace(file_path, '/', ''), '\\', ''))) + 1)")
 
 
 def _download_provenance_for_path(conn, path: Optional[str], *,
@@ -1383,9 +1503,10 @@ def _download_provenance_many(
         params.extend(value.lower() if lower else value for value in values)
 
     _in("file_path", paths)
-    for filename in filenames:
-        predicates.append("(file_path LIKE ? OR file_path LIKE ?)")
-        params.extend((f"%/{filename}", f"%\\{filename}"))
+    # the file name, through its index. one "LIKE '%/name'" pair per track
+    # read the whole history once per track (0.96 s for a 468-track album on
+    # the 300k copy, review 5 perf); the match below wants the exact name
+    _in(TRACK_DOWNLOAD_FILE_NAME_SQL, filenames)
     _in("spotify_track_id", _values("spotify_id"))
     _in("musicbrainz_recording_id", _values("musicbrainz_id"))
     _in("isrc", _values("isrc"))
@@ -1526,6 +1647,48 @@ def _file_playlists_many(conn, file_ids) -> Dict[int, List[str]]:
     return found
 
 
+def _active_media_server() -> str:
+    try:
+        from core.settings import config_manager
+        return str(config_manager.get_active_media_server() or "").strip().lower()
+    except Exception:  # noqa: BLE001 - no server known: the 3.6.1 id still answers
+        return ""
+
+
+def _server_stream_ids_many(conn, tracks: List[Any]) -> Dict[int, Any]:
+    """The id the ACTIVE media server knows each track by: its mapping on
+    that server, then the row's own server id when it came from that
+    server, then the 3.6.1 id (core/search/library_check's order).
+
+    the 3.6.1 id is whatever server the old row came from, frozen at the
+    upgrade: a plex ratingKey after a move to navidrome, or a pre-rekey
+    navidrome id. handed out as the stream id it played a dead or foreign
+    id although the mapping held the right one. review 5 R5-X3-3."""
+    active = _active_media_server()
+    mapped: Dict[int, Any] = {}
+    ids = sorted({int(t["id"]) for t in tracks})
+    if active and ids:
+        try:
+            for row in conn.execute(
+                    "SELECT entity_id, server_id FROM lib2_media_server_mappings "
+                    "WHERE entity_type='track' AND server_source=? "
+                    "AND entity_id IN (SELECT value FROM json_each(?)) "
+                    "ORDER BY entity_id, server_library_id",
+                    (active, json.dumps(ids))).fetchall():
+                if row[1]:
+                    mapped.setdefault(int(row[0]), row[1])
+        except sqlite3.OperationalError:  # a schema without mappings
+            pass
+    result: Dict[int, Any] = {}
+    for t in tracks:
+        keys = set(t.keys())
+        own = (t["server_id"] if active and "server_id" in keys and "server_source" in keys
+               and str(t["server_source"] or "").strip().lower() == active else None)
+        legacy = t["legacy_track_id"] if "legacy_track_id" in keys else None
+        result[int(t["id"])] = mapped.get(int(t["id"])) or own or legacy
+    return result
+
+
 def _serialize_track(
     conn,
     t,
@@ -1539,8 +1702,11 @@ def _serialize_track(
     linked_from: Any = _NOT_LOADED,
     findings: Any = None,
     playlists: Optional[Dict[int, List[str]]] = None,
+    server_track_id: Any = _NOT_LOADED,
 ) -> Dict[str, Any]:
     """Build a track dict with linked artists, primary file, and computed status."""
+    if server_track_id is _NOT_LOADED:
+        server_track_id = _server_stream_ids_many(conn, [t]).get(int(t["id"]))
     if file_row is _NOT_LOADED:
         from core.library2.track_files import primary_file_row
         file_row = primary_file_row(conn, t["id"])
@@ -1669,9 +1835,8 @@ def _serialize_track(
         "id": t["id"],
         "lib2_track_id": t["id"],
         "legacy_track_id": t["legacy_track_id"] if "legacy_track_id" in keys else None,
-        # Legacy ids originate from the media-server-backed tracks table and
-        # are therefore also the only safe server stream id available here.
-        "server_track_id": t["legacy_track_id"] if "legacy_track_id" in keys else None,
+        # the active server's own id for it, see _server_stream_ids_many
+        "server_track_id": server_track_id,
         **pick(effective, "title", "track_number", "disc_number", "duration", "bpm"),
         "explicit": (bool(effective["explicit"]) if effective["explicit"] is not None else None),
         "style": effective["style"],
@@ -1757,6 +1922,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
         artists,
     )
     media_sources = _media_server_sources_many(conn, "track", track_ids)
+    stream_ids = _server_stream_ids_many(conn, tracks)
     from core.library2.validation import linked_findings_many
     findings_by_file = linked_findings_many(conn, [*files.values(), *borrowed_files.values()])
     playlists_by_file = _file_playlists_many(
@@ -1776,6 +1942,7 @@ def _serialize_tracks(conn, tracks: List[Any], album=None) -> List[Dict[str, Any
             media_server_sources=media_sources.get(int(track["id"]), []),
             findings=findings_by_file.get((files.get(int(track['id'])) or _borrowed_row(links, borrowed_files, int(track['id'])) or {}).get('id'), []),
             playlists=playlists_by_file,
+            server_track_id=stream_ids.get(int(track["id"])),
         )
         for track in tracks
     ]
@@ -2101,8 +2268,9 @@ def track_versions(conn, track_id: int) -> Optional[List[Dict[str, Any]]]:
         (int(track_id),),
     ).fetchall()
     playlists_by_file = _file_playlists_many(conn, [row["id"] for row in rows])
+    stream_id = _server_stream_ids_many(conn, [t]).get(int(t["id"]))
     versions = [_serialize_track(conn, t, album, file_row=dict(row), linked_from=None,
-                                 playlists=playlists_by_file)
+                                 playlists=playlists_by_file, server_track_id=stream_id)
                 for row in rows]
     _apply_quality_verdicts(conn, versions)
     return versions

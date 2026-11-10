@@ -44,8 +44,27 @@ SOURCES = ('deezer', 'spotify', 'itunes', 'musicbrainz', 'discogs',
 
 
 def _norm(name: str) -> str:
-    """Loose name key — lowercased, whitespace-collapsed."""
-    return ' '.join((name or '').lower().split())
+    """Loose name key: case, accents, punctuation and spaces folded.
+
+    JAY-Z and Jay Z, AC/DC and AC DC, Beyoncé and Beyonce are one artist
+    spelled two ways by two servers, and share an id rightly. this runs on
+    its own at every upgrade import now, so a looser key than "lowercase"
+    is what keeps it from clearing a real id.
+    """
+    import unicodedata
+    from core.worker_utils import normalize_artist_name
+    folded = unicodedata.normalize('NFKD', name or '')
+    # review 5 R5-H-4: modifier letters (the okina, U+02BB) count as word
+    # characters, so one name spelled with an okina and with an apostrophe
+    # read as two artists and both lost a correct id. drop them
+    folded = ''.join(ch for ch in folded if not unicodedata.combining(ch)
+                     and unicodedata.category(ch) != 'Lm')
+    words = normalize_artist_name(folded).split()
+    # "The Notorious B.I.G." and "Notorious B.I.G." are one artist, and
+    # "&" is already gone, so "and" can't tell two names apart either
+    if len(words) > 1 and words[0] == 'the':
+        words = words[1:]
+    return ''.join(w for w in words if w != 'and')
 
 
 def find_corrupt_clusters(database: Any) -> list[dict]:
@@ -69,7 +88,9 @@ def find_corrupt_clusters(database: Any) -> list[dict]:
             for sid, aid, name in rows:
                 by_id.setdefault(str(sid), []).append((aid, name))
             for sid, members in by_id.items():
-                if len(members) > 1 and len({_norm(n) for _, n in members}) > 1:
+                keys = {_norm(n) for _, n in members}
+                # a name that folds to nothing can't be compared: keep the id
+                if len(members) > 1 and len(keys) > 1 and '' not in keys:
                     clusters.append({
                         'source': source,
                         'id_column': id_col,

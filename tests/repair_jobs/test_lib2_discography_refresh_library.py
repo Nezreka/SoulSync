@@ -237,8 +237,13 @@ def _auto_add_case(tmp_path, monkeypatch, *, auto_add, inserted=True):
         {**job._settings(SimpleNamespace(config_manager=None)), "auto_add_to_wishlist": auto_add},
         result)
     with db._get_connection() as conn:
-        monitored = conn.execute("SELECT monitored FROM lib2_albums WHERE id=?",
-                                 (album_id,)).fetchone()[0]
+        # the owner's (profile 3's) album rule, not the shared column (P2D-6)
+        rule = conn.execute("SELECT monitored FROM lib2_monitor_rules WHERE entity_type='album'"
+                            " AND entity_id=? AND profile_id=3", (album_id,)).fetchone()
+        shared = conn.execute("SELECT monitored FROM lib2_albums WHERE id=?",
+                              (album_id,)).fetchone()[0]
+    assert shared == 0
+    monitored = rule[0] if rule else 0
     return album_id, calls, created, result, monitored
 
 
@@ -283,3 +288,30 @@ def test_a_saved_3_6_1_auto_add_carries_to_the_refresh(tmp_path):
     assert settings["auto_add_to_wishlist"] is True
     assert settings["artists"] == "library"
     assert Lib2DiscographyRefreshJob.default_settings["auto_add_to_wishlist"] is False
+
+
+def test_an_own_library_approval_never_wants_it_for_the_shared_library(tmp_path, monkeypatch):
+    """third #1062 review P2D-6: approving a back-catalogue release for
+    profile 3 set the shared album's monitored flag. a failed tracklist then
+    retried into the admin's wishlist and downloaded into the shared library"""
+    from core.library2.discography import _owner_retry_albums, approve_release
+
+    db = _db(tmp_path)
+    with db._get_connection() as conn:
+        album_id = lib2_seed.album(conn, "Kid Artist", "Second Album", origin="discography",
+                                   monitored=0)
+        artist_id = _id(conn, "Kid Artist")
+        conn.commit()
+    monkeypatch.setattr("core.library2.discography.auto_monitor_releases",
+                        lambda *_a, **_k: 0)
+    approve_release(db, None, album_id, profile_id=3)
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT monitored FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0] == 0
+        rule = conn.execute("SELECT monitored FROM lib2_monitor_rules WHERE entity_type='album'"
+                            " AND entity_id=? AND profile_id=3", (album_id,)).fetchone()
+        assert rule is not None and rule[0] == 1
+        conn.execute("UPDATE lib2_albums SET tracklist_status='failed', tracklist_retry_at=NULL"
+                     " WHERE id=?", (album_id,))
+        conn.commit()
+    # the retry is the owner's
+    assert _owner_retry_albums(db, artist_id) == {3: [album_id]}

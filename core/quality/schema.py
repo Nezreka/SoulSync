@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS quality_profiles (
     fallback_enabled INTEGER NOT NULL DEFAULT 1,
     search_mode TEXT NOT NULL DEFAULT 'priority',
     rank_candidates_by_quality INTEGER NOT NULL DEFAULT 0,
-    upgrade_policy TEXT NOT NULL DEFAULT 'none', -- 'none'|'acceptable'|'until_cutoff'|'until_top'
+    upgrade_policy TEXT NOT NULL DEFAULT 'acceptable', -- 'none'|'acceptable'|'until_cutoff'|'until_top'
     upgrade_cutoff_index INTEGER NOT NULL DEFAULT 0,
     release_import_mode TEXT NOT NULL DEFAULT 'requested_tracks',
     acoustid_required INTEGER NOT NULL DEFAULT 0,
@@ -98,7 +98,7 @@ _ADDED_COLUMNS = (
     ("quality_profiles", "release_import_mode",
      "ALTER TABLE quality_profiles ADD COLUMN release_import_mode TEXT NOT NULL DEFAULT 'requested_tracks'"),
     ("quality_profiles", "upgrade_policy",
-     "ALTER TABLE quality_profiles ADD COLUMN upgrade_policy TEXT NOT NULL DEFAULT 'none'"),
+     "ALTER TABLE quality_profiles ADD COLUMN upgrade_policy TEXT NOT NULL DEFAULT 'acceptable'"),
     ("quality_profiles", "upgrade_cutoff_index",
      "ALTER TABLE quality_profiles ADD COLUMN upgrade_cutoff_index INTEGER NOT NULL DEFAULT 0"),
     ("quality_profiles", "acoustid_required",
@@ -171,13 +171,45 @@ def _seed_quality_profiles(cursor: Any) -> None:
              repair_job_id, repair_settings, is_default)
         VALUES
             (1, 'Balanced', 'Lossless preferred, high-quality lossy accepted.',
-             ?, 1, 'priority', 0, 'none', 0, 'quality_upgrade', '{}', 1),
+             ?, 1, 'priority', 0, 'acceptable', 0, 'quality_upgrade', '{}', 1),
             (2, 'Upgrade until top quality', 'Keep proposing upgrades until the first ranked target is reached.',
              ?, 1, 'best_quality', 1, 'until_cutoff', 0, 'quality_upgrade',
              '{"require_top_target": true}', 0)
         """,
         (_DEFAULT_RANKED_TARGETS, _TOP_RANKED_TARGETS),
     )
+
+
+_UPGRADE_DEFAULT_MARKER = "_quality_upgrade_default_restored"
+
+
+def _restore_default_upgrade_policy(cursor) -> None:
+    """once: a profile SoulSync made itself goes back to "acceptable".
+
+    library v2 seeded and migrated profiles with "none" (never replace a file
+    below the profile), so a fresh install never upgraded anything. 3.6.1's
+    default was "acceptable". only rows a seed or migration wrote and nobody
+    edited after (a save bumps updated_at), so a "none" a user picked stays.
+    """
+    if cursor.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+                      (_UPGRADE_DEFAULT_MARKER,)).fetchone():
+        return
+    try:
+        cursor.execute(
+            """UPDATE quality_profiles SET upgrade_policy = 'acceptable'
+                WHERE upgrade_policy = 'none'
+                  AND (description IN ('Lossless preferred, high-quality lossy accepted.',
+                                       'Migrated from your previous global Quality settings',
+                                       'Migrated from Library v2')
+                       OR description LIKE 'Migrated: your previous install had quality filtering%')
+                  AND (updated_at IS NULL OR created_at IS NULL
+                       OR (julianday(updated_at) - julianday(created_at)) * 86400 <= 300)""")
+        if cursor.rowcount:
+            logger.info("Restored upgrades on %d default quality profile(s)", cursor.rowcount)
+        cursor.execute(f"CREATE TABLE {_UPGRADE_DEFAULT_MARKER} "
+                       "(applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    except Exception as e:  # noqa: BLE001 - never blocks startup
+        logger.debug("default upgrade policy restore skipped: %s", e)
 
 
 def ensure_quality_profiles_schema(connection: Any) -> None:
@@ -201,6 +233,7 @@ def ensure_quality_profiles_schema(connection: Any) -> None:
             except Exception as e:  # noqa: BLE001
                 logger.debug("column migration %s.%s: %s", table, column, e)
     _seed_quality_profiles(cursor)
+    _restore_default_upgrade_policy(cursor)
     # Removed-column cleanup for installs that ran an intermediate version.
     for table, column in _DROPPED_COLUMNS:
         cursor.execute(f"PRAGMA table_info({table})")

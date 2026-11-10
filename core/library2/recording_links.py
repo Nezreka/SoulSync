@@ -200,6 +200,7 @@ def prefer_album_home(conn: Any) -> Dict[str, int]:
     a duplicate finding, not a re-home. Idempotent; does not commit.
     """
     key = _title_key_sql("{col}", ensure_sql_helpers(conn))
+    ensure_home_settled_table(conn)
     # only recordings more than one track shares can have another home: the
     # join enumerated every file's recording first (~8s on 311k files, every
     # start), now ~4.5s for the same rows
@@ -228,6 +229,19 @@ def prefer_album_home(conn: Any) -> Dict[str, int]:
          WHERE COALESCE(f.file_state,'active')
                NOT IN ('missing_confirmed','deleted')
            AND {key.format(col='dst.title')} = {key.format(col='src.title')}
+           -- the user's word stands: a file they pinned or moved, a file
+           -- this pass already re-homed once, a link they reversed, a copy
+           -- they deleted there, a track they unmonitored themselves
+           AND COALESCE(f.primary_manual, 0) = 0
+           AND NOT EXISTS (SELECT 1 FROM lib2_home_settled_files h WHERE h.file_id = f.id)
+           AND COALESCE(dst.canonical_track_id, 0) <> src.id
+           AND NOT EXISTS (
+               SELECT 1 FROM lib2_track_files gone
+                WHERE gone.track_id = dst.id AND gone.file_state = 'deleted')
+           AND NOT EXISTS (
+               SELECT 1 FROM lib2_monitor_rules r
+                WHERE r.entity_type = 'track' AND r.entity_id = dst.id
+                  AND r.monitored = 0 AND r.provenance = 'user_explicit')
            AND NOT EXISTS (
                SELECT 1 FROM lib2_track_files own
                 WHERE own.track_id = dst.id
@@ -256,7 +270,21 @@ def prefer_album_home(conn: Any) -> Dict[str, int]:
             " WHERE id=?",
             (move["to_track_id"], file_id),
         )
+        # once per file: a later move back is a decision, not a drift
+        settle_file_home(conn, file_id)
     return {"rehomed": len(moves), "considered": len(rows)}
+
+
+def ensure_home_settled_table(conn: Any) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS lib2_home_settled_files "
+                 "(file_id INTEGER PRIMARY KEY, settled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+
+
+def settle_file_home(conn: Any, file_id: int) -> None:
+    """this file's track is decided (the re-home pass placed it, or the user
+    moved it): prefer_album_home leaves it alone from now on"""
+    ensure_home_settled_table(conn)
+    conn.execute("INSERT OR IGNORE INTO lib2_home_settled_files(file_id) VALUES(?)", (int(file_id),))
 
 
 def reference_owner(conn: Any, track_id: int) -> Optional[Dict[str, Any]]:

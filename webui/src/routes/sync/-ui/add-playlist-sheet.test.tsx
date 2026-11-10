@@ -12,14 +12,12 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SYNC_TABS } from '../-sync.shell';
-import { ADD_PLAYLIST_ACCOUNTS, AddPlaylistSheet } from './add-playlist-sheet';
+import { ADD_PLAYLIST_ACCOUNTS, ADD_PLAYLIST_OTHER, AddPlaylistSheet } from './add-playlist-sheet';
 
 function renderSheet() {
   const onRoute = vi.fn();
   const onClose = vi.fn();
-  const { unmount } = render(
-    <AddPlaylistSheet anchor={{ top: 80, left: 400 }} onRoute={onRoute} onClose={onClose} />,
-  );
+  const { unmount } = render(<AddPlaylistSheet onRoute={onRoute} onClose={onClose} />);
   const input = screen.getByLabelText('Paste a link') as HTMLInputElement;
   const type = (value: string) => fireEvent.change(input, { target: { value } });
   const add = () => fireEvent.click(screen.getByRole('button', { name: 'Add' }));
@@ -133,7 +131,7 @@ describe('the other two ways in', () => {
 
   it('the file route opens the importer', () => {
     const { onRoute } = renderSheet();
-    fireEvent.click(screen.getByRole('button', { name: /Import CSV/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Import a file/ }));
     expect(onRoute).toHaveBeenCalledWith('import-file');
     expect(TAB_IDS).toContain('import-file');
   });
@@ -146,9 +144,7 @@ describe('dismissal', () => {
   it('closes from the ×, from an outside click and from Escape — not from itself', () => {
     const onRoute = vi.fn();
     const onClose = vi.fn();
-    const { container } = render(
-      <AddPlaylistSheet anchor={{ top: 80, left: 400 }} onRoute={onRoute} onClose={onClose} />,
-    );
+    const { container } = render(<AddPlaylistSheet onRoute={onRoute} onClose={onClose} />);
 
     // A click inside must not dismiss it.
     fireEvent.click(screen.getByRole('dialog'));
@@ -168,5 +164,50 @@ describe('dismissal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(onClose).toHaveBeenCalledTimes(3);
     expect(container).toBeTruthy();
+  });
+});
+
+describe('the Add sheet reaches every source, and starts fresh', () => {
+  it('opens Beatport, which lost its tab', () => {
+    const onRoute = vi.fn();
+    render(<AddPlaylistSheet onRoute={onRoute} onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /Beatport/ }));
+    expect(onRoute).toHaveBeenCalledWith('beatport');
+  });
+
+  it('every tile names a REAL tab', () => {
+    for (const s of [...ADD_PLAYLIST_ACCOUNTS, ...ADD_PLAYLIST_OTHER]) {
+      expect(
+        SYNC_TABS.some((t) => t.id === s.tab),
+        s.tab,
+      ).toBe(true);
+    }
+  });
+
+  it('New playlist and New request list start one, then close', () => {
+    const onNew = vi.fn();
+    const onClose = vi.fn();
+    render(<AddPlaylistSheet onRoute={vi.fn()} onNew={onNew} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: /New playlist/ }));
+    expect(onNew).toHaveBeenLastCalledWith('user');
+    fireEvent.click(screen.getByRole('button', { name: /New request list/ }));
+    expect(onNew).toHaveBeenLastCalledWith('requests');
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers no Start fresh when the page cannot make one', () => {
+    render(<AddPlaylistSheet onRoute={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: /New playlist/ })).toBeNull();
+  });
+});
+
+describe('every source wears its own logo', () => {
+  it('draws the brand mark, not a letter', () => {
+    const { container } = render(<AddPlaylistSheet onRoute={vi.fn()} onClose={vi.fn()} />);
+    for (const s of [...ADD_PLAYLIST_ACCOUNTS, ...ADD_PLAYLIST_OTHER]) {
+      const tile = screen.getByRole('button', { name: new RegExp(s.label) });
+      expect(tile.querySelector('.tab-icon'), s.tab).not.toBeNull();
+    }
+    expect(container.querySelector('.tab-icon.ytmusic-icon')).not.toBeNull();
   });
 });

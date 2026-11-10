@@ -292,7 +292,7 @@ def merge_rules_into(conn, entity_type: str, source_id: int, target_id: int) -> 
             " WHERE entity_type=? AND entity_id=?", (entity_type, int(source_id))).fetchall():
         rule_id, profile_id, monitored, provenance = row[0], row[1], row[2], row[3]
         existing = conn.execute(
-            "SELECT id, provenance FROM lib2_monitor_rules"
+            "SELECT id, provenance, monitored FROM lib2_monitor_rules"
             " WHERE entity_type=? AND entity_id=? AND profile_id=?",
             (entity_type, int(target_id), profile_id)).fetchone()
         if existing is None:
@@ -300,10 +300,19 @@ def merge_rules_into(conn, entity_type: str, source_id: int, target_id: int) -> 
                          (int(target_id), rule_id))
             taken += 1
             continue
-        if _PROVENANCE_RANK.get(provenance, 1) > _PROVENANCE_RANK.get(existing[1], 1):
+        rank, their_rank = _PROVENANCE_RANK.get(provenance, 1), _PROVENANCE_RANK.get(existing[1], 1)
+        if rank > their_rank:
             conn.execute(
                 "UPDATE lib2_monitor_rules SET monitored=?, provenance=?,"
                 " updated_at=CURRENT_TIMESTAMP WHERE id=?", (monitored, provenance, existing[0]))
+            taken += 1
+        elif (rank == their_rank and rank < _PROVENANCE_RANK[PROVENANCE_USER]
+              and monitored and not existing[2]):
+            # review 4 R4-A-8: two derived rules that disagree (each server's
+            # copy imported its own). which row survives the merge is
+            # arbitrary, so it must not decide: wanted stays wanted
+            conn.execute("UPDATE lib2_monitor_rules SET monitored=1,"
+                         " updated_at=CURRENT_TIMESTAMP WHERE id=?", (existing[0],))
             taken += 1
         conn.execute("DELETE FROM lib2_monitor_rules WHERE id=?", (rule_id,))
     return taken
@@ -311,15 +320,23 @@ def merge_rules_into(conn, entity_type: str, source_id: int, target_id: int) -> 
 
 def prune_orphaned_rules(cursor) -> int:
     """Drop rules whose entity no longer exists (entity deletes don't cascade
-    into this table). Idempotent; called from the schema-ensure step."""
+    into this table). Idempotent; run by the deferred backfills and the
+    importer. reads first and deletes only what it found: a DELETE ... NOT IN
+    holds the write lock for its whole scan even when nothing is orphaned
+    (review 5 R5-X2-2)."""
     pruned = 0
     for entity_type, table in _ENTITY_TABLES.items():
-        cursor.execute(
-            f"""DELETE FROM lib2_monitor_rules
+        ids = [int(r[0]) for r in cursor.execute(
+            f"""SELECT id FROM lib2_monitor_rules
                  WHERE entity_type=?
                    AND entity_id NOT IN (SELECT id FROM {table})""",
-            (entity_type,))
-        pruned += cursor.rowcount
+            (entity_type,)).fetchall()]
+        for i in range(0, len(ids), 500):
+            chunk = ids[i:i + 500]
+            cursor.execute(
+                f"DELETE FROM lib2_monitor_rules WHERE id IN ({','.join('?' * len(chunk))})",
+                chunk)
+            pruned += cursor.rowcount
     return pruned
 
 

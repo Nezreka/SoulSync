@@ -123,6 +123,34 @@ To keep 4K copies apart, like a separate **Movies 4K** library in Plex, switch o
 - Switch a 4K folder off and it's ignored everywhere (routing, scans, health checks). Its path is kept for next time.
 
 In Docker, map each 4K folder in your compose file (the default compose has commented \`/media/movies-4k\` and \`/media/tv-4k\` lines) and add it to a library on your media server. See [Video: Downloads](#video-downloads) for the full pipeline.
+
+## More libraries
+
+Add your own movie and TV libraries, like a **Stand-Up**, **Documentaries** or **Kids** library in Plex, under Settings > Folders > Video > More libraries. Each has a name, its own folder and optional rules. The main and 4K libraries are listed there too (their folders are the ones set above), so an install with no extra library works exactly as before.
+
+A new title files into, first match wins:
+
+1. the library picked for it: the **Library** picker in **Get** / **Manual search** (shown once a kind has two libraries), which sticks to the title
+2. the 4K library, when its quality profile saves to 4K
+3. the first library whose **rules** match: a **genre** (TMDB's, like Documentary or Family) or a **keyword** (found inside one of the title's TMDB keywords, like stand-up comedy, or in its name)
+4. the **default** library for its kind (**Make default** on a library)
+
+- Anime shows keep the anime folder unless a library was picked for them.
+- Titles you already have stay where they are, and their upgrades land beside the copy you have.
+- A library that's switched off or has no folder is skipped everywhere; **Remove** keeps its folder and files, and titles picked for it go back to the rules and the default.
+- A library's folder is a library folder like the main ones: scans, health checks and the download monitor know it. Map it in Docker and add it to a library on your media server.
+
+**Quality profile per library.** Each library can set the quality profile its titles are grabbed and upgraded by (**Quality profile** on its card). A title's own profile still wins; a library left on the default uses the kind's default as before.
+
+**The same movie in two libraries.** In a movie's **Get** window, **Also want a copy in…** adds a second copy in another library: the film in Movies (1080p) and in Movies 4K, neither replacing the other. Each copy is its own wishlist card (named with its library), hunted, grabbed and upgraded by its library's profile, and filed in its library. A copy is owned only by a file in its own library's folder (scans note which library each file sits in; on Docker, the server's folders need to be reached, see Your library's folders), so the 4K file never satisfies the 1080p wish or the other way round. Remove the copy with its **×**, or its wishlist card. Second copies are for movies; TV shows keep one copy.
+
+**Where a library downloads from.** **Download from** on a library's card picks the sources its automatic searches use (the wishlist, Search now, retries), in the order you click them: Usenet first then Torrent, say. None picked follows the global order in Settings > Downloads. RSS sync still runs on the global order's indexer sources, and keeps only releases from the library's own sources. **Torrent category / label** and **Usenet category** give that library's downloads their own category in the client (qBittorrent / SABnzbd / NZBGet category, Deluge / Transmission label); empty uses the client's own. Make the category in the client first: SABnzbd files an unknown one under its default. SoulSync talks to one torrent client and one usenet client (Settings > Downloads), so a library picks between those; two instances of the same client aren't supported.
+
+**Which indexers a library searches.** Open **Indexers** on a library's card to tick the Prowlarr indexers its searches use: private 4K trackers for Movies 4K, say. None ticked searches every indexer (within Settings > Indexers' own allowlist), as before. The wishlist, Search now, retries, manual search in Get, and RSS sync all follow it (an EXT.to release has no indexer and is kept).
+
+**Searching and upgrading per library.** **Search automatically** off: the wishlist drain and RSS sync leave that library's titles alone, and they're only searched when you click Search now (or Search all missing). **Upgrade what you have** off: titles you already have in that library stop being upgraded toward their profile's cutoff; missing ones are still hunted.
+
+**Filtering by library.** Once a kind has two libraries, the Movies / TV list has a **Library** filter (the library its files sit in, as the last scan saw them), the wishlist has one (a copy's library, else the library picked for the title, else where its last search filed it), and so does the video Downloads list (the library a download files into).
 `
         },
         {
@@ -416,11 +444,11 @@ The hero keeps one main action: **Play / Resume** on your server when you own it
 
 The synopsis shows three lines; **More** opens the rest in place. Every score in the ratings row opens its own site (IMDb, Rotten Tomatoes, Metacritic, Trakt, TVmaze, AniList). Below the tabs, cast comes first, then the collection and **More Like This**, videos and photos, then one **About** section with the facts (release, runtime, rating, network, budget, language, the languages subtitles exist in, with the ones you grab listed first), the studios, and keywords. An anime also gets its other names (romaji and Japanese), the studio that animated it, the next episode's countdown while it airs, and a link to each season on AniList, on a search preview too. When TMDB lumps an anime into one long season (Jujutsu Kaisen's 59 episodes), the episode list is split into the seasons TVDB, your server and release names use, from TVDB when you have a key and from AniList's seasons when you don't. If your server numbers the show TMDB's way, SoulSync keeps its numbering. **Where to Watch** shows one tile per service. The side-scrolling rows have arrows when you hover them.
 
-A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons.
+A show's numbers count like you'd read them: **Specials** and episodes that haven't aired yet are never "missing", so a show with every aired episode reads **Complete**. Specials sit after the real seasons. **Hide specials** above the episode list takes them out of the season list, and this browser remembers it; they stay in the show and can still be grabbed. When you get a whole show, specials start unticked, so only the real seasons are picked until you tick them.
 
 If a page can't load (the title left your library, YouTube didn't return a channel or playlist, or the server didn't answer), it says which, with **Try again** and, for YouTube, **Open on YouTube**.
 
-On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures.
+On a show, each episode row shows **Missing** or **Upcoming** only when there's a gap. A missing episode gets one **Get** button, and the rest (manual search, wishlist, download again for an upgrade, subtitles) is in the row's **⋯** menu. The season bar works the same way: **Grab season** plus a menu with manual search, wishlist, monitoring and clear failures. **Grab season** searches and grabs each missing episode on its own with the show's quality profile, so every episode is tracked separately and one that fails or times out doesn't stop the rest. To grab the whole season as one pack instead, use the season's search and pick a pack from the results.
 `
         },
         {
@@ -443,6 +471,8 @@ Every movie and show in your library has two tabs: the page itself (**Overview**
 
 > [!NOTE]
 > A file on a drive only your media server can see (a different Docker mount or NAS path) still shows everything the server reports, but it can't be renamed or deleted from SoulSync. The page says so instead of guessing.
+
+**Delete Show / Delete Movie** (admins, in the page's **More** menu) takes the whole title out of your library and stops it coming back. It unfollows it and clears its wishlist entries for every profile, cancels its downloads in progress, declines pending requests for it (the people who asked are told), closes its repair findings, hides it from Discover, moves its folder into the recycle bin as one entry (so it restores in one step), asks your media server to rescan, and forgets it. Torrents your client is still seeding are left alone; your seeding rules, or you, remove them. The first dialog lists exactly what will happen; the second asks you to type the title. A title with files outside your library folders is refused rather than deleted for good. Restoring the folder brings the files back, not the follow or the wishlist.
 
 For a **show**, the tab lists every season with what's owned, missing and upcoming, its size and resolution mix, and a **Monitored** switch. Open a season to see each episode's file, and **Rename all** when several have drifted from your template. **Where it lives** lists the folders the show's files are in; when it says *Split across 2 folders*, part of the show forked off somewhere else, usually an upgrade that couldn't find the original.
 
@@ -491,7 +521,7 @@ Episodes are treated as facts: a scan that no longer sees an episode **demotes**
             body: `
 Assign a title its own **quality profile** ("this show is always 1080p, that movie is 4K"). Pick it from the title's Manage panel, or right in **Get** / **Manual search** with the **Profile** picker, even for a title that isn't in your library yet: the pick judges that search and grab, sticks to the title's wishlist entries, and the title keeps it when it lands, so its upgrades use it too.
 
-**Filter and sort the results.** Every manual search (movie, show, season or episode) has a bar over its results: type to narrow by name, group or indexer, sort by best match, size, age, quality, format score, seeders, indexer or grabs, and open **Filters** to build conditions (resolution is 1080, codec is HEVC, group contains MeGusta, size less than 1 GB) matched on all or any of them. Name a filter to save it for every later search on your profile. The head says how many results there are, how many meet your profile and how many match your filter. It only changes what you see: Auto and the wishlist still rank releases by your profile.
+**Filter and sort the results.** Every manual search (movie, show, season or episode) has a bar over its results: type to narrow by name, group or indexer, sort by best match, size, age, quality, format score, seeders, indexer or grabs, and open **Filters** to build conditions (resolution is 1080, codec is HEVC, group contains MeGusta, size less than 1 GB, language contains japanese) matched on all or any of them. **Language** reads the audio language tags in a release's name, by name or code, and **dual** or **multi** finds the dual audio ones; a release with no language tag is usually the original audio only. Name a filter to save it for every later search on your profile. The head says how many results there are, how many meet your profile and how many match your filter. It only changes what you see: Auto and the wishlist still rank releases by your profile.
 
 **When a grab fails and SoulSync takes the next release**, the card you grabbed lists what it tried after (each release and whether it downloaded or failed too), and the result card of the release that replaced it is marked *Grabbed instead* or *Downloaded instead*. The episode row shows the newest attempt.
 
@@ -678,9 +708,22 @@ A **quality profile** is an ordered ladder of allowed qualities — for example,
 For dubbed or MULTI copies, pick one or more **audio languages** on the profile and a mode:
 
 - **Prefer**: releases tagged with one of your languages (FRENCH, VFF, TRUEFRENCH, GERMAN, iTA, LATINO and so on) or with MULTI / Dual Audio rank first, even over a higher resolution.
-- **Require**: anything without one of those tags is skipped.
+- **Require**: a release tagged only with other languages is skipped.
 
-A release with no language tag is the original audio, so Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
+The scene only tags audio that isn't English, so a release with no language tag reads as English. With English on your list it counts as a match and is never ranked below one that spells out ENGLISH. With only other languages on your list it's the English original, so Prefer ranks it below a dub and Require skips it. Subtitle-only tags like VOSTFR or SUBFRENCH never count as audio.
+
+## How releases are ranked
+
+Every search ranks releases the same way: the title's search modal, Auto, the wishlist's Search now, the hourly wishlist run, RSS sync, upgrades and the retry after a failed download. Among releases that meet the profile it compares, in order:
+
+1. **Quality**: the tier's place on your ladder (move a tier up and it ranks higher), plus the profile's preferences: codec, HDR, audio, repack and audio language.
+2. **Custom formats**: the summed format score.
+3. **Tie-breaks**: lossless or Atmos audio, then how close the size is to your **preferred size**.
+4. Then free slots or seeders, then the bigger file.
+
+A later step only matters when everything above it ties, so a +100 format beats a release that only differs by an ENGLISH tag, Atmos or size, and never beats a better quality tier. Each result in a search has **Why this rank**, which lists every factor and its points.
+
+**Preferred size** (per movie and per episode, off by default) sits beside the max size: releases closest to it win a tie. It never rejects anything, and it can't be set past the max size.
 
 ## Save to
 
@@ -688,7 +731,7 @@ A release with no language tag is the original audio, so Require skips it. Subti
 
 ## Custom formats
 
-**Custom formats** are scored release matchers layered on top of the profile. They nudge the ranker toward releases you like (a preferred release group, a specific HDR flavor, TrueHD audio) and away from ones you don't (extras, mislabeled scene tags). Positive scores boost a release; negative scores penalize it.
+**Custom formats** are scored release matchers layered on top of the profile. They nudge the ranker toward releases you like (a preferred release group, a specific HDR flavor, TrueHD audio) and away from ones you don't (extras, mislabeled scene tags). Positive scores boost a release; negative scores penalize it. Formats rank right after quality, so a modest score like +100 for a preferred group is enough: it doesn't need inflating to outweigh a language tag or a bigger file.
 
 ## Per-title overrides
 
@@ -1057,6 +1100,7 @@ A channel without a banner uses a blurred version of its most-viewed video as th
 
 Each followed channel (or playlist) has its own settings, under **More → Channel settings** on the channel's page (or the cog on the watchlist):
 
+- **Download new uploads** (channels): on by default. Off keeps the channel followed but downloads nothing on its own; pick videos from the channel page. Turning it off also takes back what the follow and the scan wished that hasn't downloaded yet.
 - **Custom name** — a display-name override
 - **Quality** — a per-channel quality override (blank uses the global default)
 - **Title include / exclude** filters and a **minimum minutes** length (channels only)

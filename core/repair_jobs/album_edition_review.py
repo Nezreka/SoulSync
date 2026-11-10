@@ -2,6 +2,9 @@
 
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, artist_scoped_subjects
+from utils.logging_config import get_logger
+
+logger = get_logger("repair_job.album_edition_review")
 
 
 @register_job
@@ -73,7 +76,9 @@ class AlbumEditionReviewJob(RepairJob):
                         result.findings_skipped_dedup += 1
                 else:
                     result.skipped += 1
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                # G11-7: 3.6.1 said which album and why
+                logger.warning("Edition review failed for album %s: %s", album_id, exc, exc_info=True)
                 result.errors += 1
             result.scanned += 1
             if context.update_progress:

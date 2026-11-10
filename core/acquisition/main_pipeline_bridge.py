@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from core.acquisition.candidates import redact_sensitive_text
+from core.library2.release_dates import album_release_date
 from core.runtime_state import download_tasks, tasks_lock
 from utils.logging_config import get_logger
 
@@ -44,6 +45,38 @@ def _safe_source_path(root: str, relative_path: str) -> Path:
     return source
 
 
+def _explicit(value: Any):
+    from core.library2.wishlist_mirror import _explicit as explicit_flag
+    return explicit_flag(value)
+
+
+def _album_identity(conn: Any, album_id: int, musicbrainz_id: Any) -> dict:
+    try:
+        from core.library2.wishlist_mirror import library_album_identity
+        return library_album_identity(conn, album_id, musicbrainz_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("album identity unavailable for %s", album_id, exc_info=True)
+        return {}
+
+
+def _album_images(conn: Any, album_id: int, stored_image_url: Any) -> list:
+    try:
+        from core.library2.wishlist_art import album_images
+        return album_images(conn, album_id, stored_image_url=stored_image_url)
+    except Exception:  # noqa: BLE001 - no cover is not a reason to fail an import
+        logger.debug("album images unavailable for %s", album_id, exc_info=True)
+        return []
+
+
+def _album_artist_names(conn: Any, album_id: int, primary_artist_id: int) -> list:
+    try:
+        from core.library2.wishlist_mirror import library_album_artist_names
+        return library_album_artist_names(conn, album_id, primary_artist_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("album artists unavailable for %s", album_id, exc_info=True)
+        return []
+
+
 def _pipeline_context(
     conn: Any,
     record: Any,
@@ -58,7 +91,10 @@ def _pipeline_context(
         """SELECT t.id AS track_id, t.title, t.track_number, t.disc_number,
                   t.duration, t.spotify_id AS track_spotify_id,
                   al.id AS album_id, al.title AS album_title,
-                  al.album_type, al.release_date,
+                  al.album_type, al.release_date, al.year AS album_year,
+                  al.image_url AS album_image_url, al.musicbrainz_id AS album_musicbrainz,
+                  t.explicit AS track_explicit, al.explicit AS album_explicit,
+                  COALESCE(al.expected_track_count, al.track_count) AS album_total_tracks,
                   al.spotify_id AS album_spotify_id,
                   ar.id AS artist_id, ar.name AS artist_name,
                   req.quality_profile_id, req.trigger
@@ -72,6 +108,19 @@ def _pipeline_context(
     if row is None:
         raise ValueError("matched Library-v2 track or acquisition request disappeared")
     data = dict(row)
+    # the TRACK's performers, in credit order (what the wishlist mirror
+    # sends): the album's primary artist tagged every song of a compilation
+    # "Various Artists" and dropped every feature
+    try:
+        performers = [r[0] for r in conn.execute(
+            """SELECT ar.name FROM lib2_track_artists ta
+                 JOIN lib2_artists ar ON ar.id = ta.artist_id
+                WHERE ta.track_id = ?
+                ORDER BY CASE ta.role WHEN 'primary' THEN 0 ELSE 1 END, ta.position, ar.id""",
+            (track_id,)) if r[0]]
+    except Exception:  # noqa: BLE001 - no credits table: the album artist
+        performers = []
+    performers = performers or [data["artist_name"]]
     relative = str(match.get("relative_path") or "").replace("\\", "/")
     lib2_entity = {
         "track_id": track_id,
@@ -83,16 +132,25 @@ def _pipeline_context(
         "provider": "spotify" if data.get("track_spotify_id") else "library_v2",
         "name": data["title"],
         "title": data["title"],
-        "artists": [{"name": data["artist_name"]}],
+        "artists": [{"name": name} for name in performers],
         "album": {
             "id": data.get("album_spotify_id") or f"lib2-album:{data['album_id']}",
             "name": data["album_title"],
             "album_type": data.get("album_type") or "album",
-            "release_date": data.get("release_date") or "",
+            # a missing release_date fell back to nothing, and the folder
+            # lost its [year]
+            "release_date": album_release_date(data.get("release_date"), data.get("album_year")),
+            "total_tracks": data.get("album_total_tracks") or 0,
+            "explicit": _explicit(data.get("album_explicit")),
+            **_album_identity(conn, int(data["album_id"]), data.get("album_musicbrainz")),
+            # the same cover the wishlist mirror sends: the library's artwork
+            # first, so the import has a cover to embed and save
+            "images": _album_images(conn, int(data["album_id"]), data.get("album_image_url")),
         },
         "track_number": match.get("track_number") or data.get("track_number"),
         "disc_number": match.get("disc_number") or data.get("disc_number") or 1,
         "duration_ms": data.get("duration") or 0,
+        "explicit": _explicit(data.get("track_explicit")),
         "quality_profile_id": data["quality_profile_id"],
         "lib2_entity": lib2_entity,
         "_acquisition_import_id": record.id,
@@ -104,9 +162,12 @@ def _pipeline_context(
         "name": data["artist_name"],
         "genres": [],
     }
+    # every headliner of a joint or split release, not only the main one:
+    # the folder and the various-artists check read these
+    album_artists = _album_artist_names(conn, int(data["album_id"]), int(data["artist_id"]))
     album_context = {
         **track_info["album"],
-        "artists": [{"name": data["artist_name"]}],
+        "artists": [{"name": name} for name in album_artists or [data["artist_name"]]],
     }
     context = {
         "track_info": track_info,
@@ -117,10 +178,11 @@ def _pipeline_context(
             "username": source,
             "filename": relative,
             "title": data["title"],
-            "artist": data["artist_name"],
+            "artist": performers[0],
+            "artists": list(performers),
             "spotify_clean_title": data["title"],
             "spotify_clean_album": data["album_title"],
-            "spotify_clean_artist": data["artist_name"],
+            "spotify_clean_artist": performers[0],
             "track_number": track_info["track_number"],
             "disc_number": track_info["disc_number"],
         },

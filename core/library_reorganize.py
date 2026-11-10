@@ -68,6 +68,7 @@ def resolve_album_profile_id(db, album_id, tracks=None, resolve_file_path_fn=Non
     ``owner_profile_id``. Returns None for the shared library (unchanged
     behavior)."""
     from core.imports.paths import profile_id_for_path
+    shared_path = None
     # 1. file location wins — where the files actually sit right now
     try:
         track_list = tracks
@@ -82,20 +83,29 @@ def resolve_album_profile_id(db, album_id, tracks=None, resolve_file_path_fn=Non
                 pid = profile_id_for_path(resolved)
                 if pid:
                     return pid
-                break  # resolved but shared — don't keep looking
+                # resolved outside every own-library root: only THIS file's
+                # recorded owner can still say otherwise. another library's
+                # copy of the album must not decide (it planned bob's copy for
+                # the admin looking at the shared one)
+                shared_path = db_path
+                break
     except Exception as e:
         logger.debug("[Reorganize] profile resolution from path failed: %s", e)
-    # 2. DB fallback: whose library the album's files are recorded in. Ours:
-    # Library v2 keeps the owner per file, not per album row.
+    # 2. DB fallback: whose library the album's files are recorded in, within
+    # the caller's own library scope (just the file above, when one resolved)
     try:
+        from core.library2.sql_util import owner_clause
         conn = db._get_connection()
         try:
+            same_file = " AND f.path = ?" if shared_path else ""
             row = conn.execute(
                 "SELECT f.owner_profile_id FROM lib2_track_files f"
                 "  JOIN lib2_tracks t ON t.id = f.track_id"
                 " WHERE t.album_id = ? AND COALESCE(f.file_state,'active') = 'active'"
                 "   AND f.owner_profile_id IS NOT NULL"
-                " ORDER BY f.is_primary DESC, f.id LIMIT 1", (str(album_id),)
+                f"{owner_clause(column='f.owner_profile_id')}{same_file}"
+                " ORDER BY f.is_primary DESC, f.id LIMIT 1",
+                (str(album_id), *([shared_path] if shared_path else [])),
             ).fetchone()
             if row and row[0]:
                 return int(row[0])
@@ -643,6 +653,23 @@ def _display_relative_to_root(path, root):
     return path
 
 
+def _relative_through_another_mount(resolved, transfer_dir):
+    """The file's path inside the output folder when ``resolved`` reaches it
+    through a second mount of that folder, else None.
+
+    Storm mounts one music folder twice, as /app/Transfer (the output folder)
+    and /music (what navidrome reports). a track filed from navidrome's path
+    showed as '/music/x/y/z.mp3' beside 'x/y/z.mp3' in the preview, the same
+    file under two names. Match the path's tail inside the output folder and
+    keep it only when it's the same physical file."""
+    parts = [p for p in os.path.normpath(str(resolved)).replace('\\', '/').split('/') if p]
+    for start in range(1, len(parts)):
+        candidate = os.path.join(transfer_dir, *parts[start:])
+        if os.path.exists(candidate) and _same_physical_file(resolved, candidate):
+            return os.path.join(*parts[start:])
+    return None
+
+
 def _trim_to_transfer(db_path, resolved, transfer_dir):
     """Compose the user-facing 'current path' string — relative to the
     transfer dir if the file lives there, else the raw DB value."""
@@ -650,6 +677,12 @@ def _trim_to_transfer(db_path, resolved, transfer_dir):
         trimmed = _display_relative_to_root(resolved, transfer_dir)
         if trimmed != resolved:
             return trimmed
+        try:
+            through = _relative_through_another_mount(resolved, transfer_dir)
+        except OSError:
+            through = None
+        if through:
+            return through
     return db_path or 'No file'
 
 

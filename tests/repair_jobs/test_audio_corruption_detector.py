@@ -626,3 +626,32 @@ def test_a_scoped_run_does_not_forget_what_it_did_not_see(tmp_path, monkeypatch)
     AudioCorruptionDetectorJob().scan(ctx)
 
     assert db.remembered() == set(files)
+
+
+def test_a_catalogue_read_failure_is_an_error_and_forgets_nothing(tmp_path, monkeypatch):
+    """3.6.1 counted a failed track read as an error. v2 logged it at warning,
+    walked the disk alone, and called that a full pass: the remembered
+    verdicts of every catalogue file it never saw were pruned, so the next
+    run re-decoded the whole library."""
+    _prep(monkeypatch, {})
+
+    def broken(*_a, **_k):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr("core.library2.maintenance_subjects.active_file_subjects", broken)
+    pruned = []
+
+    class _Memory:
+        def load(self): return {"/lib/known.flac": (1, 1, "ok")}
+        def prune(self, keep, known): pruned.append(1); return 0
+        def commit(self): pass
+        def close(self): pass
+        def get(self, *_a, **_k): return None
+        def remember(self, *_a, **_k): pass
+
+    monkeypatch.setattr(mod._IntegrityMemory, "open", classmethod(lambda cls, db: _Memory()))
+    ctx, _findings = _context([], tmp_path)
+    result = AudioCorruptionDetectorJob().scan(ctx)
+
+    assert result.errors == 1
+    assert pruned == []

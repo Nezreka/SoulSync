@@ -139,7 +139,7 @@ def collect_batch_real_paths(batch: dict, download_tasks: dict, *, config_manage
 
     for tid in (batch.get("queue") or []):
         task = (download_tasks or {}).get(tid) or {}
-        if task.get("status") == "completed":
+        if task.get("status") in ("completed", "already_owned"):
             _add(task.get("final_file_path"))
 
     return out
@@ -211,7 +211,7 @@ def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_mana
 
     for tid in (batch.get("queue") or []):
         task = (download_tasks or {}).get(tid) or {}
-        if task.get("status") != "completed":
+        if task.get("status") not in ("completed", "already_owned"):
             continue
         si = (task.get("track_info") or {}).get("source_info") or {}
         if isinstance(si, str):

@@ -95,3 +95,45 @@ def test_two_combined_artists_on_one_artist_are_two_findings(tmp_path):
             "SELECT title FROM repair_findings WHERE job_id='comma_artist_splitter'"))
     assert titles == ["Combined artist: A, B", "Combined artist: A, C"]
 
+
+
+def _dismiss_all(database):
+    with closing(database._get_connection()) as conn:
+        conn.execute("UPDATE repair_findings SET status='dismissed'")
+        conn.commit()
+
+
+def test_a_dismissed_finding_stays_dismissed_when_only_volatile_details_change(tmp_path):
+    """the fingerprint hashed every detail, including a rescan's size and
+    bitrate (dedup_file), ids enrichment adds and a provider's art url. a tag
+    write or an enrichment pass brought dismissed findings back."""
+    database = MusicDatabase(str(tmp_path / "repair.sqlite"))
+    worker = RepairWorker(database)
+    song = tmp_path / "song.flac"
+    song.write_bytes(b"audio")
+    base = {"target": "flac", "dedup_file": {"size": 100, "bitrate": 900},
+            "provider_ids": {"track": {}}, "found_artwork_url": "http://a/1.jpg"}
+    assert _create(worker, song, base) is True
+    _dismiss_all(database)
+
+    song.write_bytes(b"audio, retagged")      # same file, new size
+    later = {**base, "dedup_file": {"size": 140, "bitrate": 900},
+             "provider_ids": {"track": {"spotify": "sp1"}}, "found_artwork_url": "http://a/2.jpg"}
+    assert _create(worker, song, later) is False
+    # a different problem on the same file still surfaces
+    assert _create(worker, song, {**later, "target": "24bit-flac"}) is True
+
+
+def test_a_row_dismissed_under_the_old_fingerprint_stays_dismissed(tmp_path):
+    database = MusicDatabase(str(tmp_path / "repair.sqlite"))
+    worker = RepairWorker(database)
+    song = tmp_path / "song.flac"
+    song.write_bytes(b"audio")
+    assert _create(worker, song, {"target": "flac", "dedup_file": {"size": 1}}) is True
+    with closing(database._get_connection()) as conn:
+        # what an older build stored: a fingerprint over every detail, and no
+        # file identity
+        conn.execute("UPDATE repair_findings SET status='dismissed', details_json=?",
+                     ('{"target": "flac", "dedup_file": {"size": 1}, "_dedup_fingerprint": "old"}',))
+        conn.commit()
+    assert _create(worker, song, {"target": "flac", "dedup_file": {"size": 2}}) is False

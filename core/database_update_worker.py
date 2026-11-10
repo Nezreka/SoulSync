@@ -389,6 +389,10 @@ class DatabaseUpdateWorker:
                 except Exception as e:
                     logger.warning(f"Could not clear {self.server_type} cache: {e}")
 
+            # the steps below report nothing while they run, so name each one.
+            # a phase change is also a heartbeat, and a stall then says which
+            # step it stopped in instead of the artist loop that already ended
+            self._emit_signal('phase_changed', "Finishing up: checking server ids...")
             identity_repair_ok = self._post_scan()
 
             if (self.full_refresh and not artists_to_process
@@ -428,6 +432,7 @@ class DatabaseUpdateWorker:
 
             # Cleanup orphaned records after incremental updates (catches fixed matches)
             if not self.full_refresh and self.database:
+                self._emit_signal('phase_changed', "Finishing up: removing orphaned records...")
                 try:
                     cleanup_results = self.database.cleanup_orphaned_records(
                         protected_artist_ids=self._touched_artist_ids,
@@ -444,6 +449,7 @@ class DatabaseUpdateWorker:
                     logger.warning(f"Could not cleanup orphaned records: {e}")
 
                 # Merge any remaining duplicate artists (same name + server_source, different IDs)
+                self._emit_signal('phase_changed', "Finishing up: merging duplicate artists...")
                 try:
                     merge_results = self.database.merge_duplicate_artists()
                     merged = merge_results.get('artists_merged', 0)

@@ -6,7 +6,7 @@ from core.library2.maintenance_subjects import active_file_subjects
 from core.metadata_service import get_client_for_source, get_primary_source, get_source_priority
 from core.repair_jobs import register_job
 from core.repair_jobs.base import (
-    JobContext, JobResult, RepairJob, artist_scoped_subjects, drop_hand_tagged, get_scope_artist,
+    JobContext, JobResult, RepairJob, artist_scoped_subjects, drop_hand_tagged_albums, get_scope_artist,
     scoped_file_subjects,
 )
 from utils.logging_config import get_logger
@@ -59,8 +59,11 @@ class MetadataGapFillerJob(RepairJob):
         subjects: Dict[int, Dict[str, Any]] = {}
         # an artist run takes the artist page's files (its aliases and the
         # songs it guests on); an exact lead-credit name check dropped both
-        for subject in drop_hand_tagged(context, artist_scoped_subjects(
-                context, active_file_subjects(context.db, context.config_manager))):
+        # one hand-tagged file protects its whole album (3.6.1's album lock):
+        # the user typed that release, its other tracks get no service ids
+        everything = active_file_subjects(context.db, context.config_manager)
+        for subject in drop_hand_tagged_albums(
+                context, artist_scoped_subjects(context, everything), everything):
             track_id = int(subject["track_id"])
             if track_id in subjects and not subject.get("is_primary"):
                 continue
@@ -189,8 +192,9 @@ class MetadataGapFillerJob(RepairJob):
     def estimate_scope(self, context: JobContext) -> int:
         try:
             track_ids = set()
-            for subject in drop_hand_tagged(context, scoped_file_subjects(
-                context, active_file_subjects(context.db, context.config_manager))):
+            everything = active_file_subjects(context.db, context.config_manager)
+            for subject in drop_hand_tagged_albums(
+                    context, scoped_file_subjects(context, everything), everything):
                 ids = subject.get("track_source_ids") or {}
                 if not subject.get("isrc") or not ids.get("musicbrainz"):
                     track_ids.add(int(subject["track_id"]))

@@ -286,6 +286,24 @@
   font-variant-numeric: tabular-nums;
 }
 
+.target {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  margin-right: 16px;
+}
+
+.target select {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--white-a12);
+  border-radius: 8px;
+  background: var(--white-a07);
+  color: var(--text-1);
+  font: inherit;
+}
+
 .check {
   display: grid;
   flex: none;

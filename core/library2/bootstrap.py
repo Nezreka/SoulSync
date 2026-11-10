@@ -680,6 +680,73 @@ def bootstrap_is_active(database: Any, *,
     return age <= stale_after_seconds
 
 
+def _carry_upgrade_state(conn: Any) -> Dict[str, Any]:
+    """3.6.1 state the import itself leaves behind, carried once each (each
+    keeps its own marker). Only meaningful once the import is done: they map
+    legacy ids onto lib2 rows. Never raises."""
+    stats: Dict[str, Any] = {}
+    try:
+        # issues reported before the upgrade, onto the catalogue's ids
+        from core.library2.legacy_issues import carry_legacy_issue_ids
+        stats["issues_carried"] = carry_legacy_issue_ids(conn)["issues"]
+        # 3.6.1 genre-cleanup locks the import left behind
+        from core.library2.legacy_locks import carry_legacy_genre_locks
+        stats["genre_locks_carried"] = sum(carry_legacy_genre_locks(conn).values())
+        # 3.6.1's spotify/deezer artist credits, which the import left
+        # behind (collab releases on every credited artist's page)
+        from core.library2.legacy_credits import carry_legacy_artist_credits
+        stats["legacy_credits"] = sum(carry_legacy_artist_credits(conn).values())
+        # each household member's 3.6.1 watchlist as their own watch
+        # state (the Library's cards and filter read it per profile)
+        from core.library2.monitor_sync import carry_member_watchlists
+        stats["member_watchlists"] = carry_member_watchlists(conn)["artists"]
+        # a re-identify still pending from 3.6.1 names the track it replaces
+        # by its legacy id: onto the lib2 track, or no replace at all
+        from core.imports.rematch_hints import carry_legacy_rematch_hints
+        stats["rematch_hints_mapped"] = carry_legacy_rematch_hints(conn)
+        # track artists, the server's paths and Deezer compilations the
+        # import itself didn't carry
+        from core.library2.legacy_columns import carry_legacy_columns
+        stats["legacy_columns"] = sum(carry_legacy_columns(conn).values())
+        # 3.6.1 download history keyed on legacy track ids, onto the catalogue
+        from core.library2.source_info import carry_legacy_download_ids
+        stats["download_ids_mapped"] = carry_legacy_download_ids(conn)
+    except Exception as exc:  # noqa: BLE001 - each carry retries next start
+        logger.warning("3.6.1 state not fully carried yet: %s", exc)
+    return stats
+
+
+_SHARED_FILES_MARKER = "_lib2_shared_files_folded"
+
+
+def _fold_shared_files_once(database: Any, conn: Any) -> Dict[str, int]:
+    """fold the 3.6.1 per-server twins once per finished import.
+
+    the shared-path query walks every file path with a temp b-tree (about
+    4.4 s on a big library) and ran on every start while the enrichment
+    workers stood aside, finding nothing on a converged library. twins come
+    from an import (which folds at its own end, repair_duplicate_artists),
+    so this catch-up for installs imported before one-file-one-track runs
+    once per finished import (a reimport gets a new finished_at). the
+    maintenance repair-duplicates action still folds anything later.
+    review 5 R5-E-6. does not commit."""
+    state = get_state(database)
+    if state.get("status") != "done":
+        return {}
+    finished = str(state.get("finished_at") or "")
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
+                 "(import_finished_at TEXT PRIMARY KEY, "
+                 "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
+    if conn.execute(f"SELECT 1 FROM {_SHARED_FILES_MARKER} WHERE import_finished_at=?",
+                    (finished,)).fetchone():
+        return {}
+    from core.library2.dedup_repair import fold_shared_file_tracks
+    stats = fold_shared_file_tracks(conn)
+    conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
+                 "VALUES(?, ?)", (finished, int(stats.get("shared_files_folded") or 0)))
+    return stats
+
+
 def run_deferred_backfills(database: Any, *,
                            should_stop: Optional[Callable[[], bool]] = None,
                            batch_size: int = 500) -> Dict[str, Any]:
@@ -714,26 +781,37 @@ def run_deferred_backfills(database: Any, *,
                 should_stop=should_stop,
             )
             # Installs migrated before one-file-one-track also converge here.
-            from core.library2.dedup_repair import fold_shared_file_tracks
-            stats["shared_files"] = fold_shared_file_tracks(conn)
+            stats["shared_files"] = _fold_shared_files_once(database, conn)
+            # guests an older twin merge dropped from the kept album, once
+            # (review 5 W2-WE-1)
+            try:
+                from core.library2.catalogue_duplicates import restore_merged_album_credits
+                stats["merged_credits_restored"] = restore_merged_album_credits(conn)
+            except sqlite3.Error as exc:
+                logger.warning("merged album credits not restored yet: %s", exc)
             conn.commit()
             # 3.6.1 logged a scan import on every refresh; once, in batches
             from core.maintenance.library_history_dedupe import dedupe_scan_import_history
             stats["history_repeats_removed"] = dedupe_scan_import_history(
                 database, should_stop=should_stop)["removed"]
-            # issues reported before the upgrade, onto the catalogue's ids
-            from core.library2.legacy_issues import carry_legacy_issue_ids
-            stats["issues_carried"] = carry_legacy_issue_ids(conn)["issues"]
-            # 3.6.1 genre-cleanup locks the import left behind
-            from core.library2.legacy_locks import carry_legacy_genre_locks
-            stats["genre_locks_carried"] = sum(carry_legacy_genre_locks(conn).values())
+            # the one-time 3.6.1 carries, once the import has filled lib2
+            # (they run before the import loop too: on a first upgrade that
+            # is an empty catalogue they must not use up their marker on)
+            if get_state(database).get("status") == "done":
+                stats.update(_carry_upgrade_state(conn))
             # the Songs tab's artist/album/year/recent sorts walk these
             # (a pass over every track the first time, then nothing)
-            from core.library2.queries import ensure_song_sort_indexes
+            from core.library2.queries import ensure_album_sort_indexes, ensure_song_sort_indexes
             stats["song_sort_indexes"] = ensure_song_sort_indexes(conn)
+            # and the album grid's sorts (a pass over every release, once)
+            stats["album_sort_indexes"] = ensure_album_sort_indexes(conn)
     finally:
         ticker.stop()
         conn.close()
+    # once the upgrade import is done: each release a 3.6.1 install listed
+    # once per media server becomes one release (proven pairs only)
+    from core.library2.catalogue_duplicates import merge_import_twins
+    stats["import_twins"] = merge_import_twins(database)["merged"]
     if any(stats.values()):
         logger.info("Library v2 convergence complete: %s", stats)
     # PASSIVE: this runs on every start. a TRUNCATE takes the write lock and
@@ -880,8 +958,15 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
             return {"success": False, "error": str(exc)}
 
         if source_row_count(current_watermark):
-            from core.maintenance.dedupe_source_ids import repair_imported_state
-            repair_imported_state(database)
+            # the import is committed: a failing repair must not leave the
+            # claim "running" (workers paused, autostart refused) until the
+            # stale window, then fail the same way on every reclaim. it also
+            # runs from the maintenance import. review 5 W2-WE-3
+            try:
+                from core.maintenance.dedupe_source_ids import repair_imported_state
+                repair_imported_state(database)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Library v2 post-import repair failed: %s", exc, exc_info=True)
 
         if post_import is not None:
             try:
@@ -909,6 +994,17 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     if not mark_done(database, owner_token, watermark=current_watermark):
         return {"success": False, "error": "Bootstrap lease was lost before completion"}
     logger.info("Library v2 bootstrap import completed: %s", stats)
+    # straight after the import: the 3.6.1 carries first (they find rows by
+    # legacy id, and the twin merge deletes the duplicate rows holding some)
+    carry_conn = database._get_connection()
+    try:
+        carried = _carry_upgrade_state(carry_conn)
+        if any(carried.values()):
+            logger.info("3.6.1 state carried after the import: %s", carried)
+    finally:
+        carry_conn.close()
+    from core.library2.catalogue_duplicates import merge_import_twins
+    merge_import_twins(database)
     return {"success": True, "stats": stats}
 
 

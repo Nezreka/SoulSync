@@ -225,6 +225,10 @@ describe('groupPlaylistsBySource', () => {
   it('title-cases an unknown source for its tab label', () => {
     expect(explorerSourceLabel('spotify')).toBe('Spotify');
     expect(explorerSourceLabel('youtube')).toBe('YouTube');
+    // #1909: names people use, not database ids
+    expect(explorerSourceLabel('spotify_public')).toBe('Spotify Link');
+    expect(explorerSourceLabel('soulsync_discovery')).toBe('SoulSync Discovery');
+    expect(explorerSourceLabel('some_new_source')).toBe('Some New Source');
     expect(explorerSourceLabel('soundcloud')).toBe('Soundcloud');
     expect(explorerSourceLabel('')).toBe('');
   });

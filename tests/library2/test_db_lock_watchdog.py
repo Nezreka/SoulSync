@@ -138,6 +138,8 @@ def test_report_includes_the_stacks_and_says_what_to_look_for():
 
     db_lock_watchdog.report_blocked_writer(log=messages.append)
 
-    assert len(messages) == 1
+    # the dump, then one line naming the holder (#2000)
+    assert len(messages) == 2
     assert "SQLite write lock is held" in messages[0]
     assert "--- thread" in messages[0]
+    assert messages[1].startswith("Write lock holder")

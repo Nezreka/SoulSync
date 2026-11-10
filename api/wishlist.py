@@ -91,6 +91,8 @@ def register_routes(bp):
                 source_type=source_type,
                 profile_id=profile_id,
                 quality_profile_id=quality_profile_id,
+                # named for this track, so it may pin it (review 5 W2-WD-1)
+                quality_profile_explicit=quality_profile_id is not None,
                 # An API caller asking for a track IS explicit user intent, so it
                 # bypasses the ignore-list gate and updates an existing row
                 # authoritatively rather than being silently dropped.
@@ -137,15 +139,8 @@ def register_routes(bp):
         try:
             from database.music_database import get_database
             db = get_database()
-            descriptors = [
-                row for row in db.get_wishlist_tracks(profile_id=profile_id)
-                if (
-                    str(row.get("spotify_track_id") or "") == str(track_id)
-                    if "::" in str(track_id)
-                    else str(row.get("spotify_track_id") or "").split("::", 1)[0]
-                    == str(track_id).split("::", 1)[0]
-                )
-            ]
+            # just this track's rows, not the whole wishlist per delete
+            descriptors = db.get_wishlist_tracks(profile_id=profile_id, track_key=str(track_id))
             ok = db.remove_from_wishlist(track_id, profile_id=profile_id)
             if ok:
                 from core.settings import config_manager

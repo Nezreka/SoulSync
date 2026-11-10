@@ -288,7 +288,13 @@ def _record_command(
     change_source: str,
     context: Optional[Mapping[str, Any]],
 ) -> int:
-    ensure_entity_history_schema(conn.cursor())
+    # the schema (seven triggers dropped and recreated, plus the canonical
+    # backfill scan) is the startup's job: run per journal row it held a
+    # merge's write lock for each track. only a db that never had the table
+    # sets it up here. review 5 W2-WE-4
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='lib2_entity_history'").fetchone() is None:
+        ensure_entity_history_schema(conn.cursor())
     source_type = _entity_type(source_type, public_command=True)
     target_type = _entity_type(target_type, public_command=True)
     source_id = _entity_id(source_id, "source_id")

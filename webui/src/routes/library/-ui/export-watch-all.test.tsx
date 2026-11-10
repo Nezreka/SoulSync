@@ -58,6 +58,38 @@ describe('loadUnwatchedArtists', () => {
     expect(ineligible.map((a) => a.name)).toEqual(['B']);
     expect(progress).toEqual([0, 2]);
   });
+
+  it('counts an artist with any id the add accepts, not only the active source', async () => {
+    // review 5 W2-WL-2: the server falls back through every source's id
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              success: true,
+              artists: [
+                { name: 'Only Deezer', deezer_id: 123 },
+                { name: 'Only Discogs', discogs_id: 'd1' },
+                { name: 'Only MB', musicbrainz_id: 'mb1' },
+                { name: 'Spotify', spotify_artist_id: 'sp1' },
+                { name: 'Nothing', tidal_id: 't1' },
+              ],
+              pagination: { has_next: false },
+            }),
+          ),
+      ),
+    );
+    const loaded = await loadUnwatchedArtists('spotify_artist_id', () => {});
+    expect(loaded.eligible.map((a) => a.name)).toEqual([
+      'Only Deezer',
+      'Only Discogs',
+      'Only MB',
+      'Spotify',
+    ]);
+    expect(loaded.ineligible.map((a) => a.name)).toEqual(['Nothing']);
+    expect(loaded.otherSource).toBe(3);
+  });
 });
 
 describe('ExportArtistsModal', () => {
@@ -108,6 +140,38 @@ describe('ExportArtistsModal', () => {
 });
 
 describe('WatchAllModal', () => {
+  it("artists with only another source's id are ready to watch, and the button works", async () => {
+    // review 5 W2-WL-2: this read "0 Ready to watch" and disabled Watch All,
+    // though the add would have taken all three
+    window.currentMusicSourceName = 'Spotify';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              success: true,
+              artists: [
+                { name: 'Only Deezer', deezer_id: '123' },
+                { name: 'Only Discogs', discogs_id: 'd1' },
+                { name: 'Only MB', musicbrainz_id: 'mb1' },
+              ],
+              pagination: { has_next: false },
+            }),
+          ),
+      ),
+    );
+    render(<WatchAllModal onClose={vi.fn()} />);
+    await screen.findByText('Ready to watch');
+    expect(
+      document.querySelector('.watch-all-stat-card.eligible .watch-all-stat-value')?.textContent,
+    ).toBe('3');
+    expect(screen.getByText(/3 of them use another source's ID, not Spotify's/)).toBeTruthy();
+    const confirm = document.getElementById('watch-all-confirm-btn') as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    expect(confirm.textContent).toBe('Watch All (3)');
+  });
+
   it('loads, shows the split, needs TWO clicks, and announces the change on close', async () => {
     window.currentMusicSourceName = 'Spotify';
     window.showToast = vi.fn() as never;
@@ -145,7 +209,8 @@ describe('WatchAllModal', () => {
       expect(
         document.querySelector('.watch-all-stat-card.eligible .watch-all-stat-value')?.textContent,
       ).toBe('2');
-      expect(screen.getByText('1 artist without Spotify ID')).toBeTruthy();
+      // review 5 W2-WL-2: was "without Spotify ID"; any id the add accepts counts
+      expect(screen.getByText('1 artist without a provider ID')).toBeTruthy();
 
       const confirm = document.getElementById('watch-all-confirm-btn') as HTMLButtonElement;
       expect(confirm.textContent).toBe('Watch All (2)');

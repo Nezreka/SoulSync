@@ -52,6 +52,7 @@ def client(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
     _Db.keys = {"drake/hand tagged/01.flac"}
+    _Db.last_path = path
     monkeypatch.setattr(ad, "get_database", lambda: _Db(path))
     app = flask.Flask(__name__)
     app.register_blueprint(ad.bp)
@@ -66,6 +67,17 @@ def test_identity_prefers_spotify(client):
 def test_identity_falls_back_to_other_providers(client):
     body = client.get("/api/artist-detail/library/2/identity").get_json()
     assert (body["source"], body["provider_id"]) == ("deezer", "dz-9")
+
+
+def test_identity_reaches_an_amazon_only_artist(client, tmp_path):
+    """the provider page opens amazon artists; the identity skipped them."""
+    conn = row_conn(_Db.last_path)
+    conn.execute("INSERT INTO lib2_artists(id, name, sort_name, external_ids) "
+                 "VALUES(4, 'Amz', 'Amz', '{\"amazon\":\"B0AMZ\"}')")
+    conn.commit()
+    conn.close()
+    body = client.get("/api/artist-detail/library/4/identity").get_json()
+    assert (body["source"], body["provider_id"]) == ("amazon", "B0AMZ")
 
 
 def test_identity_without_provider_ids_and_unknown_rows(client):
@@ -84,3 +96,30 @@ def test_record_carries_the_artists_live_file_formats(client):
     body = client.get("/api/artist/1/record").get_json()
     assert body["formats"] == ["FLAC", "MP3"]
     assert body["record"]["name"] == "Drake"
+
+
+def test_record_counts_only_what_is_on_disk(tmp_path, monkeypatch):
+    """a wanted album with no file is a slot, not an owned album. 3.6.1's
+    tables only held owned rows, so the inspector counted only those."""
+    import api.artist_detail as ad
+    from core.library2.schema import ensure_library_v2_schema
+
+    path = str(tmp_path / "rec.db")
+    conn = row_conn(path)
+    ensure_library_v2_schema(conn)
+    conn.execute("INSERT INTO lib2_artists(id, name, sort_name) VALUES(1, 'A', 'A')")
+    for album_id in (10, 11):
+        conn.execute("INSERT INTO lib2_albums(id, primary_artist_id, title) VALUES(?, 1, ?)",
+                     (album_id, f"a{album_id}"))
+        conn.execute("INSERT INTO lib2_tracks(id, album_id, title) VALUES(?, ?, 't')",
+                     (album_id, album_id))
+    conn.execute("INSERT INTO lib2_tracks(id, album_id, title) VALUES(12, 10, 'wanted')")
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, format) VALUES(10, '/m/a/01.flac', 'flac')")
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr(ad, "get_database", lambda: _Db(path))
+    app = flask.Flask(__name__)
+    app.register_blueprint(ad.bp)
+
+    counts = app.test_client().get("/api/artist/1/record").get_json()["counts"]
+    assert counts == {"albums": 1, "tracks": 1}

@@ -1,9 +1,14 @@
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { DialogFrame } from '@/components/dialog/dialog';
 
 import type { LibraryV2EnhanceTrack } from '../-library-v2.types';
 
+import {
+  libraryV2EnhanceQueryOptions,
+  libraryV2QualityProfilesQueryOptions,
+} from '../-library-v2.api';
 import styles from './enhance-quality-modal.module.css';
 import { LibraryCover } from './library-cover';
 import { WishlistIcon } from './list-icons';
@@ -163,18 +168,53 @@ function CoverFallback({ className }: { className: string }) {
   );
 }
 
+/** Where the modal can ask for another profile's list ("upgrade to"). */
+export interface EnhanceScope {
+  entity: 'artists' | 'albums';
+  id: number;
+  /** an album's button reads the artist's list: keep only this album */
+  albumId?: number;
+}
+
 export function EnhanceQualityModal({
   title,
-  tracks,
+  tracks: ownTracks,
   onEnhance,
   onClose,
+  scope,
+  canChooseTarget = false,
 }: {
   title: string;
   tracks: LibraryV2EnhanceTrack[];
-  onEnhance: (trackIds: number[]) => void;
+  onEnhance: (trackIds: number[], targetProfileId: number | null) => void;
   onClose: () => void;
+  scope?: EnhanceScope;
+  /** the admin may aim one run at another profile (3.6.1's tier picker) */
+  canChooseTarget?: boolean;
 }) {
-  const [selected, setSelected] = useState(() => new Set(tracks.map((t) => t.track_id)));
+  const choosing = Boolean(scope) && canChooseTarget;
+  const [target, setTarget] = useState<number | null>(null);
+  const profiles = useQuery({ ...libraryV2QualityProfilesQueryOptions(), enabled: choosing });
+  const upgrading = (profiles.data ?? []).filter((p) => p.upgrade_policy !== 'none');
+  const targeted = useQuery({
+    ...libraryV2EnhanceQueryOptions(scope?.entity ?? 'artists', scope?.id ?? 0, target),
+    enabled: choosing && target != null,
+  });
+  const tracks = useMemo(() => {
+    if (target == null) return ownTracks;
+    const rows = targeted.data?.tracks ?? [];
+    return scope?.albumId != null ? rows.filter((t) => t.album_id === scope.albumId) : rows;
+  }, [target, ownTracks, targeted.data, scope?.albumId]);
+  const loadingTarget = target != null && targeted.isPending;
+  // G15-6: a failed fetch is not "nothing to upgrade"
+  // review 4 R4-E-3: a failed background refetch keeps the data on screen;
+  // only a fetch that never got any is "couldn't check"
+  const targetFailed = target != null && targeted.isError && !targeted.data;
+  // each target keeps its own picks, all of its tracks until you change them
+  const [picks, setPicks] = useState<Record<string, Set<number>>>({});
+  const pickKey = String(target ?? 'own');
+  const selected = picks[pickKey] ?? new Set(tracks.map((t) => t.track_id));
+  const setSelected = (next: Set<number>) => setPicks((prev) => ({ ...prev, [pickKey]: next }));
   const releases = useMemo(() => groupReleases(tracks), [tracks]);
   const goal = useMemo(() => mostCommon(tracks.map(targetOf)), [tracks]);
   const from = useMemo(() => mostCommon(tracks.map((t) => t.current ?? 'Unknown')), [tracks]);
@@ -236,9 +276,24 @@ export function EnhanceQualityModal({
           </span>
           <h2 className={styles.title}>{title}</h2>
           <p className={styles.summary}>
-            {tracks.length
-              ? `${plural(tracks.length, 'track')} on ${plural(releases.length, 'release')} can sound better.`
-              : 'Everything here already meets its quality profile.'}
+            {loadingTarget
+              ? 'Checking what that profile would upgrade…'
+              : targetFailed
+                ? 'Couldn’t check that profile.'
+                : tracks.length
+                  ? `${plural(tracks.length, 'track')} on ${plural(releases.length, 'release')} can sound better.`
+                  : target != null
+                    ? 'Everything here already meets that profile.'
+                    : 'Everything here already meets its quality profile.'}
+            {targetFailed ? (
+              <button
+                type="button"
+                className={styles.ghost}
+                onClick={() => void targeted.refetch()}
+              >
+                Try again
+              </button>
+            ) : null}
           </p>
           {from && goal ? <QualityJump current={from} target={goal} /> : null}
         </div>
@@ -266,6 +321,23 @@ export function EnhanceQualityModal({
           />
           <span>{allPicked ? 'Deselect all' : 'Select all'}</span>
         </label>
+        {choosing && upgrading.length ? (
+          <label className={styles.target}>
+            <span>Upgrade to</span>
+            <select
+              aria-label="Upgrade to"
+              value={target ?? ''}
+              onChange={(e) => setTarget(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">Each track&apos;s own profile</option>
+              {upgrading.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <span className={styles.picked}>
           {selected.size} of {tracks.length} picked
         </span>
@@ -331,7 +403,9 @@ export function EnhanceQualityModal({
       <footer className={styles.footer}>
         <p className={styles.footNote}>
           {selected.size
-            ? 'Picked tracks go on your Wishlist and are searched now. If no better copy turns up, the Wishlist keeps looking.'
+            ? target != null
+              ? 'Picked tracks move to this profile, go on your Wishlist and are searched now. If no better copy turns up, the Wishlist keeps looking.'
+              : 'Picked tracks go on your Wishlist and are searched now. If no better copy turns up, the Wishlist keeps looking.'
             : 'Pick the tracks to upgrade.'}
         </p>
         <div className={styles.footActions}>
@@ -341,8 +415,8 @@ export function EnhanceQualityModal({
           <button
             type="button"
             className={styles.primary}
-            disabled={selected.size === 0}
-            onClick={() => onEnhance([...selected])}
+            disabled={selected.size === 0 || loadingTarget || targetFailed}
+            onClick={() => onEnhance([...selected], target)}
           >
             <svg viewBox="0 0 16 16" aria-hidden="true">
               <path

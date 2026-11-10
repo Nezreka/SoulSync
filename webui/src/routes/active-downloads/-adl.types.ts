@@ -265,6 +265,9 @@ export interface AdlQuarantineEntry {
   source_filename: string;
   thumb_url: string;
   quality: string;
+  /** what the release said and what the file measured, in seconds; null when unknown */
+  expected_length_s?: number | null;
+  actual_length_s?: number | null;
 }
 
 // ── Filters ───────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   SYNC_DEFAULT_TAB,
@@ -14,10 +14,8 @@ import {
   SYNC_PRIMARY_TAB_IDS,
   SYNC_TABS,
   normalizeSyncTab,
-  readRememberedRoutedTabs,
-  rememberRoutedTab,
+  isPrimarySyncTab,
   syncStripTabs,
-  forgetRoutedTab,
 } from './-sync.shell';
 
 describe('normalizeSyncTab', () => {
@@ -142,17 +140,15 @@ describe('the header actions', () => {
   });
 });
 
-describe('the strip (syncStripTabs)', () => {
-  it('shows five permanent chips, not sixteen', () => {
-    // Six of the fifteen were duplicates of each other; the four paste-a-URL
-    // tabs differed at the input step not at all. They are reached through Add
-    // playlist now. my playlists and request lists are permanent.
-    expect(syncStripTabs('mirrored').map((t) => t.id)).toEqual([
+describe('the pills (syncStripTabs)', () => {
+  it('shows the four collections, and no source tabs', () => {
+    // Every source tab (and Beatport) is a way of ADDING a playlist, so it
+    // opens from Add as a panel, not as a place you live in.
+    expect(syncStripTabs().map((t) => t.id)).toEqual([
       'mirrored',
       'my-playlists',
       'request-lists',
       'server',
-      'beatport',
     ]);
   });
 
@@ -161,105 +157,10 @@ describe('the strip (syncStripTabs)', () => {
     expect(SYNC_PRIMARY_TAB_IDS).toContain(SYNC_DEFAULT_TAB);
   });
 
-  it('shows a routed tab WHILE it is active, so there is a way back', () => {
-    // A panel with no chip is a room with no door: the strip would highlight
-    // nothing and the user could not leave.
-    const ids = syncStripTabs('spotify-public').map((t) => t.id);
-    expect(ids).toEqual([
-      'mirrored',
-      'my-playlists',
-      'request-lists',
-      'server',
-      'beatport',
-      'spotify-public',
-    ]);
-  });
-
-  it('appends the routed chip, so the permanent five never move', () => {
-    for (const routed of ['deezer-link', 'youtube', 'tidal', 'import-file']) {
-      const ids = syncStripTabs(routed).map((t) => t.id);
-      expect(ids.slice(0, 5)).toEqual([
-        'mirrored',
-        'my-playlists',
-        'request-lists',
-        'server',
-        'beatport',
-      ]);
-      expect(ids[5]).toBe(routed);
-    }
-  });
-
-  it('drops the routed chip again once a permanent tab is active', () => {
-    expect(syncStripTabs('server').map((t) => t.id)).toHaveLength(5);
-  });
-
-  it('never renders a chip twice when a permanent tab is active', () => {
-    for (const id of SYNC_PRIMARY_TAB_IDS) {
-      const ids = syncStripTabs(id).map((t) => t.id);
-      expect(new Set(ids).size).toBe(ids.length);
-    }
-  });
-
-  it('every tab is still REACHABLE even when it is not in the strip', () => {
-    // The panels all still render; only the chips were reduced.
-    const stripped = SYNC_TABS.filter((t) => !SYNC_PRIMARY_TAB_IDS.includes(t.id));
-    expect(stripped.length).toBe(13);
-    for (const t of stripped) {
-      expect(syncStripTabs(t.id).map((x) => x.id)).toContain(t.id);
-    }
-  });
-});
-
-describe('remembered routed tabs (the sticky Spotify Link chip)', () => {
-  beforeEach(() => {
-    window.localStorage.clear();
-  });
-
-  it('round-trips an opened routed tab through storage', () => {
-    rememberRoutedTab('spotify-public');
-    expect(readRememberedRoutedTabs()).toEqual(['spotify-public']);
-    // remembering twice does not duplicate
-    rememberRoutedTab('spotify-public');
-    expect(readRememberedRoutedTabs()).toEqual(['spotify-public']);
-  });
-
-  it('never remembers a primary tab and drops unknown ids on read', () => {
-    rememberRoutedTab('mirrored');
-    window.localStorage.setItem(
-      'soulsync-sync-opened-tabs',
-      JSON.stringify(['spotify-public', 'not-a-tab', 42]),
-    );
-    expect(readRememberedRoutedTabs()).toEqual(['spotify-public']);
-  });
-
-  it('unreadable storage reads as nothing remembered', () => {
-    window.localStorage.setItem('soulsync-sync-opened-tabs', '{broken');
-    expect(readRememberedRoutedTabs()).toEqual([]);
-  });
-
-  it('the strip shows every opened routed tab, not just the active one', () => {
-    const tabs = syncStripTabs('mirrored', ['spotify-public']).map((t) => t.id);
-    expect(tabs).toEqual([
-      'mirrored',
-      'my-playlists',
-      'request-lists',
-      'server',
-      'beatport',
-      'spotify-public',
-    ]);
-  });
-});
-
-describe('forgetRoutedTab (#1402)', () => {
-  it('drops one remembered chip and leaves the rest', () => {
-    window.localStorage.clear();
-    rememberRoutedTab('spotify');
-    rememberRoutedTab('deezer');
-    forgetRoutedTab('deezer');
-    expect(readRememberedRoutedTabs()).toEqual(['spotify']);
-    // forgetting something never remembered is a no-op, not a throw
-    forgetRoutedTab('tidal');
-    expect(readRememberedRoutedTabs()).toEqual(['spotify']);
-    window.localStorage.clear();
+  it('every other tab is a source panel, and still exists', () => {
+    const panels = SYNC_TABS.filter((t) => !isPrimarySyncTab(t.id));
+    expect(panels.map((t) => t.id)).toContain('beatport');
+    expect(panels.map((t) => t.id)).toContain('import-file');
+    expect(panels.length).toBe(SYNC_TABS.length - 4);
   });
 });

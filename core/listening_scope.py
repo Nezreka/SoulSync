@@ -257,11 +257,13 @@ def media_account_owners(database, server_source: str) -> dict:
         conn = database._get_connection()
         cols = {r[1] for r in conn.execute("PRAGMA table_info(profiles)").fetchall()}
         # sign-in's own record first, then the home-user link; lowest id wins
-        # a tie, so two profiles on one account can't split its plays
+        # a tie, so two profiles on one account can't split its plays.
+        # review 5 R5-A-2: this read ORDER BY id DESC, and setdefault keeps
+        # the first row seen, so the highest id won
         for col in [c for c in columns if c in cols]:
             for pid, account in conn.execute(
                     f"SELECT id, {col} FROM profiles WHERE {col} IS NOT NULL AND {col} != '' "
-                    f"AND id != ? ORDER BY id DESC", (SHARED_OWNER,)).fetchall():
+                    f"AND id != ? ORDER BY id", (SHARED_OWNER,)).fetchall():
                 owners.setdefault(str(account), int(pid))
     except Exception as e:
         logger.debug("media account owners lookup failed: %s", e)
@@ -296,6 +298,13 @@ def reattribute_media_plays(database, server_source: str = 'plex') -> int:
             "WHERE server_source = ? AND server_account_id IS NOT NULL", (server_source,)).fetchall()]
         for account in accounts:
             pile = media_account_owner(owners, account)
+            # runs on every listening poll: read first, and write (taking
+            # the write lock) only when a play is actually in the wrong pile
+            if conn.execute(
+                    "SELECT 1 FROM listening_history WHERE server_source = ? "
+                    "AND server_account_id = ? AND profile_id != ? LIMIT 1",
+                    (server_source, account, pile)).fetchone() is None:
+                continue
             cur = conn.execute(
                 "UPDATE OR IGNORE listening_history SET profile_id = ? "
                 "WHERE server_source = ? AND server_account_id = ? AND profile_id != ?",

@@ -570,6 +570,45 @@ def test_remove_album_from_wishlist_matches_album_name():
     assert service.removed == [("track-1", 1)]
 
 
+def test_remove_album_from_wishlist_keeps_another_artists_album_of_that_name():
+    # review 5 R5-X1-2: the page files an album card under its artist. a bare
+    # name took every artist's "Greatest Hits" and ignore-listed their tracks
+    tracks = [
+        {
+            "wishlist_id": 1,
+            "spotify_track_id": "a1",
+            "id": "a1",
+            "spotify_data": {"album": {"name": "Greatest Hits"}, "artists": [{"name": "Artist A"}]},
+        },
+        {
+            "wishlist_id": 2,
+            "spotify_track_id": "b1",
+            "id": "b1",
+            "spotify_data": {"album": {"name": "Greatest Hits"}, "artists": [{"name": "Artist B"}]},
+        },
+        {
+            "wishlist_id": 3,
+            "spotify_track_id": "u1",
+            "id": "u1",
+            "spotify_data": {"album": {"name": "Greatest Hits"}, "artists": []},
+        },
+    ]
+    runtime, service, _db, _logger, _activity_calls = _build_runtime(tracks=tracks)
+
+    payload, status = remove_album_from_wishlist(
+        runtime, album_name_filter="Greatest Hits", artist_name_filter="artist a")
+
+    assert status == 200
+    assert payload["removed_count"] == 1
+    assert service.removed == [("a1", 1)]
+
+    # an artist-less row sits under the page's "Unknown Artist" orb
+    payload, status = remove_album_from_wishlist(
+        runtime, album_name_filter="Greatest Hits", artist_name_filter="Unknown Artist")
+    assert status == 200
+    assert service.removed == [("a1", 1), ("u1", 1)]
+
+
 def test_remove_batch_from_wishlist_returns_removed_count():
     runtime, service, _db, _logger, _activity_calls = _build_runtime()
 
@@ -582,6 +621,34 @@ def test_remove_batch_from_wishlist_returns_removed_count():
         "message": "Removed 2 tracks from wishlist",
     }
     assert service.removed == [("track-1", 1), ("track-2", 1)]
+
+
+def test_remove_batch_hands_the_reverse_sync_the_removed_release(monkeypatch):
+    """review 5 R5-J-4: descriptors were keyed by the bare track id, so with
+    two releases of one recording (t::a1, t::a2) removing t::a1 handed the
+    reverse sync t::a2's row and Library v2 released the still-wanted one"""
+    rows = [
+        {"spotify_track_id": "t::a1", "spotify_data": {"id": "t", "album": {"id": "a1"}},
+         "source_info": {"lib2_track_id": 101}},
+        {"spotify_track_id": "t::a2", "spotify_data": {"id": "t", "album": {"id": "a2"}},
+         "source_info": {"lib2_track_id": 202}},
+    ]
+    service = SimpleNamespace(
+        database=SimpleNamespace(get_wishlist_spotify_data=lambda tid, profile_id=1: None),
+        get_wishlist_tracks_for_download=lambda profile_id=1: [dict(r) for r in rows],
+        remove_track_from_wishlist=lambda tid, profile_id=1: tid == "t::a1",
+    )
+    monkeypatch.setattr(routes_module, "get_wishlist_service", lambda: service)
+    monkeypatch.setattr("core.wishlist.ignore.ignore_wishlist_track", lambda *a, **k: None)
+    synced = []
+    monkeypatch.setattr(routes_module, "_sync_user_wishlist_removal",
+                        lambda runtime, svc, descriptors: synced.extend(descriptors))
+    runtime = SimpleNamespace(profile_id=1, logger=_FakeLogger())
+
+    payload, status = remove_batch_from_wishlist(runtime, ["t::a1"])
+
+    assert (status, payload["removed"]) == (200, 1)
+    assert [d["source_info"]["lib2_track_id"] for d in synced] == [101]
 
 
 def test_set_wishlist_cycle_updates_metadata():
@@ -662,6 +729,27 @@ def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context()
     ]
     assert add_call["track_data"]["duration_ms"] == 1234
     assert add_call["track_data"]["explicit"] is True
+
+
+def test_add_album_track_to_wishlist_drops_client_upgrade_authority():
+    """review 5 W2-WD-2: the master turns a stored library_v2 / quality upgrade
+    source into a sealed upgrade intent, so a client never gets to store one."""
+    runtime, service, _db, _logger, _activity_calls = _build_runtime()
+    add_album_track_to_wishlist(
+        runtime,
+        track={"id": "t1", "name": "Any Song", "artists": [{"name": "Any Artist"}]},
+        artist={"id": "a1", "name": "Any Artist"},
+        album={"id": "al1", "name": "Any Album"},
+        source_context={"source": "library_v2", "upgrade_check": True, "lib2_track_id": 42,
+                        "lib2_album_id": 7, "job": "quality_upgrade_scan",
+                        "original_file_path": "/music/other.flac", "quality_profile_id": 2,
+                        "playlist_name": "Kept"},
+    )
+    stored = service.add_calls[0]["source_context"]
+    for key in ("source", "upgrade_check", "lib2_track_id", "lib2_album_id", "job",
+                "original_file_path", "quality_profile_id"):
+        assert key not in stored, (key, stored)
+    assert stored["playlist_name"] == "Kept"
 
 
 def test_add_album_track_to_wishlist_materializes_lib2_entity_on_success(monkeypatch):
@@ -1069,3 +1157,35 @@ def test_an_artist_page_albums_locked_type_survives_the_wishlist_add():
     assert locked["album"]["album_type_locked"] is True
     plain = _build_track_data({"id": "t2", "name": "Track"}, {"id": "x", "name": "X"})
     assert plain["album"]["album_type_locked"] is False
+
+
+# ── removals drop the wish too (second v2 review, W2) ───────────────────────
+# every wishlist add records a lib2 "wanted" rule and the hourly reconcile
+# re-adds a wanted track that isn't on the wishlist. a removal that left the
+# rule behind came back once the #874 ignore aged out.
+
+def _capture_release(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "core.library2.monitor_sync.sync_wishlist_removal",
+        lambda sync_db, _cfg, descriptors, profile_id=1: calls.append(
+            ([d["spotify_track_id"] for d in descriptors], profile_id)))
+    return calls
+
+
+def test_remove_artist_releases_the_removed_wishes(monkeypatch):
+    from core.wishlist.routes import remove_artist_from_wishlist
+    calls = _capture_release(monkeypatch)
+    runtime, service, db, _logger, _a = _build_runtime(tracks=_artist_tracks())
+    service.database = db
+    remove_artist_from_wishlist(runtime, artist_name="Big Discography")
+    assert calls == [(["qt-1", "qt-2"], 1)]
+
+
+def test_bulk_skip_releases_the_skipped_wishes(monkeypatch):
+    calls = _capture_release(monkeypatch)
+    runtime, service, db, _logger, _a = _build_runtime()
+    service.database = db
+    service.remove_fail_ids = {"gone"}
+    bulk_wishlist_action(runtime, "skip", ["t1", "gone", "t2"])
+    assert calls == [(["t1", "t2"], 1)]

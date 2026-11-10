@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob, scoped_file_subjects
 from utils.logging_config import get_logger
@@ -39,6 +41,21 @@ def _unreachable_report(context, *, missing: int, checked: int, deferred: int,
         context.report_progress(phase="Stopped: too many unreachable paths",
                                 log_line=reason, log_type="error")
     return reason
+
+
+def _count_unreachable(context: JobContext, subjects: list):
+    """how many of these files can't be reached, read only (no state is
+    written). None when the run was stopped while looking."""
+    from core.library2.paths import resolve_lib2_path
+    unreachable = 0
+    for index, subject in enumerate(subjects):
+        if index % 500 == 0 and (context.check_stop() or context.wait_if_paused()):
+            return None
+        path = subject.get("path")
+        resolved = resolve_lib2_path(path, config_manager=context.config_manager) if path else None
+        if not resolved or not os.path.exists(resolved):
+            unreachable += 1
+    return unreachable
 
 
 @register_job
@@ -105,6 +122,22 @@ class DeadFileCleanerJob(RepairJob):
             total_files = len(file_ids)
             if context.report_progress:
                 context.report_progress(phase=f'Checking {total_files} files...', total=total_files)
+            # 3.6.1's guard, before anything is written: look first (read
+            # only), and stop when too much of the set is out of reach. the
+            # rescan below marks files missing as it goes, so a guard after
+            # it only described what had already happened
+            # (only files live now: one already marked missing is a known
+            # miss waiting for review, not a sign of an outage)
+            share, minimum = self._guard_settings(context)
+            live = [s for s in before
+                    if (s.get("file_state") or "active") == "active"]
+            unreachable = _count_unreachable(context, live)
+            if unreachable is None:
+                return result
+            if len(live) >= minimum and live and unreachable >= len(live) * share:
+                result.stopped_early = _unreachable_report(
+                    context, missing=unreachable, checked=len(live), deferred=0, before=live)
+                return result
             missing = deferred = 0
             for start in range(0, total_files, _CHUNK):
                 if context.check_stop() or context.wait_if_paused():
@@ -119,10 +152,14 @@ class DeadFileCleanerJob(RepairJob):
                 if context.report_progress:
                     context.report_progress(scanned=done, total=total_files)
             checked = result.scanned + missing
-            share, minimum = self._guard_settings(context)
-            if deferred or (checked >= minimum and missing >= checked * share):
+            # the scan's own storage-outage deferral (its writes held back)
+            if deferred:
                 result.stopped_early = _unreachable_report(
                     context, missing=missing, checked=checked, deferred=deferred, before=before)
+                # 3.6.1: a run that tripped the guard files nothing. files a
+                # healthy run confirmed missing earlier wait for the next one,
+                # so a review never opens while the library is out of reach
+                return result
             after = scoped_file_subjects(context, active_file_subjects(
                 context.db, context.config_manager, include_missing=True,
             ))

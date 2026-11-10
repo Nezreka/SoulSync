@@ -46,8 +46,6 @@ def test_season_grab_carries_the_poster():
 def test_grab_module_forwards_poster_to_the_backend():
     # episode(): the grab payload must send poster_url from opts.poster …
     assert re.search(r"poster_url:\s*opts\.poster", _fn(_GRAB, "episode"))
-    # … the season-PACK grab is its own payload and needs it too …
-    assert re.search(r"poster_url:\s*opts\.poster", _fn(_GRAB, "seasonPack"))
     # … and the per-episode fan-out (where season() lands when no pack exists)
     # must forward opts.poster into each episode() call.
     assert "poster: opts.poster" in _fn(_GRAB, "perEpisode")

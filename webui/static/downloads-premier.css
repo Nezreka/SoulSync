@@ -2411,3 +2411,13 @@
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
 }
+
+/* #2029: the video downloads' library filter, shown once two libraries appear */
+.vdl-library-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 12px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}

@@ -359,8 +359,9 @@ class ListeningStatsWorker:
 
             # Batch-resolve track IDs for all events at once (was N+1 before).
             id_map = self._resolve_db_track_ids_batch(events)
+            from core.library2.title_match import title_fold
             for ev in events:
-                title_l = (ev.get('title') or '').strip().lower()
+                title_l = title_fold(ev.get('title'))
                 artist_l = _name_key((ev.get('artist') or '').strip())
                 if title_l:
                     ev['lib2_track_id'] = id_map.get((title_l, artist_l))
@@ -673,17 +674,12 @@ class ListeningStatsWorker:
             return None
         conn = None
         try:
+            from core.library2.title_match import resolve_title_artist_pairs, title_fold
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT t.id FROM lib2_tracks t
-                JOIN lib2_albums al ON al.id = t.album_id
-                JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                WHERE LOWER(t.title) = LOWER(?) AND ar.name_key = ?
-                LIMIT 1
-            """, (title.strip(), _name_key(artist)))
-            row = cursor.fetchone()
-            return row[0] if row else None
+            # same fold as the batch resolver (review 5 R5-A-1)
+            key = _name_key(artist)
+            found = resolve_title_artist_pairs(conn.cursor(), [(title, key)])
+            return found.get((title_fold(title), key))
         except Exception:
             return None
         finally:
@@ -693,51 +689,34 @@ class ListeningStatsWorker:
     def _resolve_db_track_ids_batch(self, events):
         """Batch-resolve DB track IDs for a list of history events.
 
-        Returns a dict ``{(title_lower, artist_lower): track_id}`` so callers
+        Returns a dict ``{(title_fold, artist name_key): track_id}`` so callers
         can look up without another DB round-trip. Replaces the former N+1
         pattern of one SELECT per event (500 events = 500 queries).
 
         Uses row-value IN with chunking (500 pairs = 1000 variables, well
         under SQLite's default limit). Case-insensitive matching is preserved.
         """
+        from core.library2.title_match import resolve_title_artist_pairs
+
         pairs = set()
         for ev in events:
             title = (ev.get('title') or '').strip()
             artist = (ev.get('artist') or '').strip()
             if title:
-                pairs.add((title.lower(), _name_key(artist)))
+                pairs.add((title, _name_key(artist)))
 
         result = {}
         if not pairs:
             return result
 
-        pair_list = list(pairs)
-        chunk_size = 500
-
         conn = None
         try:
             conn = self.db._get_connection()
-            cursor = conn.cursor()
-            for i in range(0, len(pair_list), chunk_size):
-                chunk = pair_list[i:i + chunk_size]
-                placeholders = ','.join(['(?,?)'] * len(chunk))
-                # The artist half is matched on the indexed, accent-preserving
-                # fold `name_key`; SQLite's LOWER() is ASCII-only (iss29-D13).
-                flat_args = [v for pair in chunk for v in pair]
-                cursor.execute(
-                    f"""
-                    SELECT LOWER(t.title), ar.name_key, t.id
-                    FROM lib2_tracks t
-                    JOIN lib2_albums al ON al.id = t.album_id
-                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                    WHERE (LOWER(t.title), ar.name_key) IN ({placeholders})
-                    """,
-                    flat_args,
-                )
-                for title_l, artist_l, tid in cursor.fetchall():
-                    # Keep first match per pair to match the LIMIT 1 semantics
-                    # of the original per-event query.
-                    result.setdefault((title_l, artist_l), tid)
+            # review 5 R5-A-1: the key was python's lower() against sqlite's
+            # ascii-only LOWER(), so a title like 'LO QUE LE PASÓ A HAWAii'
+            # never linked. one shared resolver folds both sides the same way;
+            # the artist half stays on the indexed name_key (iss29-D13)
+            result = resolve_title_artist_pairs(conn.cursor(), pairs, chunk_size=500)
         except Exception as e:
             logger.error(f"Error batch-resolving track IDs: {e}")
         finally:

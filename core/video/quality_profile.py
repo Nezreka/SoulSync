@@ -19,7 +19,11 @@ The model (rich-curated — Radarr-competitive without a full custom-formats eng
       ``prefer_audio`` (any|surround|lossless|atmos), ``prefer_repack`` (bool).
   - ``audio_language_mode`` (off|prefer|require) + ``audio_languages`` : dubbed /
                         MULTI releases. require is a real filter, prefer ranks.
-  - ``min_size_gb`` / ``max_size_gb`` : size guard per item (0 = no limit).
+  - ``max_movie_gb`` / ``max_episode_gb`` : size guard per item (0 = no limit).
+  - ``preferred_movie_gb`` / ``preferred_episode_gb`` : a tie-break, closer to
+                        it ranks higher (0 = off).
+  - ranking order (core/video/release_rank): tier on this ladder + the soft
+                        preferences, then custom formats, then tie-breaks.
   - ``library``     : main|4k. 4k files new titles on this profile in the optional
                         4K library (Settings → Folders), when that one is switched on.
 
@@ -105,6 +109,10 @@ def default_profile() -> dict:
         "library": "main",
         "max_movie_gb": 0,      # per-item size guard, split by runtime (0 = no limit)
         "max_episode_gb": 0,
+        # preferred size (#2033): a tie-break only, closer ranks higher among
+        # releases that tie on quality and custom formats. 0 = off
+        "preferred_movie_gb": 0,
+        "preferred_episode_gb": 0,
         "format_scores": {},    # custom-format score overrides (P3): {format_id: score}
         "min_format_score": 0,  # hard floor on the summed format score (0 = off)
         # Torrent health floor, the *arr apps' "minimum seeders". A swarm with no
@@ -126,6 +134,19 @@ def _coerce_int(value: Any, default: int) -> int:
 
 def _clamp_size(value: Any) -> int:
     return min(MAX_SIZE_CAP_GB, max(0, _coerce_int(value, 0)))
+
+
+def _clamp_preferred(value: Any, cap: int) -> float:
+    try:
+        gb = round(float(value), 1)
+    except (TypeError, ValueError):
+        return 0
+    if gb != gb or gb <= 0:          # nan / off
+        return 0
+    gb = min(float(MAX_SIZE_CAP_GB), gb)
+    if cap:
+        gb = min(float(cap), gb)
+    return int(gb) if gb == int(gb) else gb
 
 
 def normalize_tiers(value: Any) -> list:
@@ -187,6 +208,11 @@ def normalize(raw: Any) -> dict:
 
     d["max_movie_gb"] = _clamp_size(raw.get("max_movie_gb"))
     d["max_episode_gb"] = _clamp_size(raw.get("max_episode_gb"))
+    # preferred size, in tenths of a GB (episodes live under 1 GB). never above
+    # the hard cap, a target past it could never be grabbed
+    for pref, cap in (("preferred_movie_gb", "max_movie_gb"),
+                      ("preferred_episode_gb", "max_episode_gb")):
+        d[pref] = _clamp_preferred(raw.get(pref), d[cap])
 
     # Custom formats (P3): per-profile score overrides {format_id: score} and
     # an optional hard floor on the summed format score (0 = off).
@@ -366,7 +392,28 @@ def load_for_item(db, item: Any) -> dict:
     if isinstance(item, dict):
         pid = item.get("quality_profile_id")
         kind = item.get("kind")
+        if not pid:
+            # no profile of its own: its video library's default (#2029)
+            pid = library_profile_for_item(db, item)
     return profile_by_id(db, pid, kind=kind)
+
+
+def library_profile_for_item(db, item: Any) -> Optional[int]:
+    """The default quality profile of the video library a wished item files
+    into (#2029), or None. Reads the drain / RSS item shape (tmdb_id for a
+    movie, show_tmdb_id for an episode) and a copy's video_library_id."""
+    if not isinstance(item, dict):
+        return None
+    try:
+        from core.video.libraries import default_profile_for
+        is_movie = item.get("show_tmdb_id") is None and str(item.get("kind") or "movie") == "movie"
+        return default_profile_for(
+            db, "movie" if is_movie else "show",
+            tmdb_id=item.get("tmdb_id") if is_movie else item.get("show_tmdb_id"),
+            explicit_id=item.get("video_library_id"),
+            title=item.get("title") if is_movie else (item.get("show_title") or item.get("title")))
+    except Exception:   # noqa: BLE001 - no library default: the defaults as before
+        return None
 
 
 __all__ = [

@@ -2,6 +2,7 @@ import '@vitejs/plugin-react/preamble';
 import { createRoot } from 'react-dom/client';
 
 import { mountCandidateInspectorHost } from '@/features/downloads/inspector-modal';
+import { mountFeaturePickerHost } from '@/features/feature-picker/host';
 import { mountOnboardingHost } from '@/features/onboarding/host';
 import { mountAddToPlaylistHost } from '@/features/playlists/add-to-playlist';
 import { mountLibraryDiscographySourceSelector } from '@/features/settings/library-discography-source';
@@ -75,4 +76,6 @@ mountCandidateInspectorHost();
 window.openDownloadTaskInspector = (taskId, track) => void openDownloadTaskSearch(taskId, track);
 mountAddToPlaylistHost();
 mountVideoLibraryTabHost();
+// make soulsync yours (#1909): window.openFeaturePicker
+mountFeaturePickerHost();
 void bootstrapApp();

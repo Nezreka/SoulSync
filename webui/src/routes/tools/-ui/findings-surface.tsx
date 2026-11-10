@@ -31,7 +31,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { FindingAlbumGroup } from '../-tools.api';
+import { SHELL_LIBRARY_SCOPE_CHANGED_EVENT } from '@/platform/shell/bridge';
+
+import type { FindingAlbumGroup, FindingsQuery, FindingsViewScope } from '../-tools.api';
 import type { FindingGroup, FindingTypeInfo } from '../-tools.groups';
 import type {
   BulkFixStatus,
@@ -45,10 +47,8 @@ import {
   bulkFindingAction,
   clearFindings,
   dismissFinding,
-  dismissFindingChecked,
   dismissFindingType,
   fetchBulkFixStatus,
-  findExactArtist,
   fetchCacheHealth,
   fetchFindingCounts,
   fetchFindingGroups,
@@ -57,7 +57,6 @@ import {
   fixFinding,
   reopenFinding,
   reopenFindingsBulk,
-  searchLibraryArtists,
   startBulkFix,
   stopBulkFix,
 } from '../-tools.api';
@@ -83,9 +82,18 @@ import {
 import { safeFixablePending, visibleGroups } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
-import { ReidentifyModal } from '../../artist-detail/-ui/reidentify-modal';
-import { AlbumInspectionTray } from './album-inspection-tray';
+import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
 import { FindingDetail } from './finding-detail';
+import {
+  ReidentifyFindingModal,
+  TYPE_ACOUSTID,
+  TYPE_BACKFILL,
+  TYPE_DEAD,
+  TYPE_ORPHAN,
+  TYPE_QUALITY,
+  TYPE_RETAG,
+  useFindingFix,
+} from './finding-fix';
 import { useFindingPrompts } from './finding-prompts';
 import { FindingsAlbumGrid } from './findings-album-grid';
 import { FindingsInbox } from './findings-inbox';
@@ -96,42 +104,8 @@ function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
 }
 
-/**
- * A poisoned album holds tracks by many artists, so it can't be re-identified
- * as one release. Open it in the library instead, where each track has its own
- * Re-identify (#1567). Findings from before the artist id was stored find the
- * artist by the album artist's name.
- */
-export async function openSuspectAlbum(finding: RepairFinding): Promise<void> {
-  const d = (finding.details as Record<string, any>) || {};
-  const router = window.SoulSyncWebRouter;
-  // native findings name the album as `lib2:<id>`; the library route wants the id
-  const albumId =
-    finding.entity_id != null ? String(finding.entity_id).replace(/^lib2:/, '') : null;
-  let artistId = d.artist_id != null && d.artist_id !== '' ? String(d.artist_id) : '';
-  let artistName = String(d.album_artist_name || '');
-  if (!artistId && artistName) {
-    try {
-      const exact = findExactArtist(await searchLibraryArtists(artistName), artistName);
-      if (exact) {
-        artistId = String(exact.id);
-        artistName = exact.name || artistName;
-      }
-    } catch {
-      // falls through to the toast below
-    }
-  }
-  if (!artistId || !router) {
-    toast("Couldn't find this album in your library", 'error');
-    return;
-  }
-  toast('Open each track there and pick Re-identify from its menu', 'info');
-  await router.navigateToPage('artist-detail', {
-    artistId,
-    artistName,
-    focusAlbumId: albumId ?? undefined,
-  });
-}
+// moved to finding-fix, which Simple mode shares (review 5 W3-TT-3)
+export { openSuspectAlbum } from './finding-fix';
 
 /** The vanilla's poll interval for a background Fix All run. */
 const BULK_FIX_POLL_MS = 2000;
@@ -177,16 +151,6 @@ function readStoredPageSize(): number {
     return REPAIR_DEFAULT_PAGE_SIZE;
   }
 }
-
-/** Finding types whose fix needs a question answered before it can run. Keyed
- *  by TYPE now, not by job — a job can emit more than one type. */
-const TYPE_ORPHAN = 'orphan_file';
-const TYPE_DEAD = 'dead_file';
-const TYPE_ACOUSTID = 'acoustid_mismatch';
-const TYPE_RETAG = 'library_retag';
-const TYPE_BACKFILL = 'missing_discography_track';
-const TYPE_QUALITY = 'quality_upgrade';
-const TYPE_SUSPECT_ALBUM = 'suspect_album_tag';
 
 /** Above this many files, a whole-group orphan DELETE goes through the
  *  type-the-phrase dialog. Same number the filter-wide Fix All has always
@@ -321,8 +285,20 @@ export function FindingsSurface({
   // list | album | artist. Resets whenever a different type is opened, because
   // a grouping that made sense for upgrades rarely does for the next type.
   const [groupView, setGroupView] = useState<'list' | 'album' | 'artist'>('list');
+  /** an album or artist card drilled into from the grouped view: the open
+   *  type's rows of that one group, by the grid's own key. it used to put the
+   *  name in the search box, which escaped the type and listed every type's
+   *  rows whose text held the name, for select all and Fix Selected to act
+   *  on (review 5 W3-TT-2). */
+  const [drill, setDrill] = useState<NonNullable<FindingsQuery['group']> | null>(null);
 
   const [groups, setGroups] = useState<FindingGroup[]>([]);
+  /** the inbox rows: `groups` again, unless a job or severity filter is set,
+   *  then counted by the server for those filters. a row's count is what its
+   *  Fix all / Dismiss all / Reopen all act on, and only the server knows how
+   *  many of a type's rows came from one job (review 5 W3-TT). the hero
+   *  keeps the whole library. */
+  const [inboxGroups, setInboxGroups] = useState<FindingGroup[]>([]);
   const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [types, setTypes] = useState<FindingTypeInfo[]>([]);
   const [items, setItems] = useState<RepairFinding[] | null>(null);
@@ -394,6 +370,27 @@ export function FindingsSurface({
    *  the failure the inbox is supposed to remove. */
   const searching = query.trim().length > 0;
   const listType = searching ? '' : openType;
+  /** a drill-in only narrows the open type's list; a search leaves both */
+  const activeDrill = !searching && openType ? drill : null;
+
+  /** what the list shows, sent with Fix Selected / Dismiss Selected so the
+   *  server can refuse a row the view no longer lists (review 5 W3-TT) */
+  const viewScope = useMemo<FindingsViewScope>(
+    () => ({
+      jobId: jobFilter,
+      status: statusFilter,
+      severity: severityFilter,
+      findingType: listType,
+      q: query.trim(),
+      group: activeDrill ?? undefined,
+    }),
+    [activeDrill, jobFilter, listType, query, severityFilter, statusFilter],
+  );
+  /** the inbox's filters, for the group-row bulk buttons */
+  const groupFilters = useMemo(
+    () => ({ jobId: jobFilter || undefined, severity: severityFilter || undefined }),
+    [jobFilter, severityFilter],
+  );
 
   // ── Loading ────────────────────────────────────────────────────────────────
 
@@ -418,10 +415,20 @@ export function FindingsSurface({
     if (!video) setCacheHealth(await fetchCacheHealth());
   }, [video]);
 
+  const groupsToken = useRef(0);
   const loadGroups = useCallback(async () => {
-    setGroups(await fetchFindingGroups());
+    // a filter changed while an older load was out: the newest wins
+    const token = ++groupsToken.current;
+    const filtered = Boolean(jobFilter || severityFilter);
+    const [all, narrowed] = await Promise.all([
+      fetchFindingGroups(),
+      filtered ? fetchFindingGroups({ jobId: jobFilter, severity: severityFilter }) : null,
+    ]);
+    if (token !== groupsToken.current) return;
+    setGroups(all);
+    setInboxGroups(narrowed ?? all);
     setGroupsLoaded(true);
-  }, []);
+  }, [jobFilter, severityFilter]);
 
   const loadFindings = useCallback(async () => {
     // Nothing is open and nothing is being searched: the inbox IS the view,
@@ -440,6 +447,7 @@ export function FindingsSurface({
         findingType: listType,
         sort,
         q: query.trim(),
+        group: activeDrill ?? undefined,
         page,
         limit: pageSize,
       });
@@ -454,6 +462,7 @@ export function FindingsSurface({
       setLoadError(error instanceof Error ? error.message : String(error));
     }
   }, [
+    activeDrill,
     jobFilter,
     listType,
     openType,
@@ -490,6 +499,21 @@ export function FindingsSurface({
       clearTimeout(timer);
     };
   }, [loadCounts, loadGroups, loadFindings]);
+
+  // G16-4: another library picked in the header. every count, group and row
+  // was the old library's, and Fix All acted on what was on screen; a
+  // selection from the old library is dropped, never carried over
+  // review 4 R4-E-1: the album grids load on their own token, and an open
+  // album tray is a selection too
+  useEffect(() => {
+    const switched = () => {
+      setSelectedAlbum(null);
+      setRefreshToken((token) => token + 1);
+      refreshAll();
+    };
+    window.addEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
+    return () => window.removeEventListener(SHELL_LIBRARY_SCOPE_CHANGED_EVENT, switched);
+  }, [refreshAll]);
 
   // a job finished: its findings only showed after a page refresh (#1386).
   // any change after the first render counts, even from no runs at all (a
@@ -554,9 +578,15 @@ export function FindingsSurface({
 
   useEffect(() => {
     void loadCounts();
+  }, [loadCounts]);
+
+  useEffect(() => {
     void loadGroups();
+  }, [loadGroups]);
+
+  useEffect(() => {
     void fetchFindingTypes().then(setTypes);
-  }, [loadCounts, loadGroups]);
+  }, []);
 
   useEffect(() => {
     void loadFindings();
@@ -689,164 +719,32 @@ export function FindingsSurface({
     [refreshAll],
   );
 
-  /** `fixRepairFinding`. The per-type prompts run BEFORE the button is disabled.
-   *  `override` is a non-default action picked in the detail panel (the video
-   *  ghost's Forget); it skips the prompts because the user just chose. */
-  const fixOne = useCallback(
-    async (finding: RepairFinding, override?: string) => {
-      const type = finding.finding_type;
-      let fixAction: string | null = override ?? null;
-      if (video) {
-        // video types share some slugs with music (quality_upgrade) but none
-        // of music's questions. a fix that changes a file on disk asks once,
-        // in the words the catalog has for it.
-        const info = typeInfo(type);
-        if (!override && info?.destructive) {
-          const confirmed = await window.showConfirmDialog?.({
-            title: `${info.verb || 'Fix'}: ${finding.title}`,
-            message: info.confirm || 'This changes a file on disk.',
-            confirmText: info.verb || 'Fix',
-            destructive: true,
-          });
-          if (!confirmed) return;
-        }
-      } else if (!override) {
-        if (type === 'native_duplicate_releases') {
-          setExpanded((current) => new Set([...current, finding.id]));
-          return;
-        }
-        if (type === TYPE_ORPHAN) {
-          fixAction = await prompts.promptOrphan();
-          if (!fixAction) return;
-        }
-        if (type === TYPE_DEAD) {
-          fixAction = await prompts.promptDeadFile();
-          if (!fixAction) return;
-        }
-        if (type === TYPE_ACOUSTID) {
-          // an ambiguous finding carries its candidate recordings - hand them to
-          // the dialog so the user can pick which one to retag/relocate as
-          const d = (finding.details || {}) as {
-            ambiguous?: boolean;
-            candidates?: string[];
-          };
-          fixAction = await prompts.promptAcoustid(d.ambiguous ? d.candidates : undefined);
-          if (!fixAction) return;
-        }
-        if (type === TYPE_QUALITY) {
-          fixAction = await prompts.promptQuality();
-          if (!fixAction) return;
-          if (fixAction === 'ignore') {
-            await dismissOne(finding.id);
-            return;
-          }
-        }
-        if (type === TYPE_RETAG && !finding.details?.has_manual_conflict) {
-          // Nothing to settle on this row — the plain apply is the whole action.
-        } else if (type === TYPE_RETAG) {
-          fixAction = await prompts.promptRetag(1, 1);
-          if (!fixAction) return;
-          if (fixAction === 'safe') fixAction = null;
-        }
-        if (type === TYPE_BACKFILL) {
-          const choice = await prompts.promptBackfill(1);
-          if (!choice) return;
-          if (choice === 'dismiss') {
-            await dismissOne(finding.id);
-            return;
-          }
-          // 'add_to_wishlist' falls through with no fix_action — the handler
-          // already adds to the wishlist by default.
-        }
-        if (type === TYPE_SUSPECT_ALBUM && finding.entity_type === 'album') {
-          await openSuspectAlbum(finding);
-          return;
-        }
-        if (type === TYPE_SUSPECT_ALBUM) {
-          setReidentifyingFinding(finding);
-          return;
-        }
-      }
-
-      if (!video && type === 'native_duplicate_tracks') {
-        const weak = Boolean(finding.details?.requires_recording_confirmation);
-        const confirmed = await window.showConfirmDialog?.({
-          title: weak ? 'Confirm Recording & Keep Best' : 'Keep Best',
-          message: weak
-            ? 'After comparing these files, confirm they contain the same recording. Keep the recommended file and move redundant copies to recoverable quarantine? Protected copies stay.'
-            : 'Keep the recommended file and move redundant copies to recoverable quarantine? Protected companions, shared files and playlist copies stay.',
-          confirmText: weak ? 'Confirm Recording & Keep Best' : 'Keep Best',
-          destructive: true,
-        });
-        if (!confirmed) return;
-        fixAction = weak ? 'keep_best:confirmed' : 'keep_best';
-      }
-
-      // A finding with no catalogue subject cannot be re-downloaded — the fix
-      // is a plain delete, and unlike every prompt above it has no dialog of
-      // its own to stop at. Confirm it here rather than let one click remove a
-      // file from disk.
-      if (!video && !override && findingRowFixLabel(finding) === 'Delete File') {
-        const quarantined = type === 'corrupt_audio' || type === 'fake_lossless';
-        const confirmed = await window.showConfirmDialog?.({
-          title: 'Delete File',
-          message: quarantined
-            ? `Move ${findingFilePath(finding) || 'this file'} to the deleted-files folder? It is not in your library, so nothing will be queued to replace it.`
-            : `Permanently delete ${findingFilePath(finding) || 'this file'} from disk? It is not in your library, so nothing will be queued to replace it.`,
-          confirmText: 'Delete',
-          destructive: true,
-        });
-        if (!confirmed) return;
-        // Fake lossless refuses to remove an uncatalogued file without being
-        // told to: its default action is a re-download.
-        fixAction = 'delete';
-      }
-
-      setBusyFix((current) => new Set(current).add(finding.id));
-      try {
-        let result = await fixFinding(finding.id, fixAction);
-        if (result.needs_confirm) {
-          // a library track has the same filename somewhere else. show it and
-          // let the user decide, instead of a dead end
-          const paths = result.library_paths ?? [];
-          const confirmed = await window.showConfirmDialog?.({
-            title: 'Same Filename In Library',
-            message: paths.length
-              ? `Your library already has a file with this name:\n\n${paths.join('\n')}\n\nIf it's the same song, this orphan is a leftover copy. Delete it from disk?`
-              : 'Your library already has a file with this name in another folder. If it is the same song, this orphan is a leftover copy. Delete it from disk?',
-            confirmText: 'Delete anyway',
-            destructive: true,
-          });
-          if (!confirmed) {
-            setBusyFix((current) => {
-              const next = new Set(current);
-              next.delete(finding.id);
-              return next;
-            });
-            refreshAll();
-            return;
-          }
-          result = await fixFinding(finding.id, 'delete_confirmed');
-        }
-        toast(
-          result.success ? result.message || 'Fixed successfully' : result.error || 'Fix failed',
-          result.success ? 'success' : 'error',
-        );
-        refreshAll();
-      } catch {
-        toast('Error applying fix', 'error');
-        // Restored ONLY on the error path. On success the button stays
-        // disabled until the reload lands — which is what stops a second
-        // click firing a second fix while the request is in flight.
-        setBusyFix((current) => {
-          const next = new Set(current);
-          next.delete(finding.id);
-          return next;
-        });
-      }
-    },
-    [dismissOne, prompts, refreshAll, typeInfo, video],
-  );
+  /** `fixRepairFinding`, shared with Simple mode's album tray so both ask the
+   *  same per-type questions (review 5 W3-TT-3). The per-type prompts run
+   *  BEFORE the button is disabled. `override` is a non-default action picked
+   *  in the detail panel (the video ghost's Forget); it skips the prompts
+   *  because the user just chose. */
+  const expandFinding = useCallback((finding: RepairFinding) => {
+    setExpanded((current) => new Set([...current, finding.id]));
+  }, []);
+  const setFixBusy = useCallback((id: number, busy: boolean) => {
+    setBusyFix((current) => {
+      const next = new Set(current);
+      if (busy) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const fixOne = useFindingFix({
+    video,
+    typeInfo,
+    prompts,
+    dismiss: dismissOne,
+    refresh: refreshAll,
+    onExpand: expandFinding,
+    onReidentify: setReidentifyingFinding,
+    setBusy: setFixBusy,
+  });
 
   const handleInspectRedownload = useCallback((finding: RepairFinding) => {
     setRedownloadFinding(finding);
@@ -907,16 +805,22 @@ export function FindingsSurface({
 
   const bulkDismiss = useCallback(async () => {
     if (selected.size === 0) return;
-    const count = selected.size;
     const ids = [...selected];
     try {
-      await bulkFindingAction(ids, 'dismiss');
-      offerUndo(ids, `${count.toLocaleString()} findings dismissed`);
+      const { updated, refused } = await bulkFindingAction(ids, 'dismiss', viewScope);
+      // the server dismissed only what this view still lists
+      if (refused) {
+        toast(
+          `${refused.toLocaleString()} selected finding${refused === 1 ? ' is' : 's are'} no longer in this list and ${refused === 1 ? 'was' : 'were'} left alone`,
+          'info',
+        );
+      }
+      offerUndo(ids, `${(updated || ids.length - refused).toLocaleString()} findings dismissed`);
       refreshAll();
     } catch {
       toast('Error updating findings', 'error');
     }
-  }, [offerUndo, refreshAll, selected]);
+  }, [offerUndo, refreshAll, selected, viewScope]);
 
   /** `bulkFixFindings` — ask once per finding KIND, then fix one id at a time. */
   const bulkFix = useCallback(async () => {
@@ -1013,31 +917,41 @@ export function FindingsSurface({
     let fixed = 0;
     let failed = 0;
     let skipped = 0;
+    let refused = 0;
     let otherArtistSkipped = 0;
     let lastError = '';
     toast(`Fixing ${ids.length} findings...`, 'info');
 
+    // Backfill "Just Clear" and quality "Ignore" both dismiss rather than
+    // fix, so they bypass the fix endpoint entirely. one scoped dismiss, so
+    // the server checks them against this view like every other row
+    // (review 5 W3-TT).
+    const dismissIds = ids.filter(
+      (id) =>
+        (typeOf(id) === TYPE_BACKFILL && backfillAction === 'dismiss') ||
+        (typeOf(id) === TYPE_QUALITY && qualityAction === 'ignore'),
+    );
+    if (dismissIds.length) {
+      try {
+        const result = await bulkFindingAction(dismissIds, 'dismiss', viewScope);
+        fixed += result.updated;
+        refused += result.refused;
+        const lost = dismissIds.length - result.updated - result.refused;
+        if (lost > 0) {
+          failed += lost;
+          lastError = 'dismiss failed';
+        }
+      } catch {
+        failed += dismissIds.length;
+        lastError = 'dismiss failed';
+      }
+    }
+    const dismissed = new Set(dismissIds);
+
     for (const id of ids) {
+      if (dismissed.has(id)) continue;
       const findingType = typeOf(id);
       try {
-        // Backfill "Just Clear" and quality "Ignore" both dismiss rather than
-        // fix, so they bypass the fix endpoint entirely.
-        if (
-          (findingType === TYPE_BACKFILL && backfillAction === 'dismiss') ||
-          (findingType === TYPE_QUALITY && qualityAction === 'ignore')
-        ) {
-          try {
-            if (await dismissFindingChecked(id)) fixed++;
-            else {
-              failed++;
-              lastError = 'dismiss failed';
-            }
-          } catch {
-            failed++;
-          }
-          continue;
-        }
-
         let fixAction: string | null = null;
         if (findingType === TYPE_ORPHAN && orphanAction) fixAction = orphanAction;
         else if (findingType === TYPE_DEAD && deadAction) fixAction = deadAction;
@@ -1052,12 +966,14 @@ export function FindingsSurface({
         // would count as an explicit single fix, and the album gate
         // would let a select-all wishlist every other artist on every
         // compilation in the selection.
-        const result = await fixFinding(id, fixAction, { bulk: true });
+        // scope: the server refuses a row this view no longer lists
+        const result = await fixFinding(id, fixAction, { bulk: true, scope: viewScope });
         // Counted even on a successful fix: a partial gate resolves the
         // finding, and without this the held-back tracks are silent here
         // (the background Fix All reports them in its run note).
         otherArtistSkipped += result.other_artist_skipped || 0;
-        if (result.success) fixed++;
+        if (result.refused) refused++;
+        else if (result.success) fixed++;
         else if (result.skipped_by_design) skipped++;
         else {
           failed++;
@@ -1076,8 +992,14 @@ export function FindingsSurface({
       otherArtistSkipped,
     );
     toast(message, type);
+    if (refused) {
+      toast(
+        `${refused.toLocaleString()} selected finding${refused === 1 ? ' is' : 's are'} no longer in this list and ${refused === 1 ? 'was' : 'were'} left alone`,
+        'info',
+      );
+    }
     refreshAll();
-  }, [items, prompts, refreshAll, selected, typeInfo, video]);
+  }, [items, prompts, refreshAll, selected, typeInfo, video, viewScope]);
 
   // ── Group-scoped actions ───────────────────────────────────────────────────
 
@@ -1142,10 +1064,12 @@ export function FindingsSurface({
                     // finding types would lose all of its pending rows when
                     // you cleared one group (the #1142 family).
                     findingType: group.finding_type,
+                    // and to the severity the row counted (review 5 W3-TT)
+                    severity: groupFilters.severity,
                   })
                 : {
                     success: true,
-                    deleted: (await dismissFindingType(group.finding_type)).updated,
+                    deleted: (await dismissFindingType(group.finding_type, groupFilters)).updated,
                   };
             toast(
               result.success
@@ -1179,7 +1103,7 @@ export function FindingsSurface({
         fixAction = await prompts.promptQuality();
         if (!fixAction) return;
         if (fixAction === 'ignore') {
-          const updated = (await dismissFindingType(group.finding_type)).updated || 0;
+          const updated = (await dismissFindingType(group.finding_type, groupFilters)).updated || 0;
           toast(`Dismissed ${updated.toLocaleString()} quality findings`, 'success');
           refreshAll();
           return;
@@ -1220,9 +1144,13 @@ export function FindingsSurface({
       }
 
       try {
+        // the inbox's job / severity filters: the run fixes the rows the
+        // row counted, not every row of the type (review 5 W3-TT)
         const result = await startBulkFix({
           findingType: group.finding_type,
           fixAction,
+          jobId: groupFilters.jobId,
+          severity: groupFilters.severity,
         });
         if (result.started) {
           toast(`Fixing ${result.total} ${label.toLowerCase()} in the background…`, 'info');
@@ -1237,7 +1165,7 @@ export function FindingsSurface({
         toast('Error starting bulk fix', 'error');
       }
     },
-    [prompts, refreshAll, video, watchBulkFixRun],
+    [groupFilters, prompts, refreshAll, video, watchBulkFixRun],
   );
 
   const dismissGroup = useCallback(
@@ -1251,7 +1179,7 @@ export function FindingsSurface({
       });
       if (!confirmed) return;
       try {
-        const result = await dismissFindingType(group.finding_type);
+        const result = await dismissFindingType(group.finding_type, groupFilters);
         toast(
           result.success
             ? `Dismissed ${(result.updated || 0).toLocaleString()} findings`
@@ -1263,7 +1191,7 @@ export function FindingsSurface({
         toast('Error dismissing findings', 'error');
       }
     },
-    [refreshAll],
+    [groupFilters, refreshAll],
   );
 
   /** Reopen all dismissed/resolved findings of one type — the bulk undo for
@@ -1280,7 +1208,11 @@ export function FindingsSurface({
       });
       if (!confirmed) return;
       try {
-        const count = await reopenFindingsBulk(undefined, group.finding_type);
+        const count = await reopenFindingsBulk(
+          groupFilters.jobId,
+          group.finding_type,
+          groupFilters.severity,
+        );
         toast(
           count > 0 ? `Reopened ${count.toLocaleString()} findings` : 'No findings to reopen',
           count > 0 ? 'success' : 'info',
@@ -1290,7 +1222,7 @@ export function FindingsSurface({
         toast(e instanceof Error ? e.message : 'Error reopening findings', 'error');
       }
     },
-    [refreshAll],
+    [groupFilters, refreshAll],
   );
 
   const safeCount = useMemo(() => safeFixablePending(groups, typeInfo), [groups, typeInfo]);
@@ -1332,9 +1264,18 @@ export function FindingsSurface({
     // and its old message named only the job and status — so a user who had
     // narrowed by severity or search read a prompt describing a far wider
     // delete than they expected, and got one (#1142).
+    // a drilled-in card is a filter too: its type and its album or artist
+    // (review 5 W3-TT-2)
+    const drillType = activeDrill ? typeInfo(listType)?.label || listType.replace(/_/g, ' ') : '';
     const extra = [
       severityFilter ? `severity ${severityFilter}` : '',
       needle ? `matching "${needle}"` : '',
+      activeDrill ? `${drillType} only` : '',
+      activeDrill
+        ? activeDrill.groupBy === 'album'
+          ? `on "${activeDrill.album}" by ${activeDrill.artist}`
+          : `by ${activeDrill.artist}`
+        : '',
     ].filter(Boolean);
     const extraLabel = extra.length ? `, ${extra.join(', ')}` : '';
     const confirmed = await window.showConfirmDialog?.({
@@ -1350,6 +1291,8 @@ export function FindingsSurface({
         status: statusFilter,
         severity: severityFilter,
         q: needle,
+        findingType: activeDrill ? listType : undefined,
+        group: activeDrill ?? undefined,
       });
       toast(
         result.success
@@ -1361,7 +1304,17 @@ export function FindingsSurface({
     } catch {
       toast('Error clearing findings', 'error');
     }
-  }, [jobFilter, jobLabel, query, refreshAll, severityFilter, statusFilter]);
+  }, [
+    activeDrill,
+    jobFilter,
+    jobLabel,
+    listType,
+    query,
+    refreshAll,
+    severityFilter,
+    statusFilter,
+    typeInfo,
+  ]);
 
   // ── Keyboard triage ────────────────────────────────────────────────────────
   //
@@ -1435,12 +1388,12 @@ export function FindingsSurface({
 
   const shown = useMemo(
     () =>
-      visibleGroups(groups, {
+      visibleGroups(inboxGroups, {
         jobId: jobFilter,
         severity: severityFilter,
         status: statusFilter,
       }),
-    [groups, jobFilter, severityFilter, statusFilter],
+    [inboxGroups, jobFilter, severityFilter, statusFilter],
   );
 
   /**
@@ -1512,6 +1465,7 @@ export function FindingsSurface({
      upgrade backlog and rarely does for the next type along. */
   useEffect(() => {
     setGroupView('list');
+    setDrill(null);
   }, [openType]);
 
   /* The list/album/artist switch. Only offered inside an opened type - grouping
@@ -1530,8 +1484,12 @@ export function FindingsSurface({
           <button
             type="button"
             key={value}
-            aria-pressed={groupView === value}
-            onClick={() => setGroupView(value)}
+            aria-pressed={groupView === value && !(value === 'list' && activeDrill)}
+            onClick={() => {
+              setGroupView(value);
+              setDrill(null);
+              setPage(0);
+            }}
           >
             {label}
           </button>
@@ -1539,28 +1497,71 @@ export function FindingsSurface({
       </div>
     ) : null;
 
-  /* Drilling into a card reuses the search box, which already matches
-     details_json - so the album name filters straight to that album's rows and
-     every existing control (select all, bulk fix, sort) keeps working on it. */
+  /* Drilling into a card lists the open type's rows of that one album (or
+     artist) by the grid's own key, and every existing control (select all,
+     bulk fix, sort) keeps working on exactly those rows. It used to put the
+     name in the search box, which dropped the type and listed any finding
+     whose text held the name (review 5 W3-TT-2). */
   const groupedView =
     openType && groupView !== 'list' ? (
       <FindingsAlbumGrid
         groupBy={groupView}
+        jobId={jobFilter || undefined}
         status={statusFilter}
         findingType={openType}
         refreshToken={refreshToken}
         onOpen={(group) => {
-          const needle = groupView === 'artist' ? group.artist : group.album;
-          if (needle) setQuery(needle);
+          const identity = groupIdentity(group);
+          if (!identity) {
+            toast(
+              'This card has no artist or album name, so its findings can’t be listed alone',
+              'info',
+            );
+            return;
+          }
+          setDrill(identity);
           setGroupView('list');
           setPage(0);
         }}
       />
     ) : null;
 
+  const drillChip = activeDrill ? (
+    <span className="repair-drill-chip" data-testid="repair-drill-chip">
+      <span className="repair-drill-chip-label">
+        {activeDrill.groupBy === 'album' ? (
+          <>
+            <b>{activeDrill.album}</b> by {activeDrill.artist}
+          </>
+        ) : (
+          <>
+            by <b>{activeDrill.artist}</b>
+          </>
+        )}
+      </span>
+      <button
+        type="button"
+        className="repair-drill-chip-clear"
+        aria-label="Show every finding of this type again"
+        title="Show every finding of this type again"
+        onClick={() => {
+          setDrill(null);
+          setPage(0);
+        }}
+      >
+        &times;
+      </button>
+    </span>
+  ) : null;
+
   const findingList = (
     <>
-      {viewSwitch ? <div className="repair-findings-toolbar">{viewSwitch}</div> : null}
+      {viewSwitch ? (
+        <div className="repair-findings-toolbar">
+          {viewSwitch}
+          {groupView === 'list' ? drillChip : null}
+        </div>
+      ) : null}
       {groupedView}
       {groupedView ? null : (
         <>
@@ -1888,6 +1889,8 @@ export function FindingsSurface({
             <AlbumInspectionTray
               group={selectedAlbum}
               status={statusFilter}
+              jobId={jobFilter || undefined}
+              findingType={listType || undefined}
               onClose={() => setSelectedAlbum(null)}
               onFixFinding={fixOne}
               onDismissFinding={dismissOne}
@@ -1939,6 +1942,7 @@ export function FindingsSurface({
           groups={shown}
           typeInfo={typeInfo}
           status={statusFilter}
+          severity={severityFilter}
           openType={openType}
           onToggleOpen={toggleOpenGroup}
           onFixGroup={(group, info) => void fixGroup(group, info)}
@@ -1953,29 +1957,10 @@ export function FindingsSurface({
       {prompts.promptNode}
 
       {reidentifyingFinding ? (
-        <ReidentifyModal
-          trackId={reidentifyingFinding.entity_id}
-          trackTitle={String(
-            (reidentifyingFinding.details as Record<string, any>)?.track_title ||
-              reidentifyingFinding.title ||
-              '',
-          )}
-          artistName={String(
-            (reidentifyingFinding.details as Record<string, any>)?.artist_name || '',
-          )}
-          albumTitle={String(
-            (reidentifyingFinding.details as Record<string, any>)?.album_title || '',
-          )}
-          imageUrl={String(
-            (reidentifyingFinding.details as Record<string, any>)?.album_thumb_url || '',
-          )}
-          initialQuery={String(
-            (reidentifyingFinding.details as Record<string, any>)?.reidentify_query || '',
-          )}
+        <ReidentifyFindingModal
+          finding={reidentifyingFinding}
           onApplied={async () => {
-            if (reidentifyingFinding) {
-              await dismissOne(reidentifyingFinding.id);
-            }
+            await dismissOne(reidentifyingFinding.id);
           }}
           onClose={() => {
             setReidentifyingFinding(null);

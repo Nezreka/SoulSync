@@ -79,6 +79,11 @@ def ensure_wanted_schema(cursor: Any) -> None:
     cursor.execute(
         "CREATE INDEX IF NOT EXISTS idx_lib2_wanted_tracks_wanted "
         "ON lib2_wanted_tracks(profile_id, wanted)")
+    # review 4 R4-B-6: "is this track wanted by anyone" (the browse prune,
+    # once per artist) had no index on track_id alone; wanted rows only
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lib2_wanted_tracks_track "
+        "ON lib2_wanted_tracks(track_id) WHERE wanted = 1")
 
 
 def _decide(trk_mon: Optional[int], trk_prov: Optional[str],
@@ -379,6 +384,16 @@ def track_is_wanted(conn: Any, track_id: int, *, profile_id: int = 1) -> bool:
 def wanted_projection_status(conn: Any, *, profile_id: int = 1) -> Dict[str, Any]:
     """Read-only completeness/drift metrics for the staged consumer cutover."""
     profile_id = int(profile_id)
+    # one pass over every track (~1.3 s on 310k). everything it reads (the
+    # tracks, their monitored flag, the wanted rows) bumps the member counter,
+    # so the answer is kept until it moves (review 5 perf)
+    from core.library2.member_version import cached
+    kept = cached(conn, ("wanted_projection_status", profile_id, PROJECTION_VERSION),
+                  lambda c: _projection_status(c, profile_id))
+    return dict(kept) if kept is not None else _projection_status(conn, profile_id)
+
+
+def _projection_status(conn: Any, profile_id: int) -> Dict[str, Any]:
     row = conn.execute(
         """SELECT COUNT(*) AS tracks,
                   SUM(CASE WHEN w.track_id IS NULL THEN 1 ELSE 0 END) AS missing,
@@ -434,9 +449,17 @@ def ensure_wanted_projection(cursor: Any, *, batch_size: int = 0,
         stats = recompute_wanted(cursor, batch_size=batch_size, on_batch=on_batch)
         logger.info("Wanted projection rebuilt: %s", stats)
         return stats
-    cursor.execute(
-        "DELETE FROM lib2_wanted_tracks WHERE track_id NOT IN "
-        "(SELECT id FROM lib2_tracks)")
+    # read the orphans first, then delete just those, as recompute_wanted
+    # does: the DELETE ... NOT IN held the write lock for its whole scan
+    # (about 1 s at 300k, every start) while deleting nothing (review 5
+    # R5-G-4 / R5-X2-1)
+    orphans = [int(r[0]) for r in cursor.execute(
+        "SELECT rowid FROM lib2_wanted_tracks WHERE track_id NOT IN "
+        "(SELECT id FROM lib2_tracks)").fetchall()]
+    for i in range(0, len(orphans), 500):
+        cursor.execute(
+            "DELETE FROM lib2_wanted_tracks WHERE rowid IN "
+            "(SELECT value FROM json_each(?))", (json.dumps(orphans[i:i + 500]),))
     return None
 
 

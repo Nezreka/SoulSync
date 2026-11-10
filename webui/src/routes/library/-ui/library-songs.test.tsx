@@ -65,6 +65,8 @@ let songTotal = 2;
 let capped = false;
 let artistRows: { id: number; name: string }[] = [{ id: 1, name: 'Morgan Wallen' }];
 let copiesRows: LibrarySong[] = [];
+/** the disk refuses the delete: the route answers success with a failed item */
+let fileDeleteFails = false;
 /** a search whose request never answers, to see the list while it loads */
 let holdSearch = '';
 
@@ -93,6 +95,15 @@ function stubFetch() {
         body = { success: true, pending: 0, failed: 0 };
       } else if (url.includes('/file-delete-preview')) {
         body = { success: true, preview_token: 'tok', unsafe_count: 0, files: [] };
+      } else if (fileDeleteFails && url.includes('/file-delete')) {
+        body = {
+          success: true,
+          operation: {
+            id: 'op',
+            status: 'partial',
+            items: [{ status: 'failed', error: 'Permission denied' }],
+          },
+        };
       } else if (url.includes('/file-delete') || url.includes('/file-remove')) {
         body = { success: true, operation: { id: 'op', status: 'completed', items: [] } };
       } else if (url.includes('/api/library/v2/songs')) {
@@ -149,6 +160,7 @@ beforeEach(() => {
   capped = false;
   artistRows = [{ id: 1, name: 'Morgan Wallen' }];
   copiesRows = [];
+  fileDeleteFails = false;
   holdSearch = '';
   canWrite = true;
   window.SoulSyncWebShellBridge = createShellBridge();
@@ -227,6 +239,25 @@ describe('the Songs view', () => {
     ).toBe(true);
     // the list refetches so the row is gone
     await waitFor(() => expect(songCalls().length).toBeGreaterThan(1));
+  });
+
+  it('a song with two copies deletes only the file its row shows', async () => {
+    // a FLAC + MP3 pair is one row; 3.6.1 removed that row's file, never both
+    songs = [song({ id: 1, title: 'You Proof', copies: 2, file_ids: [10, 11], file_id: 11 })];
+    renderPage('/library?section=songs');
+    await screen.findAllByText('You Proof');
+    fireEvent.click(screen.getAllByLabelText('More for You Proof')[0]);
+    fireEvent.click(await screen.findByText('Delete…'));
+    fireEvent.click(await screen.findByText('Delete File Too'));
+    await waitFor(() =>
+      expect(requested).toContainEqual({
+        url: expect.stringContaining('/api/library/v2/albums/1/file-delete'),
+        method: 'POST',
+        body: { preview_token: 'tok', file_ids: [11] },
+      }),
+    );
+    expect(requested.some((r) => r.url.includes('file_ids=10'))).toBe(false);
+    songs = PROOF;
   });
 
   it('everyone else gets play, playlist and open, but no delete', async () => {
@@ -433,5 +464,31 @@ describe('best in class: copies', () => {
       }),
     );
     expect(requested.some((r) => r.url.includes('/api/library/v2/albums/1/file-'))).toBe(false);
+  });
+
+  it('a copy whose file the disk would not delete is reported, not counted as removed', async () => {
+    // review 5 W2-WL-1: the route answers success with a failed item
+    fileDeleteFails = true;
+    copiesRows = [
+      song({ id: '1:10', title: 'You Proof', album_title: 'Dangerous', format: 'FLAC', copies: 2 }),
+      song({ id: '2:20', title: 'You Proof', album_title: 'LP', format: 'MP3', copies: 2 }),
+    ];
+    renderPage('/library?section=songs');
+    await screen.findAllByText('You Proof');
+    fireEvent.click(screen.getAllByText('2 copies')[0]);
+    const dialog = await screen.findByRole('dialog', { name: 'Copies of You Proof' });
+    await within(dialog).findByText('Best file');
+    fireEvent.click(within(dialog).getAllByText('Keep this one')[0]);
+    fireEvent.click(await screen.findByText('Delete Their Files Too'));
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith(
+        "Removed 0 of 1 copies; 1 couldn't be (Permission denied)",
+        'warning',
+      ),
+    );
+    expect(window.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('Kept the'),
+      'success',
+    );
   });
 });

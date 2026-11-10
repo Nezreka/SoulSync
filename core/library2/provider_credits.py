@@ -58,6 +58,39 @@ def ensure_provider_credits_schema(cursor: Any) -> None:
                 DELETE FROM lib2_provider_credits
                  WHERE entity_type = '{entity}' AND entity_id = OLD.id;
             END""")
+    # an artist that loses (or changes) a spotify/deezer id loses the guest
+    # credits that id brought, unless its current ids still name it there.
+    # 3.6.1 linked credits at read time through the artist's current ids, so a
+    # cleared borrowed id unlinked them at once; materialized rows stayed for
+    # good. a trigger catches every path that changes the id (a match, the
+    # borrowed-identity healer, Dedupe Source IDs).
+    deezer_new = "TRIM(CAST(json_extract(NEW.external_ids, '$.deezer') AS TEXT))"
+    deezer_old = "TRIM(CAST(json_extract(OLD.external_ids, '$.deezer') AS TEXT))"
+    still = (f"(source = 'spotify' AND source_artist_id = NEW.spotify_id) OR "
+             f"(source = 'deezer' AND source_artist_id = {deezer_new})")
+    for source, column, old_id, new_id in (
+            ("spotify", "spotify_id", "OLD.spotify_id", "NEW.spotify_id"),
+            ("deezer", "external_ids", deezer_old, deezer_new)):
+        cursor.execute(f"""
+            CREATE TRIGGER IF NOT EXISTS trg_lib2_artist_{source}_credits_unlink
+            AFTER UPDATE OF {column} ON lib2_artists
+            WHEN COALESCE({old_id}, '') <> '' AND COALESCE({old_id}, '') <> COALESCE({new_id}, '')
+            BEGIN
+                DELETE FROM lib2_track_artists
+                 WHERE artist_id = NEW.id AND role = 'featured'
+                   AND track_id IN (SELECT entity_id FROM lib2_provider_credits
+                                     WHERE entity_type = 'track' AND source = '{source}'
+                                       AND source_artist_id = {old_id})
+                   AND track_id NOT IN (SELECT entity_id FROM lib2_provider_credits
+                                         WHERE entity_type = 'track' AND ({still}));
+                DELETE FROM lib2_album_artists
+                 WHERE artist_id = NEW.id AND role = 'featured'
+                   AND album_id IN (SELECT entity_id FROM lib2_provider_credits
+                                     WHERE entity_type = 'album' AND source = '{source}'
+                                       AND source_artist_id = {old_id})
+                   AND album_id NOT IN (SELECT entity_id FROM lib2_provider_credits
+                                         WHERE entity_type = 'album' AND ({still}));
+            END""")
 
 
 def _artist_id_sql(service: str) -> Optional[str]:
@@ -128,8 +161,21 @@ def materialize_artist_credits(conn: Any, artist_id: int) -> int:
         from core.library2.provider_ids import parse_external_ids
         ids = {"spotify": str(row[0] or "").strip(),
                "deezer": str(parse_external_ids(row[1]).get("deezer") or "").strip()}
+        canon = conn.execute("SELECT COALESCE(canonical_artist_id, id) FROM lib2_artists WHERE id=?",
+                             (int(artist_id),)).fetchone()[0]
         for source, provider_id in ids.items():
             if not provider_id:
+                continue
+            # an id two different artists hold names neither for sure (the
+            # linker's own rule): no credits from it
+            from core.library2.provider_ids import external_id_sql
+            column = ("a.spotify_id" if source == "spotify"
+                      else external_id_sql("a.external_ids", "deezer"))
+            shared = conn.execute(
+                f"SELECT 1 FROM lib2_artists a WHERE {column} = ? "
+                "AND COALESCE(a.canonical_artist_id, a.id) <> ? LIMIT 1",
+                (provider_id, canon)).fetchone()
+            if shared:
                 continue
             for entity_type, entity_id, position in conn.execute(
                     "SELECT entity_type, entity_id, position FROM lib2_provider_credits"

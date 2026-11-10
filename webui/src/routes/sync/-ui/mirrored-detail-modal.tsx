@@ -61,6 +61,7 @@ export interface MirroredDetailModalProps {
   onDelete: () => void;
   /** 1150 — Edit Source. */
   onEditSource: () => void;
+  onExport?: () => void;
   /** 1151 — Auto-Sync (runMirroredPlaylistPipeline). */
   onRunPipeline: () => void;
   /** pull the source + discover the new tracks, nothing pushed (#1413) */
@@ -86,6 +87,13 @@ export interface MirroredDetailModalProps {
   /** the wing it pool for this playlist. the tab closes this modal first, the
    *  pool is a vanilla overlay that sits under it (#1721). */
   onFindMatches?: () => void;
+  /**
+   * Show it as the playlist's own PAGE (the content area, no backdrop) rather
+   * than a floating window. The sync page does; the markup is the same.
+   */
+  asPage?: boolean;
+  /** opens the playlist's Settings sheet; the gear is hidden without it */
+  onOpenSettings?: () => void;
 }
 
 export type TrackSort = 'custom' | 'title' | 'artist' | 'album' | 'added' | 'duration';
@@ -414,6 +422,7 @@ export function MirroredDetailModal({
   onClose,
   onDelete,
   onEditSource,
+  onExport,
   onRunPipeline,
   onRefreshFromSource,
   onDiscover,
@@ -425,6 +434,8 @@ export function MirroredDetailModal({
   onMakeMine,
   onOpenEditor,
   onFindMatches,
+  asPage,
+  onOpenSettings,
 }: MirroredDetailModalProps) {
   const tracks = (data.tracks ?? []) as MirroredTrack[];
   const own = isUserPlaylist(data);
@@ -614,7 +625,7 @@ export function MirroredDetailModal({
   return (
     <div
       id="mirrored-track-modal"
-      className="mirrored-modal-overlay"
+      className={`mirrored-modal-overlay${asPage ? ' mm-as-page' : ''}`}
       // 1159 — backdrop only, never a click inside the panel.
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -965,6 +976,33 @@ export function MirroredDetailModal({
                 <button type="button" className="mm-pill mm-pill--quiet" onClick={onDiscover}>
                   {discoverLabel}
                 </button>
+                {onOpenSettings ? (
+                  <button
+                    type="button"
+                    className="mm-round"
+                    aria-label="Playlist settings"
+                    title="Settings: name, schedule, sync mode, quality, folder, source"
+                    onClick={onOpenSettings}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="18"
+                      height="18"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 7h10" />
+                      <path d="M18 7h2" />
+                      <circle cx="16" cy="7" r="2" />
+                      <path d="M4 17h4" />
+                      <path d="M12 17h8" />
+                      <circle cx="10" cy="17" r="2" />
+                    </svg>
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className={`mm-round${moreAnchor ? ' mm-round--on' : ''}`}
@@ -1025,6 +1063,7 @@ export function MirroredDetailModal({
                           ]
                         : []),
                       ...(!own ? [{ label: 'Edit source link', onSelect: onEditSource }] : []),
+                      ...(onExport ? [{ label: 'Export playlist', onSelect: onExport }] : []),
                       // a live beatport list follows the chart, so last week's
                       // tracks drop out. a snapshot keeps today's as its own
                       // playlist that never refreshes

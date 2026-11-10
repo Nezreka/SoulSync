@@ -78,13 +78,11 @@ _ALBUM_COUNTS = f"""
           FROM lib2_album_artists aa
           JOIN lib2_artists m ON m.id = aa.artist_id
           JOIN lib2_albums al ON al.id = aa.album_id
-         WHERE {_ELIGIBLE_ALBUM}
+         WHERE aa.role = 'primary' AND {_ELIGIBLE_ALBUM}
         UNION ALL
-        SELECT COALESCE(m.canonical_artist_id, m.id), t.album_id
-          FROM lib2_track_artists ta
-          JOIN lib2_artists m ON m.id = ta.artist_id
-          JOIN lib2_tracks t ON t.id = ta.track_id
-          JOIN lib2_albums al ON al.id = t.album_id
+        SELECT COALESCE(m.canonical_artist_id, m.id), al.id
+          FROM lib2_albums al
+          JOIN lib2_artists m ON m.id = al.primary_artist_id
          WHERE {_ELIGIBLE_ALBUM}
     ) x GROUP BY artist_id
 """

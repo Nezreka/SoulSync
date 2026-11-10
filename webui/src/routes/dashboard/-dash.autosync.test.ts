@@ -80,6 +80,8 @@ function seamState(): AutoSyncSeamState {
         source: 'spotify',
         total_count: 50,
         in_library_count: 41,
+        // fully checked: coverage needs library_checked_count since review 5 R5-K-1
+        library_checked_count: 50,
         pipeline_state: null,
       },
       {
@@ -90,6 +92,7 @@ function seamState(): AutoSyncSeamState {
         source: 'tidal',
         total_count: 40,
         in_library_count: 40,
+        library_checked_count: 40,
         pipeline_state: { status: 'running', progress: 62, phase: 'Discovering tracks...' },
       },
     ],

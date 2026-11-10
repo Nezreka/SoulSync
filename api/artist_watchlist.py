@@ -506,12 +506,15 @@ def export_library_artists():
             cur = conn.cursor()
             # the artists you have, once each: lib2_artists also holds
             # featured credits, discography / wishlist / watchlist rows and
-            # alias members, and 3.6.1's export was the owned library
+            # alias members, and 3.6.1's export was the owned library. the
+            # release-artist set: a featured credit on one owned track is not
+            # an artist you have (review 5 W3-TD-3)
             from core.library2.sql_util import owned_sql
             cur.execute(f"""
                 SELECT id, name, soul_id, {_ARTIST_IDS_SQL}
                 FROM lib2_artists
-                WHERE canonical_artist_id IS NULL AND {owned_sql('artist', 'lib2_artists')}
+                WHERE canonical_artist_id IS NULL
+                  AND {owned_sql('release_artist', 'lib2_artists')}
                 ORDER BY name COLLATE NOCASE
             """)
             cols = [d[0] for d in cur.description]
@@ -808,7 +811,10 @@ def remove_from_watchlist():
         # sync both ways). Fires only for a user-facing removal — the forward
         # mirror removes rows via the DB layer directly, never through here.
         _wl_descriptor = database.get_watchlist_artist_descriptor(artist_id, profile_id=get_current_profile_id())
-        success = database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id())
+        # the provider the id is from, when the page knows it (G02-4)
+        source = {'source': data['source']} if data.get('source') else {}
+        success = database.remove_artist_from_watchlist(artist_id, profile_id=get_current_profile_id(),
+                                                        **source)
 
         if success:
             try:
@@ -1079,7 +1085,9 @@ def check_watchlist_status():
             return jsonify({"success": False, "error": "Missing artist_id"}), 400
         
         database = get_database()
-        is_watching = database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id())
+        source = {'source': data['source']} if data.get('source') else {}
+        is_watching = database.is_artist_in_watchlist(artist_id, profile_id=get_current_profile_id(),
+                                                      **source)
 
         return jsonify({"success": True, "is_watching": is_watching})
         
@@ -1435,6 +1443,19 @@ def get_watchlist_scan_history():
         return jsonify({"success": True, "runs": runs})
     except Exception as e:
         logger.error(f"Error getting watchlist scan history: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route('/api/watchlist/found', methods=['GET'])
+def get_watchlist_found():
+    """What recent scans added to the wishlist, grouped by release (the page shelf)."""
+    try:
+        limit = min(50, max(1, int(request.args.get('limit', 24) or 24)))
+        releases = get_database().get_watchlist_found_releases(
+            limit=limit, profile_id=get_current_profile_id())
+        return jsonify({"success": True, "releases": releases})
+    except Exception as e:
+        logger.error(f"Error getting watchlist found releases: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

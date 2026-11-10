@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyMusicBrainzDeclutter,
   classifyReleaseContent,
   DEFAULT_DISCOGRAPHY_FILTERS,
+  liveToggleLabel,
   passesDiscographyFilters,
   type DiscographyFilterState,
 } from './discography-filters';
@@ -60,5 +62,37 @@ describe('passesDiscographyFilters', () => {
     expect(passesDiscographyFilters({ title: 'A' }, filters({ ownership: 'owned' }), null)).toBe(
       true,
     );
+  });
+});
+
+describe('MusicBrainz declutter (3.6.1 parity, third #1062 review G15-4)', () => {
+  const mb = applyMusicBrainzDeclutter(DEFAULT_DISCOGRAPHY_FILTERS, 'musicbrainz');
+
+  it('hides live, soundtrack and remix releases by default, and says Non-Studio', () => {
+    expect(liveToggleLabel(mb)).toBe('Non-Studio');
+    for (const kind of ['live', 'soundtrack', 'remix', 'demo']) {
+      expect(passesDiscographyFilters({ title: 'X', secondary_types: [kind] }, mb, false)).toBe(
+        false,
+      );
+    }
+  });
+
+  it('keeps a studio album whose title says Live', () => {
+    expect(
+      passesDiscographyFilters({ title: 'Live Through This', secondary_types: [] }, mb, false),
+    ).toBe(true);
+  });
+
+  it('never hides a non-studio release the user owns', () => {
+    expect(passesDiscographyFilters({ title: 'X', secondary_types: ['live'] }, mb, true)).toBe(
+      true,
+    );
+  });
+
+  it('leaves every other source on show-all', () => {
+    expect(applyMusicBrainzDeclutter(DEFAULT_DISCOGRAPHY_FILTERS, 'spotify')).toEqual(
+      DEFAULT_DISCOGRAPHY_FILTERS,
+    );
+    expect(liveToggleLabel(DEFAULT_DISCOGRAPHY_FILTERS)).toBe('Live');
   });
 });

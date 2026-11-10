@@ -2053,7 +2053,9 @@ def finalize_manual_rematch_replace(runtime, staged_path: str, context: Dict[str
                         return None
 
                 delete_replaced_track(cursor, hint.replace_track_id,
-                                      resolve_fn=_resolve_old, new_paths=new_paths)
+                                      resolve_fn=_resolve_old, new_paths=new_paths,
+                                      id_space=hint.replace_id_space,
+                                      file_id=hint.replace_file_id)
                 runtime.logger.info(
                     "Manual import honoured a re-identify replace for library track %s",
                     hint.replace_track_id)

@@ -80,3 +80,49 @@ def test_an_answer_is_kept_for_hours():
 
 def test_no_client_is_no_answer():
     assert db.build_tile(None, "charts") is None
+
+
+# ── the route the page fetches (review 5 R5-X1-3: it was never registered) ──
+
+def _route_client(monkeypatch, deezer):
+    from flask import Flask
+
+    import api.source_playlists as sp
+
+    monkeypatch.setattr(sp, "_get_deezer_client", lambda: deezer)
+    app = Flask(__name__)
+    app.register_blueprint(sp.bp)
+    return app.test_client()
+
+
+def test_the_browse_route_answers_a_tile_from_deezer(monkeypatch):
+    deezer = _Client({"chart/152/tracks": [_track(1, "Rock 1")],
+                      "chart/85/albums": [_album(5, "Alt LP")]})
+    c = _route_client(monkeypatch, deezer)
+    res = c.get("/api/search/browse/deezer?tile=genre:rock")
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["available"] is True
+    assert body["source"] == "deezer"
+    assert [t["name"] for t in body["tracks"]] == ["Rock 1"]
+    assert [a["name"] for a in body["albums"]] == ["Alt LP"]
+
+
+def test_the_browse_route_says_unavailable_so_the_page_keeps_its_cache(monkeypatch):
+    # ambient has no deezer genre
+    c = _route_client(monkeypatch, _Client({}))
+    assert c.get("/api/search/browse/deezer?tile=genre:ambient").get_json()["available"] is False
+    # deezer off
+    c = _route_client(monkeypatch, None)
+    assert c.get("/api/search/browse/deezer?tile=charts").get_json()["available"] is False
+
+
+def test_the_browse_route_survives_deezer_raising(monkeypatch):
+    class _Down:
+        def _api_get(self, *a, **k):
+            raise RuntimeError("deezer down")
+
+    c = _route_client(monkeypatch, _Down())
+    res = c.get("/api/search/browse/deezer?tile=charts")
+    assert res.status_code == 200
+    assert res.get_json()["available"] is False

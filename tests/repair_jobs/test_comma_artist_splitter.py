@@ -648,3 +648,87 @@ def test_the_findings_ui_carries_the_contract():
     assert "comma_artist_split: 'Split Artists'" in core     # fix button
     assert "artists_split: 'Artists Split'" in core          # resolved badge
     assert "case 'comma_artist_split':" in detail            # detail renderer
+
+
+def test_an_auto_applied_split_resolves_only_its_own_combined_credit(tmp_path):
+    """third #1062 review G11-6: "A, B" and "A, C" are both filed on artist
+    A's id. recording "A, B" as applied resolved the pending "A, C" review"""
+    import json
+    db = _db(tmp_path)
+    conn = db._get_connection()
+    for name in ("A, B", "A, C"):
+        conn.execute(
+            "INSERT INTO repair_findings(job_id, finding_type, severity, status, entity_type,"
+            " entity_id, title, description, details_json) VALUES"
+            " ('comma_artist_splitter','comma_artist_split','info','pending','artist','lib2:1',?, '', ?)",
+            (name, json.dumps({"combined_name": name})))
+    conn.commit()
+    conn.close()
+    CommaArtistSplitterJob()._record_resolved_finding(
+        _ctx(db, []), "A, B", {}, {"combined_name": "A, B"}, 3, "artist", "lib2:1")
+    conn = db._get_connection()
+    rows = dict(conn.execute("SELECT title, status FROM repair_findings").fetchall())
+    conn.close()
+    assert rows == {"A, B": "resolved", "A, C": "pending"}
+
+
+# ── review 5 R5-I-4: every file is read, not the same first window ──────────
+
+def _plain_library(tmp_path, count):
+    db = MusicDatabase(str(tmp_path / "walk.db"))
+    paths = []
+    with db._get_connection() as conn:
+        artist = _seed_artist(conn, 'Solo')
+        album = _seed_album(conn, artist, 'Album')
+        for n in range(count):
+            p = str(tmp_path / f'{n:05d}.mp3')
+            Path(p).write_bytes(b'')
+            _seed_file(conn, album, f'Song {n}', p, artist)
+            paths.append(p)
+        conn.commit()
+    return db, paths
+
+
+def _opened(monkeypatch):
+    import mutagen
+    opened = []
+    monkeypatch.setattr(mutagen, 'File', lambda path, *a, **k: opened.append(path))
+    return opened
+
+
+def test_one_run_reads_files_past_the_first_page(tmp_path, monkeypatch):
+    import core.repair_jobs.comma_artist_splitter as cas
+    monkeypatch.setattr(cas, '_FILE_PAGE', 4, raising=False)
+    # the old window was SCAN_ARTIST_LIMIT * 10 files: 10 here
+    monkeypatch.setattr(cas, 'SCAN_ARTIST_LIMIT', 1)
+    db, paths = _plain_library(tmp_path, 15)
+    opened = _opened(monkeypatch)
+    _run(db, monkeypatch, {})
+    assert opened == paths
+
+
+def test_a_capped_run_resumes_after_the_last_file_it_read(tmp_path, monkeypatch):
+    import core.repair_jobs.comma_artist_splitter as cas
+    monkeypatch.setattr(cas, '_FILE_PAGE', 4)
+    monkeypatch.setattr(cas, 'SCAN_ARTIST_LIMIT', 1)
+    db, paths = _plain_library(tmp_path, 10)
+    opened = _opened(monkeypatch)
+    # file 3 carries a splittable credit, so the run hits its one-finding cap
+    real = {paths[3]: 'Camellia, Toby Fox'}
+    monkeypatch.setattr(CommaArtistSplitterJob, '_get_artist_tag',
+                        lambda self, audio: real.get(opened[-1]))
+    import mutagen
+    monkeypatch.setattr(mutagen, 'File', lambda path, *a, **k: (
+        opened.append(path), type('A', (), {'tags': {}, 'get': lambda s, k, d=None: d})())[1])
+    monkeypatch.setattr(cas, 'file_already_split', lambda audio, parts: False)
+    monkeypatch.setattr(CommaArtistSplitterJob, '_full_string_is_real_artist',
+                        lambda self, *a, **k: (False, ['deezer']))
+    monkeypatch.setattr(CommaArtistSplitterJob, '_resolve_parts',
+                        lambda self, *a, **k: [{'name': 'Camellia'}, {'name': 'Toby Fox'}])
+    result, findings = _run(db, monkeypatch, {})
+    # stops once it has its one finding
+    assert opened == paths[:4] and len(findings) == 1
+    opened.clear()
+    _run(db, monkeypatch, {})
+    # carries on after file 3 and wraps round to the top
+    assert opened[:6] == paths[4:] and opened[6] == paths[0]

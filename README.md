@@ -58,6 +58,7 @@ Most self-hosted media setups are a relay race: one app wants things, another se
 - **It checks its work.** Downloads are fingerprinted, sanity checked, quality ranked and quarantined when they don't hold up. Nothing lands in your library on faith.
 - **It explains itself.** Stuck wishlist rows show exactly which releases were refused and why. Every download has an audit trail.
 - **It's one app for the whole house.** Music, movies, TV, YouTube, podcasts and audiobooks, with profiles so everyone gets their own taste, playlists and history.
+- **It's only as big as you want it.** Use one part or all of it. **Customize** in the sidebar hides what you don't use, and each profile picks its own.
 
 ## At a glance
 
@@ -102,6 +103,7 @@ Bring a playlist in from anywhere, keep a mirror of it, and keep your media serv
 - **Export** any playlist to Spotify, Deezer, ListenBrainz or a JSPF file.
 - **Beatport**: Top 100, Hype 100, top 10 lists and releases, and a full genre browser.
 - **Organize by playlist**: optionally download a playlist into its own folder.
+- **Rotating playlists**: turn on *Rotating* in a playlist's Settings and a song it downloaded is removed once it leaves the playlist. Anything you played, favourited, rated or still have in another playlist is kept, and removals wait for your approval until you turn dry run off.
 - **Cover art**: *Generate cover art* in any playlist's ⋯ menu (on the card or inside the playlist) paints a cover from its genres, mood and era with [Pollinations](https://pollinations.ai). Preview it with the playlist's name across the top (or without), try another style, keep the one you like; it survives refreshes and syncs to your server. Free with no key (one image every 45s, small Pollinations mark), or add a key in Settings to lift both.
 
 ## Search & downloads
@@ -129,7 +131,7 @@ One search box with three modes.
 | **SoundCloud** | anonymous |
 | **Lidarr** | hand an album to Lidarr's indexers, import only the tracks you need |
 | **Torrent** | Prowlarr search; qBittorrent, Transmission, Deluge or aria2; seeding goals; archive extraction |
-| **Usenet** | Prowlarr search; SABnzbd or NZBGet; remote path mappings |
+| **Usenet** | Prowlarr search; SABnzbd or NZBGet, sent the NZB file itself (no Prowlarr link or api key in their queue); remote path mappings |
 
 **Downloads page.** Live batches with speed and ETA, "download this next", a step-by-step detail sheet on every download (found, downloaded, verified, imported), manual search on failed tracks, play straight from finished ones, per-track audit trails (lifecycle, embedded tags, lyrics), a **Review** queue for anything that needs a human, and a **Clients** pane that manages slskd, your torrent client and your usenet client from one place.
 
@@ -267,8 +269,10 @@ A complete video side with its own database, pages and pipeline. Switch sides fr
   - A 16-tier ladder with upgrade-until-cutoff and Sonarr-style **custom formats**.
   - **Per-title profiles**: pick one in Get / Manual search (even before the title is in your library; it keeps it when it lands) or the title's Manage panel, with separate defaults for new movies and new shows.
   - **Manual search results** can be filtered (conditions on resolution, codec, group, size, age, indexer, format score and more, matched on all or any), sorted, and saved as named filters per profile. A failed grab shows which release replaced it. **Colons in titles** can become " - " instead of being dropped.
-  - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits and minimum seeders.
+  - Codec, HDR and audio preferences, **audio language** (prefer or require a dubbed / MULTI release), size limits, a **preferred size** tie-break and minimum seeders.
+  - **One ranking everywhere**, Radarr's order: quality tier and profile preferences, then custom formats, then tie-breaks. Manual search, Auto, the wishlist, RSS, upgrades and retries pick the same release, and every search result shows **why it ranks** where it does.
   - **Optional 4K libraries**: a separate Movies 4K and TV 4K folder, off until you switch them on. A profile set to save to the 4K library files new titles there.
+  - **Your own libraries**: add movie and TV libraries (Stand-Up, Documentaries, Kids), each with its own folder. A title files into the library picked for it in Get / Manual search, else the first one whose genre or keyword rules match it, else the default library for its kind. The main and 4K folders are libraries too, so nothing changes until you add one. Each library can have its own default quality profile, and a movie can be wanted in two libraries at once (Movies and Movies 4K) as two copies that never replace each other. A library can search its own sources in its own order (Usenet then Torrent, say) and give its downloads their own client category, and search only the Prowlarr indexers you tick for it. Automatic search and upgrades can be switched off per library, and the Movies / TV list, the wishlist and the Downloads list filter by library.
   - **Your library's folders**: every folder your Plex / Jellyfin libraries read, Movies or TV, asked from the server. The ones SoulSync already reaches are ticked; tell it where it reaches the rest (checked against a sample of real files) and each becomes a full library folder: files found, renamed to your templates, recycled into that drive's own bin, languages read.
   - A separate YouTube profile.
 - **Import**: sample and wrong-episode rejection, ffprobe checks, templated renames (with `$audiolangs` / `$sublangs` for `[JA+EN]` style names), NFO and artwork sidecars, subtitles, disk-space guards. Plus a **release blocklist** and a **recycle bin**.
@@ -313,6 +317,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
 ## Profiles & access
 
 - **Profiles** with avatars, PINs, a home page, page access, music / video access, and a download permission.
+- **Make SoulSync yours**: every profile picks what shows up, from **Customize** at the bottom of the sidebar (or Settings → Appearance). Start from **Simple** (music, Discover, playlists and import) or **Everything**, then switch single parts on or off: Discover, playlist sync, Explorer, Import, stats, music videos, Sample Studio, podcasts, audiobooks, the video side (or just its Discover and Calendar), chat, automations and tools. Hidden parts leave the sidebar, the dashboard and the tabs that lead to them, but keep working, unless an admin pauses podcast or audiobook jobs once every profile has hidden them. A link to one still opens, with a note that brings it back in one click. First-run setup starts you off with what you said SoulSync is for, and profiles from before ask once, right above the Customize button. Search, library, watchlist, wishlist, downloads and settings never hide.
 - Per-profile watchlists, wishlists, playlists, queues and listening history.
 - Non-admins get a **My Account** panel for their own Spotify, Tidal, ListenBrainz and Last.fm, and their own media-server identity (Plex Home user, Jellyfin / Navidrome login).
 - **Security**:
@@ -320,7 +325,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - Sign in with Plex or with your own OIDC provider, or **OIDC only**, which turns every other sign-in off. If the provider is ever down, `SOULSYNC_OIDC_ONLY_OVERRIDE=off` and a restart let the admin back in with their password. Setup and troubleshooting: [docs/guides/OIDC.md](docs/guides/OIDC.md).
   - Or trust a forward-auth header from Authelia, Authentik or oauth2-proxy.
   - Reverse-proxy and sub-path aware.
-- **Own library per profile** (Plex / Jellyfin): a profile can have its own folder and server library.
+- **Own library per profile** (Plex / Jellyfin / Navidrome 0.58+): a profile can have its own folder and server library. On Navidrome the profile picks its library under its own Navidrome login; its scans read only that library and its playlists are written as that user.
 - **Content caps** (video): per-profile G / PG / PG-13 / R limits, enforced across the video side.
 
 ## Chat & arcade

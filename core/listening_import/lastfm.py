@@ -390,32 +390,17 @@ class LastFMListeningImportWorker:
         query as ``listening_stats_worker._resolve_db_track_ids_batch``, which
         fills the identical column for the media-server importer.
         """
-        pairs = sorted({
-            ((ev.get("title") or "").strip().lower(), _name_key(ev.get("artist")))
-            for ev in events if ev.get("title")
-        })
+        from core.library2.title_match import resolve_title_artist_pairs, title_fold
+
+        pairs = {(ev.get("title"), _name_key(ev.get("artist")))
+                 for ev in events if ev.get("title")}
         if not pairs:
             return
         conn = self.db._get_connection()
         try:
-            cursor = conn.cursor()
-            found: Dict[tuple[str, str], int] = {}
-            for i in range(0, len(pairs), 400):
-                chunk = pairs[i:i + 400]
-                placeholders = ",".join(["(?,?)"] * len(chunk))
-                args = [v for pair in chunk for v in pair]
-                cursor.execute(
-                    f"""
-                    SELECT LOWER(t.title), ar.name_key, t.id
-                    FROM lib2_tracks t
-                    JOIN lib2_albums al ON al.id = t.album_id
-                    JOIN lib2_artists ar ON ar.id = al.primary_artist_id
-                    WHERE (LOWER(t.title), ar.name_key) IN ({placeholders})
-                    """,
-                    args,
-                )
-                for title_l, artist_key, track_id in cursor.fetchall():
-                    found.setdefault((title_l, artist_key), track_id)
+            # review 5 R5-H-5: sqlite's LOWER() folds only A-Z, so a title
+            # like 'WÖRLDENDER' never matched a python-lowered key
+            found = resolve_title_artist_pairs(conn.cursor(), pairs)
             for ev in events:
                 # INT-01: this resolves against `lib2_tracks`, so the id is a
                 # CATALOGUE id and belongs in `lib2_track_id` — the column every
@@ -425,7 +410,7 @@ class LastFMListeningImportWorker:
                 # the same value as a LEGACY track id, so a numeric collision
                 # could link the play to a completely different track.
                 ev["lib2_track_id"] = found.get((
-                    (ev.get("title") or "").strip().lower(),
+                    title_fold(ev.get("title")),
                     _name_key(ev.get("artist")),
                 ))
         finally:

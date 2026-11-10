@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import unicodedata
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -152,13 +152,43 @@ _INDEXES = (
 BACKFILL_BATCH_SIZE = 500
 
 
+# the recording-identity pass reads only what changed since its last pass:
+# the id history past its mark, release tracks past its mark, and release
+# tracks re-pointed since (a merge moving one onto another track/recording
+# writes no id history). review 5 W2-WE-2
+_IDENTITY_STATE_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_recording_identity_state (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    history_id INTEGER NOT NULL,
+    release_track_id INTEGER NOT NULL
+)
+"""
+_IDENTITY_DIRTY_DDL = """
+CREATE TABLE IF NOT EXISTS lib2_recording_identity_dirty (
+    release_track_id INTEGER PRIMARY KEY
+)
+"""
+_IDENTITY_DIRTY_TRIGGER = "trg_lib2_release_tracks_identity_dirty"
+
+
 def ensure_editions_schema(cursor: Any) -> None:
     """Create the edition/recording tables + indexes. Idempotent."""
     for ddl in (LIB2_RELEASE_EDITIONS_DDL, LIB2_RECORDINGS_DDL,
-                LIB2_RELEASE_TRACKS_DDL, LIB2_RECORDING_REVIEW_DDL):
+                LIB2_RELEASE_TRACKS_DDL, LIB2_RECORDING_REVIEW_DDL,
+                _IDENTITY_STATE_DDL, _IDENTITY_DIRTY_DDL):
         cursor.execute(ddl)
     for index_sql in _INDEXES:
         cursor.execute(index_sql)
+    cursor.execute(f"""
+        CREATE TRIGGER IF NOT EXISTS {_IDENTITY_DIRTY_TRIGGER}
+        AFTER UPDATE OF track_id, recording_id ON lib2_release_tracks
+        FOR EACH ROW
+        WHEN OLD.track_id IS NOT NEW.track_id OR OLD.recording_id IS NOT NEW.recording_id
+        BEGIN
+            INSERT OR IGNORE INTO lib2_recording_identity_dirty(release_track_id)
+            VALUES (NEW.id);
+        END
+    """)
 
 
 def _norm(value: Optional[Any]) -> str:
@@ -585,11 +615,11 @@ def _find_recording_by_hard_ids(cursor: Any, isrc: Optional[str],
 
 
 def _fill_missing_hard_id(cursor: Any, recording_id: int, column: str,
-                          value: Optional[str]) -> None:
+                          value: Optional[str]) -> int:
     """Enrich a found recording with a hard ID it lacks — guarded so the
     partial unique indexes can never be violated."""
     if not value:
-        return
+        return 0
     # Same partial-index rule as _find_recording_by_hard_ids: without the two
     # extra conjuncts the collision check is a full scan of lib2_recordings.
     cursor.execute(
@@ -599,6 +629,105 @@ def _fill_missing_hard_id(cursor: Any, recording_id: int, column: str,
                                 WHERE o.{column}=? AND o.{column} IS NOT NULL
                                   AND o.{column} <> '' AND o.id<>?)""",
         (value, int(recording_id), value, int(recording_id)))
+    return int(cursor.rowcount or 0)
+
+
+_IDENTITY_SELECT = """SELECT rt.id AS release_track_id, rt.recording_id, t.id AS track_id,
+                  t.isrc, t.musicbrainz_id, t.spotify_id
+             FROM lib2_release_tracks rt
+             JOIN lib2_tracks t ON t.id = rt.track_id
+             JOIN lib2_recordings rec ON rec.id = rt.recording_id
+            WHERE ((COALESCE(t.isrc,'') <> '' AND COALESCE(rec.isrc,'') = '')
+               OR (COALESCE(t.musicbrainz_id,'') <> ''
+                   AND COALESCE(rec.musicbrainz_id,'') = '')
+               OR (COALESCE(t.spotify_id,'') <> ''
+                   AND COALESCE(rec.spotify_id,'') = ''))"""
+
+# id-history namespace -> the lib2_tracks column (and the predicate that lets
+# the partial mbid index answer it)
+_FREED_ID_LOOKUP = {
+    "isrc": "t.isrc = ?",
+    "musicbrainz": "t.musicbrainz_id = ? AND t.musicbrainz_id IS NOT NULL",
+    "spotify": "t.spotify_id = ?",
+}
+
+
+# the unary + keeps the planner on the id range: through the entity index it
+# walked every track history row (2 s on a quiet start, live)
+_HISTORY_SINCE = """SELECT entity_type, entity_id, namespace, old_value
+                      FROM lib2_external_id_history
+                     WHERE id > ? AND id <= ? AND +entity_type IN ('track', 'recording')
+                       AND +namespace IN ('isrc', 'musicbrainz', 'spotify')"""
+
+
+def _sqlite_object(cursor: Any, kind: str, name: str) -> bool:
+    return cursor.execute("SELECT 1 FROM sqlite_master WHERE type=? AND name=?",
+                          (kind, name)).fetchone() is not None
+
+
+def _identity_candidates(cursor: Any) -> Tuple[list, Optional[Callable[[], None]]]:
+    """the release tracks whose track holds a hard id its recording lacks.
+
+    a row whose id another recording already owns can never settle here
+    (the unique index refuses the fill), and the whole-table walk read
+    316k release tracks on every start to re-find the same 220 of them.
+    after one full pass this reads only what changed since: release tracks
+    added or re-pointed, tracks and recordings whose ids changed (the id
+    history), and tracks holding an id a recording gave up. returns the rows
+    and the step that moves the marks, run once the rows are handled.
+    review 5 W2-WE-2"""
+    tracked = (_sqlite_object(cursor, "table", "lib2_external_id_history")
+               and _sqlite_object(cursor, "table", "lib2_recording_identity_state")
+               and _sqlite_object(cursor, "trigger", _IDENTITY_DIRTY_TRIGGER))
+    if not tracked:
+        return cursor.execute(_IDENTITY_SELECT).fetchall(), None
+    # marks taken before reading: a change made while this pass runs (its own
+    # fills included) is read again next time, never skipped
+    history_mark = int(cursor.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM lib2_external_id_history").fetchone()[0])
+    track_mark = int(cursor.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM lib2_release_tracks").fetchone()[0])
+    state = cursor.execute("SELECT history_id, release_track_id FROM lib2_recording_identity_state"
+                           " WHERE id=1").fetchone()
+    dirty = [int(r[0]) for r in cursor.execute(
+        "SELECT release_track_id FROM lib2_recording_identity_dirty").fetchall()]
+
+    def advance() -> None:
+        # nothing changed since: no write, so a quiet start opens no write lock
+        if dirty:
+            cursor.executemany("DELETE FROM lib2_recording_identity_dirty WHERE release_track_id=?",
+                               [(i,) for i in dirty])
+        if state is None or (int(state[0]), int(state[1])) != (history_mark, track_mark):
+            cursor.execute("INSERT OR REPLACE INTO lib2_recording_identity_state"
+                           "(id, history_id, release_track_id) VALUES(1, ?, ?)",
+                           (history_mark, track_mark))
+
+    # first pass, or a table rebuilt under its marks: the whole walk, once
+    if state is None or int(state[0]) > history_mark or int(state[1]) > track_mark:
+        return cursor.execute(_IDENTITY_SELECT).fetchall(), advance
+    since_history, since_track = int(state[0]), int(state[1])
+    wanted = set(dirty)
+    wanted.update(int(r[0]) for r in cursor.execute(
+        "SELECT id FROM lib2_release_tracks WHERE id > ?", (since_track,)))
+    for entity_type, entity_id, namespace, old_value in cursor.execute(
+            _HISTORY_SINCE, (since_history, history_mark)).fetchall():
+        column = "track_id" if entity_type == "track" else "recording_id"
+        wanted.update(int(r[0]) for r in cursor.execute(
+            f"SELECT id FROM lib2_release_tracks WHERE {column}=?", (int(entity_id),)))
+        if entity_type == "recording" and old_value:
+            # an id a recording gave up (replaced, cleared or deleted) is free
+            # for the tracks still holding it
+            wanted.update(int(r[0]) for r in cursor.execute(
+                f"""SELECT rt.id FROM lib2_tracks t
+                      JOIN lib2_release_tracks rt ON rt.track_id = t.id
+                     WHERE {_FREED_ID_LOOKUP[namespace]}""", (old_value,)))
+    ordered = sorted(wanted)
+    rows = []
+    for start in range(0, len(ordered), 500):
+        chunk = ordered[start:start + 500]
+        rows += cursor.execute(
+            f"{_IDENTITY_SELECT} AND rt.id IN ({','.join('?' for _ in chunk)})", chunk).fetchall()
+    return rows, advance
 
 
 def reconcile_recording_identity(cursor: Any) -> Dict[str, int]:
@@ -618,18 +747,7 @@ def reconcile_recording_identity(cursor: Any) -> Dict[str, int]:
     merges on anything but a hard id, and never commits.
     """
     stats = {"filled": 0, "merged": 0, "pruned": 0}
-    rows = cursor.execute(
-        """SELECT rt.id AS release_track_id, rt.recording_id, t.id AS track_id,
-                  t.isrc, t.musicbrainz_id, t.spotify_id
-             FROM lib2_release_tracks rt
-             JOIN lib2_tracks t ON t.id = rt.track_id
-             JOIN lib2_recordings rec ON rec.id = rt.recording_id
-            WHERE (COALESCE(t.isrc,'') <> '' AND COALESCE(rec.isrc,'') = '')
-               OR (COALESCE(t.musicbrainz_id,'') <> ''
-                   AND COALESCE(rec.musicbrainz_id,'') = '')
-               OR (COALESCE(t.spotify_id,'') <> ''
-                   AND COALESCE(rec.spotify_id,'') = '')"""
-    ).fetchall()
+    rows, advance = _identity_candidates(cursor)
 
     touched_recordings = set()
     for row in rows:
@@ -653,8 +771,11 @@ def reconcile_recording_identity(cursor: Any) -> Dict[str, int]:
                 f"AND ({column} IS NULL OR {column}='')", (target,))
             if cursor.fetchone() is None:
                 continue
-            _fill_missing_hard_id(cursor, target, column, row[column])
-            if stats["filled"] == before:
+            # review 5 smoke: only a real write counts. an id another
+            # recording already owns is refused, and counting it anyway
+            # reported the same rows "filled" on every start
+            if (_fill_missing_hard_id(cursor, target, column, row[column])
+                    and stats["filled"] == before):
                 stats["filled"] += 1
 
     for recording_id in touched_recordings:
@@ -663,6 +784,8 @@ def reconcile_recording_identity(cursor: Any) -> Dict[str, int]:
             "  SELECT 1 FROM lib2_release_tracks WHERE recording_id=?)",
             (recording_id, recording_id))
         stats["pruned"] += cursor.rowcount or 0
+    if advance is not None:
+        advance()
     return stats
 
 
@@ -764,25 +887,73 @@ def _review_unverified_canonical_links(cursor: Any) -> int:
     return cursor.rowcount
 
 
+def prune_edition_rows_for_track(cursor: Any, track_id: int) -> int:
+    """Drop one track's shadow rows, run BEFORE the track row is deleted.
+
+    the whole-table prune below is three library-wide anti-joins (about
+    1.7 s on a big library); run per trimmed placeholder it held the
+    tracklist write transaction for that long. this touches the track's
+    own release positions, only the recordings they pointed at, and its
+    review rows. review 5 R5-E-5. ``lib2_release_tracks.track_id`` is
+    ON DELETE SET NULL, so after the delete these rows can't be found by id;
+    the full prune in the backfill still sweeps anything else."""
+    if not cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_release_tracks'"
+    ).fetchone():
+        return 0
+    track_id = int(track_id)
+    recordings = [int(r[0]) for r in cursor.execute(
+        "SELECT DISTINCT recording_id FROM lib2_release_tracks WHERE track_id=?",
+        (track_id,)).fetchall()]
+    cursor.execute("DELETE FROM lib2_release_tracks WHERE track_id=?", (track_id,))
+    pruned = cursor.rowcount
+    for recording_id in recordings:
+        cursor.execute(
+            """DELETE FROM lib2_recordings WHERE id=?
+                 AND NOT EXISTS (SELECT 1 FROM lib2_release_tracks WHERE recording_id=?)""",
+            (recording_id, recording_id))
+        pruned += cursor.rowcount
+    if cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='lib2_recording_review'"
+    ).fetchone():
+        cursor.execute("DELETE FROM lib2_recording_review WHERE track_id=?", (track_id,))
+        pruned += cursor.rowcount
+        cursor.execute("DELETE FROM lib2_recording_review WHERE other_track_id=?", (track_id,))
+        pruned += cursor.rowcount
+    return pruned
+
+
+def _delete_found(cursor: Any, table: str, select_ids_sql: str) -> int:
+    """read the ids, then delete only those. a DELETE ... NOT IN takes the
+    write lock at statement start and holds it for its whole scan even when
+    it deletes nothing (review 5 R5-X2-1)."""
+    ids = [int(r[0]) for r in cursor.execute(select_ids_sql).fetchall()
+           if r[0] is not None]
+    deleted = 0
+    for i in range(0, len(ids), 500):
+        chunk = ids[i:i + 500]
+        cursor.execute(f"DELETE FROM {table} WHERE id IN "
+                       f"({','.join('?' * len(chunk))})", chunk)
+        deleted += cursor.rowcount
+    return deleted
+
+
 def prune_orphaned_edition_rows(cursor: Any) -> int:
     """Drop shadow rows whose lib2 track vanished (entity deletes don't
     cascade through the compat link on every code path), then recordings and
-    review findings nothing references anymore. Idempotent."""
-    pruned = 0
-    cursor.execute(
-        """DELETE FROM lib2_release_tracks
-            WHERE track_id IS NULL
-               OR track_id NOT IN (SELECT id FROM lib2_tracks)""")
-    pruned += cursor.rowcount
-    cursor.execute(
-        """DELETE FROM lib2_recordings
-            WHERE id NOT IN (SELECT recording_id FROM lib2_release_tracks)""")
-    pruned += cursor.rowcount
-    cursor.execute(
-        """DELETE FROM lib2_recording_review
-            WHERE track_id NOT IN (SELECT id FROM lib2_tracks)
-               OR other_track_id NOT IN (SELECT id FROM lib2_tracks)""")
-    pruned += cursor.rowcount
+    review findings nothing references anymore. Idempotent. runs every
+    start, so each step reads before it writes."""
+    pruned = _delete_found(cursor, "lib2_release_tracks", """
+        SELECT id FROM lib2_release_tracks
+         WHERE track_id IS NULL
+            OR track_id NOT IN (SELECT id FROM lib2_tracks)""")
+    pruned += _delete_found(cursor, "lib2_recordings", """
+        SELECT id FROM lib2_recordings
+         WHERE id NOT IN (SELECT recording_id FROM lib2_release_tracks)""")
+    pruned += _delete_found(cursor, "lib2_recording_review", """
+        SELECT id FROM lib2_recording_review
+         WHERE track_id NOT IN (SELECT id FROM lib2_tracks)
+            OR other_track_id NOT IN (SELECT id FROM lib2_tracks)""")
     return pruned
 
 
@@ -921,6 +1092,7 @@ __all__ = [
     "edition_signature",
     "ensure_editions_schema",
     "ensure_release_track",
+    "prune_edition_rows_for_track",
     "prune_orphaned_edition_rows",
     "reconcile_pinned_editions",
     "sync_default_edition",

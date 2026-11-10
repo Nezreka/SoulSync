@@ -204,6 +204,24 @@ describe('artist-detail route on a Library v2 catalogue', () => {
     expect(await screen.findByText('Drukqs')).toBeInTheDocument();
   });
 
+  it('searches for a library artist no provider page can open, for a search-only profile', async () => {
+    // only tidal / qobuz / audiodb know it: the provider page can't open
+    // those, and the library page isn't this profile's. it landed on an
+    // error page; search for the name instead
+    window.SoulSyncWebShellBridge = createShellBridge({
+      isPageAllowed: vi.fn((page: string) => page !== 'library'),
+    });
+    server.use(
+      http.get('/api/artist-detail/library/:id/identity', () =>
+        HttpResponse.json({ success: true, name: 'Ado', source: null, provider_id: null }),
+      ),
+    );
+    const { router } = renderAt('/artist-detail/library/42');
+
+    await waitFor(() => expect(router.state.location.pathname).toBe('/search'));
+    expect(router.state.location.searchStr).toContain('q=Ado');
+  });
+
   it('sends an in-app link to a watched artist without files to its library page', async () => {
     resolved = 7;
     owned = false;

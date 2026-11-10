@@ -1,6 +1,8 @@
 """
-Tag Writer — reads current file tags and writes DB metadata into audio file tags.
-Supports MP3 (ID3v2.4), FLAC, OGG Vorbis, and MP4/M4A.
+Read audio-file tags and write database metadata back to audio files.
+
+Supported formats are MP3, AIFF (.aiff and .aif), FLAC, Ogg Vorbis,
+Ogg Opus, and MP4/M4A. MP3 and AIFF files use ID3v2.4 tags.
 Reuses the same Mutagen patterns as _enhance_file_metadata in web_server.py.
 """
 
@@ -21,11 +23,10 @@ from mutagen.apev2 import APEv2, APENoHeaderError
 logger = logging.getLogger("tag_writer")
 
 # Write support is deliberately narrower than read support.
-SUPPORTED_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
-# read_file_tags also reads AIFF and WAV: their tags are plain ID3 (#1919,
-# #1920). writing
-# stays on SUPPORTED_EXTENSIONS.
-READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.aiff', '.aif', '.wav'}
+SUPPORTED_EXTENSIONS = {'.mp3', '.aiff', '.aif', '.flac', '.ogg', '.oga', '.opus', '.m4a', '.mp4'}
+# WAV remains read-only; AIFF uses the existing ID3 writers and the shared
+# container-aware atomic save helper.
+READABLE_EXTENSIONS = SUPPORTED_EXTENSIONS | {'.wav'}
 
 # File-field vocabulary shared by repairs. A selected-field write never
 # derives a second field (for example ALBUMARTIST) from an ARTIST change.
@@ -51,6 +52,14 @@ def read_tag_field(audio, field: str) -> Any:
     if field in ('track_number', 'disc_number', 'total_tracks', 'total_discs'):
         pair = read_number_pair(audio, 'disc' if field in ('disc_number', 'total_discs') else 'track')
         return pair[1 if field.startswith('total_') else 0]
+    if field == 'genre':
+        # every value, not the first, so a multi-value genre compares whole
+        if isinstance(audio.tags, ID3):
+            return _genre_read([t for f in audio.tags.getall('TCON') for t in (f.text or [])])[0]
+        if isinstance(audio, MP4):
+            return _genre_read(audio.tags.get('\xa9gen', []))[0]
+        if isinstance(audio, (FLAC, OggVorbis, OggOpus)):
+            return _genre_read(audio.get('genre', []))[0]
     if field in _TEXT_TAGS:
         id3, vorbis, mp4 = _TEXT_TAGS[field]
         if isinstance(audio.tags, ID3):
@@ -91,14 +100,16 @@ def set_tag_fields(audio, fields: Dict[str, Any]) -> List[str]:
             text = ', '.join(str(v) for v in value) if isinstance(value, list) else str(value)
             if field == 'bpm':
                 text = str(int(round(float(value))))
+            # genre goes in as one value per genre when multi-value is on
+            out = _genre_frame_values(text) if field == 'genre' else [text]
             if isinstance(audio.tags, ID3):
                 from mutagen import id3 as frames
                 audio.tags.delall(id3)
-                audio.tags.add(getattr(frames, id3)(encoding=3, text=[text]))
+                audio.tags.add(getattr(frames, id3)(encoding=3, text=out))
             elif isinstance(audio, MP4):
-                audio[mp4] = [int(text)] if field == 'bpm' else [text]
+                audio[mp4] = [int(text)] if field == 'bpm' else out
             else:
-                audio[vorbis] = [text]
+                audio[vorbis] = out
         else:
             if field == 'lyrics' and isinstance(audio.tags, ID3):
                 audio.tags.delall('USLT')
@@ -184,6 +195,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         'album': None,
         'year': None,
         'genre': None,
+        'genre_count': 0,
         'track_number': None,
         'disc_number': None,
         'bpm': None,
@@ -236,7 +248,8 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             result['album_artist'] = _id3_text(audio.tags, 'TPE2')
             result['album'] = _id3_text(audio.tags, 'TALB')
             result['year'] = _id3_text(audio.tags, 'TDRC')
-            result['genre'] = _id3_text(audio.tags, 'TCON')
+            result['genre'], result['genre_count'] = _genre_read(
+                [t for f in audio.tags.getall('TCON') for t in (f.text or [])])
             result['track_number'] = _parse_track_num(_id3_text(audio.tags, 'TRCK'))
             result['disc_number'] = _parse_track_num(_id3_text(audio.tags, 'TPOS'))
             bpm_text = _id3_text(audio.tags, 'TBPM')
@@ -261,7 +274,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             result['album_artist'] = _vorbis_first(audio, 'albumartist')
             result['album'] = _vorbis_first(audio, 'album')
             result['year'] = _vorbis_first(audio, 'date')
-            result['genre'] = _vorbis_first(audio, 'genre')
+            result['genre'], result['genre_count'] = _genre_read(audio.get('genre', []))
             result['track_number'] = _parse_track_num(_vorbis_first(audio, 'tracknumber'))
             result['disc_number'] = _parse_track_num(_vorbis_first(audio, 'discnumber'))
             bpm_val = _vorbis_first(audio, 'bpm')
@@ -290,7 +303,8 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             result['album_artist'] = _mp4_first(audio, 'aART')
             result['album'] = _mp4_first(audio, '\xa9alb')
             result['year'] = _mp4_first(audio, '\xa9day')
-            result['genre'] = _mp4_first(audio, '\xa9gen')
+            result['genre'], result['genre_count'] = _genre_read(
+                audio.tags.get('\xa9gen', []) if audio.tags else [])
             bpm = _mp4_first(audio, 'tmpo')
             if bpm is not None:
                 try:
@@ -409,6 +423,12 @@ def genre_write_value_is_subset_of_existing(file_genre_str: Any, db_genre_str: A
     if not db_genres:
         return False
     return all(g in file_genres for g in db_genres)
+
+
+def _genre_tokens(value: Any) -> list:
+    """The genres in a comma/semicolon-joined string."""
+    import re
+    return [g.strip() for g in re.split(r'[,;]+', str(value or '')) if g.strip()]
 
 
 def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:
@@ -546,6 +566,9 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
             if _normalize_date_str(file_str) == _normalize_date_str(db_str):
                 changed = False
 
+        if changed and file_key in ('artist', 'album_artist') and _same_artist_names(file_val, db_val):
+            changed = False
+
         if changed and db_key == 'genres' and db_val:
             # If the file genres contain the database genres, do not flag as
             # changed (prevents overwriting a rich genre list with a generic
@@ -575,6 +598,17 @@ def build_tag_diff(file_tags: Dict[str, Any], db_data: Dict[str, Any]) -> List[D
                 file_bpm = _stored_bpm(file_val)
                 if file_bpm is not None and db_bpm is not None and file_bpm == db_bpm:
                     changed = False
+
+        # Multi-value genre writing is on and the file still holds several
+        # genres as ONE joined value ("Alternative Rock, Art Pop"): media
+        # servers read that as one genre, so it is a real change even when
+        # the names match. A retag rewrites it as separate values.
+        if (not changed and db_key == 'genres' and db_str
+                and file_tags.get('genre_count') == 1
+                and len(_genre_tokens(file_str)) > 1
+                and len(_genre_tokens(db_str)) > 1
+                and _multi_artist_write_enabled()):
+            changed = True
 
         # #800 — if the change would replace a real file value with a
         # placeholder (Various Artists / [Unknown Album] / …), hold it back:
@@ -741,7 +775,10 @@ def write_tags_to_file(file_path: str, db_data: Dict[str, Any],
         if genre_str and not _current.get('error'):
             existing_genre = _current.get('genre')
             if genre_write_value_is_subset_of_existing(existing_genre, genre_str):
-                genre_str = existing_genre
+                # leave the file's richer genre exactly as it is, values and
+                # format alike: rewriting it would split or join it, which
+                # the preview promised not to do
+                genre_str = None
 
         # Multi-value artist support — issue #587. Caller can pass
         # `artists_list` (per-track list of contributor names) and the
@@ -937,7 +974,7 @@ def _write_id3(audio, title, artist, album_artist, album, year, genre,
         written.append('year')
     if genre:
         audio.tags.delall('TCON')
-        audio.tags.add(TCON(encoding=3, text=[genre]))
+        audio.tags.add(TCON(encoding=3, text=_genre_frame_values(genre)))
         written.append('genre')
     if track_num is not None:
         audio.tags.delall('TRCK')
@@ -983,7 +1020,7 @@ def _write_vorbis(audio, title, artist, album_artist, album, year, genre,
         audio['date'] = [_date_to_write(_vorbis_first(audio, 'date'), year)]
         written.append('year')
     if genre:
-        audio['genre'] = [genre]
+        audio['genre'] = _genre_frame_values(genre)
         written.append('genre')
     if track_num is not None:
         # Bare number + separate total: Vorbis does not share ID3's "N/M"
@@ -1035,7 +1072,7 @@ def _write_mp4(audio, title, artist, album_artist, album, year, genre,
         audio['\xa9day'] = [_date_to_write(_mp4_first(audio, '\xa9day'), year)]
         written.append('year')
     if genre:
-        audio['\xa9gen'] = [genre]
+        audio['\xa9gen'] = _genre_frame_values(genre)
         written.append('genre')
     if track_num is not None:
         total = total_tracks or 0
@@ -1101,6 +1138,25 @@ def _embed_cover_art_data(audio, image_data: bytes, mime_type: str) -> bool:
 
 # ── Helpers ──
 
+def _genre_read(values) -> tuple:
+    """A file's genre as one comparable string, and how many values it is
+    stored as. A multi-value genre tag (one value per genre) used to read as
+    its FIRST genre only, so every check saw it as narrower than the catalogue
+    and a retag folded it back into one joined string."""
+    parts = [str(v).strip() for v in (values or []) if str(v).strip()]
+    if not parts:
+        return None, 0
+    return ', '.join(parts), len(parts)
+
+
+def _genre_frame_values(genre) -> list:
+    """What a writer puts in the genre field: one value per genre when the
+    user writes multi-value tags (the setting the download pipeline already
+    honours), else the single joined string as before."""
+    from core.metadata.multi_value import genre_values
+    return genre_values(genre, _multi_artist_write_enabled())
+
+
 def _id3_text(tags, frame_id: str) -> Optional[str]:
     frames = tags.getall(frame_id)
     if frames and frames[0].text:
@@ -1126,6 +1182,30 @@ def _parse_track_num(val) -> Optional[int]:
         return int(str(val).split('/')[0])
     except (ValueError, IndexError):
         return None
+
+
+def _artist_name_set(value) -> set:
+    """the artists a tag names, spelling aside"""
+    import re as _re
+    from core.library2.importer import split_artist_credits
+    from core.text.normalize import normalize_for_comparison
+    if isinstance(value, (list, tuple)):
+        value = '; '.join(str(v) for v in value if v)
+    # a <Vocal: Eliana> note is a credit role, never part of a name
+    text = _re.sub(r'<[^<>]*>', '', str(value or ''))
+    return {n for n in (normalize_for_comparison(p) for p in split_artist_credits(text)) if n}
+
+
+def _same_artist_names(file_val, db_val) -> bool:
+    """Do both sides name the same artists? "8ruki, Flee" and "8ruki; Flee",
+    "Jim O’Rourke" and "Jim O'Rourke", "Tōru" and "Toru", and
+    "Hiroyuki Sawano <Vocal: Eliana>" and "Hiroyuki Sawano" all did, and the
+    re-tag job reported every one as a mismatch: 20k of 24k on one library."""
+    try:
+        names = _artist_name_set(file_val)
+        return bool(names) and names == _artist_name_set(db_val)
+    except Exception:  # noqa: BLE001 - a compare helper never breaks the diff
+        return False
 
 
 def _normalize_for_compare(val) -> str:

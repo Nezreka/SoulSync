@@ -215,3 +215,73 @@ def test_an_automation_running_single_album_dedup_runs_its_successor():
 
     result = auto_run_repair_job({"job_id": "single_album_dedup"}, Deps())
     assert result["status"] == "completed" and queued == ["native_duplicate_detector"]
+
+
+def test_a_weekly_quality_check_user_gets_the_quality_audit():
+    """3.6.1's Quality Check flagged every library track below its profile.
+    its successor, Quality Profile Audit, ships off, so someone who had the
+    check on lost it with no notice. it is switched on once in its place."""
+    from core.repair_worker import RepairWorker
+    saved = _Saved({'repair.jobs.quality_upgrade_scanner': {'enabled': True, 'interval_hours': 72}})
+    worker = RepairWorker.__new__(RepairWorker)
+    worker._migrate_legacy_job_configs(saved)
+    audit = saved.values['repair.jobs.quality_profile_audit']
+    assert audit['enabled'] is True and audit['interval_hours'] == 72
+
+    # switched off afterwards: it stays off
+    saved.values['repair.jobs.quality_profile_audit'] = {**audit, 'enabled': False}
+    worker._migrate_legacy_job_configs(saved)
+    assert saved.values['repair.jobs.quality_profile_audit']['enabled'] is False
+
+
+def test_a_quality_check_that_was_off_changes_nothing():
+    from core.repair_worker import RepairWorker
+    saved = _Saved({'repair.jobs.quality_upgrade_scanner': {'enabled': False}})
+    RepairWorker.__new__(RepairWorker)._migrate_legacy_job_configs(saved)
+    assert 'repair.jobs.quality_profile_audit' not in saved.values
+
+
+def test_an_automation_running_the_quality_check_runs_the_audit():
+    from core.automation.handlers.run_repair import auto_run_repair_job
+    queued = []
+
+    class Deps:
+        def update_progress(self, *a, **k):
+            pass
+
+        def run_repair_job_now(self, job_id, respect_enabled=True):
+            queued.append(job_id)
+            return True
+
+    result = auto_run_repair_job({"job_id": "quality_upgrade_scanner"}, Deps())
+    assert result["status"] == "completed" and queued == ["quality_profile_audit"]
+
+
+def test_the_carried_quality_audit_is_switched_on_in_its_schedule_too():
+    """second v2 review (R1): the system schedule rows are seeded before
+    this migration, from the config as it was (audit off). switching only the
+    config scheduled nothing, and the next start's toggle reconcile read the
+    off row as newer and switched the config back off"""
+    import json
+    from core.automation.migrate_repair_jobs import _SYSTEM_OWNER
+    from core.repair_worker import RepairWorker
+
+    class _Db:
+        def __init__(self):
+            self.updates = []
+
+        def get_automations(self, profile_id):
+            return [{"id": 9, "owned_by": _SYSTEM_OWNER, "action_type": "run_repair_job",
+                     "action_config": json.dumps({"job_id": "quality_profile_audit"}),
+                     "enabled": 0, "trigger_config": json.dumps({"interval": 168, "unit": "hours"})}]
+
+        def update_automation(self, automation_id, **changes):
+            self.updates.append((automation_id, changes))
+            return True
+
+    saved = _Saved({'repair.jobs.quality_upgrade_scanner': {'enabled': True, 'interval_hours': 72}})
+    worker = RepairWorker.__new__(RepairWorker)
+    worker.db = _Db()
+    worker._migrate_legacy_job_configs(saved)
+    assert worker.db.updates == [(9, {"enabled": 1,
+                                      "trigger_config": json.dumps({"interval": 72.0, "unit": "hours"})})]

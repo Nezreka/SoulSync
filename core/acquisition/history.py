@@ -20,6 +20,9 @@ EVENT_TYPES = frozenset({
     "candidates_evaluated",
     "no_candidate",
     "grab_prepared",
+    # written before the client call so a crash inside add_nzb is never
+    # mistaken for "nothing sent" (review 5 W2-WC-1)
+    "grab_submission_started",
     "grab_submitted",
     "grab_submission_uncertain",
     "manual_grab_correlated",

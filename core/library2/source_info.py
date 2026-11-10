@@ -55,17 +55,29 @@ def track_source_info(conn, track_id: int) -> List[Dict[str, Any]]:
     from core.library2.track_files import primary_file_row
 
     try:
-        # 1) Authoritative link: the legacy track id the provenance is keyed on.
-        #    ``track_downloads.track_id`` is stored as text (legacy contract),
-        #    so bind the id as a string exactly like ``get_track_downloads``.
+        # 1) Authoritative link: the rows keyed on this catalogue track, and a
+        #    3.6.1 row the upgrade carry could not map (still on its legacy
+        #    id). Both, newest first: a re-download after the upgrade must not
+        #    hide behind the old 3.6.1 row ("Blacklist This Source" then hit
+        #    the wrong uploader). ``track_id_kind`` keeps the two id spaces
+        #    apart, so a legacy number never reads as a catalogue id.
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(track_downloads)")}
         legacy_id = _legacy_track_id(conn, track_id)
-        if legacy_id is not None:
+        if "track_id_kind" in cols:
+            rows = conn.execute(
+                "SELECT * FROM track_downloads WHERE (track_id = ? AND track_id_kind = 'lib2')"
+                " OR (track_id = ? AND track_id_kind = 'legacy') ORDER BY id DESC",
+                (str(int(track_id)), str(legacy_id) if legacy_id is not None else None),
+            ).fetchall()
+        elif legacy_id is not None:
             rows = conn.execute(
                 "SELECT * FROM track_downloads WHERE track_id = ? ORDER BY id DESC",
                 (str(legacy_id),),
             ).fetchall()
-            if rows:
-                return [dict(row) for row in rows]
+        else:
+            rows = []
+        if rows:
+            return [dict(row) for row in rows]
 
         # 2) Fallback for tracks with no legacy id (pure autolink creations):
         #    resolve by the primary file path, then a filename-suffix match.
@@ -91,4 +103,47 @@ def track_source_info(conn, track_id: int) -> List[Dict[str, Any]]:
         return []
 
 
-__all__ = ["track_source_info"]
+def carry_legacy_download_ids(conn) -> int:
+    """once, after the upgrade import: a 3.6.1 download row's track_id is a
+    legacy tracks.id. map it to the catalogue track (same rule as the other
+    legacy references: lib2_tracks.legacy_track_id, then a joined copy's file
+    row); a row nothing maps stays, marked 'legacy'. rows written after the
+    upgrade began hold catalogue ids already. returns how many mapped."""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(track_downloads)")}
+        if "track_id_kind" not in cols:
+            return 0
+        state = conn.execute("SELECT started_at FROM lib2_bootstrap_state WHERE id=1").fetchone() \
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE name='lib2_bootstrap_state'").fetchone() else None
+        started = state[0] if state else None
+        # written since the upgrade began: already a catalogue id
+        if started:
+            # review 4 R4-A-2: started_at is ISO ('...T10:00:00+00:00') and
+            # created_at is CURRENT_TIMESTAMP ('... 10:30:00'); as text a
+            # same-day row sorted before the upgrade and was read as legacy
+            conn.execute("UPDATE track_downloads SET track_id_kind='lib2' WHERE track_id_kind IS NULL "
+                         "AND track_id IS NOT NULL AND julianday(created_at) >= julianday(?)",
+                         (started,))
+        rows = conn.execute("SELECT id, track_id FROM track_downloads "
+                            "WHERE track_id_kind IS NULL AND track_id IS NOT NULL").fetchall()
+        mapped = 0
+        for row_id, legacy in rows:
+            hit = conn.execute(
+                "SELECT id FROM lib2_tracks WHERE legacy_track_id=? "
+                "UNION SELECT track_id FROM lib2_track_files WHERE legacy_track_id=? "
+                "AND track_id IS NOT NULL LIMIT 2", (legacy, legacy)).fetchall()
+            if len(hit) == 1:
+                conn.execute("UPDATE track_downloads SET track_id=?, track_id_kind='lib2' WHERE id=?",
+                             (str(int(hit[0][0])), row_id))
+                mapped += 1
+            else:
+                conn.execute("UPDATE track_downloads SET track_id_kind='legacy' WHERE id=?", (row_id,))
+        conn.commit()
+        return mapped
+    except Exception as exc:  # noqa: BLE001 - the next start retries
+        logger.warning("download history ids not carried yet: %s", exc)
+        return 0
+
+
+__all__ = ["track_source_info", "carry_legacy_download_ids"]
+

@@ -32,8 +32,12 @@ class _FakeWishlistService:
         return True
 
     def add_failed_track_from_modal(self, track_info=None, source_type=None,
-                                    source_context=None, profile_id=1):
+                                    source_context=None, profile_id=1,
+                                    detailed=False):
         self.adds.append(track_info)
+        if detailed:
+            return {"status": "created", "created": True, "applied": True,
+                    "track_id": None, "reason": None}
         return True
 
 

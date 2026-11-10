@@ -365,6 +365,51 @@ def anilist_regroup(season: int, episodes: Sequence[Dict[str, Any]],
     return (groups, moved) if moved else unchanged
 
 
+def split_preview_seasons(seasons: Sequence[Dict[str, Any]],
+                          entries: Sequence[Dict[str, Any]]):
+    """the same AniList split for a show that isn't in the library yet.
+
+    a search preview lists TMDB's seasons as they are, so Frieren showed one
+    season of 38 and JJK one of 59 while the library split them (Thibs). this
+    splits the season LIST the same way anilist_regroup splits episodes.
+    skipped for any season whose split would land on a season number TMDB
+    already uses, so a preview never shows two different season 2s.
+
+    returns (seasons, {season shown: TMDB season it comes from}), the map
+    holding every season that came out of a split, sources included."""
+    def _n(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    have = {_n(s.get("season_number")) for s in seasons or []}
+    out: List[Dict[str, Any]] = []
+    source: Dict[int, int] = {}
+    for s in seasons or []:
+        n = _n(s.get("season_number"))
+        total = _n(s.get("episode_total")) or 0
+        if not n or n <= 0 or total <= 0:
+            out.append(s)
+            continue
+        groups, moved = anilist_regroup(
+            n, [{"episode_number": i} for i in range(1, total + 1)], entries)
+        extra = sorted(k for k in groups if k != n)
+        if not moved or any(k in have for k in extra):
+            out.append(s)
+            continue
+        out.append(dict(s, episode_total=len(groups[n])))
+        source[n] = n
+        for k in extra:
+            out.append({"season_number": k, "name": "Season %d" % k,
+                        "episode_total": len(groups[k]), "episode_owned": 0, "episodes": [],
+                        "poster_url": s.get("poster_url"), "has_poster": s.get("has_poster"),
+                        "air_date": None})
+            source[k] = n
+    out.sort(key=lambda s: _n(s.get("season_number")) if _n(s.get("season_number")) is not None else -1)
+    return out, source
+
+
 def annotate(items: List[Dict[str, Any]], db: Any = None, client: Any = None) -> List[Dict[str, Any]]:
     """set alt_season / alt_episode on every wished episode whose scene
     numbering differs. one TVDB client for the batch; seasons come from the

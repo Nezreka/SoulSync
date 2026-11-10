@@ -235,6 +235,16 @@ export function vdlFmtBytes(bytes: number | null | undefined): string {
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${u[i]}`;
 }
 
+/** The bin's count line: "3 files", or "1 folder · 2 files" once a whole
+ *  title folder (Delete Show / Delete Movie) is in it. */
+export function vdlBinCountLabel(items: { is_folder?: boolean | null }[]): string {
+  const folders = items.filter((e) => e.is_folder).length;
+  const files = items.length - folders;
+  const part = (n: number, noun: string) => `${n} ${noun}${n === 1 ? '' : 's'}`;
+  if (!folders) return part(files, 'file');
+  return files ? `${part(folders, 'folder')} · ${part(files, 'file')}` : part(folders, 'folder');
+}
+
 /* ── meta URLs ─────────────────────────────────────────────────────────── */
 
 /**

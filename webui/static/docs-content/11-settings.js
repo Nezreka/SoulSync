@@ -10,6 +10,8 @@ registerDocsSection({
             body: `
 SoulSync needs credentials for the services it queries for metadata and enrichment. The Settings search finds any setting by name — handy when you're not sure which tab it lives under.
 
+Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed.
+
 ## Service list
 
 - **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync. Redirect URIs must be **HTTPS** for anything that isn't a loopback address (NAS, Docker, remote host) — see [Connecting services](#gs-connecting).
@@ -78,6 +80,8 @@ No media server at all: SoulSync itself is the player and library manager. Impor
 | **Usenet** | Search via Prowlarr indexers through your usenet client |
 | **Hybrid** | Drag sources into a priority chain — SoulSync works down the list and uses the first source that returns a match |
 
+For **Usenet**, SoulSync downloads each NZB from Prowlarr itself and hands SABnzbd or NZBGet the file, the way Sonarr does. Their queue shows the release name straight away, never a "Trying to fetch NZB" entry or the Prowlarr link with your api key, and they don't need to reach Prowlarr. If the NZB can't be fetched, nothing is sent to the client and the grab fails with the reason (for example the indexer's HTTP error).
+
 The chain editor lives on the Downloads tab: drag sources from **Available** into your **Download chain**. One source in the chain means "that source only"; two or more means hybrid. Any source can be configured on the Sources tab first — it doesn't need to be in the chain yet.
 
 ## Paths
@@ -98,7 +102,7 @@ Every folder on the Folders card is checked as you type, with one line under it:
 - **Inside your download folder** (or the other way round): keep downloads and libraries side by side, not nested, or half-finished files get scanned.
 - **Not on a mapped volume** (Docker): files there live inside the container and are lost when it's recreated.
 
-The Video tab adds optional **4K libraries** (see [Video: 4K libraries](#vid-sources)) and, in Docker, the compose volume lines for every folder you've set, ready to copy.
+The Video tab adds optional **4K libraries** and **More libraries** for your own movie and TV libraries (see [Video: 4K libraries](#vid-sources)) and, in Docker, the compose volume lines for every folder you've set, ready to copy.
 
 ## Behavior
 
@@ -150,7 +154,7 @@ Quality profiles define which formats are acceptable for downloads, and when a f
 
 ![Quality profiles](dl-quality-profiles.jpg)
 
-Quality profiles are checked during downloads and auto-import. Library v2 evaluates monitored tracks against their upgrade cutoff and sends missing or upgrade-eligible tracks to the Wishlist through **Monitoring List Reconcile**. The retired Quality Upgrade Finder is not a separate repair job.
+Quality profiles are checked during downloads and auto-import. Library v2 evaluates monitored tracks against their upgrade cutoff and sends missing or upgrade-eligible tracks to the Wishlist through **Watchlist & Wishlist Reconcile**. The **Quality Profile Audit** repair job flags library files below their profile for review; the old Quality Upgrade Finder is retired.
 `
         },
         {

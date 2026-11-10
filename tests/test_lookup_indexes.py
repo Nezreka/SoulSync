@@ -114,3 +114,30 @@ def test_exact_path_lookups_search_the_index(db, sql):
     plan = _plan(db, sql, params)
     assert any("idx_lib2_track_files_path" in step for step in plan), plan
     assert not any(step == "SCAN lib2_track_files" for step in plan), plan
+
+
+def test_playable_links_search_their_indexes(db, monkeypatch):
+    """a playlist's stored links are looked up by server id: the mapping and
+    the track's own server column, each on its index, never a scan"""
+    plans = []
+
+    class Cursor(sqlite3.Cursor):
+        def execute(self, sql, params=()):
+            if "lib2_media_server_mappings m" in sql:
+                plans.append([r[3] for r in super().execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()])
+            return super().execute(sql, params)
+
+    class Conn(sqlite3.Connection):
+        def cursor(self, *a, **k):
+            return super().cursor(Cursor)
+
+    def conn(self):
+        c = sqlite3.connect(str(self.database_path), factory=Conn)
+        c.row_factory = sqlite3.Row
+        return c
+
+    monkeypatch.setattr(MusicDatabase, "_get_connection", conn)
+    resolve_playable_tracks(db, [{"title": "x", "artist": "y", "library_track_id": "591381"}])
+    assert plans
+    for plan in plans:
+        assert not any(s.startswith("SCAN m") or s == "SCAN t" or s.startswith("SCAN t ") for s in plan), plan

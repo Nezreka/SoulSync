@@ -291,3 +291,26 @@ def test_year_ignores_the_target_slot_itself():
     # The only sibling row IS the slot being imported -> excluded -> no year.
     db = _year_db([{"disc_number": 1, "track_number": 5, "file_path": "/m/Album (2030)/05.flac", "year": 2030}])
     assert mti._existing_album_year_from_sibling(db, 1, _ident, 1, 5) is None
+
+
+def test_the_album_row_carries_its_true_total_cover_and_provider_ids(tmp_path):
+    """third #1062 review G10-3: the import read 3.6.1 album columns lib2 lacks,
+    so the file was tagged 11/10, got no cover from the album row, and carried
+    the catalogue's own row id as its album identity"""
+    db, conn = _make_db(include_disc_number=True)
+    source_file = tmp_path / "src" / "08 - HUMBLE.flac"
+    source_file.parent.mkdir()
+    source_file.write_bytes(b"x")
+    source_track = _insert_track(conn, track_id="deluxe-humble", album_id=2,
+                                 title="HUMBLE.", track_number=8, file_path=source_file)
+    conn.execute("UPDATE lib2_albums SET expected_track_count=14, track_count=10, spotify_id='sp-damn', "
+                 "image_url='https://cdn-images.dzcdn.net/images/cover/x/1000x1000.jpg', "
+                 "external_ids=json_object('deezer', '4050205') WHERE id=1")
+    conn.commit()
+
+    album, _source = mti._load_album_and_source_track(db, 1, source_track)
+
+    assert album["api_track_count"] == 14
+    assert album["thumb_url"].startswith("https://cdn-images.dzcdn.net/")
+    assert album["spotify_album_id"] == "sp-damn" and album["deezer_id"] == "4050205"
+    assert mti._album_source_id({}, {}, album, 1) == "sp-damn"

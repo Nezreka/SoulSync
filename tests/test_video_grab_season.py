@@ -149,15 +149,14 @@ def test_every_configured_source_is_used():
     assert ".filter(function (s) { return SRC_META[s]; })[0]" not in fn
 
 
-def test_a_pack_is_tried_before_any_per_episode_search():
-    """Assert the GUARD, not where the text sits. perEpisode is defined near the
-    top and called at the bottom, so comparing string offsets would 'prove' the
-    opposite of the truth — the contract is that the episode path runs only once
-    every source has been asked for a pack and come back empty."""
+def test_grab_season_grabs_each_episode_and_never_a_pack():
+    """SeadogsBooty: the button says one at a time, and The Office S1 went to
+    sabnzbd as one season pack with all six rows sharing its progress. a pack is
+    the season search's job now, Grab season never looks for one."""
     fn = _grab_season()
-    assert "if (i >= sources.length) { perEpisode(); return; }" in fn
-    assert fn.count("perEpisode()") == 2, "defined once, called from exactly one place"
-    assert "Looking for a season pack" in fn
+    assert fn.count("perEpisode()") == 2, "defined once, called once"
+    assert "scope: 'season'" not in fn and "_trySeasonPack" not in _js()
+    assert "Looking for a season pack" not in fn
 
 
 def test_the_per_episode_fallback_survives():
@@ -169,21 +168,20 @@ def test_the_per_episode_fallback_survives():
 
 def test_the_fallback_spreads_episodes_across_sources():
     fn = _grab_season()
-    assert "sources[idx % sources.length]" in fn
+    assert "sources[n++ % sources.length]" in fn
 
 
-def test_the_pack_search_is_scoped_to_the_season():
-    """scope 'season' is what rides into search_ctx and tells the monitor this
-    lands as a folder — without it the pack is judged as one episode."""
+def test_the_season_search_button_still_finds_packs():
+    """the way to get a pack on purpose: the season's search, scoped to the
+    season so a grab lands as a folder mapped onto episodes"""
     src = _js()
-    fn = src[src.index("function _trySeasonPack"):src.index("function grabSeason(")]
-    assert "scope: 'season'" in fn
+    assert "data-vdl-season-search" in src
+    assert "scope: 'season'" in src
 
 
-def test_the_button_is_re_enabled_on_both_outcomes():
-    """Leaving it disabled after a successful pack grab strands the control."""
+def test_the_button_is_re_enabled_when_the_season_is_done():
     fn = _grab_season()
-    assert fn.count("btn.textContent = 'Grab season'") >= 2
+    assert fn.count("btn.textContent = 'Grab season'") >= 1
 
 
 @pytest.mark.skipif(_node() is None, reason="node not available")
@@ -252,17 +250,12 @@ def _drive():
 
 
 @pytest.mark.skipif(_node() is None, reason="node not available")
-def test_the_detail_page_helper_grabs_a_pack_when_one_exists():
+def test_the_detail_page_helper_never_grabs_a_pack_even_when_one_exists():
     d = _drive()
-    assert d["pack"]["pack"] is True and d["pack"]["grabbed"] == 5
-    assert d["packGrabs"] == ["season"], "one grab, scoped to the season"
-    assert d["packSearches"] == ["season:soulseek"], "stops at the first source that has it"
-
-
-@pytest.mark.skipif(_node() is None, reason="node not available")
-def test_it_asks_every_source_for_a_pack_before_giving_up():
-    d = _drive()
-    assert d["epSearches"][:2] == ["season:soulseek", "season:torrent"]
+    assert not d["pack"].get("pack")
+    assert "season" not in d["packGrabs"]
+    assert not [s for s in d["packSearches"] if s.startswith("season:")]
+    assert all(s.startswith("episode:") for s in d["packSearches"])
 
 
 @pytest.mark.skipif(_node() is None, reason="node not available")
@@ -293,5 +286,129 @@ def test_the_detail_page_no_longer_pins_the_season_to_one_source():
     js = Path("webui/static/video/video-detail.js").read_text(encoding="utf-8")
     fn = js[js.index("function grabSeasonInline("):js.index("function wishSeasonInline(")]
     assert "VideoGrab.pickSource()" not in fn
-    assert "Looking for a season pack" in fn
-    assert "res.pack" in fn, "a pack must not report as 'grabbing N of N episodes'"
+    assert "Looking for a season pack" not in fn and "res.pack" not in fn
+
+
+# ── a search that ends badly still ends (SeadogsBooty, MobLand S1) ───────────
+# Grab season showed "Grabbing 10 episodes", every row sat on Searching, and
+# nothing reached SABnzbd. searchInto only called its done callback on
+# success: an error answer or a closed panel returned without it, so each
+# episode's promise never settled and the 3-wide pump never freed a slot.
+
+_SEARCH_HARNESS = r"""
+const fs = require('fs');
+const src = fs.readFileSync('webui/static/video/video-download-view.js', 'utf8');
+const body = src.slice(src.indexOf('function searchInto('), src.indexOf('function _pollSearch('));
+function el(connected) {
+  return { isConnected: connected, hidden: true, innerHTML: '', classList: { remove() {}, toggle() {} } };
+}
+async function run(answer, connected) {
+  const env = {
+    postJSON: () => Promise.resolve(answer),
+    withIdentity: (c, r, p) => p, _setScanning() {}, esc: (x) => String(x),
+    scopeWord: () => 'season', renderResults() {}, _pollSearch() {},
+  };
+  const f = new Function(...Object.keys(env), body + '; return searchInto;')(...Object.values(env));
+  const res = el(connected);
+  let done = 0;
+  f({}, res, { scope: 'episode', source: 'usenet' }, [], () => { done++; });
+  await new Promise((r) => setTimeout(r, 20));
+  return { done, error: res._error || null, html: res.innerHTML };
+}
+(async () => {
+  console.log(JSON.stringify({
+    error: await run({ error: 'Prowlarr: 401' }, true),
+    closed: await run({ results: [] }, false),
+    ok: await run({ results: [] }, true),
+  }));
+})();
+"""
+
+
+@pytest.mark.skipif(_node() is None, reason="node not available")
+def test_a_search_that_errors_or_closes_still_calls_done():
+    out = subprocess.run([_node(), "-e", _SEARCH_HARNESS], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    d = json.loads(out.stdout.strip())
+    assert d["error"]["done"] == 1, "an indexer error must settle the episode"
+    assert d["error"]["error"] == "Prowlarr: 401", "and the row gets the reason"
+    assert d["closed"]["done"] == 1
+    assert d["ok"]["done"] == 1
+
+
+def test_the_episode_row_says_why_it_was_not_grabbed():
+    js = _js()
+    assert "epNoRelease(epEl, r.error || panel._error)" in js
+    assert "Not grabbed: " in js
+
+
+def test_season_and_show_pack_searches_name_a_source():
+    """they sent none, and the server answered with DEMO DATA placeholders."""
+    js = _js()
+    assert "{ scope: 'season', title: st.title, season: +sn, source: packSrc }" in js
+    assert "season_end: st.maxSeason || 5, source: showSrc }" in js
+    fn = js[js.index("function _packSource("):js.index("function _noSourceInto(")]
+    assert "'usenet'" in fn and "'torrent'" in fn
+
+
+# ── an errored search gets one more try (SeadogsBooty, Dexter S1) ────────────
+# three episode searches at once backed Prowlarr up past its 75s timeout and
+# every episode after the first few came back "Not grabbed: Prowlarr did not
+# answer within 75s". an errored search is not "nothing found": it goes to the
+# back of the queue once, one search at a time from then on.
+
+_RETRY_HARNESS = r"""
+const fs = require('fs');
+const src = fs.readFileSync('webui/static/video/video-grab.js', 'utf8');
+const calls = { search: [], grab: [], states: {} };
+const seen = {};
+global.window = {}; global.document = { dispatchEvent() {} };
+global.CustomEvent = function () {};
+global.fetch = (url, opt) => {
+  const body = opt && opt.body ? JSON.parse(opt.body) : null;
+  const reply = (x) => Promise.resolve({ ok: true, json: () => Promise.resolve(x) });
+  if (url.indexOf('/downloads/config') >= 0) return reply({ download_mode: 'usenet' });
+  if (url.indexOf('/search/start') >= 0) {
+    if (body.scope === 'season') return reply({ results: [] });
+    const ep = body.episode;
+    seen[ep] = (seen[ep] || 0) + 1;
+    calls.search.push(ep);
+    // ep 2 times out once, ep 3 every time, ep 4 simply has nothing
+    if ((ep === 2 && seen[ep] === 1) || ep === 3)
+      return reply({ error: 'Prowlarr: Prowlarr did not answer within 75s' });
+    if (ep === 4) return reply({ results: [] });
+    return reply({ results: [{ accepted: true, username: 'idx', title: 'Show.S01E0' + ep }] });
+  }
+  if (url.indexOf('/downloads/grab') >= 0) {
+    calls.grab.push(body.search_ctx.episode);
+    return reply({ ok: true, id: 7 });
+  }
+  return reply({});
+};
+eval(src);
+(async () => {
+  const res = await global.window.VideoGrab.season(
+    { title: 'Show', season: 1, episodes: [1, 2, 3, 4] },
+    (en, state) => { calls.states[en] = state; });
+  console.log(JSON.stringify({ res, calls }));
+})();
+"""
+
+
+@pytest.mark.skipif(_node() is None, reason="node not available")
+def test_an_errored_episode_search_is_tried_once_more():
+    out = subprocess.run([_node(), "-e", _RETRY_HARNESS], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    d = json.loads(out.stdout.strip())
+    assert sorted(d["calls"]["grab"]) == [1, 2], "the timed-out episode came back on its retry"
+    assert d["res"]["grabbed"] == 2
+    assert d["calls"]["search"].count(2) == 2 and d["calls"]["search"].count(3) == 2
+    assert d["calls"]["search"].count(4) == 1, "nothing found is an answer, not an error"
+    assert d["calls"]["states"]["3"] == "none" and d["calls"]["states"]["4"] == "none"
+
+
+def test_the_modal_retries_an_errored_episode_once():
+    js = _js()
+    fn = js[js.index("function grabSeason("):js.index("function perEpisode()") + 2000]
+    assert "queue.push([en, 1])" in fn and "MAX = 1" in fn
+    assert "errored: !!panel._error" in js

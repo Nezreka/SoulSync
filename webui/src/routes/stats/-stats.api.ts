@@ -228,10 +228,47 @@ export function listenbrainzListeningImportStatusQueryOptions() {
   });
 }
 
+const REPORT_REFRESH_MS = 3000;
+// asks in a row while the server still says refreshing. the server ends a
+// pass (stored or failed) and stops saying so, but a pass that hangs must not
+// keep the page polling forever (review 5 W3-TU-2)
+export const REPORT_MAX_POLLS = 40;
+
+interface ReportQueryState {
+  state: {
+    data?: { refreshing?: boolean };
+    status?: string;
+    dataUpdatedAt?: number;
+  };
+}
+
+const reportStreaks = new WeakMap<object, { at: number | undefined; count: number }>();
+
+/** poll while the report says refreshing, never after a failed fetch, and
+ *  at most REPORT_MAX_POLLS answers in a row (review 5 W3-TU-2) */
+export function reportRefetchInterval(query: ReportQueryState): number | false {
+  const { data, status, dataUpdatedAt } = query.state;
+  if (status === 'error' || !data?.refreshing) {
+    reportStreaks.delete(query);
+    return false;
+  }
+  // count answers, not calls: this runs on every observer update
+  const streak = reportStreaks.get(query) ?? { at: undefined, count: 0 };
+  if (streak.at !== dataUpdatedAt) {
+    streak.at = dataUpdatedAt;
+    streak.count += 1;
+    reportStreaks.set(query, streak);
+  }
+  return streak.count > REPORT_MAX_POLLS ? false : REPORT_REFRESH_MS;
+}
+
 export function statsDbStorageQueryOptions() {
   return queryOptions({
     queryKey: [...STATS_QUERY_KEY, 'db-storage'],
     queryFn: fetchStatsDbStorage,
+    // a whole-file report: the server answers from its last result and says
+    // when a newer one is on the way
+    refetchInterval: reportRefetchInterval,
   });
 }
 
@@ -239,6 +276,7 @@ export function statsLibraryDiskUsageQueryOptions() {
   return queryOptions({
     queryKey: [...STATS_QUERY_KEY, 'library-disk-usage'],
     queryFn: fetchStatsLibraryDiskUsage,
+    refetchInterval: reportRefetchInterval,
   });
 }
 

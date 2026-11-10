@@ -89,6 +89,32 @@ def test_preview_reports_missing_file(imported_conn):
     assert out[0]["has_changes"] is False
 
 
+@pytest.mark.parametrize('extension', ['aiff', 'aif'])
+@pytest.mark.parametrize('options', [None, {'fields': ['title', 'artist'], 'cover_art': 'skip'}])
+def test_aiff_library_preview_and_write(imported_conn, legacy_db, tmp_path, extension, options):
+    from tests.metadata.test_aiff_tags_1919 import _aiff, _sound_chunk
+    from core.tag_writer import read_file_tags
+
+    path = tmp_path / f'track.{extension}'
+    _aiff(path)
+    before = _sound_chunk(path)
+    _, _, track_id = _seed_album_with_files(imported_conn, path=str(path))
+
+    preview = retag.tag_preview(retag.track_contexts(imported_conn, [track_id]))
+    assert not preview[0].get('error')
+    assert preview[0]['has_changes'] is True
+    stats = retag.write_tags(legacy_db, [track_id], embed_cover=False, options=options)
+    assert stats['written'] == 1, stats
+    assert stats['failed'] == 0
+    tags = read_file_tags(str(path))
+    assert tags['title'] == 'One Dance'
+    assert tags['artist'] == 'Drake; Wizkid'
+    cached = imported_conn.execute(
+        'SELECT tags_json FROM lib2_track_files WHERE track_id=?', (track_id,)).fetchone()
+    assert json.loads(cached[0])['title'] == 'One Dance'
+    assert _sound_chunk(path) == before
+
+
 def test_preview_reports_unreadable_file(imported_conn):
     """A path that doesn't exist yields a per-track error, never an exception."""
     conn = imported_conn
@@ -842,3 +868,121 @@ def test_retag_preserves_manual_concrete_edition_title(imported_conn):
     data = retag.track_contexts(imported_conn, [tid])[0]['db_data']
     assert data['album_title'] == 'My edition'
     assert data['_manual_fields']['album_title'] == 'Provider edition'
+
+
+def test_write_tags_keeps_a_files_lyrics_and_respects_tag_settings(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """Write Tags (and the retag a new album cover starts) wrote Genius's
+    plain-text lyrics over a file's synced lyrics, plus style/mood/copyright/
+    ISRC with their settings off. 3.6.1's Write Tags wrote none of them."""
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, _, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")
+    conn.execute("UPDATE lib2_tracks SET genius_lyrics='plain text', mood='Happy', style='Pop',"
+                 " isrc='USRC17607839', copyright='(c) 2016' WHERE id=?", (track_id,))
+    conn.commit()
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: {"error": None, "has_cover_art": True})
+    monkeypatch.setattr("core.tag_writer.build_tag_diff", lambda *_args: [{"changed": True}])
+    written = []
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file",
+                        lambda path, db_data, **_kw: written.append(dict(db_data)) or {"success": True})
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False)
+
+    assert written, "the write ran"
+    for key in ("lyrics", "mood", "style", "isrc", "copyright"):
+        assert key not in written[-1], key
+
+
+def test_the_retag_modal_writes_extra_tags_only_where_their_setting_allows(monkeypatch):
+    from types import SimpleNamespace
+    values = {"audiodb.tags.mood": False}
+    monkeypatch.setattr("core.metadata.common.get_config_manager",
+                        lambda: SimpleNamespace(get=lambda key, default=None: values.get(key, default)))
+    data = {"title": "x", "mood": "Happy", "style": "Pop", "isrc": "US1", "lyrics": "plain"}
+    kept = retag._gate_extra_tags(data, {"lyrics": "skip"}, legacy=False)
+    assert "mood" not in kept and "lyrics" not in kept
+    assert kept["style"] == "Pop" and kept["isrc"] == "US1"
+    assert retag._gate_extra_tags(data, {"lyrics": "fetch"}, legacy=False)["lyrics"] == "plain"
+
+
+def test_write_tags_applies_the_strict_genre_whitelist(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    """#1057 / second v2 review (T4): 3.6.1 filtered genres at the tag write,
+    so Write Tags cleaned up genres stored before the whitelist was on. v2
+    wrote the stored genres unfiltered"""
+    from types import SimpleNamespace
+    conn = imported_conn
+    file_path = tmp_path / "track.flac"
+    file_path.write_bytes(b"fake")
+    _, _, track_id = _seed_album_with_files(conn, path="/mapped/track.flac")   # genres rap, pop
+    values = {"genre_whitelist.enabled": True, "genre_whitelist.genres": ["Pop"]}
+    monkeypatch.setattr("core.metadata.common.get_config_manager",
+                        lambda: SimpleNamespace(get=lambda key, default=None: values.get(key, default)))
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda _path: str(file_path))
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda _path: {"error": None, "has_cover_art": True})
+    monkeypatch.setattr("core.tag_writer.build_tag_diff", lambda *_args: [{"changed": True}])
+    written = []
+    monkeypatch.setattr("core.tag_writer.write_tags_to_file",
+                        lambda path, db_data, **_kw: written.append(dict(db_data)) or {"success": True})
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False)
+
+    assert [g.lower() for g in written[-1]["genres"]] == ["pop"]
+
+
+# review 5 R5-F-3: a hand-set album year lost to the provider's release_date,
+# which the diff and the writer read first
+
+def test_a_hand_set_year_beats_the_providers_release_date_in_the_diff(imported_conn):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='year', value=2018)
+
+    data = retag._db_data_for_row(conn, retag._track_rows(conn, [track_id])[0])
+    assert (data['year'], data['release_date']) == (2018, '2018')
+
+    diff = retag._policy_diff({'title': 'One Dance', 'year': '2018'}, data,
+                              retag.retag_options({'dry_run': False}))
+    year_row = next(d for d in diff if d['file_key'] == 'year')
+    assert not year_row['changed'], year_row
+
+
+def test_a_hand_set_year_is_what_gets_written(imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='year', value=2018)
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False)
+
+    assert written[0]['release_date'] == '2018'
+
+
+def test_releasing_the_year_hands_the_providers_date_back(
+        imported_conn, legacy_db, tmp_path, monkeypatch):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='year', value=2018)
+    written = _capture_write(monkeypatch, tmp_path)
+
+    retag.write_tags(legacy_db, [track_id], embed_cover=False,
+                     overwrite_manual=[(track_id, 'year')])
+
+    assert (written[0]['year'], written[0]['release_date']) == (2016, '2016-04-29')
+
+
+def test_a_hand_set_year_that_agrees_with_the_date_keeps_the_full_date(imported_conn):
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    conn.execute("UPDATE lib2_albums SET year=2015 WHERE id=?", (album_id,))
+    _override(conn, entity_type='release_group', entity_id=album_id,
+              field_name='year', value=2016)
+
+    data = retag._db_data_for_row(conn, retag._track_rows(conn, [track_id])[0])
+    assert (data['year'], data['release_date']) == (2016, '2016-04-29')

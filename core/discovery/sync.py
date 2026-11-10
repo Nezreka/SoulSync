@@ -381,6 +381,8 @@ def _record_library_membership(tracks_json, match_details) -> None:
                 # which library row: the next sync's skip checks it still
                 # exists, or a deleted file was never noticed (#1417)
                 'library_track_id': ((detail.get('matched_track') or {}).get('id') or None) if found else None,
+                # the sync matches by the server's id (review 5 W2-WB-2)
+                'library_track_id_kind': 'server' if found else None,
                 # Stamped so the count can say WHEN it was true. The flag is a
                 # cache: deleting files outside SoulSync will not update it
                 # until the next sync, and a number that cannot say how old it
@@ -738,7 +740,11 @@ def _run_sync_task(
             'download_missing': False,
             'profile_id': profile_id,
             'sync_mode': sync_mode,
-            'user_initiated': not bool(automation_id) if user_initiated is None else user_initiated,
+            # only a caller that says so overrides the wishlist ignore-list
+            # (#874), as in 3.6.1. reading "no automation id" as a click let
+            # the nightly playlist pipeline and every sync-page sync re-queue
+            # tracks the user had removed.
+            'user_initiated': bool(user_initiated),
         }
         if is_request_list:
             sync_kwargs['is_request_list'] = is_request_list
@@ -907,20 +913,6 @@ def _run_sync_task(
         except Exception as e:
             logger.warning(f"Failed to record sync history completion: {e}")
 
-        if sync_errors:
-            # A returned error is just as terminal as a raised exception. Do
-            # not persist a successful fingerprint or trigger sync follow-ups.
-            logger.error("SYNC FAILED for %s: %s", playlist_id, sync_error)
-            if automation_id:
-                deps.update_automation_progress(
-                    automation_id, status='error', progress=100, phase='Error',
-                    log_line=f'Sync failed: {sync_error}', log_type='error',
-                )
-            if deps.invalidate_sync_fingerprint:
-                deps.invalidate_sync_fingerprint(
-                    _fingerprint_sync_id(playlist_id, _resync_entry_id))
-            return
-
         # Record which tracks are actually IN THE LIBRARY, per track.
         #
         # The matcher has just answered this for every track, correctly — it
@@ -964,6 +956,19 @@ def _run_sync_task(
                 organize_by_playlist=organize_by_playlist,
                 result=result,
             )
+
+        if sync_errors:
+            # The server playlist write failed. The library membership above
+            # and the automation's downloads still ran: the sync service keeps
+            # going on purpose ("still wishlist what is missing"), and 3.6.1
+            # started those downloads too. What a failed write must not do is
+            # look like a success: no fingerprint, no playlist_synced event,
+            # no saved sync status.
+            logger.error("SYNC FAILED for %s: %s", playlist_id, sync_error)
+            if deps.invalidate_sync_fingerprint:
+                deps.invalidate_sync_fingerprint(
+                    _fingerprint_sync_id(playlist_id, _resync_entry_id))
+            return
 
         # Emit playlist_synced event for automation engine
         try:

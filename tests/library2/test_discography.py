@@ -1708,3 +1708,35 @@ def test_automatic_editions_keep_pins_and_respect_manual_veto(imported_conn):
     assert select_automatic_album_ids(imported_conn, ids, cfg) == [ids[1]]
     record_rule(imported_conn, 'album', ids[1], False, PROVENANCE_USER)
     assert select_automatic_album_ids(imported_conn, ids, cfg) == [ids[0]]
+
+
+def test_release_credits_never_resolve_the_primary_artist_again(imported_conn, monkeypatch):
+    """review 5 R5-E-3: the primary credit is primary_artist_id already;
+    resolving it too was an artist lookup thrown away inside the write
+    transaction. only the other credits are looked up and linked."""
+    from core.library2 import autolink
+
+    drake = _artist_id(imported_conn)
+    album = imported_conn.execute(
+        "SELECT id FROM lib2_albums WHERE primary_artist_id=? LIMIT 1", (drake,)
+    ).fetchone()["id"]
+    looked_up = []
+    real = autolink.find_or_create_artist
+
+    def spy(conn, name, **kwargs):
+        looked_up.append(name)
+        return real(conn, name, **kwargs)
+
+    monkeypatch.setattr(autolink, "find_or_create_artist", spy)
+    D._link_release_artists(
+        imported_conn, album, drake, "Drake",
+        [{"name": "Drake", "id": "246791"}, {"name": "Rihanna", "id": "564"}],
+        "deezer",
+    )
+
+    assert looked_up == ["Rihanna"]
+    featured = imported_conn.execute(
+        "SELECT a.name FROM lib2_album_artists aa JOIN lib2_artists a ON a.id=aa.artist_id "
+        "WHERE aa.album_id=? AND aa.role='featured'", (album,)).fetchall()
+    names = [r["name"] for r in featured]
+    assert "Rihanna" in names and "Drake" not in names

@@ -106,4 +106,79 @@ describe('playLibraryTrack', () => {
     expect(startAudioPlayback).not.toHaveBeenCalled();
     expect(window.showToast).not.toHaveBeenCalled();
   });
+
+  it('keeps the v2 ids the refresh hands back, so Now Playing can report the track', async () => {
+    // resolve-track answers with lib2 rows. the refresh copied id, path and
+    // album, and dropped lib2_track_id: the player then had no library row to
+    // point a report at and hid Report issue for every title+artist play
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes('/api/stats/resolve-track')
+        ? new Response(
+            JSON.stringify({
+              success: true,
+              track: {
+                id: 41,
+                title: 'Song',
+                file_path: '/a/first.mp3',
+                lib2_track_id: 41,
+                lib2_artist_id: 7,
+              },
+            }),
+          )
+        : respondJson(String(url)),
+    );
+    await playLibraryTrack({ id: 1, title: 'Song', file_path: '/a/stale.mp3' }, 'LP', 'Band');
+    expect(setTrackInfo).toHaveBeenCalledWith(
+      expect.objectContaining({ is_library: true, lib2_track_id: 41, lib2_artist_id: 7 }),
+    );
+  });
+
+  it('plays the clicked copy of a migrated v2 row, not a title+artist twin', async () => {
+    // review 5 R5-L-1: a 3.6.1-migrated row carries legacy_track_id and
+    // lib2_track_id. the name lookup answered the album's copy, so Play on the
+    // single played the album file and Now Playing named the album
+    fetchMock.mockImplementation(async (url: string) =>
+      String(url).includes('/api/stats/resolve-track')
+        ? new Response(
+            JSON.stringify({
+              success: true,
+              track: {
+                id: 1,
+                title: 'Royals',
+                file_path: '/music/Lorde/Pure Heroine/03 Royals.flac',
+                lib2_track_id: 1,
+                album_title: 'Pure Heroine',
+              },
+            }),
+          )
+        : respondJson(String(url)),
+    );
+    await playLibraryTrack(
+      {
+        id: 502,
+        lib2_track_id: 2,
+        legacy_track_id: 502,
+        title: 'Royals',
+        file_path: '/music/Lorde/Royals - Single/01 Royals.mp3',
+        _stats_image: '/api/library/v2/albums/2/image',
+      },
+      'Royals - Single',
+      'Lorde',
+    );
+    const resolved = fetchMock.mock.calls.filter(([u]) =>
+      String(u).includes('/api/stats/resolve-track'),
+    );
+    expect(resolved).toHaveLength(0);
+    expect(bodyOf('/api/library/play')).toMatchObject({
+      file_path: '/music/Lorde/Royals - Single/01 Royals.mp3',
+      album: 'Royals - Single',
+    });
+    expect(setTrackInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lib2_track_id: 2,
+        album: 'Royals - Single',
+        image_url: '/api/library/v2/albums/2/image',
+      }),
+    );
+  });
 });

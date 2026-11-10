@@ -231,3 +231,80 @@ def test_another_bridge_rejection_is_still_an_error(reorg_db, monkeypatch):
     monkeypatch.setattr(bridge, 'preview_album_reorganize', _refused)
 
     assert LibraryReorganizeJob().scan(_ctx(reorg_db, [])).errors == 1
+
+
+def test_the_job_plans_each_librarys_copy_into_its_own_root(monkeypatch):
+    """third #1062 review G11-3: the job planned every album into the shared
+    root, so an own library's album showed false "would move" findings and one
+    library's copy in place settled the album for all of them. it plans the
+    way the queued reorganize moves: per library, into that library's root"""
+    import core.library2.reorganize_bridge as bridge
+    from types import SimpleNamespace
+    from core.library_scope import current_library_scope
+    from core.repair_jobs import library_reorganize as job
+    monkeypatch.setattr("core.reorganize_runner._libraries_for",
+                        lambda _db, _item: [("shared", "/music"), (3, "/own/bob")])
+    calls = []
+
+    def preview(_db, _cfg, album_id, transfer_dir=None):
+        calls.append((current_library_scope(), transfer_dir))
+        return {"tracks": [{"track_id": f"t-{transfer_dir}"}]}
+    monkeypatch.setattr(bridge, "preview_album_reorganize", preview)
+
+    merged = job._preview_every_library(SimpleNamespace(db=None, config_manager=None), 5)
+
+    assert calls == [("shared", "/music"), (3, "/own/bob")]
+    assert len(merged["tracks"]) == 2
+
+
+# review 5 R5-I-5: an artist-scoped run never widens to a whole compilation
+
+def _guest_on_a_compilation(tmp_path, monkeypatch, *, dry_run):
+    from types import SimpleNamespace
+    from database.music_database import MusicDatabase
+    from tests import lib2_seed
+    import core.repair_jobs.library_reorganize as lr
+    import core.library_reorganize as core_lr
+    import core.library2.reorganize_bridge as bridge
+
+    db = MusicDatabase(str(tmp_path / 'r.db'))
+    with db._get_connection() as conn:
+        guest = lib2_seed.track(conn, 'Various Artists', 'Comp', 'Guest Song',
+                                credit='Scoped Artist', track_number=1)
+        other = lib2_seed.track(conn, 'Various Artists', 'Comp', 'Other Song',
+                                credit='Someone Else', track_number=2)
+        conn.execute("UPDATE lib2_track_files SET path='/m/Comp/01 Guest.flac' WHERE track_id=?", (guest,))
+        conn.execute("UPDATE lib2_track_files SET path='/m/Comp/02 Other.flac' WHERE track_id=?", (other,))
+        conn.commit()
+
+    def preview(context, album_id):
+        return {'tracks': [
+            {'track_id': tid, 'matched': True, 'file_exists': True, 'unchanged': False,
+             'source_db_path': path, 'current_path': path, 'current_path_abs': path,
+             'new_path': '/m/VA' + path[2:]}
+            for tid, path in ((guest, '/m/Comp/01 Guest.flac'), (other, '/m/Comp/02 Other.flac'))]}
+    monkeypatch.setattr(lr, '_preview_every_library', preview)
+    monkeypatch.setattr(core_lr, 'naming_fingerprint', lambda: 'fp')
+    queued = []
+    monkeypatch.setattr(bridge, 'enqueue_album_reorganize',
+                        lambda _db, album_id: queued.append(album_id) or {'queued': True})
+    settings = {'dry_run': dry_run}
+    cfg = SimpleNamespace(get=lambda k, d=None: settings if k.endswith('.settings') else d,
+                          set=lambda *a, **k: None)
+    found = []
+    ctx = JobContext(db, '/m', cfg,
+                     scope={'artist_name': 'Scoped Artist', 'file_paths': ['/m/Comp/01 Guest.flac']},
+                     create_finding=lambda **kw: found.append(kw) or True)
+    lr.LibraryReorganizeJob().scan(ctx)
+    return sorted(f['file_path'] for f in found), queued
+
+
+def test_a_scoped_preview_lists_only_the_scoped_files(tmp_path, monkeypatch):
+    found, queued = _guest_on_a_compilation(tmp_path, monkeypatch, dry_run=True)
+    assert found == ['/m/Comp/01 Guest.flac'] and queued == []
+
+
+def test_a_scoped_live_run_never_queues_the_whole_compilation(tmp_path, monkeypatch):
+    found, queued = _guest_on_a_compilation(tmp_path, monkeypatch, dry_run=False)
+    assert queued == []
+    assert found == ['/m/Comp/01 Guest.flac']

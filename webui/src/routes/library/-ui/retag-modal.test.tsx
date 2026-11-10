@@ -320,3 +320,64 @@ it('reports an unavailable full refresh without claiming provider success', asyn
   await screen.findByText(/No fresh provider metadata available/);
   expect(screen.queryByText(/Provider metadata refreshed/)).not.toBeInTheDocument();
 });
+
+it('offers Sync to Plex when Plex is the server, and says what it did', async () => {
+  // third #1062 review G15-5: 3.6.1's tag writer had "Sync to Plex/Jellyfin"
+  let written: Record<string, unknown> | undefined;
+  server.use(
+    http.get('/api/library/v2/albums/5/tag-preview', () =>
+      HttpResponse.json({
+        success: true,
+        server_type: 'plex',
+        tracks: [
+          {
+            track_id: 1,
+            album_id: 5,
+            title: 'Song',
+            file_path: '/music/song.opus',
+            has_changes: true,
+            diff: [{ field: 'Title', file_value: '', db_value: 'Song', changed: true }],
+          },
+        ],
+      }),
+    ),
+    http.post('/api/library/v2/tags/write', async ({ request }) => {
+      written = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({ success: true, job_id: 'sync-write' });
+    }),
+    http.get('/api/library/v2/jobs/status', () =>
+      HttpResponse.json({
+        running: false,
+        result: {
+          written: 1,
+          server_sync: { server: 'plex', synced: 1, failed: 0, skipped: 0, errors: [] },
+        },
+      }),
+    ),
+  );
+  render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <RetagModal entity="albums" id={5} title="Album" onClose={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await screen.findByLabelText('Sync to Plex'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Write tags (1)' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Write tags (1)' }));
+  await screen.findByText(/1 updated on Plex/);
+  expect(written).toMatchObject({ sync_to_server: true });
+});
+
+it('hides the server sync for Navidrome, which reads tags itself', async () => {
+  server.use(
+    http.get('/api/library/v2/albums/5/tag-preview', () =>
+      HttpResponse.json({ success: true, server_type: 'navidrome', tracks: [] }),
+    ),
+  );
+  render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <RetagModal entity="albums" id={5} title="Album" onClose={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  await screen.findByRole('button', { name: 'Write tags (0)' });
+  expect(screen.queryByLabelText(/Sync to/)).toBeNull();
+});

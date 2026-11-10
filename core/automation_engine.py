@@ -655,6 +655,19 @@ class AutomationEngine:
             return self.MASTER_DEFAULTS.get(side, True)
         return str(raw).strip().lower() in ('1', 'true', 'yes', 'on')
 
+    def feature_paused(self, auto) -> str | None:
+        """#1909: an admin paused a part every profile hid (podcasts,
+        audiobooks). the reason string, or None when it may run. live read,
+        so a profile turning the part back on resumes it on the next slot."""
+        try:
+            from core import ui_features
+            feature = ui_features.feature_for_automation(auto)
+            if feature and ui_features.background_paused(self.db, feature):
+                return f'{feature} is hidden for everyone and paused'
+        except Exception as e:  # noqa: BLE001 - a failed check never stops a job
+            logger.debug("feature pause check failed: %s", e)
+        return None
+
     def set_master_enabled(self, side: str, enabled: bool) -> bool:
         """Persist one side's master state to the engine DB. False on bad side."""
         key = self.MASTER_KEYS.get(side)
@@ -1137,7 +1150,8 @@ class AutomationEngine:
                     # Direct-effect callers honor the per-side master pause too —
                     # otherwise a paused side's effects would still fire through
                     # the code paths that never route via _run_event_automation.
-                    return self.master_enabled(self.automation_side(auto))
+                    return (self.master_enabled(self.automation_side(auto))
+                            and self.feature_paused(auto) is None)
             return False
         except Exception as e:
             logger.debug(f"is_event_action_enabled({event_type}, {action_type}) failed: {e}")
@@ -1270,6 +1284,10 @@ class AutomationEngine:
         side = self.automation_side(auto)
         if not self.master_enabled(side):
             logger.info(f"Event automation '{auto.get('name')}' skipped — {side} automations are paused")
+            return
+        paused = self.feature_paused(auto)
+        if paused:
+            logger.info(f"Event automation '{auto.get('name')}' skipped — {paused}")
             return
 
         action_type = auto.get('action_type')
@@ -1424,6 +1442,13 @@ class AutomationEngine:
                 logger.info(f"Automation '{auto.get('name')}' skipped — {side} automations are paused")
                 self._finish_run(auto, automation_id,
                                  {'status': 'skipped', 'reason': f'{side} automations are paused'},
+                                 error=None)
+                return
+            paused = self.feature_paused(auto)
+            if paused:
+                logger.info(f"Automation '{auto.get('name')}' skipped — {paused}")
+                self._finish_run(auto, automation_id,
+                                 {'status': 'skipped', 'reason': paused},
                                  error=None)
                 return
             # iss32-M02: same treatment while the catalogue migration owns the

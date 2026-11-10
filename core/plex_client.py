@@ -1616,8 +1616,9 @@ class PlexClient(MediaServerBase):
             logger.debug(f"Error checking update age for {artist.title}: {e}")
             return True  # Default to needing update if error
     
-    def update_artist_biography(self, artist: PlexArtist) -> bool:
-        """Update artist summary with current timestamp"""
+    def update_artist_biography(self, artist: PlexArtist, biography: Optional[str] = None) -> bool:
+        """Update artist summary with current timestamp. ``biography`` fills a
+        summary that's empty, never one that already has text (#1993)"""
         try:
             # Get current summary/biography
             current_summary = getattr(artist, 'summary', '') or ''
@@ -1637,7 +1638,7 @@ class PlexClient(MediaServerBase):
             today = datetime.now().strftime('%Y-%m-%d')
             
             # Add timestamp to summary field
-            new_summary = clean_summary
+            new_summary = clean_summary or (biography or '').strip()
             if ignore_flag:
                 new_summary = f"{new_summary}\n\n{ignore_flag}".strip()
             new_summary = f"{new_summary}\n\n-updatedAt{today}".strip()

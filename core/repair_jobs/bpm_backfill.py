@@ -22,7 +22,7 @@ from core.repair_jobs import register_job
 from core.library2.maintenance_subjects import active_file_subjects, subject_details
 from core.library2.paths import resolve_lib2_path
 from core.repair_jobs.base import (
-    JobContext, JobResult, RepairJob, drop_hand_tagged, scoped_file_subjects,
+    JobContext, JobResult, RepairJob, drop_hand_tagged_albums, scoped_file_subjects,
 )
 from core.repair_jobs.metadata_gap_filler import _gap_cursor
 from utils.logging_config import get_logger
@@ -395,8 +395,9 @@ def _beatport_bpm(row: dict, search_all: bool):
 def _missing_bpm_subjects(context: JobContext) -> list:
     """Library-v2 tracks without a BPM, by track id, hand-tagged files left out."""
     by_track: dict = {}
-    for subject in drop_hand_tagged(context, scoped_file_subjects(
-            context, active_file_subjects(context.db, context.config_manager))):
+    _everything = active_file_subjects(context.db, context.config_manager)
+    for subject in drop_hand_tagged_albums(
+            context, scoped_file_subjects(context, _everything), _everything):
         if not str(subject.get('title') or '').strip():
             continue
         try:

@@ -90,6 +90,9 @@ def load(db) -> dict:
         # A usenet/torrent download the client failed: blocklist that release
         # and grab the next one the profile ranks, arr style. On by default.
         "redownload_failed": (db.get_setting("redownload_failed") or "1") != "0",
+        # off: Specials (season 0) are not hunted, except a show that is all
+        # specials. see VideoDatabase._apply_specials_policy
+        "monitor_specials": (db.get_setting("monitor_specials") or "1") != "0",
     }
 
 
@@ -115,6 +118,12 @@ def save(db, body: Any) -> dict:
                        remove_completed.normalize(body.get("usenet_remove_completed")))
     if "redownload_failed" in body:
         db.set_setting("redownload_failed", "1" if body.get("redownload_failed") else "0")
+    if "monitor_specials" in body:
+        before = (db.get_setting("monitor_specials") or "1") != "0"
+        after = bool(body.get("monitor_specials"))
+        db.set_setting("monitor_specials", "1" if after else "0")
+        if after != before:
+            db.apply_specials_policy()
     return load(db)
 
 

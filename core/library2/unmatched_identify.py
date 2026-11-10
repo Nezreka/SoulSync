@@ -288,6 +288,9 @@ def strong_matches_ready(conn, *, at: float = 0.85) -> int:
     """how many unmatched files have a strong match waiting to be accepted.
     one count for the library banner: no per-file work"""
     from .unmatched_review import UNKNOWN_ARTISTS_CTE
+    from core.library2.sql_util import owner_clause
+    # the caller's library only, like the list it counts (review 5 R5-B-4)
+    owner = owner_clause(column="f.owner_profile_id")
     query = UNKNOWN_ARTISTS_CTE + """
         SELECT COUNT(*)
           FROM unknown u
@@ -295,7 +298,7 @@ def strong_matches_ready(conn, *, at: float = 0.85) -> int:
           JOIN lib2_tracks t ON t.album_id = al.id
           JOIN lib2_track_files f ON f.track_id = t.id
           JOIN lib2_unmatched_matches m ON m.file_id = f.id
-         WHERE COALESCE(f.file_state, 'active') = 'active'
+         WHERE COALESCE(f.file_state, 'active') = 'active'""" + owner + """
            AND m.file_key = f.path || '|' || COALESCE(f.size, '') || '|' || COALESCE(f.content_hash, '')
            AND m.status = 'matched' AND m.best_confidence >= ?
            {waiting}

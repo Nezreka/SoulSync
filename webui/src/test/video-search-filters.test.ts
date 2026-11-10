@@ -169,3 +169,30 @@ describe('manual search filters (SeadogsBooty)', () => {
     expect(api.opsFor('meets_profile')).toEqual(['equals', 'not_equals']);
   });
 });
+
+describe('the language filter (SeadogsBooty: dubbed anime)', () => {
+  const api = load();
+  const anime = [
+    { title: 'Frieren.S01E01.JAPANESE.1080p.WEB', languages: ['ja'], multi: false },
+    { title: 'Frieren.S01E01.DUAL.1080p.WEB', languages: ['en', 'ja'], multi: true },
+    { title: 'Frieren.S01E01.1080p.WEB', languages: [], multi: false },
+  ] as unknown as Row[];
+  const pick = (value: string, op = 'contains') =>
+    api
+      .view(anime, { filter: { conditions: [{ field: 'language', op, value }] } }, NOW)
+      .map((i) => i.index);
+
+  it('finds a language by name or code', () => {
+    expect(pick('japanese')).toEqual([0, 1]);
+    expect(pick('ja')).toEqual([0, 1]);
+  });
+
+  it('finds a dual audio release', () => {
+    expect(pick('dual')).toEqual([1]);
+    expect(pick('english')).toEqual([1]);
+  });
+
+  it('can rule a dub out', () => {
+    expect(pick('english', 'not_contains')).toEqual([0, 2]);
+  });
+});

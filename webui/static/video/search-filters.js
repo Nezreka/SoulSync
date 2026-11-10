@@ -28,6 +28,7 @@
         grabs: { label: 'Grabs', kind: 'number' },
         hdr: { label: 'HDR', kind: 'text', hint: 'dv' },
         audio: { label: 'Audio', kind: 'text', hint: 'atmos' },
+        language: { label: 'Language', kind: 'text', hint: 'japanese' },
         meets_profile: { label: 'Meets profile', kind: 'bool' }
     };
 
@@ -58,6 +59,27 @@
     function _codec(v) {
         var s = String(v || '').toLowerCase().replace(/\s+/g, '');
         return CODEC_ALIASES[s] || s;
+    }
+
+    // the audio language codes release_parse.parse_languages gives, by name, so
+    // a filter can say "japanese" or "ja". a dubbed anime is tagged with its dub
+    // language or DUAL / MULTi (SeadogsBooty)
+    var LANGUAGE_NAMES = {
+        fr: 'french', de: 'german', it: 'italian', es: 'spanish', pt: 'portuguese',
+        ja: 'japanese', ko: 'korean', zh: 'chinese', ru: 'russian', pl: 'polish',
+        nl: 'dutch', sv: 'swedish', da: 'danish', no: 'norwegian', fi: 'finnish',
+        hi: 'hindi', tr: 'turkish', cs: 'czech', hu: 'hungarian', ar: 'arabic',
+        uk: 'ukrainian', en: 'english'
+    };
+
+    function _languages(row) {
+        var words = [];
+        (row.languages || []).forEach(function (code) {
+            words.push(code);
+            if (LANGUAGE_NAMES[code]) words.push(LANGUAGE_NAMES[code]);
+        });
+        if (row.multi) words.push('multi', 'dual');
+        return words.join(' ');
     }
 
     function _num(v) {
@@ -92,6 +114,7 @@
             case 'grabs': return _num(row.grabs);
             case 'hdr': return String(row.hdr || '');
             case 'audio': return String(row.audio || '');
+            case 'language': return _languages(row);
             case 'meets_profile': return !!row.accepted;
             default: return null;
         }

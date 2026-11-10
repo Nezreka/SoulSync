@@ -70,6 +70,11 @@ export interface MirroredPlaylistRow {
    */
   organize_by_playlist?: boolean;
   /**
+   * rotating (#2039): a song this playlist downloaded is removed once it
+   * leaves the playlist. the Expired Download Cleaner does the removing.
+   */
+  rotating?: boolean;
+  /**
    * this playlist's own sync mode (#1704). null = the global Settings mode,
    * so an append-only mirror can live next to a Daily Mix that reconciles.
    */
@@ -495,8 +500,11 @@ export function trackStatusSegments(
   });
 }
 
-/** the card's link text, or null when nothing needs a match. */
+/** the card's link text, or null when there's nothing to review. it counts
+ *  every unconfirmed wing it guess, the pool it opens, including ones already
+ *  downloaded. it said "need a match", the playlist page's word for a song
+ *  nothing will download, so one playlist read 1239 here and 6 there (Storm) */
 export function needsMatchLabel(row: { needs_match_count?: number }): string | null {
   const n = row.needs_match_count ?? 0;
-  return n > 0 ? `${n} need${n === 1 ? 's' : ''} a match` : null;
+  return n > 0 ? `${n} guess${n === 1 ? '' : 'es'} to review` : null;
 }

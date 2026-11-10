@@ -94,23 +94,32 @@ class _IndexedPaths:
     def __init__(self, conn: Any) -> None:
         self._conn, self._cache = conn, {}
 
-    def __contains__(self, normalized: Any) -> bool:
-        normalized = str(normalized or "")
-        if normalized not in self._cache:
-            self._cache[normalized] = self._lookup(normalized)
-        return self._cache[normalized]
+    def __contains__(self, path: Any) -> bool:
+        # the raw path as the pipeline wrote it, never a normcased key:
+        # review 5 W2-WC-4, normcase lowercases on Windows and stored paths
+        # keep their case, so the index probe never matched there
+        path = str(path or "").strip()
+        if path not in self._cache:
+            self._cache[path] = self._lookup(path)
+        return self._cache[path]
 
-    def _lookup(self, normalized: str) -> bool:
-        name = normalized.rsplit("/", 1)[-1]
-        if not name or not _table_exists(self._conn, "lib2_track_files"):
+    def _lookup(self, path: str) -> bool:
+        normalized = _normalized_path(path)
+        name = path.replace("\\", "/").rsplit("/", 1)[-1]
+        if not name or not normalized or not _table_exists(self._conn, "lib2_track_files"):
             return False
         from core.library2.paths import resolve_lib2_path
 
-        # the stored path itself first: one index probe
+        # the stored path itself first: index probes on the spellings it can
+        # be stored under (as given, either separator, normalized)
+        probes = list(dict.fromkeys(
+            p for p in (path, path.replace("\\", "/"), path.replace("/", "\\"), normalized)
+            if p))
+        marks = ",".join("?" for _ in probes)
         if self._conn.execute(
-                """SELECT 1 FROM lib2_track_files WHERE path = ?
+                f"""SELECT 1 FROM lib2_track_files WHERE path IN ({marks})
                       AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')
-                    LIMIT 1""", (normalized,)).fetchone():
+                    LIMIT 1""", probes).fetchone():
             return True
         # the name search reads every file row (a leading wildcard has no
         # index). a grab that never gets indexed was asked again every 15 s,
@@ -125,6 +134,9 @@ class _IndexedPaths:
                   AND COALESCE(file_state,'active') NOT IN ('missing_confirmed','deleted')""",
             (pattern,),
         ).fetchall()
+        # the pattern keeps the name's own case: LIKE folds ASCII only, so a
+        # lowercased "maléfica" never found "MALÉFICA". the few rows that
+        # share the name are compared normalized here, in python
         found = any(
             _normalized_path(row[0]) == normalized
             or _normalized_path(resolve_lib2_path(row[0]) or "") == normalized
@@ -145,20 +157,20 @@ _NAME_MISS_TTL = 300.0
 
 
 def _path_is_indexed(path: Any, known_paths: Any) -> bool:
-    normalized = _normalized_path(path)
-    if not normalized:
+    text = str(path or "").strip()
+    if not _normalized_path(text):
         return False
     try:
-        if normalized in known_paths and os.path.isfile(str(path)):
+        if text in known_paths and os.path.isfile(text):
             return True
     except OSError:
         pass
     from core.library2.paths import resolve_lib2_path
 
-    resolved = resolve_lib2_path(str(path))
+    resolved = resolve_lib2_path(text)
     return bool(
         resolved
-        and _normalized_path(resolved) in known_paths
+        and resolved in known_paths
         and os.path.isfile(resolved)
     )
 
@@ -476,6 +488,12 @@ def _analyse_row(
             has_final_path=True,
         )
 
+    if row.get("source") == "usenet" and row.get("external_job_id"):
+        # review 5 W2-WC-2: the usenet monitor sees this job every cycle and
+        # writes only on a state change, so updated_at is not "no evidence".
+        # a slow or paused job is alive; the monitor closes a vanished one
+        return _decision(row, "none", "client_monitor_owned", "client_monitor")
+
     updated = _timestamp(row.get("updated_at"))
     age_seconds = max(0, int(now - updated)) if updated is not None else None
     if age_seconds is not None and age_seconds >= evidence_ttl_seconds:
@@ -638,7 +656,7 @@ def reconcile_persistent_grabs(
     rows = conn.execute(
         f"""SELECT g.download_id, g.status AS grab_status,
                    g.last_client_state, g.output_path, g.context_json,
-                   g.updated_at, r.id AS request_id, r.status AS request_status,
+                   g.updated_at, g.source, g.external_job_id, r.id AS request_id, r.status AS request_status,
                    r.search_options_json, r.trigger
                    {import_columns}
               FROM acquisition_grabs g

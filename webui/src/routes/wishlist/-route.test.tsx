@@ -356,6 +356,46 @@ describe('wishlist route', () => {
     );
   });
 
+  it('removing an album sends its artist, so a shared name stays one artist', async () => {
+    // review 5 R5-X1-2: two artists' "SAW" are two cards. a bare album name
+    // removed and ignore-listed both
+    const posts: [string, unknown][] = [];
+    stubFetch({
+      albums: [
+        albumRow('Aphex Twin', 'SAW', 'Xtal'),
+        albumRow('Boards of Canada', 'SAW', 'Roygbiv'),
+      ],
+      posts,
+    });
+    const base = globalThis.fetch as unknown as (
+      i: RequestInfo | URL,
+      init?: RequestInit,
+    ) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (i: RequestInfo | URL, init?: RequestInit) => {
+        const url = i instanceof Request ? i.url : String(i);
+        if (url.includes('remove-album')) {
+          await base(i, init).catch(() => undefined); // records the body
+          return res({ success: true });
+        }
+        return base(i, init);
+      }),
+    );
+    window.showConfirmDialog = vi.fn(async () => true);
+    renderRoute();
+
+    const orb = await screen.findByRole('button', { name: /^Boards of Canada,/ });
+    fireEvent.click(orb);
+    fireEvent.click(screen.getByLabelText('Remove album SAW'));
+    await waitFor(() =>
+      expect(posts).toContainEqual([
+        expect.stringContaining('/api/wishlist/remove-album'),
+        { album_name: 'SAW', artist_name: 'Boards of Canada' },
+      ]),
+    );
+  });
+
   it('declining the album confirm removes nothing', async () => {
     const calls: string[] = [];
     stubFetch();

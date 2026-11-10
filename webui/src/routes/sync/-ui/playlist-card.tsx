@@ -1,26 +1,16 @@
 /**
- * The playlist card — artwork first, state carried quietly by the artwork.
+ * The playlist card: the cover first, the words under it, controls on hover.
  *
- * What this replaces: a row with the art tile, the name, an optional original
- * name, a meta row of up to five bordered chips (source badge, track count,
- * mirrored-ago, a discovery ratio, a coloured phase line, an export status),
- * then six icon-only buttons and a schedule select. Fourteen elements at the
- * same visual weight, which is why it read as a wall of controls rather than a
- * library.
+ * What it replaced: a row with a 64px tile, the name, a meta row of chips,
+ * a % ring on the cover and six icon-only buttons. Fourteen elements at the
+ * same visual weight, which read as a wall of controls rather than a library.
  *
- * THE RESTING CARD IS ART, A NAME, ONE LINE AND A SCHEDULE. Everything else is
- * either gone or waits for a hover.
- *
- * State rides on the COVER rather than beside it:
- *   * a ring on the artwork's corner, its arc the coverage, its number the
- *     percentage — red for a failed run, pulsing for one in flight;
- *   * the cover desaturates while something is wrong, so an incomplete card
- *     reads differently even out of focus.
- *
- * A healthy card gets NEITHER. That is the point: a ring on every card would be
- * forty of them announcing that nothing is wrong, the same mistake as a full
- * green progress bar on a finished row. Problems sort to the front instead
- * (librarySortedRows), so nothing needs to shout to be found.
+ * At rest the card is the cover, the name, where it comes from, one status
+ * line and its schedule. The status line says what is wrong when something
+ * is ("24 not found", "Last runs failed") and what is happening while a run
+ * goes, with a progress bar along the cover's bottom edge. A healthy card
+ * gets a quiet check and nothing else. Play, the primary action and ⋯ sit on
+ * the cover and appear on hover (always, on touch).
  */
 
 import type { ReactNode } from 'react';
@@ -31,7 +21,6 @@ import type { MirroredPlaylistRow } from '../-sync.mirrored';
 
 import {
   libraryCardState,
-  libraryCoveragePct,
   libraryMissingCount,
   libraryOwned,
   libraryOwnedKnown,
@@ -40,6 +29,7 @@ import {
 import { needsMatchLabel } from '../-sync.mirrored';
 import { isLikedPlaylist } from '../../../features/playlists/user-playlists';
 import { LikedArt, PlaylistArt, PlaylistCollage, playlistCoverTiles } from './playlist-art';
+import styles from './playlists.module.css';
 import { SourceIcon } from './source-icon';
 
 export interface PlaylistCardAction {
@@ -124,6 +114,21 @@ export interface PlaylistCardProps {
    * and the old card never said so (#1721).
    */
   onNeedsMatch?: () => void;
+  /**
+   * The live run's progress, 0-100, for the bar along the cover's bottom edge.
+   * Only while something is running; a finished card carries no bar.
+   */
+  progress?: number | null;
+  /** where it comes from, as people say it ("Spotify", "Deezer"). */
+  sourceLabel?: string;
+  /**
+   * Whether something is running right now (a pipeline phase, a discovery, an
+   * export). `status` alone can't say: it also carries finished phases like
+   * "Discovered 30/30". Defaults to the row's own pipeline state.
+   */
+  live?: boolean;
+  /** this copy sits in the Needs attention shelf, repeating a grid card */
+  inShelf?: boolean;
 }
 
 /**
@@ -194,6 +199,31 @@ export function playlistCardPrimaryLabel(row: MirroredPlaylistRow): string {
   }
 }
 
+const PLAY_ICON = (
+  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+    <path
+      d="M8 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.2 4.5A.8.8 0 0 0 8 5.2z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
+const CHECK_ICON = (
+  <svg
+    viewBox="0 0 24 24"
+    width="14"
+    height="14"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="3"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M5 12l5 5 9-10" />
+  </svg>
+);
+
 export function PlaylistCard({
   row,
   name,
@@ -213,19 +243,79 @@ export function PlaylistCard({
   onToggleSelect,
   onPlay,
   onNeedsMatch,
+  progress,
+  sourceLabel,
+  live,
+  inShelf,
 }: PlaylistCardProps) {
   const [starting, setStarting] = useState(false);
   const state = libraryCardState(row);
-  const pct = libraryCoveragePct(row);
   const needsMatch = onNeedsMatch && !status ? needsMatchLabel(row) : null;
   // in select mode the whole card is the checkbox. one hit target the size
   // of the card beats a 16px box you have to aim for forty times over.
   const activate = selecting && onToggleSelect ? onToggleSelect : onOpen;
+  const working = live ?? state === 'working';
+  const failing = !working && (state === 'error' || health?.level === 'failing');
+  const warning = !working && !failing && health?.level === 'warning';
+  // where it comes from, and the two quiet facts that change how it behaves.
+  // each a span so the marks keep the tooltips that explain them
+  const metaParts: ReactNode[] = [];
+  if (row.is_request_list) {
+    metaParts.push(
+      <span
+        key="request"
+        className="plc-request"
+        title={
+          row.auto_remove_fulfilled
+            ? 'Request List: server audio download only (no server playlist created). Fulfilled Spotify tracks are automatically removed.'
+            : 'Request List: server audio download only (no server playlist created).'
+        }
+      >
+        Request list
+      </span>,
+    );
+  }
+  if (sourceLabel) metaParts.push(<span key="source">{sourceLabel}</span>);
+  if (row.organize_by_playlist) {
+    // the tooltip names BOTH effects: the second is not implied by the
+    // setting's name and changes where failures go
+    metaParts.push(
+      <span
+        key="organize"
+        className="plc-organize"
+        title="Downloads into a folder named after this playlist. Missed tracks are downloaded directly instead of going to the wishlist."
+      >
+        organized
+      </span>,
+    );
+  }
+  if (row.rotating) {
+    metaParts.push(
+      <span
+        key="rotating"
+        className="plc-rotating"
+        title="Rotating: a song this playlist downloaded is removed once it leaves the playlist. Played, favourited and shared songs are kept."
+      >
+        rotating
+      </span>,
+    );
+  }
+  // fully discovered but not all downloaded: the line says so, and a check
+  // beside it would contradict the words
+  const undownloaded = libraryOwnedKnown(row) && libraryOwned(row) < libraryTotal(row);
+  const pct = typeof progress === 'number' ? Math.max(0, Math.min(100, progress)) : null;
+
+  let statusClass = styles.status;
+  if (working) statusClass += ` ${styles.statusRun}`;
+  else if (failing) statusClass += ` ${styles.statusFail}`;
+  else if (warning || state === 'short') statusClass += ` ${styles.statusAttn}`;
 
   return (
     <div
-      className={`pl-card${selecting ? ' pl-card--selecting' : ''}${selected ? ' pl-card--selected' : ''}`}
-      id={`mirrored-card-${row.id}`}
+      className={`plc ${styles.card}${selected ? ` plc--selected ${styles.cardSelected}` : ''}`}
+      // the shelf repeats a card the grid also shows; only the grid one owns the id
+      id={inShelf ? undefined : `mirrored-card-${row.id}`}
+      data-shelf={inShelf ? 'true' : undefined}
       data-state={state}
       data-playlist-id={row.id}
       onClick={activate}
@@ -233,18 +323,14 @@ export function PlaylistCard({
       aria-checked={selecting ? Boolean(selected) : undefined}
       tabIndex={0}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           activate();
         }
       }}
     >
-      <div className="pl-card-art">
-        {selecting && (
-          <span className="pl-card-check" aria-hidden="true">
-            {selected ? '✓' : ''}
-          </span>
-        )}
+      <div className={styles.art}>
         <div className={`pl-card-art-img ${row.source ?? ''}`}>
           {/* A real poster beats a mosaic of the playlist's albums; the collage
               is the fallback for the sources that supply no poster at all. */}
@@ -259,171 +345,172 @@ export function PlaylistCard({
             />
           )}
         </div>
-        {state !== 'ok' && (
+        {selecting ? (
           <span
-            className={`pl-ring pl-ring--${state}`}
-            style={{ ['--pct' as string]: pct }}
-            /* The number is IN the ring, so the arc never has to be read
-               precisely — it is the glanceable half, the digits the exact one. */
-            data-pct={`${pct}%`}
-            aria-label={`${pct}% of tracks discovered`}
-          />
-        )}
-        {onPlay && !selecting ? (
-          <button
-            type="button"
-            className="pl-card-play"
-            aria-label={`Play ${name}`}
-            title="Play"
-            disabled={starting}
-            aria-busy={starting || undefined}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (starting) return;
-              setStarting(true);
-              void onPlay().finally(() => setStarting(false));
-            }}
-            onKeyDown={(e) => e.stopPropagation()}
+            className={`plc-check ${styles.check}${selected ? ` ${styles.checkOn}` : ''}`}
+            aria-hidden="true"
           >
-            {starting ? (
-              <span className="pl-card-play-spin" aria-hidden="true" />
-            ) : (
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path d="M8 5.5v13l11-6.5z" fill="currentColor" />
-              </svg>
-            )}
-          </button>
-        ) : null}
-      </div>
-
-      <div className="pl-card-body">
-        <div className="pl-card-name">
-          {health && health.level !== 'ok' ? (
-            <span
-              className={`pl-card-health pl-card-health--${health.level}`}
-              title={health.tooltip}
-              aria-label={health.tooltip}
-            >
-              {health.level === 'failing' ? '!' : '⚠'}
-            </span>
-          ) : null}
-          <SourceIcon source={row.source} />
-          <b title={nameTitle ?? name}>{name}</b>
-          {/* Organize-by-playlist was set-and-forget: nothing on the card said
-              which playlists were in that mode, so finding out meant opening
-              the overflow menu on each of thirty-eight. The tooltip names BOTH
-              effects, because the second one is not implied by the setting's
-              name and changes where failures go. */}
-          {row.organize_by_playlist ? (
-            <span
-              className="pl-card-organize"
-              title="Downloads into a folder named after this playlist. Missed tracks are downloaded directly instead of going to the wishlist."
-              aria-label="Organized by playlist"
-            >
-              📁
-            </span>
-          ) : null}
-          {row.is_request_list ? (
-            <span
-              className="pl-card-badge pl-card-badge--request"
-              title={
-                row.auto_remove_fulfilled
-                  ? 'Request List: server audio download only (no server playlist created). Fulfilled Spotify tracks are automatically removed.'
-                  : 'Request List: server audio download only (no server playlist created).'
-              }
-              aria-label="Request list"
-            >
-              📥{row.auto_remove_fulfilled ? ' ⚡' : ''}
-            </span>
-          ) : null}
-        </div>
-        {syncsAs ? (
-          <div
-            className="pl-card-syncs-as"
-            title="Another mirror has the same name, so this one gets its own playlist on the server"
-          >
-            On the server as &ldquo;{syncsAs}&rdquo;
-          </div>
-        ) : null}
-        <div className="pl-card-meta card-meta">{status ?? playlistCardMeta(row, when)}</div>
-        {needsMatch ? (
-          <button
-            type="button"
-            className="pl-card-attn"
-            title="Nothing downloads these until you pick the right song"
-            onClick={(e) => {
-              e.stopPropagation();
-              if (selecting) {
-                activate();
-                return;
-              }
-              onNeedsMatch?.();
-            }}
-          >
-            {needsMatch}
-          </button>
-        ) : null}
-        {/* The schedule is a CONTROL, not a label: with Auto-Sync's board
-            gone this is the only place a cadence gets set. It still reads as a
-            quiet pill at rest — a dropdown sitting open on every card was the
-            chrome the redesign removed. */}
-        {onSchedule ? (
-          <button
-            type="button"
-            className={`pl-card-pill pl-card-pill--action${scheduled ? '' : ' pl-card-pill--quiet'}`}
-            title="Change how often this playlist syncs"
-            onClick={(e) => {
-              e.stopPropagation();
-              // while selecting, the pill is just part of the card
-              if (selecting) {
-                activate();
-                return;
-              }
-              onSchedule(e.currentTarget);
-            }}
-          >
-            {schedule}
-          </button>
-        ) : (
-          /* No onSchedule means this source cannot be refreshed by the
-             pipeline at all. Saying "Not scheduled" would imply you could,
-             and clicking it does nothing — so it says what is actually true. */
-          <span
-            className="pl-card-pill pl-card-pill--inert pl-card-pill--quiet"
-            title="Auto-Sync cannot refresh this source, so it cannot be scheduled"
-          >
-            Can’t be scheduled
+            {CHECK_ICON}
           </span>
+        ) : (
+          <>
+            <button
+              type="button"
+              className={`plc-more ${styles.kebab}`}
+              title="More"
+              aria-label={`More actions for ${name}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMore(e.currentTarget);
+              }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <circle cx="5" cy="12" r="2" />
+                <circle cx="12" cy="12" r="2" />
+                <circle cx="19" cy="12" r="2" />
+              </svg>
+            </button>
+            {primary && (
+              <button
+                type="button"
+                className={`plc-primary ${styles.prim}${
+                  primary.danger ? ` plc-primary--danger ${styles.primDanger}` : ''
+                }${working && !primary.danger ? ` ${styles.primLive}` : ''}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  primary.onClick();
+                }}
+              >
+                {primary.label}
+              </button>
+            )}
+            {onPlay ? (
+              <button
+                type="button"
+                className={`plc-play ${styles.fab}`}
+                aria-label={`Play ${name}`}
+                title="Play"
+                disabled={starting}
+                aria-busy={starting || undefined}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (starting) return;
+                  setStarting(true);
+                  void onPlay().finally(() => setStarting(false));
+                }}
+              >
+                {starting ? <span className={styles.spin} aria-hidden="true" /> : PLAY_ICON}
+              </button>
+            ) : null}
+          </>
         )}
+        {working && pct !== null ? (
+          <span
+            className={`pl-card-progress ${styles.progress}`}
+            role="progressbar"
+            aria-label={`${name} progress`}
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
+            <span style={{ width: `${pct}%` }} />
+          </span>
+        ) : null}
       </div>
 
-      {/* Under a veil, so the resting card is only art and words. */}
-      <div className="pl-card-hover">
-        {primary && (
-          <button
-            type="button"
-            className={`pl-card-fix${primary.danger ? ' pl-card-fix--danger' : ''}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              primary.onClick();
-            }}
-          >
-            {primary.label}
-          </button>
-        )}
+      <div className={`plc-name ${styles.name}`} title={nameTitle ?? name}>
+        {name}
+      </div>
+      {metaParts.length ? (
+        <div className={styles.meta}>
+          {metaParts.flatMap((part, i) => (i === 0 ? [part] : [' · ', part]))}
+        </div>
+      ) : null}
+      {syncsAs ? (
+        <div
+          className={`plc-syncs-as ${styles.meta}`}
+          title="Another mirror has the same name, so this one gets its own playlist on the server"
+        >
+          On the server as &ldquo;{syncsAs}&rdquo;
+        </div>
+      ) : null}
+      <div className={`plc-status ${statusClass}`}>
+        {working ? <span className={styles.spin} aria-hidden="true" /> : null}
+        {failing ? (
+          <span className={styles.failIcon} aria-hidden="true">
+            !
+          </span>
+        ) : null}
+        {!working && !failing && !warning && state === 'ok' && !undownloaded ? (
+          <span className={`plc-ok ${styles.okIcon}`}>{CHECK_ICON}</span>
+        ) : null}
+        <span
+          className={health && health.level !== 'ok' ? 'plc-health' : undefined}
+          title={health && health.level !== 'ok' ? health.tooltip : undefined}
+        >
+          {status ??
+            (failing
+              ? health?.level === 'failing'
+                ? 'Last runs failed'
+                : 'Last run failed'
+              : warning
+                ? health?.tooltip
+                : playlistCardMeta(row, when))}
+        </span>
+      </div>
+      {needsMatch ? (
         <button
           type="button"
-          className="pl-card-more"
-          title="More"
-          aria-label={`More actions for ${name}`}
+          className={`plc-guesses ${styles.lineBtn} ${styles.guess}`}
+          title="Wing It matched these on a best guess. Confirm or fix them"
           onClick={(e) => {
             e.stopPropagation();
-            onMore(e.currentTarget);
+            if (selecting) {
+              activate();
+              return;
+            }
+            onNeedsMatch?.();
           }}
         >
-          ⋯
+          {needsMatch}
         </button>
-      </div>
+      ) : null}
+      {/* The schedule is a CONTROL, not a label: it is where a cadence gets
+          set from the card. Quiet at rest. */}
+      {onSchedule ? (
+        <button
+          type="button"
+          className={`plc-schedule${scheduled ? ' plc-schedule--set' : ''} ${styles.lineBtn} ${
+            scheduled ? styles.schedOn : styles.sched
+          }`}
+          title="Change how often this playlist syncs"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (selecting) {
+              activate();
+              return;
+            }
+            onSchedule(e.currentTarget);
+          }}
+        >
+          {schedule}
+        </button>
+      ) : (
+        /* No onSchedule means this source cannot be refreshed by the
+           pipeline at all, so it says what is actually true. */
+        <span
+          className={`plc-schedule plc-schedule--inert ${styles.schedInert}`}
+          title="Auto-Sync cannot refresh this source, so it cannot be scheduled"
+        >
+          Can’t be scheduled
+        </span>
+      )}
     </div>
   );
 }

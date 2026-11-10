@@ -81,6 +81,17 @@ def _is_under(child: str, parent: str) -> bool:
         return False
 
 
+def _depth_below(child: str, parent: str) -> int:
+    """how many folders ``child`` sits below ``parent`` (0 when it is it)."""
+    try:
+        rel = os.path.relpath(os.path.abspath(child), os.path.abspath(parent))
+    except ValueError:
+        return 0
+    if rel in (os.curdir, ""):
+        return 0
+    return len([p for p in rel.split(os.sep) if p and p != os.curdir])
+
+
 # Canonical release kinds for the folder-reuse type check. Anything not on
 # this map (including the empty string) is "unknown" and stays lenient.
 _RELEASE_KIND_MAP = {
@@ -189,16 +200,29 @@ def _row_release_id(db: Any, album_id: Any) -> str:
 
 
 def _row_album_type(db: Any, album_id: Any) -> str:
-    """The album row's stored album_type, "" when unknown/unreadable. A
-    ``lib2_albums`` id, like :func:`_row_release_id`'s."""
+    """The album row's KNOWN release kind, "" when unknown/unreadable. A
+    ``lib2_albums`` id, like :func:`_row_release_id`'s.
+
+    ``album_type`` is NOT NULL with the default 'album', and the 3.6.1 import
+    turned a NULL record_type into it: a bare 'album' is no evidence, as
+    completion reads it (one rule, shared). 3.6.1 saw NULL here and reused
+    the folder; reading the default as a real album split a not-yet-enriched
+    EP's next track into a new folder.
+    """
+    if album_id is None:
+        return ""
+    # full suite: the bare-'album' rule alone broke the #829 guard ("Ocean
+    # Avenue" the single must not land in "Ocean Avenue" the album's folder).
+    # lib2 says which 'album' is real: album_type_known, set by a provider
+    # or a classified import. known 'album' is evidence; the default isn't
     conn = None
     try:
         conn = db._get_connection()
-        row = conn.execute(
-            "SELECT album_type FROM lib2_albums WHERE id = ?", (int(album_id),),
-        ).fetchone()
-        return str((row[0] if row else "") or "").strip()
-    except Exception as e:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(lib2_albums)")}
+        known_sql = "album_type_known" if "album_type_known" in cols else "1"
+        row = conn.execute(f"SELECT album_type, {known_sql} FROM lib2_albums WHERE id = ?",
+                           (int(album_id),)).fetchone()
+    except Exception as e:  # noqa: BLE001
         logger.debug("album_type lookup for album %s failed: %s", album_id, e)
         return ""
     finally:
@@ -207,6 +231,14 @@ def _row_album_type(db: Any, album_id: Any) -> str:
                 conn.close()
             except Exception:  # noqa: S110 - cleanup only
                 pass
+    if not row:
+        return ""
+    kind = str(row[0] or "").strip().lower()
+    if kind and (kind != "album" or row[1]):
+        return kind
+    # an untyped row: a download's recorded filing still counts
+    from core.metadata.completion import _stored_release_kind
+    return _stored_release_kind(db, album_id)
 
 
 def _same_release(db: Any, album: Any, sample_file: Optional[str],
@@ -242,6 +274,7 @@ def resolve_existing_album_folder(
     disambiguation: Optional[str] = None,
     read_identity=read_release_identity,
     incoming_album_type: Optional[str] = None,
+    min_depth: int = 0,
 ) -> Optional[str]:
     """Return the on-disk folder an existing album lives in (so a new track joins
     it) or None to fall back to the templated path. See module docstring.
@@ -250,6 +283,11 @@ def resolve_existing_album_folder(
     ("single" / "ep" / "album" / "compilation", "" when unknown). When it and
     the stored album row's type are both known and differ, the folder is NOT
     reused — a single must never be filed into its same-named album's folder.
+
+    ``min_depth`` is how many folders below the transfer dir the album has to
+    sit. a template that files albums under an artist folder passes 2, so an
+    album that sits loose at the library root is never reused: every later
+    track joined it there instead of going under the artist (#2023).
     """
     if not transfer_dir or not os.path.isdir(transfer_dir):
         return None
@@ -304,6 +342,11 @@ def resolve_existing_album_folder(
     # or many (disc subfolders) → let the template decide.
     if len(folders) == 1:
         reuse = next(iter(folders))
+        if min_depth and _depth_below(reuse, transfer_dir) < min_depth:
+            logger.info(
+                "[Existing Album Folder] '%s' sits outside an artist folder, "
+                "not reusing it (#2023)", reuse)
+            return None
         # A smaller release never completes a bigger edition's folder. The
         # incoming release's own track total is authoritative: when the
         # existing album roster is LARGER, it is a different edition — a

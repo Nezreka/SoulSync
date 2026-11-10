@@ -95,14 +95,22 @@ _LIBRARY_ARTIST_ID_COLUMNS = ("spotify_artist_id", "itunes_artist_id", "deezer_i
                               "musicbrainz_id", "amazon_id")
 
 
-def library_artist_provider_ids(cursor, artist_id) -> list:
+def library_artist_provider_ids(cursor, artist_id, source=None) -> list:
     """the provider ids of a LIBRARY artist row, when ``artist_id`` is one.
 
     #1308: the artist page asks "is this watched?" with the library row id
     when the artist has no spotify link. add translated that id into the
     provider id it stores, check and remove never did, so the button always
     read "Add to watchlist" and adding again changed nothing."""
+    # third #1062 review G02-4: an old deezer/itunes id is small and numeric
+    # too. a page that says which provider the id is from never meant a
+    # library row: reading it as one said "Watching" for another artist and
+    # the remove deleted that artist's watch
+    if source and str(source).strip().lower() not in ("library", "lib2"):
+        return []
     aid = str(artist_id or "").strip()
+    if aid.startswith("lib2:"):
+        aid = aid[5:]
     if not aid.isdigit():
         return []
     # the library row is a Library v2 artist on this branch: the same ids,

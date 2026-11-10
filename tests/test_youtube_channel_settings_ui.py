@@ -41,3 +41,19 @@ def test_modal_loads_and_saves_via_the_settings_api():
     assert 'data-cset-retry' in _YT and 'data-cset-recheck' in _YT
     assert 'custom_name' in _YT and 'max_resolution' in _YT
     assert 'retry_policy' in _YT and 'archive_recheck_days' in _YT
+
+
+def test_the_modal_offers_follow_without_downloading():
+    """#2008: a channel can stay followed with nothing downloading on its own"""
+    assert 'data-cset-auto' in _YT and 'Download new uploads' in _YT
+    assert "s.auto_download === false ? '' : ' checked'" in _YT     # on unless saved off
+    assert 'payload.auto_download = autoEl.checked' in _YT
+    assert 'taken off your wishlist' in _YT                        # says what it took back
+
+
+def test_a_refused_save_is_not_reported_as_saved():
+    """review 4 R4-E-6: a {success: false} answer showed "settings saved" and
+    closed the dialog, so a failed "download new uploads" off looked applied"""
+    save = _YT[_YT.index("' settings saved'") - 1200:_YT.index("' settings saved'")]
+    assert "d.success === false" in save
+    assert "showToast((d && d.error) || 'Save failed', 'error')" in save

@@ -170,16 +170,20 @@ def local_album_tracks(database, album_id: Any) -> List[Dict[str, Any]]:
         return []
     conn = None
     try:
+        from core.library2.sql_util import owner_clause
         conn = database._get_connection()
         cursor = conn.cursor()
+        # the copies in the library being worked in: a track's primary flag
+        # spans every library, so unscoped this staged (and a replace then
+        # retired) another library's file (review 5 W2-WD-3)
         cursor.execute(
-            """
-            SELECT t.id, t.title, t.track_number, f.path
+            f"""
+            SELECT t.id, t.title, t.track_number, f.path, f.id
             FROM lib2_tracks t
             JOIN lib2_track_files f ON f.track_id = t.id
             WHERE t.album_id = ?
               AND f.path IS NOT NULL AND f.path != ''
-              AND COALESCE(f.file_state, 'active') = 'active'
+              AND COALESCE(f.file_state, 'active') = 'active'{owner_clause(column='f.owner_profile_id')}
             ORDER BY COALESCE(t.track_number, 999999), t.title,
                      f.is_primary DESC, f.id
             """,
@@ -193,7 +197,7 @@ def local_album_tracks(database, album_id: Any) -> List[Dict[str, Any]]:
                 continue          # a second file of a track already listed
             seen.add(track_id)
             rows.append({"id": track_id, "title": row[1], "track_number": row[2],
-                         "file_path": _readable_path(row[3])})
+                         "file_path": _readable_path(row[3]), "file_id": row[4]})
         return rows
     except Exception as exc:
         logger.error("reassign could not read local album %s: %s", album_id, exc)
@@ -369,9 +373,9 @@ def apply_reassign(
         )
         conn.commit()
     except Exception as exc:
-        # The files are already staged but their hints were never committed.
-        # Left there, auto-import would pick each one up as an ordinary new
-        # file and duplicate the whole album. Take them back out.
+        # each hint is committed before its file lands (review 5 R5-D-3), so
+        # this is a last guard: a failure after that takes the staged copies
+        # back out rather than risk auto-import filing them as new files.
         _discard_staged(result.get("staged") or [])
         logger.error("reassign apply failed: %s", exc)
         return {"success": False, "error": str(exc)}

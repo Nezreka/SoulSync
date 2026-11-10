@@ -14,8 +14,12 @@ from core.wishlist import processing as P
 
 
 class _Service:
-    def __init__(self):
+    def __init__(self, total=0):
         self.calls = []
+        self.total = total
+
+    def get_wishlist_count(self, profile_id=1, approved_only=False):
+        return self.total
 
     def get_wishlist_tracks_for_download(self, profile_id=1, approved_only=False, limit=None):
         self.calls.append((profile_id, approved_only))
@@ -33,10 +37,10 @@ class _DB:
         return self.profiles.get(pid)
 
 
-def _run(monkeypatch, profile_id, profiles):
-    service = _Service()
+def _run(monkeypatch, profile_id, profiles, total=0, batches=None):
+    service = _Service(total)
     monkeypatch.setattr(P, "get_wishlist_service", lambda: service)
-    batches = {"b1": {"phase": "analysis"}}
+    batches = batches if batches is not None else {"b1": {"phase": "analysis"}}
     runtime = SimpleNamespace(
         get_music_database=lambda: _DB(profiles), download_batches=batches,
         tasks_lock=threading.Lock(), profile_id=profile_id, logger=P.logger,
@@ -55,3 +59,17 @@ def _run(monkeypatch, profile_id, profiles):
 def test_manual_run_reads_approved_rows_for_a_profile_that_asks_first(
         monkeypatch, profile_id, profiles, approved_only):
     assert _run(monkeypatch, profile_id, profiles) == [(profile_id, approved_only)]
+
+
+def test_an_admin_sees_why_nothing_started_for_a_requester(monkeypatch):
+    """the run said "No tracks in wishlist" over a list of requests nobody had
+    approved yet. it says they wait on the Requests page now."""
+    batches = {"b1": {"phase": "analysis"}}
+    _run(monkeypatch, 5, {5: {"id": 5, "can_download": 0}}, total=3, batches=batches)
+    assert batches["b1"]["error"] == "3 requests waiting for approval on the Requests page"
+
+
+def test_an_empty_wishlist_still_says_empty(monkeypatch):
+    batches = {"b1": {"phase": "analysis"}}
+    _run(monkeypatch, 6, {6: {"id": 6, "can_download": 1}}, total=0, batches=batches)
+    assert batches["b1"]["error"] == "No tracks in wishlist"

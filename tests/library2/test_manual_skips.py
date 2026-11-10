@@ -104,3 +104,13 @@ def test_skip_history_for_path_returns_newest_first_including_acknowledged(
 def test_skip_history_for_path_empty_for_unknown_path(imported_conn):
     assert skip_history_for_path(imported_conn, "/nowhere.flac") == []
     assert skip_history_for_path(imported_conn, None) == []
+
+
+def test_manual_skip_any_profile_lookup(legacy_db, imported_conn):
+    # review 5 R5-I-2: file checks ask for every profile's overrides
+    record_manual_skip(legacy_db, content_key="u::x.flac", title="Song", artist="Artist",
+                       skipped_checks=("acoustid",), profile_id=2)
+    attach_manual_skip_file(legacy_db, content_key="u::x.flac", file_path="/music/x.flac")
+    assert check_is_skipped(imported_conn, ("/music/x.flac",), ("acoustid",), profile_id=None)
+    assert not check_is_skipped(imported_conn, ("/music/x.flac",), ("quality",), profile_id=None)
+    assert active_skip_paths(imported_conn, ("acoustid",), profile_id=None) == {"/music/x.flac"}

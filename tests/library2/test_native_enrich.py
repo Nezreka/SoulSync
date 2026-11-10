@@ -1396,6 +1396,26 @@ def test_release_borrowed_identities_clears_guests_and_keeps_the_owner(imported_
         assert row["genres"] == "[]"
 
 
+def test_release_borrowed_identities_keeps_locked_genres(imported_conn):
+    """review 5 W2-WF-1: genres the cleanup locked are settled, even when they
+    match the owner's byte for byte. the borrowed id still goes"""
+    owner = _insert_native_artist(imported_conn, "Major Lazer")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-ML', genres='[\"moombahton\"]' WHERE id=?",
+        (owner,))
+    _insert_album(imported_conn, owner, "Peace Is The Mission", spotify_id="SP-PITM")
+    guest = _insert_native_artist(imported_conn, "DJ Snake")
+    imported_conn.execute(
+        "UPDATE lib2_artists SET spotify_id='SP-ML', genres='[\"moombahton\"]', "
+        "genres_locked=1 WHERE id=?", (guest,))
+
+    assert NE.release_borrowed_artist_identities(imported_conn)["released"] == 1
+    row = imported_conn.execute(
+        "SELECT spotify_id, genres FROM lib2_artists WHERE id=?", (guest,)).fetchone()
+    assert row["spotify_id"] is None
+    assert row["genres"] == '["moombahton"]'
+
+
 def test_release_borrowed_identities_leaves_ambiguous_groups_alone(imported_conn):
     """Two co-composers of one soundtrack, neither the primary of any release:
     nothing in the catalogue says which one owns the id, so neither is touched
@@ -1538,3 +1558,177 @@ def test_prune_removes_the_lead_of_a_browse_only_single(imported_conn):
     stats = NE.prune_browse_only_artists(imported_conn)
 
     assert lead in stats["artist_ids"]
+
+
+def test_prune_keeps_an_artist_a_household_member_watches_or_wants(imported_conn):
+    """third #1062 review P2B-2: only the admin's columns were checked. a
+    member's watch is a rule (the column stays 0), and their wanted tracks
+    went with the deleted artist"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    watched, _ = _browse_only_artist(imported_conn, "Member Watched Guest")
+    record_rule(imported_conn, "artist", watched, True, PROVENANCE_USER, profile_id=2)
+    wanted, album_id = _browse_only_artist(imported_conn, "Member Wanted Guest")
+    track = imported_conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?, 'Wished', 1)",
+        (album_id,)).lastrowid
+    imported_conn.execute(
+        "INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, projection_version) "
+        "VALUES(2, ?, 1, 'track', 1)", (track,))
+
+    assert NE.prune_browse_only_artists(imported_conn)["pruned"] == 0
+
+
+def test_a_split_ghosts_watches_go_to_the_artists_it_became(imported_conn):
+    """third #1062 review P2B-8: the ghost's watch rules were deleted for every
+    profile, so the real artists showed unwatched. 3.6.1's watchlist rows
+    survived a merge or split"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    ghost = _insert_native_artist(imported_conn, "Alpha & Beta")
+    alpha = _insert_native_artist(imported_conn, "Alpha")
+    beta = _insert_native_artist(imported_conn, "Beta")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    record_rule(imported_conn, "artist", ghost, True, PROVENANCE_USER, profile_id=2)
+    record_rule(imported_conn, "artist", beta, False, PROVENANCE_USER, profile_id=2)
+
+    NE._rehome_and_delete_combined(imported_conn, ghost, alpha, [alpha, beta])
+
+    rules = {(r[0], r[1]): r[2] for r in imported_conn.execute(
+        "SELECT entity_id, profile_id, monitored FROM lib2_monitor_rules WHERE entity_type='artist'")}
+    assert rules[(alpha, 2)] == 1
+    assert rules[(beta, 2)] == 0          # beta's own choice for profile 2 stands
+    assert imported_conn.execute("SELECT monitored FROM lib2_artists WHERE id=?",
+                                 (alpha,)).fetchone()[0] == 1
+
+
+def test_a_split_ghosts_watch_never_wants_the_other_components(imported_conn):
+    """review 4 R4-B-5: a watch on "Alpha & Gamma" went onto every component,
+    and an artist rule wants a whole discography. only the primary inherits"""
+    from core.library2.monitor_rules import PROVENANCE_USER, record_rule
+    ghost = _insert_native_artist(imported_conn, "Alpha & Gamma")
+    alpha = _insert_native_artist(imported_conn, "Alpha")
+    gamma = _insert_native_artist(imported_conn, "Gamma")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    record_rule(imported_conn, "artist", ghost, True, PROVENANCE_USER, profile_id=2)
+
+    NE._rehome_and_delete_combined(imported_conn, ghost, alpha, [alpha, gamma])
+
+    rules = {(r[0], r[1]) for r in imported_conn.execute(
+        "SELECT entity_id, profile_id FROM lib2_monitor_rules WHERE entity_type='artist'")}
+    assert (alpha, 2) in rules and (gamma, 2) not in rules
+    assert imported_conn.execute("SELECT COALESCE(monitored,0) FROM lib2_artists WHERE id=?",
+                                 (gamma,)).fetchone()[0] == 0
+
+
+def test_smart_split_reuses_the_artist_holding_the_resolved_id(imported_conn):
+    """third #1062 review P2B-7: "Ian Asher & Beyonce" splits to "Beyonce";
+    the library's "Beyoncé" holds that spotify id. a NOCASE name match missed
+    the accent and minted a second row carrying the same id"""
+    beyonce = _insert_native_artist(imported_conn, "Beyoncé")
+    imported_conn.execute("UPDATE lib2_artists SET spotify_id='SP_Beyonce' WHERE id=?", (beyonce,))
+    combined = _insert_native_artist(imported_conn, "Ian Asher & Beyonce")
+    album_id, _track = _make_collab_release(imported_conn, combined)
+
+    NE.smart_split_combined_artist(imported_conn, combined, resolver=_component_resolver)
+
+    holders = imported_conn.execute(
+        "SELECT id FROM lib2_artists WHERE spotify_id='SP_Beyonce'").fetchall()
+    assert [r["id"] for r in holders] == [beyonce]
+    credited = {r["artist_id"] for r in imported_conn.execute(
+        "SELECT artist_id FROM lib2_album_artists WHERE album_id=?", (album_id,))}
+    assert beyonce in credited
+
+
+def test_the_browse_prune_reads_rules_per_track_without_planner_stats(imported_conn):
+    """review 4 R4-B-6: an OR in the rule join made SQLite walk every track
+    rule per artist when it had no stats (minutes on a big library)"""
+    seen = []
+    imported_conn.set_trace_callback(lambda sql: seen.append(sql) if "ta4" in sql else None)
+    NE.prune_browse_only_artists(imported_conn)
+    imported_conn.set_trace_callback(None)
+    assert seen
+    plan = " | ".join(r[3] for r in imported_conn.execute("EXPLAIN QUERY PLAN " + seen[0]))
+    for alias in ("r2", "r3", "r4"):
+        assert f"SEARCH {alias} USING INDEX idx_lib2_monitor_rules_entity (entity_type=? AND entity_id=?)" in plan, plan
+    assert "SCAN w" not in plan and "AUTOMATIC" not in plan, plan
+
+
+# review 5 W2-WF-1: enrich and full retag keep the genres the cleanup locked
+@pytest.mark.parametrize("fill_identity_only", [False, True])
+@pytest.mark.parametrize("entity_type", ["artist", "album"])
+def test_provider_refresh_keeps_locked_genres(imported_conn, monkeypatch,
+                                              entity_type, fill_identity_only):
+    from core.library2 import provider_adapters as PA
+
+    conn = imported_conn
+    artist_id = conn.execute(
+        "INSERT INTO lib2_artists(name, spotify_id, genres, genres_locked) "
+        "VALUES('Cleaned', 'sp-clean', '[\"rock\"]', 1)").lastrowid
+    entity_id = artist_id
+    if entity_type == "album":
+        entity_id = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id, genres, genres_locked) "
+            "VALUES(?, 'Cleaned LP', 'sp-clean', '[\"rock\"]', 1)", (artist_id,)).lastrowid
+        unlocked = conn.execute(
+            "INSERT INTO lib2_albums(primary_artist_id, title, spotify_id, genres) "
+            "VALUES(?, 'Open LP', 'sp-open', '[\"rock\"]')", (artist_id,)).lastrowid
+    else:
+        unlocked = conn.execute(
+            "INSERT INTO lib2_artists(name, spotify_id, genres) "
+            "VALUES('Open', 'sp-open', '[\"rock\"]')").lastrowid
+    conn.commit()
+
+    def fetch(kind, source_ids, **_kw):
+        sid = source_ids["spotify"]
+        return PA.DescriptiveMetadataProviderResult(
+            provider="spotify", provider_entity_id=sid,
+            genres=("rock", "album rock", "seen live"))
+
+    monkeypatch.setattr(PA, "fetch_descriptive_metadata", fetch)
+    table = f"lib2_{entity_type}s"
+    NE.refresh_native_entity_metadata(conn, entity_type, entity_id, {"spotify": "sp-clean"},
+                                      fill_identity_only=fill_identity_only)
+    NE.refresh_native_entity_metadata(conn, entity_type, unlocked, {"spotify": "sp-open"},
+                                      fill_identity_only=fill_identity_only)
+    locked_genres = json.loads(conn.execute(
+        f"SELECT genres FROM {table} WHERE id=?", (entity_id,)).fetchone()[0])
+    open_genres = json.loads(conn.execute(
+        f"SELECT genres FROM {table} WHERE id=?", (unlocked,)).fetchone()[0])
+    assert locked_genres == ["rock"]
+    # an unlocked row still takes the provider's genres
+    assert open_genres == ["rock", "album rock", "seen live"]
+
+
+def test_a_split_creates_the_guest_component_unwatched(imported_conn):
+    """review 5 W2-WF-4: a component that did not exist yet was created with
+    the ghost's watch, before the rehome gave it to the primary only"""
+    ghost = _insert_native_artist(imported_conn, "Ian Asher & Galantis")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    _make_collab_release(imported_conn, ghost)
+
+    result = NE.smart_split_combined_artist(imported_conn, ghost, resolver=_component_resolver)
+
+    primary, guest = result["component_ids"][:2]
+    flags = dict(imported_conn.execute(
+        "SELECT id, monitored FROM lib2_artists WHERE id IN (?,?)", (primary, guest)).fetchall())
+    assert flags == {primary: 1, guest: 0}
+
+
+def test_a_local_split_creates_the_guest_unwatched(imported_conn):
+    """review 5 W2-WF-4, the local credit split"""
+    lead = _insert_native_artist(imported_conn, "Oneheart")
+    imported_conn.execute("UPDATE lib2_artists SET spotify_id='SP_one' WHERE id=?", (lead,))
+    ghost = _insert_native_artist(imported_conn, "Oneheart, Malek")
+    imported_conn.execute("UPDATE lib2_artists SET monitored=1 WHERE id=?", (ghost,))
+    album = imported_conn.execute("INSERT INTO lib2_albums(primary_artist_id, title) "
+                                  "VALUES(?, 'Snow')", (lead,)).lastrowid
+    track = imported_conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                                  "VALUES(?, 'Snow', 1)", (album,)).lastrowid
+    imported_conn.execute("INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+                          "VALUES(?,?, 'primary', 0)", (track, ghost))
+    imported_conn.commit()
+
+    assert NE.split_combined_credits_locally(imported_conn)["split"] == 1
+
+    flags = {r[0]: r[1] for r in imported_conn.execute(
+        "SELECT name, monitored FROM lib2_artists WHERE name IN ('Oneheart', 'Malek')")}
+    assert flags == {"Oneheart": 1, "Malek": 0}

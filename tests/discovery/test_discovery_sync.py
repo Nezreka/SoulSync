@@ -255,7 +255,10 @@ def test_records_sync_history_for_new_sync(patched_db):
     assert history_calls[0]['source_page'] == 'sync'
 
 
-@pytest.mark.parametrize('automation, explicit, expected', [(None, None, True), ('job', None, False), ('job', True, True), (None, False, False)])
+# a sync is user-initiated only when its caller says so (#874, as in 3.6.1):
+# no automation id is not a click. the nightly playlist pipeline runs without
+# one, and taking that as a click re-queued tracks the user had removed.
+@pytest.mark.parametrize('automation, explicit, expected', [(None, None, False), ('job', None, False), ('job', True, True), (None, True, True), (None, False, False)])
 def test_sync_worker_forwards_manual_or_automatic_wishlist_intent(patched_db, automation, explicit, expected):
     deps = _build_deps()
     ds.run_sync_task('p1', 'Playlist', [_track()], automation_id=automation, user_initiated=explicit, deps=deps)
@@ -1258,3 +1261,32 @@ def test_plex_falls_back_to_url_when_no_local_cover_file(monkeypatch, patched_db
 
     assert plex.image_calls == [('Mine', 'https://img/mine.jpg')]
     assert plex.local_paths == [None]
+
+
+def test_a_failed_playlist_write_still_downloads_what_is_missing(patched_db):
+    """third #1062 review G05-2: the sync service keeps going past a failed
+    server playlist write ("still wishlist what is missing") and 3.6.1 then
+    started the automation's downloads; the early return skipped them"""
+    wishlist_calls = []
+    automation_calls = []
+    deps = _build_deps(
+        sync_service=_FakeSyncService(
+            media_client=_FakeMediaClient(),
+            sync_result=_FakeSyncResult(
+                total_tracks=3, matched_tracks=1, failed_tracks=2,
+                errors=['Navidrome playlist write failed'],
+                wishlist_added_count=2,
+            ),
+        ),
+        process_wishlist_automatically=lambda **kw: wishlist_calls.append(kw),
+        is_wishlist_actually_processing=lambda: False,
+        update_automation_progress=lambda *a, **kw: automation_calls.append(kw),
+    )
+
+    ds.run_sync_task('auto_mirror_9', 'Playlist', [_track()],
+                     automation_id='auto-1', deps=deps)
+
+    assert len(wishlist_calls) == 1
+    assert any('1/3 in library' in (c.get('log_line') or '') and c.get('status') == 'error'
+               for c in automation_calls)
+    assert deps.sync_states['auto_mirror_9']['status'] == 'error'

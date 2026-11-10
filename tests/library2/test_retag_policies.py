@@ -489,3 +489,83 @@ def test_album_edition_review_no_longer_offers_a_dead_dry_run():
     worker._config_manager = store
     shown = worker.get_job_config('album_edition_review')['settings']
     assert 'dry_run' not in shown and shown['min_score'] == 0.6
+
+
+class _FakePlex:
+    def __init__(self, ok=True):
+        self.ok, self.edits = ok, []
+
+    def update_track_metadata(self, key, metadata):
+        self.edits.append((key, metadata))
+        return self.ok
+
+
+def test_write_tags_syncs_to_plex_when_asked(api, monkeypatch):
+    """third #1062 review G15-5: 3.6.1's "Sync to Plex/Jellyfin" pushed the
+    written title/artist/album/year to Plex in the same action; v2 dropped it"""
+    from contextlib import closing
+    from core.library2 import server_tag_sync
+    client, db, ids = api
+    track = ids['album_track']
+    with closing(db._get_connection()) as conn:
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source, server_id) "
+                     "VALUES('track', ?, 'plex', '4242')", (track,))
+        title, album = conn.execute(
+            "SELECT t.title, a.title FROM lib2_tracks t JOIN lib2_albums a ON a.id=t.album_id "
+            "WHERE t.id=?", (track,)).fetchone()
+        conn.commit()
+    plex = _FakePlex()
+    monkeypatch.setattr(server_tag_sync, '_active_server_and_client', lambda: ('plex', plex))
+    monkeypatch.setattr(retag, 'write_tags', lambda *a, **kw: {'written': 1, 'skipped': 0, 'failed': 0, 'errors': []})
+
+    preview = client.get(f"/api/library/v2/albums/{ids['views']}/tag-preview").get_json()
+    assert preview['server_type'] == 'plex'
+
+    response = client.post('/api/library/v2/tags/write', json={'track_ids': [track], 'sync_to_server': True})
+    result = _wait_for_job(client, response.get_json()['job_id'])['result']
+    assert result['server_sync']['synced'] == 1
+    assert plex.edits[0][0] == '4242'
+    assert plex.edits[0][1]['title'] == title and plex.edits[0][1]['album'] == album
+
+    # not asked: the server is left alone
+    plex.edits.clear()
+    response = client.post('/api/library/v2/tags/write', json={'track_ids': [track]})
+    result = _wait_for_job(client, response.get_json()['job_id'])['result']
+    assert 'server_sync' not in result and plex.edits == []
+
+
+def test_server_sync_skips_tracks_plex_never_saw_and_scans_jellyfin(api):
+    from core.library2.server_tag_sync import sync_tracks_to_server
+    _, db, ids = api
+    plex = _FakePlex()
+    out = sync_tracks_to_server(db, [ids['album_track']], resolve=lambda: ('plex', plex))
+    assert out['skipped'] == 1 and plex.edits == []
+
+    scans = []
+    jelly = SimpleNamespace(trigger_library_scan=lambda: scans.append(1) or True)
+    out = sync_tracks_to_server(db, [ids['album_track'], ids['album_track']],
+                                resolve=lambda: ('jellyfin', jelly))
+    assert out['synced'] == 1 and scans == [1]
+
+    out = sync_tracks_to_server(db, [ids['album_track']], resolve=lambda: (None, None))
+    assert out['skipped'] == 1 and out['errors']
+
+
+def test_server_sync_never_edits_an_own_librarys_plex_key(api):
+    """review 4 R4-B-10: an own library's ratingKey came from that profile's
+    scan, maybe of another Plex server; on the active one it can name an
+    unrelated track, whose title and artist the push rewrote"""
+    from contextlib import closing
+    from core.library2.server_tag_sync import sync_tracks_to_server
+    _, db, ids = api
+    track = ids['album_track']
+    with closing(db._get_connection()) as conn:
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source, server_id, "
+                     "server_library_id) VALUES('track', ?, 'plex', '4242', '')", (track,))
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source, server_id, "
+                     "server_library_id) VALUES('track', ?, 'plex', '9999', 'own:2')", (track,))
+        conn.commit()
+    plex = _FakePlex()
+    out = sync_tracks_to_server(db, [track], resolve=lambda: ('plex', plex))
+    assert out['synced'] == 1
+    assert [key for key, _meta in plex.edits] == ['4242']

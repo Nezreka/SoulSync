@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { VdlDownload } from './-vdl.types';
 
 import {
+  vdlBinCountLabel,
   vdlBinDisplayName,
   vdlBlockSxe,
   vdlBlockWhat,
@@ -226,6 +227,15 @@ describe('formatters', () => {
     expect(vdlFmtBytes(2048)).toBe('2.0 KB');
     expect(vdlFmtBytes(15 * 1024)).toBe('15 KB');
     expect(vdlFmtBytes(0)).toBe('');
+  });
+  it('vdlBinCountLabel names folder entries as folders', () => {
+    expect(vdlBinCountLabel([{}, {}])).toBe('2 files');
+    expect(vdlBinCountLabel([{}])).toBe('1 file');
+    expect(vdlBinCountLabel([])).toBe('0 files');
+    expect(vdlBinCountLabel([{ is_folder: true }, { is_folder: true }])).toBe('2 folders');
+    expect(vdlBinCountLabel([{ is_folder: true }, {}, { is_folder: false }])).toBe(
+      '1 folder · 2 files',
+    );
   });
   it('vdlFmtHistorySize keeps 1 decimal only at GB+', () => {
     expect(vdlFmtHistorySize(1500 * 1024)).toBe('1 MB');

@@ -9,6 +9,14 @@ import pytest
 from core.repair_jobs.empty_lookup_memory import EmptyLookupMemory
 from tests import test_missing_cover_art as base
 
+
+@pytest.fixture(autouse=True)
+def _no_cover_art_artist_name_search(monkeypatch):
+    """the cover art job's artist name search talks to real clients"""
+    monkeypatch.setattr('core.repair_jobs.missing_cover_art._artist_art_by_name',
+                        lambda *a, **k: (None, None))
+
+
 mca = base.mca
 
 

@@ -362,9 +362,15 @@ export async function playLibraryTrack(
   // still exists) as `legacy_track_id`. `track.id` is then a v2 id, which
   // resolve-track cannot look up - running it would overwrite good metadata
   // with a miss, so a v2-only row skips the refresh entirely.
+  //
+  // a v2 row that also carries a legacy id (every 3.6.1-migrated track) skips it
+  // too: the caller holds that row's own file, and a title+artist lookup hands
+  // back whichever copy wins LIMIT 1, so Play on the single played the album's
+  // file (review 5 R5-L-1)
   if (
     !track.exact_path &&
-    (track.legacy_track_id || (track.id && !track.lib2_track_id)) &&
+    !track.lib2_track_id &&
+    (track.legacy_track_id || track.id) &&
     (track.title || track.name) &&
     (artistName || track.artist_name)
   ) {
@@ -390,6 +396,8 @@ export async function playLibraryTrack(
           album_thumb_url?: string;
           album_title?: string;
           artist_name?: string;
+          lib2_track_id?: number | string | null;
+          lib2_artist_id?: number | string | null;
         };
       };
       if (_dbData && _dbData.success && _dbData.track) {
@@ -402,6 +410,9 @@ export async function playLibraryTrack(
           bitrate: _row.bitrate ?? track.bitrate,
           artist_id: _row.artist_id ?? track.artist_id,
           album_id: _row.album_id ?? track.album_id,
+          // the row is a v2 row: keep its ids, or Now Playing loses Report issue
+          lib2_track_id: _row.lib2_track_id ?? track.lib2_track_id,
+          lib2_artist_id: _row.lib2_artist_id ?? track.lib2_artist_id,
           _stats_image: _row.image_url || _row.album_thumb_url || track._stats_image || null,
         };
         if (_row.album_title) albumTitle = _row.album_title;

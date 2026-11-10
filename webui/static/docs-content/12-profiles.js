@@ -18,7 +18,7 @@ Profiles give everyone their own space inside a shared SoulSync installation. Ea
 - Side access and allowed pages
 - Connected music accounts (see [Your Accounts](#docs/prof-accounts))
 
-**Shared across all profiles**: settings, and the music library by default — though a profile can have its **own library** instead (\`library_mode == 'own'\`), with its own output folder on Plex or Jellyfin. **Automations are per-profile**: each profile runs its own automations; only system automations are shared across profiles. Profiles are about personalization and permissions, not separate servers — and access to the Automations page is a grantable permission, not admin-only.
+**Shared across all profiles**: settings, and the music library by default — though a profile can have its **own library** instead (\`library_mode == 'own'\`), with its own output folder on Plex, Jellyfin or Navidrome 0.58+ (Navidrome's multiple libraries). **Automations are per-profile**: each profile runs its own automations; only system automations are shared across profiles. Profiles are about personalization and permissions, not separate servers — and access to the Automations page is a grantable permission, not admin-only.
 
 ![Profile picker](profiles-picker.jpg)
 `
@@ -112,7 +112,8 @@ The admin account's services stay managed in Settings. Disconnecting a personal 
 
 - **Plex** — link a **Plex Home user** from the server's user list (PIN asked if they have one); the profile's playlists are then written as that user. Unlink to go back to the app account.
 - **Navidrome** — save your own Navidrome username and password (verified with one ping before saving); your playlists are written as you.
-- **Library choice** — pick which Plex/Jellyfin/Navidrome library the profile reads from.
+- **Library choice** — pick which Plex/Jellyfin library the profile reads from.
+- **Own library on Navidrome** — a profile the admin gave its own library picks it under **My Account → Navidrome** after signing in with its own Navidrome user. The list is what that login can see (Navidrome scopes libraries per user), the shared library marked. Its downloads go to its own folder, the library scan reads only that library, and its playlists are written as that user. Setup: add the profile's folder as a second library in Navidrome (0.58 or newer), give their Navidrome user only that library, pick the shared library's music folder in Settings → Media server (so the shared scan leaves theirs out), then switch the profile to **Own library** in Manage Profiles. On an older Navidrome the switch stays off and says why; their downloads keep going to the shared folder.
 
 ## Your own listening
 
@@ -208,6 +209,28 @@ Every profile can choose its own home page:
 - **Discover** — the non-admin default: new releases, recommendations, trending
 
 Anyone can change their own home page; admins can set or change anyone's. A home page has to be in the profile's allowed pages — picking a new allowed-pages list resets a home page that was locked out.
+`
+        },
+        {
+            id: 'prof-features',
+            title: 'Show Only What You Use',
+            lede: 'Every profile hides the parts of SoulSync it does not need.',
+            body: `
+SoulSync does a lot. **Customize**, at the bottom of the sidebar, opens **Make SoulSync yours** (admins also find it under Settings → Appearance).
+
+- **Simple** keeps the music core plus Discover, playlist sync and Import (where downloads that need a hand wait).
+- **Everything** is SoulSync the way it ships.
+- Or switch single parts: Discover, Playlist sync, Playlist Explorer, Import, Listening stats, Music videos, Sample Studio, Podcasts, Audiobooks, Movies & TV (or just Video Discover and Calendar inside it), Chat & Arcade, Automations and Tools.
+
+Each switch saves right away. What's off leaves the sidebar, its dashboard card and the tabs that lead to it (the Videos tab in search, the Podcasts and Audiobooks tabs on the watchlist and wishlist). Turning off Movies & TV also hides the music/video switch.
+
+Search, Library, Watchlist, Wishlist, Downloads and Settings are always there, on the music side and the video side.
+
+This is a preference, not a lock. Hidden parts keep running (scans, automations, new episodes), and a link to a hidden page still opens, with a note at the top and a **Show it** button to put it back.
+
+Once **every** profile has Podcasts or Audiobooks hidden, an admin sees **Also pause its background jobs** under it. Paused, its scheduled checks and downloads stop. If anyone turns the part back on, they start again by themselves. **Run now** on the Automations page always works. The video side's jobs have their own switch on the video Automations page. To stop someone from opening a page at all, use **page access** in their profile instead.
+
+First-run setup asks what SoulSync is for and starts you off with the rest hidden. A music-only install, for example, starts without podcasts, audiobooks and the video side. Profiles that existed before see a one-time card above **Customize** until they pick something (**Keep everything** counts).
 `
         },
     ]

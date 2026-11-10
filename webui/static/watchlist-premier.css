@@ -972,19 +972,25 @@
   color: var(--wl-text-secondary) !important;
 }
 
-.watchlist-source-spotify {
+/* brand colours only on the card you're looking at (#1909). five coloured
+   badges on every card were the loudest thing on the watchlist; at rest they
+   take the neutral .watchlist-source-badge look above. */
+.watchlist-artist-card:hover .watchlist-source-spotify,
+.watchlist-artist-card:focus-within .watchlist-source-spotify {
   background: rgba(29, 185, 84, 0.14) !important;
   border-color: rgba(29, 185, 84, 0.3) !important;
   color: #26d462 !important;
 }
 
-.watchlist-source-deezer {
+.watchlist-artist-card:hover .watchlist-source-deezer,
+.watchlist-artist-card:focus-within .watchlist-source-deezer {
   background: rgba(162, 56, 255, 0.14) !important;
   border-color: rgba(162, 56, 255, 0.3) !important;
   color: #c084fc !important;
 }
 
-.watchlist-source-itunes {
+.watchlist-artist-card:hover .watchlist-source-itunes,
+.watchlist-artist-card:focus-within .watchlist-source-itunes {
   background: rgba(250, 45, 72, 0.14) !important;
   border-color: rgba(250, 45, 72, 0.3) !important;
   color: #fb7185 !important;

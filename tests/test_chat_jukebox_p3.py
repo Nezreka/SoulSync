@@ -476,3 +476,43 @@ def test_radio_says_so_when_the_library_does_not_know_the_artist(radio_app):
                      json={"title": "Someone Else - A Song"}).get_json()
 
     assert body == {"query": None, "why": "no similar data"}
+
+
+def test_radio_local_graph_matches_an_accented_seed_to_a_plain_name(radio_app):
+    """the other direction: the library spells it plainly, the title does not"""
+    http, db = radio_app
+    _seed_graph(db, name='Bjork', spotify_id='SP-BJORK', keyed_by='SP-BJORK')
+
+    body = http.post("/api/chat/jukebox/radio",
+                     json={"title": "Björk - Hyperballad"}).get_json()
+
+    assert body["query"] == "Portishead"
+
+
+def test_radio_artist_lookup_never_scans_the_artist_table(radio_app, monkeypatch):
+    """review 5 W3-TB-4: unidecode_lower(name) = ? ran python over every
+    artist row, 1 s per radio pick on a 30k-artist library. the lookup reads
+    the name_key index; a SCAN of lib2_artists is the regression"""
+    http, db = radio_app
+    _seed_graph(db, name='Björk', spotify_id='SP-BJORK', keyed_by='SP-BJORK')
+    seen = []
+    real = db._get_connection
+
+    def traced():
+        conn = real()
+        conn.set_trace_callback(seen.append)
+        return conn
+
+    monkeypatch.setattr(db, "_get_connection", traced)
+    body = http.post("/api/chat/jukebox/radio",
+                     json={"title": "Bjork - Hyperballad"}).get_json()
+    assert body["query"] == "Portishead"
+
+    lookups = [sql for sql in seen if "FROM lib2_artists" in sql]
+    assert lookups
+    with real() as conn:
+        for sql in lookups:
+            plan = [row[3] for row in conn.execute("EXPLAIN QUERY PLAN " + sql)]
+            scans = [step for step in plan
+                     if step.startswith("SCAN lib2_artists") and "COVERING INDEX" not in step]
+            assert scans == [], plan

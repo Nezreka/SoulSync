@@ -221,6 +221,9 @@ def _album_track_context(parent: dict, track: dict, album: dict, source: str) ->
     info = deepcopy(track)
     info["quality_profile_id"] = ((parent.get("track_info") or {}).get("quality_profile_id")
                                   or (parent.get("_quality_profile") or {}).get("id"))
+    # a pick made for the release carries to its tracks; never one from the track payload
+    info["quality_profile_explicit"] = (
+        (parent.get("track_info") or {}).get("quality_profile_explicit") is True)
     info["album"] = album.get("name") or ""
     ctx = {
         "artist": artist,

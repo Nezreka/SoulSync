@@ -213,6 +213,8 @@
   color: var(--text-bright);
   font-size: 12px;
   font-weight: 700;
+  /* the text column is 58% of a phone card, "Open studio" split in two */
+  white-space: nowrap;
   transition:
     background var(--studio-dur) var(--studio-ease),
     border-color var(--studio-dur) var(--studio-ease);
@@ -624,5 +626,35 @@
 
   .rings {
     display: none;
+  }
+}
+
+/* phone: two to four counts side by side, not a full-width card each. the
+   music rules this beats sit at (1,3,0) (#dashboard-page .dash-tiles
+   .dash-tile.header-button), so each selector starts with the same id and
+   doubles a class to outrank them */
+@media (max-width: 460px) {
+  :global(#dashboard-page) .tiles.tiles[data-rail] {
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+    gap: 10px;
+  }
+
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
+    min-height: 0;
+    padding: 12px;
+  }
+
+  :global(#dashboard-page) .tiles[data-rail] .tileBadge.tileBadge {
+    font-size: 26px;
+  }
+
+  /* a third of a phone is too narrow for "on your watchlist" on one line */
+  :global(#dashboard-page) .tiles[data-rail] .tileLabel.tileLabel {
+    overflow: visible;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    line-height: 1.35;
+    text-overflow: clip;
+    white-space: normal;
   }
 }

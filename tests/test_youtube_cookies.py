@@ -358,3 +358,23 @@ def test_the_connection_test_asks_before_it_probes():
     branch = src.split('elif service == "youtube":', 1)[1].split("elif service ==", 1)[0]
     assert "cookie_setup_problem" in branch
     assert branch.index("cookie_setup_problem") < branch.index("check_connection()")
+
+
+def test_private_playlists_skip_the_auth_check_only_with_cookies():
+    """#2013: the webpage skip (#908) broke yt-dlp's private-playlist auth
+    check, so Liked Music failed with good cookies. signed in, the check is
+    skipped; anonymous, it stays (a private list can't work then anyway)"""
+    from core.youtube_cookies import youtube_tab_skips
+    assert youtube_tab_skips({}) == ['webpage']
+    assert youtube_tab_skips({'cookiefile': '/config/cookies.txt'}) == ['webpage', 'authcheck']
+    assert youtube_tab_skips({'cookiesfrombrowser': ('firefox',)}) == ['webpage', 'authcheck']
+
+
+def test_an_empty_signed_in_parse_says_why_it_might_be_empty():
+    """#2013 follow-up (from PR #2016): with the auth check skipped, cookies
+    for the wrong account or expired cookies come back as an empty playlist"""
+    from core.youtube_cookies import empty_signed_in_parse_warning as warn
+    url = "https://music.youtube.com/playlist?list=LM"
+    assert "different account" in warn(url, {'cookiefile': '/c.txt'}, 0)
+    assert warn(url, {'cookiefile': '/c.txt'}, 12) is None
+    assert warn(url, {}, 0) is None
