@@ -19,7 +19,6 @@ import {
   cacheHealthLabel,
   cacheHealthModalLabel,
   cacheHealthScore,
-  findingHeadline,
   cacheSourceBars,
   cacheSourceColor,
   cacheSourceLabel,
@@ -891,71 +890,5 @@ describe('linkedJobId', () => {
     expect(linkedJobId('?job=expired_download_cleaner', ids)).toBe('expired_download_cleaner');
     expect(linkedJobId('?job=nope', ids)).toBeNull();
     expect(linkedJobId('', ids)).toBeNull();
-  });
-});
-
-describe('findingHeadline', () => {
-  // every tag-scan finding is stored as "Metadata issues" / "genre: mismatch".
-  // the row leads with the track it is about instead.
-  const scan = (reference: Record<string, unknown>, checks: Record<string, string>) => ({
-    title: 'Metadata issues',
-    description: 'genre: mismatch',
-    details: { validation: { reference, checks } },
-  });
-
-  it('leads a tag-scan finding with its track, artist and album', () => {
-    expect(
-      findingHeadline(
-        scan(
-          { title: 'Wolves', artist_name: 'Crystal Castles', album_title: 'Wolves EP' },
-          { title: 'correct', genre: 'mismatch', year: 'missing', albumartist: 'mismatch' },
-        ),
-      ),
-    ).toEqual({
-      title: 'Wolves',
-      sub: 'Crystal Castles · Wolves EP',
-      // only what is missing or wrong, in the words a person uses
-      fields: ['Genre', 'Year', 'Album artist'],
-    });
-  });
-
-  it("prefers the track's own artist credit over the album artist", () => {
-    const headline = findingHeadline(
-      scan(
-        { title: 'Song', artist_name: 'Philthy Rich', track_artist: 'Philthy Rich, Fetty Wap' },
-        {},
-      ),
-    );
-    expect(headline.sub).toBe('Philthy Rich, Fetty Wap');
-  });
-
-  it('keeps the stored title when the finding names no track', () => {
-    const finding = scan({ artist_name: 'Somebody' }, { genre: 'mismatch' });
-    expect(findingHeadline(finding)).toEqual({
-      title: 'Metadata issues',
-      sub: 'genre: mismatch',
-      fields: [],
-    });
-  });
-
-  it('leaves every other finding as it was written', () => {
-    expect(
-      findingHeadline({
-        title: 'Orphan file: 01 - vibrance.mp3',
-        description: 'Audio file is not tracked in the database.',
-        details: { folder: '/music/x' },
-      }),
-    ).toEqual({
-      title: 'Orphan file: 01 - vibrance.mp3',
-      sub: 'Audio file is not tracked in the database.',
-      fields: [],
-    });
-    expect(findingHeadline({ title: 'Bare' })).toEqual({ title: 'Bare', sub: '', fields: [] });
-  });
-
-  it('names a check it has no word for by its key', () => {
-    expect(findingHeadline(scan({ title: 'Song' }, { some_new_check: 'missing' })).fields).toEqual([
-      'some new check',
-    ]);
   });
 });

@@ -1095,10 +1095,11 @@ describe('the finding list', () => {
     await flush();
 
     expect(document.querySelector('.repair-finding-type-badge')?.textContent).toBe('Orphan');
-    expect(document.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
-    // which job found it, and when, wait in the opened row
+    // the path, which job found it and when all wait in the opened row
+    expect(document.querySelector('.repair-finding-path')).toBeNull();
     expect(document.querySelector('.repair-finding-meta')).toBeNull();
     fireEvent.click(document.querySelector('.repair-finding-main') as Element);
+    expect(document.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
     const meta = document.querySelector('.repair-finding-meta')?.textContent || '';
     // The job's DISPLAY name, matching the filter dropdown and the
     // dashboard chips — the raw snake_case id meant one job went by two
@@ -2333,7 +2334,7 @@ describe('the detail renderer', () => {
       ['Folder', '/music/a'],
       ['Format', 'FLAC'],
       ['File Size', '2.0 MB'],
-      ['Full Path', '/music/a/b.flac'],
+      // the full path is under the panel already, once
     ]);
   });
 
@@ -2527,7 +2528,7 @@ describe('the detail renderer', () => {
       '9 of 12 tracks (75%)',
     );
     expect(detail.textContent).toContain('#4 Gone');
-    expect(detail.textContent).toContain('Duration: 210s');
+    expect(detail.textContent).toContain('3:30');
   });
 
   it('missing_cover_art offers a separate apply per image', async () => {
@@ -2630,10 +2631,7 @@ describe('the detail renderer', () => {
       finding_type: 'something_new',
       details: { odd_key: 'value', nested: { a: 1 }, album_thumb_url: 'http://x' },
     });
-    expect(gridPairs(detail)).toEqual([
-      ['Odd Key', 'value'],
-      ['File', '/music/a/b.flac'],
-    ]);
+    expect(gridPairs(detail)).toEqual([['Odd Key', 'value']]);
   });
 
   it('an unknown type with nothing to show says so', async () => {
@@ -2893,26 +2891,29 @@ describe('a finding row shows what it is about', () => {
     const card = document.querySelector('.repair-finding-card') as HTMLElement;
     expect(card.querySelector('.repair-art img')?.getAttribute('src')).toBe('/art/remixes.jpg');
     expect(card.querySelector('.repair-finding-name')?.textContent).toBe('Wolves');
-    expect(card.querySelector('.repair-finding-desc')?.textContent).toBe(
+    expect(card.querySelector('.repair-finding-sub')?.textContent).toBe(
       'Crystal Castles · Wolves EP',
     );
-    expect(
-      [...card.querySelectorAll('.repair-finding-field')].map((node) => node.textContent),
-    ).toEqual(['Genre']);
-    // a row with a cover keeps its path for the opened row
-    expect(card.querySelector('.repair-finding-path')).toBeNull();
+    // what is wrong, as a sentence, not "genre: mismatch"
+    expect(card.querySelector('.repair-finding-desc')?.textContent).toBe(
+      'Genre in the file does not match the library.',
+    );
+    // what the button will do is said once the row is open
+    expect(card.querySelector('.repair-finding-fixline')).toBeNull();
     fireEvent.click(card.querySelector('.repair-finding-main') as Element);
+    expect(card.querySelector('.repair-finding-fixline')?.textContent).toBe(
+      "Apply Tags writes the library's genre into the file. Nothing else in it changes.",
+    );
     expect(card.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
   });
 
-  it('a finding with no picture keeps the box and shows its path', async () => {
+  it('a finding with no picture keeps the box', async () => {
     routes({ [FINDINGS]: page([finding({ entity_type: 'file' })]) });
     await renderList();
     await flush();
     const card = document.querySelector('.repair-finding-card') as HTMLElement;
     expect(card.querySelector('.repair-art.empty')).not.toBeNull();
     expect(card.querySelector('.repair-art img')).toBeNull();
-    expect(card.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
   });
 });
 
@@ -2964,5 +2965,20 @@ describe('the flat list', () => {
       .filter((url) => url.includes(`${FINDINGS}?`));
     expect(asked.length).toBeGreaterThan(0);
     expect(asked.at(-1)).not.toContain('finding_type=');
+  });
+});
+
+describe('a fix that failed says so once', () => {
+  it('shows the reason under the row, with no second button for the same fix', async () => {
+    routes({ [FINDINGS]: page([finding({ last_error: 'No source had this track' })]) });
+    await renderList();
+    await flush();
+    const card = document.querySelector('.repair-finding-card') as HTMLElement;
+    expect(card.querySelector('.repair-finding-error-banner')?.textContent).toBe(
+      'Last try failedNo source had this track',
+    );
+    // the row's own fix button is the way to try again
+    expect(card.querySelectorAll('.repair-finding-btn.fix').length).toBe(1);
+    expect(within(card).queryByText(/Retry/)).toBeNull();
   });
 });

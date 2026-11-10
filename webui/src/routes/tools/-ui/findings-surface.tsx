@@ -66,7 +66,6 @@ import {
   cacheHealthLabel,
   cacheHealthScore,
   findingFilePath,
-  findingHeadline,
   findingRedownloadTrackId,
   findingRowFixLabel,
   findingStatusBadge,
@@ -79,6 +78,7 @@ import {
   REPAIR_DEFAULT_PAGE_SIZE,
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
+import { describeFinding } from '../-tools.finding-copy';
 import { fixAllSafePlan, safeFixablePending, visibleGroups } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
@@ -2152,7 +2152,7 @@ function FindingCard({
   const statusBadge = findingStatusBadge(finding.status, finding.user_action);
   const typeLabel = info?.label || findingTypeLabel(finding.finding_type);
   const age = formatCacheAge(finding.created_at);
-  const headline = findingHeadline(finding);
+  const copy = describeFinding(finding, fixLabel);
 
   return (
     <div
@@ -2185,52 +2185,17 @@ function FindingCard({
                 title={finding.severity}
               />
             )}
-            <span className="repair-finding-name">{headline.title}</span>
+            <span className="repair-finding-name">{copy.title}</span>
             <span className="repair-finding-type-badge">{typeLabel}</span>
             {statusBadge ? (
               <span className={`repair-finding-status-badge ${finding.status}`}>{statusBadge}</span>
             ) : null}
           </div>
-          <div className="repair-finding-desc">{headline.sub}</div>
-          {/* a row with a cover already says what it is; its path waits in
-              the opened row. a bare file has nothing else to go by. */}
-          {filePath && (expanded || !(finding.album_thumb_url || finding.artist_thumb_url)) ? (
-            <div className="repair-finding-path">{filePath}</div>
-          ) : null}
-          {expanded ? (
-            <div className="repair-finding-meta">
-              {/* The display name the filter dropdown uses — a row showing the
-                  raw snake_case id meant the same job went by two different
-                  names on one screen. The entity id is for us, not the user:
-                  it lives in the tooltip now. */}
-              <span
-                title={
-                  finding.entity_id
-                    ? `${finding.entity_type || 'item'} ${finding.entity_id}`
-                    : undefined
-                }
-              >
-                {jobLabel(finding.job_id)}
-              </span>
-              <span>&middot;</span>
-              <span>
-                {age === 'now' ? 'found just now' : age === '—' ? 'found' : `found ${age} ago`}
-              </span>
-            </div>
-          ) : null}
+          {copy.sub ? <div className="repair-finding-sub">{copy.sub}</div> : null}
         </div>
-        {headline.fields.length ? (
-          <div className="repair-finding-fields" aria-label="Fields that differ">
-            {headline.fields.slice(0, 4).map((field) => (
-              <span className="repair-finding-field" key={field}>
-                {field}
-              </span>
-            ))}
-            {headline.fields.length > 4 ? (
-              <span className="repair-finding-field more">+{headline.fields.length - 4}</span>
-            ) : null}
-          </div>
-        ) : null}
+        {/* what is wrong, as a sentence, in the middle of the row where a wide
+            screen used to leave a gap */}
+        <div className="repair-finding-desc">{copy.problem}</div>
         <span className="repair-finding-age">{age === '—' ? '' : age === 'now' ? 'now' : age}</span>
         {/* This wrapper swallows clicks so the row toggle doesn't undo them. */}
         <div className="repair-finding-actions" onClick={(event) => event.stopPropagation()}>
@@ -2324,19 +2289,11 @@ function FindingCard({
         </div>
       </div>
       {finding.last_error ? (
-        <div className="repair-finding-error-banner" onClick={(event) => event.stopPropagation()}>
-          <div className="repair-finding-error-header">
-            <span className="repair-finding-error-title">Resolution Attempt Failed</span>
-          </div>
-          <div className="repair-finding-error-text">{finding.last_error}</div>
-          <button
-            type="button"
-            className="repair-finding-error-retry"
-            disabled={fixing}
-            onClick={() => void onFix(finding)}
-          >
-            Retry Fix
-          </button>
+        // the row's own fix button is the way to try again; a second button
+        // here said the same thing in different words
+        <div className="repair-finding-error-banner" role="note">
+          <span className="repair-finding-error-title">Last try failed</span>
+          <span className="repair-finding-error-text">{finding.last_error}</span>
         </div>
       ) : null}
       <div
@@ -2348,6 +2305,7 @@ function FindingCard({
               full 20-branch detail tree and fetch its album/artist art, hidden
               behind max-height:0 — so a 100-row page rendered 100 invisible
               panels and hammered the thumbnail endpoints for them. */}
+          {expanded && copy.fix ? <p className="repair-finding-fixline">{copy.fix}</p> : null}
           {expanded ? (
             video ? (
               <VideoFindingDetail
@@ -2361,6 +2319,30 @@ function FindingCard({
                 onApplyCoverArt={onApplyCoverArt}
               />
             )
+          ) : null}
+          {expanded ? (
+            <div className="repair-finding-foot">
+              {filePath ? <div className="repair-finding-path">{filePath}</div> : null}
+              <div className="repair-finding-meta">
+                {/* The display name the filter dropdown uses — a row showing the
+                    raw snake_case id meant the same job went by two different
+                    names on one screen. The entity id is for us, not the user:
+                    it lives in the tooltip now. */}
+                <span
+                  title={
+                    finding.entity_id
+                      ? `${finding.entity_type || 'item'} ${finding.entity_id}`
+                      : undefined
+                  }
+                >
+                  {jobLabel(finding.job_id)}
+                </span>
+                <span>&middot;</span>
+                <span>
+                  {age === 'now' ? 'found just now' : age === '—' ? 'found' : `found ${age} ago`}
+                </span>
+              </div>
+            </div>
           ) : null}
         </div>
       </div>

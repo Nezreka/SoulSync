@@ -49470,339 +49470,6 @@ tr.tag-diff-same {
     gap: 6px;
     flex-wrap: wrap;
 }
-
-/* Detail key-value rows */
-.repair-detail-grid {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 4px 14px;
-    font-size: 12px;
-}
-.repair-detail-key {
-    color: var(--white-a40);
-    white-space: nowrap;
-    font-weight: 500;
-}
-.repair-detail-val {
-    color: var(--white-a75);
-    word-break: break-all;
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-    font-size: 11px;
-}
-.repair-detail-val.path {
-    color: rgba(var(--accent-light-rgb), 0.8);
-}
-.repair-detail-val.highlight {
-    color: #fbbf24;
-}
-.repair-detail-val.success {
-    color: #4ade80;
-}
-.repair-detail-val.error {
-    color: #f87171;
-}
-
-/* Detail sub-items (for duplicates, missing tracks, etc.) */
-.repair-detail-sublist {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 4px;
-}
-.repair-detail-subitem {
-    background: var(--white-a03);
-    border: 1px solid var(--white-a04);
-    border-radius: var(--radius-sm);
-    padding: 6px 10px;
-    font-size: 11px;
-    color: var(--white-a55);
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-.repair-detail-subitem strong {
-    color: var(--white-a80);
-    font-weight: 500;
-}
-.repair-detail-subitem .mono {
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-    font-size: 10px;
-    color: var(--white-a35);
-}
-
-/* A copy you can audition (#1214): details on the left, Play on the right. */
-.repair-detail-subitem.playable {
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
-}
-/* Not scoped to .playable: a copy with no file path gets the wrapper but no
-   button, and its lines still have to stack instead of running together. */
-.repair-subitem-body {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex: 1;
-    min-width: 0;
-}
-.repair-subitem-body .mono {
-    overflow-wrap: anywhere;
-}
-/* which server playlists point at this copy, keep best keeps it */
-.repair-in-playlist {
-    color: rgb(var(--accent-light-rgb));
-    font-size: 11px;
-    overflow-wrap: anywhere;
-}
-.repair-subitem-play {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 11px;
-    background: rgba(var(--accent-rgb), 0.12);
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: var(--radius-sm);
-    color: rgb(var(--accent-light-rgb));
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--dur-base) ease;
-}
-.repair-subitem-play:hover {
-    background: rgba(var(--accent-rgb), 0.2);
-    border-color: rgba(var(--accent-rgb), 0.4);
-}
-.repair-subitem-play svg {
-    width: 11px;
-    height: 11px;
-    fill: currentColor;
-}
-
-/* Duplicate keep/remove badges */
-.repair-detail-subitem.best {
-    border-color: rgba(var(--success-strong-rgb), 0.2);
-    background: rgba(var(--success-strong-rgb), 0.04);
-}
-.repair-detail-subitem.removable {
-    opacity: 0.65;
-}
-.repair-keep-badge {
-    display: inline-block;
-    font-size: 9px;
-    font-weight: 700;
-    padding: 1px 5px;
-    border-radius: 3px;
-    background: rgba(var(--success-strong-rgb), 0.15);
-    color: var(--success-strong);
-    margin-right: 4px;
-    letter-spacing: 0.04em;
-}
-.repair-remove-badge {
-    display: inline-block;
-    font-size: 9px;
-    font-weight: 700;
-    padding: 1px 5px;
-    border-radius: 3px;
-    background: rgba(239, 68, 68, 0.12);
-    color: #ef4444;
-    margin-right: 4px;
-    letter-spacing: 0.04em;
-}
-
-/* Finding media thumbnails (album art + artist image) */
-.repair-finding-media {
-    display: flex;
-    gap: 18px;
-    margin-bottom: 14px;
-    padding: 14px 16px;
-    background: rgba(255, 255, 255, 0.025);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--white-a06);
-    align-items: flex-start;
-}
-.repair-finding-media-card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-}
-/* clickable artist card → artist page */
-.repair-finding-media-card--link { cursor: pointer; border-radius: var(--radius-lg); transition: transform var(--dur-fast) ease; }
-.repair-finding-media-card--link:hover { transform: translateY(-2px); }
-.repair-finding-media-card--link:hover .repair-finding-media-img {
-    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.7);
-}
-.repair-finding-media-card--link:hover .repair-finding-media-label {
-    color: rgb(var(--accent-rgb));
-    text-decoration: underline;
-}
-.repair-finding-media-img {
-    width: 150px;
-    height: 150px;
-    border-radius: var(--radius-control);
-    object-fit: cover;
-    border: 1px solid var(--white-a10);
-    flex-shrink: 0;
-    box-shadow: 0 4px 16px var(--black-a40);
-    transition: transform var(--dur-base) ease, box-shadow var(--dur-base) ease;
-}
-.repair-finding-media-img:hover {
-    transform: scale(1.03);
-    box-shadow: 0 6px 24px var(--black-a50);
-}
-.repair-finding-media-img.artist {
-    border-radius: var(--radius-circle);
-}
-.repair-finding-media-label {
-    font-size: 11px;
-    color: var(--white-a50);
-    text-align: center;
-    max-width: 150px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    line-height: 1.3;
-    font-weight: 500;
-}
-/* Per-image apply button on cover-art findings (Pache711: fix one or the other) */
-.repair-art-apply-btn {
-    padding: 5px 14px;
-    font-size: 11px;
-    font-weight: 600;
-    border-radius: var(--radius-pill);
-    border: 1px solid rgba(74, 222, 128, 0.4);
-    background: rgba(74, 222, 128, 0.12);
-    color: #4ade80;
-    cursor: pointer;
-    transition: background var(--dur-quick) ease, transform var(--dur-quick) ease;
-}
-.repair-art-apply-btn:hover {
-    background: rgba(74, 222, 128, 0.22);
-    transform: translateY(-1px);
-}
-
-/* Play button for findings */
-.repair-finding-play-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 14px;
-    background: rgba(var(--accent-rgb), 0.12);
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    border-radius: var(--radius-md);
-    color: rgb(var(--accent-light-rgb));
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--dur-base) ease;
-    margin-top: 4px;
-}
-.repair-finding-play-btn:hover {
-    background: rgba(var(--accent-rgb), 0.2);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    transform: translateY(-1px);
-}
-.repair-finding-play-btn:active {
-    transform: translateY(0);
-}
-.repair-finding-play-btn svg {
-    width: 14px;
-    height: 14px;
-    fill: currentColor;
-}
-
-/* Completion bar (for incomplete albums) */
-.repair-completion-bar {
-    margin: 8px 0 4px;
-}
-.repair-completion-label {
-    font-size: 11px;
-    color: var(--white-a50);
-    margin-bottom: 4px;
-}
-.repair-completion-track {
-    height: 6px;
-    background: var(--white-a06);
-    border-radius: 3px;
-    overflow: hidden;
-}
-.repair-completion-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--warning-strong), #f97316);
-    border-radius: 3px;
-    transition: width var(--dur-slow) ease;
-}
-
-/* Spectrum bar (for fake lossless) */
-.repair-spectrum-bar {
-    margin-bottom: 10px;
-}
-.repair-spectrum-label {
-    font-size: 11px;
-    color: var(--white-a50);
-    margin-bottom: 4px;
-}
-.repair-spectrum-track {
-    position: relative;
-    height: 10px;
-    background: var(--white-a06);
-    border-radius: 5px;
-    overflow: visible;
-}
-.repair-spectrum-detected {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    background: linear-gradient(90deg, #ef4444, #f97316);
-    border-radius: 5px;
-    opacity: 0.7;
-}
-.repair-spectrum-expected {
-    position: absolute;
-    top: -2px;
-    width: 2px;
-    height: 14px;
-    background: var(--success-strong);
-    border-radius: 1px;
-}
-.repair-spectrum-legend {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 4px;
-    font-size: 10px;
-}
-.repair-spectrum-legend-detected {
-    color: #f97316;
-}
-.repair-spectrum-legend-expected {
-    color: var(--success-strong);
-}
-
-/* Score bars (for AcoustID) */
-.repair-score-bar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-.repair-score-bar-track {
-    flex: 1;
-    height: 4px;
-    background: var(--white-a06);
-    border-radius: 2px;
-    overflow: hidden;
-    max-width: 120px;
-}
-.repair-score-bar-fill {
-    height: 100%;
-    border-radius: 2px;
-    transition: width var(--dur-slow) ease;
-}
-.repair-score-bar-fill.good { background: #4ade80; }
-.repair-score-bar-fill.warn { background: #fbbf24; }
-.repair-score-bar-fill.bad { background: #f87171; }
 .repair-history-stat strong {
     color: var(--white-a70);
     font-weight: 600;
@@ -49821,11 +49488,6 @@ tr.tag-diff-same {
 @media (max-width: 768px) {
     .repair-tab-content {
         padding: 12px 14px;
-    }
-
-    .repair-detail-grid {
-        grid-template-columns: 1fr;
-        gap: 2px;
     }
 }
 
@@ -73141,6 +72803,17 @@ body.src-modal-open { overflow: hidden; }
     color: var(--text-1);
 }
 
+/* severity arrives as a bare class (error, warning, info). a global
+   `.error` rule, written for empty-state messages, centres and pads anything
+   carrying it: an error finding's row came out as a 40px pink blob with its
+   text centred. nothing on this page wants that rule. */
+#tools-page .error {
+    padding: 0;
+    font-size: inherit;
+    color: inherit;
+    text-align: inherit;
+}
+
 /* ── header ── */
 #tools-page .tools-top {
     display: flex;
@@ -73809,13 +73482,13 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .repair-finding-card:not(.expanded) .repair-finding-main:hover { background: var(--white-a04); }
 #tools-page .repair-finding-select { display: grid; place-items: center; width: 24px; height: 44px; flex: none; }
-#tools-page .repair-finding-content { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+#tools-page .repair-finding-content { flex: 0 1 34%; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 #tools-page .repair-finding-title {
     display: flex;
     align-items: center;
     gap: 10px;
     min-width: 0;
-    font-size: 15px;
+    font-size: 15.5px;
     font-weight: 600;
     color: var(--text-1);
 }
@@ -73839,36 +73512,28 @@ body.src-modal-open { overflow: hidden; }
 /* inside an opened type every row is that type; saying so 30 times is noise */
 #tools-page .repair-inbox-body .repair-finding-type-badge { display: none; }
 #tools-page .repair-finding-status-badge.resolved { color: var(--accent-light); }
-#tools-page .repair-finding-desc,
-#tools-page .repair-finding-content > .repair-finding-meta {
-    margin: 0;
-    font-size: 13.5px;
-    color: var(--text-3);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-#tools-page .repair-finding-card.expanded .repair-finding-desc { white-space: normal; }
-#tools-page .repair-finding-content > .repair-finding-meta { display: flex; gap: 6px; font-size: 12.5px; }
-#tools-page .repair-finding-path {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 12px;
-    color: var(--text-3);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-#tools-page .repair-finding-card.expanded .repair-finding-path { white-space: normal; word-break: break-all; }
-#tools-page .repair-finding-fields { display: flex; gap: 6px; flex: none; }
-#tools-page .repair-finding-field {
-    padding: 4px 10px;
-    border-radius: var(--radius-pill);
-    background: var(--white-a08);
-    font-size: 12.5px;
-    font-weight: 600;
+#tools-page .repair-finding-sub {
+    font-size: 14px;
     color: var(--text-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
+/* what is wrong, as a sentence: the middle of the row */
+#tools-page .repair-finding-main > .repair-finding-desc {
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--text-2);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+#tools-page .repair-finding-card.expanded .repair-finding-main > .repair-finding-desc { display: block; color: var(--text-1); }
+#tools-page .repair-finding-card.expanded .repair-finding-sub { white-space: normal; }
 #tools-page .repair-finding-age { width: 44px; flex: none; text-align: right; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 #tools-page .repair-finding-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 #tools-page .repair-finding-actions .repair-finding-btn.fix,
@@ -73876,26 +73541,161 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-finding-detail { display: none; }
 #tools-page .repair-finding-detail.open { display: block; max-height: none; overflow: visible; }
 #tools-page .repair-finding-detail-inner {
-    margin: 0 16px 0 50px;
-    padding: 16px 0 20px;
+    margin: 0 20px 0 120px;
+    padding: 18px 0 20px;
     border-top: 1px solid var(--tl-line);
     background: none;
+    max-width: 880px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    font-size: 14.5px;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+#tools-page .repair-finding-detail-inner p { margin: 0; }
+/* what the button will do, said before you press it */
+#tools-page .repair-finding-fixline { font-size: 15px; color: var(--text-1); }
+#tools-page .repair-finding-foot {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--tl-line);
+}
+#tools-page .repair-finding-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: var(--text-2);
+    word-break: break-all;
+}
+#tools-page .repair-finding-meta { display: flex; gap: 6px; margin: 0; font-size: 13px; color: var(--text-3); }
+
+/* ── what a finding holds: one look for every kind ── */
+#tools-page .repair-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
+    gap: 8px 24px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+#tools-page .repair-detail-key { font-size: 14px; color: var(--text-3); }
+#tools-page .repair-detail-val { min-width: 0; font-size: 14.5px; color: var(--text-1); overflow-wrap: anywhere; }
+#tools-page .repair-detail-val.path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--text-2); }
+#tools-page .repair-detail-val.highlight { font-weight: 600; }
+#tools-page .repair-detail-val.success { color: var(--accent-light); }
+#tools-page .repair-detail-val.warning { color: var(--warning); }
+#tools-page .repair-detail-val.error { color: var(--danger-light); }
+
+#tools-page .repair-finding-media { display: flex; gap: 20px; flex-wrap: wrap; }
+#tools-page .repair-finding-media-card { display: flex; flex-direction: column; gap: 8px; width: 148px; }
+#tools-page .repair-finding-media-card--link { cursor: pointer; }
+#tools-page .repair-finding-media-img {
+    width: 148px;
+    height: 148px;
+    border-radius: var(--radius-lg);
+    object-fit: cover;
+    background: var(--white-a06);
+    transition: transform 0.18s;
+}
+#tools-page .repair-finding-media-img.artist { border-radius: var(--radius-circle); }
+#tools-page .repair-finding-media-card--link:hover .repair-finding-media-img { transform: scale(1.03); }
+#tools-page .repair-finding-media-label { font-size: 13.5px; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#tools-page .repair-art-apply-btn,
+#tools-page .repair-finding-play-btn,
+#tools-page .repair-subitem-play,
+#tools-page .repair-finding-detail-inner .repair-btn {
+    align-self: flex-start;
+    height: 34px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a10);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+#tools-page .repair-art-apply-btn:hover,
+#tools-page .repair-finding-play-btn:hover,
+#tools-page .repair-subitem-play:hover,
+#tools-page .repair-finding-detail-inner .repair-btn:hover:not(:disabled) { background: var(--white-a16); }
+#tools-page .repair-finding-detail-inner .repair-btn.repair-btn-fix { background: var(--text-1); color: var(--bg-primary); }
+#tools-page .repair-finding-detail-inner .repair-btn.repair-btn-fix:hover:not(:disabled) { background: var(--white-a85); }
+#tools-page .repair-finding-play-btn svg,
+#tools-page .repair-subitem-play svg { width: 12px; height: 12px; fill: currentColor; }
+
+/* copies, tracks and editions listed inside a finding */
+#tools-page .repair-detail-sublist { display: flex; flex-direction: column; }
+#tools-page .repair-detail-subitem {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 0;
+    border: 0;
+    border-top: 1px solid var(--tl-line);
+    border-radius: 0;
+    background: none;
+    cursor: default;
+}
+#tools-page section.repair-detail-subitem { flex-direction: column; align-items: flex-start; gap: 4px; }
+#tools-page .repair-subitem-body { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+#tools-page .repair-detail-subitem strong { font-size: 14.5px; font-weight: 600; color: var(--text-1); }
+#tools-page .repair-detail-subitem span { font-size: 13.5px; color: var(--text-2); }
+#tools-page .repair-detail-subitem .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-3); word-break: break-all; }
+#tools-page .repair-detail-subitem .repair-keep-badge,
+#tools-page .repair-detail-subitem .repair-remove-badge {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--accent-rgb), 0.16);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent-light);
+    vertical-align: 1px;
+}
+#tools-page .repair-detail-subitem .repair-remove-badge { background: rgba(var(--warning-rgb), 0.14); color: var(--warning); }
+#tools-page .repair-detail-subitem .repair-in-playlist { color: var(--accent-light); }
+
+/* meters */
+#tools-page .repair-score-bar { display: grid; grid-template-columns: 120px minmax(0, 1fr) 48px; align-items: center; gap: 16px; padding: 3px 0; }
+#tools-page .repair-score-bar-track,
+#tools-page .repair-completion-track,
+#tools-page .repair-spectrum-track { position: relative; height: 6px; border-radius: 3px; background: var(--white-a10); }
+#tools-page .repair-score-bar-fill,
+#tools-page .repair-completion-fill,
+#tools-page .repair-spectrum-detected { height: 100%; border-radius: 3px; background: var(--accent-light); }
+#tools-page .repair-score-bar-fill.warn,
+#tools-page .repair-spectrum-detected { background: var(--warning); }
+#tools-page .repair-score-bar-fill.bad { background: var(--danger-light); }
+#tools-page .repair-completion-bar,
+#tools-page .repair-spectrum-bar { display: flex; flex-direction: column; gap: 8px; }
+#tools-page .repair-completion-label,
+#tools-page .repair-spectrum-label { font-size: 14px; color: var(--text-1); }
+#tools-page .repair-spectrum-expected { position: absolute; top: -4px; width: 2px; height: 14px; border-radius: 1px; background: var(--text-1); }
+#tools-page .repair-spectrum-legend { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; color: var(--text-2); }
+#tools-page .repair-finding-error-banner {
+    margin: 0 20px 12px 120px;
+    max-width: 880px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
     font-size: 14px;
     color: var(--text-2);
 }
-#tools-page .repair-finding-error-banner {
-    margin: 0 16px 12px 50px;
-    padding: 12px 16px;
-    border-radius: var(--radius-lg);
-    background: rgba(var(--danger-rgb), 0.1);
-    display: flex;
-    align-items: center;
-    gap: 6px 14px;
-    flex-wrap: wrap;
-    font-size: 13.5px;
-}
-#tools-page .repair-finding-error-title { font-weight: 700; color: var(--danger-light); }
-#tools-page .repair-finding-error-text { flex: 1 1 240px; min-width: 0; color: var(--text-2); }
+#tools-page .repair-finding-error-title { flex: none; font-weight: 700; color: var(--danger-light); }
+#tools-page .repair-finding-error-text { min-width: 0; }
 
 #tools-page .repair-findings-pagination { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding-top: 8px; }
 #tools-page .repair-page-btn {
@@ -74150,26 +73950,22 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .album-tray-tracks-list { display: flex; flex-direction: column; }
 #tools-page .album-tray-track-card { border-top: 1px solid var(--tl-line); }
 #tools-page .album-track-main { display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 10px 0; flex-wrap: wrap; }
-#tools-page .album-track-num-box { width: 28px; flex: none; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; text-align: right; }
+#tools-page .album-track-num-box { width: 28px; flex: none; font-size: 14px; color: var(--text-3); font-variant-numeric: tabular-nums; text-align: right; }
 #tools-page .album-track-meta { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 #tools-page .album-track-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#tools-page .album-track-title { font-size: 15px; font-weight: 600; color: var(--text-1); }
-#tools-page .album-track-desc { font-size: 13.5px; color: var(--text-3); }
+#tools-page .album-track-title { font-size: 15.5px; font-weight: 600; color: var(--text-1); }
+#tools-page .album-track-desc { font-size: 14px; line-height: 1.45; color: var(--text-2); }
 #tools-page .album-track-diagnostic,
 #tools-page .album-track-error-callout {
     display: flex;
-    align-items: center;
-    gap: 6px 12px;
-    flex-wrap: wrap;
-    padding: 8px 12px;
-    border-radius: var(--radius-control);
-    background: rgba(var(--warning-rgb), 0.1);
-    font-size: 13px;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 14px;
+    line-height: 1.45;
     color: var(--text-2);
 }
-#tools-page .album-track-diagnostic.corrupt,
-#tools-page .album-track-error-callout { background: rgba(var(--danger-rgb), 0.1); }
-#tools-page .album-track-error-callout .error-text { flex: 1 1 200px; min-width: 0; }
+#tools-page .album-track-diagnostic strong { color: var(--warning); }
+#tools-page .album-track-diagnostic.corrupt strong,
 #tools-page .album-track-error-callout strong { color: var(--danger-light); }
 #tools-page .album-track-actions,
 #tools-page .album-track-status-group { display: flex; align-items: center; gap: 6px; flex: none; }
@@ -74731,12 +74527,14 @@ body.src-modal-open { overflow: hidden; }
     #tools-page .repair-inbox-head[role="button"] .repair-inbox-actions,
     #tools-page .repair-inbox-actions { width: 100%; min-width: 0; }
     #tools-page .repair-finding-main { flex-wrap: wrap; }
-    #tools-page .repair-finding-content { flex-basis: 50%; }
-    #tools-page .repair-finding-fields,
+    #tools-page .repair-finding-content { flex: 1 1 50%; }
+    #tools-page .repair-finding-main > .repair-finding-desc { flex: 1 1 100%; order: 5; }
     #tools-page .repair-finding-age { display: none; }
     #tools-page .repair-finding-actions { margin-left: auto; }
     #tools-page .repair-finding-detail-inner,
-    #tools-page .repair-finding-error-banner { margin-left: 16px; }
+    #tools-page .repair-finding-error-banner { margin-left: 16px; margin-right: 16px; }
+    #tools-page .repair-detail-grid { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+    #tools-page .repair-detail-val { margin-bottom: 8px; }
     #tools-page .repair-run-clock,
     #tools-page .repair-run-age { display: none; }
     #tools-page .repair-run-name { width: 40%; }

@@ -16,6 +16,7 @@ import {
   findingSeverityIcon,
   findingTypeLabel,
 } from '../-tools.core';
+import { describeFinding } from '../-tools.finding-copy';
 import { VinylCoverFallback } from './album-cover-fallback';
 
 export interface AlbumInspectionTrayProps {
@@ -465,7 +466,7 @@ export function AlbumInspectionTray({
                     <div className="album-track-meta">
                       <div className="album-track-title-row">
                         <span className="album-track-title">
-                          {details.track_title || details.title || f.title}
+                          {details.track_title || details.title || describeFinding(f).title}
                         </span>
                         <span className={`album-track-issue-tag ${f.finding_type}`}>
                           {findingTypeLabel(f.finding_type)}
@@ -476,7 +477,7 @@ export function AlbumInspectionTray({
                       </div>
 
                       <div className="album-track-desc">
-                        {f.description || details.description || f.file_path}
+                        {describeFinding(f, fixLabel).problem || details.description || f.file_path}
                       </div>
 
                       {f.finding_type === 'corrupt_audio' ? (
@@ -500,19 +501,8 @@ export function AlbumInspectionTray({
                       {f.last_error ? (
                         <div className="album-track-error-callout" role="alert">
                           <span className="error-text">
-                            <strong>Last attempt failed:</strong> {f.last_error}
+                            <strong>Last try failed:</strong> {f.last_error}
                           </span>
-                          {fixLabel && (
-                            <button
-                              type="button"
-                              className="album-error-retry-btn"
-                              disabled={busy}
-                              onClick={() => void handleFixOne(f)}
-                              title="Retry resolving this track"
-                            >
-                              {busy ? '...' : 'Retry'}
-                            </button>
-                          )}
                         </div>
                       ) : null}
                     </div>
