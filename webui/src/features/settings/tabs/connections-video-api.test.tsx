@@ -75,7 +75,8 @@ describe('the video API Configuration', () => {
     const { container } = render(<VideoApiGroup />);
     // each card sits in its wrapper (display: contents), the one thing added
     const copy = container.cloneNode(true) as HTMLElement;
-    for (const wrap of copy.querySelectorAll('[data-svc-wrap]')) wrap.replaceWith(...wrap.childNodes);
+    for (const wrap of copy.querySelectorAll('[data-svc-wrap]'))
+      wrap.replaceWith(...wrap.childNodes);
     expect(shape(copy)).toEqual(shape(vanilla('video-api.vanilla.html')));
   });
 

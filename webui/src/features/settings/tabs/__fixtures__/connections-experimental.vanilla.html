@@ -1,49 +1,107 @@
-                                    <div class="settings-section-header collapsed" data-stg="advanced" data-music-only
-                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
-                                        role="button" tabindex="0" aria-expanded="false">
-                                        <span class="settings-section-arrow">&#9660;</span>
-                                        <h3>Experimental</h3>
-                                        <span class="settings-section-hint">Opt-in preview features</span>
-                                    </div>
-                                    <div class="settings-section-body collapsed" data-stg="advanced" data-music-only>
-                                        <div class="settings-group" data-stg="advanced" data-music-only>
-                                            <p class="settings-experimental-intro">Features in this section are
-                                                optional, may change without notice, and are not held to the same
-                                                support standard as core metadata sources.</p>
-                                            <div class="form-group">
-                                                <div class="setting-row" style="flex:1;min-width:0;">
-                                                    <label
-                                                        style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin:0;">
-                                                        <input type="checkbox" id="experimental-jiosaavn-enabled"
-                                                            onchange="onExperimentalJiosaavnToggle(this)">
-                                                        <span>Enable JioSaavn metadata source</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                </div>
-                                                <div class="setting-help-text setting-help-body" hidden>Exposes JioSaavn
-                                                    as a primary metadata source on the Connections tab and in search.
-                                                    Free, no account — strong for Indian and Bollywood catalogs; limited
-                                                    to 1 request/sec via the public proxy API. Off by default.</div>
-                                            </div>
-                                            <div class="form-group">
-                                                <div class="setting-row" style="flex:1;min-width:0;">
-                                                    <label
-                                                        style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin:0;">
-                                                        <input type="checkbox" id="experimental-bandcamp-enabled"
-                                                            onchange="onExperimentalBandcampToggle(this)">
-                                                        <span>Enable Bandcamp search &amp; enrichment</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0"
-                                                        title="What's this?" onclick="toggleSettingHelp(this)"
-                                                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                </div>
-                                                <div class="setting-help-text setting-help-body" hidden>Adds Bandcamp as
-                                                    a Discover search source and a track/album metadata enrichment
-                                                    source (tags, label, credits). Free, no account — uses Bandcamp's
-                                                    own public search and release-page endpoints (unofficial, no
-                                                    guaranteed uptime or rate limits). Off by default.</div>
-                                            </div>
-                                        </div>
-                                    </div><!-- end Experimental body -->
+<div
+  class="settings-section-header collapsed"
+  data-stg="advanced"
+  data-music-only
+  onclick="
+    this.classList.toggle('collapsed');
+    const b = this.nextElementSibling;
+    b.classList.toggle('collapsed');
+    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
+  "
+  role="button"
+  tabindex="0"
+  aria-expanded="false"
+>
+  <span class="settings-section-arrow">&#9660;</span>
+  <h3>Experimental</h3>
+  <span class="settings-section-hint">Opt-in preview features</span>
+</div>
+<div class="settings-section-body collapsed" data-stg="advanced" data-music-only>
+  <div class="settings-group" data-stg="advanced" data-music-only>
+    <p class="settings-experimental-intro">
+      Features in this section are optional, may change without notice, and are not held to the same
+      support standard as core metadata sources.
+    </p>
+    <div class="form-group">
+      <div class="setting-row" style="flex: 1; min-width: 0">
+        <label
+          style="
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-weight: normal;
+            margin: 0;
+          "
+        >
+          <input
+            type="checkbox"
+            id="experimental-jiosaavn-enabled"
+            onchange="onExperimentalJiosaavnToggle(this)"
+          />
+          <span>Enable JioSaavn metadata source</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+      </div>
+      <div class="setting-help-text setting-help-body" hidden>
+        Exposes JioSaavn as a primary metadata source on the Connections tab and in search. Free, no
+        account — strong for Indian and Bollywood catalogs; limited to 1 request/sec via the public
+        proxy API. Off by default.
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="setting-row" style="flex: 1; min-width: 0">
+        <label
+          style="
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-weight: normal;
+            margin: 0;
+          "
+        >
+          <input
+            type="checkbox"
+            id="experimental-bandcamp-enabled"
+            onchange="onExperimentalBandcampToggle(this)"
+          />
+          <span>Enable Bandcamp search &amp; enrichment</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+      </div>
+      <div class="setting-help-text setting-help-body" hidden>
+        Adds Bandcamp as a Discover search source and a track/album metadata enrichment source
+        (tags, label, credits). Free, no account — uses Bandcamp's own public search and
+        release-page endpoints (unofficial, no guaranteed uptime or rate limits). Off by default.
+      </div>
+    </div>
+  </div>
+</div>
+<!-- end Experimental body -->

@@ -1,278 +1,382 @@
-                                    <!-- VIDEO quality profile — one unified profile across slskd/torrent/usenet -->
-                                    <div class="settings-section-header collapsed" data-stg="quality"
-                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
-                                        role="button" tabindex="0" aria-expanded="false">
-                                        <span class="settings-section-arrow">&#9660;</span>
-                                        <h3>Video Quality</h3>
-                                        <span class="settings-section-hint">Ladder, cutoff, rejects &amp;
-                                            tie-breakers</span>
-                                    </div>
-                                    <div class="settings-section-body collapsed" data-stg="quality">
-                                        <div class="settings-group" data-stg="quality">
-                                            <div class="setting-help-text">
-                                                Profiles apply <strong>per title</strong>: pick one in a title's
-                                                Get or Manual search, or its Manage panel. A title with none uses
-                                                its kind's default below. Quality is read from the release name — pick
-                                                the ladder you'll accept, where to stop upgrading, what to reject
-                                                outright, then the soft tie-breakers.
-                                            </div>
-                                            <div class="form-group"
-                                                style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                                                <select class="library-source-filter-select" data-vq-profile-select
-                                                    title="Which profile you're editing">
-                                                    <option value="0">Default</option>
-                                                </select>
-                                                <input type="text" class="hidden" data-vq-profile-name
-                                                    placeholder="Profile name" style="max-width:180px;">
-                                                <button class="test-button" type="button" data-vq-profile-new
-                                                    title="Duplicate what's on screen as a new named profile">+ New
-                                                    profile</button>
-                                                <button class="test-button hidden" type="button" data-vq-profile-delete
-                                                    style="background:#663333;">Delete</button>
-                                            </div>
-                                            <div class="form-group" data-vq-kind-defaults
-                                                style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
-                                                <label style="display:inline-flex; gap:8px; align-items:center;">
-                                                    <span>New movies use</span>
-                                                    <select class="library-source-filter-select" data-vq-kind-default="movie"
-                                                        title="The profile a movie gets when you haven't picked one for it">
-                                                        <option value="0">Default</option>
-                                                    </select>
-                                                </label>
-                                                <label style="display:inline-flex; gap:8px; align-items:center;">
-                                                    <span>New shows use</span>
-                                                    <select class="library-source-filter-select" data-vq-kind-default="show"
-                                                        title="The profile a show gets when you haven't picked one for it">
-                                                        <option value="0">Default</option>
-                                                    </select>
-                                                </label>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Quality ladder <span class="vq-hint">toggle what
-                                                        you'll accept · rank best&rarr;worst with the arrows</span>
-                                                </div>
-                                                <div class="hybrid-source-list" id="vq-tier-rows"></div>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Upgrade until <span class="vq-hint">once you have
-                                                        this resolution (or better) stop chasing upgrades</span></div>
-                                                <select id="vq-cutoff" class="vq-select">
-                                                    <option value="2160p">4K · 2160p</option>
-                                                    <option value="1080p">1080p</option>
-                                                    <option value="720p">720p</option>
-                                                    <option value="480p">480p (SD)</option>
-                                                    <option value="">Best available — never stop upgrading</option>
-                                                </select>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Never grab <span class="vq-hint">hard rejects
-                                                        &mdash; skipped no matter what else matches</span></div>
-                                                <div class="vq-chips" id="vq-rejects"></div>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Preferences <span class="vq-hint">soft
-                                                        tie-breakers &mdash; they rank candidates, they never reject on
-                                                        their own</span></div>
-                                                <div class="vq-prefs">
-                                                    <div class="vq-pref-row">
-                                                        <span class="vq-pref-name">Codec</span>
-                                                        <div class="vq-seg" id="vq-codec">
-                                                            <button type="button" data-vq-codec="any">Any</button>
-                                                            <button type="button" data-vq-codec="hevc">HEVC /
-                                                                x265</button>
-                                                            <button type="button" data-vq-codec="av1">AV1</button>
-                                                        </div>
-                                                    </div>
-                                                    <div class="vq-pref-row">
-                                                        <span class="vq-pref-name">HDR</span>
-                                                        <div class="vq-seg" id="vq-hdr">
-                                                            <button type="button" data-vq-hdr="off">Don't care</button>
-                                                            <button type="button" data-vq-hdr="prefer">Prefer</button>
-                                                            <button type="button" data-vq-hdr="require">Require</button>
-                                                        </div>
-                                                    </div>
-                                                    <div class="vq-pref-row">
-                                                        <span class="vq-pref-name">Audio</span>
-                                                        <div class="vq-seg" id="vq-audio">
-                                                            <button type="button" data-vq-audio="any">Any</button>
-                                                            <button type="button"
-                                                                data-vq-audio="surround">Surround</button>
-                                                            <button type="button"
-                                                                data-vq-audio="lossless">Lossless</button>
-                                                            <button type="button" data-vq-audio="atmos">Atmos</button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <label class="vq-check" style="margin-top:12px;">
-                                                    <input type="checkbox" id="vq-prefer-repack">
-                                                    <span class="vq-check-box"></span>
-                                                    <span>Prefer REPACK / PROPER re-releases</span>
-                                                </label>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Audio language <span class="vq-hint">for
-                                                        dubbed or MULTI releases. a release with no language tag is
-                                                        the original audio</span></div>
-                                                <div class="vq-seg" id="vq-lang-mode">
-                                                    <button type="button" data-vq-lang-mode="off">Don't care</button>
-                                                    <button type="button" data-vq-lang-mode="prefer">Prefer</button>
-                                                    <button type="button" data-vq-lang-mode="require">Require</button>
-                                                </div>
-                                                <div class="vq-chips" id="vq-langs" style="margin-top:10px;" hidden></div>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Save to <span class="vq-hint">which library
-                                                        new titles on this profile are filed in. the 4K library is
-                                                        used once its folder is switched on in Settings &gt; Folders,
-                                                        until then they go to the main one. titles you already have
-                                                        stay put</span></div>
-                                                <div class="vq-seg" id="vq-library">
-                                                    <button type="button" data-vq-library="main">Main library</button>
-                                                    <button type="button" data-vq-library="4k">4K library</button>
-                                                </div>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Max size <span class="vq-hint">skip anything
-                                                        bigger — set per type so a movie and an episode aren't judged
-                                                        the same</span></div>
-                                                <div class="vq-grid">
-                                                    <div class="vq-block" style="margin:0;">
-                                                        <div class="vq-label">Movie <span class="vq-hint"
-                                                                id="vq-movie-label">No limit</span></div>
-                                                        <input type="range" id="vq-movie-size" class="vq-slider" min="0"
-                                                            max="200" step="1" value="0">
-                                                    </div>
-                                                    <div class="vq-block" style="margin:0;">
-                                                        <div class="vq-label">TV episode <span class="vq-hint"
-                                                                id="vq-episode-label">No limit</span></div>
-                                                        <input type="range" id="vq-episode-size" class="vq-slider"
-                                                            min="0" max="200" step="1" value="0">
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Preferred size <span class="vq-hint">a
-                                                        tie-break only: among releases equal on quality and custom
-                                                        formats, the one closest to this size ranks first. off at 0,
-                                                        never past the max size</span></div>
-                                                <div class="vq-grid">
-                                                    <div class="vq-block" style="margin:0;">
-                                                        <div class="vq-label">Movie <span class="vq-hint"
-                                                                id="vq-movie-pref-label">Off</span></div>
-                                                        <input type="range" id="vq-movie-pref" class="vq-slider" min="0"
-                                                            max="100" step="0.5" value="0">
-                                                    </div>
-                                                    <div class="vq-block" style="margin:0;">
-                                                        <div class="vq-label">TV episode <span class="vq-hint"
-                                                                id="vq-episode-pref-label">Off</span></div>
-                                                        <input type="range" id="vq-episode-pref" class="vq-slider"
-                                                            min="0" max="10" step="0.1" value="0">
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Minimum seeders <span class="vq-hint"
-                                                        id="vq-seeders-label">At least 1 seeder</span></div>
-                                                <input type="range" id="vq-min-seeders" class="vq-slider" min="0"
-                                                    max="100" step="1" value="1">
-                                                <div class="setting-help-text">
-                                                    A torrent nobody is seeding never finishes — it parks on
-                                                    "downloading metadata" or stalls at 0% and quietly fills your client
-                                                    with dead entries.
-                                                    Set 0 to grab regardless. Usenet and Soulseek have no seeders and
-                                                    are never affected.
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <!-- Custom Formats (arr-parity P3): scored release-name matchers -->
-                                        <div class="settings-group" data-stg="quality">
-                                            <h3>Custom Formats</h3>
-                                            <div class="setting-help-text">
-                                                Score releases by their <strong>name</strong> — prefer trusted groups,
-                                                bury x265, chase freeleech, anything a pattern can see.
-                                                Terms are plain substrings, or regex written <code>/x265|hevc/</code>. A
-                                                format matches when <em>all</em> "match" terms hit and <em>no</em>
-                                                "never" term does;
-                                                matching formats add their score to a release's rank (negative buries
-                                                without rejecting).
-                                                The "this profile" column overrides a format's score for the profile
-                                                selected above.
-                                            </div>
-                                            <div id="vq-format-rows"></div>
-                                            <button class="test-button" type="button" data-vq-format-add>+ Add
-                                                format</button>
-                                            <div class="form-group" style="margin-top:10px;">
-                                                <label>Minimum format score (this profile):</label>
-                                                <input type="number" id="vq-min-format-score" style="max-width:120px;"
-                                                    value="0">
-                                                <small class="settings-hint">Releases whose summed format score falls
-                                                    below this are rejected outright. 0 = off.</small>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <!-- VIDEO youtube quality — separate, smaller yt-dlp profile -->
-                                    <div class="settings-section-header collapsed" data-stg="quality"
-                                        onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''"
-                                        role="button" tabindex="0" aria-expanded="false">
-                                        <span class="settings-section-arrow">&#9660;</span>
-                                        <h3>YouTube Quality</h3>
-                                        <span class="settings-section-hint">Resolution ceiling, codec &amp; container
-                                            for followed channels</span>
-                                    </div>
-                                    <div class="settings-section-body collapsed" data-stg="quality">
-                                        <div class="settings-group" data-stg="quality">
-                                            <div class="setting-help-text">
-                                                A separate, simpler profile for the channels you follow — YouTube is
-                                                grabbed with yt-dlp, so it's just a resolution ceiling, a codec
-                                                preference and a container.
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Max resolution <span class="vq-hint">the most
-                                                        yt-dlp will grab &mdash; it steps down to the next available
-                                                        below this</span></div>
-                                                <select id="yq-resolution" class="vq-select">
-                                                    <option value="best">Best available</option>
-                                                    <option value="4320p">8K · 4320p</option>
-                                                    <option value="2160p">4K · 2160p</option>
-                                                    <option value="1440p">1440p</option>
-                                                    <option value="1080p">1080p</option>
-                                                    <option value="720p">720p</option>
-                                                    <option value="480p">480p</option>
-                                                    <option value="360p">360p</option>
-                                                </select>
-                                            </div>
-                                            <div class="vq-block">
-                                                <div class="vq-label">Preferences <span class="vq-hint">codec is a soft
-                                                        preference; container is the final muxed file</span></div>
-                                                <div class="vq-prefs">
-                                                    <div class="vq-pref-row">
-                                                        <span class="vq-pref-name">Codec</span>
-                                                        <div class="vq-seg" id="yq-codec">
-                                                            <button type="button" data-yq-codec="any">Best</button>
-                                                            <button type="button" data-yq-codec="av1">AV1</button>
-                                                            <button type="button" data-yq-codec="vp9">VP9</button>
-                                                            <button type="button" data-yq-codec="h264">H.264</button>
-                                                        </div>
-                                                    </div>
-                                                    <div class="vq-pref-row">
-                                                        <span class="vq-pref-name">Container</span>
-                                                        <div class="vq-seg" id="yq-container">
-                                                            <button type="button" data-yq-container="mp4">MP4</button>
-                                                            <button type="button" data-yq-container="mkv">MKV</button>
-                                                            <button type="button" data-yq-container="webm">WebM</button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <label class="vq-check" style="margin-top:12px;">
-                                                    <input type="checkbox" id="yq-60fps">
-                                                    <span class="vq-check-box"></span>
-                                                    <span>Prefer 60fps when available</span>
-                                                </label>
-                                                <label class="vq-check" style="margin-top:10px;">
-                                                    <input type="checkbox" id="yq-hdr">
-                                                    <span class="vq-check-box"></span>
-                                                    <span>Allow HDR (off = always grab SDR)</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                    </div>
+<!-- VIDEO quality profile — one unified profile across slskd/torrent/usenet -->
+<div
+  class="settings-section-header collapsed"
+  data-stg="quality"
+  onclick="
+    this.classList.toggle('collapsed');
+    const b = this.nextElementSibling;
+    b.classList.toggle('collapsed');
+    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
+  "
+  role="button"
+  tabindex="0"
+  aria-expanded="false"
+>
+  <span class="settings-section-arrow">&#9660;</span>
+  <h3>Video Quality</h3>
+  <span class="settings-section-hint">Ladder, cutoff, rejects &amp; tie-breakers</span>
+</div>
+<div class="settings-section-body collapsed" data-stg="quality">
+  <div class="settings-group" data-stg="quality">
+    <div class="setting-help-text">
+      Profiles apply <strong>per title</strong>: pick one in a title's Get or Manual search, or its
+      Manage panel. A title with none uses its kind's default below. Quality is read from the
+      release name — pick the ladder you'll accept, where to stop upgrading, what to reject
+      outright, then the soft tie-breakers.
+    </div>
+    <div class="form-group" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+      <select
+        class="library-source-filter-select"
+        data-vq-profile-select
+        title="Which profile you're editing"
+      >
+        <option value="0">Default</option>
+      </select>
+      <input
+        type="text"
+        class="hidden"
+        data-vq-profile-name
+        placeholder="Profile name"
+        style="max-width: 180px"
+      />
+      <button
+        class="test-button"
+        type="button"
+        data-vq-profile-new
+        title="Duplicate what's on screen as a new named profile"
+      >
+        + New profile
+      </button>
+      <button
+        class="test-button hidden"
+        type="button"
+        data-vq-profile-delete
+        style="background: #663333"
+      >
+        Delete
+      </button>
+    </div>
+    <div
+      class="form-group"
+      data-vq-kind-defaults
+      style="display: flex; gap: 14px; align-items: center; flex-wrap: wrap"
+    >
+      <label style="display: inline-flex; gap: 8px; align-items: center">
+        <span>New movies use</span>
+        <select
+          class="library-source-filter-select"
+          data-vq-kind-default="movie"
+          title="The profile a movie gets when you haven't picked one for it"
+        >
+          <option value="0">Default</option>
+        </select>
+      </label>
+      <label style="display: inline-flex; gap: 8px; align-items: center">
+        <span>New shows use</span>
+        <select
+          class="library-source-filter-select"
+          data-vq-kind-default="show"
+          title="The profile a show gets when you haven't picked one for it"
+        >
+          <option value="0">Default</option>
+        </select>
+      </label>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Quality ladder
+        <span class="vq-hint"
+          >toggle what you'll accept · rank best&rarr;worst with the arrows</span
+        >
+      </div>
+      <div class="hybrid-source-list" id="vq-tier-rows"></div>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Upgrade until
+        <span class="vq-hint">once you have this resolution (or better) stop chasing upgrades</span>
+      </div>
+      <select id="vq-cutoff" class="vq-select">
+        <option value="2160p">4K · 2160p</option>
+        <option value="1080p">1080p</option>
+        <option value="720p">720p</option>
+        <option value="480p">480p (SD)</option>
+        <option value="">Best available — never stop upgrading</option>
+      </select>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Never grab
+        <span class="vq-hint">hard rejects &mdash; skipped no matter what else matches</span>
+      </div>
+      <div class="vq-chips" id="vq-rejects"></div>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Preferences
+        <span class="vq-hint"
+          >soft tie-breakers &mdash; they rank candidates, they never reject on their own</span
+        >
+      </div>
+      <div class="vq-prefs">
+        <div class="vq-pref-row">
+          <span class="vq-pref-name">Codec</span>
+          <div class="vq-seg" id="vq-codec">
+            <button type="button" data-vq-codec="any">Any</button>
+            <button type="button" data-vq-codec="hevc">HEVC / x265</button>
+            <button type="button" data-vq-codec="av1">AV1</button>
+          </div>
+        </div>
+        <div class="vq-pref-row">
+          <span class="vq-pref-name">HDR</span>
+          <div class="vq-seg" id="vq-hdr">
+            <button type="button" data-vq-hdr="off">Don't care</button>
+            <button type="button" data-vq-hdr="prefer">Prefer</button>
+            <button type="button" data-vq-hdr="require">Require</button>
+          </div>
+        </div>
+        <div class="vq-pref-row">
+          <span class="vq-pref-name">Audio</span>
+          <div class="vq-seg" id="vq-audio">
+            <button type="button" data-vq-audio="any">Any</button>
+            <button type="button" data-vq-audio="surround">Surround</button>
+            <button type="button" data-vq-audio="lossless">Lossless</button>
+            <button type="button" data-vq-audio="atmos">Atmos</button>
+          </div>
+        </div>
+      </div>
+      <label class="vq-check" style="margin-top: 12px">
+        <input type="checkbox" id="vq-prefer-repack" />
+        <span class="vq-check-box"></span>
+        <span>Prefer REPACK / PROPER re-releases</span>
+      </label>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Audio language
+        <span class="vq-hint"
+          >for dubbed or MULTI releases. a release with no language tag is the original audio</span
+        >
+      </div>
+      <div class="vq-seg" id="vq-lang-mode">
+        <button type="button" data-vq-lang-mode="off">Don't care</button>
+        <button type="button" data-vq-lang-mode="prefer">Prefer</button>
+        <button type="button" data-vq-lang-mode="require">Require</button>
+      </div>
+      <div class="vq-chips" id="vq-langs" style="margin-top: 10px" hidden></div>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Save to
+        <span class="vq-hint"
+          >which library new titles on this profile are filed in. the 4K library is used once its
+          folder is switched on in Settings &gt; Folders, until then they go to the main one. titles
+          you already have stay put</span
+        >
+      </div>
+      <div class="vq-seg" id="vq-library">
+        <button type="button" data-vq-library="main">Main library</button>
+        <button type="button" data-vq-library="4k">4K library</button>
+      </div>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Max size
+        <span class="vq-hint"
+          >skip anything bigger — set per type so a movie and an episode aren't judged the
+          same</span
+        >
+      </div>
+      <div class="vq-grid">
+        <div class="vq-block" style="margin: 0">
+          <div class="vq-label">
+            Movie <span class="vq-hint" id="vq-movie-label">No limit</span>
+          </div>
+          <input
+            type="range"
+            id="vq-movie-size"
+            class="vq-slider"
+            min="0"
+            max="200"
+            step="1"
+            value="0"
+          />
+        </div>
+        <div class="vq-block" style="margin: 0">
+          <div class="vq-label">
+            TV episode <span class="vq-hint" id="vq-episode-label">No limit</span>
+          </div>
+          <input
+            type="range"
+            id="vq-episode-size"
+            class="vq-slider"
+            min="0"
+            max="200"
+            step="1"
+            value="0"
+          />
+        </div>
+      </div>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Preferred size
+        <span class="vq-hint"
+          >a tie-break only: among releases equal on quality and custom formats, the one closest to
+          this size ranks first. off at 0, never past the max size</span
+        >
+      </div>
+      <div class="vq-grid">
+        <div class="vq-block" style="margin: 0">
+          <div class="vq-label">
+            Movie <span class="vq-hint" id="vq-movie-pref-label">Off</span>
+          </div>
+          <input
+            type="range"
+            id="vq-movie-pref"
+            class="vq-slider"
+            min="0"
+            max="100"
+            step="0.5"
+            value="0"
+          />
+        </div>
+        <div class="vq-block" style="margin: 0">
+          <div class="vq-label">
+            TV episode <span class="vq-hint" id="vq-episode-pref-label">Off</span>
+          </div>
+          <input
+            type="range"
+            id="vq-episode-pref"
+            class="vq-slider"
+            min="0"
+            max="10"
+            step="0.1"
+            value="0"
+          />
+        </div>
+      </div>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Minimum seeders <span class="vq-hint" id="vq-seeders-label">At least 1 seeder</span>
+      </div>
+      <input
+        type="range"
+        id="vq-min-seeders"
+        class="vq-slider"
+        min="0"
+        max="100"
+        step="1"
+        value="1"
+      />
+      <div class="setting-help-text">
+        A torrent nobody is seeding never finishes — it parks on "downloading metadata" or stalls at
+        0% and quietly fills your client with dead entries. Set 0 to grab regardless. Usenet and
+        Soulseek have no seeders and are never affected.
+      </div>
+    </div>
+  </div>
+  <!-- Custom Formats (arr-parity P3): scored release-name matchers -->
+  <div class="settings-group" data-stg="quality">
+    <h3>Custom Formats</h3>
+    <div class="setting-help-text">
+      Score releases by their <strong>name</strong> — prefer trusted groups, bury x265, chase
+      freeleech, anything a pattern can see. Terms are plain substrings, or regex written
+      <code>/x265|hevc/</code>. A format matches when <em>all</em> "match" terms hit and <em>no</em>
+      "never" term does; matching formats add their score to a release's rank (negative buries
+      without rejecting). The "this profile" column overrides a format's score for the profile
+      selected above.
+    </div>
+    <div id="vq-format-rows"></div>
+    <button class="test-button" type="button" data-vq-format-add>+ Add format</button>
+    <div class="form-group" style="margin-top: 10px">
+      <label>Minimum format score (this profile):</label>
+      <input type="number" id="vq-min-format-score" style="max-width: 120px" value="0" />
+      <small class="settings-hint"
+        >Releases whose summed format score falls below this are rejected outright. 0 = off.</small
+      >
+    </div>
+  </div>
+</div>
+<!-- VIDEO youtube quality — separate, smaller yt-dlp profile -->
+<div
+  class="settings-section-header collapsed"
+  data-stg="quality"
+  onclick="
+    this.classList.toggle('collapsed');
+    const b = this.nextElementSibling;
+    b.classList.toggle('collapsed');
+    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
+  "
+  role="button"
+  tabindex="0"
+  aria-expanded="false"
+>
+  <span class="settings-section-arrow">&#9660;</span>
+  <h3>YouTube Quality</h3>
+  <span class="settings-section-hint"
+    >Resolution ceiling, codec &amp; container for followed channels</span
+  >
+</div>
+<div class="settings-section-body collapsed" data-stg="quality">
+  <div class="settings-group" data-stg="quality">
+    <div class="setting-help-text">
+      A separate, simpler profile for the channels you follow — YouTube is grabbed with yt-dlp, so
+      it's just a resolution ceiling, a codec preference and a container.
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Max resolution
+        <span class="vq-hint"
+          >the most yt-dlp will grab &mdash; it steps down to the next available below this</span
+        >
+      </div>
+      <select id="yq-resolution" class="vq-select">
+        <option value="best">Best available</option>
+        <option value="4320p">8K · 4320p</option>
+        <option value="2160p">4K · 2160p</option>
+        <option value="1440p">1440p</option>
+        <option value="1080p">1080p</option>
+        <option value="720p">720p</option>
+        <option value="480p">480p</option>
+        <option value="360p">360p</option>
+      </select>
+    </div>
+    <div class="vq-block">
+      <div class="vq-label">
+        Preferences
+        <span class="vq-hint">codec is a soft preference; container is the final muxed file</span>
+      </div>
+      <div class="vq-prefs">
+        <div class="vq-pref-row">
+          <span class="vq-pref-name">Codec</span>
+          <div class="vq-seg" id="yq-codec">
+            <button type="button" data-yq-codec="any">Best</button>
+            <button type="button" data-yq-codec="av1">AV1</button>
+            <button type="button" data-yq-codec="vp9">VP9</button>
+            <button type="button" data-yq-codec="h264">H.264</button>
+          </div>
+        </div>
+        <div class="vq-pref-row">
+          <span class="vq-pref-name">Container</span>
+          <div class="vq-seg" id="yq-container">
+            <button type="button" data-yq-container="mp4">MP4</button>
+            <button type="button" data-yq-container="mkv">MKV</button>
+            <button type="button" data-yq-container="webm">WebM</button>
+          </div>
+        </div>
+      </div>
+      <label class="vq-check" style="margin-top: 12px">
+        <input type="checkbox" id="yq-60fps" />
+        <span class="vq-check-box"></span>
+        <span>Prefer 60fps when available</span>
+      </label>
+      <label class="vq-check" style="margin-top: 10px">
+        <input type="checkbox" id="yq-hdr" />
+        <span class="vq-check-box"></span>
+        <span>Allow HDR (off = always grab SDR)</span>
+      </label>
+    </div>
+  </div>
+</div>

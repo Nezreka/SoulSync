@@ -1,1197 +1,1935 @@
-<div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''" role="button" tabindex="0" aria-expanded="false">
-                                        <span class="settings-section-arrow">▼</span>
-                                        <h3>Organization</h3>
-                                        <span class="settings-section-hint">Naming, layout and file handling</span>
-                                    </div>
-                                    <div class="settings-section-body collapsed stg-media-card" data-stg="library">
-                                        <div class="stg-media-switcher" role="tablist" aria-label="Organization media type">
-                                            <button type="button" id="organization-music-tab" role="tab" aria-selected="true" aria-controls="organization-music-panel" tabindex="0" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Music</button>
-                                            <button type="button" id="organization-audiobooks-tab" role="tab" aria-selected="false" aria-controls="organization-audiobooks-panel" tabindex="-1" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Audiobooks</button>
-                                            <button type="button" id="organization-podcasts-tab" role="tab" aria-selected="false" aria-controls="organization-podcasts-panel" tabindex="-1" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Podcasts</button>
-                                            <button type="button" id="organization-video-tab" role="tab" aria-selected="false" aria-controls="organization-video-panel" tabindex="-1" onclick="switchLibraryMediaTab(this)" onkeydown="handleLibraryMediaTabKey(event)">Video</button>
-                                        </div>
-                                        <div id="organization-music-panel" role="tabpanel" aria-labelledby="organization-music-tab" class="stg-media-panel" tabindex="0">
-                                            <div class="stg-media-context"><strong>Music organization</strong><span class="stg-media-summary" data-stg-summary="library-music-org" data-stg-fallback="File naming templates &amp; reorganize">File
-                                                    naming templates &amp; reorganize</span></div>
+<div
+  class="settings-section-header collapsed"
+  data-stg="library"
+  onclick="
+    this.classList.toggle('collapsed');
+    const b = this.nextElementSibling;
+    b.classList.toggle('collapsed');
+    b.style.display = b.classList.contains('collapsed') ? 'none' : '';
+  "
+  role="button"
+  tabindex="0"
+  aria-expanded="false"
+>
+  <span class="settings-section-arrow">▼</span>
+  <h3>Organization</h3>
+  <span class="settings-section-hint">Naming, layout and file handling</span>
+</div>
+<div class="settings-section-body collapsed stg-media-card" data-stg="library">
+  <div class="stg-media-switcher" role="tablist" aria-label="Organization media type">
+    <button
+      type="button"
+      id="organization-music-tab"
+      role="tab"
+      aria-selected="true"
+      aria-controls="organization-music-panel"
+      tabindex="0"
+      onclick="switchLibraryMediaTab(this)"
+      onkeydown="handleLibraryMediaTabKey(event)"
+    >
+      Music
+    </button>
+    <button
+      type="button"
+      id="organization-audiobooks-tab"
+      role="tab"
+      aria-selected="false"
+      aria-controls="organization-audiobooks-panel"
+      tabindex="-1"
+      onclick="switchLibraryMediaTab(this)"
+      onkeydown="handleLibraryMediaTabKey(event)"
+    >
+      Audiobooks
+    </button>
+    <button
+      type="button"
+      id="organization-podcasts-tab"
+      role="tab"
+      aria-selected="false"
+      aria-controls="organization-podcasts-panel"
+      tabindex="-1"
+      onclick="switchLibraryMediaTab(this)"
+      onkeydown="handleLibraryMediaTabKey(event)"
+    >
+      Podcasts
+    </button>
+    <button
+      type="button"
+      id="organization-video-tab"
+      role="tab"
+      aria-selected="false"
+      aria-controls="organization-video-panel"
+      tabindex="-1"
+      onclick="switchLibraryMediaTab(this)"
+      onkeydown="handleLibraryMediaTabKey(event)"
+    >
+      Video
+    </button>
+  </div>
+  <div
+    id="organization-music-panel"
+    role="tabpanel"
+    aria-labelledby="organization-music-tab"
+    class="stg-media-panel"
+    tabindex="0"
+  >
+    <div class="stg-media-context">
+      <strong>Music organization</strong
+      ><span
+        class="stg-media-summary"
+        data-stg-summary="library-music-org"
+        data-stg-fallback="File naming templates &amp; reorganize"
+        >File naming templates &amp; reorganize</span
+      >
+    </div>
 
-                                            <div class="settings-group" data-stg="library">
-                                                <h3>File Organization</h3>
+    <div class="settings-group" data-stg="library">
+      <h3>File Organization</h3>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="file-organization-enabled" checked="">
-                                                        Enable custom file organization templates
-                                                    </label>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="file-organization-enabled" checked="" />
+          Enable custom file organization templates
+        </label>
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="auto-disambiguation" checked="">
-                                                        Automatically add disambiguation to folder and filenames
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">When a
-                                                        release carries a MusicBrainz disambiguation (edition note)
-                                                        and your template doesn't place
-                                                        <code>$disambiguation</code> itself, it is added to the
-                                                        album folder automatically. When a recording carries its own
-                                                        disambiguation (version note, like “acoustic”)
-                                                        and your template doesn't place
-                                                        <code>$track_disambiguation</code> itself, it is added to the
-                                                        track filename automatically. This keeps same-named releases
-                                                        and same-titled recordings apart — turn it off and your template is
-                                                        respected exactly as written.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="auto-disambiguation" checked="" />
+          Automatically add disambiguation to folder and filenames
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >When a release carries a MusicBrainz disambiguation (edition note) and your template
+          doesn't place <code>$disambiguation</code> itself, it is added to the album folder
+          automatically. When a recording carries its own disambiguation (version note, like
+          “acoustic”) and your template doesn't place <code>$track_disambiguation</code> itself, it
+          is added to the track filename automatically. This keeps same-named releases and
+          same-titled recordings apart — turn it off and your template is respected exactly as
+          written.</small
+        >
+      </div>
 
-                                                <div id="path-preview-scenarios" class="path-preview-scenarios" role="radiogroup" aria-label="Example release your templates are filled in with"><span class="path-preview-scenarios-label">Your templates, filled in with an example release:</span><button type="button" data-scenario="standard" role="radio">Standard</button><button type="button" data-scenario="explicit" role="radio">Explicit</button><button type="button" data-scenario="multidisc" role="radio">Multi-disc</button><button type="button" data-scenario="samename" role="radio">Shared artist name</button></div><div class="form-group">
-                                                    <label>Album Path Template:</label>
-                                                    <input type="text" id="template-album-path" placeholder="$albumartist/$albumartist - $album/$track - $title"><div class="path-preview" aria-live="polite"></div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Variables:
-                                                        <code>$albumartist</code>, <code>$artist</code>,
-                                                        <code>$artistletter</code>, <code>$albumartistletter</code>,
-                                                        <code>$album</code>,
-                                                        <code>$albumtype</code>, <code>$title</code>,
-                                                        <code>$track</code>, <code>$disc</code> (01),
-                                                        <code>$discnum</code> (1), <code>$cdnum</code> (CD01):
-                                                        these three only appear on a multi-disc album, so a
-                                                        single-disc album isn't stamped 01- on every file.
-                                                        <code>$discalways</code> (01) and
-                                                        <code>$discnumalways</code> (1) appear on every album,
-                                                        <code>$year</code>, <code>$quality</code> (filename only),
-                                                        <code>$disambiguation</code> (the release's edition note, like
-                                                        “baby punk version”; added to the album folder
-                                                        automatically when your template leaves it out, unless
-                                                        “Automatically add disambiguation”
-                                                        above is turned off),
-                                                        <code>$track_disambiguation</code> (the recording's version
-                                                        note, like “acoustic”; added to the filename
-                                                        automatically when your template leaves it out, unless the
-                                                        same toggle above is turned off),
-                                                        <code>$explicit</code> ([E] on explicit tracks, nothing
-                                                        otherwise), <code>$contentrating</code> ([E] or [C]) and
-                                                        <code>$contentratingfull</code> ([Explicit] or [Clean]); these
-                                                        stay empty when the source doesn't say, and in a folder they
-                                                        follow the album, not the track.
-                                                        To tell same-named artists apart:
-                                                        <code>$albumartistdisambiguation</code> (MusicBrainz's note,
-                                                        like “US grunge band”),
-                                                        <code>$albumartistcountry</code> (US, GB, JM),
-                                                        <code>$albumartistgenre</code>,
-                                                        <code>$albumartistinfo</code> (the first of those three the
-                                                        artist has), <code>$albumartistcomposite</code> (the note, else
-                                                        country and genre together, like “US Rock”) and
-                                                        <code>$albumartistclash</code> (the same as info, but
-                                                        only when another artist in your library shares the name, so
-                                                        <code>$albumartist ($albumartistclash)</code> keeps unique
-                                                        artists plain). The <code>$artist</code> versions
-                                                        (<code>$artistinfo</code> and so on) describe the track
-                                                        artist. They come from enrichment, so an artist that hasn't
-                                                        been matched to MusicBrainz yet renders nothing. The
-                                                        three disc variables work in a folder segment as well as in the
-                                                        filename and are empty on a single-disc album, so
-                                                        <code>$albumartist/$album/Disc $discnum/$track - $title</code>
-                                                        gives you a disc folder only where there is more than one disc.
-                                                        Put any of them in the template and it replaces the automatic
-                                                        disc folder from “Multi-Disc Folder Label” below.
-                                                        Use <code>${var}</code> to append text:
-                                                        <code>${albumtype}s</code> → Albums</small>
-                                                </div>
+      <div
+        id="path-preview-scenarios"
+        class="path-preview-scenarios"
+        role="radiogroup"
+        aria-label="Example release your templates are filled in with"
+      >
+        <span class="path-preview-scenarios-label"
+          >Your templates, filled in with an example release:</span
+        ><button type="button" data-scenario="standard" role="radio">Standard</button
+        ><button type="button" data-scenario="explicit" role="radio">Explicit</button
+        ><button type="button" data-scenario="multidisc" role="radio">Multi-disc</button
+        ><button type="button" data-scenario="samename" role="radio">Shared artist name</button>
+      </div>
+      <div class="form-group">
+        <label>Album Path Template:</label>
+        <input
+          type="text"
+          id="template-album-path"
+          placeholder="$albumartist/$albumartist - $album/$track - $title"
+        />
+        <div class="path-preview" aria-live="polite"></div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Variables: <code>$albumartist</code>, <code>$artist</code>, <code>$artistletter</code>,
+          <code>$albumartistletter</code>, <code>$album</code>, <code>$albumtype</code>,
+          <code>$title</code>, <code>$track</code>, <code>$disc</code> (01),
+          <code>$discnum</code> (1), <code>$cdnum</code> (CD01): these three only appear on a
+          multi-disc album, so a single-disc album isn't stamped 01- on every file.
+          <code>$discalways</code> (01) and <code>$discnumalways</code> (1) appear on every album,
+          <code>$year</code>, <code>$quality</code> (filename only),
+          <code>$disambiguation</code> (the release's edition note, like “baby punk version”; added
+          to the album folder automatically when your template leaves it out, unless “Automatically
+          add disambiguation” above is turned off), <code>$track_disambiguation</code> (the
+          recording's version note, like “acoustic”; added to the filename automatically when your
+          template leaves it out, unless the same toggle above is turned off),
+          <code>$explicit</code> ([E] on explicit tracks, nothing otherwise),
+          <code>$contentrating</code> ([E] or [C]) and <code>$contentratingfull</code> ([Explicit]
+          or [Clean]); these stay empty when the source doesn't say, and in a folder they follow the
+          album, not the track. To tell same-named artists apart:
+          <code>$albumartistdisambiguation</code> (MusicBrainz's note, like “US grunge band”),
+          <code>$albumartistcountry</code> (US, GB, JM), <code>$albumartistgenre</code>,
+          <code>$albumartistinfo</code> (the first of those three the artist has),
+          <code>$albumartistcomposite</code> (the note, else country and genre together, like “US
+          Rock”) and <code>$albumartistclash</code> (the same as info, but only when another artist
+          in your library shares the name, so <code>$albumartist ($albumartistclash)</code> keeps
+          unique artists plain). The <code>$artist</code> versions (<code>$artistinfo</code> and so
+          on) describe the track artist. They come from enrichment, so an artist that hasn't been
+          matched to MusicBrainz yet renders nothing. The three disc variables work in a folder
+          segment as well as in the filename and are empty on a single-disc album, so
+          <code>$albumartist/$album/Disc $discnum/$track - $title</code>
+          gives you a disc folder only where there is more than one disc. Put any of them in the
+          template and it replaces the automatic disc folder from “Multi-Disc Folder Label” below.
+          Use <code>${var}</code> to append text: <code>${albumtype}s</code> → Albums</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>
-                                                        <input type="checkbox" id="detect-multi-artist-compilations" checked="">
-                                                        Detect multi-artist compilations
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">A soundtrack
-                                                        or compilation is filed as a compilation
-                                                        instead of whichever contributor happened to be downloading
-                                                        — without this, one guitarist featured on 45 soundtracks
-                                                        collects all 45 albums. Compilations are filed with the
-                                                        Compilation Path Template below, not the album one. Each track
-                                                        still credits the artist who actually recorded it. A release
-                                                        counts as a compilation when it
-                                                        is credited to Various Artists, when the metadata source types
-                                                        it one, or — when reorganizing, where the whole tracklist
-                                                        is known — when three or more tracks have different
-                                                        artists and none of them owns more than half the album. A
-                                                        soundtrack credited to a single composer is left with that
-                                                        composer. Also governs whether reorganize gives compilations
-                                                        their own folder layout.</small>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label>Compilation Path Template:</label>
-                                                    <input type="text" id="template-compilation-path" placeholder="Compilations/$album/$track - $artist - $title"><div class="path-preview" aria-live="polite"></div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Used instead
-                                                        of the album template for soundtracks and compilations (see
-                                                        “Detect multi-artist compilations” above).
-                                                        Same variables as the album template; <code>$albumartist</code>
-                                                        is the release's credit (often Various Artists) and
-                                                        <code>$artist</code> is whoever recorded the track. To file
-                                                        compilations exactly like albums, give it the same template
-                                                        as the album one.</small>
-                                                </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="detect-multi-artist-compilations" checked="" />
+          Detect multi-artist compilations
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >A soundtrack or compilation is filed as a compilation instead of whichever contributor
+          happened to be downloading — without this, one guitarist featured on 45 soundtracks
+          collects all 45 albums. Compilations are filed with the Compilation Path Template below,
+          not the album one. Each track still credits the artist who actually recorded it. A release
+          counts as a compilation when it is credited to Various Artists, when the metadata source
+          types it one, or — when reorganizing, where the whole tracklist is known — when three or
+          more tracks have different artists and none of them owns more than half the album. A
+          soundtrack credited to a single composer is left with that composer. Also governs whether
+          reorganize gives compilations their own folder layout.</small
+        >
+      </div>
+      <div class="form-group">
+        <label>Compilation Path Template:</label>
+        <input
+          type="text"
+          id="template-compilation-path"
+          placeholder="Compilations/$album/$track - $artist - $title"
+        />
+        <div class="path-preview" aria-live="polite"></div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Used instead of the album template for soundtracks and compilations (see “Detect
+          multi-artist compilations” above). Same variables as the album template;
+          <code>$albumartist</code>
+          is the release's credit (often Various Artists) and
+          <code>$artist</code> is whoever recorded the track. To file compilations exactly like
+          albums, give it the same template as the album one.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Single Path Template:</label>
-                                                    <input type="text" id="template-single-path" placeholder="$albumartist/$albumartist - $title/$title"><div class="path-preview" aria-live="polite"></div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Variables:
-                                                        <code>$albumartist</code>, <code>$artist</code>,
-                                                        <code>$artistletter</code>, <code>$albumartistletter</code>,
-                                                        <code>$title</code>,
-                                                        <code>$track</code> (01), <code>$album</code>,
-                                                        <code>$albumtype</code>, <code>$year</code>,
-                                                        <code>$quality</code> (filename only). Use <code>${var}</code>
-                                                        to append text: <code>${albumtype}s</code> → Singles</small>
-                                                </div>
+      <div class="form-group">
+        <label>Single Path Template:</label>
+        <input
+          type="text"
+          id="template-single-path"
+          placeholder="$albumartist/$albumartist - $title/$title"
+        />
+        <div class="path-preview" aria-live="polite"></div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Variables: <code>$albumartist</code>, <code>$artist</code>, <code>$artistletter</code>,
+          <code>$albumartistletter</code>, <code>$title</code>, <code>$track</code> (01),
+          <code>$album</code>, <code>$albumtype</code>, <code>$year</code>,
+          <code>$quality</code> (filename only). Use <code>${var}</code> to append text:
+          <code>${albumtype}s</code> → Singles</small
+        >
+      </div>
 
-                                                <!-- Playlist Path Template: hidden from the UI. Playlists now import
+      <!-- Playlist Path Template: hidden from the UI. Playlists now import
                                      normally into Artist/Album and the Playlists/ folder is a symlink
                                      view that mirrors the real library filename, so this template no
                                      longer drives playlist-file naming. Kept in the DOM (display:none)
                                      so settings load/save still round-trips the stored value.
                                      hidden, not style="display: none": the media card's
                                      display:block !important beat the inline style. -->
-                                                <div class="form-group" hidden="">
-                                                    <label>Playlist Path Template:</label>
-                                                    <input type="text" id="template-playlist-path" placeholder="$playlist/$artist - $title">
-                                                    <small class="settings-hint">Variables: $playlist, $albumartist,
-                                                        $artist, $artistletter, $title, $year, $quality (filename only).
-                                                        Use ${var} to append text</small>
-                                                </div>
+      <div class="form-group" hidden="">
+        <label>Playlist Path Template:</label>
+        <input type="text" id="template-playlist-path" placeholder="$playlist/$artist - $title" />
+        <small class="settings-hint"
+          >Variables: $playlist, $albumartist, $artist, $artistletter, $title, $year, $quality
+          (filename only). Use ${var} to append text</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Playlist File Naming:</label>
-                                                    <input type="text" id="template-playlist-item" placeholder="Leave empty to keep the library filename"><div class="path-preview" aria-live="polite"></div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Renames the
-                                                        files inside each "Organize by Playlist" folder (your real
-                                                        library files are never touched). <strong>Filename only — no
-                                                            folders.</strong> Variables: <code>$position</code>
-                                                        (playlist order), <code>$artist</code>, <code>$album</code>,
-                                                        <code>$track</code>, <code>$title</code>. Must include
-                                                        <code>$title</code> and cannot contain "/". Example:
-                                                        <code>$position - $artist - $title</code> →
-                                                        <code>01 - Daft Punk - One More Time.flac</code>. Empty = keep
-                                                        the original library filename.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Playlist File Naming:</label>
+        <input
+          type="text"
+          id="template-playlist-item"
+          placeholder="Leave empty to keep the library filename"
+        />
+        <div class="path-preview" aria-live="polite"></div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Renames the files inside each "Organize by Playlist" folder (your real library files are
+          never touched). <strong>Filename only — no folders.</strong> Variables:
+          <code>$position</code> (playlist order), <code>$artist</code>, <code>$album</code>,
+          <code>$track</code>, <code>$title</code>. Must include <code>$title</code> and cannot
+          contain "/". Example: <code>$position - $artist - $title</code> →
+          <code>01 - Daft Punk - One More Time.flac</code>. Empty = keep the original library
+          filename.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Music Video Path Template:</label>
-                                                    <input type="text" id="template-video-path" placeholder="$artist/$title-video"><div class="path-preview" aria-live="polite"></div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Variables:
-                                                        <code>$artist</code>, <code>$artistletter</code>,
-                                                        <code>$title</code>, <code>$year</code>. Use <code>${var}</code>
-                                                        to append text. Default:
-                                                        <code>$artist/$title-video</code></small>
-                                                </div>
+      <div class="form-group">
+        <label>Music Video Path Template:</label>
+        <input type="text" id="template-video-path" placeholder="$artist/$title-video" />
+        <div class="path-preview" aria-live="polite"></div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Variables: <code>$artist</code>, <code>$artistletter</code>, <code>$title</code>,
+          <code>$year</code>. Use <code>${var}</code>
+          to append text. Default:
+          <code>$artist/$title-video</code></small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Sample Path Template:</label>
-                                                    <input type="text" id="template-sample-path" placeholder="$artist/$track - $chop"><div class="path-preview" aria-live="polite"></div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Variables:
-                                                        <code>$artist</code>, <code>$track</code>,
-                                                        <code>$album</code>, <code>$chop</code> (the save name),
-                                                        <code>$stem</code> (drums/vocals/bass/other, empty for the
-                                                        full mix). Default:
-                                                        <code>$artist/$track - $chop</code>. Sample Studio files saved
-                                                        chops inside the chosen sample folder with this layout; every
-                                                        rendered file also carries its own tags. Empty segments
-                                                        collapse — a chop with no album info won't leave a stray
-                                                        folder. Use <code>${var}</code> to append text.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Sample Path Template:</label>
+        <input type="text" id="template-sample-path" placeholder="$artist/$track - $chop" />
+        <div class="path-preview" aria-live="polite"></div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Variables: <code>$artist</code>, <code>$track</code>, <code>$album</code>,
+          <code>$chop</code> (the save name), <code>$stem</code> (drums/vocals/bass/other, empty for
+          the full mix). Default: <code>$artist/$track - $chop</code>. Sample Studio files saved
+          chops inside the chosen sample folder with this layout; every rendered file also carries
+          its own tags. Empty segments collapse — a chop with no album info won't leave a stray
+          folder. Use <code>${var}</code> to append text.</small
+        >
+      </div>
 
+      <div class="form-group">
+        <label>Multi-Disc Folder Label:</label>
+        <select id="disc-label">
+          <option value="Disc">Disc (e.g., Disc 1/)</option>
+          <option value="CD">CD (e.g., CD 1/)</option>
+        </select>
+        <div class="path-preview" aria-live="polite"></div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Label for the disc subfolder SoulSync adds automatically on a multi-disc album (<code
+            >Disc 1/</code
+          >). Ignored when your path template already places the disc itself with
+          <code>$disc</code>, <code>$discnum</code> or <code>$cdnum</code> — the template
+          wins.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Multi-Disc Folder Label:</label>
-                                                    <select id="disc-label">
-                                                        <option value="Disc">Disc (e.g., Disc 1/)</option>
-                                                        <option value="CD">CD (e.g., CD 1/)</option>
-                                                    </select><div class="path-preview" aria-live="polite"></div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Label for the
-                                                        disc subfolder SoulSync adds automatically on a multi-disc album
-                                                        (<code>Disc 1/</code>). Ignored when your path template already
-                                                        places the disc itself with <code>$disc</code>,
-                                                        <code>$discnum</code> or <code>$cdnum</code> — the
-                                                        template wins.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Collaborative Album Artist:</label>
+        <select id="collab-artist-mode" class="form-select">
+          <option value="first">First Listed Artist (recommended)</option>
+          <option value="all">All Artists Combined</option>
+        </select>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >How <code>$albumartist</code> resolves when a release has multiple artists — this governs
+          the FOLDER your music sorts into for both albums and singles (the default templates use
+          <code>$albumartist</code>). "First Listed" uses only the primary artist for folder names
+          (e.g., "Larry June" instead of "Larry June, Curren$y &amp; The Alchemist"). Full artist
+          list is always preserved in file metadata tags.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Collaborative Album Artist:</label>
-                                                    <select id="collab-artist-mode" class="form-select">
-                                                        <option value="first">First Listed Artist (recommended)</option>
-                                                        <option value="all">All Artists Combined</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">How
-                                                        <code>$albumartist</code> resolves when a release has multiple
-                                                        artists — this governs the FOLDER your music sorts into for both
-                                                        albums and singles (the default templates use
-                                                        <code>$albumartist</code>). "First Listed" uses only the primary
-                                                        artist for folder names (e.g., "Larry June" instead of "Larry
-                                                        June, Curren$y &amp; The Alchemist"). Full artist list is always
-                                                        preserved in file metadata tags.</small>
-                                                </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="artistletter-symbol-fallback" />
+          Group numbers &amp; symbols under "#"
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >When <code>$artistletter</code> is used in templates: artists starting with digits,
+          symbols or non-Latin scripts all sort into a single <code>#</code> folder instead of one
+          folder per character ("365 Days" → <code>#/</code>, "北京" → <code>#/</code>). Accented
+          letters fold to their base letter (Édith Piaf → <code>E/</code>). Off = the literal first
+          character, exactly as before.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>
-                                                        <input type="checkbox" id="artistletter-symbol-fallback">
-                                                        Group numbers &amp; symbols under "#"
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">When
-                                                        <code>$artistletter</code> is used in templates: artists
-                                                        starting with digits, symbols or non-Latin scripts all sort into
-                                                        a single <code>#</code> folder instead of one folder per
-                                                        character ("365 Days" → <code>#/</code>, "北京" →
-                                                        <code>#/</code>). Accented letters fold to their base letter
-                                                        (Édith Piaf → <code>E/</code>). Off = the literal first
-                                                        character, exactly as before.</small>
-                                                </div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" id="unicode-substitution" />
+          Keep symbols in names with lookalike characters
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Windows doesn't allow <code>: ? / \ " * | &lt; &gt;</code> in file or folder names. Off,
+          they become <code>_</code>
+          (<code>AC_DC</code>). On, they become lookalike characters that work everywhere
+          (<code>AC∕DC</code>,
+          <code>What's Going On？</code>), and a trailing dot is kept (<code>DAMN․</code>). Applies
+          to new downloads; run Reorganize to rename what's already there.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>
-                                                        <input type="checkbox" id="unicode-substitution">
-                                                        Keep symbols in names with lookalike characters
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Windows
-                                                        doesn't allow <code>: ? / \ " * | &lt; &gt;</code> in file or
-                                                        folder names. Off, they become <code>_</code>
-                                                        (<code>AC_DC</code>). On, they become lookalike characters
-                                                        that work everywhere (<code>AC∕DC</code>,
-                                                        <code>What's Going On？</code>), and a trailing dot is kept
-                                                        (<code>DAMN․</code>). Applies to new downloads; run
-                                                        Reorganize to rename what's already there.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Artist Tag Separator:</label>
+        <select id="artist-separator" class="form-select">
+          <option value=", ">, (comma)</option>
+          <option value="; ">; (semicolon)</option>
+          <option value=" / ">/ (slash)</option>
+          <option value=" &amp; ">&amp; (ampersand)</option>
+        </select>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Separator between multiple artists in the ARTIST tag (e.g. <code>&amp;</code> matches
+          MusicBrainz/Picard style)</small
+        >
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="write-multi-artist" />
+          <span>Write multi-value ARTISTS and GENRE tags</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Write each artist, and each genre, as a separate tag value (one GENRE= per genre) for
+          Navidrome/Jellyfin/Plex. Off writes one comma-joined value</small
+        >
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="feat-in-title" />
+          <span>Move featured artists to title</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Keep only primary artist in ARTIST tag, append others as (feat. ...) in title</small
+        >
+      </div>
 
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="allow-duplicate-tracks" checked="" />
+          Allow duplicate tracks across albums
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >When enabled, the same song can be added to the wishlist from different albums (e.g.,
+          completing a discography where albums share tracks). When disabled, tracks with the same
+          name and artist are skipped.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Artist Tag Separator:</label>
-                                                    <select id="artist-separator" class="form-select">
-                                                        <option value=", ">, (comma)</option>
-                                                        <option value="; ">; (semicolon)</option>
-                                                        <option value=" / ">/ (slash)</option>
-                                                        <option value=" &amp; ">&amp; (ampersand)</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Separator
-                                                        between multiple artists in the ARTIST tag (e.g.
-                                                        <code>&amp;</code> matches MusicBrainz/Picard style)</small>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="write-multi-artist">
-                                                        <span>Write multi-value ARTISTS and GENRE tags</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Write each
-                                                        artist, and each genre, as a separate tag value (one
-                                                        GENRE= per genre) for Navidrome/Jellyfin/Plex. Off
-                                                        writes one comma-joined value</small>
-                                                </div>
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="feat-in-title">
-                                                        <span>Move featured artists to title</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Keep only
-                                                        primary artist in ARTIST tag, append others as (feat. ...) in
-                                                        title</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="wishlist-wing-it-guesses" />
+          <span>Search Wing It guesses as wishlist tracks</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Wing It means a track couldn't be matched in the metadata catalogue — these are unmatched
+          guesses, not tracks missing from your library. Off by default: guesses stay in the Wing It
+          Pool for manual review. Turn this on to let guesses be searched like any other wishlist
+          track.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="allow-duplicate-tracks" checked="">
-                                                        Allow duplicate tracks across albums
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">When enabled,
-                                                        the same song can be added to the wishlist from different albums
-                                                        (e.g., completing a discography where albums share tracks). When
-                                                        disabled, tracks with the same name and artist are
-                                                        skipped.</small>
-                                                </div>
+      <div class="form-group">
+        <label for="wishlist-ignore-ttl">Removed-track re-try window (days)</label>
+        <input type="number" id="wishlist-ignore-ttl" min="1" max="365" step="1" value="30" />
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >When you remove or cancel a wishlist track, SoulSync remembers not to re-add it
+          automatically for this many days. Lower it (e.g. 7) to give removed tracks another chance
+          sooner.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="wishlist-wing-it-guesses">
-                                                        <span>Search Wing It guesses as wishlist tracks</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Wing It
-                                                        means a track couldn't be matched in the metadata catalogue
-                                                        — these are unmatched guesses, not tracks missing from your
-                                                        library. Off by default: guesses stay in the Wing It Pool for
-                                                        manual review. Turn this on to let guesses be searched like
-                                                        any other wishlist track.</small>
-                                                </div>
+      <div class="form-group">
+        <button
+          class="test-button"
+          onclick="resetFileOrganizationTemplates()"
+          style="background: #666"
+        >
+          🔄 Reset to Defaults
+        </button>
+        <small class="settings-hint">
+          Restores original path structure. Your downloads will be organized like before.
+        </small>
+      </div>
+    </div>
+    <div class="settings-group" data-stg="library">
+      <h3>Library Organize</h3>
+      <label class="toggle-row">
+        <input type="checkbox" id="reorganize-preserve-casing" />
+        <span>Preserve my casing, year &amp; disc layout</span>
+      </label>
+      <div class="help-text" style="margin-top: 6px">
+        When the Library Organize tool re-matches a track, the metadata source often differs from
+        files you've already organized: capitalization, release year (a reissue [2023] "corrected"
+        to the source's 2020), or disc layout (a single-disc album matched to a deluxe 2-disc
+        edition, stamping a bogus "0211" prefix). With this on (default), a title/album differing
+        <em>only</em> by letter-case, your own album year, and a genuinely single-disc album's
+        numbering are all left alone — no needless renames. Turn off to match the metadata source
+        exactly.
+      </div>
+      <label class="toggle-row" style="margin-top: 10px">
+        <input type="checkbox" id="write-artist-nfo" />
+        <span>Write artist.nfo and artwork (Plex / Jellyfin / Kodi / Emby)</span>
+      </label>
+      <div class="help-text" style="margin-top: 6px">
+        When an import creates an artist folder, also write a Kodi-format
+        <em>artist.nfo</em> containing the artist's name and MusicBrainz artist ID, so Jellyfin /
+        Kodi / Emby identify the artist instead of guessing by name. A folder with no artist artwork
+        also gets <em>poster.jpg</em> and <em>background.jpg</em> (fanart.tv, TheAudioDB or Deezer),
+        which Plex reads as local art. Nothing already in the folder is replaced, an
+        <em>artist.nfo</em> with a different ID included. To backfill folders you already have, run
+        the <em>Artist NFO Backfill</em> repair job.
+      </div>
+    </div>
+  </div>
+  <div
+    id="organization-audiobooks-panel"
+    role="tabpanel"
+    aria-labelledby="organization-audiobooks-tab"
+    class="stg-media-panel"
+    hidden=""
+    tabindex="0"
+  >
+    <div class="stg-media-context">
+      <strong>Audiobook organization</strong
+      ><span class="stg-media-summary">Naming, quality, tags &amp; recycle</span>
+    </div>
 
-                                                <div class="form-group">
-                                                    <label for="wishlist-ignore-ttl">Removed-track re-try window
-                                                        (days)</label>
-                                                    <input type="number" id="wishlist-ignore-ttl" min="1" max="365" step="1" value="30">
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">When you
-                                                        remove or cancel a wishlist track, SoulSync remembers not to
-                                                        re-add it automatically for this many days. Lower it (e.g. 7) to
-                                                        give removed tracks another chance sooner.</small>
-                                                </div>
+    <div class="settings-group" data-stg="library">
+      <div class="form-group">
+        <label>Audiobook Path Template:</label>
+        <input
+          type="text"
+          id="template-audiobook-path"
+          placeholder="$author/$series/$seriespos - $title"
+        />
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Variables: <code>$author</code>, <code>$authorletter</code>, <code>$narrator</code>,
+          <code>$title</code>, <code>$series</code>, <code>$seriespos</code> (01),
+          <code>$year</code>, <code>$asin</code>. Default:
+          <code>$author/$series/$seriespos - $title</code>. Books with no series collapse the series
+          folder and its number cleanly, the same way podcast season folders do. Use
+          <code>${var}</code> to append text.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <button class="test-button" onclick="resetFileOrganizationTemplates()" style="background: #666;">
-                                                        🔄 Reset to Defaults
-                                                    </button>
-                                                    <small class="settings-hint">
-                                                        Restores original path structure. Your downloads will be
-                                                        organized like before.
-                                                    </small>
-                                                </div>
-                                            </div>
-                                            <div class="settings-group" data-stg="library">
-                                                <h3>Library Organize</h3>
-                                                <label class="toggle-row">
-                                                    <input type="checkbox" id="reorganize-preserve-casing">
-                                                    <span>Preserve my casing, year &amp; disc layout</span>
-                                                </label>
-                                                <div class="help-text" style="margin-top: 6px;">
-                                                    When the Library Organize tool re-matches a track, the metadata
-                                                    source often
-                                                    differs from files you've already organized: capitalization, release
-                                                    year (a
-                                                    reissue [2023] "corrected" to the source's 2020), or disc layout (a
-                                                    single-disc
-                                                    album matched to a deluxe 2-disc edition, stamping a bogus "0211"
-                                                    prefix). With
-                                                    this on (default), a title/album differing <em>only</em> by
-                                                    letter-case, your own
-                                                    album year, and a genuinely single-disc album's numbering are all
-                                                    left alone —
-                                                    no needless renames. Turn off to match the metadata source exactly.
-                                                </div>
-                                                <label class="toggle-row" style="margin-top: 10px;">
-                                                    <input type="checkbox" id="write-artist-nfo">
-                                                    <span>Write artist.nfo and artwork (Plex / Jellyfin / Kodi / Emby)</span>
-                                                </label>
-                                                <div class="help-text" style="margin-top: 6px;">
-                                                    When an import creates an artist folder, also write a Kodi-format
-                                                    <em>artist.nfo</em> containing the artist's name and MusicBrainz
-                                                    artist ID, so Jellyfin / Kodi / Emby identify the artist instead
-                                                    of guessing by name. A folder with no artist artwork also gets
-                                                    <em>poster.jpg</em> and <em>background.jpg</em> (fanart.tv,
-                                                    TheAudioDB or Deezer), which Plex reads as local art. Nothing
-                                                    already in the folder is replaced, an <em>artist.nfo</em> with a
-                                                    different ID included. To backfill folders you already have, run
-                                                    the <em>Artist NFO Backfill</em> repair job.
-                                                </div>
-                                            </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-recycle-deletes" />
+          <span>Recycle deleted audiobooks</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Deleting a book MOVES it to a hidden <code>.deleted</code> folder inside your audiobook
+          library instead of erasing it, so a mis-click can be undone. The folder is hidden so
+          Audiobookshelf, Plex and Jellyfin do not keep showing books you removed. Note the space is
+          not freed until the bin is emptied. Off, deletes are permanent immediately.</small
+        >
+      </div>
 
-                                        </div>
-                                        <div id="organization-audiobooks-panel" role="tabpanel" aria-labelledby="organization-audiobooks-tab" class="stg-media-panel" hidden="" tabindex="0">
-                                            <div class="stg-media-context"><strong>Audiobook organization</strong><span class="stg-media-summary">Naming, quality, tags &amp; recycle</span></div>
+      <div class="form-group">
+        <label>Empty The Recycle Bin After:</label>
+        <input
+          type="number"
+          id="audiobook-recycle-keep-days"
+          min="0"
+          max="365"
+          step="1"
+          placeholder="7"
+        />
+        <span class="settings-unit">days</span>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >How long a deleted book stays recoverable before the daily cleanup erases it for good.
+          <strong>0 turns the bin off</strong> — it does not mean "erase everything now", because
+          purging on that reading would destroy what was recycled while the bin was still on.
+          Default: <code>7</code></small
+        >
+      </div>
 
-                                            <div class="settings-group" data-stg="library">
-                                                <div class="form-group">
-                                                    <label>Audiobook Path Template:</label>
-                                                    <input type="text" id="template-audiobook-path" placeholder="$author/$series/$seriespos - $title">
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Variables:
-                                                        <code>$author</code>, <code>$authorletter</code>,
-                                                        <code>$narrator</code>, <code>$title</code>,
-                                                        <code>$series</code>, <code>$seriespos</code> (01),
-                                                        <code>$year</code>, <code>$asin</code>. Default:
-                                                        <code>$author/$series/$seriespos - $title</code>. Books with no
-                                                        series collapse the series folder and its number cleanly, the
-                                                        same way podcast season folders do. Use <code>${var}</code> to
-                                                        append text.</small>
-                                                </div>
+      <h4 class="settings-subheading">Audiobook Quality</h4>
+      <small class="settings-hint"
+        >What counts as a good file. One profile for every audiobook — the per-author card carries
+        the settings that differ by author.</small
+      >
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-recycle-deletes">
-                                                        <span>Recycle deleted audiobooks</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Deleting a
-                                                        book MOVES it to a hidden <code>.deleted</code> folder inside
-                                                        your audiobook library instead of erasing it, so a mis-click can
-                                                        be undone. The folder is hidden so Audiobookshelf, Plex and
-                                                        Jellyfin do not keep showing books you removed. Note the space
-                                                        is not freed until the bin is emptied. Off, deletes are
-                                                        permanent immediately.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Preferred Format:</label>
+        <select id="audiobook-format-first" class="form-select">
+          <option value="m4b">M4B (recommended)</option>
+          <option value="m4a">M4A</option>
+          <option value="mp3">MP3</option>
+          <option value="opus">Opus</option>
+          <option value="ogg">OGG</option>
+          <option value="flac">FLAC</option>
+        </select>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Ranked first when several releases are otherwise equal; the rest keep their usual order
+          behind it. <strong>M4B</strong> is the only format built for audiobooks — chapters,
+          bookmarks, and one file instead of ninety. Pick <strong>MP3</strong> if your player cannot
+          read M4B. Format never outweighs having the right book and the right narrator.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Empty The Recycle Bin After:</label>
-                                                    <input type="number" id="audiobook-recycle-keep-days" min="0" max="365" step="1" placeholder="7">
-                                                    <span class="settings-unit">days</span>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">How long a
-                                                        deleted book stays recoverable before the daily cleanup erases
-                                                        it for good. <strong>0 turns the bin off</strong> — it
-                                                        does not mean "erase everything now", because purging on that
-                                                        reading would destroy what was recycled while the bin was still
-                                                        on. Default: <code>7</code></small>
-                                                </div>
+      <div class="form-group">
+        <label>Allowed Formats:</label>
+        <div
+          id="audiobook-allowed-formats"
+          style="
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, max-content));
+            gap: 0 24px;
+          "
+        >
+          <label class="checkbox-label"
+            ><input type="checkbox" value="m4b" /><span>M4B</span></label
+          >
+          <label class="checkbox-label"
+            ><input type="checkbox" value="m4a" /><span>M4A</span></label
+          >
+          <label class="checkbox-label"
+            ><input type="checkbox" value="mp3" /><span>MP3</span></label
+          >
+          <label class="checkbox-label"
+            ><input type="checkbox" value="opus" /><span>Opus</span></label
+          >
+          <label class="checkbox-label"
+            ><input type="checkbox" value="ogg" /><span>OGG</span></label
+          >
+          <label class="checkbox-label"
+            ><input type="checkbox" value="flac" /><span>FLAC</span></label
+          >
+        </div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Releases in a format that is switched off are never shown or downloaded. Preferred Format
+          only ranks, so with M4B preferred an MP3 is still grabbed when no M4B turns up; switch MP3
+          off here to wait for an M4B instead. A release whose format cannot be told from its title
+          is still allowed. Switching every format off is the same as allowing them all.</small
+        >
+      </div>
 
-                                                <h4 class="settings-subheading">Audiobook Quality</h4>
-                                                <small class="settings-hint">What counts as a good file. One profile for
-                                                    every audiobook — the per-author card carries the settings
-                                                    that differ by author.</small>
+      <div class="form-group">
+        <label>File Layout:</label>
+        <div
+          id="audiobook-file-layout"
+          style="
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, max-content));
+            gap: 0 24px;
+          "
+        >
+          <label class="checkbox-label"
+            ><input type="checkbox" value="single" /><span>Single file (whole book)</span></label
+          >
+          <label class="checkbox-label"
+            ><input type="checkbox" value="multiple" /><span
+              >Multiple files (chapters or parts)</span
+            ></label
+          >
+        </div>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Whether a book should arrive as <strong>one file</strong> or as
+          <strong>several smaller files</strong>, usually one per chapter. Switch one off and
+          releases laid out that way are skipped; leave both on (or both off) for either. Only
+          Soulseek says how many files a release has before it is downloaded; torrents and usenet do
+          not, so they are always allowed.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Preferred Format:</label>
-                                                    <select id="audiobook-format-first" class="form-select">
-                                                        <option value="m4b">M4B (recommended)</option>
-                                                        <option value="m4a">M4A</option>
-                                                        <option value="mp3">MP3</option>
-                                                        <option value="opus">Opus</option>
-                                                        <option value="ogg">OGG</option>
-                                                        <option value="flac">FLAC</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Ranked first
-                                                        when several releases are otherwise equal; the rest keep their
-                                                        usual order behind it. <strong>M4B</strong> is the only format
-                                                        built for audiobooks — chapters, bookmarks, and one file
-                                                        instead of ninety. Pick <strong>MP3</strong> if your player
-                                                        cannot read M4B. Format never outweighs having the right book
-                                                        and the right narrator.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Reject Below:</label>
+        <input
+          type="number"
+          id="audiobook-min-bitrate"
+          min="0"
+          max="512"
+          step="1"
+          placeholder="0"
+        />
+        <span class="settings-unit">kbps</span>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Hides releases below this bitrate. <strong>0 means no opinion.</strong> This is taste,
+          and separate from the completeness floor above: that one asks whether a release could be
+          the whole book at all, this one asks whether you want it. Audible's own files are 32 kbps
+          mono and 64 kbps stereo, so 32 is a reasonable floor and anything above 128 is more than
+          speech needs.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Allowed Formats:</label>
-                                                    <div id="audiobook-allowed-formats" style="display: grid; grid-template-columns: repeat(3, minmax(0, max-content)); gap: 0 24px;">
-                                                        <label class="checkbox-label"><input type="checkbox" value="m4b"><span>M4B</span></label>
-                                                        <label class="checkbox-label"><input type="checkbox" value="m4a"><span>M4A</span></label>
-                                                        <label class="checkbox-label"><input type="checkbox" value="mp3"><span>MP3</span></label>
-                                                        <label class="checkbox-label"><input type="checkbox" value="opus"><span>Opus</span></label>
-                                                        <label class="checkbox-label"><input type="checkbox" value="ogg"><span>OGG</span></label>
-                                                        <label class="checkbox-label"><input type="checkbox" value="flac"><span>FLAC</span></label>
-                                                    </div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Releases in a
-                                                        format that is switched off are never shown or downloaded.
-                                                        Preferred Format only ranks, so with M4B preferred an MP3 is
-                                                        still grabbed when no M4B turns up; switch MP3 off here to
-                                                        wait for an M4B instead. A release whose format cannot be told
-                                                        from its title is still allowed. Switching every format off is
-                                                        the same as allowing them all.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Reject Above:</label>
+        <input
+          type="number"
+          id="audiobook-max-bitrate"
+          min="0"
+          max="2000"
+          step="1"
+          placeholder="0"
+        />
+        <span class="settings-unit">kbps</span>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Hides releases above this bitrate, for when disk space matters more than headroom.
+          <strong>0 means no opinion.</strong> Speech gains nothing audible above about 128 kbps, so
+          a 45-hour book at 240 kbps is roughly 4GB for no benefit.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>File Layout:</label>
-                                                    <div id="audiobook-file-layout" style="display: grid; grid-template-columns: repeat(2, minmax(0, max-content)); gap: 0 24px;">
-                                                        <label class="checkbox-label"><input type="checkbox" value="single"><span>Single file (whole book)</span></label>
-                                                        <label class="checkbox-label"><input type="checkbox" value="multiple"><span>Multiple files (chapters or parts)</span></label>
-                                                    </div>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Whether a book
-                                                        should arrive as <strong>one file</strong> or as <strong>several
-                                                        smaller files</strong>, usually one per chapter. Switch one off and
-                                                        releases laid out that way are skipped; leave both on (or both off) for
-                                                        either. Only Soulseek says how many files a release has before it is
-                                                        downloaded; torrents and usenet do not, so they are always allowed.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-allow-dramatized" />
+          <span>Show dramatised adaptations</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >GraphicAudio and similar full-cast productions with music and sound effects. They are a
+          different product from the audiobook — different cast, different running time, usually
+          sold in several separately-downloaded parts. Left on they are shown but ranked below real
+          readings and clearly labelled; turned off they are hidden entirely.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Reject Below:</label>
-                                                    <input type="number" id="audiobook-min-bitrate" min="0" max="512" step="1" placeholder="0">
-                                                    <span class="settings-unit">kbps</span>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Hides releases
-                                                        below this bitrate. <strong>0 means no opinion.</strong> This is
-                                                        taste, and separate from the completeness floor above: that one
-                                                        asks whether a release could be the whole book at all, this one
-                                                        asks whether you want it. Audible's own files are 32 kbps mono
-                                                        and 64 kbps stereo, so 32 is a reasonable floor and anything
-                                                        above 128 is more than speech needs.</small>
-                                                </div>
+      <h4 class="settings-subheading">Downloads &amp; Import</h4>
+      <small class="settings-hint"
+        >Books use the same torrent, usenet and Soulseek clients as music — set those up under
+        Sources.</small
+      >
 
-                                                <div class="form-group">
-                                                    <label>Reject Above:</label>
-                                                    <input type="number" id="audiobook-max-bitrate" min="0" max="2000" step="1" placeholder="0">
-                                                    <span class="settings-unit">kbps</span>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Hides releases
-                                                        above this bitrate, for when disk space matters more than
-                                                        headroom. <strong>0 means no opinion.</strong> Speech gains
-                                                        nothing audible above about 128 kbps, so a 45-hour book at 240
-                                                        kbps is roughly 4GB for no benefit.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Audible Marketplace:</label>
+        <select id="audiobook-marketplace" class="form-select">
+          <option value="us">United States (audible.com)</option>
+          <option value="uk">United Kingdom (audible.co.uk)</option>
+          <option value="de">Germany (audible.de)</option>
+          <option value="fr">France (audible.fr)</option>
+          <option value="ca">Canada (audible.ca)</option>
+          <option value="au">Australia (audible.com.au)</option>
+          <option value="it">Italy (audible.it)</option>
+          <option value="es">Spain (audible.es)</option>
+          <option value="in">India (audible.in)</option>
+          <option value="jp">Japan (audible.co.jp)</option>
+        </select>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Which Audible storefront the audiobook catalogue pages, author scans and follow checks
+          query. Some titles are exclusive to one country's store, so picking the store you buy from
+          finds books the US store never lists. Default: <code>us</code></small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-allow-dramatized">
-                                                        <span>Show dramatised adaptations</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">GraphicAudio
-                                                        and similar full-cast productions with music and sound effects.
-                                                        They are a different product from the audiobook —
-                                                        different cast, different running time, usually sold in several
-                                                        separately-downloaded parts. Left on they are shown but ranked
-                                                        below real readings and clearly labelled; turned off they are
-                                                        hidden entirely.</small>
-                                                </div>
-
-                                                <h4 class="settings-subheading">Downloads &amp; Import</h4>
-                                                <small class="settings-hint">Books use the same torrent, usenet and Soulseek
-                                                        clients as music — set those up under Sources.</small>
-
-                                                <div class="form-group">
-                                                    <label>Audible Marketplace:</label>
-                                                    <select id="audiobook-marketplace" class="form-select">
-                                                        <option value="us">United States (audible.com)</option>
-                                                        <option value="uk">United Kingdom (audible.co.uk)</option>
-                                                        <option value="de">Germany (audible.de)</option>
-                                                        <option value="fr">France (audible.fr)</option>
-                                                        <option value="ca">Canada (audible.ca)</option>
-                                                        <option value="au">Australia (audible.com.au)</option>
-                                                        <option value="it">Italy (audible.it)</option>
-                                                        <option value="es">Spain (audible.es)</option>
-                                                        <option value="in">India (audible.in)</option>
-                                                        <option value="jp">Japan (audible.co.jp)</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Which Audible
-                                                        storefront the audiobook catalogue pages, author scans and
-                                                        follow checks query. Some titles are exclusive to one country's
-                                                        store, so picking the store you buy from finds books the US
-                                                        store never lists. Default: <code>us</code></small>
-                                                </div>
-
-                                                <!-- Same story as the music one: the Audiobooks tab of the chain
+      <!-- Same story as the music one: the Audiobooks tab of the chain
                                      widget (Settings -> Downloads) IS this setting. Kept as the
                                      transport saveSettings reads, hidden as a control. -->
-                                                <div class="form-group" hidden="">
-                                                    <label>Audiobook Download Sources:</label>
-                                                    <select id="audiobook-download-mode" class="form-select" onchange="onAudiobookModeChange()">
-                                                        <option value="soulseek">Soulseek Only</option>
-                                                        <option value="torrent">Torrent Only (via Prowlarr)</option>
-                                                        <option value="usenet">Usenet Only (via Prowlarr)</option>
-                                                        <option value="hybrid">Hybrid (Primary + Fallback)</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Which sources
-                                                        a book search asks. Separate from the music chain on purpose
-                                                        — Tidal, Qobuz, HiFi and Deezer carry no
-                                                        audiobooks at all, so a book on the music chain would burn an
-                                                        attempt on each of them before it could succeed. The clients
-                                                        themselves are the same ones music uses; only the order and the
-                                                        category differ.</small>
-                                                </div>
+      <div class="form-group" hidden="">
+        <label>Audiobook Download Sources:</label>
+        <select id="audiobook-download-mode" class="form-select" onchange="onAudiobookModeChange()">
+          <option value="soulseek">Soulseek Only</option>
+          <option value="torrent">Torrent Only (via Prowlarr)</option>
+          <option value="usenet">Usenet Only (via Prowlarr)</option>
+          <option value="hybrid">Hybrid (Primary + Fallback)</option>
+        </select>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Which sources a book search asks. Separate from the music chain on purpose — Tidal,
+          Qobuz, HiFi and Deezer carry no audiobooks at all, so a book on the music chain would burn
+          an attempt on each of them before it could succeed. The clients themselves are the same
+          ones music uses; only the order and the category differ.</small
+        >
+      </div>
 
-                                                <!-- The arrow-button list this replaced. renderAudiobookHybrid()
+      <!-- The arrow-button list this replaced. renderAudiobookHybrid()
                                      still writes into it, so it stays in the DOM and stays hidden. -->
-                                                <div id="audiobook-hybrid-container" style="display:none;">
-                                                    <div class="hybrid-source-list" id="audiobook-hybrid-rows" hidden="">
-                                                    </div>
-                                                </div>
+      <div id="audiobook-hybrid-container" style="display: none">
+        <div class="hybrid-source-list" id="audiobook-hybrid-rows" hidden=""></div>
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Audiobook Downloader Category:</label>
-                                                    <input type="text" id="audiobook-torrent-category" placeholder="audiobooks">
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">The category
-                                                        SoulSync tags audiobook torrents and NZBs with in your download
-                                                        client. Keep it different from your music category so a finished
-                                                        book is never picked up by anything watching for music. Default:
-                                                        <code>audiobooks</code></small>
-                                                </div>
+      <div class="form-group">
+        <label>Audiobook Downloader Category:</label>
+        <input type="text" id="audiobook-torrent-category" placeholder="audiobooks" />
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >The category SoulSync tags audiobook torrents and NZBs with in your download client. Keep
+          it different from your music category so a finished book is never picked up by anything
+          watching for music. Default: <code>audiobooks</code></small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Audiobook Prowlarr Categories:</label>
-                                                    <input type="text" id="audiobook-prowlarr-categories" placeholder="3030">
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Newznab
-                                                        category IDs searched for audiobooks. <code>3030</code> is the
-                                                        standard audiobook category and is deliberately kept OUT of
-                                                        music searches, so asking for it here costs the music side
-                                                        nothing. Only change this if your indexer uses a non-standard
-                                                        ID.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Audiobook Prowlarr Categories:</label>
+        <input type="text" id="audiobook-prowlarr-categories" placeholder="3030" />
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Newznab category IDs searched for audiobooks. <code>3030</code> is the standard audiobook
+          category and is deliberately kept OUT of music searches, so asking for it here costs the
+          music side nothing. Only change this if your indexer uses a non-standard ID.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Import When Runtime Reaches:</label>
-                                                    <input type="number" id="audiobook-completeness-tolerance" min="10" max="100" step="1" placeholder="92">
-                                                    <span class="settings-unit">%</span>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">How much of
-                                                        the runtime Audible publishes has to actually be on disk before
-                                                        a book is filed into your library. A download client reports
-                                                        "complete" when the files it was <em>asked</em> for finished,
-                                                        which is not the same as the book being whole — and a book
-                                                        missing its last chapters plays perfectly until you run out of
-                                                        it. Short books are held in staging, never failed outright.
-                                                        Default: <code>92</code></small>
-                                                </div>
+      <div class="form-group">
+        <label>Import When Runtime Reaches:</label>
+        <input
+          type="number"
+          id="audiobook-completeness-tolerance"
+          min="10"
+          max="100"
+          step="1"
+          placeholder="92"
+        />
+        <span class="settings-unit">%</span>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >How much of the runtime Audible publishes has to actually be on disk before a book is
+          filed into your library. A download client reports "complete" when the files it was
+          <em>asked</em> for finished, which is not the same as the book being whole — and a book
+          missing its last chapters plays perfectly until you run out of it. Short books are held in
+          staging, never failed outright. Default: <code>92</code></small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Give Up On A Short Book After:</label>
-                                                    <input type="number" id="audiobook-staging-days" min="1" max="90" step="1" placeholder="7">
-                                                    <span class="settings-unit">days</span>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">How long an
-                                                        incomplete book is kept staged before it is failed and sent back
-                                                        to the wishlist. Torrents finish late and uploaders repair
-                                                        releases, so patience is right here; forever would mean one
-                                                        broken release holds a wishlist row for good. Default:
-                                                        <code>7</code></small>
-                                                </div>
+      <div class="form-group">
+        <label>Give Up On A Short Book After:</label>
+        <input
+          type="number"
+          id="audiobook-staging-days"
+          min="1"
+          max="90"
+          step="1"
+          placeholder="7"
+        />
+        <span class="settings-unit">days</span>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >How long an incomplete book is kept staged before it is failed and sent back to the
+          wishlist. Torrents finish late and uploaders repair releases, so patience is right here;
+          forever would mean one broken release holds a wishlist row for good. Default:
+          <code>7</code></small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-renumber-chapters">
-                                                        <span>Renumber chapter files on import</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Chapter files
-                                                        arrive named however the uploader left them. On by default: a
-                                                        book whose files sort wrong plays wrong. Turn this off only if
-                                                        you trust your releases' own numbering.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-renumber-chapters" />
+          <span>Renumber chapter files on import</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Chapter files arrive named however the uploader left them. On by default: a book whose
+          files sort wrong plays wrong. Turn this off only if you trust your releases' own
+          numbering.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-merge-m4b">
-                                                        <span>Merge multi-file books into one M4B on import</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Off by
-                                                        default: when a book arrives as many files, combine them into
-                                                        a single <code>.m4b</code> with one chapter marker per file
-                                                        during import. Needs <code>ffmpeg</code> on the server
-                                                        (the Docker image ships it). The originals are only removed
-                                                        after the merged file verifies, so a failed merge never
-                                                        loses the book.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-merge-m4b" />
+          <span>Merge multi-file books into one M4B on import</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Off by default: when a book arrives as many files, combine them into a single
+          <code>.m4b</code> with one chapter marker per file during import. Needs
+          <code>ffmpeg</code> on the server (the Docker image ships it). The originals are only
+          removed after the merged file verifies, so a failed merge never loses the book.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-remove-owned-from-wishlist">
-                                                        <span>Remove books from the wishlist once they're in the library</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Off by default:
-                                                        a book that is downloaded or found in your library stays on the
-                                                        wishlist, marked "In library". Turn this on to drop it instead,
-                                                        the way the music wishlist does.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-remove-owned-from-wishlist" />
+          <span>Remove books from the wishlist once they're in the library</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Off by default: a book that is downloaded or found in your library stays on the wishlist,
+          marked "In library". Turn this on to drop it instead, the way the music wishlist
+          does.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-embed-metadata">
-                                                        <span>Write tags into audiobook files</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Embeds title,
-                                                        author, series and narrator into each file on import. Narrator
-                                                        goes in the COMPOSER field, which is the convention every
-                                                        audiobook server settled on. Without this a book keeps whatever
-                                                        the uploader's ripper wrote, which is usually chapter 4 of a
-                                                        27-hour book tagged as a track on an album called
-                                                        "audiobook".</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-embed-metadata" />
+          <span>Write tags into audiobook files</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Embeds title, author, series and narrator into each file on import. Narrator goes in the
+          COMPOSER field, which is the convention every audiobook server settled on. Without this a
+          book keeps whatever the uploader's ripper wrote, which is usually chapter 4 of a 27-hour
+          book tagged as a track on an album called "audiobook".</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-embed-artwork">
-                                                        <span>Embed cover art in audiobook files</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Embeds the
-                                                        cover into every chapter file. A cover the release already
-                                                        shipped is preferred over fetching one, so this still works
-                                                        offline.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-embed-artwork" />
+          <span>Embed cover art in audiobook files</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Embeds the cover into every chapter file. A cover the release already shipped is
+          preferred over fetching one, so this still works offline.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-save-artwork">
-                                                        <span>Save cover.jpg beside audiobooks</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Writes
-                                                        <code>cover.jpg</code> into the book folder. Plex, Jellyfin,
-                                                        Audiobookshelf and Booksonic all read it from there.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-save-artwork" />
+          <span>Save cover.jpg beside audiobooks</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Writes <code>cover.jpg</code> into the book folder. Plex, Jellyfin, Audiobookshelf and
+          Booksonic all read it from there.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="audiobook-write-nfo">
-                                                        <span>Write audiobook metadata sidecars</span>
-                                                    </label>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Writes
-                                                        <code>metadata.opf</code> (Audiobookshelf, Plex, Calibre) and
-                                                        <code>book.nfo</code> (Kodi, Jellyfin, Emby). Both, because the
-                                                        servers genuinely disagree about which to look for and they are
-                                                        a few hundred bytes each. These also carry the ASIN, which is
-                                                        what lets the daily library scan recognise a book you imported
-                                                        months ago.</small>
-                                                </div>
-                                            </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="audiobook-write-nfo" />
+          <span>Write audiobook metadata sidecars</span>
+        </label>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Writes <code>metadata.opf</code> (Audiobookshelf, Plex, Calibre) and
+          <code>book.nfo</code> (Kodi, Jellyfin, Emby). Both, because the servers genuinely disagree
+          about which to look for and they are a few hundred bytes each. These also carry the ASIN,
+          which is what lets the daily library scan recognise a book you imported months ago.</small
+        >
+      </div>
+    </div>
+  </div>
+  <div
+    id="organization-podcasts-panel"
+    role="tabpanel"
+    aria-labelledby="organization-podcasts-tab"
+    class="stg-media-panel"
+    hidden=""
+    tabindex="0"
+  >
+    <div class="stg-media-context">
+      <strong>Podcast organization</strong
+      ><span class="stg-media-summary">Naming &amp; media format</span>
+    </div>
 
-                                        </div>
-                                        <div id="organization-podcasts-panel" role="tabpanel" aria-labelledby="organization-podcasts-tab" class="stg-media-panel" hidden="" tabindex="0">
-                                            <div class="stg-media-context"><strong>Podcast organization</strong><span class="stg-media-summary">Naming &amp; media format</span></div>
+    <div class="settings-group" data-stg="library">
+      <div class="form-group">
+        <label>Podcast Path Template:</label>
+        <input type="text" id="template-podcast-path" placeholder="$show/Season $season/$title" />
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Variables: <code>$show</code>, <code>$author</code>, <code>$title</code>,
+          <code>$season</code> (01), <code>$seasonnum</code> (1), <code>$episode</code> (01),
+          <code>$episodenum</code> (1), <code>$year</code>, <code>$date</code> (YYYY-MM-DD),
+          <code>$type</code>. Default: <code>$show/Season $season/$title</code>. Season and episode
+          folders collapse cleanly if omitted in feed. Use <code>${var}</code> to append
+          text.</small
+        >
+      </div>
 
-                                            <div class="settings-group" data-stg="library">
-                                                <div class="form-group">
-                                                    <label>Podcast Path Template:</label>
-                                                    <input type="text" id="template-podcast-path" placeholder="$show/Season $season/$title">
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Variables:
-                                                        <code>$show</code>, <code>$author</code>, <code>$title</code>,
-                                                        <code>$season</code> (01), <code>$seasonnum</code> (1),
-                                                        <code>$episode</code> (01), <code>$episodenum</code> (1),
-                                                        <code>$year</code>, <code>$date</code> (YYYY-MM-DD),
-                                                        <code>$type</code>. Default:
-                                                        <code>$show/Season $season/$title</code>. Season and episode
-                                                        folders collapse cleanly if omitted in feed. Use
-                                                        <code>${var}</code> to append text.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Podcast Media Format:</label>
+        <select id="podcast-media-format" class="form-select">
+          <option value="audio">Audio Only (MP3 / M4A) — Default</option>
+          <option value="video">Video Only (MP4 with static artwork for TV media servers)</option>
+          <option value="both">Audio &amp; Video (Both formats side-by-side)</option>
+        </select>
+        <span
+          class="info-icon"
+          role="button"
+          tabindex="0"
+          title="What's this?"
+          onclick="toggleSettingHelp(this)"
+          onkeydown="
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSettingHelp(this);
+            }
+          "
+          >i</span
+        >
+        <small class="settings-hint setting-help-body" hidden=""
+          >Choose which formats to store in your podcast folders. <strong>Audio Only</strong> keeps
+          standard audio files with embedded tags. <strong>Video Only</strong> remuxes the audio
+          into an MP4 video container with a static high-res episode artwork frame and Apple/iTunes
+          TV metadata tags so Plex, Jellyfin, and Emby can catalog them as TV Shows with seasons,
+          episode posters, and playback resume. <strong>Audio &amp; Video</strong> keeps both
+          formats side-by-side in the same folder with shared NFO sidecars so both Music and TV
+          media libraries can index the same folder simultaneously.</small
+        >
+      </div>
+      <label class="toggle-row" style="margin-top: 10px">
+        <input type="checkbox" id="redownload-externally-deleted" />
+        <span>Re-download files deleted outside SoulSync</span>
+      </label>
+      <div class="help-text" style="margin-top: 6px">
+        When a library scan finds that a monitored track's file was deleted outside SoulSync, the
+        track is wanted again and goes back to the Wishlist (on by default, like Lidarr). Turn off
+        to treat such a deletion like <em>Don't download again</em>: the track is unmonitored
+        instead.
+      </div>
+    </div>
+  </div>
+  <div
+    id="organization-video-panel"
+    role="tabpanel"
+    aria-labelledby="organization-video-tab"
+    class="stg-media-panel"
+    hidden=""
+    tabindex="0"
+  >
+    <div class="stg-media-context">
+      <strong>Video organization</strong
+      ><span class="stg-media-summary">Path templates, post-processing &amp; recycle</span>
+    </div>
 
-                                                <div class="form-group">
-                                                    <label>Podcast Media Format:</label>
-                                                    <select id="podcast-media-format" class="form-select">
-                                                        <option value="audio">Audio Only (MP3 / M4A) — Default</option>
-                                                        <option value="video">Video Only (MP4 with static artwork for TV
-                                                            media servers)</option>
-                                                        <option value="both">Audio &amp; Video (Both formats
-                                                            side-by-side)</option>
-                                                    </select>
-                                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                                    <small class="settings-hint setting-help-body" hidden="">Choose which
-                                                        formats to store in your podcast folders. <strong>Audio
-                                                            Only</strong> keeps standard audio files with embedded tags.
-                                                        <strong>Video Only</strong> remuxes the audio into an MP4 video
-                                                        container with a static high-res episode artwork frame and
-                                                        Apple/iTunes TV metadata tags so Plex, Jellyfin, and Emby can
-                                                        catalog them as TV Shows with seasons, episode posters, and
-                                                        playback resume. <strong>Audio &amp; Video</strong> keeps both
-                                                        formats side-by-side in the same folder with shared NFO sidecars
-                                                        so both Music and TV media libraries can index the same folder
-                                                        simultaneously.</small>
-                                                </div>
-                                                <label class="toggle-row" style="margin-top: 10px;">
-                                                    <input type="checkbox" id="redownload-externally-deleted">
-                                                    <span>Re-download files deleted outside SoulSync</span>
-                                                </label>
-                                                <div class="help-text" style="margin-top: 6px;">
-                                                    When a library scan finds that a monitored track's file was
-                                                    deleted outside SoulSync, the track is wanted again and goes
-                                                    back to the Wishlist (on by default, like Lidarr). Turn off to
-                                                    treat such a deletion like <em>Don't download again</em>:
-                                                    the track is unmonitored instead.
-                                                </div>
-                                            </div>
+    <div class="settings-group" data-stg="library">
+      <div class="form-group">
+        <label>Movie Path Template:</label>
+        <input
+          type="text"
+          id="vo-movie-template"
+          placeholder="$title ($year)/$title ($year) $quality"
+        />
+        <small class="settings-hint"
+          >Variables: $title, $titlefirst, $year, $quality (e.g. Bluray-1080p), $resolution,
+          $source, $codec, $edition, $audiolangs, $sublangs, $tmdbid, $imdbid. Folders split on "/",
+          the last segment is the filename. <code>[$audiolangs]</code> gives
+          <code>[JA+EN]</code> and disappears when a file has no language tags.</small
+        >
+        <small class="settings-hint">Example: <code id="vo-movie-preview">…</code></small>
+      </div>
 
-                                        </div>
-                                        <div id="organization-video-panel" role="tabpanel" aria-labelledby="organization-video-tab" class="stg-media-panel" hidden="" tabindex="0">
-                                            <div class="stg-media-context"><strong>Video organization</strong><span class="stg-media-summary">Path templates, post-processing &amp;
-                                                    recycle</span></div>
+      <div class="form-group">
+        <label>Episode Path Template:</label>
+        <input
+          type="text"
+          id="vo-episode-template"
+          placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality"
+        />
+        <small class="settings-hint"
+          >Variables: $series, $season (01), $seasonraw (1), $episode (01), $episodetitle, $year,
+          $quality, $resolution, $source, $codec, $audiolangs, $sublangs, $tmdbid, $imdbid, $tvdbid
+          (the show's ids).</small
+        >
+        <small class="settings-hint">Example: <code id="vo-episode-preview">…</code></small>
+      </div>
 
-                                            <div class="settings-group" data-stg="library">
+      <div class="form-group">
+        <label for="vo-colon-replacement">Colons in titles:</label>
+        <select id="vo-colon-replacement">
+          <option value="delete">Delete (Dexter Resurrection)</option>
+          <option value="smart">Smart (Dexter - Resurrection, 12:30 becomes 12-30)</option>
+          <option value="space_dash_space">Space dash space (Dexter - Resurrection)</option>
+          <option value="dash">Dash (Dexter- Resurrection)</option>
+        </select>
+        <small class="settings-hint"
+          >File systems don't allow a colon, so it's replaced in movie and episode names. Mass
+          Rename can bring files you already have in line.</small
+        >
+      </div>
 
+      <div class="form-group">
+        <label>YouTube Path Template:</label>
+        <input
+          type="text"
+          id="vo-youtube-template"
+          placeholder="$channel/Season $year/$channel - $sxe - $title"
+        />
+        <small class="settings-hint"
+          >Followed YouTube channels organize as a TV show. Variables: $channel, $year, $sxe
+          (s2024e0315 — lets Plex/Jellyfin index episodes without an online agent), $date
+          (2024-03-15), $month (03), $day (15), $title, $videoid.</small
+        >
+        <small class="settings-hint"
+          >Plex tip: set the YouTube library's agent to <strong>Personal Media Shows</strong> —
+          episode titles then come straight from the filename, and the channel folder gets its
+          poster/fanart automatically.</small
+        >
+        <small class="settings-hint">Example: <code id="vo-youtube-preview">…</code></small>
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Movie Path Template:</label>
-                                                    <input type="text" id="vo-movie-template" placeholder="$title ($year)/$title ($year) $quality">
-                                                    <small class="settings-hint">Variables: $title, $titlefirst, $year,
-                                                        $quality (e.g. Bluray-1080p), $resolution, $source, $codec,
-                                                        $edition, $audiolangs, $sublangs, $tmdbid, $imdbid. Folders split
-                                                        on "/", the last segment is the filename. <code>[$audiolangs]</code>
-                                                        gives <code>[JA+EN]</code> and disappears when a file has no
-                                                        language tags.</small>
-                                                    <small class="settings-hint">Example: <code id="vo-movie-preview">…</code></small>
-                                                </div>
+      <div class="form-group">
+        <label>YouTube: videos to grab when you follow a channel:</label>
+        <input type="number" id="vo-yt-follow-count" min="0" max="100" placeholder="5" />
+        <small class="settings-hint"
+          >Following a channel backfills its most recent N videos, then watches for anything new
+          posted after you follow. This is also the rolling "keep the last N current" net the
+          channel scan uses. <strong>0</strong> = don't backfill anything, only grab new uploads
+          going forward. It never pulls the whole back catalog.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Episode Path Template:</label>
-                                                    <input type="text" id="vo-episode-template" placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
-                                                    <small class="settings-hint">Variables: $series, $season (01),
-                                                        $seasonraw (1), $episode (01), $episodetitle, $year, $quality,
-                                                        $resolution, $source, $codec, $audiolangs, $sublangs, $tmdbid,
-                                                        $imdbid, $tvdbid (the show's ids).</small>
-                                                    <small class="settings-hint">Example: <code id="vo-episode-preview">…</code></small>
-                                                </div>
+      <div class="form-group">
+        <label>When a file finishes:</label>
+        <select id="vo-transfer-mode" class="form-select">
+          <option value="copy">Copy in, then remove the source (kept for torrents)</option>
+          <option value="move">Move into the library</option>
+        </select>
+        <small class="settings-hint"
+          >How a finished download moves from the download folder into your library.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label for="vo-colon-replacement">Colons in titles:</label>
-                                                    <select id="vo-colon-replacement">
-                                                        <option value="delete">Delete (Dexter Resurrection)</option>
-                                                        <option value="smart">Smart (Dexter - Resurrection, 12:30 becomes 12-30)</option>
-                                                        <option value="space_dash_space">Space dash space (Dexter - Resurrection)</option>
-                                                        <option value="dash">Dash (Dexter- Resurrection)</option>
-                                                    </select>
-                                                    <small class="settings-hint">File systems don't allow a colon, so
-                                                        it's replaced in movie and episode names. Mass Rename can
-                                                        bring files you already have in line.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-verify" />
+          <span>Verify with ffprobe</span>
+        </label>
+        <small class="settings-hint"
+          >Tag by the file's real resolution and reject corrupt / sample files. Needs ffmpeg; falls
+          back to the release name when absent.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>YouTube Path Template:</label>
-                                                    <input type="text" id="vo-youtube-template" placeholder="$channel/Season $year/$channel - $sxe - $title">
-                                                    <small class="settings-hint">Followed YouTube channels organize as a
-                                                        TV show. Variables: $channel, $year, $sxe (s2024e0315 —
-                                                        lets Plex/Jellyfin index episodes without an online agent),
-                                                        $date (2024-03-15), $month (03), $day (15), $title,
-                                                        $videoid.</small>
-                                                    <small class="settings-hint">Plex tip: set the YouTube library's
-                                                        agent to <strong>Personal Media Shows</strong> — episode
-                                                        titles then come straight from the filename, and the channel
-                                                        folder gets its poster/fanart automatically.</small>
-                                                    <small class="settings-hint">Example: <code id="vo-youtube-preview">…</code></small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-replace" />
+          <span>Replace an existing copy when the new one is better</span>
+        </label>
+        <small class="settings-hint">Deletes the old file when an upgrade lands.</small>
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>YouTube: videos to grab when you follow a channel:</label>
-                                                    <input type="number" id="vo-yt-follow-count" min="0" max="100" placeholder="5">
-                                                    <small class="settings-hint">Following a channel backfills its most
-                                                        recent N videos, then watches for anything new posted after you
-                                                        follow. This is also the rolling "keep the last N current" net
-                                                        the channel scan uses. <strong>0</strong> = don't backfill
-                                                        anything, only grab new uploads going forward. It never pulls
-                                                        the whole back catalog.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-subs" />
+          <span>Carry matching subtitles</span>
+        </label>
+        <small class="settings-hint"
+          >Bring sibling .srt / .ass files alongside the video, renamed to match.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>When a file finishes:</label>
-                                                    <select id="vo-transfer-mode" class="form-select">
-                                                        <option value="copy">Copy in, then remove the source (kept for
-                                                            torrents)</option>
-                                                        <option value="move">Move into the library</option>
-                                                    </select>
-                                                    <small class="settings-hint">How a finished download moves from the
-                                                        download folder into your library.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-artwork" />
+          <span>Save artwork into the folder</span>
+        </label>
+        <small class="settings-hint"
+          >Download the full artwork set — poster.jpg, fanart.jpg, clearlogo.png (plus season
+          posters for shows) — next to the movie / into the show folder. Off by default;
+          Plex/Jellyfin usually fetch their own once the folder is named cleanly. Turn on to pin
+          specific art or for offline/local-assets setups.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-verify">
-                                                        <span>Verify with ffprobe</span>
-                                                    </label>
-                                                    <small class="settings-hint">Tag by the file's real resolution and
-                                                        reject corrupt / sample files. Needs ffmpeg; falls back to the
-                                                        release name when absent.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-nfo" />
+          <span>Write NFO metadata files</span>
+        </label>
+        <small class="settings-hint"
+          >Write Kodi/Jellyfin-style movie.nfo / tvshow.nfo (title, plot, rating, genres, cast, ids)
+          so the library is fully portable. Off by default — Plex ignores these, but
+          Jellyfin/Kodi/Emby use them.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-replace">
-                                                        <span>Replace an existing copy when the new one is better</span>
-                                                    </label>
-                                                    <small class="settings-hint">Deletes the old file when an upgrade
-                                                        lands.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-recycle" />
+          <span>Recycle deleted files instead of erasing them</span>
+        </label>
+        <small class="settings-hint"
+          >Upgrade-replaced copies, retention-cleaned YouTube episodes and dismissed imports move
+          into an <code>ss_recycle</code> folder inside the library instead of being deleted — a
+          safety net if something gets replaced by mistake.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-subs">
-                                                        <span>Carry matching subtitles</span>
-                                                    </label>
-                                                    <small class="settings-hint">Bring sibling .srt / .ass files
-                                                        alongside the video, renamed to match.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Keep recycled files for (days):</label>
+        <input type="number" id="vo-recycle-days" min="1" max="365" placeholder="7" />
+        <small class="settings-hint"
+          >Recycled files older than this are removed for good (cleaned automatically as new files
+          are recycled).</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-artwork">
-                                                        <span>Save artwork into the folder</span>
-                                                    </label>
-                                                    <small class="settings-hint">Download the full artwork set —
-                                                        poster.jpg, fanart.jpg, clearlogo.png (plus season posters for
-                                                        shows) — next to the movie / into the show folder. Off by
-                                                        default; Plex/Jellyfin usually fetch their own once the folder
-                                                        is named cleanly. Turn on to pin specific art or for
-                                                        offline/local-assets setups.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Recycle folder (optional):</label>
+        <input
+          type="text"
+          id="vo-recycle-path"
+          placeholder="auto — ss_recycle inside each library"
+        />
+        <small class="settings-hint"
+          >Set a single folder to collect everything (keep it on the same drive as your libraries so
+          moves are instant). Blank = an <code>ss_recycle</code> folder per library.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-nfo">
-                                                        <span>Write NFO metadata files</span>
-                                                    </label>
-                                                    <small class="settings-hint">Write Kodi/Jellyfin-style movie.nfo /
-                                                        tvshow.nfo (title, plot, rating, genres, cast, ids) so the
-                                                        library is fully portable. Off by default — Plex ignores
-                                                        these, but Jellyfin/Kodi/Emby use them.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Minimum free disk space (GB):</label>
+        <input type="number" id="vo-min-free" min="0" step="1" placeholder="0 = off" />
+        <small class="settings-hint"
+          >New grabs are refused (and the wishlist drains pause) when the target drive has less free
+          space than this — so a download can never fill the disk. 0 disables the check.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-recycle">
-                                                        <span>Recycle deleted files instead of erasing them</span>
-                                                    </label>
-                                                    <small class="settings-hint">Upgrade-replaced copies,
-                                                        retention-cleaned YouTube episodes and dismissed imports move
-                                                        into an <code>ss_recycle</code> folder inside the library
-                                                        instead of being deleted — a safety net if something gets
-                                                        replaced by mistake.</small>
-                                                </div>
+      <div class="form-group">
+        <label>YouTube: SponsorBlock</label>
+        <select id="vo-sponsorblock">
+          <option value="off">Off</option>
+          <option value="mark">Mark segments as chapters</option>
+          <option value="remove">Cut sponsor segments out</option>
+        </select>
+        <small class="settings-hint"
+          >Uses the community SponsorBlock database at download time. <strong>Mark</strong> adds
+          skippable chapters (sponsor, self-promo, intro, outro); <strong>Cut</strong> removes
+          sponsor/self-promo/interaction segments from the file entirely.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Keep recycled files for (days):</label>
-                                                    <input type="number" id="vo-recycle-days" min="1" max="365" placeholder="7">
-                                                    <small class="settings-hint">Recycled files older than this are
-                                                        removed for good (cleaned automatically as new files are
-                                                        recycled).</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-yt-subs" />
+          <span>YouTube: embed subtitles</span>
+        </label>
+        <small class="settings-hint"
+          >Embeds YouTube's subtitles (your Subtitle Languages above) into the downloaded file so
+          Plex/Jellyfin offer them without sidecar files.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Recycle folder (optional):</label>
-                                                    <input type="text" id="vo-recycle-path" placeholder="auto — ss_recycle inside each library">
-                                                    <small class="settings-hint">Set a single folder to collect
-                                                        everything (keep it on the same drive as your libraries so moves
-                                                        are instant). Blank = an <code>ss_recycle</code> folder per
-                                                        library.</small>
-                                                </div>
+      <div class="form-group">
+        <button class="test-button" id="vo-reset" style="background: #666">
+          🔄 Reset to Defaults
+        </button>
+        <small class="settings-hint">Restores the Radarr/Sonarr standard layout.</small>
+      </div>
+    </div>
 
-                                                <div class="form-group">
-                                                    <label>Minimum free disk space (GB):</label>
-                                                    <input type="number" id="vo-min-free" min="0" step="1" placeholder="0 = off">
-                                                    <small class="settings-hint">New grabs are refused (and the wishlist
-                                                        drains pause) when the target drive has less free space than
-                                                        this — so a download can never fill the disk. 0 disables
-                                                        the check.</small>
-                                                </div>
+    <div class="settings-group" data-stg="library">
+      <div class="post-processing-section-title">Subtitles</div>
 
-                                                <div class="form-group">
-                                                    <label>YouTube: SponsorBlock</label>
-                                                    <select id="vo-sponsorblock">
-                                                        <option value="off">Off</option>
-                                                        <option value="mark">Mark segments as chapters</option>
-                                                        <option value="remove">Cut sponsor segments out</option>
-                                                    </select>
-                                                    <small class="settings-hint">Uses the community SponsorBlock
-                                                        database at download time. <strong>Mark</strong> adds skippable
-                                                        chapters (sponsor, self-promo, intro, outro);
-                                                        <strong>Cut</strong> removes sponsor/self-promo/interaction
-                                                        segments from the file entirely.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-subs-dl" />
+          <span>Download subtitles</span>
+        </label>
+        <small class="settings-hint"
+          >Fetch external .srt files next to the video from the provider chain below, only for
+          what's missing. On by default for new imports — free tiers are quota-limited (~20
+          downloads/day each), so anything missed is retried later.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-yt-subs">
-                                                        <span>YouTube: embed subtitles</span>
-                                                    </label>
-                                                    <small class="settings-hint">Embeds YouTube's subtitles (your
-                                                        Subtitle Languages above) into the downloaded file so
-                                                        Plex/Jellyfin offer them without sidecar files.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Subtitle Languages:</label>
+        <input type="text" id="vo-sub-langs" placeholder="en" />
+        <small class="settings-hint"
+          >Language codes to fetch, in priority order (e.g. <code>en,es</code>). One .srt per
+          language is written as &lt;video&gt;.&lt;lang&gt;.srt.</small
+        >
+        <small class="settings-hint"
+          >Each code is 2–3 letters; separate codes with commas, spaces, or semicolons.</small
+        >
+        <small
+          class="settings-hint"
+          id="vo-sub-langs-error"
+          hidden=""
+          style="color: #ff6b6b"
+        ></small>
+      </div>
 
-                                                <div class="form-group">
-                                                    <button class="test-button" id="vo-reset" style="background: #666;">🔄 Reset to Defaults</button>
-                                                    <small class="settings-hint">Restores the Radarr/Sonarr standard
-                                                        layout.</small>
-                                                </div>
-                                            </div>
+      <div class="form-group">
+        <label for="vo-sub-hi-forced">Hearing-impaired preference:</label>
+        <select id="vo-sub-hi-forced">
+          <option value="off">Off — best match wins</option>
+          <option value="prefer_hi">Prefer hearing-impaired</option>
+        </select>
+        <small class="settings-hint"
+          >A tiebreak only, never a filter: when two subtitles score the same, the hearing-impaired
+          one (sound cues, speaker names) wins.</small
+        >
+      </div>
 
-                                            <div class="settings-group" data-stg="library">
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-sub-forced" />
+          <span>Also grab forced subtitles</span>
+        </label>
+        <small class="settings-hint"
+          >On top of the full track, fetch a forced (foreign-parts-only) track per language, written
+          as &lt;video&gt;.&lt;lang&gt;.forced.srt — the lines for scenes in another language, for
+          when you watch without full subtitles. Many titles have none, so these often stay
+          missing.</small
+        >
+      </div>
 
-                                                <div class="post-processing-section-title">Subtitles</div>
+      <div class="form-group">
+        <label>Already have it when…</label>
+        <small class="settings-hint"
+          >Before fetching, SoulSync checks what the video already has: any sidecar next to it
+          (<code>.en.srt</code>, <code>.eng.srt</code>, <code>.English.sdh.srt</code>, or an
+          unlabeled <code>.srt</code> whose language it detects) and the file's own embedded
+          tracks.</small
+        >
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-sub-use-embedded" />
+          <span>Count embedded subtitles</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-sub-ignore-pgs" />
+          <span>…except PGS (Blu-ray image subs)</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-sub-ignore-vobsub" />
+          <span>…except VobSub (DVD image subs)</span>
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-sub-ignore-ass" />
+          <span>…except ASS/SSA (styled subs)</span>
+        </label>
+        <small class="settings-hint"
+          >Ignore image subs if your players can't show them (or have to transcode for them) and
+          you'd rather have a text .srt.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-subs-dl">
-                                                        <span>Download subtitles</span>
-                                                    </label>
-                                                    <small class="settings-hint">Fetch external .srt files next to
-                                                        the video from the provider chain below, only for what's
-                                                        missing. On by default for new imports — free tiers
-                                                        are quota-limited (~20 downloads/day each), so anything
-                                                        missed is retried later.</small>
-                                                </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-sub-autosync" />
+          <span>Auto-sync subtitles to audio</span>
+        </label>
+        <small class="settings-hint"
+          >After a download, shift the subtitle timing to match the video's own audio (ffsubsync,
+          offline). Requires the <code>ffsubsync</code> Python package on the server; a failed sync
+          keeps the original file.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Subtitle Languages:</label>
-                                                    <input type="text" id="vo-sub-langs" placeholder="en">
-                                                    <small class="settings-hint">Language codes to fetch, in
-                                                        priority order (e.g. <code>en,es</code>). One .srt per
-                                                        language is written as
-                                                        &lt;video&gt;.&lt;lang&gt;.srt.</small>
-                                                    <small class="settings-hint">Each code is 2–3 letters;
-                                                        separate codes with commas, spaces, or semicolons.</small>
-                                                    <small class="settings-hint" id="vo-sub-langs-error" hidden="" style="color: #ff6b6b;"></small>
-                                                </div>
+      <div class="form-group">
+        <label>Subtitle provider chain:</label>
+        <div id="subchain-widget">
+          <div class="dlchain-columns">
+            <div class="dlchain-col">
+              <div class="dlchain-col-head">
+                <span class="dlchain-col-label">Available</span>
+                <span class="dlchain-col-hint">drag one across, or click it</span>
+              </div>
+              <div class="dlchain-pool" id="subchain-pool"></div>
+            </div>
+            <div class="dlchain-col">
+              <div class="dlchain-col-head">
+                <span class="dlchain-col-label">Provider chain</span>
+                <span class="dlchain-col-hint" id="subchain-mode-hint"></span>
+              </div>
+              <div class="dlchain-list" id="subchain-list"></div>
+            </div>
+          </div>
+        </div>
+        <small class="settings-hint"
+          >Each provider is tried in order, top first, until subtitles are found. Whisper stays
+          pinned last as the last resort when enabled.</small
+        >
+        <small class="settings-hint"
+          >API keys live under Services → OpenSubtitles, SubDL, SubSource. Embedded needs no
+          key.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label for="vo-sub-hi-forced">Hearing-impaired
-                                                        preference:</label>
-                                                    <select id="vo-sub-hi-forced">
-                                                        <option value="off">Off — best match wins</option>
-                                                        <option value="prefer_hi">Prefer hearing-impaired</option>
-                                                    </select>
-                                                    <small class="settings-hint">A tiebreak only, never a filter:
-                                                        when two subtitles score the same, the hearing-impaired
-                                                        one (sound cues, speaker names) wins.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Local transcription (Whisper):</label>
+        <div class="vo-whisper-row">
+          <select id="vo-whisper-model" aria-label="Whisper model">
+            <option value="tiny">tiny</option>
+            <option value="base">base</option>
+            <option value="small">small</option>
+          </select>
+          <button class="test-button" id="vo-whisper-dl" type="button">Download model</button>
+        </div>
+        <div class="vo-whisper-progress" id="vo-whisper-progress" hidden="">
+          <div class="vo-whisper-progress-bar" id="vo-whisper-progress-bar"></div>
+        </div>
+        <small class="settings-hint" id="vo-whisper-status"></small>
+        <small class="settings-hint" id="vo-whisper-error" hidden="" style="color: #ff6b6b"></small>
+        <label class="checkbox-label">
+          <input type="checkbox" id="vo-whisper-enabled" />
+          <span>Enable local transcription</span>
+        </label>
+        <small class="settings-hint"
+          >Last-resort fallback: when no provider has subtitles, this server transcribes the video's
+          own audio — no API key, no quota, fully offline after the one-time model download.
+          Transcription runs in the background subtitle worker (a 45-minute episode takes roughly
+          10–20 minutes on a typical CPU). Requires the <code>faster-whisper</code> Python package
+          on the server.</small
+        >
+      </div>
 
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-sub-forced">
-                                                        <span>Also grab forced subtitles</span>
-                                                    </label>
-                                                    <small class="settings-hint">On top of the full track, fetch a
-                                                        forced (foreign-parts-only) track per language, written as
-                                                        &lt;video&gt;.&lt;lang&gt;.forced.srt — the lines
-                                                        for scenes in another language, for when you watch
-                                                        without full subtitles. Many titles have none, so these
-                                                        often stay missing.</small>
-                                                </div>
+      <div class="form-group">
+        <label>Advanced:</label>
+        <div class="vo-sub-adv-grid">
+          <div>
+            <label for="vo-sub-min-score">Minimum match score</label>
+            <input type="number" id="vo-sub-min-score" min="0" max="200" step="1" />
+            <small class="settings-hint"
+              >Candidates scoring below this are a miss and never download.</small
+            >
+          </div>
+          <div>
+            <label for="vo-sub-daily-quota">Daily quota per provider</label>
+            <input type="number" id="vo-sub-daily-quota" min="1" max="1000" step="1" />
+            <small class="settings-hint">Max subtitle downloads per provider per day (UTC).</small>
+          </div>
+          <div>
+            <label for="vo-sub-upgrade-delta">Upgrade threshold</label>
+            <input type="number" id="vo-sub-upgrade-delta" min="0" max="200" step="1" />
+            <small class="settings-hint"
+              >A new candidate must beat the current subtitle by this much to replace it.</small
+            >
+          </div>
+          <div>
+            <label for="vo-sub-worker-interval">Retry every (minutes)</label>
+            <input type="number" id="vo-sub-worker-interval" min="5" max="1440" step="1" />
+            <small class="settings-hint">How often the wanted loop retries misses.</small>
+          </div>
+          <div>
+            <label for="vo-sub-worker-batch">Retries per cycle</label>
+            <input type="number" id="vo-sub-worker-batch" min="1" max="200" step="1" />
+            <small class="settings-hint">Max wanted rows attempted per worker cycle.</small>
+          </div>
+        </div>
+      </div>
 
-                                                <div class="form-group">
-                                                    <label>Already have it when…</label>
-                                                    <small class="settings-hint">Before fetching, SoulSync checks what
-                                                        the video already has: any sidecar next to it
-                                                        (<code>.en.srt</code>, <code>.eng.srt</code>,
-                                                        <code>.English.sdh.srt</code>, or an unlabeled
-                                                        <code>.srt</code> whose language it detects) and the
-                                                        file's own embedded tracks.</small>
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-sub-use-embedded">
-                                                        <span>Count embedded subtitles</span>
-                                                    </label>
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-sub-ignore-pgs">
-                                                        <span>…except PGS (Blu-ray image subs)</span>
-                                                    </label>
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-sub-ignore-vobsub">
-                                                        <span>…except VobSub (DVD image subs)</span>
-                                                    </label>
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-sub-ignore-ass">
-                                                        <span>…except ASS/SSA (styled subs)</span>
-                                                    </label>
-                                                    <small class="settings-hint">Ignore image subs if your players
-                                                        can't show them (or have to transcode for them) and you'd
-                                                        rather have a text .srt.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-sub-autosync">
-                                                        <span>Auto-sync subtitles to audio</span>
-                                                    </label>
-                                                    <small class="settings-hint">After a download, shift the
-                                                        subtitle timing to match the video's own audio
-                                                        (ffsubsync, offline). Requires the
-                                                        <code>ffsubsync</code> Python package on the server;
-                                                        a failed sync keeps the original file.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Subtitle provider chain:</label>
-                                                    <div id="subchain-widget">
-                                                        <div class="dlchain-columns">
-                                                            <div class="dlchain-col">
-                                                                <div class="dlchain-col-head">
-                                                                    <span class="dlchain-col-label">Available</span>
-                                                                    <span class="dlchain-col-hint">drag one across, or click it</span>
-                                                                </div>
-                                                                <div class="dlchain-pool" id="subchain-pool"></div>
-                                                            </div>
-                                                            <div class="dlchain-col">
-                                                                <div class="dlchain-col-head">
-                                                                    <span class="dlchain-col-label">Provider chain</span>
-                                                                    <span class="dlchain-col-hint" id="subchain-mode-hint"></span>
-                                                                </div>
-                                                                <div class="dlchain-list" id="subchain-list"></div>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <small class="settings-hint">Each provider is tried in order,
-                                                        top first, until subtitles are found. Whisper stays
-                                                        pinned last as the last resort when enabled.</small>
-                                                    <small class="settings-hint">API keys live under
-                                                        Services → OpenSubtitles, SubDL, SubSource.
-                                                        Embedded needs no key.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Local transcription (Whisper):</label>
-                                                    <div class="vo-whisper-row">
-                                                        <select id="vo-whisper-model" aria-label="Whisper model">
-                                                            <option value="tiny">tiny</option>
-                                                            <option value="base">base</option>
-                                                            <option value="small">small</option>
-                                                        </select>
-                                                        <button class="test-button" id="vo-whisper-dl" type="button">Download model</button>
-                                                    </div>
-                                                    <div class="vo-whisper-progress" id="vo-whisper-progress" hidden="">
-                                                        <div class="vo-whisper-progress-bar" id="vo-whisper-progress-bar"></div>
-                                                    </div>
-                                                    <small class="settings-hint" id="vo-whisper-status"></small>
-                                                    <small class="settings-hint" id="vo-whisper-error" hidden="" style="color: #ff6b6b;"></small>
-                                                    <label class="checkbox-label">
-                                                        <input type="checkbox" id="vo-whisper-enabled">
-                                                        <span>Enable local transcription</span>
-                                                    </label>
-                                                    <small class="settings-hint">Last-resort fallback: when no
-                                                        provider has subtitles, this server transcribes the
-                                                        video's own audio — no API key, no quota, fully
-                                                        offline after the one-time model download. Transcription
-                                                        runs in the background subtitle worker (a 45-minute
-                                                        episode takes roughly 10–20 minutes on a typical
-                                                        CPU). Requires the
-                                                        <code>faster-whisper</code> Python package on the
-                                                        server.</small>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Advanced:</label>
-                                                    <div class="vo-sub-adv-grid">
-                                                        <div>
-                                                            <label for="vo-sub-min-score">Minimum match score</label>
-                                                            <input type="number" id="vo-sub-min-score" min="0" max="200" step="1">
-                                                            <small class="settings-hint">Candidates scoring below this are a miss and never download.</small>
-                                                        </div>
-                                                        <div>
-                                                            <label for="vo-sub-daily-quota">Daily quota per provider</label>
-                                                            <input type="number" id="vo-sub-daily-quota" min="1" max="1000" step="1">
-                                                            <small class="settings-hint">Max subtitle downloads per provider per day (UTC).</small>
-                                                        </div>
-                                                        <div>
-                                                            <label for="vo-sub-upgrade-delta">Upgrade threshold</label>
-                                                            <input type="number" id="vo-sub-upgrade-delta" min="0" max="200" step="1">
-                                                            <small class="settings-hint">A new candidate must beat the current subtitle by this much to replace it.</small>
-                                                        </div>
-                                                        <div>
-                                                            <label for="vo-sub-worker-interval">Retry every (minutes)</label>
-                                                            <input type="number" id="vo-sub-worker-interval" min="5" max="1440" step="1">
-                                                            <small class="settings-hint">How often the wanted loop retries misses.</small>
-                                                        </div>
-                                                        <div>
-                                                            <label for="vo-sub-worker-batch">Retries per cycle</label>
-                                                            <input type="number" id="vo-sub-worker-batch" min="1" max="200" step="1">
-                                                            <small class="settings-hint">Max wanted rows attempted per worker cycle.</small>
-                                                        </div>
-                                                    </div>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <label>Videos already in your library:</label>
-                                                    <div>
-                                                        <button class="test-button" id="vo-sub-open-job" type="button">Missing Subtitles job →</button>
-                                                    </div>
-                                                    <small class="settings-hint" id="vo-sub-job-status"></small>
-                                                    <small class="settings-hint">New imports are covered
-                                                        automatically. The Missing Subtitles job on the Tools
-                                                        page checks everything you already own on a schedule
-                                                        and queues what's missing; turn on its Dry Run to
-                                                        review findings first.</small>
-                                                </div>
-                                            </div>
-
-                                        </div>
-                                    </div>
+      <div class="form-group">
+        <label>Videos already in your library:</label>
+        <div>
+          <button class="test-button" id="vo-sub-open-job" type="button">
+            Missing Subtitles job →
+          </button>
+        </div>
+        <small class="settings-hint" id="vo-sub-job-status"></small>
+        <small class="settings-hint"
+          >New imports are covered automatically. The Missing Subtitles job on the Tools page checks
+          everything you already own on a schedule and queues what's missing; turn on its Dry Run to
+          review findings first.</small
+        >
+      </div>
+    </div>
+  </div>
+</div>

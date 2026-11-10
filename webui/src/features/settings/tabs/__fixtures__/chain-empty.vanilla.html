@@ -1,24 +1,234 @@
 <div id="download-chain-widget">
-                                                    <div class="dlchain-tabs" id="dlchain-tabs" role="tablist"><button type="button" role="tab" class="dlchain-tab active" onclick="switchDownloadChain('music')">Music</button><button type="button" role="tab" class="dlchain-tab" onclick="switchDownloadChain('video')">Video</button><button type="button" role="tab" class="dlchain-tab" onclick="switchDownloadChain('audiobooks')">Audiobooks</button></div>
-                                                    <div class="setting-help-text" id="dlchain-help">Downloads try each source in order, top first. One source means single-source mode; two or more is hybrid.</div>
-                                                    <div class="dlchain-columns">
-                                                        <div class="dlchain-col">
-                                                            <div class="dlchain-col-head">
-                                                                <span class="dlchain-col-label">Available</span>
-                                                                <span class="dlchain-col-hint">drag one across, or click it</span>
-                                                                <input type="search" id="dlchain-filter" class="dlchain-filter" placeholder="Filter" aria-label="Filter available sources" oninput="dlchainFilter(this.value)" autocomplete="off">
-                                                            </div>
-                                                            <div class="dlchain-pool" id="dlchain-pool"><div class="dlchain-group"><div class="dlchain-group-head"><span class="dlchain-group-label">Peer-to-peer</span><span class="dlchain-group-count">1</span></div><div class="dlchain-group-row"><button type="button" class="dlchain-tile" draggable="true" data-src="soulseek" onclick="dlchainAdd('soulseek')" title="Add Soulseek to the chain"><span class="dlchain-tile-art"><img class="dlchain-mark" src="/static/img/brands/slskd.png" alt="" onerror="this.outerHTML='<span class='emoji-icon'>🎵</span>'"></span><span class="dlchain-tile-name">Soulseek</span></button></div></div><div class="dlchain-group"><div class="dlchain-group-head"><span class="dlchain-group-label">Streaming services</span><span class="dlchain-group-count">5</span></div><div class="dlchain-group-row"><button type="button" class="dlchain-tile" draggable="true" data-src="tidal" onclick="dlchainAdd('tidal')" title="Add Tidal to the chain"><span class="dlchain-tile-art"><img class="dlchain-mark is-inverted" src="/static/img/brands/tidal.svg" alt="" onerror="this.outerHTML='<span class='emoji-icon'>🌊</span>'"></span><span class="dlchain-tile-name">Tidal</span></button><button type="button" class="dlchain-tile" draggable="true" data-src="qobuz" onclick="dlchainAdd('qobuz')" title="Add Qobuz to the chain"><span class="dlchain-tile-art"><img class="dlchain-mark is-inverted" src="/static/img/brands/qobuz.svg" alt="" onerror="this.outerHTML='<span class='emoji-icon'>🎧</span>'"></span><span class="dlchain-tile-name">Qobuz</span></button><button type="button" class="dlchain-tile" draggable="true" data-src="deezer_dl" onclick="dlchainAdd('deezer_dl')" title="Add Deezer to the chain"><span class="dlchain-tile-art"><img class="dlchain-mark" src="/static/img/brands/deezer.png" alt="" onerror="this.outerHTML='<span class='emoji-icon'>🎧</span>'"></span><span class="dlchain-tile-name">Deezer</span></button><button type="button" class="dlchain-tile" draggable="true" data-src="soundcloud" onclick="dlchainAdd('soundcloud')" title="Add SoundCloud to the chain"><span class="dlchain-tile-art"><img class="dlchain-mark is-inverted" src="/static/img/brands/soundcloud.png" alt="" onerror="this.outerHTML='<span class='emoji-icon'>☁️</span>'"></span><span class="dlchain-tile-name">SoundCloud</span></button><button type="button" class="dlchain-tile" draggable="true" data-src="hifi" onclick="dlchainAdd('hifi')" title="Add HiFi to the chain"><span class="dlchain-tile-art"><span class="emoji-icon">🎶</span></span><span class="dlchain-tile-name">HiFi</span></button></div></div><div class="dlchain-group"><div class="dlchain-group-head"><span class="dlchain-group-label">Public video</span><span class="dlchain-group-count">1</span></div><div class="dlchain-group-row"><button type="button" class="dlchain-tile" draggable="true" data-src="youtube" onclick="dlchainAdd('youtube')" title="Add YouTube to the chain"><span class="dlchain-tile-art"><img class="dlchain-mark" src="/static/img/brands/youtube.svg" alt="" onerror="this.outerHTML='<span class='emoji-icon'>▶️</span>'"></span><span class="dlchain-tile-name">YouTube</span></button></div></div><div class="dlchain-group"><div class="dlchain-group-head"><span class="dlchain-group-label">Torrent &amp; Usenet</span><span class="dlchain-group-count">2</span></div><div class="dlchain-group-row"><button type="button" class="dlchain-tile" draggable="true" data-src="torrent" onclick="dlchainAdd('torrent')" title="Add Torrent to the chain"><span class="dlchain-tile-art"><span class="emoji-icon">🧲</span></span><span class="dlchain-tile-name">Torrent</span></button><button type="button" class="dlchain-tile" draggable="true" data-src="usenet" onclick="dlchainAdd('usenet')" title="Add Usenet to the chain"><span class="dlchain-tile-art"><span class="emoji-icon">📰</span></span><span class="dlchain-tile-name">Usenet</span></button></div></div><div class="dlchain-group"><div class="dlchain-group-head"><span class="dlchain-group-label">Library manager</span><span class="dlchain-group-count">1</span></div><div class="dlchain-group-row"><button type="button" class="dlchain-tile" draggable="true" data-src="lidarr" onclick="dlchainAdd('lidarr')" title="Add Lidarr to the chain"><span class="dlchain-tile-art"><span class="emoji-icon">📦</span></span><span class="dlchain-tile-name">Lidarr</span></button></div></div><div class="dlchain-empty" id="dlchain-no-match" hidden="">Nothing matches that.</div></div>
-
-                                                        </div>
-                                                        <div class="dlchain-col">
-                                                            <div class="dlchain-col-head">
-                                                                <span class="dlchain-col-label">Download chain</span>
-                                                                <span class="dlchain-col-hint" id="dlchain-mode-hint">nothing selected</span>
-                                                            </div>
-                                                            <div class="dlchain-list" id="dlchain-list"><div class="dlchain-slot first" id="dlchain-slot"><span class="dlchain-slot-title">Drag a source here — this one is tried first</span><span class="dlchain-slot-hint">Downloads need at least one source. Add more to fall back in order.</span></div></div>
-                                                        </div>
-                                                    </div>
-
-
-                                                </div>
+  <div class="dlchain-tabs" id="dlchain-tabs" role="tablist">
+    <button
+      type="button"
+      role="tab"
+      class="dlchain-tab active"
+      onclick="switchDownloadChain('music')"
+    >
+      Music</button
+    ><button type="button" role="tab" class="dlchain-tab" onclick="switchDownloadChain('video')">
+      Video</button
+    ><button
+      type="button"
+      role="tab"
+      class="dlchain-tab"
+      onclick="switchDownloadChain('audiobooks')"
+    >
+      Audiobooks
+    </button>
+  </div>
+  <div class="setting-help-text" id="dlchain-help">
+    Downloads try each source in order, top first. One source means single-source mode; two or more
+    is hybrid.
+  </div>
+  <div class="dlchain-columns">
+    <div class="dlchain-col">
+      <div class="dlchain-col-head">
+        <span class="dlchain-col-label">Available</span>
+        <span class="dlchain-col-hint">drag one across, or click it</span>
+        <input
+          type="search"
+          id="dlchain-filter"
+          class="dlchain-filter"
+          placeholder="Filter"
+          aria-label="Filter available sources"
+          oninput="dlchainFilter(this.value)"
+          autocomplete="off"
+        />
+      </div>
+      <div class="dlchain-pool" id="dlchain-pool">
+        <div class="dlchain-group">
+          <div class="dlchain-group-head">
+            <span class="dlchain-group-label">Peer-to-peer</span
+            ><span class="dlchain-group-count">1</span>
+          </div>
+          <div class="dlchain-group-row">
+            <button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="soulseek"
+              onclick="dlchainAdd('soulseek')"
+              title="Add Soulseek to the chain"
+            >
+              <span class="dlchain-tile-art"
+                ><img
+                  class="dlchain-mark"
+                  src="/static/img/brands/slskd.png"
+                  alt=""
+                  onerror="this.outerHTML='<span class='emoji-icon'>🎵</span>'" /></span
+              ><span class="dlchain-tile-name">Soulseek</span>
+            </button>
+          </div>
+        </div>
+        <div class="dlchain-group">
+          <div class="dlchain-group-head">
+            <span class="dlchain-group-label">Streaming services</span
+            ><span class="dlchain-group-count">5</span>
+          </div>
+          <div class="dlchain-group-row">
+            <button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="tidal"
+              onclick="dlchainAdd('tidal')"
+              title="Add Tidal to the chain"
+            >
+              <span class="dlchain-tile-art"
+                ><img
+                  class="dlchain-mark is-inverted"
+                  src="/static/img/brands/tidal.svg"
+                  alt=""
+                  onerror="this.outerHTML='<span class='emoji-icon'>🌊</span>'" /></span
+              ><span class="dlchain-tile-name">Tidal</span></button
+            ><button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="qobuz"
+              onclick="dlchainAdd('qobuz')"
+              title="Add Qobuz to the chain"
+            >
+              <span class="dlchain-tile-art"
+                ><img
+                  class="dlchain-mark is-inverted"
+                  src="/static/img/brands/qobuz.svg"
+                  alt=""
+                  onerror="this.outerHTML='<span class='emoji-icon'>🎧</span>'" /></span
+              ><span class="dlchain-tile-name">Qobuz</span></button
+            ><button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="deezer_dl"
+              onclick="dlchainAdd('deezer_dl')"
+              title="Add Deezer to the chain"
+            >
+              <span class="dlchain-tile-art"
+                ><img
+                  class="dlchain-mark"
+                  src="/static/img/brands/deezer.png"
+                  alt=""
+                  onerror="this.outerHTML='<span class='emoji-icon'>🎧</span>'" /></span
+              ><span class="dlchain-tile-name">Deezer</span></button
+            ><button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="soundcloud"
+              onclick="dlchainAdd('soundcloud')"
+              title="Add SoundCloud to the chain"
+            >
+              <span class="dlchain-tile-art"
+                ><img
+                  class="dlchain-mark is-inverted"
+                  src="/static/img/brands/soundcloud.png"
+                  alt=""
+                  onerror="this.outerHTML='<span class='emoji-icon'>☁️</span>'" /></span
+              ><span class="dlchain-tile-name">SoundCloud</span></button
+            ><button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="hifi"
+              onclick="dlchainAdd('hifi')"
+              title="Add HiFi to the chain"
+            >
+              <span class="dlchain-tile-art"><span class="emoji-icon">🎶</span></span
+              ><span class="dlchain-tile-name">HiFi</span>
+            </button>
+          </div>
+        </div>
+        <div class="dlchain-group">
+          <div class="dlchain-group-head">
+            <span class="dlchain-group-label">Public video</span
+            ><span class="dlchain-group-count">1</span>
+          </div>
+          <div class="dlchain-group-row">
+            <button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="youtube"
+              onclick="dlchainAdd('youtube')"
+              title="Add YouTube to the chain"
+            >
+              <span class="dlchain-tile-art"
+                ><img
+                  class="dlchain-mark"
+                  src="/static/img/brands/youtube.svg"
+                  alt=""
+                  onerror="this.outerHTML='<span class='emoji-icon'>▶️</span>'" /></span
+              ><span class="dlchain-tile-name">YouTube</span>
+            </button>
+          </div>
+        </div>
+        <div class="dlchain-group">
+          <div class="dlchain-group-head">
+            <span class="dlchain-group-label">Torrent &amp; Usenet</span
+            ><span class="dlchain-group-count">2</span>
+          </div>
+          <div class="dlchain-group-row">
+            <button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="torrent"
+              onclick="dlchainAdd('torrent')"
+              title="Add Torrent to the chain"
+            >
+              <span class="dlchain-tile-art"><span class="emoji-icon">🧲</span></span
+              ><span class="dlchain-tile-name">Torrent</span></button
+            ><button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="usenet"
+              onclick="dlchainAdd('usenet')"
+              title="Add Usenet to the chain"
+            >
+              <span class="dlchain-tile-art"><span class="emoji-icon">📰</span></span
+              ><span class="dlchain-tile-name">Usenet</span>
+            </button>
+          </div>
+        </div>
+        <div class="dlchain-group">
+          <div class="dlchain-group-head">
+            <span class="dlchain-group-label">Library manager</span
+            ><span class="dlchain-group-count">1</span>
+          </div>
+          <div class="dlchain-group-row">
+            <button
+              type="button"
+              class="dlchain-tile"
+              draggable="true"
+              data-src="lidarr"
+              onclick="dlchainAdd('lidarr')"
+              title="Add Lidarr to the chain"
+            >
+              <span class="dlchain-tile-art"><span class="emoji-icon">📦</span></span
+              ><span class="dlchain-tile-name">Lidarr</span>
+            </button>
+          </div>
+        </div>
+        <div class="dlchain-empty" id="dlchain-no-match" hidden="">Nothing matches that.</div>
+      </div>
+    </div>
+    <div class="dlchain-col">
+      <div class="dlchain-col-head">
+        <span class="dlchain-col-label">Download chain</span>
+        <span class="dlchain-col-hint" id="dlchain-mode-hint">nothing selected</span>
+      </div>
+      <div class="dlchain-list" id="dlchain-list">
+        <div class="dlchain-slot first" id="dlchain-slot">
+          <span class="dlchain-slot-title">Drag a source here — this one is tried first</span
+          ><span class="dlchain-slot-hint"
+            >Downloads need at least one source. Add more to fall back in order.</span
+          >
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
