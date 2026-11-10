@@ -267,6 +267,63 @@ describe('the health hero', () => {
     expect(bodyOf('/bulk-fix-start')).toEqual({ safe_only: true });
   });
 
+  it('asks first, naming every kind it will fix and what a tag fix writes', async () => {
+    routes({
+      [GROUPS]: {
+        groups: [
+          group({ finding_type: 'library_retag', pending: 1200 }),
+          group({ finding_type: 'missing_cover_art', pending: 10 }),
+          group({ finding_type: 'orphan_file', pending: 5 }),
+        ],
+      },
+      [TYPES]: {
+        types: [
+          typeInfo({
+            type: 'library_retag',
+            label: 'Library Re-tag',
+            verb: 'Apply Tags',
+            destructive: false,
+          }),
+          typeInfo({
+            type: 'missing_cover_art',
+            label: 'Missing Cover Art',
+            verb: 'Apply Art',
+            destructive: false,
+          }),
+          typeInfo({ type: 'orphan_file', label: 'Orphan Files', destructive: true }),
+        ],
+      },
+      '/bulk-fix-start': { started: true, total: 1210 },
+    });
+    renderSurface();
+    await flush();
+
+    fireEvent.click(document.querySelector('.repair-health-fix-safe') as HTMLElement);
+    await flush();
+    const asked = confirmSpy.mock.calls.at(-1)?.[0];
+    expect(asked.title).toBe('Fix all safe findings?');
+    expect(asked.confirmText).toBe('Fix 1,210');
+    expect(asked.message).toContain('1,200  Library Re-tag (Apply Tags)');
+    expect(asked.message).toContain('10  Missing Cover Art (Apply Art)');
+    expect(asked.message).not.toContain('Orphan Files');
+    expect(asked.message).toContain("writes into each file's tags");
+  });
+
+  it('a no sends nothing', async () => {
+    confirmSpy.mockResolvedValue(false);
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'missing_cover_art', pending: 10 })] },
+      [TYPES]: { types: [typeInfo({ type: 'missing_cover_art', destructive: false })] },
+    });
+    renderSurface();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-health-fix-safe') as HTMLElement);
+    await flush();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/bulk-fix-start'))).toBe(
+      false,
+    );
+  });
+
   it('disables Fix all safe when nothing is safe to fix', async () => {
     routes({
       [COUNTS]: { pending: 3 },
@@ -2884,5 +2941,28 @@ describe('one type open is the whole view', () => {
     await flush();
     expect(overview.hidden).toBe(false);
     expect(document.querySelector('.repair-inbox-group.open')).toBeNull();
+  });
+});
+
+describe('the flat list', () => {
+  it('loads every finding without a search or an opened type', async () => {
+    // it sat on "Loading findings..." for good: the loader only ran for a
+    // search or an opened type
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'orphan_file', pending: 1 })] },
+      [FINDINGS]: page([finding()]),
+    });
+    renderSurface();
+    await flush();
+    expect(document.querySelector('.repair-finding-card')).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Flat list' }));
+    await waitFor(() => expect(document.querySelector('.repair-finding-card')).not.toBeNull());
+    expect(screen.queryByText('Loading findings...')).toBeNull();
+    const asked = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes(`${FINDINGS}?`));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.at(-1)).not.toContain('finding_type=');
   });
 });

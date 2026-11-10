@@ -94,6 +94,10 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'track_number_repair',
       'mbid_mismatch_detector',
       'untagged_downloads',
+      // the two jobs behind the biggest tag types. they only report (neither
+      // fixes by itself), so checking or scheduling the area can't write a file
+      'library_retag',
+      'album_edition_review',
     ],
     findingTypes: [
       'album_tag_inconsistency',
@@ -104,8 +108,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'track_number_mismatch',
       'untagged_download',
       // the two biggest tag types had no area, so this one read "Clean" over
-      // tens of thousands of open findings. counted here; neither job is in
-      // jobIds, so the area's switch and Check now still leave them alone.
+      // tens of thousands of open findings
       'library_retag',
       'canonical_version',
     ],

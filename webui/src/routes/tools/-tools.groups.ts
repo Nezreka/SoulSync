@@ -337,6 +337,59 @@ export function safeFixablePending(
   return total;
 }
 
+/** how many types the fix-all-safe question names before it sums the rest */
+const SAFE_PLAN_MAX = 6;
+
+/**
+ * What "Fix all safe" is about to do, for the question it asks first.
+ *
+ * One click can write to tens of thousands of files, so "apply the default
+ * fix to 83,619 findings?" is not enough to say yes to. This names each kind
+ * of finding, how many, and what its fix is called, biggest first, and says
+ * in plain words what a tag fix writes.
+ */
+export function fixAllSafePlan(
+  groups: readonly FindingGroup[],
+  infoOf: (findingType: string) => FindingTypeInfo | undefined,
+  video = false,
+): { total: number; message: string; confirmText: string } {
+  const rows = groups
+    .map((group) => ({ group, info: infoOf(group.finding_type) }))
+    .filter(({ group, info }) => isSafeType(info) && (group.pending || 0) > 0)
+    .sort((a, b) => (b.group.pending || 0) - (a.group.pending || 0));
+  const total = rows.reduce((sum, { group }) => sum + (group.pending || 0), 0);
+  const line = ({ group, info }: (typeof rows)[number]) =>
+    `${(group.pending || 0).toLocaleString()}  ${info?.label || group.finding_type.replace(/_/g, ' ')}${
+      info?.verb ? ` (${info.verb})` : ''
+    }`;
+  const shown = rows.slice(0, SAFE_PLAN_MAX);
+  const rest = rows.slice(SAFE_PLAN_MAX);
+  const lines = shown.map(line);
+  if (rest.length) {
+    const restTotal = rest.reduce((sum, { group }) => sum + (group.pending || 0), 0);
+    lines.push(
+      `${restTotal.toLocaleString()}  in ${rest.length} more type${rest.length === 1 ? '' : 's'}`,
+    );
+  }
+  const retag = rows.some(({ group }) => group.finding_type === 'library_retag');
+  const paragraphs = [
+    `This applies the default fix to ${total.toLocaleString()} finding${total === 1 ? '' : 's'}:`,
+    lines.join('\n'),
+    video
+      ? "These only change SoulSync's own data. Nothing on disk is touched and nothing is downloaded."
+      : 'These only write tags and library data. No file is moved or deleted, and any finding that would do that is left alone.',
+    retag
+      ? "Library Re-tag writes into each file's tags: only the fields that finding names (genre and year included), and a cover where the file has none."
+      : '',
+    'It runs in the background and you can stop it at any time.',
+  ];
+  return {
+    total,
+    message: paragraphs.filter(Boolean).join('\n\n'),
+    confirmText: `Fix ${total.toLocaleString()}`,
+  };
+}
+
 // ── History sparkline ────────────────────────────────────────────────────────
 
 /**

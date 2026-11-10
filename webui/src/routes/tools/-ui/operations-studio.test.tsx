@@ -345,8 +345,8 @@ describe('OperationsStudio (the top of the Jobs panel)', () => {
     expect(onShowFindings).toHaveBeenLastCalledWith('', { findingType: 'corrupt_audio' });
   });
 
-  it('the tag area counts the types its jobs do not own', async () => {
-    // re-tag and edition findings had no area, so tags read Clean over them
+  it('the tag area owns re-tag and edition findings', async () => {
+    // they had no area, so tags read Clean over tens of thousands of them
     render(
       <OperationsStudio
         jobs={testJobs}
@@ -360,8 +360,9 @@ describe('OperationsStudio (the top of the Jobs panel)', () => {
     const tags = STRATEGIC_PILLARS.find((pillar) => pillar.id === 'metadata')!;
     expect(tags.findingTypes).toContain('library_retag');
     expect(tags.findingTypes).toContain('canonical_version');
-    // counted, never run or scheduled by the area's switch
-    expect(tags.jobIds).not.toContain('library_retag');
+    // and the area that counts them also checks them
+    expect(tags.jobIds).toContain('library_retag');
+    expect(tags.jobIds).toContain('album_edition_review');
   });
 });
 

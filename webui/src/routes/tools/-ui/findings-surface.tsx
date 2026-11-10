@@ -79,7 +79,7 @@ import {
   REPAIR_DEFAULT_PAGE_SIZE,
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
-import { safeFixablePending, visibleGroups } from '../-tools.groups';
+import { fixAllSafePlan, safeFixablePending, visibleGroups } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
@@ -435,7 +435,10 @@ export function FindingsSurface({
     // Nothing is open and nothing is being searched: the inbox IS the view,
     // and fetching 30 rows nobody asked to see was most of what made the old
     // page slow to arrive.
-    if (!searching && !openType) {
+    // the flat list is the one view that asks for every finding at once. it
+    // sat on "Loading findings..." for good, because this early return only
+    // knew about a search and an opened type.
+    if (!searching && !openType && viewMode !== 'table') {
       setItems(null);
       setTotal(0);
       return;
@@ -474,6 +477,7 @@ export function FindingsSurface({
     severityFilter,
     sort,
     statusFilter,
+    viewMode,
   ]);
 
   const refreshAll = useCallback(() => {
@@ -1231,12 +1235,14 @@ export function FindingsSurface({
   /** Every safe type in one run. The backend drops destructive types itself
    *  (`safe_only`), so this cannot become "fix everything" through drift. */
   const fixAllSafe = useCallback(async () => {
+    // the question names every kind of finding in the run and what a tag fix
+    // writes: one yes here can reach tens of thousands of files
+    const plan = fixAllSafePlan(groups, typeInfo, video);
     const confirmed = await window.showConfirmDialog?.({
-      title: 'Fix all safe findings',
-      message: video
-        ? `Apply the default fix to all ${safeCount.toLocaleString()} findings that only change SoulSync's own data? Nothing on disk is touched and nothing is downloaded; those findings are skipped.`
-        : `Apply the default fix to all ${safeCount.toLocaleString()} findings that only write metadata? Nothing is deleted or moved — anything that touches a file on disk is skipped.`,
-      confirmText: 'Fix all safe',
+      title: 'Fix all safe findings?',
+      message: plan.message,
+      confirmText: plan.confirmText,
+      cancelText: 'Not now',
       destructive: false,
     });
     if (!confirmed) return;
@@ -1254,7 +1260,7 @@ export function FindingsSurface({
     } catch {
       toast('Error starting bulk fix', 'error');
     }
-  }, [safeCount, video, watchBulkFixRun]);
+  }, [groups, typeInfo, video, watchBulkFixRun]);
 
   /** `clearRepairFindings` — deletes rows outright, filter-scoped. */
   const clearAll = useCallback(async () => {
