@@ -540,6 +540,120 @@ def _stable_finding_payload(details) -> dict:
     return {k: v for k, v in dict(details or {}).items() if k not in _VOLATILE_FINDING_KEYS}
 
 
+
+# how many of a type's newest open rows are read for its covers, and how many
+# distinct covers the inbox row shows
+_GROUP_ART_SAMPLE = 24
+_GROUP_ART_SHOWN = 4
+
+def _art_row_id(value) -> Optional[int]:
+    """A Library v2 row id out of a finding: 12, '12' or 'lib2:12'."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    text = str(value or '').strip()
+    if text.startswith('lib2:'):
+        text = text[5:]
+    return int(text) if text.isdigit() and int(text) > 0 else None
+
+
+def _finding_art_refs(item: dict) -> dict:
+    """What one finding says about its artwork: the urls it carries, and the
+    Library v2 album / track it is about. Only ids the finding marks as
+    Library v2 are read; a bare number may be an old library's row."""
+    details = item.get('details') if isinstance(item.get('details'), dict) else {}
+    validation = details.get('validation') if isinstance(details.get('validation'), dict) else {}
+    reference = validation.get('reference') if isinstance(validation.get('reference'), dict) else {}
+    native = details.get('library_v2') if isinstance(details.get('library_v2'), dict) else {}
+    entity_id = item.get('entity_id')
+    prefixed = entity_id if str(entity_id or '').startswith('lib2:') else None
+    album_marked = details.get('album_id') if str(details.get('album_id') or '').startswith('lib2:') else None
+    return {
+        'album_url': details.get('album_thumb_url') or reference.get('thumb_url') or None,
+        'artist_url': details.get('artist_thumb_url') or None,
+        'found_url': details.get('found_artwork_url') or None,
+        'album_id': (_art_row_id(native.get('album_id')) or _art_row_id(validation.get('album_id'))
+                     or _art_row_id(details.get('lib2_album_id')) or _art_row_id(album_marked)
+                     or (_art_row_id(prefixed) if item.get('entity_type') == 'album' else None)),
+        'track_id': (_art_row_id(native.get('track_id')) or _art_row_id(validation.get('track_id'))
+                     or (_art_row_id(prefixed) if item.get('entity_type') == 'track' else None)),
+        'album': str(details.get('album_title') or details.get('album') or reference.get('album_title') or '').strip(),
+        'artist': str(details.get('artist') or details.get('artist_name') or reference.get('artist_name') or '').strip(),
+    }
+
+
+def attach_finding_art(conn, items: List[dict]) -> None:
+    """Give each finding the cover and artist picture to show beside it, as
+    ``album_thumb_url`` / ``artist_thumb_url`` on the row.
+
+    Most jobs store no picture on a finding. The catalogue has one, so it is
+    looked up here: by the finding's Library v2 album or track, then by
+    artist and album name. A handful of queries for the page, never one per
+    row. A lookup that fails leaves the row without a picture.
+    """
+    refs = [_finding_art_refs(item) for item in items]
+
+    def _in(query: str, values) -> list:
+        values = sorted(set(values))
+        rows = []
+        for start in range(0, len(values), 500):
+            chunk = values[start:start + 500]
+            rows += conn.execute(query % ','.join('?' * len(chunk)), chunk).fetchall()
+        return rows
+
+    try:
+        need_album = [r for r in refs if not r['album_id'] and r['track_id']]
+        if need_album:
+            album_of = dict(_in("SELECT id, album_id FROM lib2_tracks WHERE id IN (%s)",
+                                [r['track_id'] for r in need_album]))
+            for r in need_album:
+                r['album_id'] = album_of.get(r['track_id'])
+
+        # by name, for a finding that names an album but no Library v2 row
+        named = [r for r in refs if not r['album_id'] and r['album'] and r['artist']]
+        if named:
+            artist_ids: Dict[str, list] = {}
+            for artist_id, name in _in("SELECT id, name FROM lib2_artists WHERE name IN (%s)",
+                                       [r['artist'] for r in named]):
+                artist_ids.setdefault(name, []).append(artist_id)
+            by_pair = {}
+            wanted = {(r['artist'], r['album']) for r in named}
+            name_of = {aid: name for name, ids in artist_ids.items() for aid in ids}
+            if name_of:
+                for album_id, artist_id, title in _in(
+                        "SELECT id, primary_artist_id, title FROM lib2_albums "
+                        "WHERE primary_artist_id IN (%s)", list(name_of)):
+                    pair = (name_of[artist_id], title)
+                    if pair in wanted:
+                        by_pair.setdefault(pair, album_id)
+            for r in named:
+                r['album_id'] = by_pair.get((r['artist'], r['album']))
+
+        albums = {}
+        album_ids = [r['album_id'] for r in refs if r['album_id']]
+        if album_ids:
+            albums = {row[0]: (row[1], row[2]) for row in _in(
+                "SELECT id, image_url, primary_artist_id FROM lib2_albums WHERE id IN (%s)", album_ids)}
+        artists = {}
+        artist_wanted = [albums[r['album_id']][1] for r in refs
+                         if not r['artist_url'] and r['album_id'] in albums and albums[r['album_id']][1]]
+        if artist_wanted:
+            artists = dict(_in("SELECT id, image_url FROM lib2_artists WHERE id IN (%s)", artist_wanted))
+    except Exception as e:  # noqa: BLE001 - a picture is not worth the page
+        logger.debug("Finding artwork lookup failed: %s", e)
+        albums, artists = {}, {}
+
+    for item, r in zip(items, refs, strict=True):
+        album_row = albums.get(r['album_id']) if r['album_id'] else None
+        album_url = r['album_url'] or (album_row[0] if album_row else None) or r['found_url']
+        artist_url = r['artist_url'] or (artists.get(album_row[1]) if album_row else None)
+        if album_url:
+            item['album_thumb_url'] = album_url
+        if artist_url:
+            item['artist_thumb_url'] = artist_url
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -2197,6 +2311,7 @@ class RepairWorker:
                     'last_error': row[15],
                 })
 
+            attach_finding_art(conn, items)
             return {'items': items, 'total': total, 'page': page, 'limit': limit}
 
         except Exception as e:
@@ -2515,6 +2630,34 @@ class RepairWorker:
                 manual_by_type = {row[0]: row[1] for row in cursor.fetchall()}
             except Exception as e:  # noqa: BLE001 - a count is not worth a 500
                 logger.debug("manual-conflict count unavailable: %s", e)
+
+            # a few covers per type, off its newest open rows, so a row in
+            # the inbox shows what it is about and not only a number
+            art_by_type: Dict[str, list] = {}
+            try:
+                for finding_type in sorted({row[0] for row in rows if row[1] == 'pending'}):
+                    cursor.execute(
+                        "SELECT entity_type, entity_id, details_json FROM repair_findings "
+                        f"WHERE finding_type = ? AND status = 'pending' AND {library}{narrow} "
+                        "ORDER BY id DESC LIMIT ?",
+                        [finding_type] + narrow_params + [_GROUP_ART_SAMPLE])
+                    sample = []
+                    for entity_type, entity_id, raw in cursor.fetchall():
+                        try:
+                            details = json.loads(raw) if raw else {}
+                        except Exception:  # noqa: BLE001 - one unreadable row
+                            details = {}
+                        sample.append({'entity_type': entity_type, 'entity_id': entity_id,
+                                       'details': details if isinstance(details, dict) else {}})
+                    attach_finding_art(conn, sample)
+                    seen: list = []
+                    for item in sample:
+                        url = item.get('album_thumb_url') or item.get('artist_thumb_url')
+                        if url and url not in seen:
+                            seen.append(url)
+                    art_by_type[finding_type] = seen[:_GROUP_ART_SHOWN]
+            except Exception as e:  # noqa: BLE001 - covers are not worth a 500
+                logger.debug("group artwork unavailable: %s", e)
         except Exception as e:
             logger.error("Error grouping findings: %s", e, exc_info=True)
             return []
@@ -2555,6 +2698,7 @@ class RepairWorker:
         for finding_type, group in groups.items():
             group['job_ids'] = sorted(jobs_by_type.get(finding_type, ()))
             group['manual_conflicts'] = manual_by_type.get(finding_type, 0)
+            group['art'] = art_by_type.get(finding_type, [])
 
         # Worst first, then biggest — the order you would actually work in.
         return sorted(
