@@ -1587,8 +1587,12 @@
         epEl.setAttribute('data-srcbuilt', '1');
         var panel = epEl.querySelector('[data-vdl-ep-search]'); if (!panel) return;
         var srcs = (container._dl.sources || []).filter(function (s) { return SRC_META[s]; });
-        if (!srcs.length) { panel.innerHTML = '<div class="vdl-ep-srcs"><div class="vdl-src-empty">No source configured.</div></div>'; return; }
-        panel.innerHTML = '<div class="vdl-ep-srcs">' + srcs.map(function (s) { return srcBlockHTML(s, true); }).join('') + '</div>';
+        // one inner wrapper so the panel can close fully on grid rows (see
+        // video-side.css): .vdl-ep-srcs carries vertical padding, and a padded
+        // grid child floors the 0fr track at that padding, leaving a sliver
+        // of the first source row showing after the episode collapsed (#2040)
+        if (!srcs.length) { panel.innerHTML = '<div class="vdl-ep-inner"><div class="vdl-ep-srcs"><div class="vdl-src-empty">No source configured.</div></div></div>'; return; }
+        panel.innerHTML = '<div class="vdl-ep-inner"><div class="vdl-ep-srcs">' + srcs.map(function (s) { return srcBlockHTML(s, true); }).join('') + '</div></div>';
     }
 
     // ── per-episode live tracking ──────────────────────────────────────────────
