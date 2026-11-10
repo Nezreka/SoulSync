@@ -2248,7 +2248,105 @@ function gridPairs(root: HTMLElement): Array<[string, string]> {
   return keys.map((key, index) => [key.textContent || '', values[index]?.textContent || '']);
 }
 
+/** the tag change table, as [tag, before, after] */
+function changeRows(root: HTMLElement): Array<[string, string, string]> {
+  return [...root.querySelectorAll('.tag-changes-row')].map((row) => [
+    row.querySelector('.tag-changes-tag')?.textContent || '',
+    row.querySelector('.tag-changes-before')?.textContent || '',
+    row.querySelector('.tag-changes-after')?.textContent || '',
+  ]);
+}
+
 describe('the detail renderer', () => {
+  it('a re-tag finding shows the tag in the file beside the one it would write', async () => {
+    const detail = await openDetail({
+      finding_type: 'library_retag',
+      details: {
+        validation: {
+          checks: {
+            year: 'mismatch',
+            total_discs: 'missing',
+            title: 'correct',
+            edition: 'unknown',
+          },
+          reference: { title: 'Song', artist_name: 'Band', album_title: 'LP' },
+        },
+      },
+      preview: [
+        { key: 'year', label: 'Year', before: '1999', after: '2026' },
+        { key: 'total_discs', label: 'Disc total', before: '', after: '2' },
+      ],
+    });
+    expect(changeRows(detail)).toEqual([
+      ['Year', '1999', '2026'],
+      ['Disc total', 'Empty', '2'],
+    ]);
+    // the table said the two flagged tags; the grid keeps only the rest
+    expect(gridPairs(detail)).toEqual([
+      ['Matching', 'Title'],
+      ['Could not check', 'Edition'],
+    ]);
+    // and the row itself names the change, not just the tag
+    expect(document.querySelector('.repair-finding-card')?.textContent).toContain(
+      'Year: 1999 → 2026',
+    );
+  });
+
+  it('a fixed re-tag finding shows what changed and undoes it after asking', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 1,
+          finding_type: 'library_retag',
+          status: 'resolved',
+          details: {
+            applied: {
+              at: '2026-11-10T10:00:00+00:00',
+              changes: [
+                {
+                  file_id: 4,
+                  path: '/m/a.flac',
+                  cover: 'added',
+                  fields: [{ key: 'genre', label: 'Genre', before: 'Dance', after: 'House' }],
+                },
+              ],
+            },
+          },
+        }),
+      ]),
+      '/api/repair/findings/1/undo': { success: true, kept: [] },
+    });
+    await renderList();
+    await flush();
+    fireEvent.click(document.querySelector('.repair-finding-main') as HTMLElement);
+    const detail = document.querySelector('.repair-finding-detail-inner') as HTMLElement;
+    expect(changeRows(detail)).toEqual([['Genre', 'Dance', 'House']]);
+    expect(detail.textContent).toContain("The library's cover was embedded");
+
+    fireEvent.click(within(detail).getByText('Undo changes'));
+    await flush();
+    // it asks with the value going back, and says the cover stays
+    const asked = confirmSpy.mock.calls.at(-1)?.[0] as { message: string };
+    expect(asked.message).toContain('Genre: House → Dance');
+    expect(asked.message).toContain('cover that was embedded stays');
+    const undone = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .filter((url) => url.endsWith('/findings/1/undo'));
+    expect(undone).toHaveLength(1);
+  });
+
+  it('an open finding offers no undo', async () => {
+    const detail = await openDetail({
+      finding_type: 'library_retag',
+      details: {
+        applied: {
+          changes: [{ path: '/m/a.flac', fields: [{ key: 'genre', before: 'a', after: 'b' }] }],
+        },
+      },
+    });
+    expect(within(detail).queryByText('Undo changes')).toBeNull();
+  });
+
   it('genre_cleanup spells out what stays and what goes', async () => {
     const detail = await openDetail({
       finding_type: 'genre_cleanup',
@@ -2317,7 +2415,7 @@ describe('the detail renderer', () => {
       },
     });
 
-    expect(gridPairs(detail)).toContainEqual(['New artist tag', 'A; B']);
+    expect(changeRows(detail)).toContainEqual(['Artist', 'A, B', 'A; B']);
     const chip = within(detail).getByTitle("Open A's page");
     fireEvent.click(chip);
     await flush();
@@ -2362,7 +2460,24 @@ describe('the detail renderer', () => {
     expect(bands[0]).toContain('good');
     expect(bands[1]).toContain('warn');
     expect(bands[2]).toContain('bad');
-    expect(gridPairs(detail)).toContainEqual(['Expected Title', '-']);
+    // no names on either side: no empty table
+    expect(detail.querySelector('.tag-changes')).toBeNull();
+  });
+
+  it('acoustid_mismatch puts the tagged name beside the one the audio matches', async () => {
+    const detail = await openDetail({
+      finding_type: 'acoustid_mismatch',
+      details: {
+        expected_title: 'Tagged',
+        expected_artist: 'Them',
+        acoustid_title: 'Real',
+        acoustid_artist: 'Us',
+      },
+    });
+    expect(changeRows(detail)).toEqual([
+      ['Title', 'Tagged', 'Real'],
+      ['Artist', 'Them', 'Us'],
+    ]);
   });
 
   it('fake_lossless draws the spectrum bar, and omits it without both numbers', async () => {
@@ -2590,7 +2705,7 @@ describe('the detail renderer', () => {
       finding_type: 'track_number_mismatch',
       details: { current_track_num: 0, correct_track_num: 1, changes: ['track 0 → 1'] },
     });
-    expect(gridPairs(detail)).toContainEqual(['Current Track #', '0']);
+    expect(changeRows(detail)).toEqual([['Track number', '0', '1']]);
     expect(detail.textContent).toContain('track 0 → 1');
   });
 
@@ -2622,8 +2737,10 @@ describe('the detail renderer', () => {
       finding_type: 'metadata_gap',
       details: { artist: 'Band', found_fields: { genre: 'rock', year: 1994 } },
     });
-    expect(gridPairs(detail)).toContainEqual(['Found: genre', 'rock']);
-    expect(gridPairs(detail)).toContainEqual(['Found: year', '1994']);
+    expect(changeRows(detail)).toEqual([
+      ['Genre', 'Empty', 'rock'],
+      ['Year', 'Empty', '1994'],
+    ]);
   });
 
   it('an unknown type dumps its scalar keys and skips objects and thumb urls', async () => {

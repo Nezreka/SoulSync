@@ -218,6 +218,8 @@ Inside one kind, each finding shows its cover, the track and artist, and for tag
 The view switch offers two more ways in: **Albums** is a lens on the findings that belong to an album (it says how many findings it can't show, since orphan files have no album), and **Flat list** is every finding in one list.
 
 - **Dismiss** means "don't raise this again". Every dismiss shows an **Undo** for a few seconds, and dismissed findings can be reopened from the Dismissed view.
+- **A tag finding shows both sides.** Open a Library Re-tag row and each tag is listed with the value in the file now beside the value Apply Tags would write. Nothing outside that list is touched.
+- **Fixed tag findings keep their history.** In the Fixed view, a re-tag row shows every tag as it was and as it is now. **Undo changes** writes the old values back and reopens the finding. A cover that was embedded stays, since the old picture is not kept.
 - **Delete matching…** forgets findings outright (the next scan can raise them again). It's not the same as dismiss.
 - A fix that fails keeps its reason on the row, with **Retry Fix**.
 - Keyboard, in any open list: \`j\`/\`k\` move, \`x\` select, \`Enter\` details, \`f\` fix, \`d\` dismiss, \`z\` undo, \`/\` search.

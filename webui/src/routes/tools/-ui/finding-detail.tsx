@@ -27,6 +27,7 @@
 import { createContext, Fragment, useContext, useState } from 'react';
 
 import type { FindingDetailRow } from '../-tools.core';
+import type { TagChange } from '../-tools.finding-copy';
 import type { RepairFinding } from '../-tools.types';
 
 import { findExactArtist, searchLibraryArtists } from '../-tools.api';
@@ -42,13 +43,21 @@ import {
   pickDuplicateToKeep,
   scoreBar,
 } from '../-tools.core';
-import { describeFinding, tagCheckLabel } from '../-tools.finding-copy';
+import { timeAgo } from '../-tools.core';
+import {
+  describeFinding,
+  readApplied,
+  readTagChanges,
+  readUndone,
+  tagCheckLabel,
+} from '../-tools.finding-copy';
 // tracks.duration is stored in MILLISECONDS (music_database.py:424); this
 // panel used to print it raw with an "s" suffix, so a 3:58 song read
 // "238000s" (#1210).
 // The artist-detail `enhanced` family is gone on this branch (Library v2
 // replaced it); the same helper still lives beside the sync server view.
 import { formatDurationMs } from '../../sync/-sync.server';
+import { TagChangeTable } from './tag-changes';
 
 type Details = Record<string, unknown>;
 
@@ -119,7 +128,11 @@ function retagLibraryValue(reference: Details, key: string): string {
  * library has (and what the file has, when the scan recorded it); the ones
  * that match fold into one line.
  */
-function retagCheckRows(checks: Record<string, unknown>, d: Details): FindingDetailRow[] {
+function retagCheckRows(
+  checks: Record<string, unknown>,
+  d: Details,
+  shown: ReadonlySet<string> = new Set(),
+): FindingDetailRow[] {
   const reference =
     d.validation && typeof d.validation === 'object' && 'reference' in d.validation
       ? ((d.validation.reference || {}) as Details)
@@ -132,6 +145,7 @@ function retagCheckRows(checks: Record<string, unknown>, d: Details): FindingDet
     const label = tagCheckLabel(key);
     if (status === 'correct') matching.push(label);
     else if (status === 'unknown') unchecked.push(label);
+    else if (shown.has(key)) continue;
     else if (status === 'mismatch' || status === 'missing') {
       const diff = retagDiffFor(d.diff, key);
       const library = retagLibraryValue(reference, key);
@@ -399,6 +413,8 @@ export interface FindingDetailProps {
   onKeepDuplicate: (findingId: number, trackId: string) => void;
   /** `applyCoverArtTarget` — per-image apply on a cover-art finding. */
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  /** put back what this finding's fix changed */
+  onUndo?: (finding: RepairFinding) => void;
 }
 
 const DUPLICATE_PROTECTION_LABELS: Record<string, string> = {
@@ -615,7 +631,12 @@ export function FindingDetail(props: FindingDetailProps) {
   );
 }
 
-function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: FindingDetailProps) {
+function FindingDetailBody({
+  finding,
+  onKeepDuplicate,
+  onApplyCoverArt,
+  onUndo,
+}: FindingDetailProps) {
   const d = (finding.details || {}) as Details;
   const rows: FindingDetailRow[] = [];
   const media = <FindingMedia details={d} />;
@@ -647,6 +668,18 @@ function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: Findin
       return (
         <>
           {media}
+          <TagChangeTable
+            rows={[
+              {
+                key: 'genre',
+                label: 'Genre',
+                before: [...kept, ...removed].join(', '),
+                after: kept.join(', '),
+              },
+            ]}
+            beforeLabel="Now"
+            afterLabel="After Clean Genres"
+          />
           <DetailGrid rows={rows} />
         </>
       );
@@ -706,13 +739,22 @@ function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: Findin
     case 'comma_artist_split': {
       // jadux — the contract: exactly what the artist tag becomes.
       const parts = list<string>(d.split_artists);
-      rows.push(['Current artist tag', text(d.combined_name)]);
-      rows.push(['New artist tag', text(d.new_display_artist) || parts.join('; ')]);
+      const artistChanges: TagChange[] = [
+        {
+          key: 'artist',
+          label: 'Artist',
+          before: text(d.combined_name),
+          after: text(d.new_display_artist) || parts.join('; '),
+        },
+      ];
       if (d.primary_artist) {
-        rows.push([
-          'Album artist',
-          `becomes "${text(d.primary_artist)}" (only where it was the combined name)`,
-        ]);
+        artistChanges.push({
+          key: 'albumartist',
+          label: 'Album artist',
+          before: text(d.combined_name),
+          after: text(d.primary_artist),
+        });
+        rows.push(['Album artist', 'Only changes where it was the combined name']);
       }
       const checked = list<string>(d.checked_sources);
       if (checked.length) rows.push(['Checked against', checked.join(', ')]);
@@ -725,6 +767,11 @@ function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: Findin
       return (
         <>
           {media}
+          <TagChangeTable
+            rows={artistChanges}
+            beforeLabel="In the files now"
+            afterLabel="After Split Artists"
+          />
           <DetailGrid rows={rows} />
           <div style={{ margin: '8px 0 2px', fontWeight: 600 }}>Splits into</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '4px' }}>
@@ -813,10 +860,81 @@ function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: Findin
         d.validation && typeof d.validation === 'object' && 'checks' in d.validation
           ? d.validation.checks
           : null;
+      // a fix that ran: every tag as it was and as it is now, and the way back
+      const applied = finding.status !== 'pending' ? readApplied(d) : null;
+      if (applied) {
+        return (
+          <div className="tag-history">
+            <p className="repair-finding-fixline">
+              Apply Tags changed this file{applied.at ? ` ${timeAgo(applied.at)}` : ''}.
+            </p>
+            {applied.files.map((file, index) => (
+              <Fragment key={`${file.path}-${index}`}>
+                {applied.files.length > 1 ? (
+                  <div className="repair-finding-path">{file.path}</div>
+                ) : null}
+                <TagChangeTable rows={file.fields} beforeLabel="Was" afterLabel="Now" />
+                {file.cover ? (
+                  <p className="tag-history-note">
+                    {file.cover === 'added'
+                      ? "The library's cover was embedded. The file had none."
+                      : "The embedded cover was replaced with the library's."}
+                  </p>
+                ) : null}
+              </Fragment>
+            ))}
+            {onUndo ? (
+              <div className="tag-history-actions">
+                <button
+                  className="repair-finding-btn undo"
+                  type="button"
+                  onClick={() => onUndo(finding)}
+                >
+                  Undo changes
+                </button>
+                <span className="tag-history-note">
+                  Writes the old values back and reopens this finding.
+                </span>
+              </div>
+            ) : null}
+          </div>
+        );
+      }
+      const preview = readTagChanges(finding.preview);
+      // the table says these already; the grid keeps what it does not
+      const shown = new Set<string>();
+      for (const row of preview) {
+        shown.add(
+          row.key === 'album_artist' ? 'albumartist' : row.key === 'cover_art' ? 'cover' : row.key,
+        );
+        if (row.key === 'cover_sidecar') shown.add('artwork_sidecar');
+      }
+      const undone = readUndone(d);
+      const undoneNote = undone ? (
+        <p className="tag-history-note">
+          Undone{undone.at ? ` ${timeAgo(undone.at)}` : ''}. The old tags are back in the file.
+          {undone.coverLeft ? ' The cover that was embedded is still there.' : ''}
+          {undone.kept.length
+            ? ` ${undone.kept.join(', ')} had no value before and ${undone.kept.length === 1 ? 'was' : 'were'} left in place.`
+            : ''}
+        </p>
+      ) : null;
       const checksGrid =
         checks && typeof checks === 'object' ? (
-          <DetailGrid rows={retagCheckRows(checks as Record<string, unknown>, d)} />
+          <DetailGrid rows={retagCheckRows(checks as Record<string, unknown>, d, shown)} />
         ) : null;
+      if (preview.length)
+        return (
+          <>
+            <TagChangeTable
+              rows={preview}
+              beforeLabel="In the file now"
+              afterLabel="After Apply Tags"
+            />
+            {checksGrid}
+            {undoneNote}
+          </>
+        );
       // G16-2: what Apply Tags writes comes first, every field of it
       const changes = nativeRetagChanges(d.diff);
       if (changes.length)
@@ -884,14 +1002,28 @@ function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: Findin
     }
 
     case 'acoustid_mismatch':
-      rows.push(['Expected Title', text(d.expected_title) || '-']);
-      rows.push(['Expected Artist', text(d.expected_artist) || '-']);
-      rows.push(['AcoustID Title', text(d.acoustid_title) || '-', 'highlight']);
-      rows.push(['AcoustID Artist', text(d.acoustid_artist) || '-', 'highlight']);
       pushIf(rows, finding.file_path, 'File', 'path');
       return (
         <>
           {media}
+          <TagChangeTable
+            rows={[
+              {
+                key: 'title',
+                label: 'Title',
+                before: text(d.expected_title),
+                after: text(d.acoustid_title),
+              },
+              {
+                key: 'artist',
+                label: 'Artist',
+                before: text(d.expected_artist),
+                after: text(d.acoustid_artist),
+              },
+            ]}
+            beforeLabel="Tagged as"
+            afterLabel="The audio matches"
+          />
           <div style={{ marginBottom: '8px' }}>
             <ScoreBar value={d.fingerprint_score} label="Fingerprint" />
             <ScoreBar value={d.title_similarity} label="Title Match" />
@@ -1097,6 +1229,14 @@ function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: Findin
     }
 
     case 'path_mismatch':
+      if (d.from && d.to)
+        return (
+          <TagChangeTable
+            rows={[{ key: 'location', label: 'Location', before: text(d.from), after: text(d.to) }]}
+            beforeLabel="Where it is"
+            afterLabel="After Reorganize"
+          />
+        );
       pushIf(rows, d.from, 'Current Path', 'path');
       pushIf(rows, d.to, 'Expected Path', 'success');
       return <DetailGrid rows={rows} />;
@@ -1109,14 +1249,23 @@ function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: Findin
       pushIf(rows, d.resolved_source, 'Resolved Source');
       pushIf(rows, d.resolved_track_id, 'Resolved Track ID');
       const found = d.found_fields;
-      if (found && typeof found === 'object') {
-        Object.entries(found as Record<string, unknown>).forEach(([key, value]) => {
-          rows.push([`Found: ${key}`, String(value), 'success']);
-        });
-      }
+      const filled: TagChange[] =
+        found && typeof found === 'object'
+          ? Object.entries(found as Record<string, unknown>).map(([key, value]) => ({
+              key: `found_${key}`,
+              label: /^(isrc|bpm|upc)$/.test(key) ? key.toUpperCase() : tagCheckLabel(key),
+              before: '',
+              after: text(value),
+            }))
+          : [];
       return (
         <>
           {media}
+          <TagChangeTable
+            rows={filled}
+            beforeLabel="In the library now"
+            afterLabel="After Auto-Fill"
+          />
           <DetailGrid rows={rows} />
         </>
       );
@@ -1252,17 +1401,27 @@ function FindingDetailBody({ finding, onKeepDuplicate, onApplyCoverArt }: Findin
       pushIf(rows, d.matched_title, 'Matched To');
       pushIf(rows, d.file_title, 'File Title');
       // These two are `!== undefined`, not truthy — track 0 must still show.
-      if (d.current_track_num !== undefined) {
-        rows.push(['Current Track #', text(d.current_track_num)]);
-      }
-      if (d.correct_track_num !== undefined) {
-        rows.push(['Correct Track #', text(d.correct_track_num), 'success']);
-      }
+      const numberChange: TagChange[] =
+        d.current_track_num !== undefined && d.correct_track_num !== undefined
+          ? [
+              {
+                key: 'track_number',
+                label: 'Track number',
+                before: text(d.current_track_num),
+                after: text(d.correct_track_num),
+              },
+            ]
+          : [];
       pushIf(rows, finding.file_path, 'File', 'path');
       const changes = list<string>(d.changes);
       return (
         <>
           {media}
+          <TagChangeTable
+            rows={numberChange}
+            beforeLabel="In the file now"
+            afterLabel="After Apply"
+          />
           {d.match_score ? (
             <div style={{ marginBottom: '8px' }}>
               <ScoreBar value={d.match_score} label="Title Match" />

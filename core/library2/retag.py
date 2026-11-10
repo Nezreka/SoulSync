@@ -832,15 +832,40 @@ def _gate_extra_tags(data: Dict[str, Any], policy: Dict[str, Any], legacy: bool)
     return data
 
 
+def _change_record(file, diff, written, before, after, cover):
+    """What one write changed in one file, kept so it can be shown and undone.
+
+    ``before`` is the value read just ahead of the write; ``after`` is read
+    back from the file, so it is what the file holds and not what was asked.
+    """
+    rows = []
+    for item in diff:
+        key = item.get('file_key')
+        if key not in written or key == 'cover_art':
+            continue
+        new = after.get(key)
+        if new in (None, ''):  # ids and extras the snapshot does not carry
+            new = written[key]
+        if isinstance(new, (list, tuple)):
+            new = ', '.join(str(v) for v in new)
+        rows.append({'key': key, 'label': item.get('field') or key,
+                     'before': item.get('file_value') or '', 'after': str(new)})
+    return {'file_id': file['id'], 'path': file['path'], 'fields': rows,
+            'cover': ('replaced' if before.get('has_cover_art') else 'added') if cover else None}
+
+
 def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
                        protect_hand_tagged=False, overwrite_manual=None,
-                       progress=None, lyrics_value=None, legacy=False):
+                       progress=None, lyrics_value=None, legacy=False, record_changes=False):
     """Policy adapter around effective metadata, diff and the partial writer."""
     from core.library2.paths import resolve_lib2_path
     from core.library2.tag_cache import read_tag_snapshot
     from core.tag_writer import write_tag_fields, write_tags_to_file, build_tag_diff, _multi_artist_write_enabled
     from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
     stats = {'written': 0, 'skipped': 0, 'failed': 0, 'errors': []}
+    # only a caller that keeps them asks: an artist-wide write would carry
+    # every old lyric sheet back in its reply
+    changes = stats.setdefault('changes', []) if record_changes else None
     selected = set(file_ids) if file_ids is not None else None
     covers = {}
     with closing(database._get_connection()) as conn:
@@ -902,7 +927,13 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
                         result = write_tags_to_file(path, data, embed_cover=bool(cover), cover_data=cover)
                         if result.get('success'):
                             stats['written'] += 1
-                            _persist_file_tags(database, file['id'], read_tag_snapshot(path))
+                            after = read_tag_snapshot(path)
+                            if changes is not None:
+                                changes.append(_change_record(
+                                    file, legacy_diff,
+                                    {i['file_key']: i.get('db_value') for i in legacy_diff if i.get('changed')},
+                                    tags, after, cover))
+                            _persist_file_tags(database, file['id'], after)
                         else:
                             stats['failed'] += 1
                             stats['errors'].append({'track_id': row['id'], 'file_id': file['id'], 'error': result.get('error') or 'Tag write failed'})
@@ -934,7 +965,10 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
                         stats['errors'].append({'track_id': row['id'], 'file_id': file['id'], 'error': result.get('error')})
                         continue
                     stats['written'] += 1
-                    _persist_file_tags(database, file['id'], read_tag_snapshot(path))
+                    after = read_tag_snapshot(path)
+                    if changes is not None:
+                        changes.append(_change_record(file, diff, fields, tags, after, cover))
+                    _persist_file_tags(database, file['id'], after)
                 except Exception as exc:
                     stats['failed'] += 1
                     stats['errors'].append({'track_id': row['id'], 'file_id': file['id'], 'error': str(exc)})
@@ -951,7 +985,7 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
 def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
                force_cover: bool = False, overwrite_manual: Any = None,
                progress=None, file_ids=None, protect_hand_tagged: bool = True,
-               options=None, lyrics_value=None) -> Dict[str, Any]:
+               options=None, lyrics_value=None, record_changes: bool = False) -> Dict[str, Any]:
     """Write lib2 DB metadata into the files' tags.
 
     ``overwrite_manual`` releases fields a person set by hand back to the
@@ -980,7 +1014,8 @@ def write_tags(database, track_ids: List[int], *, embed_cover: bool = True,
     return _write_policy_tags(database, track_ids, policy, file_ids=file_ids,
                               protect_hand_tagged=protect_hand_tagged,
                               overwrite_manual=overwrite_manual, progress=progress,
-                              lyrics_value=lyrics_value, legacy=options is None)
+                              lyrics_value=lyrics_value, legacy=options is None,
+                              record_changes=record_changes)
 
 
 __all__ = [

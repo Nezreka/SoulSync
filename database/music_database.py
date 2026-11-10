@@ -8859,6 +8859,25 @@ class MusicDatabase:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_rf_type_status "
                 "ON repair_findings (finding_type, status)")
+            # the Tools page asks for three things on every load: counts by
+            # type, status and severity, which job feeds each type, and how
+            # many open rows would overwrite a hand-set value. the first two
+            # read severity, job_id and created_at off the table rows, the
+            # third parsed every open row's details, so each was a full scan
+            # of a table that is mostly json. 197k findings took 15 seconds.
+            # one index answers the first two with no row read, the partial
+            # one holds only the rows the third counts. the tab badge counts
+            # open rows by job, type and severity: same scan, its own index
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_inbox "
+                "ON repair_findings (finding_type, status, severity, job_id, created_at)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_open_counts "
+                "ON repair_findings (status, job_id, finding_type, severity)")
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_rf_manual_conflict "
+                "ON repair_findings (finding_type) WHERE status = 'pending' "
+                "AND json_extract(details_json, '$.has_manual_conflict') = 1")
         except Exception as e:
             logger.error(f"Error migrating repair worker columns: {e}")
 

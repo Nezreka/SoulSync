@@ -38,6 +38,8 @@ export interface FindingLike {
   description?: string | null;
   file_path?: string | null;
   details?: Details | null;
+  /** an open re-tag finding: each tag it would change, old value and new */
+  preview?: unknown;
 }
 
 const str = (value: unknown): string =>
@@ -91,6 +93,102 @@ export const TAG_CHECK_LABELS: Record<string, string> = {
 
 export function tagCheckLabel(key: string): string {
   return TAG_CHECK_LABELS[key] || key.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+}
+
+/** one tag a re-tag changes: what the file holds and what replaces it */
+export interface TagChange {
+  key: string;
+  label: string;
+  before: string;
+  after: string;
+  /** a value a person set by hand is what gets written */
+  manual?: boolean;
+}
+
+/** what one fix changed in one file, as the server keeps it on the finding */
+export interface AppliedFile {
+  path: string;
+  fields: TagChange[];
+  cover: 'added' | 'replaced' | null;
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+export function readTagChanges(value: unknown): TagChange[] {
+  if (!Array.isArray(value)) return [];
+  const rows: TagChange[] = [];
+  for (const raw of value) {
+    const row = record(raw);
+    if (!row || typeof row.key !== 'string') continue;
+    rows.push({
+      key: row.key,
+      label: typeof row.label === 'string' ? row.label : row.key,
+      before: str(row.before),
+      after: str(row.after),
+      manual: row.manual === true,
+    });
+  }
+  return rows;
+}
+
+/** `details.applied`: every file a fix wrote, and when */
+export function readApplied(details: unknown): { at: string; files: AppliedFile[] } | null {
+  const applied = record(record(details)?.applied);
+  if (!applied || !Array.isArray(applied.changes)) return null;
+  const files: AppliedFile[] = [];
+  for (const raw of applied.changes) {
+    const change = record(raw);
+    if (!change) continue;
+    const fields = readTagChanges(change.fields);
+    const cover = change.cover === 'added' || change.cover === 'replaced' ? change.cover : null;
+    if (!fields.length && !cover) continue;
+    files.push({ path: typeof change.path === 'string' ? change.path : '', fields, cover });
+  }
+  return files.length ? { at: typeof applied.at === 'string' ? applied.at : '', files } : null;
+}
+
+/** `details.undone`: the note left when a fix was taken back */
+export function readUndone(
+  details: unknown,
+): { at: string; kept: string[]; coverLeft: boolean } | null {
+  const undone = record(record(details)?.undone);
+  if (!undone) return null;
+  return {
+    at: typeof undone.at === 'string' ? undone.at : '',
+    kept: Array.isArray(undone.kept) ? undone.kept.map(str).filter(Boolean) : [],
+    coverLeft: undone.cover_left === true,
+  };
+}
+
+const KEY_ALIASES: Record<string, string> = {
+  album_artist: 'albumartist',
+  cover_art: 'cover',
+  cover_sidecar: 'artwork_sidecar',
+};
+
+/** the tag's name as a player shows it, whatever the writer calls it */
+export function tagChangeLabel(change: Pick<TagChange, 'key' | 'label'>): string {
+  const key = KEY_ALIASES[change.key] || change.key;
+  // the tags a player shows share one vocabulary; anything else (a source
+  // id, a file's location) comes with its own label
+  return TAG_CHECK_LABELS[key] || change.label || tagCheckLabel(key);
+}
+
+export function tagChangeBefore(change: TagChange): string {
+  if (change.key === 'cover_art')
+    return change.before ? 'A cover is embedded' : 'No cover embedded';
+  if (change.key === 'cover_sidecar') return 'No cover.jpg in the folder';
+  return change.before;
+}
+
+export function tagChangeAfter(change: TagChange): string {
+  if (change.key === 'cover_art') return "The library's cover";
+  if (change.key === 'cover_sidecar') return 'cover.jpg saved beside the tracks';
+  return change.after;
 }
 
 const PROVIDER_NAMES: Record<string, string> = {
@@ -168,7 +266,7 @@ const redownload = (verb: string) =>
       : '';
 
 const WRITERS: Record<string, Writer> = {
-  library_retag: (_finding, d, s, verb) => {
+  library_retag: (finding, d, s, verb) => {
     const checks = obj(obj(d.validation).checks);
     const wrong: string[] = [];
     const missing: string[] = [];
@@ -190,10 +288,28 @@ const WRITERS: Record<string, Writer> = {
       );
     }
     if (!s.track || !sentences.length) return {};
+    // with the values to hand, the row says the change itself: "Year 2024 to
+    // 2025" beats "year does not match" when there are few enough to read
+    const changes = readTagChanges(finding.preview);
+    const short = (value: string) => (value.length > 36 ? `${value.slice(0, 35)}…` : value);
+    const spelled =
+      changes.length > 0 && changes.length <= 3
+        ? changes
+            .map((change) => {
+              const label = tagChangeLabel(change);
+              if (change.key === 'cover_art' || change.key === 'cover_sidecar') {
+                return `${label}: ${tagChangeAfter(change).toLowerCase()}`;
+              }
+              return change.before
+                ? `${label}: ${short(change.before)} → ${short(change.after)}`
+                : `${label}: empty → ${short(change.after)}`;
+            })
+            .join('  ·  ')
+        : '';
     return {
       title: s.track,
       sub: joinSub(s.artist, s.album),
-      problem: sentences.join(' '),
+      problem: spelled || sentences.join(' '),
       fix: `${verb} writes the library's ${listWords([...wrong, ...missing].map((word) => word.toLowerCase()))} into the file. Nothing else in it changes.`,
     };
   },

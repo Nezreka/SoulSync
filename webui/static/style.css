@@ -72968,6 +72968,7 @@ body.src-modal-open { overflow: hidden; }
 /* shared buttons */
 #tools-page .repair-inbox-btn,
 #tools-page .repair-finding-btn.fix,
+#tools-page .repair-finding-btn.undo,
 #tools-page .repair-finding-btn.reopen,
 #tools-page .operations-pillar-scan-btn,
 #tools-page .operations-live-hud-stop-btn,
@@ -72994,6 +72995,7 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .repair-inbox-btn:hover,
 #tools-page .repair-finding-btn.fix:hover,
+#tools-page .repair-finding-btn.undo:hover,
 #tools-page .repair-finding-btn.reopen:hover,
 #tools-page .operations-pillar-scan-btn:hover,
 #tools-page .operations-live-hud-stop-btn:hover,
@@ -73580,6 +73582,41 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-detail-val.success { color: var(--accent-light); }
 #tools-page .repair-detail-val.warning { color: var(--warning); }
 #tools-page .repair-detail-val.error { color: var(--danger-light); }
+
+/* a tag change: the value in the file beside the value that replaces it */
+#tools-page .tag-changes { max-width: 920px; margin: 4px 0 16px; }
+#tools-page .tag-changes-head,
+#tools-page .tag-changes-row {
+    display: grid;
+    grid-template-columns: 148px minmax(0, 1fr) 16px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0 16px;
+}
+#tools-page .tag-changes-head { padding-bottom: 8px; font-size: 12px; font-weight: 500; color: var(--text-3); }
+#tools-page .tag-changes-row { padding: 10px 0; border-top: 1px solid var(--white-a08); font-size: 14px; }
+#tools-page .tag-changes-tag { color: var(--text-3); }
+#tools-page .tag-changes-before { min-width: 0; color: var(--text-2); overflow-wrap: anywhere; }
+#tools-page .tag-changes-before.empty { color: var(--text-3); font-style: italic; }
+#tools-page .tag-changes-arrow { align-self: center; display: flex; color: var(--text-3); }
+#tools-page .tag-changes-after { min-width: 0; font-weight: 500; color: var(--text-1); overflow-wrap: anywhere; }
+#tools-page .tag-changes-note {
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-2);
+}
+#tools-page .tag-history .repair-finding-fixline { margin: 0 0 14px; }
+#tools-page .tag-history-note { margin: 0 0 14px; font-size: 13px; color: var(--text-3); }
+#tools-page .tag-history-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 4px; }
+#tools-page .tag-history-actions .tag-history-note { margin: 0; }
+@media (max-width: 720px) {
+    #tools-page .tag-changes-head { display: none; }
+    #tools-page .tag-changes-row { grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr); gap: 2px 10px; }
+    #tools-page .tag-changes-tag { grid-column: 1 / -1; font-size: 12px; }
+}
 
 #tools-page .repair-finding-media { display: flex; gap: 20px; flex-wrap: wrap; }
 #tools-page .repair-finding-media-card { display: flex; flex-direction: column; gap: 8px; width: 148px; }

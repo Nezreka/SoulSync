@@ -128,6 +128,9 @@ export interface RepairFinding {
    *  server from the catalogue when the finding stored none */
   album_thumb_url?: string | null;
   artist_thumb_url?: string | null;
+  /** an open re-tag finding: every tag Apply Tags would change, with the
+   *  value in the file beside the one the library holds */
+  preview?: unknown;
   /** Per-finding-type payload. Deliberately unknown — every one of the 20
    *  renderers reads a different set of keys. */
   details?: Record<string, unknown> | null;

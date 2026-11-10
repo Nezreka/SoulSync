@@ -56,6 +56,7 @@ import {
   fetchRepairFindings,
   fixFinding,
   reopenFinding,
+  undoFinding,
   reopenFindingsBulk,
   startBulkFix,
   stopBulkFix,
@@ -78,7 +79,7 @@ import {
   REPAIR_DEFAULT_PAGE_SIZE,
   REPAIR_PAGE_SIZE_OPTIONS,
 } from '../-tools.core';
-import { describeFinding } from '../-tools.finding-copy';
+import { describeFinding, readApplied, tagChangeLabel } from '../-tools.finding-copy';
 import { fixAllSafePlan, safeFixablePending, visibleGroups } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
@@ -709,6 +710,44 @@ export function FindingsSurface({
     );
     refreshAll();
   }, [refreshAll, undo]);
+
+  /** Take back a fix: the old tag values go into the file again. It asks
+   *  first, with every value it will write, because it changes the file. */
+  const undoOne = useCallback(
+    async (finding: RepairFinding) => {
+      const applied = readApplied(finding.details);
+      if (!applied) return;
+      const lines = applied.files.flatMap((file) =>
+        file.fields.map(
+          (field) =>
+            `${tagChangeLabel(field)}: ${field.after || 'empty'} → ${field.before || 'empty'}`,
+        ),
+      );
+      const cover = applied.files.some((file) => file.cover);
+      const confirmed = await window.showConfirmDialog?.({
+        title: 'Undo these tag changes?',
+        message:
+          `The old values are written back into the file and this finding reopens.\n\n${lines.join('\n')}` +
+          (cover ? '\n\nThe cover that was embedded stays. The old picture was not kept.' : ''),
+        confirmText: 'Undo changes',
+        cancelText: 'Cancel',
+      });
+      if (!confirmed) return;
+      const result = await undoFinding(finding.id);
+      if (!result.success) {
+        toast(result.error || 'Could not undo that', 'error');
+        return;
+      }
+      toast(
+        result.kept?.length
+          ? `Old tags are back. ${result.kept.join(', ')} had no value before and stayed.`
+          : 'Old tags are back in the file',
+        'success',
+      );
+      refreshAll();
+    },
+    [refreshAll],
+  );
 
   /** The undo half of dismiss. Dismiss suppresses that finding forever, which
    *  is only safe to offer freely because this exists. */
@@ -1669,6 +1708,7 @@ export function FindingsSurface({
                   onFix={fixOne}
                   onDismiss={dismissOne}
                   onReopen={reopenOne}
+                  onUndo={(target) => void undoOne(target)}
                   onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
                   onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
                   onInspectRedownload={handleInspectRedownload}
@@ -2124,6 +2164,7 @@ function FindingCard({
   onReopen,
   onKeepDuplicate,
   onApplyCoverArt,
+  onUndo,
   onInspectRedownload,
 }: {
   finding: RepairFinding;
@@ -2145,6 +2186,7 @@ function FindingCard({
   onReopen: (id: number) => Promise<void>;
   onKeepDuplicate: (findingId: number, trackId: string) => void;
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
+  onUndo: (finding: RepairFinding) => void;
   onInspectRedownload?: (finding: RepairFinding) => void;
 }) {
   const details = finding.details || {};
@@ -2305,7 +2347,9 @@ function FindingCard({
               full 20-branch detail tree and fetch its album/artist art, hidden
               behind max-height:0 — so a 100-row page rendered 100 invisible
               panels and hammered the thumbnail endpoints for them. */}
-          {expanded && copy.fix ? <p className="repair-finding-fixline">{copy.fix}</p> : null}
+          {expanded && copy.fix && finding.status === 'pending' ? (
+            <p className="repair-finding-fixline">{copy.fix}</p>
+          ) : null}
           {expanded ? (
             video ? (
               <VideoFindingDetail
@@ -2317,6 +2361,7 @@ function FindingCard({
                 finding={finding}
                 onKeepDuplicate={onKeepDuplicate}
                 onApplyCoverArt={onApplyCoverArt}
+                onUndo={onUndo}
               />
             )
           ) : null}

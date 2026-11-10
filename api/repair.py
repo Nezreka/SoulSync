@@ -387,6 +387,19 @@ def repair_findings_album_action():
         logger.error(f"Error running album action: {e}")
         return jsonify({'error': str(e)}), 500
 
+@bp.route('/api/repair/findings/<int:finding_id>/undo', methods=['POST'])
+def repair_finding_undo(finding_id):
+    """Put back the tags a fix changed, from the before values kept on the
+    finding, and reopen it."""
+    try:
+        if _repair_worker() is None:
+            return jsonify({'success': False, 'error': 'Repair worker not initialized'}), 400
+        result = _repair_worker().undo_finding(finding_id)
+        return jsonify(result), 200 if result.get('success') else 400
+    except Exception as e:
+        logger.error(f"Error undoing finding {finding_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @bp.route('/api/repair/findings/<int:finding_id>/reopen', methods=['POST'])
 def repair_finding_reopen(finding_id):
     """Put a resolved/dismissed finding back to pending — the undo half of

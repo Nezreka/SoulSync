@@ -163,6 +163,83 @@ def write_tag_fields(file_path: str, fields: Dict[str, Any], *, cover_data=None)
         return {'success': False, 'error': str(exc)}
 
 
+def _clear_tag_field(audio, field: str) -> bool:
+    """Remove one field from the tags. False when this writer has no clean way."""
+    is_id3, is_mp4 = isinstance(audio.tags, ID3), isinstance(audio, MP4)
+
+    def drop(id3, vorbis, mp4):
+        if is_id3:
+            audio.tags.delall(id3)
+        else:
+            for key in ([mp4] if is_mp4 else vorbis):
+                if key in audio:
+                    del audio[key]
+
+    if field in _TEXT_TAGS:
+        id3, vorbis, mp4 = _TEXT_TAGS[field]
+        drop(id3, [vorbis], mp4)
+        return True
+    for kind, number_key, total_key in (('track', 'track_number', 'total_tracks'), ('disc', 'disc_number', 'total_discs')):
+        frame, atom = ('TRCK', 'trkn') if kind == 'track' else ('TPOS', 'disk')
+        if field == number_key:
+            drop(frame, [kind + 'number', kind + 'total', 'total' + kind + 's'], atom)
+            return True
+        if field == total_key:
+            number, _ = read_number_pair(audio, kind)
+            drop(frame, [kind + 'number', kind + 'total', 'total' + kind + 's'], atom)
+            if number:
+                if is_id3:
+                    audio.tags.add((TRCK if kind == 'track' else TPOS)(encoding=3, text=[str(number)]))
+                elif is_mp4:
+                    audio[atom] = [(number, 0)]
+                else:
+                    audio[kind + 'number'] = [str(number)]
+            return True
+    return False
+
+
+def restore_tag_fields(file_path: str, before: Dict[str, Any]) -> Dict[str, Any]:
+    """Put earlier values back into a file: the undo of a tag write.
+
+    A field that had a value gets it back. A field that was empty is removed
+    again, where this writer knows the frame; one it cannot remove cleanly
+    (a source id, a mood) is left alone and named in ``kept``.
+    """
+    try:
+        if os.path.splitext(file_path)[1].lower() not in SUPPORTED_EXTENSIONS:
+            return {'success': False, 'error': 'Unsupported format'}
+        audio = MutagenFile(file_path)
+        if audio is None or audio.tags is None:
+            return {'success': False, 'error': 'Could not open file with Mutagen'}
+        restored, kept, values = [], [], {}
+        for key, value in before.items():
+            field = _FIELD_ALIASES.get(key, key)
+            if value not in (None, ''):
+                values[field] = value
+            elif _clear_tag_field(audio, field):
+                restored.append(key)
+            else:
+                kept.append(key)
+        # a total goes back beside its number, so both are parsed as numbers
+        for key in ('track_number', 'disc_number', 'total_tracks', 'total_discs'):
+            if key in values:
+                number = _parse_track_num(str(values[key]).split('/')[0])
+                if number is None:
+                    kept.append(key)
+                    del values[key]
+                else:
+                    values[key] = number
+        restored.extend(set_tag_fields(audio, values))
+        if not restored:
+            return {'success': True, 'restored_fields': [], 'kept_fields': kept}
+        from core.metadata.common import save_audio_file, get_mutagen_symbols
+        if not save_audio_file(audio, get_mutagen_symbols()):
+            return {'success': False, 'error': 'Atomic save aborted by the audio integrity check — tags not restored'}
+        return {'success': True, 'restored_fields': restored, 'kept_fields': kept}
+    except Exception as exc:
+        return {'success': False, 'error': str(exc)}
+
+
 def read_number_pair(audio, kind='track') -> Tuple[Optional[int], Optional[int]]:
     """Shared ID3/Vorbis/Opus/MP4 reader, including separate Vorbis totals."""
     tags = getattr(audio, 'tags', None)

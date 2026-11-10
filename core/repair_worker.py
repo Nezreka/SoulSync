@@ -654,6 +654,82 @@ def attach_finding_art(conn, items: List[dict]) -> None:
             item['artist_thumb_url'] = artist_url
 
 
+def _retag_preview_rows(details: dict, tags: Optional[dict]) -> Optional[list]:
+    """The tags one re-tag finding would change: what the file holds now and
+    what the library would write. None when it cannot be worked out."""
+    from core.library2 import retag
+    rows = []
+    stored = details.get('diff')
+    if stored:
+        # the job compared the file itself and kept both sides
+        diff = [d for d in stored if d.get('changed')]
+    else:
+        validation = details.get('validation') or {}
+        reference = validation.get('reference')
+        options = retag.scan_finding_options(details)
+        if not tags or not reference or not options:
+            return None
+        diff = [d for d in retag._policy_diff(tags, reference, options) if d.get('changed')]
+        if (validation.get('checks') or {}).get('artwork_sidecar') == 'missing':
+            rows.append({'key': 'cover_sidecar', 'label': 'Folder cover', 'before': '', 'after': 'cover.jpg'})
+    for item in diff:
+        key = item.get('file_key') or ''
+        if key == 'cover_art':
+            rows.append({'key': key, 'label': 'Cover Art',
+                         'before': 'embedded' if item.get('file_value') == 'Embedded' else '',
+                         'after': 'library cover'})
+            continue
+        row = {'key': key, 'label': item.get('field') or key,
+               'before': item.get('file_value') or '', 'after': item.get('db_value') or ''}
+        if item.get('manual'):
+            row['manual'] = True
+            row['provider_value'] = item.get('provider_value') or ''
+        rows.append(row)
+    return rows
+
+
+def attach_retag_preview(conn, items: List[dict]) -> None:
+    """Give each open re-tag finding ``preview``: every tag Apply Tags would
+    change, with the value in the file beside the value the library holds.
+
+    A finding the tag scan files stores only which checks failed. The file's
+    own values are in the tag cache, so the two are put side by side here,
+    with the same diff the write uses. One query for the page. A row that
+    cannot be worked out is left without a preview.
+    """
+    wanted = [item for item in items
+              if item.get('finding_type') == 'library_retag' and item.get('status') == 'pending'
+              and isinstance(item.get('details'), dict)]
+    if not wanted:
+        return
+    cached = {}
+    file_ids = sorted({int(fid) for item in wanted
+                       for fid in [(item['details'].get('validation') or {}).get('file_id')]
+                       if fid and not item['details'].get('diff')})
+    try:
+        from core.library2.validation import _cached_reader_tags
+        for start in range(0, len(file_ids), 500):
+            chunk = file_ids[start:start + 500]
+            for row in conn.execute(
+                    f"SELECT id, tags_json FROM lib2_track_files WHERE id IN ({','.join('?' for _ in chunk)})",
+                    chunk):
+                snapshot = json.loads(row[1] or '{}')
+                if snapshot:
+                    cached[int(row[0])] = _cached_reader_tags(snapshot)
+    except Exception as exc:  # noqa: BLE001 - a preview never fails the list
+        logger.debug("re-tag preview: tag cache read failed: %s", exc)
+    for item in wanted:
+        details = item['details']
+        try:
+            rows = _retag_preview_rows(
+                details, cached.get(int((details.get('validation') or {}).get('file_id') or 0)))
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("re-tag preview failed for finding %s: %s", item.get('id'), exc)
+            rows = None
+        if rows is not None:
+            item['preview'] = rows
+
+
 class RepairWorker:
     """Multi-job background maintenance worker.
 
@@ -2312,6 +2388,7 @@ class RepairWorker:
                 })
 
             attach_finding_art(conn, items)
+            attach_retag_preview(conn, items)
             return {'items': items, 'total': total, 'page': page, 'limit': limit}
 
         except Exception as e:
@@ -2452,9 +2529,58 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    #: get_finding_albums answers, kept until the findings change
+    _ALBUMS_CACHE_SECONDS = 300.0
+    _ALBUMS_CACHE_SIZE = 16
+
+    def _findings_fingerprint(self):
+        """Cheap to read, and different after any finding is filed, fixed,
+        dismissed or cleared: the count per status and the newest id, both
+        answered from an index. None when it cannot be read."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            counts = tuple(sorted(tuple(row) for row in conn.execute(
+                "SELECT status, COUNT(*) FROM repair_findings GROUP BY status")))
+            newest = conn.execute("SELECT MAX(id) FROM repair_findings").fetchone()[0]
+            return counts, newest
+        except Exception as e:  # noqa: BLE001 - no fingerprint, no cache
+            logger.debug("findings fingerprint unavailable: %s", e)
+            return None
+        finally:
+            if conn:
+                conn.close()
+
     def get_finding_albums(self, group_by: str = 'album', job_id: str = None,
                            status: str = 'pending', finding_type: str = None,
                            q: str = None, limit: int = 200) -> List[dict]:
+        """:meth:`_group_finding_albums`, answered from memory while the
+        findings have not changed.
+
+        The grouping reads the artist and album out of every matching row's
+        json, so on 83k open findings it took 19 seconds, and the Tools page
+        asks for it on every visit (the album shelf). A failed fix changes a
+        row without changing the fingerprint, so an answer is also dropped
+        after five minutes.
+        """
+        fingerprint = self._findings_fingerprint()
+        key = (group_by, job_id, status, finding_type, q, int(limit or 0), _findings_library_clause())
+        cache = self.__dict__.setdefault('_albums_cache', {})
+        hit = cache.get(key)
+        if (hit and fingerprint is not None and hit[0] == fingerprint
+                and time.time() - hit[1] < self._ALBUMS_CACHE_SECONDS):
+            return [dict(group) for group in hit[2]]
+        groups = self._group_finding_albums(group_by=group_by, job_id=job_id, status=status,
+                                            finding_type=finding_type, q=q, limit=limit)
+        if fingerprint is not None:
+            if len(cache) >= self._ALBUMS_CACHE_SIZE:
+                cache.pop(min(cache, key=lambda k: cache[k][1]), None)
+            cache[key] = (fingerprint, time.time(), [dict(group) for group in groups])
+        return groups
+
+    def _group_finding_albums(self, group_by: str = 'album', job_id: str = None,
+                              status: str = 'pending', finding_type: str = None,
+                              q: str = None, limit: int = 200) -> List[dict]:
         """Findings folded to one row per ALBUM (or per ARTIST), with artwork.
 
         A flat list of 40,000 upgradeable tracks is not reviewable. Nobody
@@ -2620,16 +2746,22 @@ class RepairWorker:
             # do if the client has to walk every finding's diff to find out.
             # Restricted to pending because that is all a bulk apply touches.
             manual_by_type: Dict[str, int] = {}
-            try:
-                cursor.execute(
-                    "SELECT finding_type, COUNT(*) FROM repair_findings "
-                    "WHERE status = 'pending' "
-                    "AND json_extract(details_json, '$.has_manual_conflict') = 1 "
-                    f"AND {library}{narrow} "
-                    "GROUP BY finding_type", narrow_params)
-                manual_by_type = {row[0]: row[1] for row in cursor.fetchall()}
-            except Exception as e:  # noqa: BLE001 - a count is not worth a 500
-                logger.debug("manual-conflict count unavailable: %s", e)
+            # the partial index holds exactly these rows. named, because the
+            # planner would rather walk every open row by status and parse
+            # its json (17 seconds on 83k); without the index, asked plainly
+            manual_sql = (
+                "SELECT finding_type, COUNT(*) FROM repair_findings {hint}"
+                "WHERE status = 'pending' "
+                "AND json_extract(details_json, '$.has_manual_conflict') = 1 "
+                f"AND {library}{narrow} "
+                "GROUP BY finding_type")
+            for hint in ("INDEXED BY idx_rf_manual_conflict ", ""):
+                try:
+                    cursor.execute(manual_sql.format(hint=hint), narrow_params)
+                    manual_by_type = {row[0]: row[1] for row in cursor.fetchall()}
+                    break
+                except Exception as e:  # noqa: BLE001 - a count is not worth a 500
+                    logger.debug("manual-conflict count unavailable: %s", e)
 
             # a few covers per type, off its newest open rows, so a row in
             # the inbox shows what it is about and not only a number
@@ -2705,6 +2837,102 @@ class RepairWorker:
             groups.values(),
             key=lambda g: (rank.get(g['severity_max'], 2), -g['pending'], g['finding_type']),
         )
+
+    def _save_applied(self, finding_id: int, changes: list) -> None:
+        """Keep what a fix changed on the finding: each value before and after.
+
+        This is the row's history, and what Undo puts back. json_set, because
+        the tag scan rewrites this same details column while a fix is running
+        and a read-then-write here would drop one side.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            conn.execute(
+                "UPDATE repair_findings SET details_json = json_set("
+                "json_remove(COALESCE(details_json, '{}'), '$.undone'), '$.applied', json(?)) WHERE id = ?",
+                (json.dumps({'at': datetime.now(timezone.utc).isoformat(), 'changes': changes}), finding_id))
+            conn.commit()
+        except Exception as e:  # noqa: BLE001 - the fix itself already succeeded
+            logger.warning("Could not record what finding %s changed: %s", finding_id, e)
+        finally:
+            if conn:
+                conn.close()
+
+    def undo_finding(self, finding_id: int) -> dict:
+        """Put back the tags a fix changed, and reopen the finding.
+
+        Works from the before values the fix recorded. A cover that was
+        embedded stays: the old picture was not kept. A tag that was empty
+        before is removed again where the writer can; the rest are named in
+        ``kept``.
+        """
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            row = conn.execute(
+                "SELECT status, entity_id, details_json FROM repair_findings WHERE id = ?",
+                (finding_id,)).fetchone()
+        finally:
+            if conn:
+                conn.close()
+        if not row:
+            return {'success': False, 'error': 'Finding not found'}
+        status, entity_id, details_json = row[0], row[1], row[2]
+        details = json.loads(details_json) if details_json else {}
+        changes = (details.get('applied') or {}).get('changes') or []
+        if status != 'resolved' or not changes:
+            return {'success': False, 'error': 'Nothing recorded to undo for this finding'}
+
+        from core.library2.retag import _persist_file_tags
+        from core.library2.tag_cache import read_tag_snapshot
+        from core.repair_jobs.base import hand_tagged_path_keys, is_hand_tagged_path
+        from core.tag_writer import restore_tag_fields
+        # resolve every file first: a half-undone track is worse than none
+        targets = []
+        for change in changes:
+            resolved, _ = self._resolve_finding_path(entity_id, change.get('path'))
+            if not resolved or not os.path.exists(resolved):
+                return {'success': False,
+                        'error': f"File no longer on disk: {os.path.basename(change.get('path') or '')}"}
+            keys = hand_tagged_path_keys(self.db)
+            if is_hand_tagged_path(change.get('path'), keys) or is_hand_tagged_path(resolved, keys):
+                return {'success': False, 'error': 'This file is hand-tagged now, so its tags were left alone'}
+            targets.append((change, resolved))
+        restored, kept, cover_left = [], [], False
+        for change, resolved in targets:
+            before = {f['key']: f.get('before') for f in change.get('fields') or [] if f.get('key')}
+            cover_left = cover_left or bool(change.get('cover'))
+            if not before:
+                continue
+            result = restore_tag_fields(resolved, before)
+            if not result.get('success'):
+                return {'success': False, 'retryable': True,
+                        'error': result.get('error') or 'The old tags could not be written back'}
+            restored.extend(result.get('restored_fields') or [])
+            kept.extend(result.get('kept_fields') or [])
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            conn.execute(
+                "UPDATE repair_findings SET status = 'pending', user_action = NULL, resolved_at = NULL, "
+                "last_error = NULL, updated_at = CURRENT_TIMESTAMP, details_json = json_set("
+                "json_remove(COALESCE(details_json, '{}'), '$.applied'), '$.undone', json(?)) WHERE id = ?",
+                (json.dumps({'at': datetime.now(timezone.utc).isoformat(), 'kept': sorted(set(kept)),
+                             'cover_left': cover_left}), finding_id))
+            conn.commit()
+        finally:
+            if conn:
+                conn.close()
+        for change, resolved in targets:
+            if change.get('file_id'):
+                try:
+                    _persist_file_tags(self.db, int(change['file_id']), read_tag_snapshot(resolved),
+                                       self._config_manager)
+                except Exception as e:  # noqa: BLE001 - the tags are back; the cache catches up on the next scan
+                    logger.debug("tag cache refresh after undo failed for %s: %s", resolved, e)
+        return {'success': True, 'restored': sorted(set(restored)), 'kept': sorted(set(kept)),
+                'cover_left': cover_left}
 
     def reopen_finding(self, finding_id: int) -> bool:
         """Put a resolved/dismissed finding back to pending.
@@ -3133,6 +3361,8 @@ class RepairWorker:
 
             # Dispatch fix by finding type
             result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
+            # what the fix changed stays on the row, not in the reply
+            changes = result.pop('changes', None)
 
             if result.get('success'):
                 try:
@@ -3193,6 +3423,8 @@ class RepairWorker:
                     else:
                         self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
                         self._set_finding_error(finding_id, None)
+                        if changes:
+                            self._save_applied(finding_id, changes)
             elif result.get('stale'):
                 # A finding about a vanished file can never succeed on retry.
                 # Retire it; the next scan will raise a fresh finding for the
@@ -4555,6 +4787,7 @@ class RepairWorker:
                 protect_hand_tagged=True,
                 file_ids=(details.get('file_ids') or ([validation['file_id']] if validation.get('file_id') else None)),
                 options=options, lyrics_value=details.get('lyrics_value'),
+                record_changes=True,
             )
             if stats.get('failed'):
                 failure = (stats.get('errors') or [{}])[0]
@@ -4585,7 +4818,8 @@ class RepairWorker:
             message += f" (kept your {', '.join(kept)})"
         elif release and details.get('manual_fields'):
             message += f" (overwrote your {', '.join(details['manual_fields'])})"
-        return {'success': True, 'action': 'applied_tags', 'message': message}
+        return {'success': True, 'action': 'applied_tags', 'message': message,
+                'changes': stats.get('changes') or []}
 
     def _fix_uncatalogued_bad_file(self, file_path, details, *, reason: str,
                                    noun: str, quarantine: bool = True) -> dict:
