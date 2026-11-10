@@ -409,6 +409,32 @@ def test_track_export_carries_identity_and_provider_status(db, client):
     assert item["spotify_match_status"] == "matched"
 
 
+def test_track_network_year_bit_comes_from_the_album_mark(db, client):
+    """A track's exported year is its album's (the projection reads
+    al.year), so when the album's year is a depot-promoted network
+    value, EVERY track of the album must carry the year network
+    bit — including tracks that were never tagged themselves and
+    hold no track mark. The lookup keys off the album's own
+    soul_id, which the projection carries as album_real_soul_id;
+    the internal id itself never reaches the wire."""
+    from core import metasync_depot as depot
+    _seed(db, artists=1, albums_per_artist=1, tracks_per_album=2)
+    # production album_soul_id values are kind "album_track" (per
+    # track), never the album's own id the seed writes — put the
+    # rows in production shape so the bit can only arrive via
+    # album_real_soul_id and this test guards the regression alone.
+    conn = db._get_connection()
+    conn.execute(
+        "UPDATE lib2_tracks SET album_soul_id='soul_albumtrack_0_0'")
+    conn.commit()
+    depot.record_mark(db, "album", "soul_album_0_0", "year", "2020")
+    items = _get(client, entity="track").get_json()["data"]["items"]
+    assert len(items) == 2
+    for item in items:
+        assert item["network_fields"] == ["year"]
+        assert "album_real_soul_id" not in item
+
+
 def test_track_artist_name_comes_from_the_joined_artist_not_the_tag(db, client):
     """soulid_worker._process_tracks computes the track soul_id from the album's
     primary artist name, so exporting lib2_tracks.track_artist would make an
