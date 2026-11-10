@@ -10,6 +10,8 @@ registerDocsSection({
             body: `
 Logs live in the \`logs/\` directory (in Docker: \`/app/logs/\`):
 
+![The log viewer in Settings: pick a log file, filter by level and watch entries stream live](ts-logs.jpg)
+
 | File | Contents |
 |------|----------|
 | \`app.log\` | Main application log — requests, workers, errors |
@@ -30,6 +32,8 @@ The Settings → Logs tab streams live logs with real-time operational diagnosti
             body: `
 The **Copy Debug Info** button — in the **Help & Docs sidebar header**, just under the search box — collects a comprehensive diagnostic snapshot. Pick how many log lines to include and which log file to sample (app, post-processing, acoustid, or source reuse), then click:
 
+![The Copy Debug Info button right after clicking: showing its Copied state with the "Debug info copied to clipboard" toast](ts-debug.jpg)
+
 - System info: version, OS, Python version, Docker status, ffmpeg version, uptime
 - Service status: media server, Soulseek, Spotify, and metadata services
 - Library and database statistics
@@ -49,6 +53,8 @@ Paste it into a GitHub issue or the Discord when asking for help — it answers 
             title: 'Common Issues',
             lede: 'Quick fixes for the problems people hit most often.',
             body: `
+![Status indicators on the dashboard: a media server shown as disconnected, with Soulseek disconnected too](ts-common.jpg)
+
 ## Downloads stuck or failing
 
 1. Check the download queue for error messages on individual tracks.
@@ -108,6 +114,8 @@ This gives you an \`https://your-device.tailnet.ts.net\` address that satisfies 
             title: 'Getting Help',
             lede: 'How to report a bug so it gets fixed fast.',
             body: `
+![The Help & Docs page: the documentation sidebar with search and the Copy Debug Info button](ts-reporting.jpg)
+
 ## Before you report
 
 1. Reproduce the problem once more so you can describe the exact steps.

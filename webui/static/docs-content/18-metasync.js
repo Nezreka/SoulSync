@@ -18,6 +18,8 @@ MetaSync is completely optional. SoulSync works the same without it, and nothing
 
 ![How MetaSync works: SoulSync, your MetaSync node, and the SIN network](metasync-flow.svg)
 
+![The MetaSync section in Settings → Connections: connection steps, status and disconnect in one place](ms-settings.jpg)
+
 ## How it flows
 
 ::: steps
@@ -55,6 +57,8 @@ Pulls the charts from your node, matches them, and offers them as playlists. It 
 
 You need a running SoulSync and somewhere to run MetaSync: the same machine, or another one on your network. MetaSync is a separate install. See the MetaSync repository for its Docker compose example.
 
+![Step 1 of the MetaSync connection in Settings: the Connect button, not-connected state and the MetaSync URL field](ms-setup.jpg)
+
 ## Setup steps
 
 ::: steps
@@ -86,6 +90,8 @@ Nothing else to set up. The system automation **Refresh MetaSync Charts** runs o
 ## The eight signals
 
 Each weekly report covers the **last full week** (Monday to Monday, UTC) and lists that week's events. It never lists your library or your wishlist.
+
+![Step 2 in SoulSync's MetaSync settings explains the SIN signals; the share switches themselves live on the MetaSync node's dashboard](ms-signals.jpg)
 
 | Signal | What it means | Default |
 |---|---|---|
@@ -127,6 +133,8 @@ If one kind of event happens more than 500 times in a week (a bulk import, a mig
             title: 'How Your Privacy Is Protected',
             lede: 'Safeguards that work together, plus the honest limits of the design.',
             body: `
+![The SIN explainer in SoulSync's MetaSync settings: anonymous taste signals, never your personal data](ms-privacy.jpg)
+
 ## The safeguards
 
 ::: cards
@@ -221,6 +229,8 @@ Charts also come in **genre and decade editions** ("Trending: Hip Hop", "Trendin
             title: 'Troubleshooting',
             lede: 'The common snags and what each message means.',
             body: `
+![The MetaSync status row in Settings, here reporting that no MetaSync URL is set yet](ms-status.jpg)
+
 ## No charts showing
 
 ::: steps
