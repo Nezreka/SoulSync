@@ -69,8 +69,9 @@ jobs:
         if: success() && inputs.version_tag
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_ANNOUNCEMENTS_WEBHOOK }}
+          VERSION_TAG: ${{ inputs.version_tag }}
         run: |
           if [ -z "$DISCORD_WEBHOOK" ]; then echo "No webhook configured, skipping"; exit 0; fi
           curl -s -H "Content-Type: application/json" \
-            -d "{\"embeds\": [{\"title\": \"SoulSync v${{ inputs.version_tag }} Released\", \"description\": \"A new version of SoulSync is available! Pull the latest Docker image to update.\n\n\`\`\`\ndocker pull boulderbadgedad/soulsync:${{ inputs.version_tag }}\n\`\`\`\", \"color\": 5025616, \"footer\": {\"text\": \"SoulSync Auto-Release\"}, \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
+            -d "{\"embeds\": [{\"title\": \"SoulSync v$VERSION_TAG Released\", \"description\": \"A new version of SoulSync is available! Pull the latest Docker image to update.\n\n\`\`\`\ndocker pull boulderbadgedad/soulsync:$VERSION_TAG\n\`\`\`\", \"color\": 5025616, \"footer\": {\"text\": \"SoulSync Auto-Release\"}, \"timestamp\": \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
             "$DISCORD_WEBHOOK"
