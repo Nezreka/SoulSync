@@ -12,6 +12,8 @@ SoulSync needs credentials for the services it queries for metadata and enrichme
 
 Settings save themselves a moment after you change them. The status at the top right says **All changes saved**, **Save now** while a change is waiting (click it to save straight away), or **Retry save** if a save failed.
 
+![Service credentials in Settings: the service cards grouped under Metadata, Scrobbling and Extras](settings-services.jpg)
+
 ## Service list
 
 - **Spotify** — Client ID, Client Secret, and Redirect URI (from the Spotify Developer Dashboard). Powers metadata, discovery, and playlist sync. Redirect URIs must be **HTTPS** for anything that isn't a loopback address (NAS, Docker, remote host) — see [Connecting services](#gs-connecting).
@@ -37,7 +39,7 @@ Each service card shows **configured** or **missing** in its header — the colo
             body: `
 Connect your media server to enable library scans, metadata syncing, and in-app playback.
 
-![Media server settings](settings-media-server.jpg)
+![Media server settings: server connections for Plex, Jellyfin, Navidrome, Music Assistant and standalone](settings-media-server.jpg)
 
 ## Plex
 
@@ -112,7 +114,7 @@ These live on other tabs, not Downloads:
 - **Lossy copy** — on the **Quality** tab ("Create lossy copy of downloaded FLAC files"): optionally keep a lossy copy of each downloaded FLAC alongside the original
 - **YouTube cookies** — on the **Sources** tab, in the YouTube source panel ("YouTube Browser Cookies" / "Paste cookies.txt"): authenticate with a browser profile or a \`cookies.txt\` file when YouTube rate-limits anonymous downloads
 
-![Downloads settings](settings-downloads.jpg)
+![Downloads settings: the download chain with Soulseek tried first and YouTube as fallback](settings-downloads.jpg)
 `
         },
         {
@@ -120,7 +122,7 @@ These live on other tabs, not Downloads:
             title: 'Processing & Organization',
             lede: 'How downloads are verified, enhanced, tagged, and filed.',
             body: `
-![Processing settings](settings-processing.jpg)
+![Processing settings: post-processing options for verification, artwork sources, lyrics and ReplayGain](settings-processing.jpg)
 
 ## Verification & enhancement
 
@@ -152,7 +154,7 @@ Quality profiles define which formats are acceptable for downloads, and when a f
 - **Upgrade until** — **Any accepted target** stops once a file matches any target; **Selected target or better** keeps replacing lower-quality files until they reach the selected cutoff target or better
 - **Quick Presets** — one-click starting points for common quality setups
 
-![Quality profiles](dl-quality-profiles.jpg)
+![Quality profile settings: the format priority ladder, upgrade rules and quick presets](dl-quality-profiles.jpg)
 
 Quality profiles are checked during downloads and auto-import. Library v2 evaluates monitored tracks against their upgrade cutoff and sends missing or upgrade-eligible tracks to the Wishlist through **Watchlist & Wishlist Reconcile**. The **Quality Profile Audit** repair job flags library files below their profile for review; the old Quality Upgrade Finder is retired.
 `
@@ -162,6 +164,8 @@ Quality profiles are checked during downloads and auto-import. Library v2 evalua
             title: 'Miscellaneous',
             lede: 'Appearance, API keys, logging, extra libraries, and the remaining toggles.',
             body: `
+![Appearance settings: accent color, visualizer and interface toggles](settings-other.jpg)
+
 ## Appearance
 
 Accent color, theme, visualizer effects, and interface controls. Changes apply immediately — no restart needed.
@@ -169,6 +173,8 @@ Accent color, theme, visualizer effects, and interface controls. Changes apply i
 ## REST API keys
 
 Generate API keys for external integrations. A key is either **admin** (full rights, the default) or **read** (can look, can't change anything). Guard admin keys like passwords and revoke any you no longer use. Keys are shown once at creation. See the API docs for endpoint details.
+
+![The SoulSync API settings: REST API keys, the inbound request endpoint, and the MCP and Lidarr compatible API switches](api-keys.jpg)
 
 The same section has two switches, both off by default:
 
@@ -196,6 +202,8 @@ Your **Music Library Folder** above is already covered — you don't need to rep
             title: 'Database Maintenance',
             lede: 'Backups, vacuuming, and cache management to keep SoulSync healthy.',
             body: `
+![Database maintenance: database size, Compact Database (VACUUM) and incremental vacuum](settings-maintenance.jpg)
+
 ## Backups
 
 Backups don't live in Settings — they're on the **Tools** page, in the **Backup Manager** card: create a backup now, download copies for off-site storage, and restore from any previous backup. Scheduled backups run through the Backup Database system automation.

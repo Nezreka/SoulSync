@@ -15,6 +15,8 @@ registerDocsSection({
             body: `
 SoulSync's **Video** side is a self-hosted movies & TV manager that lives inside the same app as the music side but runs as an **isolated application** — its own database, its own pages, its own API. Think of it as a Sonarr + Radarr + overlay/collection manager built into SoulSync.
 
+![The video dashboard — the video side's home for movies and TV](vid-overview.jpg)
+
 It connects to **Plex** or **Jellyfin** to read your movie and TV libraries, enriches every title from **TMDB**, **TVDB**, **OMDb**, **fanart.tv**, **Trakt**, **TVMaze**, **AniList** (anime) and **OpenSubtitles**, and can search, grab, organize, and upgrade downloads to fill the gaps in your collection.
 
 ::: cards
@@ -43,6 +45,8 @@ Follow YouTube channels and playlists like shows and pull new uploads into the v
             body: `
 Use the **side switcher** in the app header (the Audio ↔ Video toggle) to flip between the Music and Video apps. Each side has its own navigation, its own pages, and its own settings.
 
+![The side switcher in the sidebar, flipping between the Audio and Video apps](vid-switch.jpg)
+
 A handful of pages are **shared** across both sides — **Chat**, **Issues**, and this **Help & Docs** page — so you land on the same page no matter which side you were on. Everything else is side-specific: the video sidebar shows Dashboard, Search, Discover, Library, Watchlist, Wishlist, Downloads, Requests, Calendar, Automations, Tools, and Settings for the video side.
 
 > [!TIP]
@@ -55,6 +59,8 @@ A handful of pages are **shared** across both sides — **Chat**, **Issues**, an
             lede: 'Point the video side at Plex or Jellyfin, pick your libraries, and scan them in.',
             body: `
 The video side reads your libraries from **Plex** or **Jellyfin**. Configure the connection under **Video → Settings**, pick which libraries to include, then run a scan to import them.
+
+![Video server settings: the Plex/Jellyfin connection panel with server URL, token and library pickers](vid-server.jpg)
 
 SoulSync stores a lightweight copy of every movie/show/episode row and enriches it in the background — it never modifies your server's files during a scan.
 
@@ -78,6 +84,8 @@ SoulSync stores a lightweight copy of every movie/show/episode row and enriches 
             lede: 'Indexers, download clients, and library paths — what the video side shares with music and what it keeps to itself.',
             body: `
 Video downloads flow through your configured indexers and clients. Grabs are ranked by your **quality profile** and **custom formats**, then handed to the client, monitored to completion, organized into your library folder, and (optionally) your server is told to scan.
+
+![Video download sources in Settings: the source chain and the indexers section](vid-sources.jpg)
 
 ## What's shared with the music side
 
@@ -182,6 +190,8 @@ registerDocsSection({
             body: `
 The Video **Dashboard** uses the same layout as the music one.
 
+![The video dashboard: a featured title up top, your watching and rails below](vdash-overview.jpg)
+
 - **Hero**: a greeting, your movies, shows, episodes and disk size (click one for the library), and the scan strip. **Scan** picks up what changed on your server; the **⋯** menu has a deep scan, the library, the poster manager and repair.
 - **Worker orbs**: every video enrichment worker on its own stage, the same animation as music. Hover to open them into a grid; click one to pause or resume it, or **Manage Workers** for the full view.
 - **Next up**: the calendar's billboard for the next episodes on your watchlist, each with its state. Click one to open it on the calendar.
@@ -210,6 +220,8 @@ See [Watch State & History](#vdet-watch) for how watch state works per title.
             body: `
 **This week** answers one question: did what aired land? It counts the episodes on your watchlist that aired in the last seven days and how many you have, with a meter by state (in library, downloading, wanted, failed, missing). Underneath: how many more air in the next seven days and when auto-wishlist last ran. If any aired episodes are missing, **Wishlist N missing** adds them in one go (not shown to profiles that have to ask first).
 
+![The Up Next rail on the video dashboard: the next video automations to run, with the watchlist and wishlist counters. Here both counters are at zero and no runs are queued](vdash-activity.jpg)
+
 **Recently added** shows what landed on your server, newest first, with **Movies** and **Shows** tabs when there's a mix. **Downloading now** appears only while something is in flight.
 
 The rail also has the next **video automations** to run, your **watchlist** and **wishlist** counts, and **open issues** / **findings to review** tiles that only show up when there's something to look at.
@@ -230,6 +242,8 @@ registerDocsSection({
             lede: 'One search bar across movies, TV shows, people, and studios — with ownership status on every result.',
             body: `
 Search across **movies**, **TV shows**, **people**, and **studios** from one bar. Results are source-agnostic and show whether you already own a title, so you can:
+
+![Video search results with ownership badges on the titles found](vsearch-search.jpg)
 
 - Jump to a title's [detail page](#vdet-layout)
 - Add something to your [wishlist](#vwish-wanted)
@@ -266,6 +280,8 @@ Studios are also a discovery vector: if you love everything A24 puts out, follow
             lede: 'A live torrent board from EXT.to — cached, matched, and instant to open.',
             body: `
 The **Fresh Releases** tab on the Search page is a live torrent board sourced from **EXT.to** — the Movies and TV torrent sections for Day, Week, and Month, parsed from the EXT.to homepage into rows carrying size, file count, age, seeders, and leechers.
+
+![The Fresh Releases board before its first successful load. It is sourced from EXT.to through FlareSolverr, so until that is configured and a pull lands, the board shows this empty state](vsearch-fresh.jpg)
 
 ## How the board stays warm
 
@@ -311,6 +327,8 @@ registerDocsSection({
             lede: 'A streaming-style home screen: a rotating billboard of standout titles with trailers.',
             body: `
 Discover opens on a full-bleed **billboard** that rotates through standout titles with logos, backdrops, and a one-click **trailer**. It's built to feel like a streaming home screen rather than a database.
+
+![Video Discover before a TMDB key is connected — the page asks for TMDB setup first](vdisc-hero.jpg)
 
 Below the hero, content is organized into rails — personalized picks, recommendations, and browsable grids — so you can lean back and browse or drill straight into something specific.
 `
@@ -375,6 +393,8 @@ registerDocsSection({
             body: `
 The **Library** page is your owned movies and shows as a poster wall.
 
+![The video library as a poster wall of your movies and shows](vlib-browse.jpg)
+
 - **Filter** by status (all / owned / wanted / watched / unwatched), resolution, genre, and more
 - **Sort** by title, added date, release year, or rating
 - The page **remembers your scroll position** when you navigate away and come back
@@ -388,6 +408,8 @@ Filters compose — combine "4K + unwatched + sci-fi" to find exactly what you'r
             lede: 'Per-title control: metadata, locks, quality profiles, monitoring, issues, and re-scans.',
             body: `
 Open any title's **Manage** panel to:
+
+![A title's Manage panel: edits are saved here, pushed to your server, and locked against scans so refreshes don't overwrite them](vdet-meta.jpg)
 
 - Edit metadata and **lock** fields against enrichment overwrites
 - Change its **quality profile**
@@ -404,6 +426,8 @@ Locked fields are respected by every future enrichment pass — your corrections
             lede: 'Act on many titles at once — monitor, mark watched, edit ratings and genres, refresh art.',
             body: `
 Select multiple titles to act on them at once:
+
+![Selecting multiple titles in the video library opens the bulk operations bar](vlib-bulk.jpg)
 
 - Bulk **monitor / unmonitor**
 - Bulk **mark watched / unwatched**
@@ -433,6 +457,10 @@ registerDocsSection({
             body: `
 Every title has a rich **detail page**:
 
+![A movie detail page: art, ratings, format badges and the copies you own](vdet-movie.jpg)
+
+![A show detail page with season cards and episode counts](vdet-show.jpg)
+
 - Hero art, overview, cast & crew
 - Ratings, awards, and a post-credits / stinger flag
 - Format badges (HDR, Dolby Vision, Atmos, channel layout)
@@ -457,6 +485,8 @@ On a show, each episode row shows **Missing** or **Upcoming** only when there's 
             lede: 'Every copy you own of a title: where it lives, how good it is, and what you can do with it.',
             body: `
 Every movie and show in your library has two tabs: the page itself (**Overview** for a movie, **Episodes** for a show) and **Your library**. The tab you used last is remembered.
+
+![The Your Library tab on a title's detail page, listing the copies you own](vdet-library.jpg)
 
 **What you have**: how many copies and how big, your best copy's resolution, and whether it meets the quality target of the title's profile. **Find an upgrade** opens a manual search when it doesn't; **Quality and download settings** opens the Manage panel.
 
@@ -488,6 +518,8 @@ Subtitle language overrides and the acquisition history for the title live under
             body: `
 SoulSync ingests per-episode and per-movie **watch state** from your server:
 
+![Season cards on a show page, each with its watched-progress bar](vdet-watch.jpg)
+
 - Drives the **Continue Watching** rail on the [dashboard](#vdash-continue)
 - Powers a **Next Up** call-to-action on show pages
 - Lets you toggle **watched / unwatched** right on the page
@@ -503,6 +535,8 @@ The **acquisition history** on the [Your library tab](#vdet-library) shows grabs
             lede: 'Fix any field and lock it — enrichment will never overwrite your corrections.',
             body: `
 Edit any metadata field and **lock** it so enrichment never overwrites your change. You can also **refresh art** to pull fresh posters/backdrops, or pick a specific poster from the available options.
+
+![The metadata edit panel on a title's detail page](vdet-meta.jpg)
 
 > [!WARNING]
 > A re-match changes the title's identity and can update its name and art — but it does **not** silently wipe your locked fields. Locked means locked.
@@ -520,6 +554,8 @@ Episodes are treated as facts: a scan that no longer sees an episode **demotes**
             lede: 'Give individual titles their own quality profile and tell shows how their numbering works.',
             body: `
 Assign a title its own **quality profile** ("this show is always 1080p, that movie is 4K"). Pick it from the title's Manage panel, or right in **Get** / **Manual search** with the **Profile** picker, even for a title that isn't in your library yet: the pick judges that search and grab, sticks to the title's wishlist entries, and the title keeps it when it lands, so its upgrades use it too.
+
+![A title's quality badge on its detail page, showing it meets your 1080p target](vdet-quality.jpg)
 
 **Filter and sort the results.** Every manual search (movie, show, season or episode) has a bar over its results: type to narrow by name, group or indexer, sort by best match, size, age, quality, format score, seeders, indexer or grabs, and open **Filters** to build conditions (resolution is 1080, codec is HEVC, group contains MeGusta, size less than 1 GB, language contains japanese) matched on all or any of them. **Language** reads the audio language tags in a release's name, by name or code, and **dual** or **multi** finds the dual audio ones; a release with no language tag is usually the original audio only. Name a filter to save it for every later search on your profile. The head says how many results there are, how many meet your profile and how many match your filter. It only changes what you see: Auto and the wishlist still rank releases by your profile.
 
@@ -561,6 +597,8 @@ registerDocsSection({
             lede: 'Tell SoulSync who to keep an eye on — their new titles flow into your wishlist automatically.',
             body: `
 The video **Watchlist** is how you tell SoulSync "keep an eye on this." Follow an **actor**, **director**, or **studio** and their upcoming and newly-released titles are automatically added to your [Wishlist](#vwish-wanted) so the download pipeline can go find them.
+
+![The video watchlist: followed shows, people and studios with airing chips and episode counts](vwatch-follow.jpg)
 
 Follow from anywhere a follow button appears: [detail pages](#vdet-people), [studio pages](#vsearch-studios), or search results.
 `
@@ -604,6 +642,8 @@ registerDocsSection({
             body: `
 The **Wishlist** is everything the video side wants but doesn't have at the quality you asked for:
 
+![The video wishlist, Movies tab — wanted titles and still-hunting stats](vwish-wanted.jpg)
+
 - **Wanted** — titles you don't own yet
 - **Cutoff-unmet** — titles you own below their profile's cutoff quality
 
@@ -638,6 +678,8 @@ Click a poster or orb and a panel opens beside it (a drawer on a tablet, a botto
             body: `
 **Search Now** kicks off an immediate hunt for a wishlist entry instead of waiting for the next automation pass.
 
+![The wishlist toolbar: filters, the Failing toggle and Search all missing](vwish-search.jpg)
+
 Status is shown honestly — searching, found, grabbed, failed with an attempt counter — so you always know where each title stands. Missing art can be backfilled for movies and shows in bulk, so the wishlist stays visually complete even for titles added from bare metadata.
 `
         },
@@ -665,6 +707,8 @@ registerDocsSection({
             lede: 'A live view of everything in flight — per-item speed, ETA, progress, and state.',
             body: `
 The **Downloads** page is the mission-control view for video acquisition. Every grab shows live speed, ETA, progress, and state. From here you can grab a release manually, retry a failed one, cancel, or clear completed items.
+
+![The video downloads page, with recent grabs and failed items to retry](vdl-queue.jpg)
 
 ## How a grab flows
 
@@ -699,6 +743,8 @@ The **Clients** view (Torrents / Usenet / Soulseek tabs) shows per-client health
 ## Quality profiles
 
 A **quality profile** is an ordered ladder of allowed qualities — for example, HDTV-720p → WEBDL-1080p → WEBDL-2160p → Bluray-2160p. Two settings control upgrades:
+
+![Video quality profiles in Settings: the full quality ladder with accept toggles and an upgrade-until target](vdl-quality.jpg)
 
 - **Allowed qualities** — which rungs of the ladder are acceptable at all.
 - **Cutoff** — once a file at or above the cutoff is in your library, SoulSync stops looking for upgrades. Items below the cutoff stay on the wishlist with an "upgrade watch" flag until something better arrives.
@@ -780,6 +826,8 @@ There's no per-list schedule — syncing runs through the **Sync Import Lists** 
 
 When a grab turns out to be a bad file — corrupt, mislabeled, wrong title — SoulSync **blocklists** that specific release (by source + filename). The blocklist is honored at every stage:
 
+![The downloads Review tab, with the recycle bin and blocklist](vdl-blocklist.jpg)
+
 - The **ranker** filters blocked releases out of future searches.
 - **Retry** and automatic re-queries skip them.
 - A **manual grab** always overrides the blocklist, in case you know better.
@@ -807,6 +855,8 @@ When an upgrade replaces an existing file, the old file isn't deleted outright �
             lede: 'A permanent archive of every grab and its outcome.',
             body: `
 The **History** view archives every grab with its outcome — what was grabbed, when, from which source, and whether it succeeded. It's the paper trail for your library: useful for auditing, for figuring out why a title never arrived, and for spotting patterns in failing sources.
+
+![Video download history, with completed grabs and failed attempts](vdl-history.jpg)
 
 After a download completes, a lightweight post-download scan probes your media server first and skips a full library crawl when it can already see the newest grab — faster imports, less churn.
 `
@@ -844,6 +894,8 @@ registerDocsSection({
             body: `
 The **Requests** system gives every member a voice in what gets added. A member searches for a movie or show and submits a request; an admin reviews the queue and either **approves** it — movies drop straight onto the wishlist, shows go to the watchlist — or **denies** it.
 
+![The requests page: waiting requests with one-click approve buttons](vreq-flow.jpg)
+
 ## How it works
 
 ::: steps
@@ -874,6 +926,8 @@ registerDocsSection({
             body: `
 The **Calendar** shows what airs this week for the shows you follow, plus release dates for the movies on your wishlist. Up top, **Next up** shows the next three episodes as one billboard; hover one to open it out.
 
+![The video calendar week view, with airing episodes and their states](vcal-grid.jpg)
+
 Three views, with ‹ › and **Today** to move around (or the ← → and T keys):
 
 - **Week**: seven columns, grouped by time of day. A whole season dropped on one day is a single card (*S2 · E1–19 · 19 eps*).
@@ -899,6 +953,8 @@ Three views, with ‹ › and **Today** to move around (or the ← → and T key
 | **Auto** / Upcoming | Hasn't aired. *Auto* means the airing automation will grab it after it airs |
 | **Not monitored** | You told SoulSync to stop looking for it |
 
+![A calendar card close-up: an aired episode marked Missing](vcal-states.jpg)
+
 The chips above the calendar count each state and filter to it. When aired episodes are **Missing**, a bar offers to wishlist all of them at once. Click any episode for details: an admin can **Ignore** one (stop monitoring it), and anyone with download rights can wishlist or retry it.
 
 The line at the right says when air dates were last refreshed from TMDB and when the auto-wishlist last ran, so a quiet calendar and a stalled automation never look the same. The page refreshes itself every 15 seconds while something is downloading, every few minutes otherwise, and whenever you come back to it.
@@ -910,6 +966,8 @@ The line at the right says when air dates were last refreshed from TMDB and when
             lede: 'How aired episodes reach your wishlist without you.',
             body: `
 **Auto-Wishlist Episodes Airing Today** runs every 4 hours. Each run looks back a week and adds every aired, monitored episode you don't own for the shows you follow, **once each**. An episode you remove from the wishlist isn't added back.
+
+![The calendar's auto-wishlist banner and the Auto state card](vcal-auto.jpg)
 
 Looking back a week means a run the server missed (asleep, restarting) costs a few hours, not a day, and an episode TMDB lists late, like a streaming season posted on release day, still gets picked up. **Refresh Airing TV Schedules** re-pulls air dates from TMDB every night, so the calendar and the automation both see new and moved episodes.
 
@@ -931,6 +989,8 @@ Movies on your wishlist appear on the day they reach **cinemas** and the day the
             body: `
 Open the ⋯ menu and choose **Subscribe in a calendar app**. Copy the link into Google Calendar, Apple Calendar or Outlook ("add calendar from URL").
 
+![The Subscribe in a calendar app dialog with the .ics feed link](vcal-ical.jpg)
+
 The link has your own token in it, so a calendar app can read it without signing in, and it shows your calendar: your follows, your profile's rating limits. Treat it like a password. **Reset link** makes a new one and the old one stops working.
 
 The feed covers the next 14 days; add \`days=60\` to the link for up to 60. Episodes with a known air time are timed events, everything else is all-day.
@@ -950,6 +1010,8 @@ registerDocsSection({
             lede: 'The same automation engine as the music side — scheduled tasks and event workflows for video.',
             body: `
 The video side surfaces the same **system automation engine** the music side uses: scheduled tasks and event-driven workflows, minus the music-only kinds (Beatport, user, playlist triggers). SoulSync seeds **28 system automations** for video — all enabled, all editable or deletable.
+
+![Video automations: the shared system automations with their schedules and run counts](vauto-shared.jpg)
 
 ## Seeded video system automations
 
@@ -1034,6 +1096,8 @@ If you already know the [music automations](#auto-overview), the video side work
             body: `
 The video builder exposes **19 video-only event triggers**, plus the shared ones (Schedule, Daily Time, Weekly Schedule, Monthly Schedule, App Started, Signal Received, Issue Reported, Issue Status Changed, Issue Reply, Webhook Received — the same blocks the music side uses).
 
+![The automation builder's trigger palette, including video download events](vauto-events.jpg)
+
 Triggers with conditions let you filter (e.g. only fire when \`kind\` is \`movie\`, or when a finding's severity is \`critical\`). Every trigger also exposes its variables — \`{title}\`, \`{quality}\`, \`{season}\`, … — for use in notification message templates.
 
 | Trigger | Fires when | Key config (conditions) |
@@ -1085,6 +1149,8 @@ registerDocsSection({
             lede: 'Follow a YouTube channel like a show — new uploads flow through the normal download pipeline.',
             body: `
 Follow a **YouTube channel** (or a specific **playlist**) the way you'd follow a TV show. SoulSync uses yt-dlp to track new uploads and bridges them into the video wishlist/watchlist, so channel videos flow through the same download pipeline as everything else.
+
+![The YouTube Channels tab before a media server is connected — no channels pulled in yet](vyt-follow.jpg)
 
 It's visual-first: channels get artwork and a proper detail page showing their videos, what you own, and what's still available.
 
@@ -1153,6 +1219,8 @@ registerDocsSection({
             body: `
 **Overlay Studio** is a visual editor for poster overlays, Kometa-style. Design **badge templates** — resolution, HDR flavor, ratings, audio codec, awards, custom text, logo packs — on a live preview canvas, assign templates to filtered sets of titles, and **apply** them. SoulSync renders the overlays with Pillow and writes them straight back to your Plex/Jellyfin posters.
 
+![Overlay Studio: badge templates with per-type settings for movies, shows, seasons and episodes](vtool-overlays.jpg)
+
 When you want the originals back, the **cleanup** tool removes overlays again.
 
 > [!WARNING]
@@ -1165,6 +1233,8 @@ When you want the originals back, the **cleanup** tool removes overlays again.
             lede: 'Smart collections synced to Plex Collections or Jellyfin BoxSets, with generated posters.',
             body: `
 Build **collections** two ways:
+
+![Collection Studio, with smart collections synced to your server](vtool-collections.jpg)
 
 - **Smart filters** — "all 4K sci-fi from the 80s", "every Oscar Best Picture winner you own" — membership updates itself.
 - **Hand-picked** — curate the exact titles yourself.
@@ -1189,6 +1259,8 @@ Each collection hands a title to the wishlist **once**. Remove it from the wishl
             lede: 'Repair jobs that find library problems and fix them — individually or in bulk.',
             body: `
 **Library Maintenance** runs eleven repair jobs that scan the video library for problems. Each job produces rich, lazy-loaded **findings** you can fix individually, fix in bulk, resolve, or dismiss — with a full run history and live progress while jobs execute. Run jobs on demand, on their schedule, or from an automation via the **Run Maintenance Job** action (chain it with the *Maintenance Finding Raised* trigger for alerts).
+
+![Video Library Maintenance: run a check and work through the findings buckets](vtool-repair.jpg)
 
 The video **Tools** page is the same page as music's: an **Operations** tab (Simple and Advanced mode, the findings inbox, the jobs and their history) and a **Tools** tab (Library Scan, Server Scan, the Overlay and Collection Studios, Backups and Mass Rename). Findings work the same way on both sides, see [Repair & Maintenance](#dash-repair).
 
@@ -1219,6 +1291,8 @@ On the video side, **Fix all safe** only runs fixes that change SoulSync's own d
             body: `
 Background **enrichment workers** fill in metadata from TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles, Return-YouTube-Dislike, SponsorBlock, and more.
 
+![Metadata enrichment in Operations advanced mode: media info and metadata gap jobs](vtool-enrichment.jpg)
+
 From the Enrichment view you can:
 
 - Watch **per-service coverage** and status
@@ -1242,6 +1316,8 @@ A **Server Activity** drawer shows live Plex streams and recent watch history ap
             lede: 'On-demand or scheduled backups of the video database — restore or download when needed.',
             body: `
 Take **on-demand or scheduled backups** of the video database, then restore or download them when needed.
+
+![The Backups card in video Tools, with an existing snapshot and restore](vtool-backups.jpg)
 
 > [!DANGER]
 > A restore **replaces the entire database** — and it's **staged, not instant**: the swap happens on the next restart, with the current database set aside (kept, not deleted). Backup endpoints are admin-only, and you should verify a backup's integrity before restoring over a live system.
@@ -1286,6 +1362,8 @@ registerDocsSection({
             body: `
 Configure your **Plex / Jellyfin connection**, test it, and pick which **libraries** the video side manages. For Jellyfin you can select which user's watch state to read.
 
+![Video library settings: folders, organization, post-processing and import](vset-server.jpg)
+
 Server and library configuration lives on the admin-only Settings page — the connection details are sensitive, so reads are gated too.
 `
         },
@@ -1295,6 +1373,8 @@ Server and library configuration lives on the admin-only Settings page — the c
             lede: 'API keys for TMDB, TVDB, OMDb, fanart.tv — plus indexer and download-client credentials.',
             body: `
 Enter API keys for **TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles, SubDL, SubSource** and the rest, set **service priority** (which source wins when several have the answer), and manage **indexer / download-client credentials** (Usenet, torrents, Soulseek).
+
+![Video enrichment services in Settings, under the TMDB/TVDB keys banner](vset-services.jpg)
 
 > [!WARNING]
 > These endpoints return raw tokens, so they're **admin-gated for both reads and writes**.
@@ -1306,6 +1386,8 @@ Enter API keys for **TMDB, TVDB, OMDb, fanart.tv, OpenSubtitles, SubDL, SubSourc
             lede: 'Bazarr built in: fetch only what is missing, upgrade what is weak, and keep forced tracks alongside full ones.',
             body: `
 Turn on **Download subtitles** (Settings → Library → Subtitles) and every import gets external \`.srt\` files for your **subtitle languages**, written next to the video as \`<video>.<lang>.srt\`. Per-movie and per-show language overrides live on the detail pages.
+
+![Subtitle provider settings: the OpenSubtitles, SubDL and SubSource cards](vset-subtitles.jpg)
 
 **Providers.** OpenSubtitles, SubDL and SubSource (free API keys, each with a **Test** button), **Embedded** (extracts a text track already inside the file) and optional **Whisper** local transcription as the last resort. Drag the **provider chain** to set the order. Candidates are scored hash-first: a subtitle timed for your exact file beats one that only shares the release name, and anything under the minimum score is never downloaded.
 
@@ -1330,6 +1412,8 @@ A hearing-impaired track counts for a plain request. A forced track never does, 
             body: `
 Wire up event **notifications** — Discord, webhook, Telegram — for grabs, imports, and upgrades, and send a **test** to verify delivery before you rely on it.
 
+![Notification settings live at the bottom of the video side's Connections settings](vset-notify.jpg)
+
 > [!WARNING]
 > Notification config exposes webhook URLs and bot tokens, so it's **admin-only**.
 `
@@ -1348,6 +1432,8 @@ registerDocsSection({
             lede: 'Session-authenticated internal API — your browser session, not API keys.',
             body: `
 The video API lives under \`/api/video\` and is **session-authenticated** — it uses your logged-in browser session and active profile, *not* the \`sk_\` API keys the public [REST API](#api-auth) uses. It's the app's own internal API — separate from the key-authenticated public video v1 surface (\`/api/v1/video/*\`, documented under [Video](#api-video)).
+
+![The video side's Connections settings, where the services behind the API are configured](vapi-surfaces.jpg)
 
 A single blueprint-level gate enforces these rules on every request:
 
@@ -1368,6 +1454,8 @@ A single blueprint-level gate enforces these rules on every request:
             lede: 'Read-only content endpoints — open to any video-enabled profile.',
             body: `
 Base path: \`/api/video\`. Read-only content endpoints, open to any video-enabled profile.
+
+![The video library poster wall — the collection the content endpoints serve](vlib-browse.jpg)
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -1394,6 +1482,8 @@ Base path: \`/api/video\`. Read-only content endpoints, open to any video-enable
             lede: 'Acquisition endpoints. Download triggers need can_download; config writes need admin.',
             body: `
 Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config writes and library mutations require admin.
+
+![The video downloads page — the acquisition surface behind the download endpoints](vdl-queue.jpg)
 
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|
@@ -1430,6 +1520,8 @@ Base path: \`/api/video\`. Download *triggers* require \`can_download\`; config 
             body: `
 Base path: \`/api/video\`. **Admin-only** for every method.
 
+![Overlay Studio — one of the admin-only management surfaces](vtool-overlays.jpg)
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET/POST/PUT/DELETE | \`/overlays/templates...\` | Overlay template CRUD, duplicate, thumbnails |
@@ -1458,6 +1550,8 @@ Base path: \`/api/video\`. **Admin-only** for every method.
             body: `
 Base path: \`/api/video\`. Credential-exposing endpoints are **admin (any method)**; content-read config is admin-on-write.
 
+![Enrichment service settings — the configuration the settings endpoints manage](vset-services.jpg)
+
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|
 | GET | \`/server\` | Media-server connection | open (any video profile) |
@@ -1476,6 +1570,8 @@ Base path: \`/api/video\`. Credential-exposing endpoints are **admin (any method
             body: `
 Channel/playlist following and downloads under \`/api/video/youtube\`.
 
+![The YouTube Channels tab — the surface behind the YouTube endpoints](vyt-follow.jpg)
+
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|
 | GET | \`/youtube/channels\`, \`/youtube/channel/{id}\`, \`/youtube/wishlist\` | Followed channels & their videos | video |
@@ -1492,6 +1588,8 @@ Channel/playlist following and downloads under \`/api/video/youtube\`.
             lede: 'The rest of the video API: bulk metadata, mass rename, recycle bin, Fresh Releases, watch party, overlay assets, and issues.',
             body: `
 Base path: \`/api/video\`. Session-authenticated like the rest of this surface (see [Auth Model](#vapi-auth)).
+
+![Bulk selection in the video library — the surface behind the bulk endpoints](vlib-bulk.jpg)
 
 ## Bulk metadata operations
 
