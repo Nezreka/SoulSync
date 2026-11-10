@@ -22,7 +22,7 @@
  *    job gets dot 'enabled' and card class '' (see repairJobCardClass).
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { RepairJob, RepairJobProgress, RepairJobRun } from '../-tools.types';
@@ -212,7 +212,8 @@ export function MaintenanceHero({
 
   const loadHistory = useCallback(async () => {
     try {
-      setHistory(await fetchRepairHistory(50));
+      // enough runs for the history page's two-week view to mean something
+      setHistory(await fetchRepairHistory(200));
       setHistoryError(false);
     } catch {
       setHistoryError(true);
@@ -407,6 +408,10 @@ export function MaintenanceHero({
   }, [jobs, onTab]);
 
   const enabledJobs = (jobs || []).filter((job) => job.enabled).length;
+  const jobNames = useMemo(
+    () => Object.fromEntries((jobs || []).map((job) => [job.job_id, job.display_name])),
+    [jobs],
+  );
 
   return (
     <div className="tools-maintenance-hero">
@@ -505,6 +510,7 @@ export function MaintenanceHero({
               error={historyError}
               onShowFindings={showJobFindings}
               onRefresh={() => void loadHistory()}
+              jobNames={jobNames}
             />
           </div>
         </section>

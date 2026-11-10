@@ -90,9 +90,10 @@ describe('ToolCard chrome', () => {
         ]}
       />,
     );
-    expect(screen.getByText('Artists:')).toBeTruthy();
+    // the label loses its colon: the number leads and the word sits under it
+    expect(screen.getByText('Artists')).toBeTruthy();
     expect(screen.getByText('12')).toBeTruthy();
-    expect(screen.getByText('Albums:')).toBeTruthy();
+    expect(screen.getByText('Albums')).toBeTruthy();
   });
 
   it('hides with an inline display:none, the way the Plex-only cards do', () => {
@@ -221,14 +222,14 @@ describe('DiscoveryPoolCard', () => {
     expect(container.querySelector('#discovery-pool-failed-count')?.textContent).toBe('—');
   });
 
-  it('keeps the failed counter’s red pill styling', async () => {
+  it('the failed counter turns red only when something failed', async () => {
     render(<DiscoveryPoolCard />);
     // The id sits ON the .stat-item-value span, exactly as in the markup — not
     // on a nested node — so the styling and the id are the same element.
     const failed = document.querySelector('#discovery-pool-failed-count') as HTMLElement;
     expect(failed.classList.contains('stat-item-value')).toBe(true);
-    expect(failed.style.color).toBe('rgb(239, 68, 68)');
-    expect(failed.style.backgroundColor).toBe('rgba(239, 68, 68, 0.15)');
+    // nothing loaded yet: a dash, and no alarm colour around it
+    expect(failed.style.color).toBe('');
     await flush();
   });
 });

@@ -74371,20 +74371,60 @@ body.src-modal-open { overflow: hidden; }
 .repair-help-setting-val { color: var(--text-1); font-weight: 600; }
 
 /* ── History ── */
-#tools-page .repair-runs { display: flex; flex-direction: column; gap: 20px; }
-#tools-page .repair-runs-toolbar { display: flex; align-items: flex-start; gap: 12px; }
-#tools-page .repair-runs-chips { flex: 1; display: flex; gap: 8px; flex-wrap: wrap; }
-#tools-page .repair-runs-tools { display: flex; align-items: center; gap: 4px; flex: none; }
+#tools-page .repair-runs { display: flex; flex-direction: column; gap: 24px; }
+
+/* what the runs add up to, and how they fell day by day */
+#tools-page .repair-runs-overview {
+    display: flex;
+    align-items: stretch;
+    gap: 24px 40px;
+    flex-wrap: wrap;
+    padding: 24px 28px;
+    border-radius: 20px;
+    background: var(--tl-card);
+}
+#tools-page .repair-runs-figures { flex: 1 1 520px; display: flex; gap: 20px 36px; flex-wrap: wrap; align-items: flex-end; }
+#tools-page .repair-runs-figure { display: flex; flex-direction: column; gap: 4px; min-width: 96px; }
+#tools-page .repair-runs-figure-value {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+}
+#tools-page .repair-runs-figure.bad .repair-runs-figure-value { color: var(--danger-light); }
+#tools-page .repair-runs-figure-label { font-size: 13.5px; color: var(--text-2); }
+#tools-page .repair-runs-days { flex: 0 1 380px; min-width: 260px; display: flex; align-items: flex-end; gap: 6px; height: 84px; }
+#tools-page .repair-runs-daybar { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; gap: 6px; }
+#tools-page .repair-runs-daybar-stack {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 2px;
+    border-radius: var(--radius-xs);
+    background: var(--white-a04);
+    overflow: hidden;
+}
+#tools-page .repair-runs-daybar-fill { display: block; min-height: 3px; border-radius: 2px; background: var(--white-a40); }
+#tools-page .repair-runs-daybar-fill.failed { background: var(--danger-light); }
+#tools-page .repair-runs-daybar:hover .repair-runs-daybar-fill:not(.failed) { background: var(--text-1); }
+#tools-page .repair-runs-daybar-label { font-size: 11px; text-align: center; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+#tools-page .repair-runs-toolbar { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+#tools-page .repair-runs-chips { flex: 1 1 420px; display: flex; gap: 8px; flex-wrap: wrap; }
+#tools-page .repair-runs-tools { display: flex; align-items: center; gap: 8px; flex: none; }
 #tools-page .repair-runs-chip,
 #tools-page .repair-runs-toggle {
-    height: 32px;
-    padding: 0 12px;
+    height: 34px;
+    padding: 0 14px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--white-a08);
     color: var(--text-1);
     font: inherit;
-    font-size: 13px;
+    font-size: 13.5px;
     font-weight: 600;
     display: inline-flex;
     align-items: center;
@@ -74399,121 +74439,285 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-runs-chip-count { font-weight: 500; color: var(--text-3); }
 #tools-page .repair-runs-chip.active .repair-runs-chip-count,
 #tools-page .repair-runs-toggle.active .repair-runs-chip-count { color: var(--black-a60); }
-#tools-page .repair-runs-chip.has-failure:not(.active) { box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.5); }
-#tools-page .repair-runs-day { display: flex; flex-direction: column; }
-#tools-page .repair-runs-day-head { display: flex; align-items: baseline; gap: 10px; padding: 0 0 8px; }
-#tools-page .repair-runs-day-label { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
-#tools-page .repair-runs-day-count { font-size: 12.5px; color: var(--text-3); }
-#tools-page .repair-run { border-top: 1px solid var(--tl-line); }
-#tools-page .repair-run-head {
-    display: flex;
+/* a job with a failed run carries a red dot, not a red outline */
+#tools-page .repair-runs-chip.has-failure::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-circle);
+    background: var(--danger-light);
+}
+
+/* the runs, as a table: the same columns on every row */
+#tools-page .repair-runs-table { display: flex; flex-direction: column; }
+#tools-page .repair-runs-cols,
+#tools-page .repair-run-head,
+#tools-page .repair-runs-job {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 170px 90px 104px 84px 84px 22px;
     align-items: center;
-    gap: 14px;
-    min-height: 48px;
-    padding: 0 4px;
+    column-gap: 16px;
+}
+#tools-page .repair-runs-table.jobs .repair-runs-cols,
+#tools-page .repair-runs-job { grid-template-columns: minmax(0, 1fr) 130px 70px 70px 130px 90px 90px; }
+#tools-page .repair-runs-cols {
+    padding: 0 8px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+#tools-page .repair-runs-cols > :nth-child(n + 3),
+#tools-page .repair-run-cell,
+#tools-page .repair-runs-job > :nth-child(n + 3) { text-align: right; font-variant-numeric: tabular-nums; }
+#tools-page .repair-runs-day { display: flex; flex-direction: column; }
+#tools-page .repair-runs-day-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 18px 8px 8px;
+    border-top: 1px solid var(--tl-line);
+}
+#tools-page .repair-runs-day-label { font-size: 15px; font-weight: 700; color: var(--text-1); }
+#tools-page .repair-runs-day-count { font-size: 13px; color: var(--text-3); }
+#tools-page .repair-run { border-radius: var(--radius-lg); }
+#tools-page .repair-run.open { background: var(--tl-card); margin: 4px 0; }
+#tools-page .repair-run-head,
+#tools-page .repair-runs-job {
+    min-height: 52px;
+    padding: 6px 8px;
+    border-radius: var(--radius-lg);
     font-size: 14px;
+    color: var(--text-2);
     cursor: pointer;
 }
-#tools-page .repair-run-head:hover { background: var(--white-a04); }
-#tools-page .repair-run-glyph { width: 16px; flex: none; text-align: center; font-weight: 700; color: var(--text-3); }
-#tools-page .repair-run-glyph.success { color: var(--accent-light); }
-#tools-page .repair-run-glyph.failed { color: var(--danger-light); }
-#tools-page .repair-run-glyph.stopped { color: var(--warning); }
-#tools-page .repair-run-clock { width: 72px; flex: none; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-#tools-page .repair-run-name { width: 260px; flex: none; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#tools-page .repair-run-summary { flex: 1 1 0; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#tools-page .repair-run.failed .repair-run-summary { color: var(--danger-light); }
-#tools-page .repair-run-age { flex: none; font-size: 13px; color: var(--text-3); }
-#tools-page .repair-run-chevron { flex: none; color: var(--text-3); transition: transform 0.18s; }
+#tools-page .repair-runs-job { width: 100%; border: 0; background: none; font: inherit; font-size: 14px; text-align: left; }
+#tools-page .repair-run:not(.open) .repair-run-head:hover,
+#tools-page .repair-runs-job:hover { background: var(--white-a04); }
+#tools-page .repair-run-name { display: flex; align-items: center; gap: 12px; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text-1); }
+#tools-page .repair-run-name-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+#tools-page .repair-run-reason {
+    font-size: 13.5px;
+    font-weight: 400;
+    color: var(--danger-light);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#tools-page .repair-run.stopped .repair-run-reason { color: var(--warning); }
+#tools-page .repair-run-glyph {
+    width: 26px;
+    height: 26px;
+    flex: none;
+    border-radius: var(--radius-circle);
+    background: var(--white-a08);
+    color: var(--text-3);
+    display: grid;
+    place-items: center;
+}
+#tools-page .repair-run-glyph.success { background: rgba(var(--accent-rgb), 0.16); color: var(--accent-light); }
+#tools-page .repair-run-glyph.failed { background: rgba(var(--danger-rgb), 0.16); color: var(--danger-light); }
+#tools-page .repair-run-glyph.stopped { background: rgba(var(--warning-rgb), 0.16); color: var(--warning); }
+#tools-page .repair-run-glyph.running { background: rgba(var(--accent-rgb), 0.16); color: var(--accent-light); }
+#tools-page .repair-run-clock { display: flex; align-items: baseline; gap: 8px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+#tools-page .repair-run-age { font-size: 12.5px; color: var(--text-3); }
+#tools-page .repair-run-cell.strong { font-weight: 700; color: var(--text-1); }
+#tools-page .repair-runs-job .bad { color: var(--danger-light); font-weight: 700; }
+#tools-page .repair-run-chevron { color: var(--text-3); transition: transform 0.18s; }
 #tools-page .repair-run-chevron.open { transform: rotate(180deg); }
-#tools-page .repair-run-detail { padding: 4px 4px 20px 34px; display: flex; flex-direction: column; gap: 14px; }
-#tools-page .repair-run-counters { display: flex; gap: 28px; flex-wrap: wrap; }
+#tools-page .repair-run-detail { padding: 8px 20px 20px 46px; display: flex; flex-direction: column; gap: 16px; }
+#tools-page .repair-run-counters { display: flex; gap: 32px; flex-wrap: wrap; }
 #tools-page .repair-run-counter { display: flex; flex-direction: column; gap: 2px; }
-#tools-page .repair-run-counter-value { font-size: 20px; font-weight: 700; color: var(--text-1); font-variant-numeric: tabular-nums; }
-#tools-page .repair-run-counter-label { font-size: 12.5px; color: var(--text-3); }
-#tools-page .repair-run-error { padding: 12px 16px; border-radius: var(--radius-lg); background: rgba(var(--danger-rgb), 0.1); }
-#tools-page .repair-run-error-title { margin-bottom: 4px; font-size: 13px; font-weight: 700; color: var(--danger-light); }
-#tools-page .repair-run-error-text { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+#tools-page .repair-run-counter-value { font-size: 22px; font-weight: 700; color: var(--text-1); font-variant-numeric: tabular-nums; }
+#tools-page .repair-run-counter-label { font-size: 13px; color: var(--text-2); }
+#tools-page .repair-run-error { display: flex; flex-direction: column; gap: 6px; max-width: 880px; }
+#tools-page .repair-run-error-title { font-size: 13.5px; font-weight: 700; color: var(--danger-light); }
+#tools-page .repair-run.stopped .repair-run-error-title { color: var(--warning); }
+#tools-page .repair-run-error-text {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-1);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+#tools-page .repair-run-error-text.muted { font-family: inherit; color: var(--text-2); }
 #tools-page .repair-run-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-3); }
 
 /* ── Tools ── */
-#tools-page #tools-panel-tools .tools-grid { display: flex; flex-direction: column; }
-#tools-page .tool-card {
+#tools-page #tools-panel-tools .tools-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    column-gap: 24px;
-    row-gap: 4px;
-    align-items: center;
+    grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
+    gap: 16px;
+}
+#tools-page .tool-card {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
     margin: 0;
-    padding: 16px 0;
+    padding: 24px;
     border: 0;
-    border-top: 1px solid var(--tl-line);
-    border-radius: 0;
-    background: none;
+    border-radius: 20px;
+    background: var(--tl-card);
     box-shadow: none;
 }
 #tools-page .tool-card::before,
 #tools-page .tool-card::after { content: none; }
-#tools-page .tool-card:hover { transform: none; background: none; box-shadow: none; }
-#tools-page .tool-card-header { grid-column: 1; display: flex; align-items: center; justify-content: flex-start; gap: 6px; margin: 0; padding: 0; border: 0; }
-#tools-page .tool-card-title { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-1); }
-#tools-page .tool-help-button { width: 28px; height: 28px; font-size: 13px; }
+#tools-page .tool-card:hover { transform: none; background: var(--tl-card); box-shadow: none; }
+/* the tool a section leads with: full width, its numbers at headline size */
+#tools-page .tool-card--feature { grid-column: 1 / -1; padding: 28px; }
+#tools-page .tool-card-top { display: flex; align-items: flex-start; gap: 16px; }
+#tools-page .tool-card-icon {
+    width: 48px;
+    height: 48px;
+    flex: none;
+    border-radius: var(--radius-card);
+    background: var(--white-a08);
+    color: var(--text-1);
+    display: grid;
+    place-items: center;
+}
+#tools-page .tool-card--feature .tool-card-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent-light); }
+#tools-page .tool-card-heading { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+#tools-page .tool-card-header { display: flex; align-items: center; justify-content: flex-start; gap: 6px; margin: 0; padding: 0; border: 0; }
+#tools-page .tool-card-title { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-1); }
+#tools-page .tool-card--feature .tool-card-title { font-size: 22px; letter-spacing: -0.02em; }
+#tools-page .tool-help-button { width: 26px; height: 26px; font-size: 12.5px; }
 #tools-page .tool-card-info,
-#tools-page .metadata-updater-description { grid-column: 1; margin: 0; font-size: 13.5px; color: var(--text-3); }
+#tools-page .metadata-updater-description { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text-2); }
+
+/* where the tool stands: the number first, its word under it */
 #tools-page .tool-card-stats {
-    grid-column: 1;
     display: flex;
-    gap: 2px 18px;
+    gap: 18px 36px;
     flex-wrap: wrap;
     margin: 0;
     padding: 0;
     border: 0;
     background: none;
 }
-#tools-page .stat-item { display: inline-flex; gap: 6px; padding: 0; background: none; font-size: 13px; }
-#tools-page .stat-item-label { color: var(--text-3); }
-#tools-page .stat-item-value { padding: 0; background: none; font-weight: 600; color: var(--text-2); }
+#tools-page .stat-item { display: flex; flex-direction: column; gap: 4px; padding: 0; background: none; min-width: 64px; }
+#tools-page .stat-item-value {
+    padding: 0;
+    background: none;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: var(--text-1);
+    font-variant-numeric: tabular-nums;
+}
+#tools-page .tool-card--feature .stat-item-value { font-size: 40px; font-weight: 800; letter-spacing: -0.035em; line-height: 1; }
+#tools-page .stat-item.wordy .stat-item-value,
+#tools-page .tool-card--feature .stat-item.wordy .stat-item-value { font-size: 16px; font-weight: 600; letter-spacing: 0; line-height: 1.4; }
+#tools-page .stat-item-label { font-size: 13px; color: var(--text-3); }
+
+/* what it is doing now, and the button that starts it */
+#tools-page .tool-card-bottom {
+    display: flex;
+    align-items: center;
+    gap: 12px 20px;
+    flex-wrap: wrap;
+    margin-top: auto;
+    padding-top: 18px;
+    border-top: 1px solid var(--tl-line);
+}
+#tools-page .tool-card-progress-section {
+    flex: 1 1 220px;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: auto minmax(60px, 1fr);
+    align-items: center;
+    gap: 6px 12px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+#tools-page .progress-phase-label { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tools-page .progress-details-label { grid-column: 1 / -1; margin: 0; font-size: 12.5px; color: var(--text-3); }
+/* nothing running: the tool says so in a word, without an empty bar */
+#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-bar-container,
+#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-details-label { display: none; }
+#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-phase-label { font-weight: 400; color: var(--text-3); }
 #tools-page .tool-card-controls {
-    grid-column: 2;
-    grid-row: 1 / span 3;
     display: flex;
     align-items: center;
     justify-content: flex-end;
     gap: 8px;
     flex-wrap: wrap;
-    margin: 0;
+    margin: 0 0 0 auto;
 }
+#tools-page .tool-card-controls button { height: 40px; padding: 0 20px; font-size: 14px; }
+/* a card's one action is the white button; a second one stays outlined */
+#tools-page .tool-card-controls > button:first-of-type:not(.tool-card-btn-secondary),
+#tools-page .tool-card-controls > .media-scan-btn { border-color: transparent; background: var(--text-1); color: var(--bg-primary); }
+#tools-page .tool-card-controls > button:first-of-type:not(.tool-card-btn-secondary):hover:not(:disabled),
+#tools-page .tool-card-controls > .media-scan-btn:hover:not(:disabled) { background: var(--white-a85); border-color: transparent; }
 #tools-page .tool-card-controls select {
-    height: 36px;
+    height: 40px;
     max-width: 220px;
-    padding: 0 30px 0 14px;
+    padding: 0 30px 0 16px;
     border: 0;
     border-radius: var(--radius-pill);
     background-color: var(--white-a08);
     color: var(--text-1);
     font: inherit;
-    font-size: 13.5px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
 }
 #tools-page .tool-card-controls select option { background: var(--bg-raised); color: var(--text-1); }
-#tools-page .tool-card-controls .scan-icon { display: none; }
-#tools-page .tool-card-progress-section {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: auto minmax(120px, 1fr) auto;
+
+/* the backups a card lists */
+#tools-page .backup-list-container,
+#tools-page .vbk-list { display: flex; flex-direction: column; max-height: 232px; overflow-y: auto; margin: 0; padding: 0; border: 0; background: none; }
+#tools-page .backup-list-container:empty { display: none; }
+#tools-page .backup-list-item,
+#tools-page .vbk-row {
+    display: flex;
     align-items: center;
     gap: 12px;
-    margin: 6px 0 0;
-    padding: 0;
+    min-height: 46px;
+    padding: 4px 0;
     border: 0;
+    border-top: 1px solid var(--tl-line);
+    border-radius: 0;
+    background: none;
+    font-size: 14px;
 }
-/* nothing running: the tool says so in a word, without an empty bar */
-#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-bar-container,
-#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-details-label { display: none; }
-#tools-page .progress-phase-label,
-#tools-page .progress-details-label { margin: 0; font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
-#tools-page .tool-card > :not(.tool-card-header, .tool-card-info, .tool-card-stats, .tool-card-controls, .metadata-updater-description) { grid-column: 1 / -1; }
+#tools-page .backup-list-info,
+#tools-page .vbk-name { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 12px; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tools-page .backup-list-size,
+#tools-page .backup-list-version { font-size: 13px; color: var(--text-3); }
+#tools-page .backup-list-actions { display: flex; gap: 2px; flex: none; }
+#tools-page .backup-dl-btn,
+#tools-page .backup-restore-btn,
+#tools-page .backup-delete-btn,
+#tools-page .vbk-btn,
+#tools-page .vbk-cancel {
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+}
+#tools-page .backup-dl-btn:hover,
+#tools-page .backup-restore-btn:hover,
+#tools-page .vbk-btn:hover,
+#tools-page .vbk-cancel:hover { background: var(--white-a08); color: var(--text-1); }
+#tools-page .backup-delete-btn:hover { background: rgba(var(--danger-rgb), 0.14); color: var(--danger-light); }
+#tools-page .vbk-empty,
+#tools-page .vbk-pending { padding: 10px 0; font-size: 14px; color: var(--text-3); }
 
 @media (max-width: 760px) {
     #tools-page { padding: 24px 16px 40px; gap: 20px; }
@@ -74535,11 +74739,18 @@ body.src-modal-open { overflow: hidden; }
     #tools-page .repair-finding-error-banner { margin-left: 16px; margin-right: 16px; }
     #tools-page .repair-detail-grid { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
     #tools-page .repair-detail-val { margin-bottom: 8px; }
-    #tools-page .repair-run-clock,
+    #tools-page .repair-runs-cols { display: none; }
+    #tools-page .repair-run-head { grid-template-columns: minmax(0, 1fr) auto 22px; row-gap: 2px; }
+    #tools-page .repair-run-head > .repair-run-cell { display: none; }
     #tools-page .repair-run-age { display: none; }
-    #tools-page .repair-run-name { width: 40%; }
-    #tools-page .tool-card { grid-template-columns: minmax(0, 1fr); }
-    #tools-page .tool-card-controls { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-top: 8px; }
+    #tools-page .repair-runs-job { grid-template-columns: minmax(0, 1fr) auto; }
+    #tools-page .repair-runs-job > :nth-child(n + 3) { display: none; }
+    #tools-page .repair-runs-overview { padding: 20px; }
+    #tools-page .repair-runs-figure-value { font-size: 26px; }
+    #tools-page .tool-card,
+    #tools-page .tool-card--feature { padding: 20px; }
+    #tools-page .tool-card--feature .stat-item-value { font-size: 30px; }
+    #tools-page .tool-card-controls { margin-left: 0; justify-content: flex-start; }
     #tools-page .operations-pillar-stat,
     #tools-page .operations-pillar-stat + .operations-pillar-stat,
     #tools-page .operations-pillar-autopilot { width: auto; }

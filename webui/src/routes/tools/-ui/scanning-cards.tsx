@@ -176,6 +176,8 @@ export function DbUpdaterCard() {
   return (
     <ToolCard
       id="db-updater-card"
+      icon="database"
+      feature
       title={serverName ? `${serverName} Database Updater` : 'Database Updater'}
       helpTool="db-updater"
       info={
@@ -340,6 +342,7 @@ export function ReconcileIdsCard() {
   return (
     <ToolCard
       id="reconcile-ids-card"
+      icon="tags"
       title="Import IDs from File Tags"
       helpTool="reconcile-ids"
       info={
@@ -466,6 +469,7 @@ export function DuplicateCleanerCard() {
   return (
     <ToolCard
       id="duplicate-cleaner-card"
+      icon="copies"
       title="Duplicate Cleaner"
       helpTool="duplicate-cleaner"
       info="Detect and remove duplicate tracks in output folder"
