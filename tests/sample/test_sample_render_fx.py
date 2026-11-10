@@ -340,7 +340,8 @@ def test_v2_rows_reanalyze_for_the_key(client):
     assert data["bpm"] == 99.0  # the old numbers stay visible meanwhile
     assert data["status"] in ("pending", "running", "done")
     # Keep this fixture's database/path alive until its queued job has finished.
-    deadline = time.monotonic() + 10
+    # a cold first analysis (librosa import, numba jit) can take well over 10s
+    deadline = time.monotonic() + 60
     from core.sample import worker
     while time.monotonic() < deadline:
         status = worker.get_status(1)

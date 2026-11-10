@@ -31,3 +31,36 @@ def isolated_sample_resolver(monkeypatch):
     monkeypatch.setattr(sample_worker, "_resolve_path_fn", None)
     monkeypatch.setattr(sample_worker, "_config_manager", _EmptyConfig())
     monkeypatch.setattr(sample_worker, "_resolve_cache", {})
+
+
+def _reset_worker():
+    import queue
+    import time
+
+    from core.sample import worker as sample_worker
+
+    q = sample_worker._task_queue
+    while True:
+        try:
+            q.get_nowait()
+        except queue.Empty:
+            break
+        q.task_done()
+    # a job another test left running still writes its status when it ends,
+    # so let it end before clearing
+    deadline = time.monotonic() + 10
+    while q.unfinished_tasks and time.monotonic() < deadline:
+        time.sleep(0.01)
+    with sample_worker._lock:
+        sample_worker._status.clear()
+        sample_worker._pending.clear()
+
+
+@pytest.fixture(autouse=True)
+def clean_sample_worker():
+    """the worker's status is module-global and an error sticks until a retry.
+    one test's 'ffmpeg isn't installed' on track 1 used to come back as the
+    next test's answer for its own track 1 (red nightly on 279a2224e)."""
+    _reset_worker()
+    yield
+    _reset_worker()
