@@ -114,7 +114,6 @@ export function RunHistory({ runs, error, onShowFindings, onRefresh }: RunHistor
 
       {shown.length === 0 ? (
         <div className="repair-empty-state">
-          <div className="repair-empty-icon">&#128337;</div>
           <div className="repair-empty-title">
             {all.length === 0 ? 'No runs yet' : 'Nothing matches'}
           </div>
@@ -192,9 +191,20 @@ function RunRow({
         <span className="repair-run-name">{label}</span>
         <span className="repair-run-summary">{runSummary(run)}</span>
         <span className="repair-run-age">{formatCacheAge(run.started_at)}</span>
-        <span className={`repair-run-chevron${open ? ' open' : ''}`} aria-hidden="true">
-          &#9660;
-        </span>
+        <svg
+          className={`repair-run-chevron${open ? ' open' : ''}`}
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
       </div>
 
       {open ? (

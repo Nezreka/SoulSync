@@ -159,7 +159,7 @@ export function FindingsAlbumGrid({
                   className="repair-album-error-badge"
                   title={`${group.error_count} fix attempts failed`}
                 >
-                  ⚠️ {group.error_count}
+                  {group.error_count} failed
                 </span>
               ) : null}
             </div>

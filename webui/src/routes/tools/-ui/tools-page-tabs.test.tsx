@@ -3,23 +3,21 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * Tools and Operations as two tabs, not one page carrying both.
+ * The Tools page is four pills: Findings, Jobs, History, Tools.
  *
- * Operations used to scroll inside its own capped box (max-height + overflow
- * auto) while the tool cards sat below it on the page. That gave the page two
- * scrollbars doing different jobs, and neither one showed you everything.
- * Boulder: "i dont like how you scroll the operations in their own container
- * while the tools exist outside of that on the page ... instead of all that we
- * just have tabs. tools and operations. defaults to operatoins".
+ * It was two tabs (Operations, Tools), and Operations was itself two modes
+ * (Simple, Advanced) with a jump nav inside the second. The findings list only
+ * existed in Advanced, so "review these" in Simple switched modes under you.
+ * Boulder: "how findings work, how the page is laid out, the advanced mode. it
+ * all isn't very intuitive". Each thing now has one home.
  *
- * The cap existed for a reason worth recording: without it, a large maintenance
- * surface pushed the tool cards far down the page. Splitting them into tabs
- * removes the reason rather than working around it, which is why the cap comes
- * out in the same change.
+ * Before that, Operations scrolled inside its own capped box while the tool
+ * cards sat below it, which gave the page two scrollbars. The cap came out
+ * when the cards got their own tab and must stay out.
  *
- * These read the source rather than rendering: ToolsPage mounts the whole
+ * These read the source rather than rendering: the page mounts the whole
  * maintenance surface, which fans out into a dozen polling hooks. The contract
- * that matters here is structural.
+ * that matters here is structural. maintenance-hero.test.tsx renders it.
  */
 
 const PAGE = readFileSync(resolve(process.cwd(), 'src/routes/tools/-ui/tools-page.tsx'), 'utf8');
@@ -27,27 +25,26 @@ const HERO = readFileSync(
   resolve(process.cwd(), 'src/routes/tools/-ui/maintenance-hero.tsx'),
   'utf8',
 );
-const CSS = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8');
+const OPERATIONS = readFileSync(
+  resolve(process.cwd(), 'src/routes/tools/-ui/operations.tsx'),
+  'utf8',
+);
+const CSS = readFileSync(resolve(process.cwd(), 'static/style.css'), 'utf8').replace(
+  /\/\*[\s\S]*?\*\//g,
+  '',
+);
 
-describe('the tab switch', () => {
-  it('opens on Operations, because that is the half with work waiting in it', () => {
-    expect(PAGE).toContain("useState<'operations' | 'tools'>('operations')");
+describe('the pills', () => {
+  it('opens on Findings, because that is the one with work waiting in it', () => {
+    expect(PAGE).toContain("useState<ToolsTab>(maintenance ? 'findings' : 'tools')");
   });
 
-  it('offers exactly the two tabs asked for, Operations first', () => {
-    // sliced from the tablist div to the first panel. 'tabpanel' now also
-    // appears earlier in the reveal hook, so indexOf on it alone inverts the
-    // range and silently compares an empty string.
-    const start = PAGE.indexOf('className="tools-tabs"');
-    const end = PAGE.indexOf('id="tools-panel-operations"');
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const block = PAGE.slice(start, end);
-    expect(block.indexOf("'operations', 'Operations'")).toBeGreaterThan(-1);
-    expect(block.indexOf("'tools', 'Tools'")).toBeGreaterThan(-1);
-    expect(block.indexOf("'operations', 'Operations'")).toBeLessThan(
-      block.indexOf("'tools', 'Tools'"),
-    );
+  it('offers Findings, Jobs, History, then Tools', () => {
+    const order = ["['findings', 'Findings']", "['jobs', 'Jobs']", "['history', 'History']"];
+    const at = order.map((entry) => PAGE.indexOf(entry));
+    expect(at.every((index) => index > -1)).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(PAGE).toContain("[...MAINTENANCE_TABS, ['tools', 'Tools']]");
   });
 
   it('is a real tablist, not a row of buttons', () => {
@@ -58,61 +55,76 @@ describe('the tab switch', () => {
     expect(PAGE).toContain('aria-controls={`tools-panel-${value}`}');
   });
 
-  it('hides the inactive panel instead of unmounting it', () => {
+  it('hides the inactive panels instead of unmounting them', () => {
     // The maintenance surface polls job progress and holds the findings filter
-    // and page you were on. Unmounting on every tab flip would restart the
-    // polling and throw that away, so both panels stay mounted.
-    expect(PAGE).toContain("hidden={tab !== 'operations'}");
+    // and page you were on. Unmounting on every pill would restart the polling
+    // and throw that away, so every panel stays mounted.
+    for (const panel of ['findings', 'jobs', 'history']) {
+      expect(HERO).toContain(`id="tools-panel-${panel}"`);
+      expect(HERO).toContain(`hidden={tab !== '${panel}'}`);
+    }
     expect(PAGE).toContain("hidden={tab !== 'tools'}");
-    expect(PAGE).not.toMatch(/tab === 'operations' \? <MaintenanceHero/);
+    expect(HERO).not.toMatch(/tab === '\w+' \? </);
   });
 
-  it('puts the maintenance surface on one tab and the cards on the other', () => {
-    const ops = PAGE.indexOf('id="tools-panel-operations"');
-    const tools = PAGE.indexOf('id="tools-panel-tools"');
-    expect(ops).toBeGreaterThan(-1);
-    expect(tools).toBeGreaterThan(ops);
-    // the hero belongs to Operations
-    expect(PAGE.indexOf('<MaintenanceHero />')).toBeGreaterThan(ops);
-    expect(PAGE.indexOf('<MaintenanceHero />')).toBeLessThan(tools);
+  it('gives each thing one home', () => {
+    const findings = HERO.indexOf('id="tools-panel-findings"');
+    const jobs = HERO.indexOf('id="tools-panel-jobs"');
+    const history = HERO.indexOf('id="tools-panel-history"');
+    expect(findings).toBeGreaterThan(-1);
+    expect(jobs).toBeGreaterThan(findings);
+    expect(history).toBeGreaterThan(jobs);
+    const between = (name: string, from: number, to: number) => {
+      const at = HERO.indexOf(name, from);
+      return at > -1 && at < to;
+    };
+    expect(between('<FindingsSurface', findings, jobs)).toBe(true);
+    expect(between('<OperationsStudio', jobs, history)).toBe(true);
+    expect(between('<Operations\n', jobs, history)).toBe(true);
+    expect(HERO.indexOf('<RunHistory', history)).toBeGreaterThan(history);
+    // each of them appears once
+    for (const name of ['<FindingsSurface', '<OperationsStudio', '<RunHistory']) {
+      expect(HERO.split(name).length - 1).toBe(1);
+    }
     // and every tool card section belongs to Tools
-    expect(PAGE.indexOf('<ToolsSection')).toBeGreaterThan(tools);
+    expect(PAGE.indexOf('<ToolsSection')).toBeGreaterThan(PAGE.indexOf('id="tools-panel-tools"'));
+  });
+});
+
+describe('there is no Simple or Advanced', () => {
+  it('no mode switch, no saved mode, nothing that flips one', () => {
+    for (const source of [PAGE, HERO, OPERATIONS]) {
+      expect(source).not.toContain('soulsync_operations_mode');
+      expect(source).not.toContain('Advanced Mode');
+      expect(source).not.toContain("'simple' | 'advanced'");
+    }
+  });
+
+  it("a job's findings open the Findings pill", () => {
+    expect(HERO).toContain("onTab('findings')");
+  });
+
+  it('a /tools?job= link opens the Jobs pill, where the row is', () => {
+    const at = HERO.indexOf('linkedJobId(');
+    expect(at).toBeGreaterThan(-1);
+    expect(HERO.slice(at, at + 400)).toContain("onTab('jobs')");
   });
 });
 
 describe('the inner scroll box is gone', () => {
-  it('no longer caps the maintenance surface or gives it its own scrollbar', () => {
-    const rule = CSS.slice(
-      CSS.indexOf('.tools-maintenance-hero {', CSS.indexOf('maintenance surface')),
-    ).slice(0, 400);
-    expect(rule).toContain('overflow: visible');
-    expect(rule).not.toContain('max-height');
-    expect(rule).not.toContain('overflow: hidden auto');
-  });
-
-  it('rounds the accent line now that nothing clips it', () => {
-    // the hero's own overflow:hidden used to crop the 3px top line to the
-    // rounded corners; without it the line juts past them
-    // anchored to the section comment: 'overflow: visible' appears all over
-    // this stylesheet, and indexOf on it lands on an unrelated rule
-    const section = CSS.indexOf('The maintenance surface: one scroll');
-    expect(section).toBeGreaterThan(-1);
-    const idx = CSS.indexOf('.tools-maintenance-hero::before {', section);
-    expect(idx).toBeGreaterThan(-1);
-    expect(CSS.slice(idx, idx + 200)).toContain('border-radius: 16px 16px 0 0');
+  it('gives the maintenance surface no box, cap or scrollbar of its own', () => {
+    const at = CSS.indexOf('#tools-page .tools-maintenance-hero {');
+    expect(at).toBeGreaterThan(-1);
+    const rule = CSS.slice(at, CSS.indexOf('}', at));
+    expect(rule).toContain('display: contents');
+    expect(CSS).not.toMatch(/\.tools-maintenance-hero[^{]*\{[^}]*(max-height|overflow)/);
   });
 });
 
-describe('the two navs do not share a name', () => {
-  it('calls the inner section Jobs, since the page tab is already Operations', () => {
-    // Two controls called "Operations" on one screen is a guessing game. The
-    // section's own heading is "Maintenance jobs", so Jobs is its real name.
-    expect(HERO).toContain("label: 'Jobs'");
-    expect(HERO).not.toContain("label: 'Operations'");
-  });
-
-  it('keeps the anchor and id, so deep links and scroll targets still resolve', () => {
-    expect(HERO).toContain("anchor: 'repair-section-operations'");
+describe('scroll targets still resolve', () => {
+  it('keeps the section ids links and the dashboard jump to', () => {
     expect(HERO).toContain('id="repair-section-operations"');
+    expect(HERO).toContain('id="repair-section-history"');
+    expect(HERO).toContain('className="tools-maintenance-hero"');
   });
 });

@@ -71,9 +71,11 @@ describe('Tools job-settings panel fits its tile', () => {
     expect(block('.repair-save-settings-btn')).toMatch(/max-width:\s*100%/);
   });
 
-  it('documents that the tile still clips, which is why the above matters', () => {
-    // If the tile ever stops hiding overflow, these rules become belt-and-
-    // braces rather than load-bearing — worth knowing before deleting them.
-    expect(block('.repair-tile')).toMatch(/overflow:\s*hidden/);
+  it('the job row itself no longer clips', () => {
+    // The tile used to be overflow: hidden, which is what turned a too-wide
+    // row into an unreachable field. The row lets its content show now, so
+    // the rules above are what keep a setting on one screen rather than what
+    // keep it reachable at all.
+    expect(block('.repair-job-card.repair-tile')).not.toMatch(/overflow:\s*hidden/);
   });
 });

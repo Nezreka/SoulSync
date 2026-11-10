@@ -1,9 +1,9 @@
 {
   "legacy": {
-    "hex": 3571,
-    "rgbLiterals": 4197,
+    "hex": 3426,
+    "rgbLiterals": 4014,
     "important": 2092,
-    "duplicateSelectors": 311
+    "duplicateSelectors": 306
   },
   "modules": {
     "hex": 698,

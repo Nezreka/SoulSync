@@ -294,8 +294,8 @@ describe('video findings', () => {
   it('offers no albums view', async () => {
     renderVideoSurface([]);
     await flush();
-    expect(screen.queryByText('Albums & Releases')).toBeNull();
-    expect(screen.getByText('Issue Types')).not.toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Albums' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Issue types' })).not.toBeNull();
   });
 
   it('a video quality upgrade never gets the music quality question', async () => {
@@ -655,32 +655,12 @@ describe('the albums view says what it cannot show', () => {
     render(<FindingsSurface jobs={[]} runs={[]} trackCount={1000} onStatusChanged={vi.fn()} />);
     await flush();
     const selected = document.querySelector('.repair-view-mode-tab[aria-selected="true"]');
-    expect(selected?.textContent).toContain('Issue Types');
+    expect(selected?.textContent).toContain('Issue types');
   });
 });
 
 describe('nothing claims a clean library before it has looked', () => {
-  it('simple mode says it is checking until the groups land', async () => {
-    setToolsMedia('music');
-    fetchMock.mockImplementation(() => new Promise(() => {}));
-    const { OperationsStudio } = await import('./operations-studio');
-    render(
-      <OperationsStudio
-        jobs={[]}
-        progress={{}}
-        runs={[]}
-        onChanged={vi.fn()}
-        onShowFindings={vi.fn()}
-        onSwitchToAdvanced={vi.fn()}
-      />,
-    );
-    await flush();
-    expect(screen.getByText('Looking at your findings…')).not.toBeNull();
-    expect(screen.queryByText('Nothing needs you')).toBeNull();
-    expect(document.querySelector('.operations-exec-num')?.textContent).toBe('–');
-  });
-
-  it('the advanced health hero does too', async () => {
+  it('the health card says it is checking until the groups land', async () => {
     setToolsMedia('music');
     fetchMock.mockImplementation(() => new Promise(() => {}));
     render(<FindingsSurface jobs={[]} runs={[]} trackCount={1000} onStatusChanged={vi.fn()} />);

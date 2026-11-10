@@ -29,6 +29,8 @@ export interface FindingGroup {
   severity_max: string;
   last_seen?: string | null;
   job_ids?: string[];
+  /** a few covers off this type's newest open findings, for the inbox row */
+  art?: string[];
   /** Pending rows in this group that would overwrite a value someone set by
    *  hand. Counted server-side: "apply all" and "apply all except my own
    *  edits" are two different requests, and the choice has to be made before

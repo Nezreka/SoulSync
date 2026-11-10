@@ -162,7 +162,7 @@ export function ToolProgress({
       </p>
       <div className="progress-bar-container">
         <div
-          className="progress-bar-fill"
+          className={`progress-bar-fill${percent > 0 ? '' : ' is-empty'}`}
           id={barId}
           style={{ width: `${percent}%`, backgroundColor: barColor }}
         />
@@ -191,17 +191,14 @@ export interface ToolsSectionProps {
  * The class and the title node are unchanged so the existing style.css and
  * mobile.css rules keep applying; the container chrome is additive.
  */
-export function ToolsSection({ title, blurb, glow, children }: ToolsSectionProps) {
+export function ToolsSection({ title, blurb, children }: ToolsSectionProps) {
   return (
-    <div
-      className="tools-section tools-container"
-      style={glow ? ({ ['--tile-glow' as string]: glow } as React.CSSProperties) : undefined}
-    >
-      <div className="tools-container-head">
+    <section className="tools-section">
+      <div className="tools-section-head">
         <h3 className="tools-section-title">{title}</h3>
-        {blurb ? <span className="tools-container-blurb">{blurb}</span> : null}
+        {blurb ? <span className="tools-section-blurb">{blurb}</span> : null}
       </div>
       <div className="tools-grid">{children}</div>
-    </div>
+    </section>
   );
 }

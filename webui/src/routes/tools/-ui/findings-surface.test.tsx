@@ -383,7 +383,7 @@ describe('cache health', () => {
 // ── The inbox ────────────────────────────────────────────────────────────────
 
 describe('the findings inbox', () => {
-  it('orders worst-first, with destructive types last inside a severity band', async () => {
+  it('orders worst-first: the section with the worst finding, then worst inside it', async () => {
     routes({
       [GROUPS]: {
         groups: [
@@ -408,9 +408,10 @@ describe('the findings inbox', () => {
     const order = [...document.querySelectorAll('.repair-inbox-group')].map((node) =>
       node.getAttribute('data-finding-type'),
     );
-    // metadata_gap (2 rows) beats orphan_file (9) inside the warning band
-    // because orphan_file moves files — the safe decision comes first.
-    expect(order).toEqual(['corrupt_audio', 'metadata_gap', 'orphan_file', 'missing_cover_art']);
+    // the section holding the broken file leads, then the safe one. inside
+    // a section it is worst first, which puts metadata_gap (warning) ahead
+    // of missing_cover_art (info).
+    expect(order).toEqual(['corrupt_audio', 'orphan_file', 'metadata_gap', 'missing_cover_art']);
   });
 
   it('shows the blurb and the served verb, and no fix button for an unfixable type', async () => {
@@ -1038,6 +1039,9 @@ describe('the finding list', () => {
 
     expect(document.querySelector('.repair-finding-type-badge')?.textContent).toBe('Orphan');
     expect(document.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
+    // which job found it, and when, wait in the opened row
+    expect(document.querySelector('.repair-finding-meta')).toBeNull();
+    fireEvent.click(document.querySelector('.repair-finding-main') as Element);
     const meta = document.querySelector('.repair-finding-meta')?.textContent || '';
     // The job's DISPLAY name, matching the filter dropdown and the
     // dashboard chips — the raw snake_case id meant one job went by two
@@ -2799,5 +2803,86 @@ describe('switching library in the header (third #1062 review G16-4)', () => {
     });
     await flush();
     expect(albumCalls()).toBeGreaterThan(before);
+  });
+});
+
+// ── Pictures and the tag-scan row ────────────────────────────────────────────
+
+describe('a finding row shows what it is about', () => {
+  it('draws the cover the server sent, and the track a tag-scan finding names', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          finding_type: 'library_retag',
+          title: 'Metadata issues',
+          description: 'genre: mismatch',
+          album_thumb_url: '/art/remixes.jpg',
+          details: {
+            validation: {
+              reference: {
+                title: 'Wolves',
+                artist_name: 'Crystal Castles',
+                album_title: 'Wolves EP',
+              },
+              checks: { genre: 'mismatch', title: 'correct' },
+            },
+          },
+        }),
+      ]),
+    });
+    await renderList();
+    await flush();
+
+    const card = document.querySelector('.repair-finding-card') as HTMLElement;
+    expect(card.querySelector('.repair-art img')?.getAttribute('src')).toBe('/art/remixes.jpg');
+    expect(card.querySelector('.repair-finding-name')?.textContent).toBe('Wolves');
+    expect(card.querySelector('.repair-finding-desc')?.textContent).toBe(
+      'Crystal Castles · Wolves EP',
+    );
+    expect(
+      [...card.querySelectorAll('.repair-finding-field')].map((node) => node.textContent),
+    ).toEqual(['Genre']);
+    // a row with a cover keeps its path for the opened row
+    expect(card.querySelector('.repair-finding-path')).toBeNull();
+    fireEvent.click(card.querySelector('.repair-finding-main') as Element);
+    expect(card.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
+  });
+
+  it('a finding with no picture keeps the box and shows its path', async () => {
+    routes({ [FINDINGS]: page([finding({ entity_type: 'file' })]) });
+    await renderList();
+    await flush();
+    const card = document.querySelector('.repair-finding-card') as HTMLElement;
+    expect(card.querySelector('.repair-art.empty')).not.toBeNull();
+    expect(card.querySelector('.repair-art img')).toBeNull();
+    expect(card.querySelector('.repair-finding-path')?.textContent).toBe('/music/a/b.flac');
+  });
+});
+
+describe('one type open is the whole view', () => {
+  it('puts the library health away and brings it back with All findings', async () => {
+    routes({
+      [GROUPS]: { groups: [group({ finding_type: 'orphan_file', pending: 3 })] },
+      [FINDINGS]: page([finding()]),
+    });
+    renderSurface();
+    await flush();
+    const overview = document.querySelector('.repair-findings-overview') as HTMLElement;
+    expect(overview.hidden).toBe(false);
+    expect(screen.getByRole('tab', { name: 'Flat list' })).not.toBeNull();
+
+    fireEvent.click(document.querySelector('.repair-inbox-head') as Element);
+    await flush();
+    expect(overview.hidden).toBe(true);
+    // which view of everything is not a question inside one type
+    expect(screen.queryByRole('tab', { name: 'Flat list' })).toBeNull();
+    expect(document.querySelector('.repair-findings-surface')?.classList.contains('focused')).toBe(
+      true,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'All findings' }));
+    await flush();
+    expect(overview.hidden).toBe(false);
+    expect(document.querySelector('.repair-inbox-group.open')).toBeNull();
   });
 });

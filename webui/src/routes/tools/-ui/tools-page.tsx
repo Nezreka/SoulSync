@@ -1,17 +1,13 @@
 /**
- * The Tools page shell.
+ * The Tools page shell: the title, the four pills (Findings, Jobs, History,
+ * Tools) and the panels behind them.
  *
- * `page-shell tools-page-container` and the section structure are transcribed
- * from index.html so style.css applies unchanged. Note what is NOT here: the
- * `page` class. The shell styles `.page { display: none }` and only adds
- * `.active` to vanilla pages, so a React page carrying it renders invisible with
- * every test still passing — the trap that cost a round on the label-detail port.
+ * Note what is NOT on the root: the `page` class. The shell styles
+ * `.page { display: none }` and only adds `.active` to vanilla pages, so a
+ * React page carrying it renders invisible with every test still passing.
  *
  * The `#tools-page` id IS kept: helper.js's search walks up the DOM matching
- * HELPER_CONTENT selectors, and the bugfix PR pointed its page hint at 'tools'.
- *
- * All eleven cards are present. Section order, and card order within each
- * section, both come from index.html. The route is not flipped until P7.
+ * HELPER_CONTENT selectors, and its page hint is 'tools'.
  */
 
 import { useEffect, useState } from 'react';
@@ -60,9 +56,26 @@ export function ToolsPage({ media = 'music', isAdmin = true }: ToolsPageProps) {
   );
 }
 
+/** the four places on the page. findings first: it is the one with work
+ *  waiting in it. */
+export type ToolsTab = 'findings' | 'jobs' | 'history' | 'tools';
+
+const MAINTENANCE_TABS: ReadonlyArray<readonly [ToolsTab, string]> = [
+  ['findings', 'Findings'],
+  ['jobs', 'Jobs'],
+  ['history', 'History'],
+];
+
 function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean }) {
   const video = media === 'video';
-  const [tab, setTab] = useState<'operations' | 'tools'>('operations');
+  /* library maintenance changes the shared library, so on the video side it
+     lives with the admin profile. everyone else gets the tools they may use. */
+  const maintenance = !video || isAdmin;
+  const [tab, setTab] = useState<ToolsTab>(maintenance ? 'findings' : 'tools');
+  const [pending, setPending] = useState(0);
+  /** where the maintenance switch renders: the header is the page's, the
+   *  switch's state is the maintenance surface's */
+  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
 
   /* Anything that jumps straight to a tool card - the helper's search, the
      onboarding checklist's "Run First Library Scan" - finds it MOUNTED but
@@ -79,7 +92,9 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
       if (!target) return false;
       const panel = target.closest<HTMLElement>('[role="tabpanel"]');
       if (!panel || !panel.hidden) return false;
-      const wanted = panel.id === 'tools-panel-tools' ? 'tools' : 'operations';
+      const wanted = panel.id.replace('tools-panel-', '');
+      if (wanted !== 'findings' && wanted !== 'jobs' && wanted !== 'history' && wanted !== 'tools')
+        return false;
       setTab(wanted);
       return true;
     };
@@ -89,55 +104,36 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
     };
   }, []);
 
+  const tabs: ReadonlyArray<readonly [ToolsTab, string]> = maintenance
+    ? [...MAINTENANCE_TABS, ['tools', 'Tools']]
+    : [['tools', 'Tools']];
+
   return (
     <div
       className={`page-shell tools-page-container${video ? ' tools-page--video' : ''}`}
       id="tools-page"
       data-tools-media={media}
     >
-      <div className="tools-page-header">
-        <div className="tools-page-header-left">
-          <h2 className="tools-page-title">
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
-            </svg>
-            Tools &amp; Operations
-          </h2>
-          <p className="tools-page-subtitle">
+      <div className="tools-top">
+        <div className="tools-top-text">
+          <h2 className="tools-title">Tools</h2>
+          <p className="tools-sub">
             {/* Says what the Issues page ISN'T, so the two stop reading as
                 duplicates of each other (#1210). */}
             {video
-              ? 'Library maintenance, scans, backups and the studios. Hand-reported problems live on the Issues page'
-              : 'Automated scans, database management, metadata, backups — hand-reported problems live on the Issues page'}
+              ? 'Library maintenance, scans, backups and the studios. Hand-reported problems live on the Issues page.'
+              : 'Library maintenance, scans and backups. Hand-reported problems live on the Issues page.'}
           </p>
         </div>
+        <div className="tools-top-actions" ref={setHeaderSlot} />
       </div>
 
-      {/* Two tabs instead of one page carrying both.
-          Operations used to scroll inside its own capped box while the tool
-          cards sat below it on the page, so the page had two scrollbars doing
-          different jobs and neither one showed you everything. The cap existed
-          only to keep the cards below reachable - once the cards are their own
-          tab, nothing needs capping and the maintenance surface scrolls with
-          the page like everything else.
-          Defaults to Operations: that is the half that has work waiting in it. */}
+      {/* One page, four places. There used to be a Simple and an Advanced
+          mode on top of two tabs: the findings only lived in Advanced, so
+          every link in Simple quietly switched modes under you. Now each
+          thing has one home and the pills say where. */}
       <div className="tools-tabs" role="tablist" aria-label="Tools sections">
-        {(
-          [
-            ['operations', 'Operations'],
-            ['tools', 'Tools'],
-          ] as const
-        ).map(([value, label]) => (
+        {tabs.map(([value, label]) => (
           <button
             type="button"
             key={value}
@@ -149,32 +145,38 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
             onClick={() => setTab(value)}
           >
             {label}
+            {value === 'findings' ? (
+              <span
+                className="tools-tab-count"
+                id="repair-findings-tab-badge"
+                style={{ display: pending > 0 ? '' : 'none' }}
+              >
+                {pending.toLocaleString()}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
 
-      {/* Both panels stay MOUNTED, hidden with the hidden attribute rather than
-          unmounted. The maintenance surface polls job progress and holds the
-          findings filter/page you were on; tearing it down on every tab flip
+      {/* The maintenance panels stay MOUNTED, hidden with the hidden attribute
+          rather than unmounted. The surface polls job progress and holds the
+          findings filter/page you were on; tearing it down on every pill
           would restart the polling and throw that state away. */}
-      <div
-        role="tabpanel"
-        id="tools-panel-operations"
-        aria-labelledby="tools-tab-operations"
-        hidden={tab !== 'operations'}
-      >
-        {video && !isAdmin ? (
-          <div className="repair-empty-state">
-            <div className="repair-empty-icon">&#128274;</div>
-            <div className="repair-empty-title">Admins only</div>
-            <div className="repair-empty-text">
-              Library maintenance changes the shared library, so it lives with the admin profile.
-            </div>
-          </div>
-        ) : (
-          <MaintenanceHero />
-        )}
-      </div>
+      {maintenance ? (
+        <MaintenanceHero
+          tab={tab}
+          onTab={setTab}
+          headerSlot={headerSlot}
+          onPendingChanged={setPending}
+        />
+      ) : (
+        <div className="tools-locked-note" role="note">
+          <strong>Admins only</strong>
+          <span>
+            Library maintenance changes the shared library, so it lives with the admin profile.
+          </span>
+        </div>
+      )}
 
       <div
         role="tabpanel"
@@ -182,16 +184,11 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
         aria-labelledby="tools-tab-tools"
         hidden={tab !== 'tools'}
       >
-        {/* Same container chassis as the maintenance job families, and the same
-            glow device, so the page reads as one system rather than a hero
-            followed by a strip of unrelated boxes. The blurbs answer "why would
-            I open this section", which a taxonomy title does not. */}
         {video ? (
           <>
             <ToolsSection
               title="Database &amp; Scanning"
               blurb="Reading your media server into SoulSync, and keeping the two in step."
-              glow="56,189,248"
             >
               <VideoLibraryScanCard />
               <VideoServerScanCard />
@@ -201,14 +198,12 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
                 <ToolsSection
                   title="Studios"
                   blurb="The visual editors for posters and collections."
-                  glow="168,85,247"
                 >
                   <VideoStudioCards />
                 </ToolsSection>
                 <ToolsSection
                   title="Management"
                   blurb="Backups of the video database, and file names that follow your templates."
-                  glow="245,158,11"
                 >
                   <VideoBackupsCard />
                   <VideoMassRenameCard />
@@ -230,7 +225,6 @@ function MusicToolSections() {
       <ToolsSection
         title="Database &amp; Scanning"
         blurb="Reading your media server into SoulSync, and keeping the two in step."
-        glow="56,189,248"
       >
         <DbUpdaterCard />
         <ReconcileIdsCard />
@@ -241,7 +235,6 @@ function MusicToolSections() {
       <ToolsSection
         title="Metadata &amp; Cache"
         blurb="Enriching what SoulSync knows, and fixing what it got wrong."
-        glow="168,85,247"
       >
         <MetadataUpdaterCard />
         <DiscoveryPoolCard />
@@ -251,7 +244,6 @@ function MusicToolSections() {
       <ToolsSection
         title="Management"
         blurb="Backups, moving install, and the lists you have told SoulSync to respect."
-        glow="245,158,11"
       >
         <BackupManagerCard />
         <ConfigMigrationCard />

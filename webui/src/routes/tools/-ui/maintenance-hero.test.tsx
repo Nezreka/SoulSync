@@ -1,5 +1,8 @@
 /**
- * Library Maintenance hero — shell, jobs tab, history tab.
+ * Library maintenance: the Findings, Jobs and History pills.
+ *
+ * Rendered through the page, which owns the pills and the header the master
+ * switch sits in.
  *
  * The job-card assertions lean on the two contracts the P0 flagged: the
  * `data-job-id` the socket handler still needs, and the card-class / dot-class
@@ -9,7 +12,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { MaintenanceHero } from './maintenance-hero';
+import { ToolsPage } from './tools-page';
 
 const fetchMock = vi.fn();
 const toastSpy = vi.fn();
@@ -65,22 +68,21 @@ afterEach(() => {
 });
 
 describe('hero shell', () => {
-  it('offers the four section anchors in scroll order', async () => {
-    const { container } = render(<MaintenanceHero />);
+  it('offers the four pills, findings first', async () => {
+    const { container } = render(<ToolsPage />);
     await flush();
-    const links = [...container.querySelectorAll('.repair-section-link')];
-    expect(links.map((link) => link.getAttribute('data-section'))).toEqual([
-      'health',
-      'findings',
-      'operations',
-      'history',
+    const tabs = [...container.querySelectorAll('.tools-tabs [role="tab"]')];
+    expect(tabs.map((tab) => tab.id)).toEqual([
+      'tools-tab-findings',
+      'tools-tab-jobs',
+      'tools-tab-history',
+      'tools-tab-tools',
     ]);
+    expect(tabs[0].getAttribute('aria-selected')).toBe('true');
   });
 
-  it('renders every section at once — the nav jumps, it does not hide', async () => {
-    // Tabs made the findings you came for a room you had to know to enter,
-    // and nothing on screen told you whether the library was alright at all.
-    const { container } = render(<MaintenanceHero />);
+  it('keeps every panel mounted, so a pill never restarts the polling', async () => {
+    const { container } = render(<ToolsPage />);
     await flush();
     expect(container.querySelector('#repair-section-health')).not.toBeNull();
     expect(container.querySelector('#repair-section-findings')).not.toBeNull();
@@ -88,20 +90,23 @@ describe('hero shell', () => {
     expect(container.querySelector('#repair-section-history')).not.toBeNull();
   });
 
-  it('a nav button scrolls its section into view', async () => {
-    const scrollSpy = vi.fn();
-    const { container } = render(<MaintenanceHero />);
+  it('a pill shows its panel and hides the others', async () => {
+    const { container } = render(<ToolsPage />);
     await flush();
-    const section = container.querySelector('#repair-section-history') as HTMLElement;
-    section.scrollIntoView = scrollSpy;
+    const panel = (name: string) => container.querySelector(`#tools-panel-${name}`) as HTMLElement;
+    expect(panel('findings').hidden).toBe(false);
+    expect(panel('history').hidden).toBe(true);
 
-    fireEvent.click(container.querySelector('[data-section="history"]') as Element);
-    expect(scrollSpy).toHaveBeenCalled();
+    fireEvent.click(container.querySelector('#tools-tab-history') as Element);
+    expect(panel('history').hidden).toBe(false);
+    expect(panel('findings').hidden).toBe(true);
+    expect(panel('jobs').hidden).toBe(true);
+    expect(panel('tools').hidden).toBe(true);
   });
 
   it('reflects the master toggle from the status payload', async () => {
     routes({ '/api/repair/status': { enabled: true } });
-    const { container } = render(<MaintenanceHero />);
+    const { container } = render(<ToolsPage />);
     await waitFor(() =>
       expect((container.querySelector('#repair-master-toggle') as HTMLInputElement).checked).toBe(
         true,
@@ -112,7 +117,7 @@ describe('hero shell', () => {
 
   it('hides the findings badge at zero and shows it otherwise', async () => {
     routes({ '/api/repair/status': { enabled: true, findings_pending: 0 } });
-    const { container } = render(<MaintenanceHero />);
+    const { container } = render(<ToolsPage />);
     await flush();
     expect(
       (container.querySelector('#repair-findings-tab-badge') as HTMLElement).style.display,
@@ -120,7 +125,7 @@ describe('hero shell', () => {
     cleanup();
 
     routes({ '/api/repair/status': { enabled: true, findings_pending: 12 } });
-    const second = render(<MaintenanceHero />);
+    const second = render(<ToolsPage />);
     await waitFor(() =>
       expect(second.container.querySelector('#repair-findings-tab-badge')?.textContent).toBe('12'),
     );
@@ -135,7 +140,7 @@ describe('hero shell', () => {
         ? Promise.resolve({ ok: false, status: 500, json: async () => ({}) } as never)
         : Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as never),
     );
-    const { container } = render(<MaintenanceHero />);
+    const { container } = render(<ToolsPage />);
     await flush();
     fireEvent.click(container.querySelector('#repair-master-toggle') as Element);
     await flush();
@@ -146,7 +151,7 @@ describe('hero shell', () => {
 describe('the operations section', () => {
   it('renders the job containers — the tiles have their own suite', async () => {
     routes({ '/api/repair/jobs': { jobs: [job()] } });
-    const { container } = render(<MaintenanceHero />);
+    const { container } = render(<ToolsPage />);
     await waitFor(() =>
       expect(
         container.querySelector('.repair-job-card[data-job-id="orphan_file_detector"]'),
@@ -170,7 +175,7 @@ describe('the history section', () => {
 
   it('loads on mount — the hero needs the runs for its trend line too', async () => {
     routes({ '/api/repair/history': { runs: [run] } });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await flush();
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/history'))).toBe(true);
   });
@@ -196,7 +201,7 @@ describe('the history section', () => {
    */
   it('refreshes as soon as a job finishes', async () => {
     routes({ '/api/repair/history': { runs: [run] } });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await flush();
     const afterMount = historyCalls();
 
@@ -207,7 +212,7 @@ describe('the history section', () => {
 
   it('refreshes on a job that ERRORED too — a failed run is still a run', async () => {
     routes({ '/api/repair/history': { runs: [run] } });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await flush();
     const afterMount = historyCalls();
 
@@ -223,7 +228,7 @@ describe('the history section', () => {
    */
   it('refreshes ONCE per completion, not on every frame that follows', async () => {
     routes({ '/api/repair/history': { runs: [run] } });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await flush();
     const afterMount = historyCalls();
 
@@ -236,7 +241,7 @@ describe('the history section', () => {
 
   it('does not refresh while a job is still running', async () => {
     routes({ '/api/repair/history': { runs: [run] } });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await flush();
     const afterMount = historyCalls();
 
@@ -266,7 +271,7 @@ describe('job help overlay', () => {
         ],
       },
     });
-    const { container } = render(<MaintenanceHero />);
+    const { container } = render(<ToolsPage />);
     await waitFor(() => expect(container.querySelector('.repair-help-btn')).not.toBeNull());
     fireEvent.click(container.querySelector('.repair-help-btn') as Element);
 
@@ -292,7 +297,7 @@ describe('job help overlay', () => {
 
   it('says Scan Only for a job with no auto-fix', async () => {
     routes({ '/api/repair/jobs': { jobs: [job({ auto_fix: false, enabled: false })] } });
-    const { container } = render(<MaintenanceHero />);
+    const { container } = render(<ToolsPage />);
     await waitFor(() => expect(container.querySelector('.repair-help-btn')).not.toBeNull());
     fireEvent.click(container.querySelector('.repair-help-btn') as Element);
     const badges = [...container.querySelectorAll('.repair-help-badges .repair-flow-badge')].map(
@@ -303,7 +308,7 @@ describe('job help overlay', () => {
 
   it('closes on the backdrop and the × button', async () => {
     routes({ '/api/repair/jobs': { jobs: [job()] } });
-    const { container } = render(<MaintenanceHero />);
+    const { container } = render(<ToolsPage />);
     await waitFor(() => expect(container.querySelector('.repair-help-btn')).not.toBeNull());
     fireEvent.click(container.querySelector('.repair-help-btn') as Element);
     fireEvent.click(container.querySelector('.repair-help-close') as Element);
@@ -320,7 +325,7 @@ describe('job help overlay', () => {
 describe('live repair frames', () => {
   it('moves the tab badge and the master toggle from a pushed status frame', async () => {
     routes({ '/api/repair/status': { enabled: false, findings_pending: 0 } });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await flush();
 
     const badge = document.getElementById('repair-findings-tab-badge') as HTMLElement;
@@ -344,7 +349,7 @@ describe('live repair frames', () => {
 
   it('hides the badge again when a frame drops the count to zero', async () => {
     routes({ '/api/repair/status': { enabled: true, findings_pending: 5 } });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await flush();
     expect(
       (document.getElementById('repair-findings-tab-badge') as HTMLElement).style.display,
@@ -373,7 +378,7 @@ describe('live repair frames', () => {
         dead_file_cleaner: { status: 'running', progress: 10, phase: 'Starting' },
       },
     });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await waitFor(() =>
       expect(document.querySelectorAll('.repair-progress-phase')).toHaveLength(2),
     );
@@ -406,7 +411,7 @@ describe('live repair frames', () => {
         orphan_file_detector: { status: 'running', progress: 40, phase: 'Scanning' },
       },
     });
-    render(<MaintenanceHero />);
+    render(<ToolsPage />);
     await waitFor(() => expect(document.querySelector('.repair-progress-phase')).not.toBeNull());
 
     await act(async () => {
@@ -416,13 +421,11 @@ describe('live repair frames', () => {
   });
 });
 
-describe('simple mode triage buttons', () => {
+describe('an area leads to its findings', () => {
   // discord: "122 suggestions and a bunch for quarantine, but the buttons don't
-  // do anything". the findings list lives in the advanced chassis, which simple
-  // mode hides, and the buttons filtered by severity while the cards count by
-  // destructive / fixable, so orphan files ('info') never showed as quarantine.
+  // do anything". the findings list lived in a mode the overview hid. it has
+  // its own pill now, and a count anywhere on the page goes there.
   beforeEach(() => {
-    localStorage.removeItem('soulsync_operations_mode');
     routes({
       '/api/repair/jobs': { jobs: [job()] },
       '/api/repair/findings/groups': {
@@ -441,13 +444,6 @@ describe('simple mode triage buttons', () => {
             destructive: true,
           },
           {
-            type: 'canonical_version',
-            label: 'Canonical',
-            verb: null,
-            fixable: false,
-            destructive: false,
-          },
-          {
             type: 'missing_lyrics',
             label: 'Lyrics',
             verb: 'Fetch',
@@ -459,25 +455,26 @@ describe('simple mode triage buttons', () => {
     });
   });
 
-  it('needs-your-call shows the findings, opened on the file-touching type', async () => {
-    const { container } = render(<MaintenanceHero />);
+  it('the count on an area opens Findings on its biggest type', async () => {
+    const { container } = render(<ToolsPage />);
     await flush();
-    const chassis = container.querySelector('.repair-advanced-chassis') as HTMLElement;
-    expect(chassis.hidden).toBe(true);
+    fireEvent.click(container.querySelector('#tools-tab-jobs') as Element);
+    const findings = container.querySelector('#tools-panel-findings') as HTMLElement;
+    expect(findings.hidden).toBe(true);
 
-    const button = await screen.findByRole('button', { name: /^Review Orphan/ });
-    await waitFor(() => expect(button.closest('button')?.disabled).toBe(false));
+    const link = await screen.findByRole('button', { name: '11 open' });
     fetchMock.mockClear();
-    fireEvent.click(button);
+    fireEvent.click(link);
     await flush();
 
-    expect(chassis.hidden).toBe(false);
+    expect(findings.hidden).toBe(false);
+    expect(container.querySelector('#tools-tab-findings')?.getAttribute('aria-selected')).toBe(
+      'true',
+    );
     await waitFor(() =>
       expect(
         fetchMock.mock.calls.some(([url]) => String(url).includes('finding_type=orphan_file')),
       ).toBe(true),
     );
-    // shown for this visit only, the saved preference stays simple
-    expect(localStorage.getItem('soulsync_operations_mode')).toBeNull();
   });
 });

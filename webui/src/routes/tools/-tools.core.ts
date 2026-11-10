@@ -1027,3 +1027,66 @@ export function linkedJobId(search: string, jobIds: readonly string[]): string |
   const wanted = new URLSearchParams(search).get('job');
   return wanted && jobIds.includes(wanted) ? wanted : null;
 }
+
+// ── What a finding row leads with ────────────────────────────────────────────
+
+const TAG_CHECK_LABELS: Record<string, string> = {
+  title: 'Title',
+  artist: 'Artist',
+  album: 'Album',
+  albumartist: 'Album artist',
+  track_number: 'Track number',
+  disc_number: 'Disc number',
+  total_tracks: 'Total tracks',
+  total_discs: 'Total discs',
+  year: 'Year',
+  genre: 'Genre',
+  cover: 'Cover',
+  artwork_database: 'Library cover',
+  artwork_sidecar: 'cover.jpg',
+  edition: 'Edition',
+};
+
+export interface FindingHeadline {
+  title: string;
+  /** the line under it: who and what the finding is about, or its description */
+  sub: string;
+  /** a tag-scan finding's fields that are missing or wrong, as short labels */
+  fields: string[];
+}
+
+/**
+ * The title and second line of a finding row.
+ *
+ * A tag-scan finding is stored as "Metadata issues" / "genre: mismatch", the
+ * same two lines on tens of thousands of rows. It carries the track it is
+ * about (`details.validation.reference`), so the row leads with that and
+ * names the fields as chips. Every other type keeps its own title and
+ * description.
+ */
+export function findingHeadline(finding: {
+  title: string;
+  description?: string | null;
+  details?: Record<string, unknown> | null;
+}): FindingHeadline {
+  const plain = { title: finding.title, sub: finding.description || '', fields: [] };
+  const validation = finding.details?.validation;
+  if (!validation || typeof validation !== 'object') return plain;
+  const { reference, checks } = validation as {
+    reference?: Record<string, unknown> | null;
+    checks?: Record<string, unknown> | null;
+  };
+  const text = (value: unknown) => (typeof value === 'string' ? value.trim() : '');
+  const title = text(reference?.title);
+  if (!title) return plain;
+  const artist = text(reference?.track_artist) || text(reference?.artist_name);
+  const album = text(reference?.album_title);
+  const fields = Object.entries(checks || {})
+    .filter(([, value]) => value === 'missing' || value === 'mismatch')
+    .map(([key]) => TAG_CHECK_LABELS[key] || key.replace(/_/g, ' '));
+  return {
+    title,
+    sub: [artist, album].filter(Boolean).join(' · ') || finding.description || '',
+    fields,
+  };
+}

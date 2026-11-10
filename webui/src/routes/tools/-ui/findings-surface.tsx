@@ -66,9 +66,9 @@ import {
   cacheHealthLabel,
   cacheHealthScore,
   findingFilePath,
+  findingHeadline,
   findingRedownloadTrackId,
   findingRowFixLabel,
-  findingSeverityIcon,
   findingStatusBadge,
   findingTypeLabel,
   findingsBulkBarState,
@@ -83,6 +83,7 @@ import { safeFixablePending, visibleGroups } from '../-tools.groups';
 import { useToolsMedia } from '../-tools.media';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
+import { FindingArt } from './finding-art';
 import { FindingDetail } from './finding-detail';
 import {
   ReidentifyFindingModal,
@@ -1405,6 +1406,8 @@ export function FindingsSurface({
     if (openType && !shown.some((group) => group.finding_type === openType)) setOpenType('');
   }, [openType, shown]);
 
+  /** one type is open in the inbox: the surface shows that type alone */
+  const focused = Boolean(openType) && !searching && viewMode === 'inbox';
   const bar = findingsBulkBarState(selected.size, items?.length || 0, total);
   const pagination = findingsPagination(total, serverPage, pageSize);
   const runningJobs = jobs.filter((job) => job.is_running).length;
@@ -1727,24 +1730,28 @@ export function FindingsSurface({
   );
 
   return (
-    <div className="repair-findings-surface" ref={surfaceRef}>
-      <HealthHero
-        groups={groups}
-        typeInfo={typeInfo}
-        trackCount={trackCount}
-        sizeLabel={sizeLabel}
-        loading={!groupsLoaded}
-        runs={runs}
-        runningJobs={runningJobs}
-        safeCount={safeCount}
-        onFixAllSafe={() => void fixAllSafe()}
-        fixAllBusy={Boolean(bulkRun?.running)}
-        onPickType={pickType}
-      />
+    <div className={`repair-findings-surface${focused ? ' focused' : ''}`} ref={surfaceRef}>
+      {/* one type is open: the page is that type now, and the library's
+          health is a click back. kept mounted so its numbers don't reload. */}
+      <div className="repair-findings-overview" hidden={focused}>
+        <HealthHero
+          groups={groups}
+          typeInfo={typeInfo}
+          trackCount={trackCount}
+          sizeLabel={sizeLabel}
+          loading={!groupsLoaded}
+          runs={runs}
+          runningJobs={runningJobs}
+          safeCount={safeCount}
+          onFixAllSafe={() => void fixAllSafe()}
+          fixAllBusy={Boolean(bulkRun?.running)}
+          onPickType={pickType}
+        />
+      </div>
 
       {bulkRunBar}
 
-      {cacheHealth && (cacheHealth.total_entities || cacheHealth.total_searches) ? (
+      {!focused && cacheHealth && (cacheHealth.total_entities || cacheHealth.total_searches) ? (
         <div className="repair-cache-health">
           {/* The modal stays vanilla: `openCacheHealthModal` is reached from
               the Metadata Cache card too, and it opens onward into the
@@ -1760,44 +1767,6 @@ export function FindingsSurface({
           </div>
         </div>
       ) : null}
-
-      <div className="repair-findings-header-row">
-        <div className="repair-view-mode-tabs" role="tablist" aria-label="Findings View Mode">
-          {/* issue types first: it's the view that holds every finding */}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={viewMode === 'inbox'}
-            className={`repair-view-mode-tab${viewMode === 'inbox' ? ' active' : ''}`}
-            onClick={() => changeViewMode('inbox')}
-          >
-            <span className="repair-view-mode-icon">📂</span>
-            <span>Issue Types</span>
-          </button>
-          {video ? null : (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === 'albums'}
-              className={`repair-view-mode-tab${viewMode === 'albums' ? ' active' : ''}`}
-              onClick={() => changeViewMode('albums')}
-            >
-              <span className="repair-view-mode-icon">💿</span>
-              <span>Albums & Releases</span>
-            </button>
-          )}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={viewMode === 'table'}
-            className={`repair-view-mode-tab${viewMode === 'table' ? ' active' : ''}`}
-            onClick={() => changeViewMode('table')}
-          >
-            <span className="repair-view-mode-icon">📋</span>
-            <span>Flat List</span>
-          </button>
-        </div>
-      </div>
 
       {/* The section anchor lands here rather than on the inbox: the toolbar
           is always present, and the inbox is not (a search replaces it). */}
@@ -1835,6 +1804,43 @@ export function FindingsSurface({
             setPage(0);
           }}
         />
+
+        {/* inside one type the question is how to group ITS rows (the List /
+            Albums / Artists switch below), not which view of everything */}
+        {focused ? null : (
+          <div className="repair-view-mode-tabs" role="tablist" aria-label="Findings View Mode">
+            {/* issue types first: it's the view that holds every finding */}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'inbox'}
+              className={`repair-view-mode-tab${viewMode === 'inbox' ? ' active' : ''}`}
+              onClick={() => changeViewMode('inbox')}
+            >
+              Issue types
+            </button>
+            {video ? null : (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={viewMode === 'albums'}
+                className={`repair-view-mode-tab${viewMode === 'albums' ? ' active' : ''}`}
+                onClick={() => changeViewMode('albums')}
+              >
+                Albums
+              </button>
+            )}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={viewMode === 'table'}
+              className={`repair-view-mode-tab${viewMode === 'table' ? ' active' : ''}`}
+              onClick={() => changeViewMode('table')}
+            >
+              Flat list
+            </button>
+          </div>
+        )}
 
         <div className="repair-findings-filters">
           <select
@@ -2110,10 +2116,13 @@ function FindingCard({
   const statusBadge = findingStatusBadge(finding.status, finding.user_action);
   const typeLabel = info?.label || findingTypeLabel(finding.finding_type);
   const age = formatCacheAge(finding.created_at);
+  const headline = findingHeadline(finding);
 
   return (
     <div
-      className={`repair-finding-card ${finding.severity}${active ? ' kb-active' : ''}`}
+      className={`repair-finding-card ${finding.severity}${active ? ' kb-active' : ''}${
+        expanded ? ' expanded' : ''
+      }`}
       data-id={finding.id}
       data-job-id={finding.job_id}
       data-mass-orphan={String(Boolean(details.mass_orphan))}
@@ -2127,37 +2136,66 @@ function FindingCard({
             onChange={(event) => onToggleSelect(finding.id, event.target.checked)}
           />
         </div>
+        <FindingArt
+          album={finding.album_thumb_url}
+          artist={finding.artist_thumb_url}
+          file={finding.entity_type === 'file' || finding.entity_type === 'folder'}
+        />
         <div className="repair-finding-content">
           <div className="repair-finding-title">
-            <span className="repair-finding-icon">{findingSeverityIcon(finding.severity)}</span>
-            {finding.title}
+            {finding.severity === 'info' ? null : (
+              <span
+                className={`repair-finding-icon ${finding.severity}`}
+                title={finding.severity}
+              />
+            )}
+            <span className="repair-finding-name">{headline.title}</span>
             <span className="repair-finding-type-badge">{typeLabel}</span>
             {statusBadge ? (
               <span className={`repair-finding-status-badge ${finding.status}`}>{statusBadge}</span>
             ) : null}
           </div>
-          <div className="repair-finding-desc">{finding.description || ''}</div>
-          {filePath ? <div className="repair-finding-path">{filePath}</div> : null}
-          <div className="repair-finding-meta">
-            {/* The display name the filter dropdown uses — a row showing the
-                raw snake_case id meant the same job went by two different
-                names on one screen. The entity id is for us, not the user:
-                it lives in the tooltip now. */}
-            <span
-              title={
-                finding.entity_id
-                  ? `${finding.entity_type || 'item'} ${finding.entity_id}`
-                  : undefined
-              }
-            >
-              {jobLabel(finding.job_id)}
-            </span>
-            <span>&middot;</span>
-            <span>
-              {age === 'now' ? 'found just now' : age === '—' ? 'found' : `found ${age} ago`}
-            </span>
-          </div>
+          <div className="repair-finding-desc">{headline.sub}</div>
+          {/* a row with a cover already says what it is; its path waits in
+              the opened row. a bare file has nothing else to go by. */}
+          {filePath && (expanded || !(finding.album_thumb_url || finding.artist_thumb_url)) ? (
+            <div className="repair-finding-path">{filePath}</div>
+          ) : null}
+          {expanded ? (
+            <div className="repair-finding-meta">
+              {/* The display name the filter dropdown uses — a row showing the
+                  raw snake_case id meant the same job went by two different
+                  names on one screen. The entity id is for us, not the user:
+                  it lives in the tooltip now. */}
+              <span
+                title={
+                  finding.entity_id
+                    ? `${finding.entity_type || 'item'} ${finding.entity_id}`
+                    : undefined
+                }
+              >
+                {jobLabel(finding.job_id)}
+              </span>
+              <span>&middot;</span>
+              <span>
+                {age === 'now' ? 'found just now' : age === '—' ? 'found' : `found ${age} ago`}
+              </span>
+            </div>
+          ) : null}
         </div>
+        {headline.fields.length ? (
+          <div className="repair-finding-fields" aria-label="Fields that differ">
+            {headline.fields.slice(0, 4).map((field) => (
+              <span className="repair-finding-field" key={field}>
+                {field}
+              </span>
+            ))}
+            {headline.fields.length > 4 ? (
+              <span className="repair-finding-field more">+{headline.fields.length - 4}</span>
+            ) : null}
+          </div>
+        ) : null}
+        <span className="repair-finding-age">{age === '—' ? '' : age === 'now' ? 'now' : age}</span>
         {/* This wrapper swallows clicks so the row toggle doesn't undo them. */}
         <div className="repair-finding-actions" onClick={(event) => event.stopPropagation()}>
           {finding.status === 'pending' ? (
@@ -2192,7 +2230,18 @@ function FindingCard({
                 aria-label={`Dismiss ${finding.title}`}
                 onClick={() => void onDismiss(finding.id)}
               >
-                &times;
+                <svg
+                  width="15"
+                  height="15"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
               </button>
             </>
           ) : (
@@ -2222,14 +2271,25 @@ function FindingCard({
               onToggleDetail(finding.id);
             }}
           >
-            &#9660;
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
           </button>
         </div>
       </div>
       {finding.last_error ? (
         <div className="repair-finding-error-banner" onClick={(event) => event.stopPropagation()}>
           <div className="repair-finding-error-header">
-            <span className="repair-finding-error-icon">⚠️</span>
             <span className="repair-finding-error-title">Resolution Attempt Failed</span>
           </div>
           <div className="repair-finding-error-text">{finding.last_error}</div>

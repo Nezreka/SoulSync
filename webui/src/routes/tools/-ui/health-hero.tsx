@@ -48,6 +48,8 @@ export interface HealthHeroProps {
 
 const SPARK_WIDTH = 132;
 const SPARK_HEIGHT = 30;
+/** how many types the legend under the bar names */
+const LEGEND_MAX = 6;
 
 export function HealthHero({
   groups,
@@ -81,41 +83,42 @@ export function HealthHero({
   );
   if (runningJobs > 0) meta.push(`${runningJobs} job${runningJobs === 1 ? '' : 's'} running`);
 
+  const legend = segments.slice(0, LEGEND_MAX);
+  const band = loading ? 'checking' : healthBandLabel(health.band);
+
   return (
     <div className="repair-health" id="repair-section-health">
-      <div className="repair-health-score-block">
+      <div className="repair-health-main">
         <div className={`repair-health-score ${loading ? '' : health.band}`}>
           {loading ? '–' : health.score}
         </div>
-        <div className={`repair-health-band ${loading ? '' : health.band}`}>
-          {loading ? 'checking' : healthBandLabel(health.band)}
+
+        <div className="repair-health-body">
+          <div className={`repair-health-band ${loading ? '' : health.band}`}>{band}</div>
+          <div className="repair-health-meta">{meta.join(' · ')}</div>
         </div>
-      </div>
 
-      <div className="repair-health-body">
-        <div className="repair-health-meta">{meta.join(' · ')}</div>
-
-        {segments.length > 0 ? (
-          <div
-            className="repair-health-bar"
-            role="group"
-            aria-label="What is affecting library health"
-          >
-            {segments.map((segment) => (
-              <button
-                type="button"
-                key={segment.findingType}
-                className={`repair-health-seg ${segment.severity}`}
-                style={{ flexGrow: segment.percent }}
-                title={`${segment.label} — ${segment.pending.toLocaleString()} open`}
-                aria-label={`${segment.label}, ${segment.pending} open findings`}
-                onClick={() => onPickType(segment.findingType)}
+        {trend.length > 1 ? (
+          <div className="repair-health-trend" title="Findings created per run, last 20 runs">
+            <svg
+              width={SPARK_WIDTH}
+              height={SPARK_HEIGHT}
+              viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`}
+              aria-hidden="true"
+              preserveAspectRatio="none"
+            >
+              <polyline
+                points={sparklinePoints(trend, SPARK_WIDTH, SPARK_HEIGHT)}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+                strokeLinecap="round"
               />
-            ))}
+            </svg>
+            <span className="repair-health-trend-label">findings / run</span>
           </div>
-        ) : loading ? null : (
-          <div className="repair-health-bar-empty">Nothing is dragging your library down.</div>
-        )}
+        ) : null}
 
         <div className="repair-health-actions">
           <button
@@ -143,27 +146,55 @@ export function HealthHero({
         </div>
       </div>
 
-      {trend.length > 1 ? (
-        <div className="repair-health-trend" title="Findings created per run, last 20 runs">
-          <svg
-            width={SPARK_WIDTH}
-            height={SPARK_HEIGHT}
-            viewBox={`0 0 ${SPARK_WIDTH} ${SPARK_HEIGHT}`}
-            aria-hidden="true"
-            preserveAspectRatio="none"
+      {segments.length > 0 ? (
+        <div className="repair-health-breakdown">
+          <div
+            className="repair-health-bar"
+            role="group"
+            aria-label="What is affecting library health"
           >
-            <polyline
-              points={sparklinePoints(trend, SPARK_WIDTH, SPARK_HEIGHT)}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          </svg>
-          <span className="repair-health-trend-label">findings / run</span>
+            {segments.map((segment) => (
+              <button
+                type="button"
+                key={segment.findingType}
+                className={`repair-health-seg ${segment.severity}`}
+                style={{ flexGrow: segment.percent }}
+                title={`${segment.label} — ${segment.pending.toLocaleString()} open`}
+                aria-label={`${segment.label}, ${segment.pending} open findings`}
+                onClick={() => onPickType(segment.findingType)}
+              />
+            ))}
+          </div>
+          {/* the bar's widths are weighted, so a sliver can be the biggest
+              count. the names and numbers say which is which. */}
+          <div className="repair-health-legend">
+            {legend.map((segment) => (
+              <button
+                type="button"
+                className="repair-health-legend-item"
+                key={segment.findingType}
+                onClick={() => onPickType(segment.findingType)}
+              >
+                <span
+                  className={`repair-health-legend-dot ${segment.severity}`}
+                  aria-hidden="true"
+                />
+                {segment.label}
+                <span className="repair-health-legend-count">
+                  {segment.pending.toLocaleString()}
+                </span>
+              </button>
+            ))}
+            {segments.length > legend.length ? (
+              <span className="repair-health-legend-more">
+                +{segments.length - legend.length} more
+              </span>
+            ) : null}
+          </div>
         </div>
-      ) : null}
+      ) : loading ? null : (
+        <div className="repair-health-bar-empty">Nothing is dragging your library down.</div>
+      )}
     </div>
   );
 }

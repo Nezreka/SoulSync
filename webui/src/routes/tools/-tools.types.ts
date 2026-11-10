@@ -124,6 +124,10 @@ export interface RepairFinding {
   created_at?: string | null;
   user_action?: string | null;
   last_error?: string | null;
+  /** the cover and artist picture to show beside the row, looked up by the
+   *  server from the catalogue when the finding stored none */
+  album_thumb_url?: string | null;
+  artist_thumb_url?: string | null;
   /** Per-finding-type payload. Deliberately unknown — every one of the 20
    *  renderers reads a different set of keys. */
   details?: Record<string, unknown> | null;

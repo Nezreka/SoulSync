@@ -1,35 +1,32 @@
 /**
- * The Library Maintenance hero — master toggle, the four sections (health,
- * findings, operations, history) and the job list they share.
+ * Library maintenance: the three panels behind the Findings, Jobs and History
+ * pills, the job list they share, and the master switch.
  *
- * The three tabs are gone. Tabs made the page a set of rooms you had to know
- * to walk into: the findings you needed to act on were behind a tab that
- * looked identical to the two you didn't want, and nothing on screen told you
- * whether your library was actually alright. It is one scroll surface now,
- * ordered by what you came here to learn: how healthy am I → what is wrong →
- * what is running → what happened. The nav jumps; it doesn't hide.
+ * It used to be one surface with a Simple and an Advanced mode. The findings
+ * list only existed in Advanced, so "review these" in Simple flipped the mode
+ * under you and the page you were reading was gone. Each thing now has one
+ * home: findings and their health on Findings, checks, areas and every job on
+ * Jobs, the run log on History. A link to a job's findings changes the pill;
+ * nothing changes shape.
  *
- * The hero owns the job list because two sections need it: operations renders
- * it, and the findings filter is populated from it — which is exactly why the
- * vanilla filled that `<select>` from inside `loadRepairJobs`.
+ * This component owns the job list because two panels need it: Jobs renders
+ * it, and the findings filter is filled from it.
  *
- * Two contracts from the P0 that outlive this file:
+ * Two contracts that outlive the redesigns:
  *
- * 1. `.repair-job-card[data-job-id]` — the vanilla socket handler used to find
- *    cards by this selector and write progress into them. My P6-era claim that
- *    the markup deletion would make that a no-op was WRONG: this component
- *    re-renders the very selector it queries, so the vanilla body was stomping
- *    React-managed nodes. The post-flip hardening reduced that handler to its
- *    ss:repair-progress dispatch; the attribute stays as the stable per-job
- *    hook the tests (and any future e2e) key on.
+ * 1. `.repair-job-card[data-job-id]` is the stable per-job hook the tests (and
+ *    a /tools?job=<id> link) key on. The vanilla socket handler only
+ *    dispatches ss:repair-progress now; React owns the nodes.
  *
  * 2. The class on the card is NOT the class on the status dot. An idle enabled
- *    job gets dot 'enabled' and card class '' — see repairJobCardClass.
+ *    job gets dot 'enabled' and card class '' (see repairJobCardClass).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
-import type { RepairJob, RepairJobProgress, RepairJobRun, RepairSection } from '../-tools.types';
+import type { RepairJob, RepairJobProgress, RepairJobRun } from '../-tools.types';
+import type { ToolsTab } from './tools-page';
 
 import {
   fetchDatabaseStats,
@@ -171,20 +168,22 @@ function JobHelpOverlay({ job, onClose }: { job: RepairJob; onClose: () => void 
   );
 }
 
-// ── The hero ─────────────────────────────────────────────────────────────────
+export interface MaintenanceHeroProps {
+  /** which pill is showing. the page owns it: the Tools pill is not ours. */
+  tab: ToolsTab;
+  onTab: (tab: ToolsTab) => void;
+  /** the header's right side, where the master switch renders */
+  headerSlot: HTMLElement | null;
+  /** open findings, for the count on the Findings pill */
+  onPendingChanged?: (pending: number) => void;
+}
 
-/** The nav. Jumping, not hiding — every section is on the page already. */
-const SECTIONS: Array<{ id: RepairSection; label: string; anchor: string }> = [
-  { id: 'health', label: 'Health', anchor: 'repair-section-health' },
-  { id: 'findings', label: 'Findings', anchor: 'repair-section-findings' },
-  // 'Jobs', not 'Operations': the page tab above is called Operations and two
-  // controls with one name is a guessing game. This matches the section's own
-  // heading, 'Maintenance jobs'.
-  { id: 'operations', label: 'Jobs', anchor: 'repair-section-operations' },
-  { id: 'history', label: 'History', anchor: 'repair-section-history' },
-];
-
-export function MaintenanceHero() {
+export function MaintenanceHero({
+  tab,
+  onTab,
+  headerSlot,
+  onPendingChanged,
+}: MaintenanceHeroProps) {
   const media = useToolsMedia();
   const [enabled, setEnabled] = useState(false);
   // Driven by the same /api/repair/status payload as the master toggle. Hidden
@@ -334,18 +333,14 @@ export function MaintenanceHero() {
 
   const [helpJob, setHelpJob] = useState<RepairJob | null>(null);
 
-  const [mode, setMode] = useState<'simple' | 'advanced'>(() => {
-    try {
-      const saved = localStorage.getItem('soulsync_operations_mode');
-      if (saved === 'advanced' || saved === 'simple') return saved;
-    } catch {}
-    return 'simple';
-  });
+  useEffect(() => {
+    onPendingChanged?.(findingsPending);
+  }, [findingsPending, onPendingChanged]);
 
   /**
-   * A run row's "see this job's findings" jump. The token makes a second
-   * click on the same job re-fire — without it, clicking the same row twice
-   * after wandering off would change nothing.
+   * "See this job's findings", from a job row, a run or an area. The token
+   * makes a second click on the same job re-fire: without it, clicking the
+   * same row twice after wandering off would change nothing.
    */
   const [jobFocus, setJobFocus] = useState<{
     jobId: string;
@@ -363,13 +358,10 @@ export function MaintenanceHero() {
         findingType: options?.findingType,
         token: (previous?.token || 0) + 1,
       }));
-      // the findings list lives in the advanced chassis, which simple mode
-      // hides, so review suggestions / inspect quarantine did nothing. show it
-      // for this visit (not saved as the preference) and scroll once it's up.
-      setMode('advanced');
+      onTab('findings');
       setTimeout(() => jumpToSection('repair-section-findings'), 150);
     },
-    [],
+    [onTab],
   );
 
   // sent here from an issue ("find duplicates"): that job's findings, searched
@@ -377,20 +369,25 @@ export function MaintenanceHero() {
     const asked = takeFindingsFocus();
     if (!asked) return;
     setJobFocus((previous) => ({ ...asked, token: (previous?.token || 0) + 1 }));
-    setMode('advanced');
+    onTab('findings');
     setTimeout(() => jumpToSection('repair-section-findings'), 300);
+  }, [onTab]);
+
+  /** an area's "Job settings": its family in the list below, on this panel */
+  const showFamily = useCallback((category?: string) => {
+    if (!category) {
+      jumpToSection('repair-section-operations');
+      return;
+    }
+    const target = [...document.querySelectorAll<HTMLElement>('.repair-family')].find(
+      (node) => node.dataset.category === category,
+    );
+    if (target) target.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    else jumpToSection('repair-section-operations');
   }, []);
 
-  const handleModeChange = useCallback((next: 'simple' | 'advanced') => {
-    setMode(next);
-    try {
-      localStorage.setItem('soulsync_operations_mode', next);
-    } catch {}
-  }, []);
-
-  // /tools?job=<id>: the job card only exists in advanced mode, so a link that
-  // just opened /tools dropped people on simple mode with the job nowhere in
-  // sight. flip to advanced for this visit, scroll to the card and light it up.
+  // /tools?job=<id>: the job's row is on the Jobs pill. open it there, scroll
+  // to the row and light it up.
   const linkedJobHandled = useRef(false);
   useEffect(() => {
     if (linkedJobHandled.current || !jobs) return;
@@ -400,119 +397,47 @@ export function MaintenanceHero() {
     );
     if (!jobId) return;
     linkedJobHandled.current = true;
-    setMode('advanced');
+    onTab('jobs');
     setTimeout(() => {
       const card = document.querySelector<HTMLElement>(`.repair-job-card[data-job-id="${jobId}"]`);
       card?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
       card?.classList.add('repair-job-card--linked');
       setTimeout(() => card?.classList.remove('repair-job-card--linked'), 2600);
     }, 150);
-  }, [jobs]);
+  }, [jobs, onTab]);
+
+  const enabledJobs = (jobs || []).filter((job) => job.enabled).length;
 
   return (
     <div className="tools-maintenance-hero">
-      <div className="tools-maintenance-header">
-        <div className="tools-maintenance-header-left">
-          <img src="/static/whisoul.png" alt="" className="tools-maintenance-logo" />
-          <div>
-            <h3 className="tools-maintenance-title">Library Maintenance</h3>
-            <p className="tools-maintenance-subtitle">
-              {media === 'video'
-                ? 'Jobs that check your movies, shows and YouTube, and the findings they raise'
-                : 'Automated scanning, detection, and repair of library issues'}
-            </p>
-          </div>
-        </div>
-
-        <div className="tools-maintenance-header-actions">
-          {/* Workstation Mode Switcher */}
-          <div
-            className="operations-mode-toggle-group"
-            role="tablist"
-            aria-label="Workstation View Mode"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'simple'}
-              className={`operations-mode-toggle-btn ${mode === 'simple' ? 'active' : ''}`}
-              onClick={() => handleModeChange('simple')}
-              title="The overview (recommended)"
+      {headerSlot
+        ? createPortal(
+            <label
+              className="repair-master-toggle"
+              title="Lets enabled jobs run on their schedules. Off, a job only runs when you start it."
             >
-              <span className="operations-mode-toggle-icon">✦</span>
-              <span>Simple Mode</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'advanced'}
-              className={`operations-mode-toggle-btn ${mode === 'advanced' ? 'active' : ''}`}
-              onClick={() => handleModeChange('advanced')}
-              title="Every finding and every job, one by one"
-            >
-              <span className="operations-mode-toggle-icon">⚙</span>
-              <span>Advanced Mode</span>
-            </button>
-          </div>
-
-          <label className="repair-master-toggle">
-            <input
-              type="checkbox"
-              id="repair-master-toggle"
-              checked={enabled}
-              onChange={() => void onMasterToggle()}
-            />
-            <span className="repair-toggle-slider" />
-            <span className="repair-toggle-label" id="repair-master-label">
-              {enabled ? 'Enabled' : 'Disabled'}
-            </span>
-          </label>
-        </div>
-      </div>
-
-      {/* ── SIMPLE MODE: Primary Curated Studio & Spotlight ──────────────── */}
-      {mode === 'simple' ? (
-        <OperationsStudio
-          jobs={jobs}
-          progress={progress}
-          runs={history || []}
-          trackCount={trackCount}
-          sizeLabel={sizeLabel}
-          onChanged={loadJobs}
-          onShowFindings={showJobFindings}
-          onSwitchToAdvanced={(_cat) => handleModeChange('advanced')}
-        />
-      ) : null}
-
-      {/* ── ADVANCED MODE: Granular Chassis (Mounted for contracts, visible in Advanced) ── */}
-      <nav
-        className="repair-section-nav"
-        aria-label="Maintenance sections"
-        hidden={mode !== 'advanced'}
-      >
-        {SECTIONS.map((section) => (
-          <button
-            className="repair-section-link"
-            type="button"
-            data-section={section.id}
-            key={section.id}
-            onClick={() => jumpToSection(section.anchor)}
-          >
-            {section.label}
-            {section.id === 'findings' ? (
-              <span
-                className="repair-tab-badge"
-                id="repair-findings-tab-badge"
-                style={{ display: findingsPending > 0 ? '' : 'none' }}
-              >
-                {findingsPending}
+              <span className="repair-master-name">Scheduled jobs</span>
+              <span className="repair-toggle-label" id="repair-master-label">
+                {enabled ? 'Enabled' : 'Disabled'}
               </span>
-            ) : null}
-          </button>
-        ))}
-      </nav>
+              <input
+                type="checkbox"
+                id="repair-master-toggle"
+                checked={enabled}
+                onChange={() => void onMasterToggle()}
+              />
+              <span className="repair-toggle-slider" />
+            </label>,
+            headerSlot,
+          )
+        : null}
 
-      <div className="repair-advanced-chassis" hidden={mode !== 'advanced'}>
+      <div
+        role="tabpanel"
+        id="tools-panel-findings"
+        aria-labelledby="tools-tab-findings"
+        hidden={tab !== 'findings'}
+      >
         <FindingsSurface
           jobs={jobs || []}
           runs={history || []}
@@ -521,9 +446,32 @@ export function MaintenanceHero() {
           focusJob={jobFocus}
           onStatusChanged={refreshStatus}
         />
+      </div>
+
+      <div
+        role="tabpanel"
+        id="tools-panel-jobs"
+        aria-labelledby="tools-tab-jobs"
+        hidden={tab !== 'jobs'}
+      >
+        <OperationsStudio
+          jobs={jobs}
+          progress={progress}
+          onChanged={loadJobs}
+          onShowFindings={showJobFindings}
+          onShowFamily={showFamily}
+        />
 
         <section className="repair-section" id="repair-section-operations">
-          <h4 className="repair-section-title">Maintenance jobs</h4>
+          <div className="tools-section-head">
+            <h3 className="tools-section-title">All jobs</h3>
+            {jobs && jobs.length ? (
+              <span className="tools-section-blurb">
+                {jobs.length} jobs, {enabledJobs} on a schedule.
+                {enabled ? '' : ' Scheduled jobs are off, so none of them runs by itself.'}
+              </span>
+            ) : null}
+          </div>
           <div id="repair-jobs-list">
             <Operations
               jobs={jobs}
@@ -533,14 +481,24 @@ export function MaintenanceHero() {
               onChanged={loadJobs}
               onHelp={setHelpJob}
               onShowFindings={showJobFindings}
-              mode={mode}
-              onModeChange={handleModeChange}
             />
           </div>
         </section>
+      </div>
 
+      <div
+        role="tabpanel"
+        id="tools-panel-history"
+        aria-labelledby="tools-tab-history"
+        hidden={tab !== 'history'}
+      >
         <section className="repair-section" id="repair-section-history">
-          <h4 className="repair-section-title">Recent runs</h4>
+          <div className="tools-section-head">
+            <h3 className="tools-section-title">Recent runs</h3>
+            <span className="tools-section-blurb">
+              Every time a job ran, what it checked and what it found.
+            </span>
+          </div>
           <div className="repair-runs-card" id="repair-history-list">
             <RunHistory
               runs={history}

@@ -2115,7 +2115,6 @@ body.helper-mode-active * {
 
 /* Highlight on hoverable elements in help mode */
 body.helper-mode-active .nav-button:hover,
-body.helper-mode-active .tool-card:hover,
 body.helper-mode-active .service-card:hover,
 body.helper-mode-active .stat-card:hover,
 body.helper-mode-active .version-button:hover,
@@ -9641,72 +9640,11 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     color: var(--white-a25);
 }
 
-/* Tools & Operations Grid */
-.tools-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-    gap: 16px;
-}
-
-.tool-card {
-    background: rgba(18, 18, 22, 0.9);
-    backdrop-filter: blur(12px);
-    border-radius: var(--radius-xl);
-    border: 1px solid var(--white-a06);
-    padding: 22px 24px;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 4px 16px var(--black-a30);
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    transition: all var(--dur-slow) var(--ease-standard);
-}
-
-/* Top accent line */
-.tool-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 20%;
-    right: 20%;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.4), transparent);
-    border-radius: 2px;
-    transition: all var(--dur-slow);
-}
-
-.tool-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(var(--accent-rgb), 0.15);
-    box-shadow: 0 8px 32px var(--black-a40), 0 0 20px rgba(var(--accent-rgb), 0.06);
-}
-
-.tool-card:hover::before {
-    left: 10%;
-    right: 10%;
-    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.7), transparent);
-    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
-}
-
 .tool-card-title {
     font-size: 15px;
     font-weight: 700;
     color: var(--white-a90);
     letter-spacing: -0.01em;
-}
-
-.tool-card-info {
-    font-size: 12px;
-    color: var(--white-a40);
-    line-height: 1.5;
-    min-height: 0;
-}
-
-.tool-card-controls {
-    display: flex;
-    gap: 8px;
-    align-items: center;
 }
 
 .tool-card-controls select {
@@ -9793,25 +9731,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     box-shadow: none;
 }
 
-/* Media Scan Button Styling */
-.media-scan-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9) 0%, rgba(var(--accent-light-rgb), 0.9) 100%);
-    padding: 12px 22px;
-    font-size: 14px;
-    box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.2);
-    width: 100%;
-    border-radius: var(--radius-control);
-}
-
-.media-scan-btn:hover:not(:disabled) {
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.3);
-    transform: translateY(-1px);
-}
-
 .media-scan-btn .scan-icon {
     font-size: 18px;
     animation: pulse 2s ease-in-out infinite;
@@ -9819,29 +9738,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 
 .media-scan-btn:disabled .scan-icon {
     animation: spin 1s linear infinite;
-}
-
-
-
-.tool-card-progress-section {
-    padding-top: 12px;
-    border-top: 1px solid var(--white-a04);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.progress-phase-label {
-    font-size: 11px;
-    color: var(--white-a45);
-    font-weight: 500;
-}
-
-.progress-details-label {
-    font-size: 10px;
-    color: var(--white-a30);
-    text-align: center;
-    font-variant-numeric: tabular-nums;
 }
 
 .progress-bar-container {
@@ -10008,9 +9904,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 @media (max-width: 1200px) {
-    .tools-grid {
-        grid-template-columns: 1fr;
-    }
 
     .service-status-grid {
         grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -10068,11 +9961,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     .stats-grid-dashboard {
         grid-template-columns: 1fr;
         gap: 15px;
-    }
-
-    .tool-card-controls {
-        flex-direction: column;
-        align-items: stretch;
     }
 
     .tool-card-controls button {
@@ -13435,45 +13323,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
 }
 
 
-
-/* Styles for Stats inside the DB Updater Tool Card */
-.tool-card-stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px;
-    padding: 10px 12px;
-    background: var(--white-a02);
-    border: 1px solid var(--white-a04);
-    border-radius: var(--radius-control);
-}
-
-.manual-library-match-stats .stat-item-value {
-    background-color: rgba(var(--accent-rgb), 0.12);
-    color: rgb(var(--accent-rgb));
-    white-space: nowrap;
-}
-
-.stat-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-    padding: 2px 0;
-}
-
-.stat-item-label {
-    color: var(--white-a35);
-}
-
-.stat-item-value {
-    color: #ffffff;
-    font-weight: 600;
-    background-color: rgba(var(--accent-rgb), 0.1);
-    border-radius: var(--radius-xs);
-    padding: 2px 6px;
-}
-
-
 /* ======================================================= */
 /* == STYLES FOR SYNC PAGE (REDESIGNED)                 == */
 /* ======================================================= */
@@ -16500,35 +16349,6 @@ body:has(.chat-web-modal-overlay--open) #activity-float-btn {
     justify-content: center;
     gap: 16px;
     margin-top: 12px;
-}
-
-.beatport-hero .stat-item {
-    /* Premium badge styling matching modal detail badges - scoped to Beatport hero only */
-    background: rgba(1, 255, 149, 0.15);
-    color: #01FF95;
-    font-size: 14px;
-    font-weight: 600;
-    padding: 8px 16px;
-    border-radius: var(--radius-lg);
-    border: 1px solid rgba(1, 255, 149, 0.3);
-
-    /* Subtle shadow for depth */
-    box-shadow:
-        0 4px 12px rgba(1, 255, 149, 0.2),
-        0 2px 6px var(--black-a20);
-
-    /* Glassmorphic effect */
-    backdrop-filter: blur(8px);
-    transition: all var(--dur-slow) ease;
-}
-
-.beatport-hero .stat-item:hover {
-    background: rgba(1, 255, 149, 0.2);
-    border-color: rgba(1, 255, 149, 0.4);
-    transform: translateY(-2px) scale(1.05);
-    box-shadow:
-        0 6px 16px rgba(1, 255, 149, 0.3),
-        0 3px 8px var(--black-a30);
 }
 
 /* ================================= */
@@ -48918,62 +48738,8 @@ tr.tag-diff-same {
     z-index: 10;
 }
 
-/* Master toggle */
-.repair-master-toggle {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-}
-
-.repair-toggle-label {
-    font-size: 13px;
-    color: var(--white-a60);
-    font-weight: 500;
-}
-
-.repair-toggle-slider {
-    position: relative;
-    width: 44px;
-    height: 24px;
-    background: var(--white-a12);
-    border-radius: var(--radius-lg);
-    transition: background var(--dur-base) ease;
-    display: inline-block;
-}
-
-.repair-toggle-slider::after {
-    content: '';
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 18px;
-    height: 18px;
-    background: #fff;
-    border-radius: var(--radius-circle);
-    transition: transform var(--dur-base) ease;
-}
-
 .repair-master-toggle input {
     display: none;
-}
-
-.repair-master-toggle input:checked + .repair-toggle-slider {
-    background: var(--accent);
-}
-
-.repair-master-toggle input:checked + .repair-toggle-slider::after {
-    transform: translateX(20px);
-}
-
-/* Job toggle sizing moved to .repair-job-toggle block in Jobs Tab section */
-
-/* Tabs */
-.repair-tabs {
-    display: flex;
-    gap: 0;
-    padding: 0 24px;
-    border-bottom: 1px solid var(--white-a06);
 }
 
 .repair-tab {
@@ -48998,20 +48764,6 @@ tr.tag-diff-same {
 .repair-tab.active {
     color: rgb(var(--accent-light-rgb));
     border-bottom-color: rgb(var(--accent-light-rgb));
-}
-
-.repair-tab-badge {
-    background: #ef4444;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    min-width: 18px;
-    height: 18px;
-    border-radius: 9px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 5px;
 }
 
 /* Tab content */
@@ -49046,342 +48798,16 @@ tr.tag-diff-same {
     font-size: 14px; color: var(--white-a40); margin-bottom: 0;
     max-width: 420px; margin-left: auto; margin-right: auto; line-height: 1.6;
 }
-
-/* ── Jobs Tab ── */
-.repair-jobs-list {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-}
-
-@media (max-width: 900px) { .repair-jobs-list { grid-template-columns: 1fr; } }
-
-.repair-job-card {
-    background: linear-gradient(135deg, rgba(22, 22, 22, 0.95), rgba(16, 16, 16, 0.98));
-    border: 1px solid var(--white-a07);
-    border-top: 1px solid var(--white-a10);
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    transition: all var(--dur-moderate) var(--ease-standard);
-    position: relative;
-}
-
-.repair-job-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.3), transparent);
-    opacity: 0;
-    transition: opacity var(--dur-slow);
-}
-
-.repair-job-card:hover {
-    background: linear-gradient(135deg, rgba(28, 28, 28, 0.98), rgba(20, 20, 20, 0.99));
-    border-color: rgba(var(--accent-rgb), 0.15);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px var(--black-a30);
-}
-
-.repair-job-card:hover::before { opacity: 1; }
-
-.repair-job-card.running {
-    border-color: rgba(var(--accent-rgb), 0.3);
-    box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.1);
-}
-
-.repair-job-card.running::before {
-    opacity: 1;
-    height: 3px;
-    background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.6), transparent);
-    animation: scanPulse 2s ease-in-out infinite;
-}
-
-.repair-job-card.disabled {
-    opacity: 0.5;
-}
-.repair-job-card.disabled:hover {
-    opacity: 0.7;
-    transform: none;
-}
-
-.repair-job-main {
-    display: flex;
-    align-items: flex-start;
-    padding: 14px 16px;
-    gap: 12px;
-}
-
-/* Status dot */
-.repair-job-status {
-    width: 10px;
-    height: 10px;
-    border-radius: var(--radius-circle);
-    flex-shrink: 0;
-    margin-top: 4px;
-}
-.repair-job-status.enabled {
-    background: #4ade80;
-    box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
-}
-.repair-job-status.disabled {
-    background: #444;
-}
-.repair-job-status.running {
-    background: rgb(var(--accent-rgb));
-    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5);
-    animation: repair-status-pulse 1.5s ease-in-out infinite;
-}
 @keyframes repair-status-pulse {
     0%, 100% { opacity: 1; box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.5); }
     50% { opacity: 0.4; box-shadow: 0 0 3px rgba(var(--accent-rgb), 0.2); }
 }
-
-.repair-job-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.repair-job-name {
-    font-size: 14px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.2px;
-}
-
-.repair-job-desc {
-    font-size: 11px;
-    color: var(--white-a35);
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-/* Flow visualization — job type badges */
-.repair-job-flow {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    align-items: center;
-}
-
-.repair-flow-badge {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: var(--radius-control);
-    font-weight: 500;
-    white-space: nowrap;
-}
-
-.repair-flow-badge.scan {
-    background: rgba(var(--accent-rgb), 0.12);
-    color: rgb(var(--accent-light-rgb));
-}
-.repair-flow-badge.autofix {
-    background: rgba(59, 130, 246, 0.12);
-    color: #60a5fa;
-}
-.repair-flow-badge.dryrun {
-    background: rgba(250, 204, 21, 0.10);
-    color: #fbbf24;
-}
-.repair-flow-badge.findings {
-    background: rgba(239, 68, 68, 0.10);
-    color: #f87171;
-}
-/* Historical "found in last scan" — present but already resolved /
-   dismissed. Muted so it doesn't read as urgent action like the
-   current-pending badge. */
-.repair-flow-badge.findings-historical {
-    background: rgba(148, 163, 184, 0.10);
-    color: #94a3b8;
-}
-.repair-flow-arrow {
-    color: var(--white-a25);
-    font-size: 12px;
-}
-
-.repair-job-meta {
-    font-size: 10px;
-    color: var(--white-a30);
-    line-height: 1.3;
-}
-
-.repair-job-actions {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-shrink: 0;
-    margin-left: auto;
-}
-
-/* Toggle — matches automation-toggle (32x18) */
-.repair-job-toggle {
-    position: relative;
-    width: 32px;
-    height: 18px;
-    flex-shrink: 0;
-}
 .repair-job-toggle input { display: none; }
-.repair-job-toggle .repair-toggle-slider.small {
-    width: 32px;
-    height: 18px;
-    border-radius: 9px;
-}
-.repair-job-toggle .repair-toggle-slider.small::after {
-    top: 3px;
-    left: 3px;
-    width: 12px;
-    height: 12px;
-}
-.repair-job-toggle input:checked + .repair-toggle-slider.small {
-    background: rgba(var(--accent-rgb), 0.5);
-}
-.repair-job-toggle input:checked + .repair-toggle-slider.small::after {
-    transform: translateX(14px);
-    background: rgb(var(--accent-light-rgb));
-}
-
-/* Action buttons — compact 26x26 */
-.repair-run-btn, .repair-settings-btn, .repair-stop-btn {
-    background: transparent;
-    border: 1px solid var(--white-a08);
-    color: var(--white-a40);
-    width: 26px;
-    height: 26px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 11px;
-    transition: all var(--dur-base) ease;
-}
-/* Stop button (shown while a job is running) — reads as the destructive action */
-.repair-stop-btn {
-    border-color: rgba(239, 68, 68, 0.35);
-    color: rgba(248, 113, 113, 0.85);
-}
-.repair-stop-btn:hover {
-    background: rgba(239, 68, 68, 0.15);
-    color: rgb(248, 113, 113);
-    border-color: rgba(239, 68, 68, 0.5);
-}
-/* #970: stop clicked but the run hasn't unwound yet (waiting on its current item) */
-.repair-stop-btn.stopping {
-    cursor: default;
-    opacity: 0.6;
-    animation: repair-stop-pulse 1s ease-in-out infinite;
-}
-.repair-stop-btn.stopping:hover {
-    background: transparent;
-    color: rgba(248, 113, 113, 0.85);
-    border-color: rgba(239, 68, 68, 0.35);
-}
 @keyframes repair-stop-pulse {
     0%, 100% { opacity: 0.35; }
     50% { opacity: 0.7; }
 }
 
-.repair-run-btn:hover {
-    background: rgba(var(--accent-rgb), 0.15);
-    color: rgb(var(--accent-light-rgb));
-    border-color: rgba(var(--accent-rgb), 0.3);
-}
-.repair-settings-btn:hover {
-    background: var(--white-a08);
-    color: var(--white-a70);
-}
-
-/* Job settings panel */
-.repair-job-settings {
-    padding: 12px 16px 16px;
-    border-top: 1px solid var(--white-a04);
-    background: var(--black-a20);
-}
-
-/* The settings panel lives inside a job tile, and `.repair-tile` is
-   `overflow: hidden` (for its rounded corners and glow edge). So anything
-   wider than the tile is CLIPPED, not scrolled — the field just vanishes off
-   the right and cannot be filled in.
-
-   The row has to be able to shrink to whatever the tile gives it. Two things
-   stop that by default and both are handled below: a form control's
-   `min-width: auto` resolves to its INTRINSIC width (~170px for a number
-   input, regardless of any `width` we set), and a long label like
-   "Fingerprint Threshold" will not break. Together they put the row's minimum
-   at roughly the tile's inner width, so it clipped on some setups and not
-   others depending on scrollbars, zoom and column count. */
-.repair-setting-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    /* Last resort: drop the input onto its own line rather than clip it. */
-    flex-wrap: wrap;
-    padding: 7px 0;
-    gap: 6px 12px;
-    border-bottom: 1px dashed var(--white-a06);
-}
-
-.repair-setting-row:last-child {
-    border-bottom: none;
-}
-
-.repair-setting-row label {
-    font-size: 12px;
-    color: var(--white-a50);
-    /* Let the label give way before the input does — it is the part that can
-       afford to wrap. */
-    min-width: 0;
-    overflow-wrap: anywhere;
-}
-
-/* Section header inside a repair job settings panel — used to group related
-   toggles (e.g. "Release Types" above include_albums/eps/singles). Rendered
-   from `_section_*` sentinel keys in a job's default_settings. */
-.repair-setting-section {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.42);
-    padding: 12px 0 4px;
-    margin-top: 4px;
-    border-bottom: 1px solid var(--white-a10);
-}
-
-.repair-setting-section:first-child {
-    margin-top: 0;
-    padding-top: 4px;
-}
-
-.repair-setting-input {
-    background: var(--white-a06);
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-sm);
-    color: #fff;
-    padding: 5px 10px;
-    font-size: 12px;
-    width: 100px;
-    /* `min-width: 0` is the one that matters. Without it a form control's
-       min-width is `auto` = its intrinsic size, so it ignores the 100px above
-       and refuses to shrink — which is what pushed the row past the tile. */
-    min-width: 0;
-    max-width: 100%;
-    flex: 0 1 100px;
-    box-sizing: border-box;
-    text-align: right;
-}
-
-.repair-setting-input[type="checkbox"] {
-    width: auto;
-    accent-color: var(--accent);
-}
 
 /* Native <option> popups don't inherit the translucent select background, so
    they rendered as white-on-white. Give the options a solid dark background. */
@@ -49389,44 +48815,6 @@ tr.tag-diff-same {
     background: #1e1e24;
     color: #fff;
 }
-
-.repair-save-settings-btn {
-    margin-top: 10px;
-    /* Same story: the button must not be the thing that widens the panel. */
-    max-width: 100%;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 6px 16px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: opacity var(--dur-base) ease;
-}
-
-.repair-save-settings-btn:hover {
-    opacity: 0.85;
-}
-
-/* ── Cache Health Bar (Repair Dashboard) ── */
-.repair-cache-health { margin-top: 12px; }
-.repair-cache-health-bar {
-    display: flex; align-items: center; gap: 10px;
-    padding: 10px 16px; border-radius: var(--radius-control); cursor: pointer;
-    background: var(--white-a03); border: 1px solid var(--white-a06);
-    transition: all var(--dur-base);
-}
-.repair-cache-health-bar:hover { background: var(--white-a05); border-color: rgba(var(--accent-rgb), 0.15); }
-.repair-cache-health-dot {
-    width: 8px; height: 8px; border-radius: var(--radius-circle); flex-shrink: 0;
-}
-.repair-cache-health-dot.healthy { background: var(--success-strong); box-shadow: 0 0 6px rgba(var(--success-strong-rgb), 0.4); }
-.repair-cache-health-dot.fair { background: var(--warning-strong); box-shadow: 0 0 6px rgba(var(--warning-strong-rgb), 0.4); }
-.repair-cache-health-dot.poor { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,0.4); }
-.repair-cache-health-title { font-size: 13px; font-weight: 600; color: var(--white-a70); }
-.repair-cache-health-summary { flex: 1; font-size: 12px; color: var(--white-a30); }
-.repair-cache-health-action { font-size: 12px; color: rgb(var(--accent-rgb)); white-space: nowrap; }
 
 /* ── Cache Health Modal ── */
 .cache-health-modal {
@@ -50001,62 +49389,6 @@ tr.tag-diff-same {
 .mb-search-result-disambig { font-size: 11px; color: var(--white-a25); font-style: italic; margin-top: 3px; }
 .mb-search-result-detail { font-size: 11px; color: var(--white-a30); margin-top: 3px; }
 .mb-search-result-mbid { font-size: 9px; color: var(--white-a12); font-family: monospace; flex-shrink: 0; letter-spacing: 0.5px; }
-
-/* ── Findings Tab ── */
-/* ── Findings grouped by album / artist ──────────────────────────────────────
-   The upgrade backlog as things you can decide about, instead of one row per
-   track. Art comes off the finding, so the grid renders in one request. */
-.repair-album-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 16px;
-    margin-bottom: 16px;
-}
-
-.repair-album-card {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    padding: 10px;
-    background: rgba(18, 22, 34, 0.65);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-card);
-    overflow: hidden;
-    cursor: pointer;
-    text-align: left;
-    color: inherit;
-    font: inherit;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    transition: all var(--dur-moderate) var(--ease-emphasized);
-    box-shadow: 0 4px 16px var(--black-a25);
-}
-.repair-album-card:hover {
-    background: rgba(26, 32, 50, 0.8);
-    border-color: rgba(168, 85, 247, 0.45);
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px var(--black-a40), 0 0 16px rgba(168, 85, 247, 0.18);
-}
-.repair-album-card.active {
-    border-color: rgba(168, 85, 247, 0.9);
-    background: rgba(30, 36, 62, 0.9);
-    box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.45), 0 10px 30px var(--black-a50);
-}
-.repair-album-card:focus-visible {
-    outline: 2px solid rgb(var(--accent-rgb));
-    outline-offset: 2px;
-}
-
-.repair-album-art {
-    position: relative;
-    aspect-ratio: 1;
-    border-radius: var(--radius-control);
-    overflow: hidden;
-    background: var(--white-a04);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
 .repair-album-art img {
     width: 100%;
     height: 100%;
@@ -50114,108 +49446,6 @@ tr.tag-diff-same {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     text-shadow: 0 1px 3px var(--black-a50);
 }
-
-/* The count badge sits ON the art with sleek frosted glass */
-.repair-album-count {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    min-width: 22px;
-    height: 22px;
-    padding: 0 6px;
-    border-radius: 11px;
-    background: rgba(0, 0, 0, 0.72);
-    border: 1px solid var(--white-a12);
-    color: #fff;
-    font-size: 11.5px;
-    font-weight: 700;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    z-index: 2;
-}
-
-.repair-album-meta {
-    padding: 8px 2px 2px;
-    min-width: 0;
-}
-.repair-album-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.repair-album-artist {
-    font-size: 12px;
-    color: var(--white-a55);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    margin-top: 1px;
-}
-/* The worst quality is why the card is here, so it gets the accent. */
-.repair-album-quality {
-    font-size: 11px;
-    color: rgb(var(--accent-rgb));
-    font-weight: 600;
-    margin-top: 6px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.repair-album-tracks {
-    font-size: 11px;
-    color: var(--white-a40);
-    margin-top: 2px;
-}
-
-.repair-album-error-badge {
-    border: 1px solid var(--white-a20);
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    -webkit-backdrop-filter: blur(4px);
-}
-
-.repair-album-tags {
-    align-items: center;
-}
-
-.repair-album-tag.corrupt_audio {
-    background: rgba(239, 68, 68, 0.15);
-    color: #fca5a5;
-    border: 1px solid rgba(239, 68, 68, 0.3);
-}
-
-.repair-album-tag.short_preview_track {
-    background: rgba(var(--warning-strong-rgb), 0.15);
-    color: #fcd34d;
-    border: 1px solid rgba(var(--warning-strong-rgb), 0.3);
-}
-
-.repair-album-tag.more {
-    color: var(--white-a40);
-    background: transparent;
-}
-
-.repair-album-grid-empty {
-    padding: 28px 14px;
-    text-align: center;
-    color: var(--white-a45);
-    font-size: 13px;
-}
-
-/* The list/album/artist switch, sitting with the other findings controls. */
-.repair-view-switch {
-    display: inline-flex;
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-}
 .repair-view-switch button {
     background: var(--white-a06);
     border: 0;
@@ -50235,143 +49465,6 @@ tr.tag-diff-same {
     background: rgb(var(--accent-rgb));
     color: #fff;
     font-weight: 600;
-}
-
-@media (max-width: 640px) {
-    .repair-album-grid {
-        grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-        gap: 10px;
-    }
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   PREMIER FINDINGS SUITE & WORKSTATION TRAY
-   Luxurious obsidian aesthetics, glowing accents, and fluid interactions
-   ───────────────────────────────────────────────────────────────────────────── */
-
-.repair-findings-header-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--white-a06);
-}
-
-.repair-view-mode-tabs {
-    display: inline-flex;
-    background: rgba(15, 23, 42, 0.65);
-    border: 1px solid var(--white-a08);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border-radius: var(--radius-control);
-    padding: 3px;
-    gap: 3px;
-    box-shadow: 0 4px 16px var(--black-a25);
-}
-
-.repair-view-mode-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: transparent;
-    border: none;
-    border-radius: 7px;
-    color: var(--white-a60);
-    padding: 7px 14px;
-    font-size: 12.5px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--dur-base) var(--ease-standard);
-}
-
-.repair-view-mode-tab:hover {
-    color: #fff;
-    background: var(--white-a06);
-}
-
-.repair-view-mode-tab.active {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.35) 0%, rgba(168, 85, 247, 0.35) 100%);
-    border: 1px solid rgba(168, 85, 247, 0.4);
-    color: #fff;
-    font-weight: 600;
-    box-shadow: 0 2px 10px rgba(168, 85, 247, 0.25);
-}
-
-.repair-view-mode-icon {
-    font-size: 13px;
-    display: inline-block;
-}
-
-.repair-album-error-badge {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    background: rgba(239, 68, 68, 0.9);
-    backdrop-filter: blur(4px);
-    color: #fff;
-    font-size: 10.5px;
-    font-weight: 700;
-    padding: 2px 7px;
-    border-radius: var(--radius-pill);
-    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.5);
-    z-index: 2;
-    letter-spacing: 0.02em;
-}
-
-.repair-album-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 6px;
-}
-
-.repair-album-tag {
-    white-space: nowrap;
-    font-size: 9.5px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 2px 6px;
-    border-radius: var(--radius-xs);
-    background: var(--white-a08);
-    color: var(--white-a70);
-}
-
-.repair-album-tag.corrupt {
-    background: rgba(239, 68, 68, 0.2);
-    color: #fca5a5;
-    border: 1px solid rgba(239, 68, 68, 0.35);
-}
-
-.repair-album-tag.preview {
-    background: rgba(var(--warning-strong-rgb), 0.2);
-    color: #fcd34d;
-    border: 1px solid rgba(var(--warning-strong-rgb), 0.35);
-}
-
-.repair-album-tag.quality {
-    background: rgba(56, 189, 248, 0.2);
-    color: #7dd3fc;
-    border: 1px solid rgba(56, 189, 248, 0.35);
-}
-
-.repair-album-tag.missing_lyrics,
-.repair-album-tag.missing-lyrics {
-    background: rgba(56, 189, 248, 0.18);
-    color: #38bdf8;
-    border: 1px solid rgba(56, 189, 248, 0.35);
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   ALBUM INSPECTION TRAY (Action Center Workstation)
-   ───────────────────────────────────────────────────────────────────────────── */
-
-.repair-albums-view {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    margin-bottom: 24px;
 }
 
 .album-inspection-tray {
@@ -50430,18 +49523,6 @@ tr.tag-diff-same {
     height: 100%;
     object-fit: cover;
     display: block;
-}
-
-.album-tray-art-fallback {
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 26px;
-    font-weight: 700;
-    color: var(--white-a50);
 }
 
 .album-tray-info {
@@ -50873,72 +49954,6 @@ tr.tag-diff-same {
     color: #cbd5e1;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   DIAGNOSTIC ERROR CALLOUT BANNER IN FINDING CARDS
-   ───────────────────────────────────────────────────────────────────────────── */
-
-.repair-finding-error-banner {
-    margin: 8px 14px 12px;
-    padding: 10px 14px;
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px solid rgba(239, 68, 68, 0.35);
-    border-radius: var(--radius-md);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);
-}
-
-.repair-finding-error-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 600;
-    color: #f87171;
-    font-size: 12px;
-    flex-shrink: 0;
-}
-
-.repair-finding-error-text {
-    flex: 1;
-    font-size: 11.5px;
-    color: #fca5a5;
-    word-break: break-word;
-}
-
-.repair-finding-error-retry {
-    background: rgba(239, 68, 68, 0.2);
-    border: 1px solid rgba(239, 68, 68, 0.4);
-    color: #fff;
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    font-size: 11.5px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--dur-fast) ease;
-    flex-shrink: 0;
-}
-
-.repair-finding-error-retry:hover {
-    background: rgba(239, 68, 68, 0.35);
-    border-color: rgba(239, 68, 68, 0.6);
-}
-
-.repair-findings-toolbar {
-    display: flex;
-    align-items: center;
-    margin-bottom: 14px;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.repair-findings-filters {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-}
-
 .repair-findings-filters select {
     background: var(--white-a06);
     border: 1px solid var(--white-a10);
@@ -50952,146 +49967,12 @@ tr.tag-diff-same {
 .repair-findings-filters select option {
     background: var(--bg-raised);
 }
-
-.repair-select-all {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    color: var(--white-a60);
-    font-size: 12px;
-    user-select: none;
-}
 .repair-select-all input[type="checkbox"] {
     accent-color: rgb(var(--accent-rgb));
     cursor: pointer;
 }
-.repair-select-all:hover {
-    color: var(--white-a90);
-}
-
-.repair-findings-bulk {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.repair-bulk-count {
-    color: var(--white-a60);
-    font-size: 12px;
-    margin-right: 4px;
-}
-
-/* .repair-bulk-btn / .fix / .fix-all migrated to .btn .btn--sm
-   (.btn--secondary / .btn--primary / .btn--warning). */
-
-.repair-clear-btn {
-    margin-left: auto;
-    background: rgba(239, 68, 68, 0.08);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    border-radius: var(--radius-sm);
-    padding: 5px 12px;
-    color: #f87171;
-    font-size: 11px;
-    cursor: pointer;
-    transition: all var(--dur-base) ease;
-}
-
-.repair-clear-btn:hover {
-    background: rgba(239, 68, 68, 0.18);
-    border-color: rgba(239, 68, 68, 0.4);
-}
-
-.repair-findings-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-/* Finding card — expandable two-row layout */
-.repair-finding-card {
-    background: rgba(22, 22, 22, 0.95);
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-control);
-    /* overflow: clip (not hidden): keeps the rounded-corner clipping but,
-       unlike hidden, does NOT make the card a scroll container — so the
-       sticky card header below can stick to the inbox scrollport instead
-       of being trapped inside the card. */
-    overflow: clip;
-    transition: all var(--dur-base) ease;
-}
-.repair-finding-card:hover {
-    border-color: var(--white-a12);
-    background: rgba(28, 28, 28, 0.98);
-}
-.repair-finding-card.warning {
-    border-left: 3px solid rgba(var(--warning-strong-rgb), 0.5);
-}
-.repair-finding-card.critical {
-    border-left: 3px solid rgba(239, 68, 68, 0.5);
-}
-.repair-finding-card.info {
-    border-left: 3px solid rgba(59, 130, 246, 0.3);
-}
-
-.repair-finding-main {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    cursor: pointer;
-}
-
-.repair-finding-select {
-    flex-shrink: 0;
-}
 .repair-finding-select input[type="checkbox"] {
     accent-color: var(--accent);
-}
-
-.repair-finding-content {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.repair-finding-title {
-    font-size: 13px;
-    font-weight: 500;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-}
-.repair-finding-icon {
-    font-size: 12px;
-    flex-shrink: 0;
-}
-.repair-finding-status-badge {
-    font-size: 9px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: var(--radius-md);
-    text-transform: uppercase;
-}
-.repair-finding-status-badge.resolved {
-    background: rgba(var(--success-strong-rgb), 0.12);
-    color: var(--success-strong);
-}
-.repair-finding-status-badge.dismissed {
-    background: var(--white-a06);
-    color: var(--white-a40);
-}
-.repair-finding-type-badge {
-    font-size: 10px;
-    font-weight: 500;
-    padding: 1px 7px;
-    border-radius: var(--radius-md);
-    background: rgba(var(--accent-rgb), 0.1);
-    color: rgb(var(--accent-light-rgb));
 }
 
 .repair-finding-desc {
@@ -51100,124 +49981,12 @@ tr.tag-diff-same {
     line-height: 1.4;
 }
 
-.repair-finding-path {
-    font-size: 11px;
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-    color: var(--white-a30);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
 .repair-finding-meta {
     font-size: 10px;
     color: var(--white-a25);
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
-}
-
-.repair-finding-actions {
-    display: flex;
-    gap: 4px;
-    flex-shrink: 0;
-    align-items: center;
-}
-
-.repair-finding-btn {
-    background: none;
-    border: 1px solid var(--white-a08);
-    border-radius: 5px;
-    min-width: 26px;
-    height: 26px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 13px;
-    transition: all var(--dur-base) ease;
-}
-.repair-finding-btn.fix {
-    color: rgb(var(--accent-light-rgb));
-    border-color: rgba(var(--accent-rgb), 0.25);
-    font-size: 10px;
-    font-weight: 600;
-    padding: 0 8px;
-    letter-spacing: 0.02em;
-}
-.repair-finding-btn.fix:hover {
-    background: rgba(var(--accent-rgb), 0.15);
-    border-color: rgba(var(--accent-rgb), 0.4);
-}
-.repair-finding-btn.fix:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-.repair-finding-btn.resolve {
-    color: var(--success-strong);
-}
-.repair-finding-btn.resolve:hover {
-    background: rgba(var(--success-strong-rgb), 0.15);
-    border-color: rgba(var(--success-strong-rgb), 0.3);
-}
-.repair-finding-btn.dismiss {
-    color: var(--white-a40);
-}
-.repair-finding-btn.dismiss:hover {
-    background: rgba(239, 68, 68, 0.12);
-    border-color: rgba(239, 68, 68, 0.3);
-    color: #ef4444;
-}
-.repair-finding-expand-btn {
-    background: none;
-    border: 1px solid var(--white-a06);
-    border-radius: 5px;
-    width: 26px;
-    height: 26px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    color: var(--white-a30);
-    transition: all var(--dur-base) ease;
-}
-.repair-finding-expand-btn:hover {
-    background: var(--white-a08);
-    color: var(--white-a60);
-}
-.repair-finding-expand-btn.open {
-    transform: rotate(180deg);
-}
-
-/* Finding detail panel — expandable */
-.repair-finding-detail {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height var(--dur-moderate) ease;
-}
-.repair-finding-detail.open {
-    max-height: 600px;
-    overflow-y: auto;
-    border-top: 1px solid var(--white-a04);
-}
-/* The expanded detail (600px) is taller than the scrolling inbox body
-   (480px), so the card header — with its per-track Fix/X buttons — used to
-   scroll out of view, leaving only the group-level "Re-tag…" button visible.
-   Pin the header of an open card to the top of the inbox scrollport so the
-   per-track actions stay reachable while the detail scrolls beneath. */
-.repair-finding-card:has(.repair-finding-detail.open) .repair-finding-main {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    background: rgba(22, 22, 22, 0.98);
-    border-bottom: 1px solid var(--white-a04);
-}
-.repair-finding-detail-inner {
-    padding: 16px 18px 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
 }
 
 /* Detail key-value rows */
@@ -51552,157 +50321,18 @@ tr.tag-diff-same {
 .repair-score-bar-fill.good { background: #4ade80; }
 .repair-score-bar-fill.warn { background: #fbbf24; }
 .repair-score-bar-fill.bad { background: #f87171; }
-
-/* Pagination */
-.repair-findings-pagination {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 4px;
-    padding: 14px 0 4px;
-}
-.repair-page-btn {
-    background: var(--white-a06);
-    border: 1px solid var(--white-a08);
-    color: var(--white-a50);
-    padding: 4px 10px;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: all var(--dur-base) ease;
-}
-.repair-page-btn.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-}
-.repair-page-btn:hover:not(.active) {
-    background: var(--white-a12);
-    color: #fff;
-}
-.repair-page-info {
-    font-size: 11px;
-    color: var(--white-a30);
-    padding: 0 8px;
-}
-
-/* ── History Tab ── */
-.repair-history-list {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.repair-history-entry {
-    padding: 12px 14px;
-    background: rgba(22, 22, 22, 0.95);
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-control);
-    transition: all var(--dur-base) ease;
-}
-.repair-history-entry:hover {
-    border-color: var(--white-a10);
-    background: rgba(28, 28, 28, 0.98);
-}
-
-.repair-history-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-}
-.repair-history-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: var(--radius-circle);
-    flex-shrink: 0;
-}
-.repair-history-dot.success {
-    background: #4ade80;
-    box-shadow: 0 0 6px rgba(74, 222, 128, 0.4);
-}
-.repair-history-dot.error {
-    background: #f87171;
-    box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
-}
-.repair-history-dot.running {
-    background: rgb(var(--accent-rgb));
-    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4);
-}
-
-.repair-history-name {
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    flex: 1;
-}
-
-.repair-history-status {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: var(--radius-md);
-    text-transform: uppercase;
-}
-.repair-history-status.success {
-    background: rgba(var(--success-strong-rgb), 0.12);
-    color: var(--success-strong);
-}
-.repair-history-status.error {
-    background: rgba(239, 68, 68, 0.12);
-    color: #ef4444;
-}
-.repair-history-status.running {
-    background: rgba(var(--accent-rgb), 0.12);
-    color: var(--accent);
-}
-.repair-history-duration {
-    font-size: 11px;
-    color: var(--white-a35);
-}
-
-.repair-history-stats {
-    display: flex;
-    gap: 4px;
-    flex-wrap: wrap;
-}
-.repair-history-stat {
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: var(--radius-sm);
-    background: var(--white-a04);
-    color: var(--white-a45);
-}
 .repair-history-stat strong {
     color: var(--white-a70);
     font-weight: 600;
 }
-.repair-history-stat.findings {
-    background: rgba(var(--warning-strong-rgb), 0.08);
-    color: rgba(var(--warning-strong-rgb), 0.7);
-}
 .repair-history-stat.findings strong {
     color: var(--warning-strong);
-}
-.repair-history-stat.errors {
-    background: rgba(239, 68, 68, 0.08);
-    color: rgba(239, 68, 68, 0.7);
 }
 .repair-history-stat.errors strong {
     color: #ef4444;
 }
-.repair-history-stat.fixed {
-    background: rgba(var(--success-strong-rgb), 0.08);
-    color: rgba(var(--success-strong-rgb), 0.7);
-}
 .repair-history-stat.fixed strong {
     color: var(--success-strong);
-}
-
-.repair-history-meta {
-    font-size: 10px;
-    color: var(--white-a25);
-    margin-top: 6px;
 }
 
 /* ── Responsive ── */
@@ -51711,26 +50341,9 @@ tr.tag-diff-same {
         padding: 12px 14px;
     }
 
-    .repair-findings-filters {
-        flex-wrap: wrap;
-    }
-
-    .repair-job-main {
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .repair-job-actions {
-        align-self: flex-end;
-    }
-
     .repair-detail-grid {
         grid-template-columns: 1fr;
         gap: 2px;
-    }
-
-    .repair-help-modal {
-        max-width: 95vw;
     }
 }
 
@@ -51739,186 +50352,19 @@ tr.tag-diff-same {
     0%, 100% { box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.08); }
     50% { box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.2); }
 }
-
-.repair-job-card.running {
-    animation: repair-card-glow 2s ease-in-out infinite;
-}
-
-.repair-job-progress {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height var(--dur-slow) ease, padding var(--dur-slow) ease;
-    padding: 0 14px;
-}
-
-.repair-job-progress.visible {
-    max-height: 300px;
-    padding: 8px 14px 12px;
-    border-top: 1px solid var(--white-a04);
-}
-
-.repair-progress-bar-wrap {
-    width: 100%;
-    height: 3px;
-    background: var(--white-a06);
-    border-radius: 2px;
-    overflow: hidden;
-    margin-bottom: 6px;
-}
-
-.repair-progress-bar {
-    height: 100%;
-    background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    transition: width var(--dur-slowest) ease;
-    border-radius: 2px;
-}
-
-.repair-job-progress.finished .repair-progress-bar {
-    background: #4ade80;
-}
-
-.repair-job-progress.error .repair-progress-bar {
-    background: #ef4444;
-}
-
-.repair-progress-phase {
-    font-size: 10px;
-    color: var(--white-a50);
-    margin-bottom: 4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.repair-progress-log {
-    max-height: 200px;
-    overflow-y: auto;
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-    font-size: 10px;
-    line-height: 1.5;
-}
-
-.repair-progress-log::-webkit-scrollbar {
-    width: 4px;
-}
-
-.repair-progress-log::-webkit-scrollbar-thumb {
-    background: var(--white-a10);
-    border-radius: 2px;
-}
-
-.repair-log-line {
-    padding: 1px 0;
-    color: var(--white-a45);
-}
-
-.repair-log-line.success {
-    color: #4ade80;
-}
-
-.repair-log-line.error {
-    color: #f87171;
-}
-
-.repair-log-line.skip {
-    color: var(--white-a25);
-}
-
-/* ── Repair Job Help Button & Modal ── */
-.repair-help-btn {
-    background: transparent;
-    border: 1px solid var(--white-a08);
-    color: var(--white-a35);
-    width: 26px;
-    height: 26px;
-    border-radius: var(--radius-circle);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 600;
-    transition: all var(--dur-base) ease;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-}
-.repair-help-btn:hover {
-    background: rgba(var(--accent-rgb), 0.15);
-    color: rgb(var(--accent-light-rgb));
-    border-color: rgba(var(--accent-rgb), 0.3);
-}
-
-.repair-help-overlay {
-    position: fixed;
-    inset: 0;
-    background: var(--black-a60);
-    z-index: 10001;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    backdrop-filter: blur(4px);
-    animation: repair-help-fadein 0.15s ease;
-}
 @keyframes repair-help-fadein {
     from { opacity: 0; }
     to { opacity: 1; }
 }
-
-.repair-help-modal {
-    background: rgba(18, 18, 18, 0.98);
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-xl);
-    width: 90vw;
-    max-width: 480px;
-    max-height: 80vh;
-    max-height: 80dvh;
-    overflow-y: auto;
-    box-shadow: 0 24px 64px var(--black-a60);
-    animation: repair-help-slidein 0.2s ease;
-}
 @keyframes repair-help-slidein {
     from { transform: translateY(12px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
-}
-
-.repair-help-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 24px 12px;
 }
 .repair-help-header h3 {
     margin: 0;
     font-size: 18px;
     font-weight: 600;
     color: #fff;
-}
-.repair-help-close {
-    background: none;
-    border: none;
-    color: var(--white-a40);
-    font-size: 22px;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-    transition: all var(--dur-base) ease;
-}
-.repair-help-close:hover {
-    color: #fff;
-    background: var(--white-a10);
-}
-
-.repair-help-badges {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    padding: 0 24px 16px;
-}
-
-.repair-help-body {
-    padding: 0 24px 20px;
-    color: var(--white-a65);
-    font-size: 13px;
-    line-height: 1.7;
 }
 .repair-help-body p {
     margin: 0 0 12px;
@@ -51927,689 +50373,14 @@ tr.tag-diff-same {
     margin-bottom: 0;
 }
 
-.repair-help-setting-list {
-    background: var(--white-a03);
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-md);
-    padding: 10px 14px;
-    margin-top: 4px;
-}
-.repair-help-setting-item {
-    font-size: 12px;
-    color: var(--white-a55);
-    padding: 3px 0;
-    line-height: 1.5;
-}
-.repair-help-setting-item::before {
-    content: '\2022';
-    color: rgb(var(--accent-light-rgb));
-    margin-right: 8px;
-}
-
-.repair-help-settings-section {
-    padding: 0 24px 20px;
-}
-.repair-help-section-title {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--white-a35);
-    margin-bottom: 8px;
-}
-.repair-help-setting {
-    display: flex;
-    justify-content: space-between;
-    padding: 5px 0;
-    border-bottom: 1px solid var(--white-a04);
-}
-.repair-help-setting:last-child {
-    border-bottom: none;
-}
-.repair-help-setting-key {
-    font-size: 12px;
-    color: var(--white-a50);
-}
-.repair-help-setting-val {
-    font-size: 12px;
-    color: #fff;
-    font-weight: 500;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   OPERATIONS WORKSTATION: MODE SWITCHER & STUDIO VIEW (Simple vs Advanced)
-   ───────────────────────────────────────────────────────────────────────────── */
-
-.operations-wrapper {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-/* Mode Switcher Bar */
-.operations-mode-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 16px 20px;
-    background: rgba(18, 22, 34, 0.7);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-card);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 4px 20px var(--black-a25);
-    flex-wrap: wrap;
-}
-
-.operations-mode-meta {
-    flex: 1;
-    min-width: 260px;
-}
-
-.operations-mode-heading {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 4px;
-}
-
-.operations-mode-pill {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 2px 8px;
-    border-radius: var(--radius-pill);
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25));
-    border: 1px solid rgba(168, 85, 247, 0.4);
-    color: #e0e7ff;
-}
-
-.operations-mode-label {
-    font-size: 14px;
-    font-weight: 600;
-    color: #fff;
-}
-
-.operations-mode-description {
-    margin: 0;
-    font-size: 12px;
-    color: var(--white-a55);
-    line-height: 1.45;
-}
-
-.operations-mode-toggle-group {
-    display: inline-flex;
-    background: var(--black-a40);
-    border: 1px solid var(--white-a10);
-    padding: 4px;
-    border-radius: var(--radius-control);
-    gap: 4px;
-}
-
-.operations-mode-toggle-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: transparent;
-    border: none;
-    border-radius: 7px;
-    color: var(--white-a60);
-    padding: 8px 16px;
-    font-size: 12.5px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all var(--dur-base) var(--ease-emphasized);
-}
-
-.operations-mode-toggle-btn:hover {
-    color: #fff;
-    background: var(--white-a06);
-}
-
-.operations-mode-toggle-btn.active {
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.85) 0%, rgba(168, 85, 247, 0.85) 100%);
-    border: 1px solid var(--white-a25);
-    color: #fff;
-    font-weight: 600;
-    box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
-}
-
-.operations-mode-toggle-icon {
-    font-size: 13px;
-}
-
 /* Below 360px the toggle group's two buttons total ~282px and start after
    the hero's left block — at 320px the group ran to x=328 and the page
    scrolled sideways (batch #2 fold-in). Tighten the buttons so the group
    fits the narrowest phones; ≥360px rendering is untouched. */
-@media (max-width: 359px) {
-    .operations-mode-toggle-group {
-        max-width: 100%;
-    }
-
-    .operations-mode-toggle-btn {
-        padding: 8px 10px;
-        gap: 4px;
-    }
-}
-
-/* Header Actions: Mode switcher + Master toggle in maintenance header */
-.tools-maintenance-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-}
-
-/* Executive Library Health Hero in Simple Studio */
-.operations-executive-hero {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 18px 24px;
-    background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);
-    border: 1px solid var(--white-a10);
-    border-radius: var(--radius-xl);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 8px 32px var(--black-a35);
-    flex-wrap: wrap;
-}
-
-.operations-exec-metric {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-}
-
-.operations-exec-score {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-width: 68px;
-    height: 68px;
-    border-radius: var(--radius-card);
-    background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, rgba(15, 23, 42, 0.6) 100%);
-    border: 1px solid rgba(129, 140, 248, 0.4);
-    box-shadow: 0 0 18px rgba(99, 102, 241, 0.2);
-}
-
-.operations-exec-num {
-    font-size: 20px;
-    font-weight: 800;
-    color: #fff;
-    line-height: 1;
-    font-family: ui-monospace, SFMono-Regular, monospace;
-}
-
-.operations-exec-status {
-    font-size: 9.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #a5b4fc;
-    margin-top: 3px;
-}
-
-.operations-exec-detail {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.operations-exec-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.01em;
-}
-
-.operations-exec-sub {
-    font-size: 13px;
-    color: var(--white-a60);
-}
-
-.operations-exec-cta {
-    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-    border: 1px solid var(--white-a20);
-    color: #fff;
-    font-size: 13px;
-    font-weight: 600;
-    padding: 10px 20px;
-    border-radius: var(--radius-control);
-    cursor: pointer;
-    box-shadow: 0 4px 16px rgba(16, 185, 129, 0.35);
-    transition: all var(--dur-base) var(--ease-emphasized);
-}
-
-.operations-exec-cta:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
-}
-
-/* Spotlight Section in Simple Studio */
-.operations-spotlight-section {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    background: linear-gradient(180deg, rgba(17, 24, 39, 0.75) 0%, rgba(15, 23, 42, 0.65) 100%);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-xl);
-    padding: 22px;
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 8px 32px var(--black-a35);
-}
-
-.operations-spotlight-header {
-    margin-bottom: 6px;
-}
-
-.operations-spotlight-title-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 5px;
-}
-
-.operations-spotlight-badge {
-    font-size: 10.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 2px 8px;
-    border-radius: var(--radius-xs);
-    background: linear-gradient(135deg, rgba(168, 85, 247, 0.2) 0%, rgba(99, 102, 241, 0.2) 100%);
-    border: 1px solid rgba(168, 85, 247, 0.4);
-    color: #c084fc;
-}
-
-.operations-spotlight-title {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #fff;
-}
-
-.operations-spotlight-sub {
-    margin: 0;
-    font-size: 12.5px;
-    color: var(--white-a55);
-}
-
-/* ── Operations Studio View ─────────────────────────────────────────────── */
-
-.operations-studio {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
-}
-
-/* ── Autonomous Authority & Triage Center ────────────────────────────── */
-.operations-triage-section {
-    background: linear-gradient(180deg, rgba(17, 24, 39, 0.75) 0%, rgba(15, 23, 42, 0.65) 100%);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-xl);
-    padding: 22px;
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    box-shadow: 0 8px 32px var(--black-a35);
-}
-
-.operations-triage-header {
-    margin-bottom: 18px;
-}
-
-.operations-triage-title-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 5px;
-}
-
-.operations-triage-badge {
-    font-size: 10.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 2px 8px;
-    border-radius: var(--radius-xs);
-    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(56, 189, 248, 0.2) 100%);
-    border: 1px solid rgba(16, 185, 129, 0.4);
-    color: #34d399;
-}
-
-.operations-triage-title {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #fff;
-}
-
-.operations-triage-sub {
-    margin: 0;
-    font-size: 12.5px;
-    color: var(--white-a55);
-}
-
-.operations-triage-grid {
-    display: grid;
-    /* min(280px, 100%): the 280px floor must never exceed the container —
-       on a phone the cards live in a ~252px box and spilled out of their
-       parent card (mobile CSS batch #2, RC3). */
-    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
-    gap: 16px;
-}
-
-.operations-triage-card {
-    display: flex;
-    flex-direction: column;
-    background: var(--white-a03);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-card);
-    padding: 18px;
-    position: relative;
-    overflow: hidden;
-    transition: all var(--dur-moderate) var(--ease-emphasized);
-}
-
-.operations-triage-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    opacity: 0.8;
-}
-
-.operations-triage-card.safe {
-    background: linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, var(--white-a02) 100%);
-    border-color: rgba(16, 185, 129, 0.25);
-}
-.operations-triage-card.safe::before {
-    background: linear-gradient(90deg, #10b981, #34d399);
-}
-
-.operations-triage-card.suggestions {
-    background: linear-gradient(180deg, rgba(139, 92, 246, 0.05) 0%, var(--white-a02) 100%);
-    border-color: rgba(139, 92, 246, 0.25);
-}
-.operations-triage-card.suggestions::before {
-    background: linear-gradient(90deg, #8b5cf6, #c084fc);
-}
-
-.operations-triage-card.quarantine {
-    background: linear-gradient(180deg, rgba(239, 68, 68, 0.06) 0%, var(--white-a02) 100%);
-    border-color: rgba(239, 68, 68, 0.25);
-}
-.operations-triage-card.quarantine::before {
-    background: linear-gradient(90deg, #ef4444, #f87171);
-}
-
-.operations-triage-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 28px var(--black-a35);
-}
-.operations-triage-card.safe:hover {
-    border-color: rgba(16, 185, 129, 0.5);
-    box-shadow: 0 10px 28px var(--black-a35), 0 0 20px rgba(16, 185, 129, 0.15);
-}
-.operations-triage-card.quarantine:hover {
-    border-color: rgba(239, 68, 68, 0.5);
-    box-shadow: 0 10px 28px var(--black-a35), 0 0 20px rgba(239, 68, 68, 0.15);
-}
-
-.operations-triage-top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-}
-
-.operations-triage-icon {
-    font-size: 22px;
-}
-
-.operations-triage-count-pill {
-    font-size: 11px;
-    font-weight: 700;
-    padding: 3px 10px;
-    border-radius: var(--radius-pill);
-    letter-spacing: 0.02em;
-}
-.operations-triage-count-pill.safe {
-    background: rgba(16, 185, 129, 0.15);
-    border: 1px solid rgba(16, 185, 129, 0.35);
-    color: #34d399;
-}
-.operations-triage-count-pill.suggestions {
-    background: rgba(139, 92, 246, 0.15);
-    border: 1px solid rgba(139, 92, 246, 0.35);
-    color: #c084fc;
-}
-.operations-triage-count-pill.quarantine {
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.35);
-    color: #fca5a5;
-}
-
-.operations-triage-heading {
-    margin: 0 0 6px 0;
-    font-size: 14.5px;
-    font-weight: 600;
-    color: #fff;
-}
-
-.operations-triage-desc {
-    margin: 0 0 16px 0;
-    font-size: 12px;
-    color: var(--white-a55);
-    line-height: 1.45;
-    flex: 1;
-}
-
-.operations-triage-action-row {
-    margin-top: auto;
-}
-
-.operations-triage-btn {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 9px 16px;
-    border-radius: 9px;
-    font-size: 12.5px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all var(--dur-base) var(--ease-emphasized);
-}
-
-.operations-triage-btn.safe {
-    background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-    border: none;
-    color: #fff;
-    box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
-}
-.operations-triage-btn.safe:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
-    filter: brightness(1.08);
-}
-
-.operations-triage-btn.suggestions {
-    background: rgba(139, 92, 246, 0.15);
-    border: 1px solid rgba(139, 92, 246, 0.4);
-    color: #d8b4fe;
-}
-.operations-triage-btn.suggestions:hover:not(:disabled) {
-    background: rgba(139, 92, 246, 0.28);
-    color: #fff;
-    transform: translateY(-1px);
-}
-
-.operations-triage-btn.quarantine {
-    background: rgba(239, 68, 68, 0.12);
-    border: 1px solid rgba(239, 68, 68, 0.4);
-    color: #fca5a5;
-}
-.operations-triage-btn.quarantine:hover:not(:disabled) {
-    background: rgba(239, 68, 68, 0.22);
-    color: #fff;
-    transform: translateY(-1px);
-}
-
-.operations-triage-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-}
-
-/* ── Bulk Fix Progress Banner ─────────────────────────────────────────── */
-.operations-triage-bulk-banner,
-.operations-bulk-progress-panel {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-top: 18px;
-    padding: 14px 20px;
-    background: linear-gradient(135deg, rgba(6, 78, 59, 0.4) 0%, rgba(15, 23, 42, 0.75) 100%);
-    border: 1px solid rgba(16, 185, 129, 0.35);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 4px 20px var(--black-a30), 0 0 16px rgba(16, 185, 129, 0.15);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-.operations-triage-bulk-info,
-.operations-bulk-progress-info {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex: 1;
-    min-width: 0;
-}
-
-.operations-triage-bulk-pulse,
-.operations-bulk-pulse-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: var(--radius-circle);
-    background: #10b981;
-    box-shadow: 0 0 12px #34d399, 0 0 4px #fff;
-    animation: radar-pulse-dot 1.4s infinite ease-in-out;
-    flex-shrink: 0;
-}
-
-.operations-triage-bulk-text,
-.operations-bulk-progress-text {
-    font-size: 13px;
-    color: #e2e8f0;
-    font-weight: 500;
-}
-
-.operations-triage-bulk-stop,
-.operations-bulk-stop-btn {
-    background: rgba(239, 68, 68, 0.18);
-    border: 1px solid rgba(239, 68, 68, 0.4);
-    color: #fca5a5;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 6px 14px;
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: all var(--dur-base) ease;
-}
-
-.operations-triage-bulk-stop:hover,
-.operations-bulk-stop-btn:hover {
-    background: rgba(239, 68, 68, 0.3);
-    border-color: rgba(239, 68, 68, 0.6);
-    color: #fff;
-    box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
-}
-
-/* ── Live Mission Control Telemetry HUD ───────────────────────────────── */
-.operations-live-hud,
-.operations-mission-control-hud {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 20px 24px;
-    background: linear-gradient(135deg, rgba(30, 27, 75, 0.75) 0%, rgba(15, 23, 42, 0.9) 100%);
-    border: 1px solid rgba(129, 140, 248, 0.35);
-    border-radius: var(--radius-xl);
-    box-shadow: 0 10px 36px var(--black-a45), 0 0 28px rgba(99, 102, 241, 0.18);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    animation: hud-slide-down 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-    position: relative;
-    overflow: hidden;
-}
-
-.operations-live-hud::before,
-.operations-mission-control-hud::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg, transparent 0%, rgba(168, 85, 247, 0.6) 30%, rgba(56, 189, 248, 0.6) 70%, transparent 100%);
-}
 
 @keyframes hud-slide-down {
     from { transform: translateY(-8px); opacity: 0; }
     to { transform: translateY(0); opacity: 1; }
-}
-
-.operations-live-hud-head {
-    display: flex;
-    align-items: center;
-    gap: 18px;
-}
-
-.operations-live-hud-radar,
-.operations-hud-orb-box {
-    position: relative;
-    width: 44px;
-    height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: var(--radius-lg);
-    background: rgba(99, 102, 241, 0.18);
-    border: 1px solid rgba(129, 140, 248, 0.4);
-    flex-shrink: 0;
-    box-shadow: 0 0 16px rgba(99, 102, 241, 0.25);
-}
-
-.operations-live-hud-ping {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: var(--radius-lg);
-    border: 2px solid #818cf8;
-    animation: radar-pulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
-    pointer-events: none;
-}
-
-.operations-live-hud-dot,
-.operations-hud-orb {
-    width: 14px;
-    height: 14px;
-    border-radius: var(--radius-circle);
-    background: #6366f1;
-    box-shadow: 0 0 14px #818cf8, 0 0 4px #fff;
-    animation: radar-pulse-dot 1.5s infinite ease-in-out;
 }
 
 @keyframes radar-pulse {
@@ -52623,481 +50394,9 @@ tr.tag-diff-same {
     50% { transform: scale(1.15); opacity: 1; filter: brightness(1.2); }
 }
 
-.operations-live-hud-title-wrap,
-.operations-hud-meta {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.operations-live-hud-badge,
-.operations-hud-badge {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    padding: 2px 7px;
-    border-radius: var(--radius-xs);
-    background: rgba(99, 102, 241, 0.25);
-    border: 1px solid rgba(129, 140, 248, 0.5);
-    color: #c7d2fe;
-    width: fit-content;
-}
-
-.operations-live-hud-name,
-.operations-hud-job-name {
-    margin: 0;
-    font-size: 16.5px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.01em;
-}
-
-.operations-live-hud-phase,
-.operations-hud-phase {
-    margin: 0;
-    font-size: 12.5px;
-    color: #cbd5e1;
-    font-family: ui-monospace, SFMono-Regular, monospace;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    opacity: 0.85;
-}
-
-.operations-live-hud-actions {
-    display: flex;
-    align-items: center;
-    flex-shrink: 0;
-}
-
-.operations-live-hud-stop-btn,
-.operations-hud-stop-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(239, 68, 68, 0.15);
-    border: 1px solid rgba(239, 68, 68, 0.4);
-    color: #fca5a5;
-    font-size: 12.5px;
-    font-weight: 600;
-    padding: 8px 16px;
-    border-radius: 9px;
-    cursor: pointer;
-    transition: all var(--dur-base) var(--ease-emphasized);
-    box-shadow: 0 2px 8px var(--black-a20);
-    flex-shrink: 0;
-}
-
-.operations-live-hud-stop-btn:hover,
-.operations-hud-stop-btn:hover {
-    background: rgba(239, 68, 68, 0.3);
-    border-color: rgba(239, 68, 68, 0.6);
-    color: #fff;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
-}
-
-.operations-live-hud-bar-track,
-.operations-hud-progress-track {
-    height: 7px;
-    background: var(--black-a45);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-pill);
-    overflow: hidden;
-    position: relative;
-    margin-top: 4px;
-}
-
-.operations-live-hud-bar-fill,
-.operations-hud-progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #6366f1 0%, #a855f7 50%, #38bdf8 100%);
-    border-radius: var(--radius-pill);
-    transition: width var(--dur-slow) var(--ease-emphasized);
-    box-shadow: 0 0 12px rgba(129, 140, 248, 0.7);
-}
-
-/* Playbooks Section */
-.operations-playbooks-section {
-    background: rgba(15, 19, 30, 0.6);
-    border: 1px solid var(--white-a07);
-    border-radius: var(--radius-card);
-    padding: 20px;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-.operations-playbooks-header {
-    margin-bottom: 16px;
-}
-
-.operations-playbooks-title-group {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 4px;
-}
-
-.operations-playbooks-badge {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    padding: 2px 7px;
-    border-radius: var(--radius-xs);
-    background: rgba(56, 189, 248, 0.15);
-    border: 1px solid rgba(56, 189, 248, 0.35);
-    color: #7dd3fc;
-}
-
-.operations-playbooks-title {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
-    color: #fff;
-}
-
-.operations-playbooks-sub {
-    margin: 0;
-    font-size: 12px;
-    color: var(--white-a50);
-}
-
-.operations-playbooks-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 14px;
-}
-
-.operations-playbook-card {
-    display: flex;
-    flex-direction: column;
-    text-align: left;
-    background: var(--white-a03);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-lg);
-    padding: 16px;
-    cursor: pointer;
-    color: inherit;
-    font: inherit;
-    transition: all var(--dur-moderate) var(--ease-emphasized);
-    position: relative;
-    overflow: hidden;
-}
-
-.operations-playbook-card:hover {
-    background: var(--white-a06);
-    border-color: rgba(99, 102, 241, 0.45);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px var(--black-a30), 0 0 16px rgba(99, 102, 241, 0.15);
-}
-
-.operations-playbook-card.active {
-    border-color: rgba(99, 102, 241, 0.9);
-    background: rgba(99, 102, 241, 0.12);
-}
-
-.operations-playbook-icon {
-    font-size: 20px;
-}
-
-.operations-playbook-desc {
-    font-size: 11.5px;
-    color: var(--white-a50);
-    line-height: 1.4;
-    flex: 1;
-    margin-bottom: 14px;
-}
-
-/* Strategic Pillars Section */
-.operations-pillars-section {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
-
-.operations-pillars-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-}
-
-.operations-pillars-title-group {
-    flex-shrink: 0;
-}
-
-.operations-pillars-sub {
-    min-width: 0;
-    margin: 0;
-    font-size: 12px;
-    color: var(--white-a50);
-    text-align: right;
-}
-
 /* Phones: the title group and the explainer paragraph can't share a row —
    the paragraph was crushed into the leftover sliver beside the title and
    the two columns collided (batch #2, RC3). Stack them instead. */
-@media (max-width: 640px) {
-    .operations-pillars-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 6px;
-    }
-
-    .operations-pillars-sub {
-        margin: 0;
-        text-align: left;
-    }
-}
-
-.operations-pillars-title {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
-    color: #fff;
-}
-
-.operations-pillars-grid {
-    display: grid;
-    /* min(320px, 100%): see .operations-triage-grid — the floor capped at
-       the container width so a card can never be wider than a phone. */
-    grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
-    gap: 16px;
-}
-
-.operations-pillar-card {
-    display: flex;
-    flex-direction: column;
-    background: rgba(18, 22, 34, 0.65);
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-card);
-    padding: 20px;
-    position: relative;
-    overflow: hidden;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    transition: all var(--dur-moderate) var(--ease-emphasized);
-    box-shadow: 0 4px 16px var(--black-a25);
-}
-
-.operations-pillar-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: rgb(var(--pillar-glow, 99, 102, 241));
-    opacity: 0.6;
-    transition: opacity var(--dur-base) ease;
-}
-
-.operations-pillar-card:hover {
-    border-color: rgba(var(--pillar-glow, 99, 102, 241), 0.4);
-    box-shadow: 0 8px 30px var(--black-a40), 0 0 20px rgba(var(--pillar-glow, 99, 102, 241), 0.15);
-    transform: translateY(-2px);
-}
-
-.operations-pillar-card:hover::before {
-    opacity: 1;
-}
-
-.operations-pillar-card.running {
-    border-color: rgba(var(--pillar-glow, 99, 102, 241), 0.8);
-    box-shadow: 0 0 24px rgba(var(--pillar-glow, 99, 102, 241), 0.25);
-}
-
-.operations-pillar-head {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 10px;
-}
-
-.operations-pillar-icon-box {
-    width: 38px;
-    height: 38px;
-    border-radius: var(--radius-control);
-    background: rgba(var(--pillar-glow, 99, 102, 241), 0.15);
-    border: 1px solid rgba(var(--pillar-glow, 99, 102, 241), 0.3);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    flex-shrink: 0;
-}
-
-.operations-pillar-head-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.operations-pillar-name {
-    margin: 0;
-    font-size: 14.5px;
-    font-weight: 600;
-    color: #fff;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.operations-pillar-tagline {
-    font-size: 11.5px;
-    color: var(--white-a50);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: block;
-}
-
-.operations-pillar-findings-badge {
-    background: rgba(var(--warning-strong-rgb), 0.15);
-    border: 1px solid rgba(var(--warning-strong-rgb), 0.4);
-    color: #fbbf24;
-    font-size: 11px;
-    font-weight: 700;
-    padding: 3px 8px;
-    border-radius: var(--radius-pill);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: all var(--dur-base) ease;
-}
-
-.operations-pillar-findings-badge:hover {
-    background: rgba(var(--warning-strong-rgb), 0.3);
-    color: #fff;
-    transform: scale(1.04);
-}
-
-.operations-pillar-desc {
-    margin: 0 0 16px 0;
-    font-size: 12px;
-    color: var(--white-a60);
-    line-height: 1.5;
-}
-
-.operations-pillar-stats-row {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 16px;
-    padding: 10px;
-    background: var(--black-a30);
-    border: 1px solid var(--white-a05);
-    border-radius: var(--radius-md);
-}
-
-.operations-pillar-stat {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-}
-
-.operations-pillar-stat-val {
-    font-size: 13px;
-    font-weight: 700;
-    color: #fff;
-}
-
-.operations-pillar-stat-lbl {
-    font-size: 10px;
-    text-transform: uppercase;
-    color: var(--white-a40);
-    letter-spacing: 0.05em;
-    margin-top: 1px;
-}
-
-.operations-pillar-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 14px;
-    padding-top: 4px;
-}
-
-.operations-pillar-autopilot {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    user-select: none;
-}
-
-.operations-pillar-autopilot-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--white-a70);
-}
-
-.operations-pillar-scan-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: linear-gradient(135deg, rgba(var(--pillar-glow, 99, 102, 241), 0.8) 0%, rgba(var(--pillar-glow, 99, 102, 241), 0.5) 100%);
-    border: 1px solid var(--white-a20);
-    border-radius: var(--radius-md);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 7px 14px;
-    cursor: pointer;
-    transition: all var(--dur-base) var(--ease-emphasized);
-    box-shadow: 0 2px 8px var(--black-a30);
-}
-
-.operations-pillar-scan-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 14px rgba(var(--pillar-glow, 99, 102, 241), 0.4);
-    background: rgb(var(--pillar-glow, 99, 102, 241));
-}
-
-.operations-pillar-scan-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
-.operations-pillar-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding-top: 10px;
-    border-top: 1px solid var(--white-a05);
-    font-size: 11px;
-}
-
-.operations-pillar-subjob-hint {
-    color: var(--white-a35);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1;
-}
-
-.operations-pillar-inspect-link {
-    background: transparent;
-    border: none;
-    color: rgb(var(--accent-rgb));
-    font-weight: 600;
-    cursor: pointer;
-    padding: 0;
-    font-size: 11px;
-    flex-shrink: 0;
-    transition: color var(--dur-fast) ease;
-}
-
-.operations-pillar-inspect-link:hover {
-    color: #fff;
-    text-decoration: underline;
-}
 
 /* =====================================================
    SETTINGS PAGE — Modern Tabbed Redesign (stg- prefix)
@@ -57884,534 +55183,6 @@ body.max-performance #page-particles-canvas {
     font-weight: 500;
 }
 
-/* ── Library Maintenance hero section ── */
-.tools-maintenance-hero {
-    background: linear-gradient(135deg,
-        rgba(20, 20, 20, 0.95) 0%,
-        rgba(12, 12, 12, 0.98) 100%);
-    border: 1px solid var(--white-a08);
-    border-top: 1px solid var(--white-a12);
-    border-radius: var(--radius-xl);
-    padding: 20px 24px;
-    margin-bottom: 28px;
-    box-shadow:
-        0 4px 16px var(--black-a30),
-        inset 0 1px 0 var(--white-a06);
-    position: relative;
-}
-
-.tools-maintenance-hero::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg,
-        transparent,
-        rgba(var(--accent-rgb), 0.5),
-        rgba(var(--accent-rgb), 0.8),
-        rgba(var(--accent-rgb), 0.5),
-        transparent);
-    box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
-}
-
-.tools-maintenance-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 16px;
-}
-
-.tools-maintenance-header-left {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-}
-
-.tools-maintenance-logo {
-    width: 40px;
-    height: 40px;
-    border-radius: var(--radius-control);
-    object-fit: cover;
-    box-shadow: 0 2px 8px var(--black-a30);
-}
-
-.tools-maintenance-title {
-    font-size: 20px;
-    font-weight: 700;
-    color: #fff;
-    margin: 0 0 2px 0;
-    letter-spacing: -0.3px;
-}
-
-.tools-maintenance-subtitle {
-    font-size: 12px;
-    color: var(--white-a40);
-    margin: 0;
-    font-weight: 500;
-}
-
-/* ── The maintenance surface: one scroll, four sections ──
-   It used to be its own capped scroll box (max-height + overflow:auto) so the
-   tool cards sitting below it on the page stayed reachable. That gave the page
-   two scrollbars doing different jobs. The tool cards are their own tab now, so
-   nothing needs capping: this scrolls with the page, and the section nav sticks
-   to the viewport instead of to a box. */
-.tools-maintenance-hero {
-    overflow: visible;
-    scroll-behavior: smooth;
-}
-
-/* The 3px accent line was clipped by the hero's own overflow:hidden; with that
-   gone it has to round its own top corners or it juts past them. */
-.tools-maintenance-hero::before {
-    border-radius: 16px 16px 0 0;
-}
-
-/* ── Tools / Operations tabs ── */
-.tools-tabs {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 18px;
-    border-bottom: 1px solid var(--white-a08);
-}
-
-.tools-tab {
-    appearance: none;
-    background: none;
-    border: 0;
-    border-bottom: 2px solid transparent;
-    color: var(--white-a50);
-    padding: 9px 16px;
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    cursor: pointer;
-    transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
-}
-
-.tools-tab:hover {
-    color: #fff;
-}
-
-.tools-tab[aria-selected="true"] {
-    color: #fff;
-    border-bottom-color: rgb(var(--accent-rgb));
-}
-
-.tools-tab:focus-visible {
-    outline: 2px solid rgb(var(--accent-rgb));
-    outline-offset: -2px;
-    border-radius: var(--radius-xs);
-}
-
-.repair-section-nav {
-    position: sticky;
-    top: 0;
-    z-index: 5;
-    display: flex;
-    gap: 6px;
-    padding: 8px 0;
-    margin-bottom: 14px;
-    background: #17171b;
-    border-bottom: 1px solid var(--white-a06);
-}
-
-.repair-section-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    padding: 6px 13px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-pill);
-    background: var(--white-a04);
-    color: var(--white-a55);
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.2px;
-    cursor: pointer;
-    transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast);
-}
-
-.repair-section-link:hover {
-    color: #fff;
-    background: rgba(var(--accent-rgb), 0.12);
-    border-color: rgba(var(--accent-rgb), 0.3);
-}
-
-.repair-section {
-    margin-top: 26px;
-    scroll-margin-top: 52px;   /* clear the sticky nav when jumped to */
-}
-
-.repair-section-title {
-    margin: 0 0 12px 0;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-    color: var(--white-a35);
-}
-
-/* ── Library health hero ── */
-.repair-health {
-    display: flex;
-    align-items: center;
-    gap: 22px;
-    flex-wrap: wrap;
-    padding: 16px 18px;
-    margin-bottom: 14px;
-    border: 1px solid var(--white-a07);
-    border-radius: var(--radius-card);
-    background:
-        radial-gradient(120% 160% at 0% 0%, rgba(var(--accent-rgb), 0.09), transparent 60%),
-        var(--white-a02);
-    scroll-margin-top: 52px;
-}
-
-.repair-health-score-block {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-width: 96px;
-}
-
-.repair-health-score {
-    font-size: 52px;
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: -2px;
-    font-variant-numeric: tabular-nums;
-    background: linear-gradient(120deg, #fff 20%, var(--white-a55) 50%, #fff 80%);
-    background-size: 200% auto;
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: page-title-shimmer 6s ease-in-out infinite;
-}
-
-.repair-health-band {
-    margin-top: 5px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
-}
-
-.repair-health-band.healthy { color: var(--success-strong); }
-.repair-health-band.attention { color: var(--warning-strong); }
-.repair-health-band.unhealthy { color: #f44336; }
-
-.repair-health-body {
-    flex: 1 1 320px;
-    min-width: 0;
-}
-
-.repair-health-meta {
-    font-size: 12px;
-    color: var(--white-a45);
-    margin-bottom: 9px;
-}
-
-/* Each segment is one finding type, sized by its WEIGHTED share — otherwise
-   three corrupt files vanish behind four hundred missing covers. */
-.repair-health-bar {
-    display: flex;
-    gap: 2px;
-    height: 12px;
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    background: var(--white-a05);
-}
-
-.repair-health-seg {
-    min-width: 6px;
-    height: 100%;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    transition: filter var(--dur-fast), transform var(--dur-fast);
-}
-
-.repair-health-seg:hover { filter: brightness(1.35); }
-.repair-health-seg.error { background: #f44336; }
-.repair-health-seg.warning { background: var(--warning-strong); }
-.repair-health-seg.info { background: rgba(var(--accent-rgb), 0.45); }
-
-.repair-health-bar-empty {
-    font-size: 12px;
-    color: var(--white-a30);
-    font-style: italic;
-}
-
-.repair-health-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-top: 11px;
-}
-
-.repair-health-fix-safe {
-    padding: 7px 15px;
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(var(--accent-rgb), 0.35);
-    background: rgba(var(--accent-rgb), 0.14);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: background var(--dur-fast), opacity var(--dur-fast);
-}
-
-.repair-health-fix-safe:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.24); }
-.repair-health-fix-safe:disabled { opacity: 0.35; cursor: default; }
-
-.repair-health-actions-note {
-    font-size: 11px;
-    color: var(--white-a30);
-}
-
-.repair-health-trend {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    color: rgba(var(--accent-rgb), 0.7);
-}
-
-.repair-health-trend-label {
-    font-size: 10px;
-    letter-spacing: 0.4px;
-    color: var(--white-a25);
-}
-
-/* ── Status segmented control ── */
-.repair-status-segments {
-    display: inline-flex;
-    padding: 3px;
-    border-radius: 9px;
-    background: var(--white-a04);
-    border: 1px solid var(--white-a07);
-}
-
-.repair-status-seg {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 5px 11px;
-    border: none;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--white-a50);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background var(--dur-fast), color var(--dur-fast);
-}
-
-.repair-status-seg:hover { color: #fff; }
-
-.repair-status-seg.active {
-    background: rgba(var(--accent-rgb), 0.14);
-    color: #fff;
-    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.3);
-}
-
-.repair-status-seg-count {
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    color: var(--white-a35);
-}
-
-.repair-status-seg.active .repair-status-seg-count { color: var(--white-a75); }
-
-.repair-findings-search {
-    flex: 1 1 180px;
-    min-width: 140px;
-    padding: 6px 11px;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--white-a10);
-    background: var(--white-a05);
-    color: #fff;
-    font-size: 12px;
-}
-
-.repair-findings-search::placeholder { color: rgba(255, 255, 255, 0.28); }
-
-.repair-search-note {
-    padding: 9px 13px;
-    margin-bottom: 10px;
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(var(--accent-rgb), 0.22);
-    background: rgba(var(--accent-rgb), 0.07);
-    font-size: 12px;
-    color: var(--white-a65);
-}
-
-/* ── The findings inbox ── */
-.repair-inbox {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.repair-inbox-group {
-    border: 1px solid var(--white-a07);
-    border-left: 3px solid var(--white-a12);
-    border-radius: 11px;
-    background: var(--white-a02);
-    overflow: hidden;
-    scroll-margin-top: 60px;
-    transition: border-color var(--dur-fast), background var(--dur-fast);
-}
-
-.repair-inbox-group.critical { border-left-color: #f44336; }
-.repair-inbox-group.warning { border-left-color: var(--warning-strong); }
-.repair-inbox-group.info { border-left-color: rgba(var(--accent-rgb), 0.5); }
-.repair-inbox-group.open { background: rgba(255, 255, 255, 0.035); }
-
-.repair-inbox-head {
-    display: flex;
-    align-items: center;
-    gap: 13px;
-    padding: 13px 15px;
-    cursor: pointer;
-}
-
-.repair-inbox-head:hover { background: var(--white-a02); }
-
-.repair-inbox-sev {
-    font-size: 15px;
-    line-height: 1;
-    flex-shrink: 0;
-}
-
-.repair-inbox-count {
-    min-width: 58px;
-    font-size: 24px;
-    font-weight: 800;
-    line-height: 1;
-    letter-spacing: -0.8px;
-    font-variant-numeric: tabular-nums;
-    color: #fff;
-    flex-shrink: 0;
-}
-
-.repair-inbox-text {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.repair-inbox-label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    font-weight: 700;
-    color: #fff;
-}
-
-.repair-inbox-risk {
-    padding: 2px 7px;
-    border-radius: var(--radius-pill);
-    border: 1px solid rgba(244, 67, 54, 0.3);
-    background: rgba(244, 67, 54, 0.1);
-    color: #f88;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    text-transform: uppercase;
-}
-
-.repair-inbox-blurb {
-    font-size: 12px;
-    color: var(--white-a40);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.repair-inbox-actions {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    flex-shrink: 0;
-}
-
-.repair-inbox-btn {
-    padding: 6px 12px;
-    border-radius: 7px;
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    background: rgba(var(--accent-rgb), 0.13);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: background var(--dur-fast), opacity var(--dur-fast);
-}
-
-.repair-inbox-btn:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.22); }
-.repair-inbox-btn:disabled { opacity: 0.35; cursor: default; }
-
-/* Destructive verbs are outlined, not filled — they should never be the
-   most clickable thing in the row. */
-.repair-inbox-btn.destructive {
-    border-color: rgba(244, 67, 54, 0.4);
-    background: rgba(244, 67, 54, 0.08);
-    color: #ffb3ad;
-}
-
-.repair-inbox-btn.destructive:hover:not(:disabled) { background: rgba(244, 67, 54, 0.16); }
-
-.repair-inbox-btn.ghost {
-    border-color: var(--white-a10);
-    background: transparent;
-    color: var(--white-a45);
-}
-
-.repair-inbox-btn.ghost:hover:not(:disabled) {
-    background: var(--white-a06);
-    color: #fff;
-}
-
-.repair-inbox-expand {
-    width: 26px;
-    height: 26px;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--white-a35);
-    font-size: 10px;
-    cursor: pointer;
-    transition: transform var(--dur-quick), color var(--dur-fast);
-}
-
-.repair-inbox-expand:hover { color: #fff; }
-.repair-inbox-expand.open { transform: rotate(180deg); color: #fff; }
-
-/* The open group hosts the finding list, bounded so the inbox below it
-   stays reachable without scrolling past hundreds of rows. */
-.repair-inbox-body {
-    max-height: 480px;
-    overflow-y: auto;
-    padding: 0 15px 14px 15px;
-    border-top: 1px solid var(--white-a05);
-}
-
-.repair-list-controls {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    padding: 11px 0;
-}
-
 .repair-list-controls select {
     background: var(--white-a06);
     border: 1px solid var(--white-a10);
@@ -58423,313 +55194,6 @@ body.max-performance #page-particles-canvas {
 }
 
 .repair-list-controls select option { background: var(--bg-raised); }
-
-/* A run in flight sits at surface level, above the inbox — it belongs to the
-   library, not to whichever group happens to be open. */
-.repair-findings-bulk.running {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    padding: 9px 14px;
-    margin-bottom: 12px;
-    border-radius: 9px;
-    border: 1px solid rgba(var(--accent-rgb), 0.28);
-    background: rgba(var(--accent-rgb), 0.09);
-}
-
-.repair-finding-btn.reopen {
-    background: var(--white-a06);
-    color: var(--white-a60);
-}
-
-.repair-finding-btn.reopen:hover { background: var(--white-a12); color: #fff; }
-
-/* ── Tool sections as containers ──
-   Same chassis as the maintenance job families: a glow edge, a header that
-   explains itself, and a grid inside. Eleven identical boxes in a row was
-   what made the strip read as filler. */
-.tools-container {
-    --tile-glow: 148, 163, 184;
-    position: relative;
-    padding: 13px 14px 15px 14px;
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-card);
-    background:
-        radial-gradient(90% 120% at 0% 0%, rgba(var(--tile-glow), 0.06), transparent 55%),
-        rgba(255, 255, 255, 0.012);
-    overflow: hidden;
-}
-
-.tools-container::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg,
-        transparent,
-        rgba(var(--tile-glow), 0.5),
-        rgba(var(--tile-glow), 0.8),
-        rgba(var(--tile-glow), 0.5),
-        transparent);
-}
-
-.tools-container-head {
-    display: flex;
-    align-items: baseline;
-    gap: 11px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-}
-
-.tools-container .tools-section-title { margin: 0; }
-
-.tools-container-blurb {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.28);
-}
-
-/* A modal-opener is not the same kind of thing as the Database Updater, and
-   giving it the same footprint is what made them all look alike. */
-.tool-card--launcher {
-    border-style: dashed;
-    border-color: var(--white-a09);
-    background: rgba(255, 255, 255, 0.015);
-}
-
-.tool-card--launcher .tool-card-info {
-    font-size: 11px;
-    opacity: 0.75;
-}
-
-.tool-card--launcher:hover { border-style: solid; border-color: rgba(var(--tile-glow), 0.35); }
-
-/* ── Operations: families of job tiles ──
-   Thirty identical stacked cards had no order and no organisation. Each
-   family is a container carrying its own glow, on the same chassis the
-   arcade tiles and dashboard orbs use. */
-.repair-families {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-.repair-family {
-    --tile-glow: 148, 163, 184;
-    border: 1px solid var(--white-a06);
-    border-radius: var(--radius-card);
-    background:
-        radial-gradient(90% 120% at 0% 0%, rgba(var(--tile-glow), 0.07), transparent 55%),
-        rgba(255, 255, 255, 0.015);
-    padding: 13px 14px 15px 14px;
-    position: relative;
-    overflow: hidden;
-}
-
-.repair-family::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: linear-gradient(90deg,
-        transparent,
-        rgba(var(--tile-glow), 0.55),
-        rgba(var(--tile-glow), 0.85),
-        rgba(var(--tile-glow), 0.55),
-        transparent);
-}
-
-.repair-family-head {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    width: 100%;
-    padding: 0;
-    border: none;
-    background: none;
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-}
-
-.repair-family-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.1px;
-    flex-shrink: 0;
-}
-
-.repair-family-summary {
-    flex: 1;
-    min-width: 0;
-    font-size: 11px;
-    color: var(--white-a35);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.repair-family-pending {
-    padding: 2px 9px;
-    border-radius: var(--radius-pill);
-    background: rgba(var(--tile-glow), 0.16);
-    color: var(--white-a85);
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
-}
-
-.repair-family-chevron {
-    font-size: 9px;
-    color: var(--white-a30);
-    transition: transform var(--dur-quick);
-    flex-shrink: 0;
-}
-
-.repair-family-chevron.open { transform: rotate(180deg); }
-
-.repair-family-blurb {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.28);
-    margin: 5px 0 0 0;
-}
-
-.repair-family.collapsed .repair-family-blurb { margin-bottom: 0; }
-
-.repair-family-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(310px, 100%), 1fr));
-    gap: 11px;
-    margin-top: 12px;
-}
-
-/* ── One job tile ── */
-.repair-tile {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    padding: 12px 13px;
-    border: 1px solid var(--white-a07);
-    border-radius: 11px;
-    background: rgba(255, 255, 255, 0.025);
-    overflow: hidden;
-    transition: border-color var(--dur-fast), background var(--dur-fast), opacity var(--dur-fast);
-}
-
-.repair-tile:hover { border-color: rgba(var(--tile-glow), 0.35); }
-.repair-tile.off { opacity: 0.55; }
-.repair-tile.sched-overdue { border-color: rgba(var(--warning-strong-rgb), 0.3); }
-
-/* The glow edge IS the progress bar: a family-coloured hairline at rest,
-   filling left-to-right while the job scans. */
-.repair-tile-edge {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 3px;
-    width: 100%;
-    background: linear-gradient(90deg,
-        rgba(var(--tile-glow), 0.25),
-        rgba(var(--tile-glow), 0.55));
-    opacity: 0.55;
-    transition: width var(--dur-slower) ease, opacity var(--dur-slow);
-}
-
-.repair-tile-edge.running {
-    opacity: 1;
-    background: linear-gradient(90deg,
-        rgba(var(--tile-glow), 0.7),
-        rgba(var(--tile-glow), 1));
-    box-shadow: 0 0 10px rgba(var(--tile-glow), 0.55);
-}
-
-.repair-tile-head {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.repair-tile-name {
-    flex: 1;
-    min-width: 0;
-    font-size: 13px;
-    font-weight: 700;
-    color: #fff;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.repair-tile-badge {
-    flex-shrink: 0;
-    padding: 2px 8px;
-    border: 1px solid rgba(var(--accent-rgb), 0.3);
-    border-radius: var(--radius-pill);
-    background: rgba(var(--accent-rgb), 0.13);
-    color: #fff;
-    font-size: 10px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.repair-tile-badge:hover { background: rgba(var(--accent-rgb), 0.24); }
-
-.repair-tile-badge.historical {
-    border-color: var(--white-a10);
-    background: var(--white-a04);
-    color: var(--white-a45);
-}
-
-.repair-tile-desc {
-    font-size: 11px;
-    line-height: 1.45;
-    color: rgba(255, 255, 255, 0.38);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-.repair-tile-schedule {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    flex-wrap: wrap;
-}
-
-/* The cadence is a control, not a label — it was the thing users could not
-   find, buried in a gear as a bare "Interval (hours)" box. */
-.repair-tile-cadence {
-    padding: 3px 9px;
-    border: 1px dashed var(--white-a16);
-    border-radius: var(--radius-pill);
-    background: transparent;
-    color: var(--white-a70);
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.repair-tile-cadence:hover {
-    border-style: solid;
-    border-color: rgba(var(--tile-glow), 0.5);
-    color: #fff;
-    background: rgba(var(--tile-glow), 0.1);
-}
-
-.repair-tile-cadence-edit {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-}
 
 .repair-tile-cadence-edit input,
 .repair-tile-cadence-edit select {
@@ -58744,390 +55208,7 @@ body.max-performance #page-particles-canvas {
 .repair-tile-cadence-edit input { width: 52px; }
 .repair-tile-cadence-edit select option { background: var(--bg-raised); }
 
-.repair-tile-cadence-save,
-.repair-tile-cadence-cancel {
-    padding: 3px 9px;
-    border-radius: var(--radius-sm);
-    border: 1px solid transparent;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.repair-tile-cadence-save {
-    border-color: rgba(var(--accent-rgb), 0.35);
-    background: rgba(var(--accent-rgb), 0.16);
-    color: #fff;
-}
-
-.repair-tile-cadence-cancel {
-    background: transparent;
-    color: var(--white-a40);
-}
-
-.repair-tile-cadence-cancel:hover { color: #fff; }
-
-.repair-tile-next {
-    font-size: 11px;
-    color: var(--white-a35);
-}
-
-.repair-tile-next.overdue { color: var(--warning-strong); font-weight: 600; }
-.repair-tile-next.due { color: rgba(var(--accent-rgb), 0.9); font-weight: 600; }
-.repair-tile-next.running { color: var(--success-strong); font-weight: 600; }
-.repair-tile-next.disabled { color: rgba(255, 255, 255, 0.22); }
-
-.repair-tile-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-top: 2px;
-}
-
-.repair-tile-trend {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    flex-shrink: 0;
-    cursor: help;
-}
-
-.repair-tile-spark { color: rgba(var(--tile-glow), 0.65); flex-shrink: 0; }
-
-.repair-tile-trend-label {
-    font-size: 9px;
-    letter-spacing: 0.3px;
-    color: var(--white-a25);
-    white-space: nowrap;
-}
-
-.repair-tile-meta {
-    font-size: 10px;
-    color: var(--white-a25);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.repair-tile .repair-job-actions {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex-shrink: 0;
-}
-
-/* ── Recent runs ── */
-.repair-runs-card {
-    border: 1px solid var(--white-a07);
-    border-radius: var(--radius-lg);
-    background: var(--white-a02);
-    overflow: hidden;
-}
-
-.repair-runs-toolbar {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 11px 13px;
-    border-bottom: 1px solid var(--white-a06);
-    background: rgba(255, 255, 255, 0.015);
-}
-
-.repair-runs-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    flex: 1;
-    min-width: 0;
-}
-
-.repair-runs-chip,
-.repair-runs-toggle {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border: 1px solid var(--white-a08);
-    border-radius: var(--radius-pill);
-    background: var(--white-a03);
-    color: var(--white-a50);
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast);
-}
-
-.repair-runs-chip:hover,
-.repair-runs-toggle:hover { color: #fff; background: var(--white-a07); }
-
-.repair-runs-chip.active {
-    color: #fff;
-    background: rgba(var(--accent-rgb), 0.15);
-    border-color: rgba(var(--accent-rgb), 0.35);
-}
-
-/* A job with a failed run in the window says so before you click it. */
-.repair-runs-chip.has-failure { border-color: rgba(244, 67, 54, 0.35); }
-.repair-runs-chip.has-failure::before {
-    content: '';
-    width: 5px;
-    height: 5px;
-    border-radius: var(--radius-circle);
-    background: #f44336;
-}
-
-.repair-runs-toggle.active {
-    color: #ffb3ad;
-    background: rgba(244, 67, 54, 0.12);
-    border-color: rgba(244, 67, 54, 0.35);
-}
-
-.repair-runs-chip-count {
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-    color: var(--white-a35);
-}
-
-.repair-runs-chip.active .repair-runs-chip-count { color: var(--white-a70); }
-
-.repair-runs-tools {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-}
-
-.repair-runs-refresh {
-    width: 26px;
-    height: 26px;
-    border: 1px solid var(--white-a08);
-    border-radius: 7px;
-    background: var(--white-a03);
-    color: var(--white-a45);
-    font-size: 13px;
-    cursor: pointer;
-}
-
-.repair-runs-refresh:hover { color: #fff; background: var(--white-a08); }
-
-/* Day headings are what give a log a shape — "nine today, four yesterday,
-   none since" is a rhythm you can read; fifty undifferentiated rows are not. */
-.repair-runs-day-head {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 9px 13px 6px 13px;
-}
-
-.repair-runs-day-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.6px;
-    text-transform: uppercase;
-    color: var(--white-a40);
-}
-
-.repair-runs-day-count {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.22);
-}
-
-.repair-runs-day-head::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--white-a05);
-}
-
-.repair-run {
-    border-top: 1px solid var(--white-a03);
-}
-
-.repair-run-head {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    padding: 8px 13px;
-    cursor: pointer;
-    transition: background var(--dur-xfast);
-}
-
-.repair-run-head:hover { background: var(--white-a03); }
-.repair-run.open .repair-run-head { background: rgba(255, 255, 255, 0.035); }
-
-.repair-run-glyph {
-    width: 18px;
-    text-align: center;
-    font-size: 12px;
-    flex-shrink: 0;
-}
-
-.repair-run-glyph.success { color: var(--success-strong); }
-.repair-run-glyph.quiet { color: var(--white-a25); }
-.repair-run-glyph.failed { color: #f44336; }
-.repair-run-glyph.stopped { color: var(--warning-strong); }
-.repair-run-glyph.running { color: rgba(var(--accent-rgb), 0.9); }
-
-.repair-run-clock {
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    color: var(--white-a30);
-    flex-shrink: 0;
-    min-width: 46px;
-}
-
-.repair-run-name {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--white-a85);
-    flex-shrink: 0;
-    min-width: 170px;
-}
-
-.repair-run-summary {
-    flex: 1;
-    min-width: 0;
-    font-size: 12px;
-    color: var(--white-a40);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.repair-run.failed .repair-run-summary { color: #f88; }
-
-.repair-run-age {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.22);
-    flex-shrink: 0;
-}
-
-.repair-run-chevron {
-    font-size: 9px;
-    color: var(--white-a25);
-    flex-shrink: 0;
-    transition: transform var(--dur-quick);
-}
-
-.repair-run-chevron.open { transform: rotate(180deg); color: #fff; }
-
-.repair-run-detail {
-    padding: 4px 13px 14px 42px;
-    display: flex;
-    flex-direction: column;
-    gap: 11px;
-}
-
-.repair-run-counters {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px;
-}
-
-.repair-run-counter {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.repair-run-counter-value {
-    font-size: 16px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    color: #fff;
-}
-
-.repair-run-counter-label {
-    font-size: 10px;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    color: var(--white-a30);
-}
-
-.repair-run-error {
-    border: 1px solid rgba(244, 67, 54, 0.25);
-    border-radius: var(--radius-md);
-    background: rgba(244, 67, 54, 0.06);
-    padding: 9px 11px;
-}
-
-.repair-run-error-title {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    color: #f88;
-    margin-bottom: 5px;
-}
-
-.repair-run-error-text {
-    margin: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
-    line-height: 1.5;
-    color: var(--white-a75);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 180px;
-    overflow-y: auto;
-}
-
-.repair-run-error-text.muted {
-    font-family: inherit;
-    color: var(--white-a40);
-    font-style: italic;
-}
-
-.repair-run-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-}
-
-.repair-run-stamps {
-    font-size: 11px;
-    color: var(--white-a25);
-}
-
-.repair-run-link {
-    border: none;
-    background: none;
-    padding: 0;
-    color: rgba(var(--accent-rgb), 0.85);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.repair-run-link:hover { color: #fff; text-decoration: underline; }
-
-
-/* ── Tool card sections ── */
-.tools-section {
-    margin-bottom: 24px;
-}
-
-.tools-section-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--white-a35);
-    text-transform: uppercase;
-    letter-spacing: 1.2px;
-    margin: 0 0 12px 4px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--white-a04);
-}
-
 @media (max-width: 768px) {
-    .tools-page-container {
-        padding: 16px;
-        margin: 10px;
-        border-radius: var(--radius-xl);
-    }
 
     .tools-page-header {
         padding: 16px;
@@ -59138,12 +55219,6 @@ body.max-performance #page-particles-canvas {
 
     .tools-page-title {
         font-size: 22px;
-    }
-
-    .tools-maintenance-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 12px;
     }
 }
 
@@ -73141,14 +69216,6 @@ a.chat-jbx-title:hover { color: rgb(var(--accent-light-rgb)); }
     color: #fff;
 }
 
-/* /tools?job=<id> lands on the card and lights it for a moment */
-.repair-job-card.repair-job-card--linked {
-    outline: 2px solid rgba(var(--accent-rgb), 0.8);
-    outline-offset: 3px;
-    box-shadow: 0 0 0 6px rgba(var(--accent-rgb), 0.18), 0 12px 32px var(--black-a30);
-    transition: outline-color var(--dur-slower) ease, box-shadow var(--dur-slower) ease;
-}
-
 .explorer-tier {
     position: relative;
     z-index: 1;
@@ -77472,74 +73539,9 @@ body.src-modal-open { overflow: hidden; }
     cursor: pointer;
 }
 .pl-card-attn:hover { text-decoration: underline; }
-
-/* ── findings, oct 27 pass ──────────────────────────────────────────────────
-   the undo bar after a dismiss, the keyboard cursor, the albums-view note,
-   the triage cards' type chips, and the video "downloads" risk tag. */
-.repair-undo-bar {
-    position: fixed;
-    left: 50%;
-    bottom: 28px;
-    transform: translateX(-50%);
-    z-index: 1200;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    max-width: min(560px, calc(100vw - 32px));
-    padding: 10px 12px 10px 18px;
-    border-radius: var(--radius-pill);
-    background: var(--bg-secondary);
-    border: 1px solid var(--white-a12);
-    box-shadow: 0 12px 40px var(--black-a45);
-    color: var(--white-a85);
-    font-size: 13px;
-    animation: repair-undo-in 0.18s ease-out;
-}
 @keyframes repair-undo-in {
     from { opacity: 0; transform: translate(-50%, 8px); }
     to { opacity: 1; transform: translate(-50%, 0); }
-}
-.repair-undo-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-}
-.repair-undo-btn {
-    flex: 0 0 auto;
-    padding: 5px 14px;
-    border-radius: var(--radius-pill);
-    border: 1px solid rgba(var(--accent-rgb), 0.45);
-    background: rgba(var(--accent-rgb), 0.16);
-    color: rgb(var(--accent-rgb));
-    font-weight: 700;
-    font-size: 12.5px;
-    cursor: pointer;
-}
-.repair-undo-btn:hover { background: rgba(var(--accent-rgb), 0.26); }
-.repair-undo-close {
-    flex: 0 0 auto;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    border: none;
-    background: transparent;
-    color: var(--white-a50);
-    font-size: 16px;
-    cursor: pointer;
-}
-.repair-undo-close:hover { color: var(--text-primary); background: var(--white-a08); }
-
-.repair-finding-card.kb-active {
-    outline: 2px solid rgba(var(--accent-rgb), 0.55);
-    outline-offset: 1px;
-}
-
-.repair-kb-hint {
-    font-size: 11px;
-    color: var(--white-a40);
-    margin-left: auto;
-    white-space: nowrap;
 }
 .repair-kb-hint kbd {
     display: inline-block;
@@ -77551,21 +73553,6 @@ body.src-modal-open { overflow: hidden; }
     background: var(--white-a06);
     font: 600 10.5px/16px ui-monospace, SFMono-Regular, monospace;
     text-align: center;
-    color: var(--white-a70);
-}
-
-.repair-albums-uncovered {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    padding: 10px 14px;
-    margin-bottom: 12px;
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(var(--accent-rgb), 0.22);
-    background: rgba(var(--accent-rgb), 0.07);
-    font-size: 12.5px;
     color: var(--white-a70);
 }
 .repair-albums-uncovered button {
@@ -77580,80 +73567,6 @@ body.src-modal-open { overflow: hidden; }
 }
 .repair-albums-uncovered button:hover { background: rgba(var(--accent-rgb), 0.12); }
 
-.repair-inbox-risk.acquires {
-    border-color: rgba(var(--info-rgb), 0.35);
-    background: rgba(var(--info-rgb), 0.1);
-    color: var(--info);
-    margin-left: 6px;
-}
-
-.operations-triage-types {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin: 4px 0 12px;
-}
-.operations-triage-type {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 6px 4px 10px;
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--white-a10);
-    background: var(--white-a04);
-    color: var(--white-a75);
-    font-size: 11.5px;
-    cursor: pointer;
-    max-width: 100%;
-}
-.operations-triage-type:hover { border-color: var(--white-a20); color: var(--text-primary); }
-.operations-triage-type-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    min-width: 0;
-}
-.operations-triage-type-count {
-    flex: 0 0 auto;
-    padding: 1px 7px;
-    border-radius: var(--radius-pill);
-    background: var(--white-a08);
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-}
-.operations-triage-type-more {
-    align-self: center;
-    font-size: 11px;
-    color: var(--white-a45);
-}
-
-/* the simple-mode score speaks the same band colours as the advanced one */
-.operations-exec-score.healthy { --band-rgb: var(--success-strong-rgb); --band-text: var(--success); }
-.operations-exec-score.attention { --band-rgb: var(--warning-strong-rgb); --band-text: var(--warning); }
-.operations-exec-score.unhealthy { --band-rgb: var(--danger-rgb); --band-text: var(--danger-light); }
-.operations-exec-score.healthy,
-.operations-exec-score.attention,
-.operations-exec-score.unhealthy {
-    border-color: rgba(var(--band-rgb), 0.45);
-    background: radial-gradient(circle, rgba(var(--band-rgb), 0.2) 0%, var(--black-a60) 100%);
-}
-.operations-exec-score.healthy .operations-exec-status,
-.operations-exec-score.attention .operations-exec-status,
-.operations-exec-score.unhealthy .operations-exec-status { color: var(--band-text); }
-
-@media (max-width: 768px) {
-    .repair-kb-hint { display: none; }
-    .repair-undo-bar { bottom: 16px; }
-}
-
-/* sections that hide themselves with the hidden attribute: their display
-   rules outranked it, so the advanced section nav showed in simple mode. */
-.repair-section-nav[hidden],
-.repair-advanced-chassis[hidden],
-.repair-families[hidden] {
-    display: none;
-}
-
 /* the schedule switch: the checkbox is the switch's input, not a second control */
 .operations-pillar-autopilot input {
     position: absolute;
@@ -77662,48 +73575,6 @@ body.src-modal-open { overflow: hidden; }
     height: 1px;
     margin: 0;
     pointer-events: none;
-}
-.operations-pillar-autopilot input:focus-visible + .repair-toggle-slider {
-    outline: 2px solid rgba(var(--accent-rgb), 0.7);
-    outline-offset: 2px;
-}
-
-/* playbook cards had no type scale: an h6 title smaller than its own body
-   and a run label bigger than both */
-.operations-playbook-name {
-    margin: 10px 0 4px;
-    font-size: 14px;
-    font-weight: 700;
-    color: #fff;
-    letter-spacing: -0.005em;
-}
-.operations-playbook-cta {
-    font-size: 12.5px;
-    font-weight: 700;
-    color: var(--white-a75);
-}
-.operations-playbook-card:hover .operations-playbook-cta {
-    color: var(--text-primary);
-}
-/* the switch only knew how to look ON inside a job card, so every area's
-   switch read OFF even with all its jobs scheduled */
-.operations-pillar-autopilot .repair-toggle-slider.small {
-    width: 32px;
-    height: 18px;
-    border-radius: 9px;
-}
-.operations-pillar-autopilot .repair-toggle-slider.small::after {
-    top: 3px;
-    left: 3px;
-    width: 12px;
-    height: 12px;
-}
-.operations-pillar-autopilot input:checked + .repair-toggle-slider.small {
-    background: rgba(var(--accent-rgb), 0.5);
-}
-.operations-pillar-autopilot input:checked + .repair-toggle-slider.small::after {
-    transform: translateX(14px);
-    background: rgb(var(--accent-light-rgb));
 }
 
 /* adding songs (#1933): the header steps back so the search gets the room */
@@ -77768,36 +73639,1463 @@ body.src-modal-open { overflow: hidden; }
     color: var(--text-secondary);
 }
 
-/* a drilled-in album or artist card inside an open finding type, shown as a
-   removable chip instead of text in the search box (review 5 W3-TT-2) */
-.repair-drill-chip {
+/* ════════════════════════════════════════════════════════════════════════════
+   Tools page (webui/src/routes/tools)
+
+   One page, four pills: Findings, Jobs, History, Tools. Flat rows on the
+   page shell, hairlines between them, one accent. Everything is scoped to
+   #tools-page: a few of these class names are also written by old dashboard
+   code, and their rules elsewhere must not reach in.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+#tools-page {
+    --tl-line: var(--white-a08);
+    --tl-card: var(--white-a06);
+    --tl-card-hover: var(--white-a09);
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding: 36px 36px 56px;
+    color: var(--text-1);
+}
+
+/* ── header ── */
+#tools-page .tools-top {
+    display: flex;
+    align-items: flex-end;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+#tools-page .tools-top-text { flex: 1 1 320px; min-width: 0; }
+#tools-page .tools-title {
+    margin: 0;
+    font-size: 48px;
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+    color: var(--text-1);
+}
+#tools-page .tools-sub { margin: 8px 0 0; font-size: 15px; color: var(--text-2); }
+#tools-page .tools-top-actions { display: flex; align-items: center; gap: 10px; }
+#tools-page .tools-locked-note {
+    padding: 16px 20px;
+    border-radius: var(--radius-sheet);
+    background: var(--tl-card);
+    font-size: 14px;
+    color: var(--text-2);
+}
+#tools-page .tools-locked-note strong { display: block; margin-bottom: 2px; color: var(--text-1); }
+
+/* the switch that lets jobs run on their schedules */
+#tools-page .repair-master-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-left: 10px;
-    padding: 4px 6px 4px 12px;
-    border: 1px solid rgba(var(--accent-rgb), 0.45);
-    border-radius: 999px;
-    background: rgba(var(--accent-rgb), 0.14);
-    color: var(--white-a80);
-    font-size: 12px;
-    max-width: 100%;
-    min-width: 0;
+    gap: 10px;
+    height: 44px;
+    padding: 0 8px 0 18px;
+    border-radius: var(--radius-pill);
+    background: var(--tl-card);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-2);
+    cursor: pointer;
 }
-.repair-drill-chip-label {
+#tools-page .repair-master-toggle:hover { background: var(--tl-card-hover); }
+#tools-page .repair-toggle-label { color: var(--text-1); }
+#tools-page .repair-master-toggle input,
+#tools-page .repair-job-toggle input,
+#tools-page .operations-pillar-autopilot input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+}
+#tools-page .repair-toggle-slider {
+    position: relative;
+    flex: none;
+    width: 44px;
+    height: 26px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a16);
+    transition: background 0.18s;
+}
+#tools-page .repair-toggle-slider::before {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-circle);
+    background: var(--text-1);
+    transition: transform 0.18s;
+}
+#tools-page .repair-toggle-slider.small { width: 38px; height: 22px; }
+#tools-page .repair-toggle-slider.small::before { width: 16px; height: 16px; }
+#tools-page input:checked + .repair-toggle-slider { background: var(--accent-light); }
+#tools-page input:checked + .repair-toggle-slider::before { transform: translateX(18px); }
+#tools-page input:checked + .repair-toggle-slider.small::before { transform: translateX(16px); }
+#tools-page input:focus-visible + .repair-toggle-slider { outline: 2px solid var(--text-1); outline-offset: 2px; }
+
+/* ── pills ── */
+#tools-page .tools-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+#tools-page .tools-tab {
+    height: 36px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+#tools-page .tools-tab:hover { background: var(--white-a12); }
+#tools-page .tools-tab[aria-selected="true"] { background: var(--text-1); color: var(--bg-primary); }
+#tools-page .tools-tab:focus-visible { outline: 2px solid var(--text-1); outline-offset: 2px; }
+#tools-page .tools-tab-count { font-size: 13px; color: var(--text-3); }
+#tools-page .tools-tab[aria-selected="true"] .tools-tab-count { color: var(--black-a60); }
+
+/* the maintenance surface has no box of its own: its three panels sit in
+   the page's column like the Tools panel does */
+#tools-page .tools-maintenance-hero { display: contents; }
+#tools-page [role="tabpanel"]:not([hidden]) { display: flex; flex-direction: column; gap: 40px; }
+
+/* ── a section: a heading, a count, one line of why ── */
+#tools-page .tools-section,
+#tools-page .repair-section,
+#tools-page .repair-triage,
+#tools-page .operations-playbooks-section,
+#tools-page .operations-pillars-section { display: flex; flex-direction: column; margin: 0; padding: 0; }
+#tools-page .tools-section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px 12px;
+    flex-wrap: wrap;
+    padding-bottom: 14px;
+}
+#tools-page .tools-section-title {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+    text-transform: none;
+}
+#tools-page .tools-section-blurb { font-size: 14px; color: var(--text-3); }
+#tools-page .repair-triage-count { font-size: 15px; font-weight: 600; color: var(--text-2); }
+
+/* shared quiet states */
+#tools-page .repair-empty,
+#tools-page .repair-loading {
+    padding: 28px 0;
+    font-size: 14px;
+    color: var(--text-3);
+    text-align: left;
+}
+#tools-page .repair-empty-state {
+    padding: 40px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+}
+#tools-page .repair-empty-title { font-size: 17px; font-weight: 700; color: var(--text-1); }
+#tools-page .repair-empty-text { font-size: 14px; color: var(--text-3); }
+
+/* shared buttons */
+#tools-page .repair-inbox-btn,
+#tools-page .repair-finding-btn.fix,
+#tools-page .repair-finding-btn.reopen,
+#tools-page .operations-pillar-scan-btn,
+#tools-page .operations-live-hud-stop-btn,
+#tools-page .repair-finding-error-retry,
+#tools-page .repair-save-settings-btn,
+#tools-page .tool-card-controls button,
+#tools-page .tool-card-btn-secondary,
+#tools-page .media-scan-btn {
+    height: 36px;
+    padding: 0 16px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--white-a30);
+    background: none;
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: border-color 0.15s, background 0.15s;
+}
+#tools-page .repair-inbox-btn:hover,
+#tools-page .repair-finding-btn.fix:hover,
+#tools-page .repair-finding-btn.reopen:hover,
+#tools-page .operations-pillar-scan-btn:hover,
+#tools-page .operations-live-hud-stop-btn:hover,
+#tools-page .repair-finding-error-retry:hover,
+#tools-page .repair-save-settings-btn:hover,
+#tools-page .tool-card-controls button:hover,
+#tools-page .tool-card-btn-secondary:hover,
+#tools-page .media-scan-btn:hover { border-color: var(--text-1); }
+#tools-page button:disabled { opacity: 0.45; cursor: default; }
+#tools-page .repair-inbox-btn.destructive,
+#tools-page .repair-finding-btn.fix.destructive { border-color: rgba(var(--warning-rgb), 0.5); }
+#tools-page .repair-inbox-btn.destructive:hover,
+#tools-page .repair-finding-btn.fix.destructive:hover { border-color: var(--warning); }
+#tools-page .repair-inbox-btn.ghost {
+    border-color: transparent;
+    color: var(--text-2);
+    font-weight: 600;
+    padding: 0 12px;
+}
+#tools-page .repair-inbox-btn.ghost:hover { color: var(--text-1); background: var(--white-a08); border-color: transparent; }
+
+/* round icon buttons */
+#tools-page .repair-inbox-expand,
+#tools-page .repair-finding-btn.dismiss,
+#tools-page .repair-finding-expand-btn,
+#tools-page .repair-run-btn,
+#tools-page .repair-stop-btn,
+#tools-page .repair-settings-btn,
+#tools-page .repair-help-btn,
+#tools-page .tool-help-button,
+#tools-page .repair-runs-refresh,
+#tools-page .repair-undo-close,
+#tools-page .repair-drill-chip-clear {
+    width: 36px;
+    height: 36px;
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-circle);
+    background: none;
+    color: var(--text-3);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+#tools-page .repair-inbox-expand:hover,
+#tools-page .repair-finding-btn.dismiss:hover,
+#tools-page .repair-finding-expand-btn:hover,
+#tools-page .repair-run-btn:hover,
+#tools-page .repair-stop-btn:hover,
+#tools-page .repair-settings-btn:hover,
+#tools-page .repair-help-btn:hover,
+#tools-page .tool-help-button:hover,
+#tools-page .repair-runs-refresh:hover,
+#tools-page .repair-undo-close:hover,
+#tools-page .repair-drill-chip-clear:hover { background: var(--white-a10); color: var(--text-1); }
+#tools-page .repair-run-btn { color: var(--text-1); }
+#tools-page .repair-stop-btn { color: var(--danger-light); }
+#tools-page .repair-finding-expand-btn svg { transition: transform 0.18s; }
+#tools-page .repair-finding-expand-btn.open svg { transform: rotate(180deg); }
+
+/* ── Findings: where the library stands ── */
+#tools-page .repair-findings-surface { display: flex; flex-direction: column; gap: 24px; }
+#tools-page .repair-health {
+    padding: 24px 28px;
+    border-radius: 20px;
+    background: var(--tl-card);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+#tools-page .repair-health-main { display: flex; align-items: center; gap: 16px 24px; flex-wrap: wrap; }
+#tools-page .repair-health-score {
+    width: 72px;
+    height: 72px;
+    flex: none;
+    border-radius: var(--radius-circle);
+    background: var(--white-a08);
+    color: var(--text-1);
+    display: grid;
+    place-items: center;
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+#tools-page .repair-health-score.healthy { background: rgba(var(--accent-rgb), 0.16); color: var(--accent-light); }
+#tools-page .repair-health-score.attention { background: rgba(var(--warning-rgb), 0.16); color: var(--warning); }
+#tools-page .repair-health-score.unhealthy { background: rgba(var(--danger-rgb), 0.16); color: var(--danger-light); }
+#tools-page .repair-health-body { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+#tools-page .repair-health-band {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text-1);
+    text-transform: none;
+}
+#tools-page .repair-health-band::first-letter { text-transform: uppercase; }
+#tools-page .repair-health-meta { font-size: 14px; color: var(--text-2); }
+#tools-page .repair-health-trend { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; color: var(--text-3); }
+#tools-page .repair-health-trend-label { font-size: 11.5px; }
+#tools-page .repair-health-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+#tools-page .repair-health-fix-safe {
+    height: 44px;
+    padding: 0 22px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent-light);
+    color: var(--bg-primary);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: transform 0.12s;
+}
+#tools-page .repair-health-fix-safe:hover:not(:disabled) { transform: scale(1.03); }
+#tools-page .repair-health-fix-safe:disabled { background: var(--white-a08); color: var(--text-3); opacity: 1; }
+#tools-page .repair-health-actions-note { font-size: 12.5px; color: var(--text-3); }
+#tools-page .repair-health-breakdown { display: flex; flex-direction: column; gap: 10px; }
+#tools-page .repair-health-bar { display: flex; gap: 3px; height: 8px; }
+#tools-page .repair-health-seg {
+    flex-basis: 0;
+    min-width: 6px;
+    height: 8px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-xs);
+    background: var(--white-a35);
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+/* a sliver of a bar, not a touch target: the legend under it is the way in
+   on a phone, so the global button floor must not reach these */
+#tools-page .repair-health-bar .repair-health-seg { min-height: 0; }
+#tools-page .repair-health-seg:hover { opacity: 0.75; }
+#tools-page .repair-health-seg.warning,
+#tools-page .repair-health-legend-dot.warning { background: var(--warning); }
+#tools-page .repair-health-seg.error,
+#tools-page .repair-health-seg.critical,
+#tools-page .repair-health-legend-dot.error,
+#tools-page .repair-health-legend-dot.critical { background: var(--danger-light); }
+#tools-page .repair-health-legend { display: flex; gap: 4px 6px; flex-wrap: wrap; margin-left: -8px; }
+#tools-page .repair-health-legend-item {
+    height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+#tools-page .repair-health-legend-item:hover { background: var(--white-a08); color: var(--text-1); }
+#tools-page .repair-health-legend-dot { width: 8px; height: 8px; border-radius: 2px; background: var(--white-a35); }
+#tools-page .repair-health-legend-count { color: var(--text-3); font-variant-numeric: tabular-nums; }
+#tools-page .repair-health-legend-more { align-self: center; padding: 0 8px; font-size: 13px; color: var(--text-3); }
+#tools-page .repair-health-bar-empty { font-size: 14px; color: var(--text-3); }
+
+/* a fix running in the background, and the selection bar */
+#tools-page .repair-findings-bulk {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 52px;
+    padding: 0 12px 0 18px;
+    border-radius: var(--radius-card);
+    background: var(--white-a08);
+    font-size: 14px;
+    font-weight: 600;
+}
+#tools-page .repair-findings-bulk.running { background: rgba(var(--accent-rgb), 0.14); }
+#tools-page .repair-bulk-count { flex: 1; min-width: 0; }
+
+#tools-page .repair-cache-health-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 4px;
+    font-size: 13.5px;
+    color: var(--text-3);
+    cursor: pointer;
+}
+#tools-page .repair-cache-health-bar:hover { color: var(--text-1); }
+#tools-page .repair-cache-health-dot { width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--white-a35); }
+#tools-page .repair-cache-health-dot.good { background: var(--accent-light); }
+#tools-page .repair-cache-health-dot.warn,
+#tools-page .repair-cache-health-dot.fair { background: var(--warning); }
+#tools-page .repair-cache-health-dot.bad,
+#tools-page .repair-cache-health-dot.poor { background: var(--danger-light); }
+#tools-page .repair-cache-health-title { font-weight: 600; color: var(--text-2); }
+#tools-page .repair-cache-health-action { margin-left: auto; }
+
+/* ── Findings: the one toolbar ── */
+#tools-page .repair-findings-toolbar { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; }
+#tools-page .repair-status-segments,
+#tools-page .repair-view-mode-tabs,
+#tools-page .repair-view-switch {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+    display: inline-flex;
+    padding: 3px;
+    border-radius: var(--radius-pill);
+    background: var(--tl-card);
+}
+#tools-page .repair-status-seg,
+#tools-page .repair-view-mode-tab,
+#tools-page .repair-view-switch button {
+    height: 34px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+#tools-page .repair-status-seg:hover,
+#tools-page .repair-view-mode-tab:hover,
+#tools-page .repair-view-switch button:hover { color: var(--text-1); }
+#tools-page .repair-status-seg.active,
+#tools-page .repair-view-mode-tab.active,
+#tools-page .repair-view-switch button[aria-pressed="true"] { background: var(--white-a14); color: var(--text-1); }
+#tools-page .repair-status-seg-count { font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; }
+#tools-page .repair-findings-search {
+    flex: 1 1 320px;
+    min-width: 0;
+    height: 40px;
+    padding: 0 18px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--tl-card);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 14px;
+    outline: 0;
+}
+#tools-page .repair-findings-search::placeholder { color: var(--text-3); }
+#tools-page .repair-findings-search:focus-visible { box-shadow: inset 0 0 0 1.5px var(--white-a40); }
+#tools-page .repair-findings-filters { display: flex; gap: 4px; }
+#tools-page .repair-findings-filters select,
+#tools-page .repair-list-controls select {
+    height: 40px;
+    max-width: 160px;
+    padding: 0 30px 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background-color: transparent;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#tools-page .repair-findings-filters select:hover,
+#tools-page .repair-list-controls select:hover { background-color: var(--white-a08); color: var(--text-1); }
+#tools-page .repair-findings-filters select option,
+#tools-page .repair-list-controls select option { background: var(--bg-raised); color: var(--text-1); }
+#tools-page .repair-clear-btn {
+    height: 40px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-3);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#tools-page .repair-findings-toolbar .repair-clear-btn { margin-left: auto; }
+#tools-page .repair-clear-btn:hover { color: var(--danger-light); background: var(--white-a06); }
+#tools-page .repair-search-note { font-size: 14px; color: var(--text-3); }
+#tools-page .repair-search-note b { color: var(--text-1); }
+
+/* ── Findings: issue types ── */
+#tools-page .repair-inbox { display: flex; flex-direction: column; gap: 36px; }
+#tools-page .repair-inbox-group { border-top: 1px solid var(--tl-line); }
+#tools-page .repair-inbox-head {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    min-height: 76px;
+    padding: 10px 0;
+}
+#tools-page .repair-inbox-head[role="button"] { cursor: pointer; }
+#tools-page .repair-inbox-head[role="button"]:hover .repair-inbox-label { text-decoration: underline; text-underline-offset: 3px; }
+#tools-page .repair-inbox-head:focus-visible { outline: 2px solid var(--white-a40); outline-offset: 2px; border-radius: var(--radius-md); }
+#tools-page .repair-inbox-count {
+    width: 92px;
+    flex: none;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-1);
+}
+#tools-page .repair-inbox-text { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+/* in the list the covers sit by the action, so every label starts on one
+   edge whether its type has covers or not */
+#tools-page .repair-inbox-head[role="button"] .repair-art-stack { order: 1; justify-content: flex-end; }
+#tools-page .repair-inbox-head[role="button"] .repair-inbox-actions { order: 2; }
+#tools-page .repair-inbox-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-1);
+}
+#tools-page .repair-inbox-blurb { font-size: 13.5px; color: var(--text-3); }
+#tools-page .repair-inbox-sev { width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--warning); }
+#tools-page .repair-inbox-sev.error,
+#tools-page .repair-inbox-sev.critical { background: var(--danger-light); }
+#tools-page .repair-inbox-risk {
+    padding: 2px 9px;
+    border: 1px solid rgba(var(--warning-rgb), 0.45);
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--warning);
+}
+#tools-page .repair-inbox-actions { display: flex; align-items: center; gap: 4px; flex: none; }
+/* the action is first to the keyboard; to the eye it sits by the arrow */
+#tools-page .repair-inbox-actions .repair-inbox-btn.ghost { order: -1; }
+/* the second choice waits until you are on the row */
+#tools-page .repair-inbox-head[role="button"] .repair-inbox-btn.ghost { opacity: 0; }
+#tools-page .repair-inbox-head[role="button"]:hover .repair-inbox-btn.ghost,
+#tools-page .repair-inbox-head[role="button"]:focus-within .repair-inbox-btn.ghost { opacity: 1; }
+@media (hover: none) {
+    #tools-page .repair-inbox-head[role="button"] .repair-inbox-btn.ghost { opacity: 1; }
+}
+
+/* covers */
+#tools-page .repair-art {
+    width: 48px;
+    height: 48px;
+    flex: none;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--white-a08);
+    color: var(--text-3);
+    display: grid;
+    place-items: center;
+}
+#tools-page .repair-art.round { border-radius: var(--radius-circle); }
+#tools-page .repair-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#tools-page .repair-art-stack { display: flex; flex: none; }
+#tools-page .repair-art-stack.empty { display: none; }
+#tools-page .repair-art-stack img {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    object-fit: cover;
+    background: var(--bg-raised-2);
+    box-shadow: 0 0 0 2px var(--bg-surface);
+}
+#tools-page .repair-art-stack img + img { margin-left: -24px; }
+
+/* one type opened: it is the page now */
+#tools-page .repair-inbox.is-open { gap: 0; }
+#tools-page .repair-inbox-back {
+    align-self: flex-start;
+    height: 40px;
+    margin-left: -10px;
+    padding: 0 12px 0 8px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+#tools-page .repair-inbox-back:hover { color: var(--text-1); background: var(--white-a08); }
+#tools-page .repair-findings-surface.focused .repair-inbox,
+#tools-page .repair-findings-surface.focused .repair-inbox-group.open { display: contents; }
+#tools-page .repair-findings-surface.focused .repair-inbox-back { order: 1; margin-bottom: -16px; }
+#tools-page .repair-findings-surface.focused .repair-inbox-group.open > .repair-inbox-head { order: 2; padding: 0; min-height: 0; flex-wrap: wrap; }
+#tools-page .repair-findings-surface.focused .repair-findings-bulk.running { order: 3; }
+#tools-page .repair-findings-surface.focused .repair-findings-toolbar { order: 4; }
+#tools-page .repair-findings-surface.focused .repair-inbox-body { order: 5; }
+#tools-page .repair-inbox-group.open .repair-inbox-count { width: auto; font-size: 40px; font-weight: 800; letter-spacing: -0.03em; }
+#tools-page .repair-inbox-group.open .repair-inbox-label { font-size: 26px; font-weight: 800; letter-spacing: -0.025em; }
+#tools-page .repair-inbox-group.open .repair-inbox-blurb { font-size: 15px; color: var(--text-2); }
+#tools-page .repair-inbox-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ── Findings: the list ── */
+#tools-page .repair-list-controls { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; }
+#tools-page .repair-select-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 40px;
+    padding: 0 12px;
+    margin-right: auto;
+    font-size: 14px;
+    color: var(--text-2);
+    cursor: pointer;
+}
+#tools-page .repair-select-all input,
+#tools-page .repair-finding-select input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent-light); cursor: pointer; }
+#tools-page .repair-kb-hint { width: 100%; padding: 0 12px; font-size: 12.5px; color: var(--text-3); }
+#tools-page .repair-kb-hint kbd {
+    display: inline-block;
+    min-width: 18px;
+    padding: 1px 5px;
+    margin-right: 3px;
+    border-radius: var(--radius-xs);
+    background: var(--white-a08);
+    font: inherit;
+    font-size: 11.5px;
+    text-align: center;
+    color: var(--text-2);
+}
+#tools-page .repair-drill-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 40px;
+    padding: 0 4px 0 16px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    font-size: 14px;
+    color: var(--text-2);
+}
+#tools-page .repair-drill-chip b { color: var(--text-1); }
+
+#tools-page .repair-findings-list { display: flex; flex-direction: column; }
+#tools-page .repair-findings-list .repair-finding-card,
+#tools-page .repair-finding-card {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid var(--tl-line);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    transition: background 0.15s;
+}
+#tools-page .repair-finding-card::before,
+#tools-page .repair-finding-card::after { content: none; }
+#tools-page .repair-finding-card.expanded {
+    margin: 6px 0;
+    border-bottom-color: transparent;
+    border-radius: var(--radius-xl);
+    background: var(--tl-card);
+}
+#tools-page .repair-finding-card.kb-active { box-shadow: inset 2px 0 0 var(--text-1); }
+#tools-page .repair-finding-main {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 68px;
+    padding: 8px 4px 8px 12px;
+    cursor: pointer;
+}
+#tools-page .repair-finding-card:not(.expanded) .repair-finding-main:hover { background: var(--white-a04); }
+#tools-page .repair-finding-select { display: grid; place-items: center; width: 24px; height: 44px; flex: none; }
+#tools-page .repair-finding-content { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+#tools-page .repair-finding-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-1);
+}
+#tools-page .repair-finding-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tools-page .repair-finding-card.expanded .repair-finding-name { white-space: normal; }
+#tools-page .repair-finding-icon { width: 8px; height: 8px; flex: none; border-radius: var(--radius-circle); background: var(--warning); }
+#tools-page .repair-finding-icon.error,
+#tools-page .repair-finding-icon.critical { background: var(--danger-light); }
+#tools-page .repair-finding-type-badge,
+#tools-page .repair-finding-status-badge {
+    flex: none;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-2);
+    text-transform: none;
+    letter-spacing: 0;
+}
+/* inside an opened type every row is that type; saying so 30 times is noise */
+#tools-page .repair-inbox-body .repair-finding-type-badge { display: none; }
+#tools-page .repair-finding-status-badge.resolved { color: var(--accent-light); }
+#tools-page .repair-finding-desc,
+#tools-page .repair-finding-content > .repair-finding-meta {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--text-3);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.repair-drill-chip-clear {
-    background: transparent;
+#tools-page .repair-finding-card.expanded .repair-finding-desc { white-space: normal; }
+#tools-page .repair-finding-content > .repair-finding-meta { display: flex; gap: 6px; font-size: 12.5px; }
+#tools-page .repair-finding-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#tools-page .repair-finding-card.expanded .repair-finding-path { white-space: normal; word-break: break-all; }
+#tools-page .repair-finding-fields { display: flex; gap: 6px; flex: none; }
+#tools-page .repair-finding-field {
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-2);
+    white-space: nowrap;
+}
+#tools-page .repair-finding-age { width: 44px; flex: none; text-align: right; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+#tools-page .repair-finding-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+#tools-page .repair-finding-actions .repair-finding-btn.fix,
+#tools-page .repair-finding-actions .repair-finding-btn.reopen { margin-right: 6px; }
+#tools-page .repair-finding-detail { display: none; }
+#tools-page .repair-finding-detail.open { display: block; max-height: none; overflow: visible; }
+#tools-page .repair-finding-detail-inner {
+    margin: 0 16px 0 50px;
+    padding: 16px 0 20px;
+    border-top: 1px solid var(--tl-line);
+    background: none;
+    font-size: 14px;
+    color: var(--text-2);
+}
+#tools-page .repair-finding-error-banner {
+    margin: 0 16px 12px 50px;
+    padding: 12px 16px;
+    border-radius: var(--radius-lg);
+    background: rgba(var(--danger-rgb), 0.1);
+    display: flex;
+    align-items: center;
+    gap: 6px 14px;
+    flex-wrap: wrap;
+    font-size: 13.5px;
+}
+#tools-page .repair-finding-error-title { font-weight: 700; color: var(--danger-light); }
+#tools-page .repair-finding-error-text { flex: 1 1 240px; min-width: 0; color: var(--text-2); }
+
+#tools-page .repair-findings-pagination { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding-top: 8px; }
+#tools-page .repair-page-btn {
+    min-width: 40px;
+    height: 40px;
+    padding: 0 12px;
     border: 0;
-    color: var(--white-a60);
-    font-size: 15px;
-    line-height: 1;
-    padding: 0 4px;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    font-variant-numeric: tabular-nums;
+}
+#tools-page .repair-page-btn:hover { background: var(--white-a08); color: var(--text-1); }
+#tools-page .repair-page-btn.active { background: var(--text-1); color: var(--bg-primary); }
+#tools-page .repair-page-info { padding: 0 8px; font-size: 13.5px; color: var(--text-3); }
+
+#tools-page .repair-undo-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 48px;
+    padding: 0 6px 0 20px;
+    border-radius: var(--radius-pill);
+    background: var(--text-1);
+    color: var(--bg-primary);
+    font-size: 14px;
+    font-weight: 600;
+    box-shadow: 0 12px 40px var(--black-a50);
+}
+#tools-page .repair-undo-btn {
+    height: 36px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--black-a10);
+    color: var(--bg-primary);
+    font: inherit;
+    font-weight: 700;
     cursor: pointer;
 }
-.repair-drill-chip-clear:hover {
-    color: var(--white-a90);
+#tools-page .repair-undo-bar .repair-undo-close { color: var(--black-a60); }
+
+/* ── Findings: albums ── */
+#tools-page .repair-albums-view { display: flex; flex-direction: column; gap: 20px; }
+#tools-page .repair-albums-uncovered {
+    display: flex;
+    align-items: center;
+    gap: 8px 16px;
+    flex-wrap: wrap;
+    font-size: 14px;
+    color: var(--text-3);
+}
+#tools-page .repair-albums-uncovered strong { color: var(--text-1); }
+#tools-page .repair-albums-uncovered button {
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#tools-page .repair-album-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(168px, 100%), 1fr)); gap: 24px 20px; }
+#tools-page .repair-album-grid-empty { padding: 28px 0; font-size: 14px; color: var(--text-3); }
+#tools-page .repair-album-card {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    cursor: pointer;
+}
+#tools-page .repair-album-art {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--white-a06);
+    transition: transform 0.18s;
+}
+#tools-page .repair-album-card:hover .repair-album-art { transform: scale(1.02); }
+#tools-page .repair-album-card.active .repair-album-art { box-shadow: 0 0 0 2px var(--text-1); }
+#tools-page .repair-album-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+#tools-page .repair-album-count,
+#tools-page .repair-album-error-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-width: 24px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: var(--radius-pill);
+    background: var(--black-a70);
+    color: var(--text-1);
+    font-size: 12px;
+    font-weight: 700;
+    display: grid;
+    place-items: center;
+}
+#tools-page .repair-album-error-badge { right: auto; left: 8px; color: var(--danger-light); }
+#tools-page .repair-album-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#tools-page .repair-album-name { font-size: 14.5px; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tools-page .repair-album-artist,
+#tools-page .repair-album-quality,
+#tools-page .repair-album-tracks { font-size: 13px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tools-page .repair-album-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+#tools-page .repair-album-tag { padding: 2px 8px; border-radius: var(--radius-pill); background: var(--white-a08); font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+
+/* ── Jobs: running now, checks, areas ── */
+#tools-page .operations-studio { display: flex; flex-direction: column; gap: 40px; }
+#tools-page .operations-live-hud {
+    padding: 18px 24px;
+    border-radius: 20px;
+    background: var(--tl-card);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+#tools-page .operations-live-hud-head { display: flex; align-items: center; gap: 16px; }
+#tools-page .operations-live-hud-dot {
+    width: 10px;
+    height: 10px;
+    flex: none;
+    border-radius: var(--radius-circle);
+    background: var(--accent-light);
+    box-shadow: 0 0 0 5px rgba(var(--accent-rgb), 0.2);
+}
+#tools-page .operations-live-hud-title-wrap { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+#tools-page .operations-live-hud-name { margin: 0; font-size: 16px; font-weight: 700; color: var(--text-1); }
+#tools-page .operations-live-hud-phase { font-size: 13.5px; color: var(--text-2); }
+#tools-page .operations-live-hud-bar-track,
+#tools-page .progress-bar-container { height: 4px; border-radius: 2px; background: var(--white-a10); overflow: hidden; }
+#tools-page .operations-live-hud-bar-fill,
+#tools-page .progress-bar-fill { height: 100%; border-radius: 2px; background: var(--accent-light); transition: width 0.3s; }
+
+#tools-page .operations-playbooks-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 12px; }
+#tools-page .operations-playbook-card {
+    min-height: 148px;
+    padding: 20px;
+    border: 0;
+    border-radius: var(--radius-xl);
+    background: var(--tl-card);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+#tools-page .operations-playbook-card:hover:not(:disabled) { background: var(--tl-card-hover); }
+#tools-page .operations-playbook-name { font-size: 16px; font-weight: 700; color: var(--text-1); }
+#tools-page .operations-playbook-desc { flex: 1; font-size: 13.5px; line-height: 1.45; color: var(--text-2); }
+#tools-page .operations-playbook-cta {
+    align-self: flex-start;
+    height: 34px;
+    padding: 0 14px 0 12px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a10);
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text-1);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+#tools-page .operations-pillars-grid { display: flex; flex-direction: column; }
+#tools-page .operations-pillar-card {
+    display: flex;
+    align-items: center;
+    gap: 10px 20px;
+    flex-wrap: wrap;
+    min-height: 76px;
+    padding: 12px 0;
+    border-top: 1px solid var(--tl-line);
+}
+#tools-page .operations-pillar-head-info { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+#tools-page .operations-pillar-name { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-1); }
+#tools-page .operations-pillar-tagline { font-size: 13.5px; color: var(--text-2); }
+#tools-page .operations-pillar-subjob-hint { font-size: 12.5px; color: var(--text-3); }
+#tools-page .operations-pillar-inspect-link,
+#tools-page .operations-pillar-findings-badge,
+#tools-page .repair-run-link,
+#tools-page .repair-tile-badge {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: var(--white-a30);
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+#tools-page .operations-pillar-inspect-link:hover,
+#tools-page .operations-pillar-findings-badge:hover,
+#tools-page .repair-run-link:hover,
+#tools-page .repair-tile-badge:hover { color: var(--text-1); text-decoration-color: var(--text-1); }
+#tools-page .operations-pillar-stat { width: 150px; font-size: 13.5px; color: var(--text-2); }
+#tools-page .operations-pillar-stat + .operations-pillar-stat { width: 84px; }
+#tools-page .operations-pillar-findings-badge { font-size: 13.5px; }
+#tools-page .operations-pillar-autopilot {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    width: 152px;
+    min-height: 44px;
+    font-size: 13.5px;
+    color: var(--text-2);
+    cursor: pointer;
+}
+
+/* ── Jobs: every job ── */
+#tools-page .repair-families { display: flex; flex-direction: column; gap: 12px; }
+#tools-page .repair-family {
+    padding: 4px 24px 8px;
+    border-radius: 20px;
+    background: var(--tl-card);
+}
+#tools-page .repair-family.collapsed { padding-bottom: 4px; }
+#tools-page .repair-family-head {
+    width: 100%;
+    min-height: 60px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-1);
+    font: inherit;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 6px 16px;
+    flex-wrap: wrap;
+    cursor: pointer;
+}
+#tools-page .repair-family-title { font-size: 17px; font-weight: 700; }
+#tools-page .repair-family-summary { flex: 1 1 200px; font-size: 13.5px; color: var(--text-3); }
+#tools-page .repair-family-pending { font-size: 13.5px; font-weight: 600; color: var(--text-2); }
+#tools-page .repair-family-chevron { color: var(--text-3); transition: transform 0.18s; }
+#tools-page .repair-family-chevron.open { transform: rotate(180deg); }
+#tools-page .repair-family-blurb { margin: -10px 0 12px; font-size: 13.5px; color: var(--text-3); }
+#tools-page .repair-family.collapsed .repair-family-blurb { display: none; }
+#tools-page .repair-family-grid { display: flex; flex-direction: column; }
+
+#tools-page .repair-job-card.repair-tile {
+    position: relative;
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) 72px 104px 168px 92px 172px;
+    column-gap: 16px;
+    align-items: center;
+    margin: 0;
+    padding: 12px 0;
+    border: 0;
+    border-top: 1px solid var(--tl-line);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+}
+#tools-page .repair-job-card.repair-tile::before,
+#tools-page .repair-job-card.repair-tile::after { content: none; }
+#tools-page .repair-tile-head,
+#tools-page .repair-tile-schedule,
+#tools-page .repair-tile-foot { display: contents; }
+#tools-page .repair-tile-edge {
+    position: absolute;
+    top: -1px;
+    left: 0;
+    height: 2px;
+    width: 0;
+    border-radius: 1px;
+    background: var(--accent-light);
+    transition: width 0.3s;
+}
+#tools-page .repair-job-status {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-circle);
+    background: var(--white-a20);
+}
+#tools-page .repair-job-status.enabled { background: var(--accent-light); }
+#tools-page .repair-job-status.running { background: var(--accent-light); box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.22); }
+#tools-page .repair-job-status.error { background: var(--danger-light); }
+#tools-page .repair-tile-name { grid-column: 2; grid-row: 1; font-size: 15px; font-weight: 600; color: var(--text-1); }
+#tools-page .repair-tile-desc {
+    grid-column: 2;
+    grid-row: 2;
+    font-size: 13.5px;
+    color: var(--text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#tools-page .repair-tile.off .repair-tile-name { color: var(--text-2); }
+#tools-page .repair-flow-badge {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    justify-self: start;
+    padding: 2px 9px;
+    border: 1px solid var(--white-a20);
+    border-radius: var(--radius-pill);
+    background: none;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-2);
+    white-space: nowrap;
+    text-transform: none;
+    letter-spacing: 0;
+}
+#tools-page .repair-flow-badge.dryrun { border-color: rgba(var(--warning-rgb), 0.45); color: var(--warning); }
+#tools-page .repair-tile-cadence {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+    justify-self: start;
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+}
+#tools-page .repair-tile-cadence:hover { background: var(--white-a14); }
+#tools-page .repair-tile-cadence-edit {
+    grid-column: 2 / -1;
+    grid-row: 3;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 10px;
+}
+#tools-page .repair-tile-cadence-edit input,
+#tools-page .repair-tile-cadence-edit select,
+#tools-page .repair-setting-input:not([type="checkbox"]) {
+    height: 36px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13.5px;
+}
+#tools-page .repair-tile-cadence-edit input { width: 72px; }
+#tools-page .repair-tile-cadence-edit select option,
+#tools-page .repair-setting-input option { background: var(--bg-raised); color: var(--text-1); }
+#tools-page .repair-tile-cadence-save,
+#tools-page .repair-tile-cadence-cancel {
+    height: 36px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--text-1);
+    color: var(--bg-primary);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 700;
+    cursor: pointer;
+}
+#tools-page .repair-tile-cadence-cancel { background: none; color: var(--text-2); font-weight: 600; }
+#tools-page .repair-tile-cadence-custom { font-size: 13.5px; color: var(--text-2); }
+#tools-page .repair-tile-next { grid-column: 5; grid-row: 1; font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tools-page .repair-tile-next.due { color: var(--text-1); }
+#tools-page .repair-tile-next.off { color: var(--text-3); }
+#tools-page .repair-tile-meta,
+#tools-page .repair-tile-trend {
+    grid-column: 5;
+    grid-row: 2;
+    font-size: 12px;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#tools-page .repair-tile-trend { display: inline-flex; align-items: center; gap: 8px; }
+#tools-page .repair-tile-badge { grid-column: 6; grid-row: 1 / span 2; justify-self: end; font-size: 13.5px; white-space: nowrap; }
+#tools-page .repair-tile-badge.historical { color: var(--text-3); }
+#tools-page .repair-job-actions { grid-column: 7; grid-row: 1 / span 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+#tools-page .repair-job-toggle { display: inline-flex; align-items: center; min-height: 36px; padding: 0 8px; cursor: pointer; }
+#tools-page .repair-job-progress,
+#tools-page .repair-job-settings { grid-column: 2 / -1; }
+#tools-page .repair-job-progress { padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+#tools-page .repair-progress-phase { font-size: 13px; font-weight: 600; color: var(--text-2); }
+#tools-page .repair-progress-log {
+    max-height: 120px;
+    overflow: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: var(--text-3);
+}
+#tools-page .repair-log-line.error { color: var(--danger-light); }
+#tools-page .repair-log-line.success { color: var(--accent-light); }
+#tools-page .repair-job-settings {
+    margin-top: 12px;
+    padding: 16px 20px;
+    border-radius: var(--radius-card);
+    background: var(--white-a04);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+/* a settings row must fit its job row. a form control's min-width is its
+   intrinsic width (about 170px for a number input) and a long label won't
+   break, so without these the row ran past the edge and the field could not
+   be reached (reported by TheHomeGuy). */
+#tools-page .repair-setting-input {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+#tools-page .repair-setting-section { margin-top: 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+#tools-page .repair-setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    min-height: 36px;
+    font-size: 14px;
+    color: var(--text-2);
+}
+/* the label gives way before the input does: it is the part that can wrap */
+#tools-page .repair-setting-row label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+#tools-page .repair-setting-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent-light); }
+#tools-page .repair-save-settings-btn {
+    align-self: flex-start;
+    max-width: 100%;
+    margin-top: 6px;
+}
+#tools-page .repair-job-card--linked { animation: tools-linked-row 2.4s ease-out; }
+@keyframes tools-linked-row {
+    0%, 60% { background: var(--white-a10); }
+    100% { background: transparent; }
+}
+
+@media (max-width: 1180px) {
+    #tools-page .repair-job-card.repair-tile { grid-template-columns: 8px minmax(0, 1fr) auto; row-gap: 4px; }
+    #tools-page .repair-flow-badge,
+    #tools-page .repair-tile-cadence,
+    #tools-page .repair-tile-next,
+    #tools-page .repair-tile-meta,
+    #tools-page .repair-tile-trend,
+    #tools-page .repair-tile-badge { grid-column: 2; grid-row: auto; justify-self: start; }
+    #tools-page .repair-job-actions { grid-column: 3; grid-row: 1 / span 2; }
+    #tools-page .repair-tile-desc { white-space: normal; }
+}
+
+/* ── the job help sheet ── */
+.repair-help-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--black-a70);
+}
+.repair-help-modal {
+    width: min(560px, 100%);
+    max-height: min(80vh, 720px);
+    overflow: auto;
+    padding: 24px 28px 28px;
+    border-radius: var(--radius-sheet);
+    background: var(--bg-raised);
+    color: var(--text-2);
+    font-size: 14px;
+    line-height: 1.55;
+    box-shadow: 0 24px 80px var(--black-a60);
+}
+.repair-help-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.repair-help-close {
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: var(--radius-circle);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+}
+.repair-help-badges { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 16px; }
+.repair-help-badges .repair-flow-badge {
+    padding: 2px 9px;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-2);
+}
+.repair-help-setting-list { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
+.repair-help-settings-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--white-a08); }
+.repair-help-section-title { margin-bottom: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.repair-help-setting { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; }
+.repair-help-setting-val { color: var(--text-1); font-weight: 600; }
+
+/* ── History ── */
+#tools-page .repair-runs { display: flex; flex-direction: column; gap: 20px; }
+#tools-page .repair-runs-toolbar { display: flex; align-items: flex-start; gap: 12px; }
+#tools-page .repair-runs-chips { flex: 1; display: flex; gap: 8px; flex-wrap: wrap; }
+#tools-page .repair-runs-tools { display: flex; align-items: center; gap: 4px; flex: none; }
+#tools-page .repair-runs-chip,
+#tools-page .repair-runs-toggle {
+    height: 32px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+#tools-page .repair-runs-chip:hover,
+#tools-page .repair-runs-toggle:hover { background: var(--white-a12); }
+#tools-page .repair-runs-chip.active,
+#tools-page .repair-runs-toggle.active { background: var(--text-1); color: var(--bg-primary); }
+#tools-page .repair-runs-chip-count { font-weight: 500; color: var(--text-3); }
+#tools-page .repair-runs-chip.active .repair-runs-chip-count,
+#tools-page .repair-runs-toggle.active .repair-runs-chip-count { color: var(--black-a60); }
+#tools-page .repair-runs-chip.has-failure:not(.active) { box-shadow: inset 0 0 0 1px rgba(var(--danger-rgb), 0.5); }
+#tools-page .repair-runs-day { display: flex; flex-direction: column; }
+#tools-page .repair-runs-day-head { display: flex; align-items: baseline; gap: 10px; padding: 0 0 8px; }
+#tools-page .repair-runs-day-label { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
+#tools-page .repair-runs-day-count { font-size: 12.5px; color: var(--text-3); }
+#tools-page .repair-run { border-top: 1px solid var(--tl-line); }
+#tools-page .repair-run-head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 48px;
+    padding: 0 4px;
+    font-size: 14px;
+    cursor: pointer;
+}
+#tools-page .repair-run-head:hover { background: var(--white-a04); }
+#tools-page .repair-run-glyph { width: 16px; flex: none; text-align: center; font-weight: 700; color: var(--text-3); }
+#tools-page .repair-run-glyph.success { color: var(--accent-light); }
+#tools-page .repair-run-glyph.failed { color: var(--danger-light); }
+#tools-page .repair-run-glyph.stopped { color: var(--warning); }
+#tools-page .repair-run-clock { width: 72px; flex: none; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+#tools-page .repair-run-name { width: 260px; flex: none; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tools-page .repair-run-summary { flex: 1 1 0; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tools-page .repair-run.failed .repair-run-summary { color: var(--danger-light); }
+#tools-page .repair-run-age { flex: none; font-size: 13px; color: var(--text-3); }
+#tools-page .repair-run-chevron { flex: none; color: var(--text-3); transition: transform 0.18s; }
+#tools-page .repair-run-chevron.open { transform: rotate(180deg); }
+#tools-page .repair-run-detail { padding: 4px 4px 20px 34px; display: flex; flex-direction: column; gap: 14px; }
+#tools-page .repair-run-counters { display: flex; gap: 28px; flex-wrap: wrap; }
+#tools-page .repair-run-counter { display: flex; flex-direction: column; gap: 2px; }
+#tools-page .repair-run-counter-value { font-size: 20px; font-weight: 700; color: var(--text-1); font-variant-numeric: tabular-nums; }
+#tools-page .repair-run-counter-label { font-size: 12.5px; color: var(--text-3); }
+#tools-page .repair-run-error { padding: 12px 16px; border-radius: var(--radius-lg); background: rgba(var(--danger-rgb), 0.1); }
+#tools-page .repair-run-error-title { margin-bottom: 4px; font-size: 13px; font-weight: 700; color: var(--danger-light); }
+#tools-page .repair-run-error-text { margin: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+#tools-page .repair-run-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--text-3); }
+
+/* ── Tools ── */
+#tools-page #tools-panel-tools .tools-grid { display: flex; flex-direction: column; }
+#tools-page .tool-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 24px;
+    row-gap: 4px;
+    align-items: center;
+    margin: 0;
+    padding: 16px 0;
+    border: 0;
+    border-top: 1px solid var(--tl-line);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+}
+#tools-page .tool-card::before,
+#tools-page .tool-card::after { content: none; }
+#tools-page .tool-card:hover { transform: none; background: none; box-shadow: none; }
+#tools-page .tool-card-header { grid-column: 1; display: flex; align-items: center; justify-content: flex-start; gap: 6px; margin: 0; padding: 0; border: 0; }
+#tools-page .tool-card-title { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-1); }
+#tools-page .tool-help-button { width: 28px; height: 28px; font-size: 13px; }
+#tools-page .tool-card-info,
+#tools-page .metadata-updater-description { grid-column: 1; margin: 0; font-size: 13.5px; color: var(--text-3); }
+#tools-page .tool-card-stats {
+    grid-column: 1;
+    display: flex;
+    gap: 2px 18px;
+    flex-wrap: wrap;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+#tools-page .stat-item { display: inline-flex; gap: 6px; padding: 0; background: none; font-size: 13px; }
+#tools-page .stat-item-label { color: var(--text-3); }
+#tools-page .stat-item-value { padding: 0; background: none; font-weight: 600; color: var(--text-2); }
+#tools-page .tool-card-controls {
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0;
+}
+#tools-page .tool-card-controls select {
+    height: 36px;
+    max-width: 220px;
+    padding: 0 30px 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background-color: var(--white-a08);
+    color: var(--text-1);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#tools-page .tool-card-controls select option { background: var(--bg-raised); color: var(--text-1); }
+#tools-page .tool-card-controls .scan-icon { display: none; }
+#tools-page .tool-card-progress-section {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto minmax(120px, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    margin: 6px 0 0;
+    padding: 0;
+    border: 0;
+}
+/* nothing running: the tool says so in a word, without an empty bar */
+#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-bar-container,
+#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-details-label { display: none; }
+#tools-page .progress-phase-label,
+#tools-page .progress-details-label { margin: 0; font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
+#tools-page .tool-card > :not(.tool-card-header, .tool-card-info, .tool-card-stats, .tool-card-controls, .metadata-updater-description) { grid-column: 1 / -1; }
+
+@media (max-width: 760px) {
+    #tools-page { padding: 24px 16px 40px; gap: 20px; }
+    #tools-page .tools-title { font-size: 36px; }
+    #tools-page .repair-health { padding: 20px; }
+    #tools-page .repair-health-actions { align-items: flex-start; }
+    #tools-page .repair-inbox-head { flex-wrap: wrap; gap: 8px 14px; }
+    #tools-page .repair-inbox-count { width: 68px; font-size: 22px; }
+    #tools-page .repair-art-stack { display: none; }
+    #tools-page .repair-inbox-text { flex-basis: 60%; }
+    #tools-page .repair-inbox-actions { width: 100%; }
+    #tools-page .repair-finding-main { flex-wrap: wrap; }
+    #tools-page .repair-finding-content { flex-basis: 50%; }
+    #tools-page .repair-finding-fields,
+    #tools-page .repair-finding-age { display: none; }
+    #tools-page .repair-finding-actions { margin-left: auto; }
+    #tools-page .repair-finding-detail-inner,
+    #tools-page .repair-finding-error-banner { margin-left: 16px; }
+    #tools-page .repair-run-clock,
+    #tools-page .repair-run-age { display: none; }
+    #tools-page .repair-run-name { width: 40%; }
+    #tools-page .tool-card { grid-template-columns: minmax(0, 1fr); }
+    #tools-page .tool-card-controls { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-top: 8px; }
+    #tools-page .operations-pillar-stat,
+    #tools-page .operations-pillar-stat + .operations-pillar-stat,
+    #tools-page .operations-pillar-autopilot { width: auto; }
 }

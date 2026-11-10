@@ -73,13 +73,12 @@ describe('RC2 — tab rails that #1661 could not reach', () => {
 
 describe('RC3 — min-width floors collapse at phone widths', () => {
   it('tools grids cap their floor at the container width', () => {
-    expect(STYLE).toContain('minmax(min(280px, 100%), 1fr)');
-    expect(STYLE).toContain('minmax(min(320px, 100%), 1fr)');
+    expect(STYLE).toContain('minmax(min(230px, 100%), 1fr)');
+    expect(STYLE).toContain('minmax(min(168px, 100%), 1fr)');
   });
 
-  it('the pillars header stacks on phones instead of crushing the paragraph', () => {
-    const at = STYLE.indexOf('.operations-pillars-header {\n        flex-direction: column;');
-    expect(at).toBeGreaterThan(-1);
+  it('a tools section heading wraps on phones instead of crushing its one-line why', () => {
+    expect(blockAfter(STYLE, '#tools-page .tools-section-head {')).toContain('flex-wrap: wrap');
   });
 
   it('the logs toolbar wraps so the Auto-scroll toggle stays on screen', () => {
@@ -110,18 +109,6 @@ describe('RC3 — min-width floors collapse at phone widths', () => {
     // Without min-width: 0 the wrap's automatic minimum size (the input's
     // intrinsic width) becomes the floor and the basis cap never engages.
     expect(block).toContain('min-width: 0');
-  });
-
-  it('below 360px the operations mode toggle tightens so the tools page cannot scroll sideways', () => {
-    // 320px only: the two buttons total ~282px and ran to x=328 (fold-in).
-    const at = STYLE.indexOf('@media (max-width: 359px)');
-    expect(at).toBeGreaterThan(-1);
-    const block = STYLE.slice(
-      at,
-      STYLE.indexOf('}', STYLE.indexOf('.operations-mode-toggle-btn', at)) + 1,
-    );
-    expect(block).toContain('.operations-mode-toggle-btn');
-    expect(block).toContain('padding: 8px 10px');
   });
 
   it('below 360px the audiobooks mode strip scrolls inside the search bar instead of painting past it', () => {

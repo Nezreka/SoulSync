@@ -192,24 +192,30 @@ The **Backup Manager** is a server card on the **Tools** page. It protects your 
             body: `
 ## Where it lives now
 
-Repair and maintenance moved to the **Tools** page, which has two tabs:
+Repair and maintenance live on the **Tools** page, which has four pills:
 
-- **Operations** — the findings inbox. Repair scans surface problems here (missing tags, duplicates, dead files, …) and you fix them individually or in bulk.
-- **Tools** — launcher cards for scans and maintenance: **Media Server Scan**, **Metadata Updater**, **Backup Manager**, **Download Blacklist**, **Metadata Cache**, **Discovery Pool**, and more.
+- **Findings** — what the repair jobs found (missing tags, duplicates, dead files, …), with the library's health score. You fix them one at a time or in bulk.
+- **Jobs** — what is running, **Run a check** (a few jobs queued together), the **Areas**, and every job with its schedule, switch and settings.
+- **History** — every run of every job: what it checked, what it found, and why it failed if it did.
+- **Tools** — scans and maintenance you start by hand: **Media Server Scan**, **Metadata Updater**, **Backup Manager**, **Download Blacklist**, **Metadata Cache**, **Discovery Pool**, and more.
+
+The **Scheduled jobs** switch at the top lets enabled jobs run on their schedules. With it off, a job only runs when you start it.
 
 ## Working through findings
 
-**Simple mode** opens with one health score (the same one Advanced shows) and sorts every open finding by what fixing it would do:
+Findings opens with one health score and sorts every kind of finding by what fixing it would do:
 
-| Card | What's in it |
-|------|--------------|
-| **Safe to fix** | Fixes that only write tags and data. **Fix all** runs them in the background. |
-| **Needs your call** | Fixes that move, delete or replace files. Each asks first. |
+| Section | What's in it |
+|---------|--------------|
+| **Safe to fix** | Fixes that only write tags and data. **Fix all safe** runs them in the background. |
+| **Needs your call** | Fixes that move, delete or replace files, or start downloads. Each asks first. |
 | **Review only** | Things worth a look that have no automatic fix. |
 
-Each card lists the finding types inside it; click one to open its findings.
+The section holding the worst finding comes first. Each row is one kind of finding, with its own fix-all (and dismiss-all when you point at the row) and a few covers from the albums it is about. Click a row to open that kind alone; **All findings** takes you back.
 
-**Advanced mode** lands on **Issue Types**: one row per kind of finding, worst first, each with its own fix-all and dismiss-all. **Albums & Releases** is a lens on the findings that belong to an album; it says how many findings it can't show (orphan files have no album) and links to the rest.
+Inside one kind, each finding shows its cover, the track and artist, and for tag findings the fields that differ. Open a row for the file path, the job that found it and the full detail. **List / Albums / Artists** regroups the rows.
+
+The view switch offers two more ways in: **Albums** is a lens on the findings that belong to an album (it says how many findings it can't show, since orphan files have no album), and **Flat list** is every finding in one list.
 
 - **Dismiss** means "don't raise this again". Every dismiss shows an **Undo** for a few seconds, and dismissed findings can be reopened from the Dismissed view.
 - **Delete matching…** forgets findings outright (the next scan can raise them again). It's not the same as dismiss.

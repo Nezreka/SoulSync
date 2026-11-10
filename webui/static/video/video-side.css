@@ -4807,16 +4807,6 @@ img.vdh-poster--none { font-size: 0; }
     transition: all var(--dur-fast) ease; }
 .vdh-more:hover { color: #fff; background: var(--white-a10); }
 @media (max-width: 620px) { .vdh-detail { grid-template-columns: 1fr; padding-left: 16px; } }
-
-/* ── Video Tools scan cards ──────────────────────────────────────────────
-   The video scan cards carry THREE controls (target + mode + action button),
-   one more than music's two, so the shared no-wrap flex row overflowed and clipped
-   the button. Scoped to the video Tools page (music's .tool-card-controls is
-   untouched): let the row wrap, two selects share the top row, the button drops
-   to its own full-width row. The page is the React tools page on ?media=video. */
-.tools-page--video .tool-card-controls {
-    flex-wrap: wrap;
-}
 .tools-page--video .tool-card-controls select {
     flex: 1 1 140px;          /* two selects share the top row, each ≥140px */
     min-width: 0;

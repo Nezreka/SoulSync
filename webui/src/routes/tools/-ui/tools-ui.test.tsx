@@ -305,13 +305,11 @@ describe('ToolsPage shell', () => {
 
   it('renders the header copy verbatim', async () => {
     render(<ToolsPage />);
-    expect(screen.getByText('Tools & Operations')).toBeTruthy();
-    // The subtitle now also says what this page ISN'T, because Issues and
-    // Library Maintenance read as duplicates of each other otherwise (#1210).
-    expect(
-      screen.getByText(/Automated scans, database management, metadata, backups/),
-    ).toBeTruthy();
-    expect(screen.getByText(/hand-reported\s+problems live on the Issues page/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Tools' })).toBeTruthy();
+    // The subtitle also says what this page ISN'T, because Issues and
+    // library maintenance read as duplicates of each other otherwise (#1210).
+    expect(screen.getByText(/Library maintenance, scans and backups/)).toBeTruthy();
+    expect(screen.getByText(/Hand-reported\s+problems live on the Issues page/)).toBeTruthy();
     await flush();
   });
 

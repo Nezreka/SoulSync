@@ -1,28 +1,19 @@
 /**
- * Operations — the maintenance jobs, grouped and given a face.
+ * Every maintenance job, as a row, grouped into the families the backend
+ * serves. A row carries what you want to know about a job on its face: is it
+ * on, how often it runs (click to change), when it last ran, how many
+ * findings it has open, and the three things you do to it (switch, run, set).
  *
- * What this replaced: thirty identical stacked cards in one undifferentiated
- * list, each carrying a name, a description, a row of badges and a settings
- * gear. No order, no organisation, and the one thing a user actually wants to
- * know about a job — when does this run, and can I change that — was a bare
- * "Interval (hours)" box hidden inside the gear.
+ * Two contracts that outlive the redesigns:
  *
- * Now: containers per family (served by the backend, not guessed here), each
- * summarising itself so a collapsed one still tells you something, and a tile
- * per job whose face carries the cadence as an editable control.
- *
- * Two contracts from the P0 that outlive the redesign:
- *
- * 1. `.repair-job-card[data-job-id]` — the stable per-job hook the socket
- *    dispatch and the tests key on. It stays on the tile root.
+ * 1. `.repair-job-card[data-job-id]` is the stable per-job hook the socket
+ *    dispatch and the tests key on. It stays on the row root.
  * 2. The class on the card is NOT the class on the status dot. An idle
- *    enabled job gets dot 'enabled' and card class '' — see
- *    repairJobCardClass.
+ *    enabled job gets dot 'enabled' and card class '' (see
+ *    repairJobCardClass).
  *
- * The glow edge is the progress bar: it idles as a family-coloured hairline
- * and fills left-to-right while that job scans. Same idea as the dashboard's
- * worker orbs — one object carrying identity, state and control — rather than
- * a separate progress panel that appears and shoves the layout around.
+ * The thin line along the top of a row is its progress bar: it fills left to
+ * right while that job scans, so nothing appears and shoves the list around.
  */
 
 import { Link } from '@tanstack/react-router';
@@ -59,7 +50,6 @@ import {
   jobTrend,
 } from '../-tools.ops';
 import { updateAutomationTrigger } from '../../automations/-automations.api';
-import { OperationsStudio } from './operations-studio';
 
 function toast(message: string, type = 'info') {
   window.showToast?.(message, type);
@@ -559,7 +549,15 @@ export function OperationTile({
               title={stopping ? 'Stopping…' : 'Stop this run'}
               onClick={() => void onStop()}
             >
-              &#9209;
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
             </button>
           ) : (
             <button
@@ -568,7 +566,15 @@ export function OperationTile({
               title="Run now"
               onClick={() => void onRun()}
             >
-              &#9654;
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                aria-hidden="true"
+              >
+                <path d="M7 4.5v15l13-7.5z" />
+              </svg>
             </button>
           )}
           {hasSettings ? (
@@ -581,7 +587,20 @@ export function OperationTile({
                 setSettingsOpen((previous) => !previous);
               }}
             >
-              &#9881;
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+                <circle cx="16" cy="7" r="2" />
+                <circle cx="8" cy="17" r="2" />
+              </svg>
             </button>
           ) : null}
           <button
@@ -632,9 +651,6 @@ export interface OperationsProps {
   onChanged: () => void;
   onHelp: (job: RepairJob) => void;
   onShowFindings: (jobId: string, options?: { severity?: string; findingType?: string }) => void;
-  mode?: 'simple' | 'advanced';
-  onModeChange?: (mode: 'simple' | 'advanced') => void;
-  defaultMode?: 'simple' | 'advanced';
 }
 
 export function Operations({
@@ -645,36 +661,7 @@ export function Operations({
   onChanged,
   onHelp,
   onShowFindings,
-  mode: controlledMode,
-  onModeChange,
-  defaultMode,
 }: OperationsProps) {
-  const [internalMode, setInternalMode] = useState<'simple' | 'advanced'>(() => {
-    if (defaultMode) return defaultMode;
-    try {
-      const saved = localStorage.getItem('soulsync_operations_mode');
-      if (saved === 'advanced' || saved === 'simple') return saved;
-    } catch {
-      // Fallback if localStorage unavailable
-    }
-    return 'simple';
-  });
-
-  const mode = controlledMode ?? internalMode;
-
-  const handleModeSwitch = useCallback(
-    (next: 'simple' | 'advanced') => {
-      setInternalMode(next);
-      try {
-        localStorage.setItem('soulsync_operations_mode', next);
-      } catch {
-        // Ignore storage errors
-      }
-      onModeChange?.(next);
-    },
-    [onModeChange],
-  );
-
   const families = useMemo(() => jobFamilies(jobs || []), [jobs]);
   /** Collapsed families, by name. Everything starts open — a page that hides
    *  its own contents on arrival is the tab problem again, one level down. */
@@ -685,7 +672,6 @@ export function Operations({
   if (jobs.length === 0) {
     return (
       <div className="repair-empty-state">
-        <div className="repair-empty-icon">🔧</div>
         <div className="repair-empty-title">No Maintenance Jobs</div>
         <div className="repair-empty-text">
           Library maintenance jobs will appear here once available.
@@ -696,94 +682,12 @@ export function Operations({
 
   return (
     <div className="operations-wrapper">
-      {/* ── Mode Switcher Bar ────────────────────────────────────────────── */}
-      {/* the maintenance hero has its own switch at the top of the page and
-          drives this one (controlledMode). a second identical switch half a
-          page down was the same control twice, so it only shows standalone. */}
-      {controlledMode === undefined ? (
-        <div className="operations-mode-bar">
-          <div className="operations-mode-meta">
-            <div className="operations-mode-heading">
-              <span className="operations-mode-pill">
-                {mode === 'simple' ? '✦ Simple View' : '⚙ Advanced View'}
-              </span>
-              <span className="operations-mode-label">
-                {mode === 'simple'
-                  ? 'Checks and areas'
-                  : `All ${(jobs || []).length} jobs, their schedules and settings`}
-              </span>
-            </div>
-            <p className="operations-mode-description">
-              {mode === 'simple'
-                ? 'Run a few jobs together, or put a whole area on its schedule.'
-                : 'Every job on its own: turn it on or off, run it now, change how often it runs and what it looks for.'}
-            </p>
-          </div>
-
-          <div
-            className="operations-mode-toggle-group"
-            role="tablist"
-            aria-label="Workstation View Mode"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'simple'}
-              className={`operations-mode-toggle-btn ${mode === 'simple' ? 'active' : ''}`}
-              onClick={() => handleModeSwitch('simple')}
-              title="The overview (recommended)"
-            >
-              <span className="operations-mode-toggle-icon">✦</span>
-              <span>Simple Mode</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === 'advanced'}
-              className={`operations-mode-toggle-btn ${mode === 'advanced' ? 'active' : ''}`}
-              onClick={() => handleModeSwitch('advanced')}
-              title="Every job, one by one"
-            >
-              <span className="operations-mode-toggle-icon">⚙</span>
-              <span>Advanced Mode</span>
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {/* ── Simple Mode (Studio) View ────────────────────────────────────── */}
-      {mode === 'simple' ? (
-        <OperationsStudio
-          jobs={jobs}
-          progress={progress}
-          runs={runs}
-          onChanged={onChanged}
-          onShowFindings={onShowFindings}
-          onSwitchToAdvanced={(category) => {
-            handleModeSwitch('advanced');
-            if (category) {
-              setTimeout(() => {
-                const target = document.querySelector(`[data-category="${category}"]`);
-                target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }, 50);
-            }
-          }}
-        />
-      ) : null}
-
-      {/* ── Advanced Mode (Job Families & Tiles) View ─────────────────────── */}
-      {/* Kept in the DOM with hidden when in Simple mode to maintain socket dispatch hooks & test stability */}
-      <div
-        className="repair-families"
-        hidden={mode !== 'advanced'}
-        style={mode !== 'advanced' ? { display: 'none' } : undefined}
-      >
+      <div className="repair-families">
         {families.map((family) => {
           const isOpen = !collapsed.has(family.category);
           return (
             <section
               className={`repair-family${isOpen ? '' : ' collapsed'}`}
-              style={{ ['--tile-glow' as string]: family.glow }}
               data-category={family.category}
               key={family.category}
             >
@@ -807,12 +711,20 @@ export function Operations({
                     {family.pending.toLocaleString()} open
                   </span>
                 ) : null}
-                <span
+                <svg
                   className={`repair-family-chevron${isOpen ? ' open' : ''}`}
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                   aria-hidden="true"
                 >
-                  &#9660;
-                </span>
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
               </button>
               <div className="repair-family-blurb">{family.blurb}</div>
               {isOpen ? (
