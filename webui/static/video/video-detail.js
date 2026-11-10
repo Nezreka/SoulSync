@@ -1943,12 +1943,26 @@
         try { return localStorage.getItem(TAB_KEY + kind) === 'library' ? 'library' : 'main'; }
         catch (e) { return 'main'; }
     }
+    // A library MOVIE has no tabs any more: a movie is one thing, and a tab in
+    // front of its two files was a page split for nothing. Its library panel
+    // (what needs attention, its files) is part of the page, and the library
+    // line sits in the hero. Shows still have the two tabs until their episode
+    // list carries the files too.
+    function onePage() { return tabbable() && data.kind === 'movie'; }
     function renderTabs() {
-        var bar = q('[data-vd-tabs]'), body = q('.vd-body');
+        var bar = q('[data-vd-tabs]'), body = q('.vd-body'), panel = q('[data-vd-library-panel]');
         if (!bar || !body) return;
-        var on = tabbable();
+        var one = onePage();
+        var on = tabbable() && !one;
         bar.hidden = !on;
         body.classList.toggle('vd-body--tabbed', on);
+        body.classList.toggle('vd-body--one', one);
+        if (one && panel) {
+            body.classList.remove('vd-body--library');
+            panel.hidden = false;
+            mountLibraryTab();
+            return;
+        }
         setTab(on ? savedTab(data.kind) : 'main', true);
     }
     function setTab(tab, quiet) {
@@ -1975,7 +1989,8 @@
             document.addEventListener('soulsync:video-library-tab-ready', mountLibraryTab, { once: true });
             return;
         }
-        window.VideoLibraryTab.mount(panel, { kind: data.kind, id: data.id });
+        window.VideoLibraryTab.mount(panel, { kind: data.kind, id: data.id,
+            heroSlot: onePage() ? q('[data-vd-libline]') : null });
         _libMounted = panel;
     }
     function unmountLibraryTab() {

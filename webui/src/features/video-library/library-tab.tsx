@@ -15,6 +15,7 @@
  */
 
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { ActionMenu, type ActionMenuItem } from '@/routes/artist-detail/-ui/action-menu';
 
@@ -30,8 +31,10 @@ import type {
 } from './types';
 
 import {
+  type AcquisitionState,
   bulkFiles,
   type ConsolidateState,
+  fetchAcquisition,
   deleteFile,
   fetchConsolidateState,
   fetchTitleLibrary,
@@ -44,14 +47,16 @@ import {
 } from './api';
 import { FixMatchDialog } from './fix-match-dialog';
 import {
+  audioLabel,
   audioLanguagesLabel,
+  codecLabel,
   dateLabel,
   driveLabel,
   formatBytes,
-  mediaFacts,
   pad2,
+  rangeLabel,
   resolutionTone,
-  sourceLine,
+  runtimeLabel,
   subtitleLabels,
 } from './format';
 import { ConsolidateDialog, CopiesDialog, ReassignDialog } from './library-dialogs';
@@ -231,8 +236,16 @@ interface Issue {
   action?: { label: string; onClick: () => void; busy?: boolean };
 }
 
-function Attention({ issues }: { issues: Issue[] }) {
+function Attention({
+  issues,
+  quietWhenClear,
+}: {
+  issues: Issue[];
+  /** on the one-page layout a healthy title shows no section at all */
+  quietWhenClear?: boolean;
+}) {
   if (!issues.length) {
+    if (quietWhenClear) return null;
     return (
       <p className={s.allGood}>
         <span className={s.tick} aria-hidden="true">
@@ -341,149 +354,222 @@ interface Quiet {
   below?: boolean;
 }
 
-/** picture, sound and size: the line a file is judged by */
-function MediaLine({ f }: { f: LibraryFile }) {
-  const facts = mediaFacts(f);
-  const named = f.quality && f.quality !== f.resolution_label ? f.quality : '';
-  if (!facts.length && !named) return null;
+/** one labelled fact on a file card: a small label, the value, a quiet second line */
+function Fact({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className={s.media}>
-      {named ? <span className={s.mediaName}>{named}</span> : null}
-      {facts.map((fact) => (
-        <span key={fact.key} className={s.mediaFact} data-strong={fact.strong ? 'yes' : 'no'}>
-          {fact.text}
-        </span>
-      ))}
+    <div className={s.spec}>
+      <div className={s.specLabel}>{label}</div>
+      <div className={s.specValue}>{value}</div>
+      {sub ? (
+        <div className={s.specSub} title={sub}>
+          {sub}
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function FileStatus({
-  f,
-  canManage,
-  onRename,
-  quiet = {},
-}: {
-  f: LibraryFile;
-  canManage: boolean;
-  onRename: (f: LibraryFile) => void;
-  quiet?: Quiet;
-}) {
-  const chips: ReactNode[] = [];
-  if (f.below_cutoff && !quiet.below) {
-    chips.push(
-      <Chip key="cut" tone="warn">
-        Below your quality target
-      </Chip>,
-    );
-  }
-  // audio, subtitles and resolution: the three a file is picked by (Thibs)
-  const audio = audioLanguagesLabel(f.audio_languages);
-  if (audio) {
-    chips.push(
-      <Chip key="audio" tone="info" title="The languages of the file's audio tracks">
-        <span className={s.cc}>Audio</span>
-        {audio}
-      </Chip>,
-    );
-  }
+/** the subtitle cell: how many there are and where, then which */
+function subtitleFact(f: LibraryFile): { value: string; sub: string; all: string } {
   const labelled = subtitleLabels(f.subtitles, f.subtitle_languages);
-  // every track inside the file: said once up front, not after each language
-  const inFile =
-    !!labelled && labelled.length > 1 && labelled.every((label) => label.endsWith(' (in file)'));
-  const subs = inFile ? labelled.map((label) => label.replace(/ \(in file\)$/, '')) : labelled;
-  if (subs) {
-    chips.push(
-      subs.length ? (
-        // a release with thirty subtitle tracks used to fill the row with
-        // them; the first few are named and the rest are counted
-        <Chip key="subs" tone="info" title={subs.join(', ')}>
-          <span className={s.cc}>{inFile ? 'CC in file' : 'CC'}</span>
-          {subs.slice(0, 3).join(', ')}
-          {subs.length > 3 ? ` and ${subs.length - 3} more` : ''}
-        </Chip>
-      ) : (
-        <Chip key="subs" tone="muted">
-          {f.subtitle_languages == null ? 'No subtitle files beside it' : 'No subtitles'}
-        </Chip>
-      ),
-    );
+  if (labelled == null) {
+    return {
+      value: 'Not known',
+      sub: f.reachable === false ? 'SoulSync can’t see the folder' : 'Not read yet',
+      all: '',
+    };
   }
-  if (f.naming) {
-    chips.push(
-      f.naming.conforms ? (
-        <Chip key="name" tone="ok">
-          ✓ Named by your template
-        </Chip>
-      ) : (
-        <span key="name" className={s.rename}>
-          <Chip tone="warn" title={f.naming.expected_name}>
-            Template name: {f.naming.expected_name ?? 'differs'}
-          </Chip>
-          {canManage ? (
-            <button type="button" className={s.linkBtn} onClick={() => onRename(f)}>
-              Rename
-            </button>
-          ) : null}
-        </span>
-      ),
-    );
+  if (!labelled.length) {
+    return {
+      value: 'None',
+      // the folder was looked at but the file's own tracks were not read yet
+      sub: f.subtitle_languages == null ? 'No subtitle files beside it' : 'No subtitles',
+      all: '',
+    };
   }
-  if (f.reachable === false && !quiet.unreachable) {
-    chips.push(
-      <Chip
-        key="far"
-        tone="muted"
-        title="The file is on a drive only your media server can see. Its facts come from the server."
-      >
-        Only your media server can see this file
-      </Chip>,
-    );
-  }
-  return chips.length ? <div className={s.chips}>{chips}</div> : null;
+  const inFile = labelled.filter((label) => label.endsWith(' (in file)')).length;
+  const where =
+    inFile === labelled.length
+      ? 'in the file'
+      : inFile === 0
+        ? 'beside the file'
+        : `, ${inFile} in the file`;
+  const value = where.startsWith(',')
+    ? `${labelled.length}${where}`
+    : `${labelled.length} ${where}`;
+  // every track inside the file: said once in the value, not after each language
+  const names =
+    inFile === labelled.length
+      ? labelled.map((label) => label.replace(/ \(in file\)$/, ''))
+      : labelled;
+  return {
+    value,
+    sub: names.slice(0, 3).join(', ') + (names.length > 3 ? ` and ${names.length - 3} more` : ''),
+    all: names.join(', '),
+  };
 }
 
-/** one file, the same on a movie and under an episode */
-function FileRow({
+/** the last folders of a path, as a trail: "MOVIES / Heat (1995)" */
+function folderTrail(path: string | null | undefined): string {
+  const parts = folderOf(path).split('/').filter(Boolean);
+  return parts.slice(-2).join(' / ');
+}
+
+/**
+ * one file, as a card. the same on a movie and under an episode.
+ *
+ * it was a row: every fact on one line and a pile of chips under it, so
+ * nothing had a place. now the resolution leads, four labelled facts sit in a
+ * grid (picture, sound, subtitles, where), the file name carries its naming
+ * status, and the foot says where the file came from. two copies sit side by
+ * side so they can be compared; the best one is outlined.
+ */
+function FileCard({
   f,
   actions,
-  quiet,
+  quiet = {},
   label,
-  showFolder,
+  extra,
 }: {
   f: LibraryFile;
   actions: FileActions;
   quiet?: Quiet;
   label: string;
-  showFolder?: boolean;
+  /** another copy of the same movie or episode is the best one */
+  extra?: boolean;
 }) {
-  const source = sourceLine(f.source);
+  const named = f.quality && f.quality !== f.resolution_label ? f.quality : '';
+  const codec = codecLabel(f.video_codec);
+  const range = rangeLabel(f.dynamic_range);
+  const audio = audioLabel(f);
+  const languages = audioLanguagesLabel(f.audio_languages);
+  const subs = subtitleFact(f);
+  const drive = driveLabel(f.root);
+  const trail = folderTrail(f.path);
+  const source = f.source;
+  const far = f.reachable === false && !quiet.unreachable;
   return (
-    <div className={s.file} data-file-id={f.id}>
-      <ResBadge label={f.resolution_label} />
-      <div className={s.fileBody}>
-        <div className={s.fileTop}>
-          <MediaLine f={f} />
-          {f.best ? <span className={s.best}>Best copy</span> : null}
+    <article className={s.fileCard} data-file-id={f.id} data-best={f.best ? 'yes' : 'no'}>
+      <header className={s.fileHead}>
+        <span className={s.resTile} data-tone={resolutionTone(f.resolution_label)}>
+          {f.resolution_label || '—'}
+        </span>
+        <div className={s.fileHeadText}>
+          <div className={s.fileTitleRow}>
+            <span className={s.fileTitle}>
+              {named || [codec, f.resolution_label].filter(Boolean).join(' ') || 'File'}
+            </span>
+            {f.best ? <span className={s.best}>Best copy</span> : null}
+            {extra && !f.best ? <span className={s.extra}>Extra copy</span> : null}
+          </div>
+          <div className={s.fileSub}>
+            {[formatBytes(f.size_bytes), runtimeLabel(f.runtime_seconds)]
+              .filter(Boolean)
+              .join(' · ')}
+          </div>
         </div>
+        <MenuButton label={`${label} actions`} items={fileMenu(f, actions)} />
+      </header>
+      <div className={s.specs}>
+        <Fact label="Picture" value={range || codec || 'Not known'} sub={range ? codec : ''} />
+        <Fact
+          label="Sound"
+          value={audio || 'Not known'}
+          sub={languages || (f.audio_languages == null ? 'Languages not read yet' : '')}
+        />
+        <Fact label="Subtitles" value={subs.value} sub={subs.sub} />
+        {f.path ? <Fact label="Where" value={drive || 'Library'} sub={trail} /> : null}
+      </div>
+      <div className={s.fileFoot}>
+        <div className={s.specLabel}>File</div>
         <div className={s.fileName} title={f.path || f.filename}>
           {f.filename}
         </div>
-        {showFolder && f.path ? (
-          <div className={s.path} title={f.path}>
-            {driveLabel(f.root) ? <span className={s.drive}>{driveLabel(f.root)}</span> : null}
-            {folderOf(f.path)}
+        {f.below_cutoff && !quiet.below ? (
+          <div className={s.status} data-tone="warn">
+            <span className={s.statusDot} aria-hidden="true" />
+            Below your quality target
           </div>
         ) : null}
-        <FileStatus f={f} canManage={actions.canManage} onRename={actions.onRename} quiet={quiet} />
-        {source ? (
-          <div className={s.source} title="The download this file came from">
-            <span className={s.sourceTag}>From</span>
-            {source}
+        {f.naming ? (
+          f.naming.conforms ? (
+            <div className={s.status} data-tone="ok">
+              <span className={s.statusDot} aria-hidden="true" />
+              Named by your template
+            </div>
+          ) : (
+            <div className={s.status} data-tone="warn">
+              <span className={s.statusDot} aria-hidden="true" />
+              <span>Your template names it {f.naming.expected_name ?? 'differently'}</span>
+              {actions.canManage ? (
+                <button type="button" className={s.linkBtn} onClick={() => actions.onRename(f)}>
+                  Rename
+                </button>
+              ) : null}
+            </div>
+          )
+        ) : null}
+        {far ? (
+          <div
+            className={s.status}
+            data-tone="muted"
+            title="The file is on a drive only your media server can see. Its facts come from the server."
+          >
+            <span className={s.statusDot} aria-hidden="true" />
+            Only your media server can see this file
           </div>
         ) : null}
       </div>
-      <MenuButton label={`${label} actions`} items={fileMenu(f, actions)} />
+      <footer className={s.fileSource} title={source?.release ?? undefined}>
+        {source
+          ? [
+              `Downloaded${source.at ? ` ${dateLabel(source.at)}` : ''}`,
+              source.indexer || source.via ? `from ${source.indexer || source.via}` : '',
+            ]
+              .filter(Boolean)
+              .join(' ')
+          : 'No download on record'}
+      </footer>
+    </article>
+  );
+}
+
+/** "WEBDL-1080p · Dolby Vision · EAC3 5.1 Atmos · 5.7 GB": a file in one line */
+function fileLineText(f: LibraryFile): string {
+  const named =
+    f.quality && f.quality !== f.resolution_label ? f.quality : codecLabel(f.video_codec);
+  return [named, rangeLabel(f.dynamic_range), audioLabel(f), formatBytes(f.size_bytes)]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/** a title's or an episode's files, side by side */
+function FileCards({
+  files,
+  actions,
+  quiet,
+  label,
+}: {
+  files: LibraryFile[];
+  actions: FileActions;
+  quiet?: Quiet;
+  label: string;
+}) {
+  return (
+    <div className={s.fileCards} data-count={Math.min(files.length, 2)}>
+      {/* the best copy leads, whatever order the files were stored in */}
+      {[...files]
+        .sort((a, b) => Number(Boolean(b.best)) - Number(Boolean(a.best)))
+        .map((f) => (
+          <FileCard
+            key={f.id}
+            f={f}
+            actions={actions}
+            quiet={quiet}
+            label={label}
+            extra={files.length > 1}
+          />
+        ))}
     </div>
   );
 }
@@ -658,7 +744,15 @@ async function renameMany(files: LibraryFile[], kind: TitleKind, reload: () => v
 
 /* ── movie ────────────────────────────────────────────────────────────────── */
 
-function MovieView({ data, reload }: { data: MovieLibrary; reload: () => void }) {
+function MovieView({
+  data,
+  reload,
+  heroSlot,
+}: {
+  data: MovieLibrary;
+  reload: () => void;
+  heroSlot?: HTMLElement | null;
+}) {
   const { onRename, onDelete } = useFileActions(reload, 'movie');
   const { fixing, setFixing, onRelease } = useIdentity('movie', data.id, reload);
   const [copies, setCopies] = useState(false);
@@ -694,9 +788,42 @@ function MovieView({ data, reload }: { data: MovieLibrary; reload: () => void })
     setBusy(false);
   };
 
+  // a grab that is running or stuck is this title's news too. it used to be a
+  // second "Needs attention" block further down the page
+  const [acq, setAcq] = useState<AcquisitionState | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchAcquisition('movie', data.id)
+      .then((state) => live && setAcq(state))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [data.id]);
+  const stuck = acq?.counts?.failed ?? 0;
+  const moving = (acq?.counts?.queued ?? 0) + (acq?.counts?.downloading ?? 0);
+
   const drifted = data.files.filter((f) => f.reachable && f.naming && !f.naming.conforms);
   const extra = data.extra_copies;
   const issues: Issue[] = [];
+  if (stuck) {
+    issues.push({
+      key: 'stuck',
+      tone: 'warn',
+      title: stuck === 1 ? 'A download for this movie is stuck' : `${stuck} downloads are stuck`,
+      detail: 'The last tries failed. Search again to pick another release.',
+      action: b.manualSearch
+        ? { label: 'Search releases', onClick: () => b.manualSearch?.('movie') }
+        : undefined,
+    });
+  } else if (moving) {
+    issues.push({
+      key: 'moving',
+      tone: 'info',
+      title: 'Downloading now',
+      detail: 'A grab for this movie is on its way. It shows here when it lands.',
+    });
+  }
   if (!data.identity.tmdb_id) {
     issues.push({
       key: 'match',
@@ -753,49 +880,72 @@ function MovieView({ data, reload }: { data: MovieLibrary; reload: () => void })
     });
   }
 
+  // the page's library line: what the summary card used to say, in one row.
+  // on the page it sits in the hero (a slot the page hands over); in a test or
+  // an older shell with no slot it leads the panel instead.
+  const line = (
+    <div className={s.libLine} data-card="have">
+      {best ? (
+        <>
+          <ResBadge label={best.resolution_label} size="lg" />
+          <span className={s.libFact}>
+            {plural(data.files.length, 'copy', 'copies')} · {formatBytes(data.summary.size_bytes)}
+            {data.copies.roots.length > 1 ? ` on ${data.copies.roots.length} drives` : ''}
+          </span>
+          <span className={s.libFact} data-tone={q.meets === false ? 'warn' : 'ok'}>
+            {q.meets === false
+              ? (q.reasons?.find((r) => !r.ok)?.text ?? `Below your ${q.cutoff_label} target`)
+              : `Meets your ${q.cutoff_label} target`}
+          </span>
+        </>
+      ) : (
+        <span className={s.libFact}>No files on record for this movie.</span>
+      )}
+      <span className={s.libDim}>{q.profile_name} profile</span>
+      {data.summary.added_at ? (
+        <span className={s.libDim}>Added {dateLabel(data.summary.added_at)}</span>
+      ) : null}
+      {!data.identity.tmdb_id ? (
+        <Chip tone="warn">Not matched</Chip>
+      ) : (
+        <span className={s.libDim}>
+          TMDB {data.identity.tmdb_id}
+          {data.identity.imdb_id ? ` · IMDb ${data.identity.imdb_id}` : ''}
+        </span>
+      )}
+      {data.identity.fixed ? <Chip tone="ok">Fixed by you</Chip> : null}
+      {data.can_manage ? (
+        <span className={s.libLinks}>
+          {b.openManage ? (
+            <button type="button" className={s.linkBtn} onClick={() => b.openManage?.()}>
+              Quality and download settings
+            </button>
+          ) : null}
+          <button type="button" className={s.linkBtn} onClick={() => setFixing(true)}>
+            {data.identity.tmdb_id ? 'Fix match' : 'Find the right title'}
+          </button>
+          {data.identity.fixed ? (
+            <button type="button" className={s.linkBtn} onClick={onRelease}>
+              Use the server’s match again
+            </button>
+          ) : null}
+        </span>
+      ) : null}
+    </div>
+  );
+
   return (
-    <div className={s.tab}>
-      <section className={s.summary} data-card="have">
-        <div className={s.summaryMain}>
-          {best ? (
-            <>
-              <ResBadge label={best.resolution_label} size="lg" />
-              <div className={s.summaryText}>
-                <div className={s.headline}>
-                  {plural(data.files.length, 'copy', 'copies')} ·{' '}
-                  {formatBytes(data.summary.size_bytes)}
-                  {data.copies.roots.length > 1 ? ` on ${data.copies.roots.length} drives` : ''}
-                </div>
-                <div className={s.subline}>
-                  {[
-                    data.summary.added_at ? `Added ${dateLabel(data.summary.added_at)}` : '',
-                    data.summary.watched ? 'Watched' : 'Not watched yet',
-                    q.meets ? `Meets your ${q.cutoff_label} target` : '',
-                  ]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </div>
-              </div>
-            </>
-          ) : (
-            <p className={s.cardText}>No files on record for this movie.</p>
-          )}
-        </div>
-        <div className={s.summarySide}>
-          <TargetLine
-            cutoff={q.cutoff_label}
-            profile={q.profile_name}
-            canManage={data.can_manage}
-          />
-          <MatchLine
-            identity={data.identity}
-            canManage={data.can_manage}
-            onFix={() => setFixing(true)}
-            onRelease={onRelease}
-          />
-        </div>
-        {b.manualSearch ? (
-          <div className={s.summaryActions}>
+    <div className={s.tab} data-layout="page">
+      {heroSlot ? createPortal(line, heroSlot) : line}
+
+      <Attention issues={issues} quietWhenClear />
+
+      <section>
+        <div className={s.sectionHead}>
+          <h3 className={s.sectionTitle}>
+            Files <span className={s.count}>{data.files.length}</span>
+          </h3>
+          {b.manualSearch ? (
             <button
               type="button"
               className={q.meets === false ? s.btnPrimary : s.btn}
@@ -803,21 +953,9 @@ function MovieView({ data, reload }: { data: MovieLibrary; reload: () => void })
             >
               {q.meets === false ? 'Find an upgrade' : 'Search releases'}
             </button>
-          </div>
-        ) : null}
-      </section>
-
-      <Attention issues={issues} />
-
-      <section>
-        <h3 className={s.sectionTitle}>
-          Files <span className={s.count}>{data.files.length}</span>
-        </h3>
-        <div className={s.files}>
-          {data.files.map((f) => (
-            <FileRow key={f.id} f={f} actions={actions} label="File" showFolder />
-          ))}
+          ) : null}
         </div>
+        <FileCards files={data.files} actions={actions} label="File" />
       </section>
 
       {fixing ? (
@@ -924,6 +1062,8 @@ function EpisodeRow({
       ? () => b.manualSearch?.('episode', season, ep.episode_number)
       : undefined,
   };
+  const [open, setOpen] = useState(false);
+  const lead = ep.files.find((f) => f.best) ?? ep.files[0];
   const meta = [
     ep.air_date ? dateLabel(ep.air_date) : '',
     ep.runtime_minutes ? `${ep.runtime_minutes}m` : '',
@@ -961,6 +1101,30 @@ function EpisodeRow({
             ) : null}
           </div>
           {meta ? <div className={s.epMeta}>{meta}</div> : null}
+          {lead ? (
+            // the file as one quiet line. the cards (every fact, every action)
+            // open under it: a season of ten open cards was a wall
+            <button
+              type="button"
+              className={s.fileLine}
+              aria-expanded={open}
+              aria-label={`${label} files`}
+              onClick={() => setOpen(!open)}
+            >
+              <ResBadge label={lead.resolution_label} />
+              <span className={s.fileLineText}>{fileLineText(lead)}</span>
+              {lead.below_cutoff && !quiet.below ? (
+                <Chip tone="warn">Below your target</Chip>
+              ) : null}
+              {ep.files.length > 1 ? <Chip>{ep.files.length} copies</Chip> : null}
+              {ep.files.some((f) => f.naming && !f.naming.conforms) ? (
+                <Chip tone="warn">Name differs</Chip>
+              ) : null}
+              <span className={s.fileLineChev} aria-hidden="true">
+                ›
+              </span>
+            </button>
+          ) : null}
         </div>
         {!ep.has_file ? (
           ep.aired ? (
@@ -983,11 +1147,9 @@ function EpisodeRow({
           )
         ) : null}
       </div>
-      {ep.files.length ? (
+      {open && ep.files.length ? (
         <div className={s.epFiles}>
-          {ep.files.map((f) => (
-            <FileRow key={f.id} f={f} actions={fileActions} quiet={quiet} label={`${label} file`} />
-          ))}
+          <FileCards files={ep.files} actions={fileActions} quiet={quiet} label={`${label} file`} />
         </div>
       ) : null}
     </li>
@@ -1607,7 +1769,16 @@ function ShowView({
 
 /* ── the tab ──────────────────────────────────────────────────────────────── */
 
-export function LibraryTab({ kind, id }: { kind: TitleKind; id: number }) {
+export function LibraryTab({
+  kind,
+  id,
+  heroSlot,
+}: {
+  kind: TitleKind;
+  id: number;
+  /** where the page wants the library line: an element in its hero */
+  heroSlot?: HTMLElement | null;
+}) {
   const [data, setData] = useState<TitleLibrary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openSeason, setOpenSeason] = useState<number | null>(null);
@@ -1666,7 +1837,7 @@ export function LibraryTab({ kind, id }: { kind: TitleKind; id: number }) {
       </div>
     );
   }
-  if (data.kind === 'movie') return <MovieView data={data} reload={reload} />;
+  if (data.kind === 'movie') return <MovieView data={data} reload={reload} heroSlot={heroSlot} />;
   return (
     <ShowView
       data={data}

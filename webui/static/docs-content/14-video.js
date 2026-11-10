@@ -456,11 +456,11 @@ On a show, each episode row shows **Missing** or **Upcoming** only when there's 
             title: 'Your Library Tab',
             lede: 'Every copy you own of a title: where it lives, how good it is, and what you can do with it.',
             body: `
-Every movie and show in your library has two tabs: the page itself (**Overview** for a movie, **Episodes** for a show) and **Your library**. The tab you used last is remembered.
+A **movie** in your library is one page, with no tabs. Under the buttons in the hero, one line says what you have: your best copy's resolution, how many copies and how big, whether it meets the quality target of its profile, when it was added and what it is matched to, with **Quality and download settings** and **Fix match** at the end. **Needs attention** and **Files** follow, then the rest of the page.
 
-**The summary**: how many copies and how big, your best copy's resolution, and whether it meets the quality target of the title's profile. **Find an upgrade** opens a manual search when it doesn't; **Quality and download settings** opens the Manage panel.
+A **show** still has two tabs, **Episodes** and **Your library**, and remembers the one you used last. Its summary says how many aired episodes you have, their size and their quality mix.
 
-**Needs attention** lists every problem with the title, each with its fix beside it. When there is nothing, it says so.
+**Needs attention** lists every problem with the title, each with its fix beside it. On a movie the section is not shown at all when there is nothing; on a show it says so. A download for a movie that is stuck or on its way is a row here too.
 
 | It says | The fix |
 |---------|---------|
@@ -471,7 +471,7 @@ Every movie and show in your library has two tabs: the page itself (**Overview**
 | *Not named by your template* | **Rename** or **Rename all**. |
 | *Not matched* | **Find the right title**. |
 
-**Files**: one row per copy, with the quality tag, HDR or Dolby Vision, codecs, audio (and Atmos), size and runtime, the file name and its folder, audio and subtitle languages, and whether its name matches your [naming template](#vlib-manage). A file SoulSync downloaded also says where it came from: the release, the indexer and the date. The **⋯** menu on each file:
+**Files**: one card per copy, two side by side so copies can be compared, the best one first and outlined. The card leads with the resolution, the quality tag, size and runtime, then four facts: **Picture** (HDR or Dolby Vision, codec), **Sound** (format, Atmos, languages), **Subtitles** (how many, in the file or beside it, and which) and **Where** (drive and folder). Under those, the file name and whether it matches your [naming template](#vlib-manage), with **Rename** when it doesn't. The foot says when it was downloaded and from which indexer (hover for the release), or that there is no download on record. On a show, each episode shows its file as one line; click it to open the cards. The **⋯** menu on each file:
 
 | Action | What it does |
 |--------|--------------|

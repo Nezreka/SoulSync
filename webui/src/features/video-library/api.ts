@@ -63,6 +63,22 @@ export function deleteFile(fileId: number): Promise<FileActionResult> {
   });
 }
 
+export interface AcquisitionState {
+  total?: number;
+  counts?: {
+    owned?: number;
+    wanted?: number;
+    queued?: number;
+    downloading?: number;
+    failed?: number;
+  };
+}
+
+/** where acquisition stands for the title right now (the page's own endpoint) */
+export function fetchAcquisition(kind: TitleKind, id: number): Promise<AcquisitionState> {
+  return send<AcquisitionState>(`/api/video/detail/${kind}/${id}/acquisition`);
+}
+
 export interface BulkResult {
   success: boolean;
   done: number;

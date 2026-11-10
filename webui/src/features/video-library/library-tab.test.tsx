@@ -243,7 +243,9 @@ describe('movie tab', () => {
     expect(screen.getByText('2 copies · 9.0 GB on 2 drives')).toBeTruthy();
     expect(screen.getByText('Only your media server can see this file')).toBeTruthy();
     expect(screen.getByText('English')).toBeTruthy();
-    expect(screen.getByText('✓ Named by your template')).toBeTruthy();
+    expect(screen.getByText('Named by your template')).toBeTruthy();
+    // the copy that is not the best one says what it is
+    expect(screen.getByText('Extra copy')).toBeTruthy();
     expect(screen.getByText(/Meets your 1080p target/)).toBeTruthy();
   });
 
@@ -441,6 +443,10 @@ describe('show tab', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Season 2/ }));
     expect(await screen.findByText(/only your media server can see, so SoulSync/)).toBeTruthy();
     expect(screen.getByText(/Every file here is/)).toBeTruthy();
+    // not on the episode's own line, and not on its card once that is open
+    expect(screen.queryByText('Below your target')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'S02E01 files' }));
+    expect(await screen.findByText('S02E01.mkv')).toBeTruthy();
     expect(screen.queryByText('Only your media server can see this file')).toBeNull();
     expect(screen.queryByText('Below your quality target')).toBeNull();
   });
@@ -521,14 +527,17 @@ describe('what a file says', () => {
     render(<LibraryTab kind="movie" id={7} />);
     expect(await screen.findByText('Dolby Vision')).toBeTruthy();
     expect(screen.getByText('EAC3 5.1 Atmos')).toBeTruthy();
-    expect(screen.getByText(/Heat\.1995\.2160p\.UHD\.BluRay-GRP · 1337x/)).toBeTruthy();
+    // the foot says when and from where; the release name is on hover
+    const foot = screen.getByText(/^Downloaded .* from 1337x$/);
+    expect(foot.getAttribute('title')).toBe('Heat.1995.2160p.UHD.BluRay-GRP');
   });
 
   it('a file soulsync did not download claims no source', async () => {
     routes['/library'] = () => movie();
     render(<LibraryTab kind="movie" id={7} />);
     await screen.findByText('Bluray-1080p');
-    expect(screen.queryByText('From')).toBeNull();
+    expect(screen.queryByText(/^Downloaded/)).toBeNull();
+    expect(screen.getAllByText('No download on record').length).toBe(2);
   });
 
   it('names the first few subtitle tracks and counts the rest', async () => {
@@ -537,10 +546,10 @@ describe('what a file says', () => {
         files: [file({ subtitles: [], subtitle_languages: ['en', 'ar', 'de', 'fr', 'ja'] })],
       });
     render(<LibraryTab kind="movie" id={7} />);
-    const chip = await screen.findByText(/English, Arabic, German and 2 more/);
-    // all five are inside the file: said once, and the full list is on hover
-    expect(chip.textContent).toContain('CC in file');
-    expect(chip.getAttribute('title')).toBe('English, Arabic, German, French, Japanese');
+    // all five are inside the file: the count says so once, the first few are
+    // named, and the rest are counted
+    expect(await screen.findByText('5 in the file')).toBeTruthy();
+    expect(screen.getByText('English, Arabic, German and 2 more')).toBeTruthy();
   });
 });
 
@@ -549,7 +558,10 @@ describe('needs attention', () => {
     routes['/library'] = () =>
       movie({ files: [file()], extra_copies: { titles: 0, files: 0, size_bytes: 0 } });
     render(<LibraryTab kind="movie" id={7} />);
-    expect(await screen.findByText('Nothing here needs attention.')).toBeTruthy();
+    // a healthy movie shows no section at all: the page is just the page
+    await screen.findByText('Bluray-1080p');
+    expect(screen.queryByText(/Needs attention/)).toBeNull();
+    expect(screen.queryByText('Nothing here needs attention.')).toBeNull();
   });
 
   it('a movie with extra copies shows the plan and removes them only on the button', async () => {
@@ -764,6 +776,7 @@ describe('acting on episodes', () => {
     routes['/reassign'] = () => ({ success: true, action: 'reassigned', renamed: true });
     render(<LibraryTab kind="show" id={445} />);
     fireEvent.click(await screen.findByRole('button', { name: /Season 1/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'S01E01 files' }));
     const menu = await openMenu('S01E01 file actions');
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to another episode…' }));
     const dialog = await screen.findByRole('dialog');
@@ -791,6 +804,7 @@ describe('acting on episodes', () => {
     routes['/reassign'] = () => ({ success: true, action: 'reassigned', renamed: false });
     render(<LibraryTab kind="show" id={445} />);
     fireEvent.click(await screen.findByRole('button', { name: /Season 1/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'S01E01 files' }));
     const menu = await openMenu('S01E01 file actions');
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to another episode…' }));
     const dialog = await screen.findByRole('dialog');
@@ -801,6 +815,83 @@ describe('acting on episodes', () => {
       expect.stringContaining('may file it back'),
       'warning',
     ]);
+  });
+});
+
+describe('an episode and its files', () => {
+  it('shows the file as one line, and the cards only when it is opened', async () => {
+    routes['/library'] = () => {
+      const d = show();
+      d.seasons[0].episodes[0].files = [
+        file({ id: 31, filename: 'best.mkv', best: true, below_cutoff: false }),
+        file({
+          id: 32,
+          filename: 'other.mkv',
+          best: false,
+          resolution_label: '720p',
+          quality: null,
+        }),
+      ];
+      return d;
+    };
+    render(<LibraryTab kind="show" id={445} />);
+    fireEvent.click(await screen.findByRole('button', { name: /Season 1/ }));
+    const line = await screen.findByRole('button', { name: 'S01E01 files' });
+    expect(line.textContent).toContain('Bluray-1080p');
+    expect(line.textContent).toContain('2 copies');
+    expect(screen.queryByText('best.mkv')).toBeNull();
+    fireEvent.click(line);
+    // the best copy leads, whatever order the files came in
+    const cards = [...document.querySelectorAll('[data-file-id]')];
+    expect(cards.map((c) => c.getAttribute('data-file-id'))).toEqual(['31', '32']);
+    expect(screen.getByText('Extra copy')).toBeTruthy();
+    fireEvent.click(line);
+    expect(screen.queryByText('best.mkv')).toBeNull();
+  });
+});
+
+describe('the one-page movie', () => {
+  it('puts the library line in the slot the page hands over', async () => {
+    routes['/library'] = () => movie();
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    const { container } = render(<LibraryTab kind="movie" id={7} heroSlot={slot} />);
+    await screen.findByText('Bluray-1080p');
+    expect(slot.textContent).toContain('2 copies · 9.0 GB on 2 drives');
+    expect(within(slot).getByRole('button', { name: 'Fix match' })).toBeTruthy();
+    // and not a second time in the panel
+    expect(container.textContent).not.toContain('2 copies · 9.0 GB');
+    slot.remove();
+  });
+
+  it('a stuck download is a row in needs attention, with a way out', async () => {
+    const search = vi.fn();
+    window.SoulSyncVideoDetail = { manualSearch: search };
+    routes['/library'] = () => movie({ files: [file()] });
+    routes['/acquisition'] = () => ({ success: true, total: 1, counts: { failed: 1 } });
+    render(<LibraryTab kind="movie" id={7} />);
+    const row = (await screen.findByText('A download for this movie is stuck')).closest('li')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Search releases' }));
+    expect(search).toHaveBeenCalledWith('movie');
+  });
+
+  it('a file card names what is not known instead of guessing', async () => {
+    routes['/library'] = () =>
+      movie({
+        files: [
+          file({
+            reachable: false,
+            subtitles: null,
+            subtitle_languages: null,
+            audio_languages: null,
+            naming: null,
+          }),
+        ],
+      });
+    render(<LibraryTab kind="movie" id={7} />);
+    expect(await screen.findByText('Not known')).toBeTruthy();
+    expect(screen.getByText('SoulSync can’t see the folder')).toBeTruthy();
+    expect(screen.getByText('Languages not read yet')).toBeTruthy();
   });
 });
 
