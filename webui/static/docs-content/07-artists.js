@@ -10,7 +10,7 @@ registerDocsSection({
             body: `
 Search for any artist by name. Results show artist cards with images and genres, sourced from Spotify (or iTunes as fallback). Click any card to open the artist detail view.
 
-![Artist search results](art-search.jpg)
+![Artist search results for Neon, showing Neon Orchard](art-search.jpg)
 `
         },
         {
@@ -29,7 +29,7 @@ At the top, **View on** buttons link to the artist on each matched external serv
 
 **Similar Artists** appear as clickable bubbles below the discography for further exploration and discovery.
 
-![Artist detail page](art-detail.jpg)
+![The Flicker Testers artist page with its collection summary and album grid with completion badges](art-detail.jpg)
 `
         },
         {
@@ -45,7 +45,7 @@ The watchlist tracks artists you want to follow for new releases. When SoulSync 
 - Use **Watch All** to add all recommended artists at once
 - **Watch All Unwatched** — bulk-add every library artist that isn't already on your watchlist
 
-![Watchlist page](art-watchlist.jpg)
+![The Watchlist grid with followed artists, the recent releases rail and the scan controls](art-watchlist.jpg)
 `
         },
         {
@@ -60,7 +60,7 @@ Click **Scan for New Releases** or let the system automation handle it (runs eve
 - Recent wishlist additions feed
 - Stats: artists scanned, new tracks found, tracks added to wishlist
 
-![New release scan panel](art-scan.jpg)
+![The watchlist scan activity panel](art-scan.jpg)
 
 > [!TIP]
 > Scanning respects your per-artist release-type settings — if you've excluded live albums for an artist, they won't land in your wishlist.
@@ -107,7 +107,7 @@ The **Cleanup Wishlist** action removes duplicates (the same track added multipl
 > [!NOTE]
 > Each wishlist item tracks its source (watchlist scan, playlist sync, manual), retry attempts, and the last error message. There is no status column — a wishlist row is deleted once its download completes.
 
-![Wishlist queue](art-wishlist.jpg)
+![The Wishlist with its failing-items banner and tracks grouped by hunting state](art-wishlist.jpg)
 `
         },
         {
@@ -115,6 +115,8 @@ The **Cleanup Wishlist** action removes duplicates (the same track added multipl
             title: 'Watchlist Settings',
             lede: 'Control exactly which release types SoulSync grabs for each artist — or set one global rule.',
             body: `
+![The Watchlist defaults modal with release types and content filters](art-settings.jpg)
+
 ## Per-artist settings
 
 Click the config icon on any watched artist to customize which release types to include:
@@ -150,6 +152,8 @@ registerDocsSection({
             title: 'The Label Page',
             lede: 'Every record label gets a catalog page: releases, ownership status, and a follow button.',
             body: `
+![The Blue Note label page with its hero, follow button and release catalog](label-page.jpg)
+
 ## Getting there
 
 - **Search** — label results render as quiet tiles (name, "Record label", area) linking to \`/label-detail/<id>?name=<name>\`. Labels only appear when the query also has other results — a labels-only match never shows on its own.
@@ -177,6 +181,8 @@ The **← Back** button doesn't use browser history: it returns to wherever you 
             lede: 'The label\'s full release list with ownership badges, filters, and one-click downloads.',
             body: `
 The catalog is a flat grid of release cards in server order (newest first), fetched 60 at a time from the label's MusicBrainz catalog. There is no grouping — filtering and sorting happen client-side, instantly, without refetching.
+
+![The label catalog grid with All, Missing and Owned filters and ownership badges on the cards](label-catalog.jpg)
 
 ## Filters and sorting
 
@@ -215,6 +221,8 @@ Cards show cover art, album title, and "artist · year" (year omitted when unkno
             title: 'Following Labels',
             lede: 'Follow a label to monitor its new releases from the Watchlist.',
             body: `
+![A label hero in the Watching state with the New releases and Full backlog monitor control](label-follow.jpg)
+
 ## Following
 
 Click **Add to Watchlist** in the label hero. The button flips to **Watching...** and the **Monitor** segmented control appears:
