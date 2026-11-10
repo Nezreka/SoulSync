@@ -103,6 +103,7 @@
          after the redesign so it wins where they meet (see file header). -->
     <link rel="stylesheet" href="{{ url_for('static', filename='automations-overhaul.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='video/video-detail-premier.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-overlay-editor.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='video/video-collection-editor.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='settings-premier.css', v=static_v) }}">
@@ -1551,23 +1552,26 @@
                             <div class="vd-bb-content">
                                 <img class="vd-cover" data-vd-cover alt="" hidden />
                                 <div class="vd-copy">
+                                    <!-- Read top to bottom: what it is, the facts, the story,
+                                         what you can do, then what others think of it. -->
                                     <img class="vd-logo" data-vd-logo alt="" hidden />
                                     <h1 class="vd-title" data-vd-title>—</h1>
                                     <div class="vd-tagline" data-vd-tagline hidden></div>
                                     <div class="vd-meta" data-vd-meta></div>
-                                    <div class="vd-crew-line" data-vd-crew-line hidden></div>
+                                    <div class="vd-genres" data-vd-genres></div>
                                     <div class="vd-next-ep" data-vd-next-ep hidden></div>
+                                    <p class="vd-overview" data-vd-overview></p>
+                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <div class="vd-kudos">
+                                        <div class="vd-ratings" data-vd-ratings hidden></div>
+                                        <div class="vd-awards" data-vd-awards hidden></div>
+                                    </div>
+                                    <div class="vd-crew-line" data-vd-crew-line hidden></div>
+                                    <div class="vd-essentials" data-vd-essentials hidden></div>
+                                    <div class="vd-health" data-vd-health hidden></div>
+                                    <div class="vd-subs" data-vd-subs hidden></div>
                                     <!-- External-source links reuse the artist-hero-badge style. -->
                                     <div class="artist-hero-badges vd-links" data-vd-links></div>
-                                    <div class="vd-ratings" data-vd-ratings hidden></div>
-                                    <div class="vd-awards" data-vd-awards hidden></div>
-                                    <p class="vd-overview" data-vd-overview></p>
-                                    <div class="vd-essentials" data-vd-essentials hidden></div>
-                                    <!-- Action buttons reuse the exact artist-detail button styles. -->
-                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
-                                    <div class="vd-health" data-vd-health hidden></div>
-                                    <div class="vd-genres" data-vd-genres></div>
-                                    <div class="vd-subs" data-vd-subs hidden></div>
                                 </div>
                             </div>
                             <!-- offscreen poster, only used to sample the accent color -->
@@ -1693,16 +1697,18 @@
                                     <h1 class="vd-title" data-vd-title>—</h1>
                                     <div class="vd-tagline" data-vd-tagline hidden></div>
                                     <div class="vd-meta" data-vd-meta></div>
-                                    <div class="vd-crew-line" data-vd-crew-line hidden></div>
-                                    <div class="artist-hero-badges vd-links" data-vd-links></div>
-                                    <div class="vd-ratings" data-vd-ratings hidden></div>
-                                    <div class="vd-awards" data-vd-awards hidden></div>
-                                    <p class="vd-overview" data-vd-overview></p>
-                                    <div class="vd-essentials" data-vd-essentials hidden></div>
-                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
-                                    <div class="vd-health" data-vd-health hidden></div>
                                     <div class="vd-genres" data-vd-genres></div>
+                                    <p class="vd-overview" data-vd-overview></p>
+                                    <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <div class="vd-kudos">
+                                        <div class="vd-ratings" data-vd-ratings hidden></div>
+                                        <div class="vd-awards" data-vd-awards hidden></div>
+                                    </div>
+                                    <div class="vd-crew-line" data-vd-crew-line hidden></div>
+                                    <div class="vd-essentials" data-vd-essentials hidden></div>
+                                    <div class="vd-health" data-vd-health hidden></div>
                                     <div class="vd-subs" data-vd-subs hidden></div>
+                                    <div class="artist-hero-badges vd-links" data-vd-links></div>
                                 </div>
                             </div>
                             <img data-vd-poster crossorigin="anonymous" alt="" style="display:none" />
