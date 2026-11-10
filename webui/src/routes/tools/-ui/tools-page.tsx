@@ -10,7 +10,7 @@
  * HELPER_CONTENT selectors, and its page hint is 'tools'.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ToolsMedia } from '../-tools.media';
 
@@ -104,6 +104,33 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
     };
   }, []);
 
+  /* the white pill slides from one tab to the next instead of blinking
+     between them. the tab list measures the selected tab and hands its box to
+     the stylesheet; until that has happened once (and anywhere it can't, a
+     test's dom has no layout) the selected tab simply carries the fill. */
+  const tabList = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const list = tabList.current;
+    if (!list) return;
+    const place = () => {
+      const selected = list.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!selected || !selected.offsetWidth) return;
+      list.style.setProperty('--pill-x', `${selected.offsetLeft}px`);
+      list.style.setProperty('--pill-y', `${selected.offsetTop}px`);
+      list.style.setProperty('--pill-w', `${selected.offsetWidth}px`);
+      list.style.setProperty('--pill-h', `${selected.offsetHeight}px`);
+      list.dataset.sliding = 'true';
+    };
+    place();
+    if (typeof ResizeObserver === 'undefined') return;
+    // the count on Findings arrives late and widens its tab; a narrow window
+    // wraps the row
+    const observer = new ResizeObserver(place);
+    observer.observe(list);
+    for (const tab of list.children) observer.observe(tab);
+    return () => observer.disconnect();
+  }, [tab, pending, maintenance]);
+
   const tabs: ReadonlyArray<readonly [ToolsTab, string]> = maintenance
     ? [...MAINTENANCE_TABS, ['tools', 'Tools']]
     : [['tools', 'Tools']];
@@ -132,7 +159,7 @@ function ToolsPageBody({ media, isAdmin }: { media: ToolsMedia; isAdmin: boolean
           mode on top of two tabs: the findings only lived in Advanced, so
           every link in Simple quietly switched modes under you. Now each
           thing has one home and the pills say where. */}
-      <div className="tools-tabs" role="tablist" aria-label="Tools sections">
+      <div className="tools-tabs" role="tablist" aria-label="Tools sections" ref={tabList}>
         {tabs.map(([value, label]) => (
           <button
             type="button"

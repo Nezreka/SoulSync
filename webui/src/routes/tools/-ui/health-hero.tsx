@@ -89,7 +89,15 @@ export function HealthHero({
   return (
     <div className="repair-health" id="repair-section-health">
       <div className="repair-health-main">
-        <div className={`repair-health-score ${loading ? '' : health.band}`}>
+        <div
+          className={`repair-health-score ${loading ? '' : health.band}`}
+          style={{ ['--score' as string]: loading ? 0 : health.score }}
+        >
+          {/* the score as a ring that draws itself to the number */}
+          <svg className="repair-health-ring" viewBox="0 0 80 80" aria-hidden="true">
+            <circle className="repair-health-ring-track" cx="40" cy="40" r="36" />
+            <circle className="repair-health-ring-value" cx="40" cy="40" r="36" pathLength="100" />
+          </svg>
           {loading ? '–' : health.score}
         </div>
 

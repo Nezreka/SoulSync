@@ -298,12 +298,13 @@ export function ToolProgress({
 }: ToolProgressProps) {
   return (
     <>
-      <p className="progress-phase-label" id={phaseId}>
+      {/* a long phase line is cut to fit; its full text is the tooltip */}
+      <p className="progress-phase-label" id={phaseId} title={phase}>
         {phase}
       </p>
       <div className="progress-bar-container">
         <div
-          className={`progress-bar-fill${percent > 0 ? '' : ' is-empty'}`}
+          className={`progress-bar-fill${percent > 0 ? (percent >= 100 ? ' is-done' : '') : ' is-empty'}`}
           id={barId}
           style={{ width: `${percent}%`, backgroundColor: barColor }}
         />

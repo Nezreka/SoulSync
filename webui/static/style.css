@@ -72799,7 +72799,11 @@ body.src-modal-open { overflow: hidden; }
     display: flex;
     flex-direction: column;
     gap: 24px;
-    padding: 36px 36px 56px;
+    /* a page this dense needs a measure: past it, rows turn into a title on
+       the left, a button on the right and nothing in between */
+    max-width: 1440px;
+    margin: 20px auto;
+    padding: 32px 36px 48px;
     color: var(--text-1);
 }
 
@@ -72824,10 +72828,10 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .tools-top-text { flex: 1 1 320px; min-width: 0; }
 #tools-page .tools-title {
     margin: 0;
-    font-size: 48px;
-    font-weight: 800;
-    letter-spacing: -0.035em;
-    line-height: 1.05;
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
     color: var(--text-1);
 }
 #tools-page .tools-sub { margin: 8px 0 0; font-size: 15px; color: var(--text-2); }
@@ -72846,12 +72850,12 @@ body.src-modal-open { overflow: hidden; }
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    height: 44px;
-    padding: 0 8px 0 18px;
+    height: 36px;
+    padding: 0 7px 0 14px;
     border-radius: var(--radius-pill);
     background: var(--tl-card);
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     color: var(--text-2);
     cursor: pointer;
 }
@@ -72868,8 +72872,8 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-toggle-slider {
     position: relative;
     flex: none;
-    width: 44px;
-    height: 26px;
+    width: 38px;
+    height: 22px;
     border-radius: var(--radius-pill);
     background: var(--white-a16);
     transition: background 0.18s;
@@ -72879,34 +72883,31 @@ body.src-modal-open { overflow: hidden; }
     position: absolute;
     top: 3px;
     left: 3px;
-    width: 20px;
-    height: 20px;
+    width: 16px;
+    height: 16px;
     border-radius: var(--radius-circle);
     background: var(--text-1);
     transition: transform 0.18s;
 }
-#tools-page .repair-toggle-slider.small { width: 38px; height: 22px; }
-#tools-page .repair-toggle-slider.small::before { width: 16px; height: 16px; }
 #tools-page input:checked + .repair-toggle-slider { background: var(--accent-light); }
-#tools-page input:checked + .repair-toggle-slider::before { transform: translateX(18px); }
-#tools-page input:checked + .repair-toggle-slider.small::before { transform: translateX(16px); }
+#tools-page input:checked + .repair-toggle-slider::before { transform: translateX(16px); }
 #tools-page input:focus-visible + .repair-toggle-slider { outline: 2px solid var(--text-1); outline-offset: 2px; }
 
 /* ── pills ── */
-#tools-page .tools-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+#tools-page .tools-tabs { position: relative; display: flex; gap: 6px; flex-wrap: wrap; }
 #tools-page .tools-tab {
-    height: 36px;
-    padding: 0 16px;
+    height: 32px;
+    padding: 0 14px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--white-a08);
     color: var(--text-1);
     font: inherit;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.15s;
@@ -72914,7 +72915,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .tools-tab:hover { background: var(--white-a12); }
 #tools-page .tools-tab[aria-selected="true"] { background: var(--text-1); color: var(--bg-primary); }
 #tools-page .tools-tab:focus-visible { outline: 2px solid var(--text-1); outline-offset: 2px; }
-#tools-page .tools-tab-count { font-size: 13px; color: var(--text-3); }
+#tools-page .tools-tab-count { font-size: 12px; font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; }
 #tools-page .tools-tab[aria-selected="true"] .tools-tab-count { color: var(--black-a60); }
 
 /* the maintenance surface has no box of its own: its three panels sit in
@@ -72937,13 +72938,13 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .tools-section-title {
     margin: 0;
-    font-size: 22px;
-    font-weight: 700;
+    font-size: 20px;
+    font-weight: 600;
     letter-spacing: -0.02em;
     color: var(--text-1);
     text-transform: none;
 }
-#tools-page .tools-section-blurb { font-size: 14px; color: var(--text-3); }
+#tools-page .tools-section-blurb { font-size: 13px; color: var(--text-3); }
 #tools-page .repair-triage-count { font-size: 15px; font-weight: 600; color: var(--text-2); }
 
 /* shared quiet states */
@@ -72961,7 +72962,7 @@ body.src-modal-open { overflow: hidden; }
     gap: 6px;
     text-align: left;
 }
-#tools-page .repair-empty-title { font-size: 17px; font-weight: 700; color: var(--text-1); }
+#tools-page .repair-empty-title { font-size: 17px; font-weight: 600; color: var(--text-1); }
 #tools-page .repair-empty-text { font-size: 14px; color: var(--text-3); }
 
 /* shared buttons */
@@ -72975,21 +72976,21 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .tool-card-controls button,
 #tools-page .tool-card-btn-secondary,
 #tools-page .media-scan-btn {
-    height: 36px;
-    padding: 0 16px;
+    height: 32px;
+    padding: 0 14px;
+    border: 0;
     border-radius: var(--radius-pill);
-    border: 1px solid var(--white-a30);
-    background: none;
+    background: var(--white-a10);
     color: var(--text-1);
     font: inherit;
-    font-size: 13.5px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    transition: border-color 0.15s, background 0.15s;
+    gap: 6px;
+    transition: background 0.15s, color 0.15s;
 }
 #tools-page .repair-inbox-btn:hover,
 #tools-page .repair-finding-btn.fix:hover,
@@ -73000,19 +73001,11 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-save-settings-btn:hover,
 #tools-page .tool-card-controls button:hover,
 #tools-page .tool-card-btn-secondary:hover,
-#tools-page .media-scan-btn:hover { border-color: var(--text-1); }
+#tools-page .media-scan-btn:hover { background: var(--white-a16); }
 #tools-page button:disabled { opacity: 0.45; cursor: default; }
-#tools-page .repair-inbox-btn.destructive,
-#tools-page .repair-finding-btn.fix.destructive { border-color: rgba(var(--warning-rgb), 0.5); }
-#tools-page .repair-inbox-btn.destructive:hover,
-#tools-page .repair-finding-btn.fix.destructive:hover { border-color: var(--warning); }
-#tools-page .repair-inbox-btn.ghost {
-    border-color: transparent;
-    color: var(--text-2);
-    font-weight: 600;
-    padding: 0 12px;
-}
-#tools-page .repair-inbox-btn.ghost:hover { color: var(--text-1); background: var(--white-a08); border-color: transparent; }
+/* a fix that touches files says so by its colour, not by a louder shape */
+#tools-page .repair-inbox-btn.ghost { background: none; color: var(--text-2); padding: 0 10px; }
+#tools-page .repair-inbox-btn.ghost:hover { color: var(--text-1); background: var(--white-a08); }
 
 /* round icon buttons */
 #tools-page .repair-inbox-expand,
@@ -73026,8 +73019,8 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-runs-refresh,
 #tools-page .repair-undo-close,
 #tools-page .repair-drill-chip-clear {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     flex: none;
     padding: 0;
     border: 0;
@@ -73036,7 +73029,7 @@ body.src-modal-open { overflow: hidden; }
     color: var(--text-3);
     font: inherit;
     font-size: 15px;
-    font-weight: 700;
+    font-weight: 600;
     display: grid;
     place-items: center;
     cursor: pointer;
@@ -73061,8 +73054,8 @@ body.src-modal-open { overflow: hidden; }
 /* ── Findings: where the library stands ── */
 #tools-page .repair-findings-surface { display: flex; flex-direction: column; gap: 24px; }
 #tools-page .repair-health {
-    padding: 24px 28px;
-    border-radius: 20px;
+    padding: 20px 24px;
+    border-radius: var(--radius-xl);
     background: var(--tl-card);
     display: flex;
     flex-direction: column;
@@ -73070,26 +73063,25 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .repair-health-main { display: flex; align-items: center; gap: 16px 24px; flex-wrap: wrap; }
 #tools-page .repair-health-score {
-    width: 72px;
-    height: 72px;
+    position: relative;
+    width: 60px;
+    height: 60px;
     flex: none;
     border-radius: var(--radius-circle);
-    background: var(--white-a08);
     color: var(--text-1);
     display: grid;
     place-items: center;
-    font-size: 26px;
-    font-weight: 800;
-    letter-spacing: -0.02em;
+    font-size: 20px;
+    font-weight: 600;
     font-variant-numeric: tabular-nums;
 }
-#tools-page .repair-health-score.healthy { background: rgba(var(--accent-rgb), 0.16); color: var(--accent-light); }
-#tools-page .repair-health-score.attention { background: rgba(var(--warning-rgb), 0.16); color: var(--warning); }
-#tools-page .repair-health-score.unhealthy { background: rgba(var(--danger-rgb), 0.16); color: var(--danger-light); }
+#tools-page .repair-health-score.healthy { color: var(--accent-light); }
+#tools-page .repair-health-score.attention { color: var(--warning); }
+#tools-page .repair-health-score.unhealthy { color: var(--danger-light); }
 #tools-page .repair-health-body { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 #tools-page .repair-health-band {
-    font-size: 20px;
-    font-weight: 700;
+    font-size: 17px;
+    font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--text-1);
     text-transform: none;
@@ -73097,25 +73089,25 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-health-band::first-letter { text-transform: uppercase; }
 #tools-page .repair-health-meta { font-size: 14px; color: var(--text-2); }
 #tools-page .repair-health-trend { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; color: var(--text-3); }
-#tools-page .repair-health-trend-label { font-size: 11.5px; }
+#tools-page .repair-health-trend-label { font-size: 12px; }
 #tools-page .repair-health-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #tools-page .repair-health-fix-safe {
-    height: 44px;
-    padding: 0 22px;
+    height: 36px;
+    padding: 0 18px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--accent-light);
     color: var(--bg-primary);
     font: inherit;
-    font-size: 14px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
     transition: transform 0.12s;
 }
 #tools-page .repair-health-fix-safe:hover:not(:disabled) { transform: scale(1.03); }
 #tools-page .repair-health-fix-safe:disabled { background: var(--white-a08); color: var(--text-3); opacity: 1; }
-#tools-page .repair-health-actions-note { font-size: 12.5px; color: var(--text-3); }
+#tools-page .repair-health-actions-note { font-size: 12px; color: var(--text-3); }
 #tools-page .repair-health-breakdown { display: flex; flex-direction: column; gap: 10px; }
 #tools-page .repair-health-bar { display: flex; gap: 3px; height: 8px; }
 #tools-page .repair-health-seg {
@@ -73180,7 +73172,7 @@ body.src-modal-open { overflow: hidden; }
     align-items: center;
     gap: 10px;
     padding: 0 4px;
-    font-size: 13.5px;
+    font-size: 13px;
     color: var(--text-3);
     cursor: pointer;
 }
@@ -73210,14 +73202,14 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-status-seg,
 #tools-page .repair-view-mode-tab,
 #tools-page .repair-view-switch button {
-    height: 34px;
+    height: 30px;
     padding: 0 14px;
     border: 0;
     border-radius: var(--radius-pill);
     background: none;
     color: var(--text-2);
     font: inherit;
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 600;
     display: inline-flex;
     align-items: center;
@@ -73233,9 +73225,9 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-view-switch button[aria-pressed="true"] { background: var(--white-a14); color: var(--text-1); }
 #tools-page .repair-status-seg-count { font-weight: 500; color: var(--text-3); font-variant-numeric: tabular-nums; }
 #tools-page .repair-findings-search {
-    flex: 1 1 260px;
+    flex: 1 1 140px;
     min-width: 0;
-    height: 40px;
+    height: 36px;
     padding: 0 18px;
     border: 0;
     border-radius: var(--radius-pill);
@@ -73250,7 +73242,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-findings-filters { display: flex; gap: 4px; }
 #tools-page .repair-findings-filters select,
 #tools-page .repair-list-controls select {
-    height: 40px;
+    height: 36px;
     max-width: 160px;
     padding: 0 30px 0 14px;
     border: 0;
@@ -73267,14 +73259,14 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-findings-filters select option,
 #tools-page .repair-list-controls select option { background: var(--bg-raised); color: var(--text-1); }
 #tools-page .repair-clear-btn {
-    height: 40px;
+    height: 36px;
     padding: 0 12px;
     border: 0;
     border-radius: var(--radius-pill);
     background: none;
     color: var(--text-3);
     font: inherit;
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 600;
     cursor: pointer;
 }
@@ -73301,8 +73293,8 @@ body.src-modal-open { overflow: hidden; }
     flex: none;
     min-width: 72px;
     text-align: right;
-    font-size: 22px;
-    font-weight: 700;
+    font-size: 20px;
+    font-weight: 600;
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
     color: var(--text-1);
@@ -73313,20 +73305,20 @@ body.src-modal-open { overflow: hidden; }
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text-1);
 }
-#tools-page .repair-inbox-blurb { font-size: 13.5px; color: var(--text-3); }
+#tools-page .repair-inbox-blurb { font-size: 13px; color: var(--text-3); }
 #tools-page .repair-inbox-sev { width: 8px; height: 8px; border-radius: var(--radius-circle); background: var(--warning); }
 #tools-page .repair-inbox-sev.error,
 #tools-page .repair-inbox-sev.critical { background: var(--danger-light); }
 #tools-page .repair-inbox-risk {
-    padding: 2px 9px;
-    border: 1px solid rgba(var(--warning-rgb), 0.45);
+    padding: 2px 8px;
     border-radius: var(--radius-pill);
+    background: rgba(var(--warning-rgb), 0.12);
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 500;
     color: var(--warning);
 }
 #tools-page .repair-inbox-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; flex: none; }
@@ -73380,7 +73372,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-inbox.is-open { gap: 0; }
 #tools-page .repair-inbox-back {
     align-self: flex-start;
-    height: 40px;
+    height: 36px;
     margin-left: -10px;
     padding: 0 12px 0 8px;
     border: 0;
@@ -73404,9 +73396,9 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-findings-surface.focused .repair-findings-toolbar { order: 4; }
 #tools-page .repair-findings-surface.focused .repair-inbox-body { order: 5; }
 #tools-page .repair-inbox-group.open .repair-art-mosaic { width: 112px; height: 112px; border-radius: var(--radius-card); }
-#tools-page .repair-inbox-group.open .repair-inbox-count { order: 1; min-width: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.025em; color: var(--text-3); }
+#tools-page .repair-inbox-group.open .repair-inbox-count { order: 1; min-width: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--text-3); }
 #tools-page .repair-inbox-group.open .repair-inbox-actions { order: 2; }
-#tools-page .repair-inbox-group.open .repair-inbox-label { font-size: 26px; font-weight: 800; letter-spacing: -0.025em; }
+#tools-page .repair-inbox-group.open .repair-inbox-label { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
 #tools-page .repair-inbox-group.open .repair-inbox-blurb { font-size: 15px; color: var(--text-2); }
 #tools-page .repair-inbox-body { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 
@@ -73425,7 +73417,7 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .repair-select-all input,
 #tools-page .repair-finding-select input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent-light); cursor: pointer; }
-#tools-page .repair-kb-hint { width: 100%; padding: 0 12px; font-size: 12.5px; color: var(--text-3); }
+#tools-page .repair-kb-hint { width: 100%; padding: 0 12px; font-size: 12px; color: var(--text-3); }
 #tools-page .repair-kb-hint kbd {
     display: inline-block;
     min-width: 18px;
@@ -73434,7 +73426,7 @@ body.src-modal-open { overflow: hidden; }
     border-radius: var(--radius-xs);
     background: var(--white-a08);
     font: inherit;
-    font-size: 11.5px;
+    font-size: 12px;
     text-align: center;
     color: var(--text-2);
 }
@@ -73442,7 +73434,7 @@ body.src-modal-open { overflow: hidden; }
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    height: 40px;
+    height: 36px;
     padding: 0 4px 0 16px;
     border-radius: var(--radius-pill);
     background: var(--white-a08);
@@ -73488,7 +73480,7 @@ body.src-modal-open { overflow: hidden; }
     align-items: center;
     gap: 10px;
     min-width: 0;
-    font-size: 15.5px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text-1);
 }
@@ -73503,7 +73495,7 @@ body.src-modal-open { overflow: hidden; }
     padding: 2px 8px;
     border-radius: var(--radius-pill);
     background: var(--white-a08);
-    font-size: 11.5px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-2);
     text-transform: none;
@@ -73549,7 +73541,7 @@ body.src-modal-open { overflow: hidden; }
     display: flex;
     flex-direction: column;
     gap: 16px;
-    font-size: 14.5px;
+    font-size: 14px;
     line-height: 1.5;
     color: var(--text-2);
 }
@@ -73565,7 +73557,7 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .repair-finding-path {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 12.5px;
+    font-size: 12px;
     color: var(--text-2);
     word-break: break-all;
 }
@@ -73582,8 +73574,8 @@ body.src-modal-open { overflow: hidden; }
     background: none;
 }
 #tools-page .repair-detail-key { font-size: 14px; color: var(--text-3); }
-#tools-page .repair-detail-val { min-width: 0; font-size: 14.5px; color: var(--text-1); overflow-wrap: anywhere; }
-#tools-page .repair-detail-val.path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; color: var(--text-2); }
+#tools-page .repair-detail-val { min-width: 0; font-size: 14px; color: var(--text-1); overflow-wrap: anywhere; }
+#tools-page .repair-detail-val.path { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-2); }
 #tools-page .repair-detail-val.highlight { font-weight: 600; }
 #tools-page .repair-detail-val.success { color: var(--accent-light); }
 #tools-page .repair-detail-val.warning { color: var(--warning); }
@@ -73602,22 +73594,22 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page .repair-finding-media-img.artist { border-radius: var(--radius-circle); }
 #tools-page .repair-finding-media-card--link:hover .repair-finding-media-img { transform: scale(1.03); }
-#tools-page .repair-finding-media-label { font-size: 13.5px; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tools-page .repair-finding-media-label { font-size: 13px; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 #tools-page .repair-art-apply-btn,
 #tools-page .repair-finding-play-btn,
 #tools-page .repair-subitem-play,
 #tools-page .repair-finding-detail-inner .repair-btn {
     align-self: flex-start;
-    height: 34px;
+    height: 30px;
     padding: 0 14px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--white-a10);
     color: var(--text-1);
     font: inherit;
-    font-size: 13.5px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -73649,8 +73641,8 @@ body.src-modal-open { overflow: hidden; }
 }
 #tools-page section.repair-detail-subitem { flex-direction: column; align-items: flex-start; gap: 4px; }
 #tools-page .repair-subitem-body { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-#tools-page .repair-detail-subitem strong { font-size: 14.5px; font-weight: 600; color: var(--text-1); }
-#tools-page .repair-detail-subitem span { font-size: 13.5px; color: var(--text-2); }
+#tools-page .repair-detail-subitem strong { font-size: 14px; font-weight: 600; color: var(--text-1); }
+#tools-page .repair-detail-subitem span { font-size: 13px; color: var(--text-2); }
 #tools-page .repair-detail-subitem .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; color: var(--text-3); word-break: break-all; }
 #tools-page .repair-detail-subitem .repair-keep-badge,
 #tools-page .repair-detail-subitem .repair-remove-badge {
@@ -73659,8 +73651,8 @@ body.src-modal-open { overflow: hidden; }
     padding: 2px 8px;
     border-radius: var(--radius-pill);
     background: rgba(var(--accent-rgb), 0.16);
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 12px;
+    font-weight: 600;
     letter-spacing: 0.04em;
     color: var(--accent-light);
     vertical-align: 1px;
@@ -73694,13 +73686,13 @@ body.src-modal-open { overflow: hidden; }
     font-size: 14px;
     color: var(--text-2);
 }
-#tools-page .repair-finding-error-title { flex: none; font-weight: 700; color: var(--danger-light); }
+#tools-page .repair-finding-error-title { flex: none; font-weight: 600; color: var(--danger-light); }
 #tools-page .repair-finding-error-text { min-width: 0; }
 
 #tools-page .repair-findings-pagination { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding-top: 8px; }
 #tools-page .repair-page-btn {
-    min-width: 40px;
-    height: 40px;
+    min-width: 36px;
+    height: 36px;
     padding: 0 12px;
     border: 0;
     border-radius: var(--radius-pill);
@@ -73713,8 +73705,8 @@ body.src-modal-open { overflow: hidden; }
     font-variant-numeric: tabular-nums;
 }
 #tools-page .repair-page-btn:hover { background: var(--white-a08); color: var(--text-1); }
-#tools-page .repair-page-btn.active { background: var(--text-1); color: var(--bg-primary); }
-#tools-page .repair-page-info { padding: 0 8px; font-size: 13.5px; color: var(--text-3); }
+#tools-page .repair-page-btn.active { background: var(--white-a14); color: var(--text-1); }
+#tools-page .repair-page-info { padding: 0 8px; font-size: 13px; color: var(--text-3); }
 
 #tools-page .repair-undo-bar {
     position: fixed;
@@ -73735,14 +73727,14 @@ body.src-modal-open { overflow: hidden; }
     box-shadow: 0 12px 40px var(--black-a50);
 }
 #tools-page .repair-undo-btn {
-    height: 36px;
+    height: 32px;
     padding: 0 14px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--black-a10);
     color: var(--bg-primary);
     font: inherit;
-    font-weight: 700;
+    font-weight: 600;
     cursor: pointer;
 }
 #tools-page .repair-undo-bar .repair-undo-close { color: var(--black-a60); }
@@ -73831,23 +73823,23 @@ body.src-modal-open { overflow: hidden; }
     background: var(--black-a70);
     color: var(--text-1);
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
     display: grid;
     place-items: center;
 }
 #tools-page .repair-album-error-badge { right: auto; left: 8px; color: var(--danger-light); }
 #tools-page .repair-album-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-#tools-page .repair-album-name { font-size: 14.5px; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tools-page .repair-album-name { font-size: 14px; font-weight: 600; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #tools-page .repair-album-artist,
 #tools-page .repair-album-quality,
 #tools-page .repair-album-tracks { font-size: 13px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #tools-page .repair-album-tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
-#tools-page .repair-album-tag { padding: 2px 8px; border-radius: var(--radius-pill); background: var(--white-a08); font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+#tools-page .repair-album-tag { padding: 2px 8px; border-radius: var(--radius-pill); background: var(--white-a08); font-size: 12px; font-weight: 600; color: var(--text-2); }
 
 /* one album opened from the grid: its findings, track by track */
 #tools-page .album-inspection-tray {
     padding: 20px 24px 8px;
-    border-radius: 20px;
+    border-radius: var(--radius-xl);
     background: var(--tl-card);
     display: flex;
     flex-direction: column;
@@ -73888,23 +73880,23 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .album-tray-error-badge { background: rgba(var(--danger-rgb), 0.14); color: var(--danger-light); }
 #tools-page .album-track-status-pill.resolved,
 #tools-page .album-tray-status-tag.resolved { color: var(--accent-light); }
-#tools-page .album-tray-title { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; color: var(--text-1); }
+#tools-page .album-tray-title { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; color: var(--text-1); }
 #tools-page .album-tray-artist { margin: 0; font-size: 14px; color: var(--text-2); }
 #tools-page .album-tray-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 #tools-page .album-tray-btn,
 #tools-page .album-action-btn,
 #tools-page .album-action-reopen-btn,
 #tools-page .album-error-retry-btn {
-    height: 36px;
-    padding: 0 16px;
+    height: 32px;
+    padding: 0 14px;
+    border: 0;
     border-radius: var(--radius-pill);
-    border: 1px solid var(--white-a30);
-    background: none;
+    background: var(--white-a10);
     box-shadow: none;
     color: var(--text-1);
     font: inherit;
-    font-size: 13.5px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
     display: inline-flex;
@@ -73915,17 +73907,19 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .album-tray-btn:hover,
 #tools-page .album-action-btn:hover,
 #tools-page .album-action-reopen-btn:hover,
-#tools-page .album-error-retry-btn:hover { border-color: var(--text-1); background: none; transform: none; }
-#tools-page .album-tray-btn.btn--primary { border-color: transparent; background: var(--text-1); color: var(--bg-primary); }
-#tools-page .album-tray-btn.btn--primary:hover { background: var(--white-a85); }
+#tools-page .album-error-retry-btn:hover { background: var(--white-a16); transform: none; }
+#tools-page .album-tray-btn.btn--primary,
+#tools-page .repair-findings-bulk .btn--primary { border-color: transparent; background: rgba(var(--accent-rgb), 0.2); color: var(--accent-light); }
+#tools-page .album-tray-btn.btn--primary:hover,
+#tools-page .repair-findings-bulk .btn--primary:hover { background: rgba(var(--accent-rgb), 0.3); }
 #tools-page .album-tray-btn.btn--secondary,
 #tools-page .album-action-btn.dismiss { border-color: transparent; color: var(--text-2); font-weight: 600; padding: 0 12px; }
 #tools-page .album-tray-btn.btn--secondary:hover,
 #tools-page .album-action-btn.dismiss:hover { color: var(--text-1); background: var(--white-a08); border-color: transparent; }
-#tools-page .album-error-retry-btn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+#tools-page .album-error-retry-btn { height: 30px; padding: 0 12px; font-size: 12px; }
 #tools-page .album-tray-close {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     flex: none;
     padding: 0;
     border: 0;
@@ -73941,7 +73935,7 @@ body.src-modal-open { overflow: hidden; }
     padding: 10px 14px;
     border-radius: var(--radius-lg);
     background: var(--white-a06);
-    font-size: 13.5px;
+    font-size: 13px;
     color: var(--text-2);
 }
 #tools-page .album-tray-alert.error { background: rgba(var(--danger-rgb), 0.1); color: var(--danger-light); }
@@ -73953,7 +73947,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .album-track-num-box { width: 28px; flex: none; font-size: 14px; color: var(--text-3); font-variant-numeric: tabular-nums; text-align: right; }
 #tools-page .album-track-meta { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 #tools-page .album-track-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-#tools-page .album-track-title { font-size: 15.5px; font-weight: 600; color: var(--text-1); }
+#tools-page .album-track-title { font-size: 15px; font-weight: 600; color: var(--text-1); }
 #tools-page .album-track-desc { font-size: 14px; line-height: 1.45; color: var(--text-2); }
 #tools-page .album-track-diagnostic,
 #tools-page .album-track-error-callout {
@@ -73974,7 +73968,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .operations-studio { display: flex; flex-direction: column; gap: 40px; }
 #tools-page .operations-live-hud {
     padding: 18px 24px;
-    border-radius: 20px;
+    border-radius: var(--radius-xl);
     background: var(--tl-card);
     display: flex;
     flex-direction: column;
@@ -73990,8 +73984,8 @@ body.src-modal-open { overflow: hidden; }
     box-shadow: 0 0 0 5px rgba(var(--accent-rgb), 0.2);
 }
 #tools-page .operations-live-hud-title-wrap { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-#tools-page .operations-live-hud-name { margin: 0; font-size: 16px; font-weight: 700; color: var(--text-1); }
-#tools-page .operations-live-hud-phase { font-size: 13.5px; color: var(--text-2); }
+#tools-page .operations-live-hud-name { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-1); }
+#tools-page .operations-live-hud-phase { font-size: 13px; color: var(--text-2); }
 #tools-page .operations-live-hud-bar-track,
 #tools-page .progress-bar-container { height: 4px; border-radius: 2px; background: var(--white-a10); overflow: hidden; }
 #tools-page .operations-live-hud-bar-fill,
@@ -74014,16 +74008,16 @@ body.src-modal-open { overflow: hidden; }
     transition: background 0.15s;
 }
 #tools-page .operations-playbook-card:hover:not(:disabled) { background: var(--tl-card-hover); }
-#tools-page .operations-playbook-name { font-size: 16px; font-weight: 700; color: var(--text-1); }
-#tools-page .operations-playbook-desc { flex: 1; font-size: 13.5px; line-height: 1.45; color: var(--text-2); }
+#tools-page .operations-playbook-name { font-size: 15px; font-weight: 600; color: var(--text-1); }
+#tools-page .operations-playbook-desc { flex: 1; font-size: 13px; line-height: 1.45; color: var(--text-2); }
 #tools-page .operations-playbook-cta {
     align-self: flex-start;
-    height: 34px;
+    height: 30px;
     padding: 0 14px 0 12px;
     border-radius: var(--radius-pill);
     background: var(--white-a10);
-    font-size: 13.5px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     color: var(--text-1);
     display: inline-flex;
     align-items: center;
@@ -74041,9 +74035,9 @@ body.src-modal-open { overflow: hidden; }
     border-top: 1px solid var(--tl-line);
 }
 #tools-page .operations-pillar-head-info { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-#tools-page .operations-pillar-name { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-1); }
-#tools-page .operations-pillar-tagline { font-size: 13.5px; color: var(--text-2); }
-#tools-page .operations-pillar-subjob-hint { font-size: 12.5px; color: var(--text-3); }
+#tools-page .operations-pillar-name { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-1); }
+#tools-page .operations-pillar-tagline { font-size: 13px; color: var(--text-2); }
+#tools-page .operations-pillar-subjob-hint { font-size: 12px; color: var(--text-3); }
 #tools-page .operations-pillar-inspect-link,
 #tools-page .operations-pillar-findings-badge,
 #tools-page .repair-run-link,
@@ -74063,16 +74057,16 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .operations-pillar-findings-badge:hover,
 #tools-page .repair-run-link:hover,
 #tools-page .repair-tile-badge:hover { color: var(--text-1); text-decoration-color: var(--text-1); }
-#tools-page .operations-pillar-stat { width: 150px; font-size: 13.5px; color: var(--text-2); }
+#tools-page .operations-pillar-stat { width: 150px; font-size: 13px; color: var(--text-2); }
 #tools-page .operations-pillar-stat + .operations-pillar-stat { width: 84px; }
-#tools-page .operations-pillar-findings-badge { font-size: 13.5px; }
+#tools-page .operations-pillar-findings-badge { font-size: 13px; }
 #tools-page .operations-pillar-autopilot {
     display: inline-flex;
     align-items: center;
     gap: 10px;
     width: 152px;
     min-height: 44px;
-    font-size: 13.5px;
+    font-size: 13px;
     color: var(--text-2);
     cursor: pointer;
 }
@@ -74081,7 +74075,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-families { display: flex; flex-direction: column; gap: 12px; }
 #tools-page .repair-family {
     padding: 4px 24px 8px;
-    border-radius: 20px;
+    border-radius: var(--radius-xl);
     background: var(--tl-card);
 }
 #tools-page .repair-family.collapsed { padding-bottom: 4px; }
@@ -74100,12 +74094,12 @@ body.src-modal-open { overflow: hidden; }
     flex-wrap: wrap;
     cursor: pointer;
 }
-#tools-page .repair-family-title { font-size: 17px; font-weight: 700; }
-#tools-page .repair-family-summary { flex: 1 1 200px; font-size: 13.5px; color: var(--text-3); }
-#tools-page .repair-family-pending { font-size: 13.5px; font-weight: 600; color: var(--text-2); }
+#tools-page .repair-family-title { font-size: 17px; font-weight: 600; }
+#tools-page .repair-family-summary { flex: 1 1 200px; font-size: 13px; color: var(--text-3); }
+#tools-page .repair-family-pending { font-size: 13px; font-weight: 600; color: var(--text-2); }
 #tools-page .repair-family-chevron { color: var(--text-3); transition: transform 0.18s; }
 #tools-page .repair-family-chevron.open { transform: rotate(180deg); }
-#tools-page .repair-family-blurb { margin: -10px 0 12px; font-size: 13.5px; color: var(--text-3); }
+#tools-page .repair-family-blurb { margin: -10px 0 12px; font-size: 13px; color: var(--text-3); }
 #tools-page .repair-family.collapsed .repair-family-blurb { display: none; }
 #tools-page .repair-family-grid { display: flex; flex-direction: column; }
 
@@ -74153,7 +74147,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-tile-desc {
     grid-column: 2;
     grid-row: 2;
-    font-size: 13.5px;
+    font-size: 13px;
     color: var(--text-3);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -74205,33 +74199,33 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-tile-cadence-edit input,
 #tools-page .repair-tile-cadence-edit select,
 #tools-page .repair-setting-input:not([type="checkbox"]) {
-    height: 36px;
+    height: 32px;
     padding: 0 12px;
     border: 0;
     border-radius: var(--radius-control);
     background: var(--white-a08);
     color: var(--text-1);
     font: inherit;
-    font-size: 13.5px;
+    font-size: 13px;
 }
 #tools-page .repair-tile-cadence-edit input { width: 72px; }
 #tools-page .repair-tile-cadence-edit select option,
 #tools-page .repair-setting-input option { background: var(--bg-raised); color: var(--text-1); }
 #tools-page .repair-tile-cadence-save,
 #tools-page .repair-tile-cadence-cancel {
-    height: 36px;
+    height: 32px;
     padding: 0 14px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--text-1);
     color: var(--bg-primary);
     font: inherit;
-    font-size: 13.5px;
-    font-weight: 700;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
 }
 #tools-page .repair-tile-cadence-cancel { background: none; color: var(--text-2); font-weight: 600; }
-#tools-page .repair-tile-cadence-custom { font-size: 13.5px; color: var(--text-2); }
+#tools-page .repair-tile-cadence-custom { font-size: 13px; color: var(--text-2); }
 #tools-page .repair-tile-next { grid-column: 5; grid-row: 1; font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #tools-page .repair-tile-next.due { color: var(--text-1); }
 #tools-page .repair-tile-next.off { color: var(--text-3); }
@@ -74246,7 +74240,7 @@ body.src-modal-open { overflow: hidden; }
     text-overflow: ellipsis;
 }
 #tools-page .repair-tile-trend { display: inline-flex; align-items: center; gap: 8px; }
-#tools-page .repair-tile-badge { grid-column: 6; grid-row: 1 / span 2; justify-self: end; font-size: 13.5px; white-space: nowrap; }
+#tools-page .repair-tile-badge { grid-column: 6; grid-row: 1 / span 2; justify-self: end; font-size: 13px; white-space: nowrap; }
 #tools-page .repair-tile-badge.historical { color: var(--text-3); }
 #tools-page .repair-job-actions { grid-column: 7; grid-row: 1 / span 2; display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
 #tools-page .repair-job-toggle { display: inline-flex; align-items: center; min-height: 36px; padding: 0 8px; cursor: pointer; }
@@ -74281,7 +74275,7 @@ body.src-modal-open { overflow: hidden; }
     max-width: 100%;
     box-sizing: border-box;
 }
-#tools-page .repair-setting-section { margin-top: 6px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+#tools-page .repair-setting-section { margin-top: 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
 #tools-page .repair-setting-row {
     display: flex;
     align-items: center;
@@ -74345,8 +74339,8 @@ body.src-modal-open { overflow: hidden; }
 }
 .repair-help-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .repair-help-close {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     border: 0;
     border-radius: var(--radius-circle);
     background: var(--white-a08);
@@ -74366,7 +74360,7 @@ body.src-modal-open { overflow: hidden; }
 }
 .repair-help-setting-list { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .repair-help-settings-section { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--white-a08); }
-.repair-help-section-title { margin-bottom: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+.repair-help-section-title { margin-bottom: 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
 .repair-help-setting { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; }
 .repair-help-setting-val { color: var(--text-1); font-weight: 600; }
 
@@ -74380,21 +74374,21 @@ body.src-modal-open { overflow: hidden; }
     gap: 24px 40px;
     flex-wrap: wrap;
     padding: 24px 28px;
-    border-radius: 20px;
+    border-radius: var(--radius-xl);
     background: var(--tl-card);
 }
 #tools-page .repair-runs-figures { flex: 1 1 520px; display: flex; gap: 20px 36px; flex-wrap: wrap; align-items: flex-end; }
 #tools-page .repair-runs-figure { display: flex; flex-direction: column; gap: 4px; min-width: 96px; }
 #tools-page .repair-runs-figure-value {
-    font-size: 32px;
-    font-weight: 800;
-    letter-spacing: -0.03em;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
     line-height: 1;
     color: var(--text-1);
     font-variant-numeric: tabular-nums;
 }
 #tools-page .repair-runs-figure.bad .repair-runs-figure-value { color: var(--danger-light); }
-#tools-page .repair-runs-figure-label { font-size: 13.5px; color: var(--text-2); }
+#tools-page .repair-runs-figure-label { font-size: 13px; color: var(--text-2); }
 #tools-page .repair-runs-days { flex: 0 1 380px; min-width: 260px; display: flex; align-items: flex-end; gap: 6px; height: 84px; }
 #tools-page .repair-runs-daybar { flex: 1 1 0; min-width: 0; height: 100%; display: flex; flex-direction: column; gap: 6px; }
 #tools-page .repair-runs-daybar-stack {
@@ -74410,21 +74404,21 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-runs-daybar-fill { display: block; min-height: 3px; border-radius: 2px; background: var(--white-a40); }
 #tools-page .repair-runs-daybar-fill.failed { background: var(--danger-light); }
 #tools-page .repair-runs-daybar:hover .repair-runs-daybar-fill:not(.failed) { background: var(--text-1); }
-#tools-page .repair-runs-daybar-label { font-size: 11px; text-align: center; color: var(--text-3); font-variant-numeric: tabular-nums; }
+#tools-page .repair-runs-daybar-label { font-size: 12px; text-align: center; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 #tools-page .repair-runs-toolbar { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
 #tools-page .repair-runs-chips { flex: 1 1 420px; display: flex; gap: 8px; flex-wrap: wrap; }
 #tools-page .repair-runs-tools { display: flex; align-items: center; gap: 8px; flex: none; }
 #tools-page .repair-runs-chip,
 #tools-page .repair-runs-toggle {
-    height: 34px;
+    height: 30px;
     padding: 0 14px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--white-a08);
     color: var(--text-1);
     font: inherit;
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 600;
     display: inline-flex;
     align-items: center;
@@ -74463,7 +74457,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-runs-cols {
     padding: 0 8px 10px;
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: var(--text-3);
@@ -74479,7 +74473,7 @@ body.src-modal-open { overflow: hidden; }
     padding: 18px 8px 8px;
     border-top: 1px solid var(--tl-line);
 }
-#tools-page .repair-runs-day-label { font-size: 15px; font-weight: 700; color: var(--text-1); }
+#tools-page .repair-runs-day-label { font-size: 15px; font-weight: 600; color: var(--text-1); }
 #tools-page .repair-runs-day-count { font-size: 13px; color: var(--text-3); }
 #tools-page .repair-run { border-radius: var(--radius-lg); }
 #tools-page .repair-run.open { background: var(--tl-card); margin: 4px 0; }
@@ -74498,7 +74492,7 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-run-name { display: flex; align-items: center; gap: 12px; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text-1); }
 #tools-page .repair-run-name-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 #tools-page .repair-run-reason {
-    font-size: 13.5px;
+    font-size: 13px;
     font-weight: 400;
     color: var(--danger-light);
     overflow: hidden;
@@ -74521,18 +74515,18 @@ body.src-modal-open { overflow: hidden; }
 #tools-page .repair-run-glyph.stopped { background: rgba(var(--warning-rgb), 0.16); color: var(--warning); }
 #tools-page .repair-run-glyph.running { background: rgba(var(--accent-rgb), 0.16); color: var(--accent-light); }
 #tools-page .repair-run-clock { display: flex; align-items: baseline; gap: 8px; color: var(--text-1); font-variant-numeric: tabular-nums; }
-#tools-page .repair-run-age { font-size: 12.5px; color: var(--text-3); }
-#tools-page .repair-run-cell.strong { font-weight: 700; color: var(--text-1); }
-#tools-page .repair-runs-job .bad { color: var(--danger-light); font-weight: 700; }
+#tools-page .repair-run-age { font-size: 12px; color: var(--text-3); }
+#tools-page .repair-run-cell.strong { font-weight: 600; color: var(--text-1); }
+#tools-page .repair-runs-job .bad { color: var(--danger-light); font-weight: 600; }
 #tools-page .repair-run-chevron { color: var(--text-3); transition: transform 0.18s; }
 #tools-page .repair-run-chevron.open { transform: rotate(180deg); }
 #tools-page .repair-run-detail { padding: 8px 20px 20px 46px; display: flex; flex-direction: column; gap: 16px; }
 #tools-page .repair-run-counters { display: flex; gap: 32px; flex-wrap: wrap; }
 #tools-page .repair-run-counter { display: flex; flex-direction: column; gap: 2px; }
-#tools-page .repair-run-counter-value { font-size: 22px; font-weight: 700; color: var(--text-1); font-variant-numeric: tabular-nums; }
+#tools-page .repair-run-counter-value { font-size: 20px; font-weight: 600; color: var(--text-1); font-variant-numeric: tabular-nums; }
 #tools-page .repair-run-counter-label { font-size: 13px; color: var(--text-2); }
 #tools-page .repair-run-error { display: flex; flex-direction: column; gap: 6px; max-width: 880px; }
-#tools-page .repair-run-error-title { font-size: 13.5px; font-weight: 700; color: var(--danger-light); }
+#tools-page .repair-run-error-title { font-size: 13px; font-weight: 600; color: var(--danger-light); }
 #tools-page .repair-run.stopped .repair-run-error-title { color: var(--warning); }
 #tools-page .repair-run-error-text {
     margin: 0;
@@ -74549,98 +74543,105 @@ body.src-modal-open { overflow: hidden; }
 /* ── Tools ── */
 #tools-page #tools-panel-tools .tools-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
-    gap: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+    gap: 14px;
 }
 #tools-page .tool-card {
+    position: relative;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 16px;
     margin: 0;
-    padding: 24px;
+    padding: 20px;
     border: 0;
-    border-radius: 20px;
+    border-radius: var(--radius-xl);
     background: var(--tl-card);
     box-shadow: none;
 }
 #tools-page .tool-card::before,
 #tools-page .tool-card::after { content: none; }
-#tools-page .tool-card:hover { transform: none; background: var(--tl-card); box-shadow: none; }
-/* the tool a section leads with: full width, its numbers at headline size */
-#tools-page .tool-card--feature { grid-column: 1 / -1; padding: 28px; }
-#tools-page .tool-card-top { display: flex; align-items: flex-start; gap: 16px; }
+#tools-page .tool-card:hover { transform: none; background: linear-gradient(180deg, var(--white-a10), var(--white-a05) 70%); }
+#tools-page .tool-card-top { display: flex; align-items: flex-start; gap: 12px; }
 #tools-page .tool-card-icon {
-    width: 48px;
-    height: 48px;
+    width: 36px;
+    height: 36px;
     flex: none;
-    border-radius: var(--radius-card);
+    border-radius: var(--radius-control);
     background: var(--white-a08);
-    color: var(--text-1);
+    color: var(--text-2);
     display: grid;
     place-items: center;
 }
-#tools-page .tool-card--feature .tool-card-icon { background: rgba(var(--accent-rgb), 0.16); color: var(--accent-light); }
-#tools-page .tool-card-heading { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+#tools-page .tool-card-icon svg { width: 18px; height: 18px; }
+#tools-page .tool-card-heading { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding-right: 24px; }
 #tools-page .tool-card-header { display: flex; align-items: center; justify-content: flex-start; gap: 6px; margin: 0; padding: 0; border: 0; }
-#tools-page .tool-card-title { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-1); }
-#tools-page .tool-card--feature .tool-card-title { font-size: 22px; letter-spacing: -0.02em; }
-#tools-page .tool-help-button { width: 26px; height: 26px; font-size: 12.5px; }
+#tools-page .tool-card-title { margin: 0; font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--text-1); }
+/* help sits in the corner of the card, out of the title's way */
+#tools-page .tool-card .tool-help-button { position: absolute; top: 14px; right: 14px; width: 24px; height: 24px; font-size: 12px; font-weight: 500; }
 #tools-page .tool-card-info,
-#tools-page .metadata-updater-description { margin: 0; font-size: 14px; line-height: 1.45; color: var(--text-2); }
+#tools-page .metadata-updater-description {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-2);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
 
-/* where the tool stands: the number first, its word under it */
+/* where the tool stands: the number, and its word under it */
 #tools-page .tool-card-stats {
     display: flex;
-    gap: 18px 36px;
+    gap: 12px 28px;
     flex-wrap: wrap;
     margin: 0;
     padding: 0;
     border: 0;
     background: none;
 }
-#tools-page .stat-item { display: flex; flex-direction: column; gap: 4px; padding: 0; background: none; min-width: 64px; }
+#tools-page .stat-item { display: flex; flex-direction: column; gap: 2px; padding: 0; background: none; min-width: 56px; }
 #tools-page .stat-item-value {
     padding: 0;
     background: none;
-    font-size: 24px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.2;
     color: var(--text-1);
     font-variant-numeric: tabular-nums;
 }
-#tools-page .tool-card--feature .stat-item-value { font-size: 40px; font-weight: 800; letter-spacing: -0.035em; line-height: 1; }
-#tools-page .stat-item.wordy .stat-item-value,
-#tools-page .tool-card--feature .stat-item.wordy .stat-item-value { font-size: 16px; font-weight: 600; letter-spacing: 0; line-height: 1.4; }
-#tools-page .stat-item-label { font-size: 13px; color: var(--text-3); }
+#tools-page .stat-item.wordy .stat-item-value { font-size: 14px; font-weight: 500; line-height: 24px; }
+#tools-page .stat-item-label { font-size: 12px; color: var(--text-3); }
 
 /* what it is doing now, and the button that starts it */
 #tools-page .tool-card-bottom {
     display: flex;
     align-items: center;
-    gap: 12px 20px;
+    gap: 10px 16px;
     flex-wrap: wrap;
     margin-top: auto;
-    padding-top: 18px;
+    padding-top: 14px;
     border-top: 1px solid var(--tl-line);
 }
 #tools-page .tool-card-progress-section {
-    flex: 1 1 220px;
+    flex: 1 1 160px;
     min-width: 0;
     display: grid;
     grid-template-columns: auto minmax(60px, 1fr);
     align-items: center;
-    gap: 6px 12px;
+    gap: 4px 12px;
     margin: 0;
     padding: 0;
     border: 0;
 }
-#tools-page .progress-phase-label { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#tools-page .progress-details-label { grid-column: 1 / -1; margin: 0; font-size: 12.5px; color: var(--text-3); }
-/* nothing running: the tool says so in a word, without an empty bar */
-#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-bar-container,
+#tools-page .progress-phase-label { margin: 0; min-width: 0; font-size: 13px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#tools-page .progress-details-label { grid-column: 1 / -1; margin: 0; font-size: 12px; color: var(--text-3); }
+/* nothing running, or finished: the tool says so in a line, without a bar
+   sitting empty or full */
+#tools-page .tool-card-progress-section:has(.progress-bar-fill:is(.is-empty, .is-done)) { grid-template-columns: minmax(0, 1fr); }
+#tools-page .tool-card-progress-section:has(.progress-bar-fill:is(.is-empty, .is-done)) .progress-bar-container,
 #tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-details-label { display: none; }
-#tools-page .tool-card-progress-section:has(.progress-bar-fill.is-empty) .progress-phase-label { font-weight: 400; color: var(--text-3); }
+#tools-page .tool-card-progress-section:has(.progress-bar-fill:is(.is-empty, .is-done)) .progress-phase-label { color: var(--text-3); }
 #tools-page .tool-card-controls {
     display: flex;
     align-items: center;
@@ -74649,26 +74650,41 @@ body.src-modal-open { overflow: hidden; }
     flex-wrap: wrap;
     margin: 0 0 0 auto;
 }
-#tools-page .tool-card-controls button { height: 40px; padding: 0 20px; font-size: 14px; }
-/* a card's one action is the white button; a second one stays outlined */
-#tools-page .tool-card-controls > button:first-of-type:not(.tool-card-btn-secondary),
-#tools-page .tool-card-controls > .media-scan-btn { border-color: transparent; background: var(--text-1); color: var(--bg-primary); }
-#tools-page .tool-card-controls > button:first-of-type:not(.tool-card-btn-secondary):hover:not(:disabled),
-#tools-page .tool-card-controls > .media-scan-btn:hover:not(:disabled) { background: var(--white-a85); border-color: transparent; }
 #tools-page .tool-card-controls select {
-    height: 40px;
-    max-width: 220px;
-    padding: 0 30px 0 16px;
+    height: 32px;
+    max-width: 200px;
+    padding: 0 28px 0 14px;
     border: 0;
     border-radius: var(--radius-pill);
-    background-color: var(--white-a08);
+    background-color: var(--white-a06);
     color: var(--text-1);
     font: inherit;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
 }
 #tools-page .tool-card-controls select option { background: var(--bg-raised); color: var(--text-1); }
+
+/* the tool a section leads with: one band across the page, what it is on the
+   left and its numbers on the right */
+#tools-page .tool-card--feature {
+    grid-column: 1 / -1;
+    flex-flow: row wrap;
+    align-items: center;
+    gap: 18px 48px;
+    padding: 22px 24px;
+}
+#tools-page .tool-card--feature .tool-card-top { flex: 1 1 320px; min-width: 0; align-items: center; }
+#tools-page .tool-card--feature .tool-card-icon { width: 44px; height: 44px; background: rgba(var(--accent-rgb), 0.16); color: var(--accent-light); }
+#tools-page .tool-card--feature .tool-card-icon svg { width: 22px; height: 22px; }
+#tools-page .tool-card--feature .tool-card-title { font-size: 17px; }
+#tools-page .tool-card--feature .tool-card-stats { flex: none; gap: 12px 40px; margin-right: 24px; }
+#tools-page .tool-card--feature .stat-item-value { font-size: 24px; }
+#tools-page .tool-card--feature .stat-item.wordy .stat-item-value { font-size: 14px; line-height: 29px; }
+#tools-page .tool-card--feature .tool-card-bottom { flex: 1 1 100%; margin-top: 0; }
+/* its button is the one on the tab that carries the accent */
+#tools-page .tool-card--feature .tool-card-controls > button:first-of-type { background: rgba(var(--accent-rgb), 0.2); color: var(--accent-light); }
+#tools-page .tool-card--feature .tool-card-controls > button:first-of-type:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.3); }
 
 /* the backups a card lists */
 #tools-page .backup-list-container,
@@ -74721,11 +74737,11 @@ body.src-modal-open { overflow: hidden; }
 
 @media (max-width: 760px) {
     #tools-page { padding: 24px 16px 40px; gap: 20px; }
-    #tools-page .tools-title { font-size: 36px; }
+    #tools-page .tools-title { font-size: 28px; }
     #tools-page .repair-health { padding: 20px; }
     #tools-page .repair-health-actions { align-items: flex-start; }
     #tools-page .repair-inbox-head { flex-wrap: wrap; gap: 8px 14px; }
-    #tools-page .repair-inbox-count { min-width: 0; font-size: 18px; }
+    #tools-page .repair-inbox-count { min-width: 0; font-size: 17px; }
     #tools-page .repair-art-mosaic { width: 56px; height: 56px; }
     #tools-page .repair-inbox-text { flex-basis: 60%; }
     #tools-page .repair-inbox-head[role="button"] .repair-inbox-actions,
@@ -74746,12 +74762,212 @@ body.src-modal-open { overflow: hidden; }
     #tools-page .repair-runs-job { grid-template-columns: minmax(0, 1fr) auto; }
     #tools-page .repair-runs-job > :nth-child(n + 3) { display: none; }
     #tools-page .repair-runs-overview { padding: 20px; }
-    #tools-page .repair-runs-figure-value { font-size: 26px; }
+    #tools-page .repair-runs-figure-value { font-size: 24px; }
     #tools-page .tool-card,
     #tools-page .tool-card--feature { padding: 20px; }
-    #tools-page .tool-card--feature .stat-item-value { font-size: 30px; }
+    #tools-page .tool-card--feature .stat-item-value { font-size: 20px; }
+    #tools-page .tool-card--feature .tool-card-stats { flex: 1 1 100%; gap: 12px 24px; margin-right: 0; flex-wrap: wrap; }
     #tools-page .tool-card-controls { margin-left: 0; justify-content: flex-start; }
     #tools-page .operations-pillar-stat,
     #tools-page .operations-pillar-stat + .operations-pillar-stat,
     #tools-page .operations-pillar-autopilot { width: auto; }
+}
+
+/* ── Tools page: surfaces and motion ─────────────────────────────────────────
+   The layout above says where things are. This is how the page feels: cards
+   with a lit top edge, a slow glow behind the three headline cards, things
+   arriving in order, numbers and bars drawing themselves, and controls that
+   answer a pointer. Everything that moves sits behind one gate: the reduced
+   motion preference, and the app's own Reduce effects and Max performance
+   switches, turn all of it off and leave the page exactly as laid out. */
+
+/* surfaces: a card is lit from above and has an edge */
+#tools-page .repair-health,
+#tools-page .repair-runs-overview,
+#tools-page .tool-card,
+#tools-page .repair-family,
+#tools-page .operations-live-hud,
+#tools-page .album-inspection-tray,
+#tools-page .operations-playbook-card {
+    background: linear-gradient(180deg, var(--white-a08), var(--white-a04) 70%);
+    box-shadow: inset 0 0 0 1px var(--white-a06), inset 0 1px 0 var(--white-a10);
+}
+
+/* the three headline cards carry a slow glow in the page's accent */
+#tools-page .repair-health,
+#tools-page .repair-runs-overview,
+#tools-page .tool-card--feature { position: relative; overflow: hidden; }
+#tools-page .repair-health > *,
+#tools-page .repair-runs-overview > *,
+#tools-page .tool-card--feature > * { position: relative; }
+#tools-page .repair-health::before,
+#tools-page .repair-runs-overview::before,
+#tools-page .tool-card--feature::before {
+    content: '';
+    position: absolute;
+    top: -60%;
+    left: -10%;
+    width: 60%;
+    height: 220%;
+    background: radial-gradient(closest-side, rgba(var(--accent-rgb), 0.2), transparent);
+    pointer-events: none;
+}
+#tools-page .repair-runs-overview::before { left: auto; right: -10%; background: radial-gradient(closest-side, rgba(var(--accent-rgb), 0.14), transparent); }
+
+/* the health score is a ring, drawn to the number */
+#tools-page .repair-health-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+#tools-page .repair-health-ring circle { fill: none; stroke-width: 5; }
+#tools-page .repair-health-ring-track { stroke: var(--white-a10); }
+#tools-page .repair-health-ring-value {
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-dasharray: 100;
+    stroke-dashoffset: calc(100 - var(--score, 0));
+    transition: stroke-dashoffset 0.9s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* the selected pill is one white shape that slides between the tabs */
+#tools-page .tools-tabs[data-sliding]::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--pill-w);
+    height: var(--pill-h);
+    border-radius: var(--radius-pill);
+    background: var(--text-1);
+    transform: translate(var(--pill-x), var(--pill-y));
+}
+#tools-page .tools-tabs[data-sliding] .tools-tab { position: relative; }
+#tools-page .tools-tabs[data-sliding] .tools-tab[aria-selected="true"] { background: none; }
+
+/* the main action glows a little in its own colour */
+#tools-page .repair-health-fix-safe:not(:disabled) { box-shadow: 0 6px 20px rgba(var(--accent-rgb), 0.22); }
+
+/* a running thing shows it: a bar with light moving through it */
+#tools-page .progress-bar-fill:not(.is-empty),
+#tools-page .operations-live-hud-bar-fill,
+#tools-page .repair-tile-edge.running {
+    background-image: linear-gradient(90deg, transparent 0%, var(--white-a40) 50%, transparent 100%);
+    background-size: 200% 100%;
+    background-repeat: no-repeat;
+    background-position: -100% 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    /* arriving: a panel fades up when its pill is picked, and what is in it
+       follows in order */
+    body:not(.reduce-effects, .max-performance) #tools-page [role="tabpanel"]:not([hidden]) { animation: tools-rise 0.36s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-inbox-group, .repair-finding-card, .tool-card, .repair-run, .repair-runs-job, .repair-job-card, .operations-playbook-card, .operations-pillar-card, .repair-album-card, .repair-runs-figure, .repair-family, .repair-triage, .album-tray-track-card) {
+        animation: tools-rise 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+    }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-inbox-group, .repair-finding-card, .tool-card, .repair-run, .repair-runs-job, .repair-job-card, .operations-playbook-card, .operations-pillar-card, .repair-album-card, .repair-runs-figure, .repair-family, .album-tray-track-card):nth-child(2) { animation-delay: 40ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-inbox-group, .repair-finding-card, .tool-card, .repair-run, .repair-runs-job, .repair-job-card, .operations-playbook-card, .operations-pillar-card, .repair-album-card, .repair-runs-figure, .repair-family, .album-tray-track-card):nth-child(3) { animation-delay: 80ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-inbox-group, .repair-finding-card, .tool-card, .repair-run, .repair-runs-job, .repair-job-card, .operations-playbook-card, .operations-pillar-card, .repair-album-card, .repair-runs-figure, .repair-family, .album-tray-track-card):nth-child(4) { animation-delay: 120ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-inbox-group, .repair-finding-card, .tool-card, .repair-run, .repair-runs-job, .repair-job-card, .operations-playbook-card, .operations-pillar-card, .repair-album-card, .repair-runs-figure, .repair-family, .album-tray-track-card):nth-child(5) { animation-delay: 160ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-inbox-group, .repair-finding-card, .tool-card, .repair-run, .repair-runs-job, .repair-job-card, .operations-playbook-card, .operations-pillar-card, .repair-album-card, .repair-runs-figure, .repair-family, .album-tray-track-card):nth-child(6) { animation-delay: 200ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-inbox-group, .repair-finding-card, .tool-card, .repair-run, .repair-runs-job, .repair-job-card, .operations-playbook-card, .operations-pillar-card, .repair-album-card, .repair-runs-figure, .repair-family, .album-tray-track-card):nth-child(7) { animation-delay: 240ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-inbox-group, .repair-finding-card, .tool-card, .repair-run, .repair-runs-job, .repair-job-card, .operations-playbook-card, .operations-pillar-card, .repair-album-card, .repair-runs-figure, .repair-family, .album-tray-track-card):nth-child(n + 8) { animation-delay: 280ms; }
+
+    /* a row that opens: its panel settles in under it */
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-finding-detail.open .repair-finding-detail-inner, .repair-run-detail, .repair-job-settings, .album-inspection-tray) { animation: tools-rise 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+
+    /* covers fade in as they load, and lean toward the pointer */
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-art, .repair-art-mosaic, .repair-album-art, .repair-finding-media-img) img,
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-finding-media-img { animation: tools-fade 0.5s ease backwards; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-art,
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-art-mosaic,
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-album-art { transition: transform 0.28s cubic-bezier(0.3, 1.3, 0.5, 1), box-shadow 0.28s; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-finding-main:hover .repair-art { transform: scale(1.06); }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-inbox-head[role="button"]:hover .repair-art-mosaic { transform: scale(1.04); box-shadow: 0 8px 24px var(--black-a40); }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-album-card:hover .repair-album-art { transform: translateY(-4px) scale(1.02); box-shadow: 0 16px 36px var(--black-a50); }
+
+    /* the arrow on a row leans the way it goes */
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-inbox-expand svg,
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-inbox-back svg { transition: transform 0.22s cubic-bezier(0.3, 1.3, 0.5, 1); }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-inbox-head[role="button"]:hover .repair-inbox-expand svg { transform: translateX(4px); }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-inbox-back:hover svg { transform: translateX(-3px); }
+
+    /* numbers and bars draw themselves */
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-health-ring-value { animation: tools-ring 1.1s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-runs-figure-value, .stat-item-value, .repair-inbox-count, .repair-run-counter-value) { animation: tools-count 0.6s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-health-seg { transform-origin: left center; animation: tools-grow-x 0.7s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-health-seg:nth-child(2) { animation-delay: 90ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-health-seg:nth-child(3) { animation-delay: 150ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-health-seg:nth-child(n + 4) { animation-delay: 210ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-runs-daybar-fill { transform-origin: center bottom; animation: tools-grow-y 0.6s cubic-bezier(0.3, 1.2, 0.5, 1) backwards; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-runs-daybar:nth-child(n + 4) .repair-runs-daybar-fill { animation-delay: 90ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-runs-daybar:nth-child(n + 8) .repair-runs-daybar-fill { animation-delay: 180ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-runs-daybar:nth-child(n + 12) .repair-runs-daybar-fill { animation-delay: 270ms; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-score-bar-fill, .repair-completion-fill, .repair-spectrum-detected) { transform-origin: left center; animation: tools-grow-x 0.7s cubic-bezier(0.22, 0.61, 0.36, 1) backwards; }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-run-glyph svg { animation: tools-pop 0.4s cubic-bezier(0.3, 1.5, 0.5, 1) backwards; }
+
+    /* the glow drifts, slowly enough to miss unless you look */
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-health, .repair-runs-overview, .tool-card--feature)::before { animation: tools-drift 16s ease-in-out infinite alternate; }
+
+    /* something is running: light moves through its bar, its dot calls out */
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.progress-bar-fill:not(.is-empty), .operations-live-hud-bar-fill, .repair-tile-edge.running) { animation: tools-shimmer 1.6s linear infinite; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.operations-live-hud-dot, .repair-job-status.running) { animation: tools-ping 1.8s ease-out infinite; }
+
+    /* controls answer: a lift under the pointer, a give under the press */
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.tools-tab, .repair-inbox-btn, .repair-finding-btn, .operations-pillar-scan-btn, .operations-live-hud-stop-btn, .tool-card-controls button, .media-scan-btn, .repair-health-fix-safe, .album-tray-btn, .album-action-btn, .repair-runs-chip, .repair-runs-toggle, .repair-page-btn, .repair-status-seg, .repair-view-mode-tab, .repair-tile-cadence, .repair-shelf-all) {
+        transition: transform 0.16s cubic-bezier(0.3, 1.3, 0.5, 1), background 0.18s, color 0.18s, border-color 0.18s, box-shadow 0.18s;
+    }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.tools-tab, .repair-inbox-btn, .repair-finding-btn, .operations-pillar-scan-btn, .operations-live-hud-stop-btn, .tool-card-controls button, .media-scan-btn, .repair-health-fix-safe, .album-tray-btn, .album-action-btn, .repair-runs-chip, .repair-runs-toggle, .repair-page-btn, .repair-tile-cadence, .repair-shelf-all):active:not(:disabled) { transform: scale(0.96); }
+    body:not(.reduce-effects, .max-performance) #tools-page .tools-tabs[data-sliding]::before { transition: transform 0.34s cubic-bezier(0.3, 1.25, 0.45, 1), width 0.34s cubic-bezier(0.3, 1.25, 0.45, 1); }
+    body:not(.reduce-effects, .max-performance) #tools-page .repair-toggle-slider::before { transition: transform 0.26s cubic-bezier(0.3, 1.6, 0.5, 1); }
+
+    /* a tool card rises to the pointer and its picture takes the accent */
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.tool-card, .operations-playbook-card) { transition: transform 0.24s cubic-bezier(0.3, 1.2, 0.5, 1), background 0.2s, box-shadow 0.24s; }
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.tool-card:not(.tool-card--feature), .operations-playbook-card:not(:disabled)):hover {
+        transform: translateY(-2px);
+        box-shadow: inset 0 0 0 1px var(--white-a10), inset 0 1px 0 var(--white-a14), 0 12px 28px var(--black-a30);
+    }
+    body:not(.reduce-effects, .max-performance) #tools-page .tool-card-icon { transition: background 0.24s, color 0.24s, transform 0.3s cubic-bezier(0.3, 1.5, 0.5, 1); }
+    body:not(.reduce-effects, .max-performance) #tools-page .tool-card:hover .tool-card-icon { background: rgba(var(--accent-rgb), 0.18); color: var(--accent-light); }
+    body:not(.reduce-effects, .max-performance) #tools-page .operations-playbook-cta svg { transition: transform 0.22s cubic-bezier(0.3, 1.5, 0.5, 1); }
+    body:not(.reduce-effects, .max-performance) #tools-page .operations-playbook-card:hover .operations-playbook-cta svg { transform: translateX(3px) scale(1.15); }
+
+    /* rows take the pointer with a soft wash */
+    body:not(.reduce-effects, .max-performance) #tools-page :is(.repair-finding-main, .repair-run-head, .repair-runs-job, .repair-inbox-head) { transition: background 0.18s; }
+}
+
+@keyframes tools-rise {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes tools-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes tools-count {
+    from { opacity: 0; transform: translateY(30%); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes tools-grow-x {
+    from { transform: scaleX(0); }
+    to { transform: none; }
+}
+@keyframes tools-grow-y {
+    from { transform: scaleY(0); }
+    to { transform: none; }
+}
+@keyframes tools-ring {
+    from { stroke-dashoffset: 100; }
+}
+@keyframes tools-pop {
+    from { opacity: 0; transform: scale(0.3); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes tools-drift {
+    from { transform: translate(0, 0) scale(1); }
+    to { transform: translate(22%, 6%) scale(1.25); }
+}
+@keyframes tools-shimmer {
+    from { background-position: 200% 0; }
+    to { background-position: -100% 0; }
+}
+@keyframes tools-ping {
+    0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55); }
+    100% { box-shadow: 0 0 0 10px rgba(var(--accent-rgb), 0); }
 }
