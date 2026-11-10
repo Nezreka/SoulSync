@@ -4240,6 +4240,13 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
 .vdl-ep-search { display: grid; grid-template-rows: 0fr; grid-template-columns: minmax(0, 1fr); overflow: hidden;
     transition: grid-template-rows var(--dur-slow) var(--ease-out); }
 .vdl-ep-search > * { min-height: 0; }
+/* the grid child must carry no vertical padding of its own: a padded child
+   floors the 0fr track at its padding (3px + 12px here), so a collapsed
+   episode kept a 15px strip with the top of its first source row showing —
+   the brand bar and top border in #2040 (the bar takes the first source's
+   brand colour). .vdl-ep-srcs keeps its padding one level down, inside
+   this wrapper (same shape as .vdl-season-inner). */
+.vdl-ep-inner { min-height: 0; }
 .vdl-ep-srcs { display: flex; flex-direction: column; gap: 7px; padding: 3px 14px 12px 42px; }
 .vdl-src--mini { padding: 8px 11px; border-radius: 0; animation: none; }
 .vdl-src--mini .vdl-src-icon { width: 30px; height: 30px; border-radius: 0; }
