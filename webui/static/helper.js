@@ -3445,6 +3445,7 @@ const WHATS_NEW = {
         { title: 'Your own video libraries', desc: 'Make your own movie and TV libraries and pick what goes in each by hand, by rules or by default. Each library has its own quality profile, download sources in order, client category, Prowlarr indexers and automatic search and upgrades, and the same movie can sit in two libraries as two copies. Movies, Wanted and Downloads get a library filter (thanks SeadogsBooty, #2029).' },
         { title: 'One release ranking', desc: 'Releases are ranked one way everywhere: quality, then custom formats, then tie-breaks. Every search result says why it ranked where it did, and a preferred size setting breaks ties toward the size you want (thanks SeadogsBooty, #2033).' },
         { title: 'NZB files, not links', desc: 'SABnzbd and NZBGet get the NZB file itself instead of a Prowlarr link, so the client never needs to reach Prowlarr (thanks SeadogsBooty, #2030).' },
+        { title: 'Delete a show or movie for good', desc: 'Admins can delete a whole show or movie from its More menu. Follows, wishlist rows, downloads, requests and repair findings are cleared for every profile so nothing grabs it again, the folder goes to the recycle bin as one entry you can restore, and torrents still seeding stay in your client (thanks PapaBearDoes, #2020).' },
         { title: 'The right show', desc: 'A grab checks the release is the show you wanted, so Grab season stops taking episodes of a similar series, and the search tries the show\'s English and original names (thanks SeadogsBooty and Thibs, #2027, #2021). A cropped Blu-ray reads as 1080p (thanks Thibs, #2025).' },
         { title: 'Specials and languages', desc: 'A Monitor Specials setting, specials can be hidden on a show page and left out of a whole-show grab, and search results can be filtered by language.' },
         { title: 'Own libraries on Navidrome', desc: 'Own-library profiles work on Navidrome 0.58+ through its multi-library support (thanks mirlooun, #2031).', page: 'settings' },
@@ -3453,7 +3454,7 @@ const WHATS_NEW = {
         { title: 'More', desc: 'Follow a YouTube channel without downloading its new uploads (thanks JuanVqz, #2008), per-artist cleanup checks in Library Health (thanks QT3496, #2004), M3U export for mirrored playlists (thanks TaunGadd), the quarantine badge and length check (thanks lozog, #2001), and empty Plex artist bios filled (thanks Eric-sson, #1993).' },
         { title: 'Library v2, reviewed five times', desc: 'Everything Library v2 touched was reviewed end to end five times, and every finding was fixed with a test: the 3.6.1 upgrade brings everything over, household members and own libraries stay separate, tags, artwork, repair jobs and downloads behave, and album folders never land at the library root (thanks SeadogsBooty, #2023).', page: 'library' },
         { title: 'Faster', desc: 'The library pages read their page off indexes, whole-library reports answer from their last result, the integrity report runs as a job, cache health opens in under a second, and startup skips scans it ran every time.' },
-        { title: 'Fixes', desc: 'Release counts stay "X of all" (thanks QT3496, #2012), reorganize keeps the explicit flag (#2009), SoulSync shows up as one Navidrome player (thanks cremonies, #2005), liked music imports with cookies again (thanks jdfrye2, #2013), the Sources tab shows video and audiobook sources as in use (#2026), and video fixes from PapaBearDoes (#2015, #2017, #2018, #2019).' },
+        { title: 'Fixes', desc: 'Release counts stay "X of all" (thanks QT3496, #2012), reorganize keeps the explicit flag (#2009), SoulSync shows up as one Navidrome player (thanks cremonies, #2005), liked music imports with cookies again (thanks jdfrye2, #2013), a scan is no longer flagged as stuck while an own library is still scanning (thanks QT3496, #2036), the Sources tab shows video and audiobook sources as in use (#2026), and video fixes from PapaBearDoes (#2015, #2017, #2018, #2019).' },
         { title: 'Earlier versions', desc: '3.6.3 was a hot fix for the Library page on big libraries, and 3.6.2 brought Library v2, built by @nick2000713.' },
     ],
 };
@@ -3485,10 +3486,11 @@ const WHATS_NEW = {
 const VERSION_MODAL_SECTIONS = [
     {
         title: '3.6.4: your own video libraries',
-        description: 'Video libraries with their own sources and profiles, one release ranking, own libraries on Navidrome, redesigned Playlists and Watchlist pages, and five full reviews of everything Library v2 touched.',
+        description: 'Video libraries with their own sources and profiles, one release ranking, delete a show or movie for good, own libraries on Navidrome, redesigned Playlists and Watchlist pages, and five full reviews of everything Library v2 touched.',
         features: [
             'Your own movie and TV libraries, each with its own quality profile, download sources, client category, Prowlarr indexers and automatic search, and the same movie in two libraries as two copies (thanks SeadogsBooty, #2029).',
             'One release ranking (quality, then custom formats, then tie-breaks), with why on every search result and a preferred size setting (thanks SeadogsBooty, #2033).',
+            'Delete a show or movie and it stays deleted: nothing grabs it again, and the folder goes to the recycle bin as one entry (thanks PapaBearDoes, #2020).',
             'SABnzbd and NZBGet get the NZB file itself (#2030), a grab checks it has the right show and searches its English and original names (thanks SeadogsBooty and Thibs, #2027, #2021), and a cropped Blu-ray reads as 1080p (#2025).',
             'Own-library profiles on Navidrome 0.58+ (thanks mirlooun, #2031).',
             'Every profile can hide what it doesn\'t use, and the Playlists and Watchlist pages are redesigned.',

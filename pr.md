@@ -1,12 +1,13 @@
 # soulsync 3.6.4: `dev` → `main`
 
-a big one. your own video libraries with their own sources, indexers and quality profiles, one release ranking that says why, own libraries on navidrome, every profile can hide what it doesn't use, the playlists and watchlist pages redone, and five full reviews of everything library v2 touched, with every finding fixed and tested.
+a big one. your own video libraries with their own sources, indexers and quality profiles, one release ranking that says why, delete a show or movie and have it stay deleted, own libraries on navidrome, every profile can hide what it doesn't use, the playlists and watchlist pages redone, and five full reviews of everything library v2 touched, with every finding fixed and tested.
 
 ## video
 
 - **your own movie and tv libraries (thanks SeadogsBooty, #2029).** make as many libraries as you like and pick what goes in each by hand, by rules or by default. each library has its own quality profile, its own download sources in order, its own client category, its own prowlarr indexers, and its own automatic search and upgrades. the same movie can sit in two libraries as two copies (a 1080p and a 4k, say). movies, wanted and downloads get a library filter. not built yet: two instances of the same client, and a second copy of a tv show.
 - **one release ranking, and why (thanks SeadogsBooty, #2033).** quality first, then custom formats, then tie-breaks, the same order everywhere a release is picked. every search result says why it ranked where it did, and a preferred size setting breaks ties toward the size you want.
 - **sabnzbd and nzbget get the nzb file, not the prowlarr link (thanks SeadogsBooty, #2030).** soulsync fetches the nzb itself and sends the file, so the client never needs to reach prowlarr, and a fetch that fails says so instead of handing the client a dead link.
+- **delete show / delete movie, and it stays deleted (thanks PapaBearDoes, #2020).** admins get it in a title's More menu. it mutes the follow and clears wishlist rows, downloads, pending requests and repair findings for every profile first, so nothing grabs it straight back, then the title's folder goes to the recycle bin as one entry you can restore in one click. you type the title to confirm, and torrents still seeding are left in the client. the wishlist run also skips anything taken off the wishlist while its search ran.
 - **a grab checks it's the right show (thanks SeadogsBooty and Thibs, #2027, #2021).** grab season could take episodes of a different series with a similar name. a release must match the wanted show now, and the search tries the show's english and original names too.
 - **a cropped bluray reads as 1080p (thanks Thibs, #2025).** a 1920x800 encode read as unknown quality and below target. the width counts now.
 - **a Monitor Specials setting.** specials can be hidden on a show page and left out of a whole-show grab, and specials you set by hand keep their state.
@@ -44,6 +45,7 @@ every part of the app library v2 touched was read again end to end, five times o
 - **downloads:** album torrents honour your seed goals, a cancelled torrent stays cancelled, a slow usenet download is never failed while the client still has it, and a feat. credit in a title no longer passes another act's recording.
 - **an artist's release counts stay "x of all" (thanks QT3496, #2012)**, reorganize names files with the explicit flag the page shows (thanks QT3496, #2009), navidrome shows soulsync as one player (thanks cremonies, #2005), and liked music imports with cookies again (thanks jdfrye2, #2013).
 - **the sources tab shows a source the video or audiobook chain uses as in use (thanks SeadogsBooty, #2026).**
+- **a scan isn't called stuck while an own library is still scanning (thanks QT3496, #2036).** own-library profile scans never reported progress, so one that ran past 5 minutes tripped the stall check. the quiet steps at the end of a scan name themselves too, so a real stall says where it stopped.
 - a failed boot ends the process so the container restarts, and the healthcheck goes through the app again once it's up.
 
 ## performance
@@ -58,4 +60,4 @@ measured on a 300k-track copy of a real library:
 
 ## contributors
 
-thanks PapaBearDoes (video fixes and the wishlist failure log, #1998), JuanVqz (a numeric keypad for the launch pin, #2007), nick2000713 (text in a number column no longer stops the v2 upgrade, #1991) and TaunGadd (m3u export, and aiff files get re-tagged, #1997).
+thanks PapaBearDoes (video fixes and the wishlist failure log, #1998), JuanVqz (a numeric keypad for the launch pin, #2007), nick2000713 (text in a number column no longer stops the v2 upgrade, #1991), TaunGadd (m3u export, and aiff files get re-tagged, #1997) and splitsec2 (the release workflow passes the version tag safely, #2037).
