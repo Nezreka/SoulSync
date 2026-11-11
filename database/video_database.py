@@ -456,6 +456,9 @@ _COLUMN_MIGRATIONS = [
     ("movies", "streaming_status", "TEXT"), ("movies", "streaming_attempted", "TEXT"),
     ("shows", "streaming", "TEXT"),
     ("shows", "streaming_status", "TEXT"), ("shows", "streaming_attempted", "TEXT"),
+    # when the server added the movie (Plex addedAt / Jellyfin DateCreated);
+    # added_at is when SoulSync first saw the row
+    ("movies", "server_added_at", "TEXT"),
     # Mediastinger (TMDB keywords → after/during-credits scene) for its overlay badge
     ("movies", "mediastinger", "INTEGER"),
     ("movies", "mediastinger_status", "TEXT"), ("movies", "mediastinger_attempted", "TEXT"),
@@ -5664,7 +5667,7 @@ class VideoDatabase:
         (default); a FULL scan passes False for a clean reset."""
         conn = self._get_connection()
         try:
-            self._resilient_upsert(conn, "movies", {
+            base = {
                 "server_source": server_source, "server_id": item["server_id"],
                 "title": item.get("title"), "sort_title": _sort_title(item.get("title")),
                 "year": item.get("year"), "overview": item.get("overview"),
@@ -5676,8 +5679,15 @@ class VideoDatabase:
                 "view_offset_ms": item.get("view_offset_ms"),
                 "poster_url": item.get("poster_url"),
                 "has_file": 1 if (item.get("files") or item.get("file")) else 0,
-            }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
-                preserve_enrichment=preserve_enrichment)
+            }
+            # when the SERVER added it (added_at is when SoulSync first saw the
+            # row). only written when the scan has one, so a path that doesn't
+            # carry it never blanks a stored date
+            if item.get("server_added_at"):
+                base["server_added_at"] = item["server_added_at"]
+            self._resilient_upsert(conn, "movies", base,
+                                   {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
+                                   preserve_enrichment=preserve_enrichment)
             movie_id = conn.execute(
                 "SELECT id FROM movies WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),

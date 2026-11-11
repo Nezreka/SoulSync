@@ -1233,6 +1233,8 @@ class PlexVideoSource:
             "play_count": int(getattr(m, "viewCount", 0) or 0),
             "last_viewed_at": _iso_dt(getattr(m, "lastViewedAt", None)),
             "view_offset_ms": int(getattr(m, "viewOffset", 0) or 0),   # resume position
+            # when it went into Plex (immutable), not when SoulSync first saw it
+            "server_added_at": _iso_dt(getattr(m, "addedAt", None)),
             "genres": self._tags(getattr(m, "genres", None)),
             "runtime_minutes": int(dur / 60000) if dur else None,
             "files": self._part_files(m),
@@ -1326,7 +1328,7 @@ class PlexVideoSource:
 
 # ── Jellyfin ────────────────────────────────────────────────────────────────
 _JF_MOVIE_FIELDS = ("Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,"
-                    "ProviderIds,Genres,Taglines,CommunityRating,CriticRating,UserData")
+                    "ProviderIds,Genres,Taglines,CommunityRating,CriticRating,DateCreated,UserData")
 _JF_EP_FIELDS = ("Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,"
                  "ProviderIds,CommunityRating,DateCreated,UserData")
 _JF_SHOW_FIELDS = ("Overview,ProductionYear,OfficialRating,ProviderIds,Genres,Taglines,CommunityRating,"
@@ -1945,6 +1947,8 @@ class JellyfinVideoSource:
             "last_viewed_at": _iso_dt((it.get("UserData") or {}).get("LastPlayedDate")),
             # JF ticks are 100ns units → ms
             "view_offset_ms": int(((it.get("UserData") or {}).get("PlaybackPositionTicks") or 0) // 10_000),
+            # when it went into Jellyfin, not when SoulSync first saw it
+            "server_added_at": _iso_dt(it.get("DateCreated")),
             "genres": it.get("Genres") or [],
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
             "files": self._files(it),
