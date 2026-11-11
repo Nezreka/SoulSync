@@ -1376,6 +1376,14 @@ function FindingDetailBody({
       pushIf(rows, d.file_path, 'File', 'path');
       return <DetailGrid rows={rows} />;
 
+    case 'library_unreachable': {
+      const outage = (d.outage || {}) as Record<string, unknown>;
+      pushIf(rows, outage.unreachable, 'Files not reached');
+      pushIf(rows, outage.checked, 'Files checked');
+      pushIf(rows, outage.example_path, 'Example', 'path');
+      return <DetailGrid rows={rows} />;
+    }
+
     case 'empty_folder': {
       pushIf(rows, d.folder_path, 'Folder', 'path');
       const junk = list<string>(d.junk_files);

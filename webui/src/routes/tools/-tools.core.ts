@@ -214,6 +214,7 @@ export function findingSeverityClass(severity: string | null | undefined): strin
 
 export const FINDING_TYPE_LABELS: Record<string, string> = {
   dead_file: 'Dead File',
+  library_unreachable: 'Unreachable Library',
   orphan_file: 'Orphan',
   acoustid_mismatch: 'Wrong Song',
   acoustid_no_match: 'No Match',
@@ -256,6 +257,7 @@ export function findingTypeLabel(findingType: string): string {
  *  above — that asymmetry is in the vanilla and is preserved. */
 export const FINDING_FIXABLE_TYPES: Record<string, string> = {
   dead_file: 'Re-download',
+  library_unreachable: 'They are gone',
   orphan_file: 'Resolve',
   track_number_mismatch: 'Fix',
   missing_cover_art: 'Apply Art',

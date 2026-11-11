@@ -215,3 +215,23 @@ describe('words', () => {
     expect(tagCheckLabel('some_new_check')).toBe('Some new check');
   });
 });
+
+describe('describeFinding: a library that could not be reached (#2005)', () => {
+  it('says how much, where, and what answering does', () => {
+    const copy = describeFinding(
+      {
+        finding_type: 'library_unreachable',
+        title: "1204 of 1300 files can't be reached",
+        description: 'x',
+        details: { outage: { unreachable: 1204, checked: 1300, example_path: '/music/a.flac' } },
+      },
+      'They are gone',
+    );
+    expect(copy.title).toBe("1,204 of 1,300 files can't be reached");
+    expect(copy.sub).toBe('/music/a.flac');
+    expect(copy.problem).toContain('disconnected drive');
+    expect(copy.fix).toBe(
+      'If you deleted them yourself, They are gone marks them missing and lists each one under Dead Files.',
+    );
+  });
+});

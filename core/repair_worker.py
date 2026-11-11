@@ -106,6 +106,7 @@ def _json_ids(ids) -> str:
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
+    'library_unreachable',    # marks every unreachable file missing: a person's call, never Fix All
     'corrupt_audio',          # moves to the deleted-files folder, re-wishlists
     'fake_lossless',          # moves the transcode to the deleted-files folder
     'unwanted_content',       # deletes/quarantines live + spoken content
@@ -129,6 +130,10 @@ DESTRUCTIVE_FINDING_TYPES = frozenset({
 #   dry_run_capable: the owning job supports a dry-run/preview mode
 FINDING_TYPE_META = {
     'dead_file':                {'label': 'Dead Files', 'verb': 'Re-download'},
+    'library_unreachable':      {'label': 'Unreachable Library', 'verb': 'They are gone',
+                                 'confirm': ('Every file that still cannot be reached is marked missing '
+                                             'and listed under Dead Files. Cancel if a drive is '
+                                             'disconnected.')},
     'orphan_file':              {'label': 'Orphan Files', 'verb': 'Review & Move'},
     'track_number_mismatch':    {'label': 'Track Number Mismatch', 'verb': 'Apply'},
     'missing_cover_art':        {'label': 'Missing Cover Art', 'verb': 'Apply Art'},
@@ -529,7 +534,7 @@ def _path_mapping_hint(config_manager) -> str:
 # details that change without the problem changing: a rescan's size and
 # bitrate, ids enrichment adds, a provider's art url or a replaygain read.
 _VOLATILE_FINDING_KEYS = frozenset({
-    'dedup_file', 'provider_ids', 'file_size', 'current_gain',
+    'dedup_file', 'provider_ids', 'file_size', 'current_gain', 'outage',
     'found_artwork_url', 'artist_thumb_url', 'found_artist_url',
     '_dedup_fingerprint', '_file_identity',
 })
@@ -1776,6 +1781,7 @@ class RepairWorker:
                 self.retire_tracked_orphan_findings()
             elif job_id == 'dead_file_cleaner':
                 self.retire_resolved_dead_file_findings()
+                self.retire_unreachable_finding()
 
         duration = time.time() - start_time
 
@@ -3201,6 +3207,33 @@ class RepairWorker:
             logger.error("Could not reconcile tracked orphan findings: %s", e, exc_info=True)
             return 0
 
+    def retire_unreachable_finding(self) -> int:
+        """A Dead File Cleaner run that finished saw the library: the
+        "files can't be reached" question it asked earlier is answered."""
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            retired = conn.execute(
+                "UPDATE repair_findings SET status = 'resolved', user_action = 'obsolete', "
+                "resolved_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                "WHERE job_id = 'dead_file_cleaner' AND finding_type = 'library_unreachable' "
+                "AND status = 'pending'").rowcount
+            if retired:
+                conn.commit()
+            return int(retired or 0)
+        except Exception as e:
+            logger.debug("Unreachable-library retire skipped: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
+    def _fix_library_unreachable(self, entity_type, entity_id, file_path, details):
+        """#2005: the user says the unreachable files are deleted, not on a
+        dropped mount. Confirm them missing and list them under Dead Files."""
+        from core.repair_jobs.dead_file_cleaner import confirm_unreachable_gone
+        return confirm_unreachable_gone(self.db, self._config_manager, self._create_finding)
+
     def retire_resolved_dead_file_findings(self) -> int:
         """Close pending dead_file findings that no longer describe a dead file.
 
@@ -3550,6 +3583,7 @@ class RepairWorker:
         """
         return {
             'dead_file': self._fix_dead_file,
+            'library_unreachable': self._fix_library_unreachable,
             'orphan_file': self._fix_orphan_file,
             'track_number_mismatch': self._fix_track_number,
             'missing_cover_art': self._fix_missing_cover_art,

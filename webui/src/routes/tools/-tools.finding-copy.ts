@@ -380,6 +380,21 @@ const WRITERS: Record<string, Writer> = {
     fix: redownload(verb),
   }),
 
+  library_unreachable: (finding, d, _s, verb) => {
+    const outage = obj(d.outage);
+    const count = Number(outage.unreachable) || 0;
+    const checked = Number(outage.checked) || 0;
+    return {
+      title: count
+        ? `${count.toLocaleString()} of ${checked.toLocaleString()} files can't be reached`
+        : withoutPrefix(finding.title),
+      sub: str(outage.example_path),
+      problem:
+        'This many files missing at once is usually a disconnected drive or a path mapping, so nothing was marked missing.',
+      fix: `If you deleted them yourself, ${verb} marks them missing and lists each one under Dead Files.`,
+    };
+  },
+
   untagged_download: (finding, d, s, verb) => {
     const missing = arr(d.missing).map(str).filter(Boolean);
     return {

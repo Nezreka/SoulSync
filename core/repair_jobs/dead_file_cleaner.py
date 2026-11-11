@@ -18,6 +18,118 @@ _GUARD_MIN_FILES = 25
 _GUARD_SHARE = 0.5
 
 
+UNREACHABLE_TYPE = "library_unreachable"
+
+
+def _file_unreachable_finding(context, *, missing: int, checked: int, sample) -> None:
+    """one finding that asks the question the guard can't answer: a dropped
+    mount, or files deleted on purpose? (#2005: someone who emptied their
+    library had no way to say so, and it never cleared.)"""
+    if not context.create_finding:
+        return
+    context.create_finding(
+        job_id="dead_file_cleaner",
+        finding_type=UNREACHABLE_TYPE,
+        severity="warning",
+        entity_type="library",
+        entity_id="unreachable",
+        file_path=None,
+        title=f"{missing} of {checked} files can't be reached",
+        description=(
+            "This many files missing at once is usually a disconnected drive or "
+            "a path mapping, so nothing was marked missing. If you deleted them, "
+            "say so here and they are cleared."
+        ),
+        # counts move from run to run; they are not what the finding is about
+        details={"outage": {"unreachable": missing, "checked": checked,
+                            "example_path": sample}},
+    )
+
+
+def file_dead_findings(create_finding, subjects, check_stop=None):
+    """A Dead Files finding for each confirmed-missing file. Returns
+    ``(created, already_listed)``."""
+    from core.library2.maintenance_subjects import subject_details
+
+    created = skipped = 0
+    for subject in subjects:
+        if check_stop and check_stop():
+            break
+        details = {
+            "track_id": subject["track_id"],
+            "artist_id": subject.get("artist_id"),
+            "title": subject.get("title"),
+            "artist": subject.get("artist_name"),
+            "album": subject.get("album_title"),
+            "original_path": subject.get("path"),
+            "album_thumb_url": subject.get("album_image"),
+            "artist_thumb_url": subject.get("artist_image"),
+        }
+        details.update(subject_details(subject))
+        inserted = create_finding(
+            job_id="dead_file_cleaner",
+            finding_type="dead_file",
+            severity="warning",
+            entity_type="track",
+            entity_id=f"lib2:{subject['track_id']}",
+            file_path=subject.get("path"),
+            title=f"Missing file: {subject.get('title') or 'Unknown'}",
+            description=(
+                f'"{subject.get("title") or "Unknown"}" by '
+                f'{subject.get("artist_name") or "Unknown"} was missing '
+                "during two healthy storage scans."
+            ),
+            details=details,
+        )
+        if inserted:
+            created += 1
+        else:
+            skipped += 1
+    return created, skipped
+
+
+def confirm_unreachable_gone(db, config_manager, create_finding) -> dict:
+    """The person's answer to an unreachable-library finding: the files are
+    gone. Every file that still can't be reached is confirmed missing and
+    listed under Dead Files. A file that is back is left alone."""
+    from core.library2.maintenance_subjects import active_file_subjects
+    from core.library2.paths import resolve_lib2_path
+    from core.library2.scan import rescan_files
+
+    def _gone(subject) -> bool:
+        path = subject.get("path")
+        resolved = resolve_lib2_path(path, config_manager=config_manager) if path else None
+        return not resolved or not os.path.exists(resolved)
+
+    waiting = [s for s in active_file_subjects(db, config_manager, include_missing=True)
+               if (s.get("file_state") or "active") in ("active", "missing_suspected")
+               and _gone(s)]
+    if not waiting:
+        return {"success": False,
+                "error": "Every file can be reached now, so there is nothing to clear. "
+                         "Dismiss this or run Dead File Cleaner again."}
+    file_ids = [int(s["file_id"]) for s in waiting]
+    confirmed = released = 0
+    for start in range(0, len(file_ids), _CHUNK):
+        stats = rescan_files(db, file_ids=file_ids[start:start + _CHUNK],
+                             confirmed_gone=True, source="dead_file_cleaner")
+        confirmed += int(stats.get("missing_confirmed") or 0)
+        released += int(stats.get("released") or 0)
+    wanted = set(file_ids)
+    dead = [s for s in active_file_subjects(db, config_manager, include_missing=True)
+            if s.get("file_state") == "missing_confirmed" and int(s["file_id"]) in wanted]
+    file_dead_findings(create_finding, dead)
+    noun = "file" if confirmed == 1 else "files"
+    message = (f"{confirmed} {noun} marked missing. They are under Dead Files, "
+               f"to download again or remove.")
+    if released:
+        message += f" {released} track{'s are' if released != 1 else ' is'} no longer wanted."
+    logger.info("Dead file cleaner: %d files confirmed gone by hand (%d of %d asked)",
+                confirmed, len(dead), len(file_ids))
+    return {"success": True, "action": "confirmed_missing", "message": message,
+            "confirmed": confirmed}
+
+
 def _unreachable_report(context, *, missing: int, checked: int, deferred: int,
                         before: list) -> str:
     """Say why a run with most of the library out of reach found nothing,
@@ -40,6 +152,7 @@ def _unreachable_report(context, *, missing: int, checked: int, deferred: int,
     if context.report_progress:
         context.report_progress(phase="Stopped: too many unreachable paths",
                                 log_line=reason, log_type="error")
+    _file_unreachable_finding(context, missing=missing, checked=checked, sample=sample)
     return reason
 
 
@@ -104,10 +217,7 @@ class DeadFileCleanerJob(RepairJob):
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
         try:
-            from core.library2.maintenance_subjects import (
-                active_file_subjects,
-                subject_details,
-            )
+            from core.library2.maintenance_subjects import active_file_subjects
             from core.library2.scan import rescan_files
 
             before = scoped_file_subjects(context, active_file_subjects(
@@ -175,40 +285,11 @@ class DeadFileCleanerJob(RepairJob):
         total = len(after)
         if context.update_progress:
             context.update_progress(total, total)
-        for subject in confirmed:
-            if context.check_stop():
-                return result
-            details = {
-                "track_id": subject["track_id"],
-                "artist_id": subject.get("artist_id"),
-                "title": subject.get("title"),
-                "artist": subject.get("artist_name"),
-                "album": subject.get("album_title"),
-                "original_path": subject.get("path"),
-                "album_thumb_url": subject.get("album_image"),
-                "artist_thumb_url": subject.get("artist_image"),
-            }
-            details.update(subject_details(subject))
-            if context.create_finding:
-                inserted = context.create_finding(
-                    job_id=self.job_id,
-                    finding_type="dead_file",
-                    severity="warning",
-                    entity_type="track",
-                    entity_id=f"lib2:{subject['track_id']}",
-                    file_path=subject.get("path"),
-                    title=f"Missing file: {subject.get('title') or 'Unknown'}",
-                    description=(
-                        f'"{subject.get("title") or "Unknown"}" by '
-                        f'{subject.get("artist_name") or "Unknown"} was missing '
-                        "during two healthy storage scans."
-                    ),
-                    details=details,
-                )
-                if inserted:
-                    result.findings_created += 1
-                else:
-                    result.findings_skipped_dedup += 1
+        if context.create_finding:
+            created, skipped = file_dead_findings(
+                context.create_finding, confirmed, check_stop=context.check_stop)
+            result.findings_created += created
+            result.findings_skipped_dedup += skipped
         return result
 
     def estimate_scope(self, context: JobContext) -> int:

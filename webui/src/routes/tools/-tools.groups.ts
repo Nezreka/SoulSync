@@ -81,6 +81,7 @@ export function isSafeType(info: FindingTypeInfo | undefined): boolean {
  */
 export const FINDING_TYPE_BLURBS: Record<string, string> = {
   dead_file: 'Library rows whose audio file is missing from disk.',
+  library_unreachable: 'Most of the library could not be reached at once.',
   orphan_file: 'Audio files on disk with no matching row in the library.',
   track_number_mismatch: "Tag track numbers disagree with the release's order.",
   missing_cover_art: 'Albums or artists with no artwork stored.',

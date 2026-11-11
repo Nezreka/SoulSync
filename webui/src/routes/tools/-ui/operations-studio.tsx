@@ -145,6 +145,7 @@ export const STRATEGIC_PILLARS: readonly StrategicPillar[] = [
       'duplicate_tracks',
       'orphan_file',
       'dead_file',
+      'library_unreachable',
       'empty_folder',
     ],
   },
