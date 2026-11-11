@@ -444,6 +444,10 @@ class JobContext:
     # honor it; scheduled runs never carry one.
     scope: Optional[Dict[str, Any]] = None
 
+    # True when a person started this run (Run Now, a Run a check playbook),
+    # False for the schedule. a job can do by hand what it won't do on its own.
+    manual: bool = False
+
     # API clients (may be None if unavailable)
     spotify_client: Any = None
     itunes_client: Any = None

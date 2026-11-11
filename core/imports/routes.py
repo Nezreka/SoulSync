@@ -1483,7 +1483,9 @@ def fingerprint_files(runtime: ImportRouteRuntime, file_paths: list,
             client = client_factory()
         except Exception as exc:  # noqa: BLE001
             return {"success": False, "error": f"AcoustID is not available: {exc}"}, 503
-        available, reason = client.is_available()
+        # a button someone pressed: the download verification setting is not
+        # about this (#2042)
+        available, reason = getattr(client, 'can_fingerprint', client.is_available)()
         if not available:
             return {"success": False, "error": reason or "AcoustID is not set up", "code": "acoustid_unavailable"}, 503
 

@@ -1679,6 +1679,7 @@ class RepairWorker:
             transfer_folder=self.transfer_folder,
             config_manager=self._config_manager,
             scope=run_scope,
+            manual=bool(forced),
             spotify_client=self.spotify_client,
             itunes_client=self.itunes_client,
             mb_client=self.mb_client,

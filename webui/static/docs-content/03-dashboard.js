@@ -233,7 +233,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Track Number Repair | Fixes missing/incorrect track numbers against official tracklists |
 | Orphan File Detector | Finds audio files in your output folder not tracked in the database |
 | Dead File Cleaner | Removes database entries pointing to files that no longer exist |
-| AcoustID Scanner | Batch audio fingerprint verification across your library |
+| AcoustID Scanner | Batch audio fingerprint verification across your library. Needs an AcoustID key. With **Enable Download Verification** off in Settings, new downloads are not checked and the scheduled scan is skipped, but **Run Now** still scans, so you can check your library when you choose |
 | Cover Art Filler | Detects albums/tracks without embedded artwork and fetches it |
 | Metadata Gap Filler | Completes missing fields (genre, year, …) from connected services |
 | Fake Lossless Detector | Flags suspected lossy transcodes for review; findings have no automatic repair or re-download action |
