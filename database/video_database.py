@@ -8411,6 +8411,51 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def same_titled_show_files(self, title, *, exclude_tmdb_id=None) -> list:
+        """One stored episode path per season of every OTHER owned show with
+        this title: [{"tmdb_id", "path"}]. Two shows can share a name (The
+        Office 2005 and 2001), and the importer has to know when the folder a
+        title renders to is already another show's (#2052)."""
+        title = str(title or "").strip()
+        if not title:
+            return []
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT s.tmdb_id, MIN(f.relative_path) AS path FROM media_files f "
+                "JOIN episodes e ON e.id = f.episode_id "
+                "JOIN shows s ON s.id = e.show_id "
+                "WHERE LOWER(s.title) = LOWER(?) AND COALESCE(s.tmdb_id, 0) <> ? "
+                "AND e.has_file=1 AND f.relative_path<>'' "
+                "GROUP BY s.id, e.season_number",
+                (title, int(exclude_tmdb_id or 0))).fetchall()
+            return [{"tmdb_id": r["tmdb_id"], "path": r["path"]} for r in rows]
+        except (sqlite3.Error, ValueError, TypeError):
+            return []
+        finally:
+            conn.close()
+
+    def show_download_placements(self, title) -> list:
+        """Where finished episode downloads of any show with this title were
+        placed: the download rows, newest first. They say which folder a show
+        lives in before the media server has scanned it in (#2052)."""
+        title = str(title or "").strip()
+        if not title:
+            return []
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, kind, title, media_id, media_source, dest_path, search_ctx, status "
+                "FROM video_downloads WHERE LOWER(title) = LOWER(?) "
+                "AND kind NOT IN ('movie', 'youtube') AND status = 'completed' "
+                "AND COALESCE(dest_path, '') <> '' ORDER BY id DESC LIMIT 400",
+                (title,)).fetchall()
+            return [dict(r) for r in rows]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
     def video_show_episode_file_path(self, tmdb_id=None, *, season=None):
         """The server-reported path (+ size, + its season) of ANY owned episode
         of a show: {"path", "size_bytes", "season_number"} or None. A new episode

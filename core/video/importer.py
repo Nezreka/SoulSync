@@ -280,7 +280,7 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
                 settings: dict | None = None, force: bool = False,
                 override: dict | None = None, library_dir: str | None = None,
                 expected_duration_sec: float | None = None,
-                ids: dict | None = None) -> dict:
+                ids: dict | None = None, series_name: str | None = None) -> dict:
     """Decide what to do with a finished download. Returns one of:
 
       {"action": "import",  "dest": {...}, "quality_label": str}
@@ -296,6 +296,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
     truncated download or the wrong file entirely, and is rejected. ``ids`` are
     the title's {tmdb_id, imdb_id, tvdb_id} for the $tmdbid/$imdbid/$tvdbid
     tokens (an episode's are its show's); None = only a TMDB id we're sure of.
+    ``series_name`` is what $series renders as for a show the library does not
+    own yet, when its plain title's folder is already another show's
+    (core.video.show_folder, #2052); None = the title.
 
     MANUAL placement: ``force=True`` with an ``override`` ({scope, title, year, season,
     episode, episode_title, target_dir, media_id}) trusts the user's chosen identity —
@@ -444,7 +447,9 @@ def plan_import(dl: dict, src_path: str, *, list_dir: Callable, probe: dict | No
             # the grab's own year wins; a show not in the library yet and a
             # repair grab carry none, so the title's year is used to NAME it
             "title": ctx.get("title"), "year": _naming_year(ctx.get("year"), ids),
-            "series": ctx.get("title"), "season": ctx.get("season"),
+            "series": (series_name if (series_name and not force and not library_dir)
+                       else ctx.get("title")),
+            "season": ctx.get("season"),
             "episode": ep, "episode_end": ep_end, "episode_title": ctx.get("episode_title"),
             "air_date": ctx.get("air_date"),
             "quality": quality, "resolution": parsed.get("resolution"),
@@ -547,7 +552,8 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
                override: dict | None = None, library_dir: str | None = None,
                recycle: Callable | None = None,
                expected_duration_sec: float | None = None,
-               plan: dict | None = None, ids: dict | None = None) -> dict:
+               plan: dict | None = None, ids: dict | None = None,
+               series_name: str | None = None) -> dict:
     """Execute the import and return a DB patch dict for the download row.
 
     ``fs`` is an injected facade with: ``list_dir(dir)->iterable[name]``,
@@ -581,7 +587,7 @@ def run_import(dl: dict, src_path: str, *, fs: Any, prober: Callable | None = No
         plan = plan_import(dl, src_path, list_dir=fs.list_dir, probe=probe_info,
                            settings=settings, force=force, override=override,
                            library_dir=library_dir, expected_duration_sec=expected_duration_sec,
-                           ids=ids)
+                           ids=ids, series_name=series_name)
     if plan["action"] == "reject":
         # Leave the file where it is; remember WHERE so manual import can find it.
         # _bad_release is transient (stripped by update_video_download): it tells
