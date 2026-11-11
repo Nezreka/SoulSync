@@ -25,6 +25,20 @@ The Library page shows every artist in your collection as cards with images, alb
 - **Alphabet navigation** (A–Z, #) — jump through large collections
 - **Watchlist filter** — All, Watched, or Unwatched artists
 - **Metadata source filter** — find artists unmatched to a specific service (e.g. "No Discogs") or matched to one (e.g. "Has Spotify")
+- **Reviewed filter** — All, Not reviewed, or Reviewed. An artist is reviewed when every album of theirs with files is locked
+
+#### Reviewed and locked
+
+The **padlock** on an album or an artist is for when you have gone through it and it is right. Locking it does two things: it counts as reviewed, and nothing automated changes it after that.
+
+- **What is left alone** is a set of switches, all on by default: tags in the files, artwork, library details, file names and folders, the release match, and quality upgrades. Switch one off to keep that part handled for you
+- **What a lock does not stop**: missing tracks still download, and a missing or damaged file is still reported on the Tools page (marked **Locked**). **Fix all** passes a locked finding over; the button on the finding itself still works
+- **Your own hands are never blocked** — editing, retagging or reorganizing a locked album from its page works as before
+- **Kept away** lists the jobs the lock turned back, so you can see it working
+- **Changed since your review** shows when a file of a locked album was replaced, renamed, added or removed outside SoulSync. **Mark reviewed again** clears it
+- **Lock and next** locks the album and opens the artist's next album that is not reviewed. The artist's toolbar shows the count, e.g. "14 of 20 reviewed"
+- **An artist's lock** covers the artist (photo, details, folder, match). Albums are locked one by one, so a new release still gets tagged; locking an artist offers **And all current albums**
+- Locking needs the admin profile. Everyone sees the padlock on what is locked
 
 Click any artist card to open their detail page: albums, EPs, and singles as cards with completion percentages. Filter by category, content type (live, compilations, featured), or status (owned, missing). **View on** buttons at the top link the artist on each matched external service.
 `

@@ -73506,6 +73506,8 @@ body.src-modal-open { overflow: hidden; }
 /* inside an opened type every row is that type; saying so 30 times is noise */
 #tools-page .repair-inbox-body .repair-finding-type-badge { display: none; }
 #tools-page .repair-finding-status-badge.resolved { color: var(--accent-light); }
+/* #2046 the album or artist is reviewed and locked: a bulk fix passes it over */
+#tools-page .repair-finding-status-badge.locked { color: var(--accent-light); }
 #tools-page .repair-finding-sub {
     font-size: 14px;
     color: var(--text-2);

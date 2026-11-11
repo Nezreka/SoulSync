@@ -317,6 +317,97 @@ def test_no_edition_is_proposed_for_a_match_locked_album(library, monkeypatch):
     assert asked == [1]
 
 
+# ── the rest of what respects it ─────────────────────────────────────────────
+
+def test_a_thread_keeps_who_started_it():
+    import threading
+    seen = []
+
+    def work():
+        seen.append(locks.acting_as_user())
+
+    with locks.user_action():
+        asked = locks.carry(work)
+    by_job = locks.carry(work)
+    for target in (asked, by_job, work):
+        thread = threading.Thread(target=target)
+        thread.start()
+        thread.join()
+    # a person's fetch stays a person's; a job's, and a bare thread, are automation
+    assert seen == [True, False, False]
+
+
+def test_an_import_landing_on_a_locked_album_keeps_its_details(lib):
+    from core.library2.media_server_sync import upsert_album, upsert_artist
+
+    lib.execute("UPDATE lib2_albums SET server_source='plex', server_id='p1', year=1999 WHERE id=1")
+    lib.execute("UPDATE lib2_albums SET server_source='plex', server_id='p2', year=1999 WHERE id=2")
+    lib.execute("UPDATE lib2_artists SET server_source='plex', server_id='a1' WHERE id=1")
+    locks.set_lock(lib, "album", 1, ["metadata"])
+    cursor = lib.cursor()
+    for server_id in ("p1", "p2"):
+        upsert_album(cursor, server_source="plex", server_id=server_id, artist_id=1,
+                     title="Renamed", year=2024, allow_create=True)
+    rows = {r["id"]: (r["title"], r["year"]) for r in lib.execute(
+        "SELECT id, title, year FROM lib2_albums")}
+    assert rows == {1: ("One", 1999), 2: ("Renamed", 2024)}
+
+    locks.set_lock(lib, "artist", 1, ["metadata"])
+    upsert_artist(cursor, server_source="plex", server_id="a1", name="Someone Else",
+                  allow_create=True)
+    assert lib.execute("SELECT name FROM lib2_artists WHERE id=1").fetchone()[0] == "A"
+    with locks.user_action():
+        upsert_artist(cursor, server_source="plex", server_id="a1", name="Renamed By Hand",
+                      allow_create=True)
+    assert lib.execute("SELECT name FROM lib2_artists WHERE id=1").fetchone()[0] == "Renamed By Hand"
+
+
+def test_cover_apply_and_lyrics_pass_over_a_locked_album(library, monkeypatch):
+    from contextlib import closing
+    from core.metadata import art_apply
+    from core.lyrics_client import LyricsClient
+
+    db, path, _config = library
+    monkeypatch.setattr(locks, "_open", db._get_connection)
+    with closing(db._get_connection()) as conn, conn:
+        locks.set_lock(conn, "album", 1, ["artwork", "tags"])
+
+    apply = next(getattr(art_apply, name) for name in dir(art_apply)
+                 if name.startswith("apply") and callable(getattr(art_apply, name)))
+    result = apply([str(path)], {"album": "Album"}, None) if apply.__code__.co_argcount >= 3 \
+        else apply([str(path)], {"album": "Album"})
+    assert result["locked"] == 1 and result["embedded"] == 0
+
+    client = LyricsClient.__new__(LyricsClient)
+    client.api = object()
+    assert client.create_lrc_file_detailed(str(path), "Track 7", "Artist") == (
+        False, "This album is locked")
+    assert not path.with_suffix(".lrc").exists()
+
+
+def test_the_unattended_upgrade_pass_skips_an_upgrade_locked_album(lib):
+    """Enhance Quality on tracks someone picked still considers them."""
+    from core.library2 import wishlist_mirror
+    from core.library2.wanted import PROJECTION_VERSION, ensure_wanted_schema
+
+    ensure_wanted_schema(lib.cursor())
+    lib.execute("UPDATE lib2_track_files SET format='mp3', bitrate=128")
+    for track_id in (1, 2, 3, 4):
+        lib.execute(
+            "INSERT INTO lib2_wanted_tracks(profile_id, track_id, wanted, reason, projection_version) "
+            "VALUES(1,?,1,'x',?)", (track_id, PROJECTION_VERSION))
+    lib.commit()
+    assert wishlist_mirror.upgrade_candidate_track_ids(lib) == [1, 2, 3, 4]
+
+    locks.set_lock(lib, "album", 1, ["upgrades"])
+    assert wishlist_mirror.upgrade_candidate_track_ids(lib) == [3, 4]
+    # picked by hand
+    assert wishlist_mirror.upgrade_candidate_track_ids(lib, track_ids=[1, 3]) == [1, 3]
+    # a lock on another part does not hold upgrades back
+    locks.set_lock(lib, "album", 1, ["tags"], review=False)
+    assert wishlist_mirror.upgrade_candidate_track_ids(lib) == [1, 2, 3, 4]
+
+
 from tests.library2.test_metadata_consistency import (  # noqa: E402,F401 - fixtures
     _no_cover_art_artist_name_search, library,
 )

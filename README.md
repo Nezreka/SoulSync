@@ -168,6 +168,7 @@ A personal front page shaped by your library, your listening and your watchlist.
   - **Gap-fill** pulls in releases your other metadata sources know about.
   - **Enhanced view** (admins): inline tag editing, bulk BPM / mood / style edits, write tags to files with a diff preview, ReplayGain, reorganize with a path preview, move an album to another artist, re-identify a track, redownload with source picking, and delete (database only, or files too).
   - **Fix matches**: change artwork from any source, inspect the database record, and forget wrong matches per source.
+  - **Lock what you have reviewed** (admins): the padlock on an album or artist marks it reviewed and keeps every automated job off it: scans, enrichment, repair jobs, retags, reorganize and upgrades. Switch off any part you still want handled. Missing tracks still download, a missing or damaged file is still reported, and anything you do by hand still works. The sheet shows what the lock kept away and whether a file changed since your review. Filter the library by **Reviewed** / **Not reviewed**.
 - **Label pages**: a label's full catalog with owned / missing filters. Follow a label for new releases or its whole backlog.
 
 ## Watchlist & wishlist

@@ -2241,6 +2241,14 @@ function FindingCard({
             {statusBadge ? (
               <span className={`repair-finding-status-badge ${finding.status}`}>{statusBadge}</span>
             ) : null}
+            {finding.locked && finding.status === 'pending' ? (
+              <span
+                className="repair-finding-status-badge locked"
+                title={`This ${finding.locked.entity_type} is reviewed and locked. Fix all leaves it alone. The button on this row still works.`}
+              >
+                Locked
+              </span>
+            ) : null}
           </div>
           {copy.sub ? <div className="repair-finding-sub">{copy.sub}</div> : null}
         </div>

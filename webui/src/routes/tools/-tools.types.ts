@@ -124,6 +124,9 @@ export interface RepairFinding {
   created_at?: string | null;
   user_action?: string | null;
   last_error?: string | null;
+  /** #2046: its album or artist is reviewed and locked. a bulk fix leaves
+   *  it alone; Fix on the row itself still works */
+  locked?: { entity_type: 'album' | 'artist'; entity_id: number } | null;
   /** the cover and artist picture to show beside the row, looked up by the
    *  server from the catalogue when the finding stored none */
   album_thumb_url?: string | null;
