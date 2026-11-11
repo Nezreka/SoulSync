@@ -159,6 +159,51 @@ def test_a_finding_about_nothing_but_the_numbers_waits_and_says_what_to_do(libra
     assert FLAC(path)['tracknumber'] == ['3']
 
 
+# ── a cover nobody has: say so, and say it in the log ────────────────────────
+
+def _coverless(library, monkeypatch, checks):
+    from core.library2 import provider_adapters
+    db, path, config = library
+    with closing(db._get_connection()) as conn, conn:
+        conn.execute("UPDATE lib2_albums SET image_url=NULL, spotify_id='sp-album', "
+                     "external_ids='{\"deezer\": \"123\", \"lastfm\": \"x\"}' WHERE id=1")
+    asked = []
+    monkeypatch.setattr(provider_adapters, 'fetch_artwork_url',
+                        lambda kind, **kw: asked.append(kw) or None)
+    details = {'validation': {'file_id': 1, 'track_id': 7, 'album_id': 1, 'source': 'scan',
+                              'reference': {'artist_name': 'Artist', 'album_title': 'Album'},
+                              'checks': {'edition': 'correct', **checks}}}
+    return db, path, config, details, asked
+
+
+def test_a_cover_no_source_has_is_said_plainly(library, monkeypatch):
+    """artwork_database: missing, cover: missing. the fix found no art, wrote
+    nothing, failed its own check and answered "Repair is incomplete or could
+    not be verified", with nothing in the log."""
+    from core.repair_worker import RETAG_NO_COVER_FOUND
+    db, path, config, details, asked = _coverless(
+        library, monkeypatch, {'artwork_database': 'missing', 'cover': 'missing'})
+    result = _worker(db, config)._fix_library_retag('track', 'lib2:7', str(path), details)
+    assert result == {'success': False, 'error': RETAG_NO_COVER_FOUND}
+    assert 'Change Cover' in RETAG_NO_COVER_FOUND
+    # looked up by the album's own ids first, not by name alone
+    assert asked[0]['source_ids'] == {'deezer': '123', 'spotify': 'sp-album'}
+
+
+def test_the_other_tags_are_still_written_when_no_cover_is_found(library, monkeypatch):
+    from core.repair_worker import RETAG_NO_COVER_FOUND
+    db, path, config, details, _ = _coverless(
+        library, monkeypatch, {'artwork_database': 'missing', 'cover': 'missing', 'genre': 'mismatch'})
+    audio = FLAC(path)
+    audio['genre'] = ['Krautrock']
+    audio.save()
+    result = _worker(db, config)._fix_library_retag('track', 'lib2:7', str(path), details)
+    assert result['success'] is True, result
+    assert FLAC(path)['genre'] == ['Rock']
+    # and the reason the finding stays open rides along for the caller
+    assert result['incomplete_reason'] == RETAG_NO_COVER_FOUND
+
+
 def test_a_known_edition_writes_the_numbers_as_before(library):
     db, path, config = library
     audio = FLAC(path)

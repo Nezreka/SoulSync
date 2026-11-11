@@ -700,6 +700,12 @@ RETAG_NEEDS_EDITION = (
     "trusted yet. Pick the release this track is from with Re-identify, then apply again."
 )
 
+#: the album has no cover and no source offers one. names the way out.
+RETAG_NO_COVER_FOUND = (
+    "No cover art was found for this album on any source. Open the album in the Library, "
+    "pick one with Change Cover, then apply again."
+)
+
 
 def attach_retag_preview(conn, items: List[dict]) -> None:
     """Give each open re-tag finding ``preview``: every tag Apply Tags would
@@ -3460,7 +3466,13 @@ class RepairWorker:
                     from core.library2.validation import verify_finding_change
                     verified = verify_finding_change(self.db, finding_type, entity_type, entity_id, file_path, details, self._config_manager)
                     if verified is False:
-                        result.update(success=False, error='Repair is incomplete or could not be verified; finding remains pending')
+                        # say what is still wrong when the fix knows, and put
+                        # it in the log either way ("logs show nothing")
+                        reason = result.pop('incomplete_reason', None)
+                        result.update(success=False, error=reason or
+                                      'Repair is incomplete or could not be verified; finding remains pending')
+                        logger.warning("Finding %s (%s) applied but did not pass its own check: %s",
+                                       finding_id, finding_type, result['error'])
                         self._set_finding_error(finding_id, result['error'])
                     else:
                         self.resolve_finding(finding_id, action=result.get('action', 'auto_fix'))
@@ -4816,6 +4828,7 @@ class RepairWorker:
             numbers_held = True
         release = details.get('_fix_action') == 'overwrite_manual'
         cover_enabled = (options is None or options['cover_art'] != 'skip') and (selected is None or 'cover_art' in selected)
+        no_cover_found = False
 
         try:
             # A finding's path and hand-tag status may have changed since scan.
@@ -4828,7 +4841,9 @@ class RepairWorker:
             if cover_enabled and validation.get('checks', {}).get('artwork_database') == 'missing':
                 from core.library2.provider_adapters import fetch_artwork_url
                 reference = validation.get('reference') or {}
-                art = fetch_artwork_url('album', artist_name=reference.get('artist_name') or '', album_title=reference.get('album_title') or '')
+                art = fetch_artwork_url('album', artist_name=reference.get('artist_name') or '',
+                                        album_title=reference.get('album_title') or '',
+                                        source_ids=self._album_art_ids(validation.get('album_id')))
                 if art:
                     conn = self.db._get_connection()
                     try:
@@ -4837,6 +4852,17 @@ class RepairWorker:
                         conn.commit()
                     finally:
                         conn.close()
+                else:
+                    # the album has no cover and no source has one. the fix
+                    # used to write nothing, fail its own check and answer
+                    # "Repair is incomplete or could not be verified", with
+                    # nothing in the log to say why
+                    no_cover_found = True
+                    logger.warning("Library re-tag: no cover art found on any source for %s - %s (%s)",
+                                   reference.get('artist_name') or '?', reference.get('album_title') or '?',
+                                   entity_id)
+                    if selected is not None and set(selected) <= {'cover_art'}:
+                        return {'success': False, 'error': RETAG_NO_COVER_FOUND}
             stats = retag.write_tags(
                 self.db, [native_track_id],
                 embed_cover=cover_enabled and bool(validation or options), overwrite_manual=release,
@@ -4877,8 +4903,40 @@ class RepairWorker:
         if numbers_held:
             message += ('. Track numbers were left as they are: pick this track\'s release with '
                         'Re-identify and they can be written too')
-        return {'success': True, 'action': 'applied_tags', 'message': message,
-                'changes': stats.get('changes') or []}
+        result = {'success': True, 'action': 'applied_tags', 'message': message,
+                  'changes': stats.get('changes') or []}
+        if no_cover_found:
+            # the tags were written; the cover is what keeps the finding open
+            result['incomplete_reason'] = RETAG_NO_COVER_FOUND
+        return result
+
+    def _album_art_ids(self, album_id) -> dict:
+        """the ids an album is known by, so a cover is looked up by its exact
+        release before anyone searches by name."""
+        try:
+            conn = self.db._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT spotify_id, musicbrainz_id, external_ids FROM lib2_albums WHERE id=?",
+                    (int(album_id),)).fetchone()
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 - the name search still runs
+            logger.debug("album ids not read for cover lookup: %s", exc)
+            return {}
+        if not row:
+            return {}
+        try:
+            ids = json.loads(row[2] or '{}')
+        except (TypeError, ValueError):
+            ids = {}
+        ids = {str(k): str(v) for k, v in (ids if isinstance(ids, dict) else {}).items() if v}
+        if row[0]:
+            ids.setdefault('spotify', str(row[0]))
+        if row[1]:
+            ids.setdefault('musicbrainz', str(row[1]))
+        ids.pop('lastfm', None)
+        return ids
 
     def _fix_uncatalogued_bad_file(self, file_path, details, *, reason: str,
                                    noun: str, quarantine: bool = True) -> dict:
