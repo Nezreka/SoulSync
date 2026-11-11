@@ -202,6 +202,19 @@ def _group_has_conflict(members: List[Any]) -> bool:
                for index, first in enumerate(ids) for second in ids[index + 1:])
 
 
+def _reviewed(conn: Any, entity_type: str, *ids: Any) -> bool:
+    """one of these is locked against re-matching (#2046). a fold changes what
+    a reviewed artist or album holds, so the repair leaves the pair as it is.
+    a person running the repair from the page is not held back."""
+    from core.library2 import locks
+    try:
+        return any(locks.blocks(entity_type, entity_id, "match", "Duplicate repair", conn=conn)
+                   for entity_id in ids)
+    except Exception as exc:  # noqa: BLE001 - no lock tables yet reads as unlocked
+        logger.debug("lock check skipped in duplicate repair: %s", exc)
+        return False
+
+
 def _survivor_key(member: Any) -> tuple:
     # a canonical row before an alias: an alias kept over its own canonical
     # ended up pointing at itself and vanished from the artist list
@@ -804,6 +817,8 @@ def fold_server_twins(conn: Any, *, resolve=None, commit=None, should_stop=None)
                     # two releases of one name on one server are two releases
                     # (#1299), and so are two that disagree about what they are
                     continue
+                if _reviewed(conn, "album", survivor["id"], twin["id"]):
+                    continue        # someone reviewed one and locked it (#2046)
                 if keep_tracks is None:
                     keep_tracks = _twin_tracks(conn, survivor["id"])
                 twin_tracks = _twin_tracks(conn, twin["id"])
@@ -985,7 +1000,8 @@ def _fold_albums_within_artist(conn: Any, cursor: Any, artist_id: int,
                         or _identity_supports_fold(survivor, duplicate))
             if (evidence
                     and _is_pristine(cursor, duplicate)
-                    and _counts_compatible(survivor, duplicate)):
+                    and _counts_compatible(survivor, duplicate)
+                    and not _reviewed(conn, "album", survivor["id"], duplicate["id"])):
                 _fold_duplicate(cursor, survivor, duplicate)
                 stats["albums_folded"] += 1
             else:
@@ -1037,6 +1053,8 @@ def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
         members.sort(key=_survivor_key, reverse=True)
         survivor = members[0]
         for duplicate in members[1:]:
+            if _reviewed(conn, "artist", survivor["id"], duplicate["id"]):
+                continue
             _merge_artist(cursor, survivor, duplicate)
             stats["artists_merged"] += 1
             logger.info(
@@ -1079,6 +1097,8 @@ def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
         active_members.sort(key=_survivor_key, reverse=True)
         survivor = active_members[0]
         for duplicate in active_members[1:]:
+            if _reviewed(conn, "artist", survivor["id"], duplicate["id"]):
+                continue
             _merge_artist(cursor, survivor, duplicate)
             stats["artists_merged"] += 1
             logger.info(

@@ -876,6 +876,35 @@ def test_one_lesser_catalogue_disagreeing_does_not_keep_an_artist_in_two(repair_
     assert not any(again.values()), again
 
 
+def test_a_reviewed_artist_is_not_merged_behind_its_lock(repair_db, monkeypatch):
+    """#2046: a lock against re-matching holds off the repair too."""
+    from core.library2 import locks
+    database, conn = repair_db
+    mine, other = _twin_artists(conn, monkeypatch, theirs={
+        "deezer": "twin-dz", "spotify": "twin-sp", "musicbrainz": "twin-mb", "tidal": "999"})
+    locks.set_lock(conn, "artist", mine, ["match"])
+    conn.commit()
+    locks.invalidate()
+    assert repair_duplicate_artists(database)["artists_merged"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE name='Twin Artist'").fetchone()[0] == 2
+    # unlocked, the same repair merges them
+    locks.clear_lock(conn, "artist", mine)
+    conn.commit()
+    locks.invalidate()
+    assert repair_duplicate_artists(database)["artists_merged"] == 1
+
+
+def test_a_reviewed_album_keeps_its_server_twin(repair_db, monkeypatch):
+    from core.library2 import locks
+    database, conn = repair_db
+    _artist_id, plex, _tracks, jelly, navi = _three_servers(conn, monkeypatch, "Locked Servers")
+    locks.set_lock(conn, "album", plex, ["match"])
+    conn.commit()
+    locks.invalidate()
+    repair_duplicate_artists(database)
+    assert {r[0] for r in conn.execute("SELECT id FROM lib2_albums WHERE title='Same Album'")} == {plex, jelly, navi}
+
+
 def test_a_strong_id_disagreeing_still_keeps_two_artists(repair_db, monkeypatch):
     database, conn = repair_db
     mine, other = _twin_artists(conn, monkeypatch, theirs={
