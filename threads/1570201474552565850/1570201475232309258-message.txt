@@ -1,0 +1,28 @@
+) Chrome/157.0.0.0 Safari/537.36"  
+2026-11-11 23:11:47 - soulsync.metadata.artwork - ERROR - Art fetch failed after 1 attempt(s): HTTP Error 404: NOT FOUND  
+2026-11-11 23:11:48 - soulsync.slow_sql - WARNING - slow query 2.8s at /app/core/library2/worker_queue.py:404 _compute_progress: SELECT a.service, COUNT(*) FROM lib2_provider_attempts a WHERE a.entity_type=? AND a.entity_id IN (SELECT e.id FROM lib2_albums e WHERE EXISTS (SELECT 1 FROM lib2_tracks owned_t JOIN lib2_track_files owned_f ON owned_f.track_id = owned_t.id WHERE owned_t.album_id = e.id AND owned_f.path IS NOT NULL AND TRIM(owned_f.path) <> '' AND COALESCE(owned_f.file_state,'active') = 'active') AND NOT EXISTS (SELECT 1 FROM lib2_artists a WHERE a.id=e.primary_artist_id AND ((a.name GLOB '*[,;&/+×]*' OR a.name LIKE '% feat %' OR a.name LIKE '% feat. %' OR a.name LIKE '% ft %' OR a.name LIKE '% ft. %' OR a.nam  
+2026-11-11 23:11:48 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149426: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:49 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149435: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:49 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149438: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:49 - gunicorn.access - INFO - 172.31.200.1 - - "GET /api/repair/bulk-fix/status HTTP/1.1" 200 2170 "https://redaczed/tools" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"  
+2026-11-11 23:11:50 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149444: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:50 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149475: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:51 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149478: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:51 - soulsync - WARNING - Slow request: GET /api/repair/findings/counts -> 200 in 1646.6ms (cpu 165ms)  
+2026-11-11 23:11:51 - gunicorn.access - INFO - 172.31.200.1 - - "GET /api/repair/findings/counts HTTP/1.1" 200 352 "https://redacted/tools" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"  
+2026-11-11 23:11:51 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149480: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:52 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149508: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:52 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149513: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:52 - gunicorn.access - INFO - 172.31.200.1 - - "GET /api/repair/bulk-fix/status HTTP/1.1" 200 2170 "https://souls.schroeter-cloud.de/tools" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"  
+2026-11-11 23:11:52 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149518: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:53 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149531: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:53 - gunicorn.access - INFO - 172.31.200.1 - - "GET /api/repair/findings/counts HTTP/1.1" 200 352 "https://souls.schroeter-cloud.de/tools" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"  
+2026-11-11 23:11:53 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149534: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:53 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149536: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:54 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149537: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:54 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149541: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:54 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149546: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:55 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149547: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:55 - gunicorn.access - INFO - 172.31.200.1 - - "GET /api/repair/bulk-fix/status HTTP/1.1" 200 2170 "https://redacted/tools" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"  
+2026-11-11 23:11:55 - soulsync.repair_worker - WARNING - Bulk fix failed for finding #149551: Repair is incomplete or could not be verified; finding remains pending  
+2026-11-11 23:11:56 - soulsync - WARNING - Slow request: GET /api/repair/cache-health -> 200 in 4286.7ms (cpu 626ms)
