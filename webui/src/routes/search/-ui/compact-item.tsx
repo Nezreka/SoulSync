@@ -5,9 +5,41 @@ import type { UserPlaylistTrack } from '@/features/playlists/user-playlists';
 import { AddToPlaylistButton } from '@/features/playlists/add-to-playlist';
 import { acquireVerb } from '@/platform/shell/download-rights';
 
-import { splitTitleExtra } from '../-search.helpers';
+import { sourceLabel, splitTitleExtra } from '../-search.helpers';
+import { SOURCE_LABELS } from '../-search.types';
 import { ChevronIcon, DiscIcon, DownloadIcon, PlayIcon } from './search-icons';
 import styles from './search.module.css';
+
+/**
+ * Which sources a result came from, as their marks ("All sources", #2051).
+ *
+ * The first one is the source the card opens and downloads from. Read out as
+ * a sentence, since a row of logos says nothing to a screen reader.
+ */
+export function SourceMarks({ sources }: { sources?: readonly string[] }) {
+  if (!sources?.length) return null;
+  const names = sources.map(sourceLabel);
+  const said =
+    names.length === 1
+      ? `From ${names[0]}`
+      : `From ${names[0]}. Also on ${names.slice(1).join(', ')}`;
+  return (
+    <span className={styles.marks} title={said} aria-label={said} role="img">
+      {sources.map((source) => {
+        const info = SOURCE_LABELS[source];
+        return (
+          <span key={source} className={styles.mark} data-source={source} aria-hidden="true">
+            {info?.logo ? (
+              <img src={info.logo} alt="" loading="lazy" />
+            ) : (
+              sourceLabel(source).slice(0, 1)
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
 
 /**
  * The search page's result pieces: an artist face, a cover card (albums,
@@ -39,6 +71,7 @@ export function ArtistFace({
   href,
   inLibrary,
   artistId,
+  sources,
 }: {
   name: string;
   /** a found artist's quiet line, e.g. "9.8M fans". defaults to "Artist" */
@@ -47,6 +80,8 @@ export function ArtistFace({
   href: string;
   inLibrary: boolean;
   artistId?: string | number;
+  /** "All sources": where this artist was found */
+  sources?: readonly string[];
 }) {
   const img = useImage(image);
   return (
@@ -79,6 +114,7 @@ export function ArtistFace({
           (sub ?? 'Artist')
         )}
       </span>
+      <SourceMarks sources={sources} />
     </a>
   );
 }
@@ -114,12 +150,15 @@ export function CoverCard({
   onOpen,
   actionLabel,
   onAction,
+  sources,
 }: {
   name: string;
   sub: string;
   image?: string;
   round?: boolean;
   badge?: string;
+  /** "All sources": where this release was found */
+  sources?: readonly string[];
   /** a label or anything else that is a page, opens as a link */
   href?: string;
   onOpen?: () => void;
@@ -157,6 +196,7 @@ export function CoverCard({
       </div>
       <span className={styles.coverName}>{name}</span>
       <span className={styles.coverSub}>{sub}</span>
+      <SourceMarks sources={sources} />
     </>
   );
   if (href) {
@@ -197,7 +237,10 @@ export function TrackRow({
   onOpen,
   onPlay,
   playlistTrack,
+  sources,
 }: {
+  /** "All sources": where this track was found */
+  sources?: readonly string[];
   index: number;
   name: string;
   sub: string;
@@ -259,6 +302,7 @@ export function TrackRow({
         </span>
       </span>
       <span className={styles.badgeSlot}>
+        <SourceMarks sources={sources} />
         {badge === 'library' ? (
           <span className={styles.badge}>In library</span>
         ) : badge === 'wishlist' ? (

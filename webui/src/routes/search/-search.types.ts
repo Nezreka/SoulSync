@@ -161,6 +161,11 @@ export interface SearchArtist {
    * artist owned that number. Cards must not lazily resolve these.
    */
   image_is_native?: boolean;
+  /**
+   * "All sources" only: every source that returned this result, the one whose
+   * copy this is first. Absent on a single source's results.
+   */
+  sources?: string[];
 }
 
 export interface SearchAlbum {
@@ -183,6 +188,11 @@ export interface SearchAlbum {
    *     the only way to fetch that exact release instead of re-searching.
    */
   external_urls?: Record<string, string | undefined>;
+  /**
+   * "All sources" only: every source that returned this result, the one whose
+   * copy this is first. Absent on a single source's results.
+   */
+  sources?: string[];
 }
 
 export interface SearchTrack {
@@ -208,6 +218,11 @@ export interface SearchTrack {
   popularity?: number;
   preview_url?: string | null;
   external_urls?: Record<string, string | undefined> | null;
+  /**
+   * "All sources" only: every source that returned this result, the one whose
+   * copy this is first. Absent on a single source's results.
+   */
+  sources?: string[];
 }
 
 export interface SearchLabel {

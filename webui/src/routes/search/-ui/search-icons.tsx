@@ -16,6 +16,13 @@ export const CaretIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+/** a stack of layers: every source at once */
+export const LayersIcon = () => (
+  <svg {...common}>
+    <path d="M8 2 2 5l6 3 6-3-6-3zM2.5 8 8 10.8 13.500 8M2.5 11 8 13.800 13.500 11" />
+  </svg>
+);
+
 export const DownloadIcon = () => (
   <svg {...common} strokeWidth={1.8}>
     <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />

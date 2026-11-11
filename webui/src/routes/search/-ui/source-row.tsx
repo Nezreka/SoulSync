@@ -6,7 +6,8 @@ import type { SearchControllerState } from '../-search.use-controller';
 
 import { sourceLabel, visibleSources } from '../-search.helpers';
 import { SOURCE_LABELS } from '../-search.types';
-import { CaretIcon, DiscIcon, FileIcon, FilmIcon } from './search-icons';
+import { ALL_SOURCES, unifiedMembers, unifiedProgress } from '../-search.unified';
+import { CaretIcon, DiscIcon, FileIcon, FilmIcon, LayersIcon } from './search-icons';
 import styles from './search.module.css';
 
 /** not metadata providers: each is its own tab */
@@ -107,7 +108,14 @@ export function ModeTabs({
   );
 }
 
-function SourceLogo({ source }: { source: string }) {
+export function SourceLogo({ source }: { source: string }) {
+  if (source === ALL_SOURCES) {
+    return (
+      <span className={styles.sourceLogo} aria-hidden="true">
+        <LayersIcon />
+      </span>
+    );
+  }
   const info = SOURCE_LABELS[source];
   return (
     <span className={styles.sourceLogo} aria-hidden="true">
@@ -124,6 +132,52 @@ function SourceLogo({ source }: { source: string }) {
  * the provider for it. a source the server answered from somewhere else says
  * so in the menu.
  */
+/**
+ * "All sources" at the head of the menu (#2051). It asks every source below
+ * that is set up, so its note counts them, and while it is searching says how
+ * many have answered.
+ */
+function AllSourcesItem({
+  state,
+  onSelect,
+}: {
+  state: SearchControllerState;
+  onSelect: () => void;
+}) {
+  const members = unifiedMembers(catalogSources(state), state.configuredSources);
+  // one source is not "all": there is nothing to bring together
+  if (members.length < 2) return null;
+  const active = state.activeSource === ALL_SOURCES;
+  const progress = unifiedProgress(
+    members,
+    state.sources,
+    state.loadingSources,
+    state.failedSources,
+  );
+  const note =
+    active && progress.pending.length
+      ? `${progress.answered.length} of ${progress.total} answered`
+      : `${members.length} sources at once`;
+  return (
+    <button
+      type="button"
+      role="menuitemradio"
+      aria-checked={active}
+      className={styles.menuItem}
+      data-source={ALL_SOURCES}
+      title="Ask every source that is set up and bring the answers together. The same release from several sources shows once."
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+    >
+      <SourceLogo source={ALL_SOURCES} />
+      <span>{sourceLabel(ALL_SOURCES)}</span>
+      <span className={styles.menuNote}>{note}</span>
+    </button>
+  );
+}
+
 export function SourcePicker({
   state,
   onSelect,
@@ -183,6 +237,13 @@ export function SourcePicker({
       {open ? (
         <div className={styles.menu} role="menu" aria-label="Search with">
           <div className={styles.menuHead}>Search with</div>
+          <AllSourcesItem
+            state={state}
+            onSelect={() => {
+              setOpen(false);
+              onSelect(ALL_SOURCES);
+            }}
+          />
           {catalogSources(state).map((source) => {
             const configured = state.configuredSources[source] !== false;
             const served = state.fallbacks[source];

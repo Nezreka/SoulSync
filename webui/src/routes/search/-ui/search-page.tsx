@@ -15,6 +15,7 @@ import type {
   SearchVideo,
 } from '../-search.types';
 import type { LibraryCheckTrack } from '../-search.types';
+import type { UnifiedProgress } from '../-search.unified';
 import type { ResultFilter } from './search-results';
 import type { VideoProgress } from './video-grid';
 
@@ -49,8 +50,16 @@ import {
   shouldSearch,
   sourceLabel,
 } from '../-search.helpers';
+import { ALL_SOURCES } from '../-search.unified';
 import { useArtistImages } from '../-search.use-artist-images';
-import { activeResults, getPersistedQuery, useSearchController } from '../-search.use-controller';
+import {
+  activeSourceLoading,
+  activeSourceSettled,
+  activeUnifiedProgress,
+  getPersistedQuery,
+  useActiveResults,
+  useSearchController,
+} from '../-search.use-controller';
 import { useLibraryCheck } from '../-search.use-library-check';
 import { useVideoDownloads } from '../-search.use-video-downloads';
 import {
@@ -124,8 +133,12 @@ export function SearchPage() {
   });
   const { state, submitQuery, setActiveSource, syncQuery, seedFromIdLookup } = controller;
 
-  const results = activeResults(state);
+  const results = useActiveResults(state);
   const soulseekActive = state.activeSource === 'soulseek';
+  // "All sources": every card carries the source it came from, and that is
+  // the source its clicks resolve on
+  const allSources = state.activeSource === ALL_SOURCES;
+  const unified = activeUnifiedProgress(state);
 
   // a browse tile's view (/search?browse=genre:jazz). typing takes over from
   // it, and clearing the box comes back to it.
@@ -304,8 +317,8 @@ export function SearchPage() {
     };
   }, [state.query, hasSourceResults]);
 
-  const loading = state.loadingSources.has(state.activeSource) || idLookupPending;
-  const cached = Boolean(state.sources[state.activeSource]);
+  const loading = activeSourceLoading(state) || idLookupPending;
+  const cached = activeSourceSettled(state);
 
   const view: DropdownView = useMemo(() => {
     if (dismissed || soulseekActive) return 'hidden';
@@ -355,7 +368,9 @@ export function SearchPage() {
     window.showSearchDownloadBubbles?.();
   }, []);
 
-  const served = state.fallbacks[state.activeSource];
+  // a source answered from somewhere else. "All sources" has no banner for
+  // it: that member is simply left out, and its stand-in is asked on its own
+  const served = allSources ? undefined : state.fallbacks[state.activeSource];
 
   /**
    * A library artist opens in Library V2 by its catalogue id; a found one on
@@ -371,7 +386,11 @@ export function SearchPage() {
   const onArtistHref = (artist: SearchArtist, inLibrary: boolean) =>
     inLibrary
       ? inLibraryArtistPath(artist, headerFromSearch)
-      : artistDetailPath(artist.id ?? '', state.activeSource, artist.name);
+      : artistDetailPath(
+          artist.id ?? '',
+          allSources ? (artist.source ?? state.activeSource) : state.activeSource,
+          artist.name,
+        );
 
   const onLabelHref = (label: SearchLabel) => labelDetailPath(label.id ?? '', label.name);
 
@@ -625,7 +644,9 @@ export function SearchPage() {
                 <p className={styles.stateText} id="enhanced-loading-text" style={{ margin: 0 }}>
                   {idLookupPending
                     ? 'Looking up that link…'
-                    : `Searching ${sourceLabel(state.activeSource)}…`}
+                    : allSources
+                      ? `Searching ${unified?.total ?? 0} sources…`
+                      : `Searching ${sourceLabel(state.activeSource)}…`}
                 </p>
                 {/* a search that hangs used to say "Searching Deezer…" for
                     as long as it took, two minutes once, with nothing else */}
@@ -668,6 +689,8 @@ export function SearchPage() {
                 </div>
               ) : null}
 
+              {view === 'results' && unified ? <UnifiedStatus progress={unified} /> : null}
+
               {view === 'results' && !videosMode ? (
                 <FilterPills
                   counts={counts}
@@ -700,7 +723,10 @@ export function SearchPage() {
                 onArtistHref={onArtistHref}
                 onLabelHref={onLabelHref}
                 onAlbumClick={(album: SearchAlbum) =>
-                  void openSearchAlbum(album, state.activeSource)
+                  void openSearchAlbum(
+                    album,
+                    allSources ? (album.source ?? state.activeSource) : state.activeSource,
+                  )
                 }
                 onTrackClick={(track: SearchTrack) => void openSearchTrack(track)}
                 onPlaylistClick={(playlist: SearchPlaylist) => setPreviewPlaylist(playlist)}
@@ -738,6 +764,38 @@ export function SearchPage() {
         <PlaylistPreviewModal playlist={previewPlaylist} onClose={() => setPreviewPlaylist(null)} />
       )}
     </div>
+  );
+}
+
+/**
+ * Where an "All sources" search stands (#2051): results show as each source
+ * answers, so this says how many have, and names any that never did. Quiet
+ * once everything is in.
+ */
+function UnifiedStatus({ progress }: { progress: UnifiedProgress }) {
+  const { answered, pending, failed, total } = progress;
+  if (!pending.length && !failed.length) {
+    return (
+      <p className={styles.unified} id="enh-unified-status">
+        From {total} sources. The same release from several shows once.
+      </p>
+    );
+  }
+  return (
+    <p className={styles.unified} id="enh-unified-status" role="status">
+      {pending.length ? (
+        <>
+          <span className={styles.unifiedDot} aria-hidden="true" />
+          {answered.length} of {total} sources answered. Still searching{' '}
+          {pending.map(sourceLabel).join(', ')}.
+        </>
+      ) : (
+        <>
+          From {answered.length} of {total} sources.
+        </>
+      )}
+      {failed.length ? ` No answer from ${failed.map(sourceLabel).join(', ')}.` : ''}
+    </p>
   );
 }
 

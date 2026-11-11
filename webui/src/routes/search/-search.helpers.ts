@@ -17,6 +17,7 @@ import type {
 } from './-search.types';
 
 import { EXPERIMENTAL_SOURCES, SOURCE_LABELS, SOURCE_ORDER } from './-search.types';
+import { ALL_SOURCES, ALL_SOURCES_LABEL } from './-search.unified';
 
 /** The shortest query that is allowed to fire. Below this the dropdown hides. */
 export const MIN_QUERY_LENGTH = 2;
@@ -111,6 +112,7 @@ export function pickerSource(source: string | undefined | null): string {
 }
 
 export function sourceLabel(source: string): string {
+  if (source === ALL_SOURCES) return ALL_SOURCES_LABEL;
   return SOURCE_LABELS[source]?.text ?? source;
 }
 
@@ -148,6 +150,8 @@ export function resolveInitialSource({
 
 /** May the picker switch to this source at all? */
 export function canSelectSource(source: string, enabledExperimental: ReadonlySet<string>): boolean {
+  // "All sources" has no label entry: it is a view over the others (#2051)
+  if (source === ALL_SOURCES) return true;
   if (!SOURCE_LABELS[source]) return false;
   // A hidden experimental source has no icon; selecting it programmatically
   // would strand the row with nothing active.

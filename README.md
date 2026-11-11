@@ -110,7 +110,7 @@ Bring a playlist in from anywhere, keep a mirror of it, and keep your media serv
 
 One search box with three modes.
 
-- **Catalog**: search Spotify, Apple Music, Deezer, Discogs, MusicBrainz or Amazon. Results show *In library* and *In wishlist*; albums open a download-missing view, artists and labels open their pages.
+- **Catalog**: search Spotify, Apple Music, Deezer, Discogs, MusicBrainz or Amazon, or **All sources** at once with the same release shown once. Results show *In library* and *In wishlist*; albums open a download-missing view, artists and labels open their pages.
 - **Videos**: official music videos from YouTube, downloaded straight into your library.
 - **Files**: search a download source directly (like classic Soulseek), filter by format and quality, then choose how it comes in:
   - **Download as-is** — untouched, into Transfer.

@@ -29,11 +29,12 @@ With nothing typed, the page offers browse tiles (Top trending, New releases and
 - Click a **track** to open the download modal for that specific song
 - **Preview tracks** — the play button on track results streams a short preview from your download source before you commit to a download
 - **Mode tabs** — switch what you search with the tabs above the results: **Catalog** (metadata search), **Videos**, or **Files** (raw file search). Within Catalog, pick the metadata source from the **Search with** dropdown (Spotify, iTunes, Deezer, and more). Each source has its own catalog, so a track missing on one may appear on another
+- **All sources** — the first entry in **Search with** asks every source you have set up at the same moment and shows one list. Results appear as each source answers, and a line above them says who has answered and who is still searching. The same artist, album or track found on several sources is shown once, with a small logo for each source that has it; it opens from your primary source when that source has it. What several sources agree on is listed first. Two releases only share a card when artist, title, kind (album against single or EP), year and length all line up, so a remaster, a deluxe edition or a remix keeps its own card. It is never the default: pick it when one source comes up short
 
 ![Enhanced search results](dl-enhanced-search.jpg)
 
 > [!TIP]
-> If a search comes up empty, try a different metadata source in the **Search with** dropdown first — catalogs differ between Spotify, iTunes, and Deezer, especially for regional or older releases.
+> If a search comes up empty, try **All sources** or a different metadata source in the **Search with** dropdown first — catalogs differ between Spotify, iTunes, and Deezer, especially for regional or older releases.
 `
         },
         {
