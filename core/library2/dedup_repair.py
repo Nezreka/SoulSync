@@ -597,6 +597,282 @@ def fold_shared_file_tracks(conn: Any) -> Dict[str, int]:
     return stats
 
 
+def _years_disagree(a: Any, b: Any) -> bool:
+    def year(row):
+        value = str(row.get("release_date") or row.get("year") or "")[:4]
+        return value if value.isdigit() and value != "0000" else None
+    first, second = year(a), year(b)
+    return bool(first and second and first != second)
+
+
+def _release_ids_disagree(a: Any, b: Any) -> bool:
+    first, second = _release_ids(a), _release_ids(b)
+    return any(source in first and first[source] != value for source, value in second.items())
+
+
+def _twin_album_rows(conn: Any, artist_id: int) -> List[Dict[str, Any]]:
+    return [dict(r) for r in conn.execute(
+        """SELECT al.id, al.title, al.album_type, al.origin, al.monitored, al.year,
+                  al.release_date, al.expected_track_count, al.track_count,
+                  al.spotify_id, al.musicbrainz_id, al.external_ids, al.soul_id,
+                  COALESCE(al.server_source, '') AS server_source,
+                  (SELECT COUNT(*) FROM lib2_tracks t WHERE t.album_id = al.id) AS track_rows,
+                  (SELECT COUNT(*) FROM lib2_track_files tf
+                    JOIN lib2_tracks t2 ON t2.id = tf.track_id
+                   WHERE t2.album_id = al.id
+                     AND COALESCE(tf.file_state, 'active') <> 'deleted') AS file_rows
+             FROM lib2_albums al WHERE al.primary_artist_id = ?""", (artist_id,))]
+
+
+def _twin_tracks(conn: Any, album_id: int) -> List[Dict[str, Any]]:
+    from core.library2.recording_links import normalize_title
+
+    tracks = [dict(r) for r in conn.execute(
+        "SELECT id, title, COALESCE(disc_number, 1) AS disc, track_number, duration "
+        "FROM lib2_tracks WHERE album_id=? ORDER BY id", (album_id,))]
+    for track in tracks:
+        track["key"] = normalize_title(track["title"] or "")
+        track["files"] = [dict(f) for f in conn.execute(
+            "SELECT id, path, owner_profile_id FROM lib2_track_files "
+            "WHERE track_id=? AND COALESCE(file_state, 'active') <> 'deleted'", (track["id"],))]
+    return tracks
+
+
+def _lengths_disagree(a: Any, b: Any) -> bool:
+    try:
+        first, second = float(a or 0), float(b or 0)
+    except (TypeError, ValueError):
+        return False
+    return min(first, second) > 0 and abs(first - second) > max(5000, max(first, second) * .1)
+
+
+def _pair_twin_tracks(keep: List[Dict[str, Any]], twin: List[Dict[str, Any]]) -> List[tuple]:
+    """Which track of the kept release each track of the twin is: same title,
+    the same number when two share a title, never two lengths apart."""
+    by_title: Dict[str, List[Dict[str, Any]]] = {}
+    for track in keep:
+        by_title.setdefault(track["key"], []).append(track)
+    used: set = set()
+    pairs = []
+    for track in twin:
+        candidates = [k for k in by_title.get(track["key"], ())
+                      if k["id"] not in used and not _lengths_disagree(k["duration"], track["duration"])]
+        placed = [k for k in candidates if k["track_number"] == track["track_number"]]
+        exact = [k for k in placed if k["disc"] == track["disc"]]
+        match = (exact[0] if len(exact) == 1 else placed[0] if len(placed) == 1
+                 else candidates[0] if len(candidates) == 1 else None)
+        if match is not None:
+            used.add(match["id"])
+            pairs.append((match, track))
+    return pairs
+
+
+def _fold_twin_track(conn: Any, keep: Dict[str, Any], twin: Dict[str, Any],
+                     resolve, stats: Dict[str, int]) -> None:
+    """The twin's listing of the track, onto the kept one. Its file row goes
+    when it names the kept file by another path or names nothing on disk; a
+    second real file stays, as another copy of the kept track."""
+    import os
+    from core.library2.track_files import elect_primary_file
+
+    cursor = conn.cursor()
+    kept_paths = {str(f["path"] or "") for f in keep["files"]}
+    kept_real: Optional[set] = None
+    moved = False
+    for file in twin["files"]:
+        path = str(file["path"] or "")
+        second_copy = False
+        if path and path not in kept_paths:
+            real = resolve(path)
+            if real and os.path.isfile(real):
+                if kept_real is None:
+                    kept_real = {os.path.realpath(r) for r in
+                                 (resolve(p) for p in kept_paths if p) if r}
+                second_copy = os.path.realpath(real) not in kept_real
+        if second_copy:
+            cursor.execute(
+                "UPDATE lib2_track_files SET track_id=?, is_primary=0, "
+                "updated_at=CURRENT_TIMESTAMP WHERE id=?", (keep["id"], file["id"]))
+            keep["files"].append(file)
+            kept_paths.add(path)
+            if kept_real is not None:
+                kept_real.add(os.path.realpath(resolve(path)))
+            stats["server_twin_copies_kept"] += 1
+            moved = True
+        else:
+            cursor.execute("DELETE FROM lib2_track_files WHERE id=?", (file["id"],))
+    if moved:
+        elect_primary_file(conn, int(keep["id"]))
+    _carry_folded_track(conn, int(twin["id"]), int(keep["id"]))
+    cursor.execute("DELETE FROM lib2_track_files WHERE track_id=?", (twin["id"],))
+    cursor.execute("DELETE FROM lib2_media_server_mappings "
+                   "WHERE entity_type='track' AND entity_id=?", (twin["id"],))
+    _delete_placeholder_track(cursor, int(twin["id"]))
+    stats["server_twins_folded"] += 1
+
+
+def fold_server_twins(conn: Any, *, resolve=None, commit=None, should_stop=None) -> Dict[str, int]:
+    """One release, one album, however many media servers listed it (#1985).
+
+    3.6.1 kept a row set per media server and showed the active one. A library
+    that had been on Plex, Jellyfin and Navidrome imported the same album
+    three or four times: ``fold_shared_file_tracks`` only knows two rows as one
+    file when the PATH is the same text, and every server names the same file
+    its own way (Plex's mount, Navidrome's path under its music folder, a path
+    from before a reorganize). An artist with 85 tracks showed 290.
+
+    Two releases of one artist are the same release here when they come from
+    different servers, share the title and the single/release bucket, do not
+    disagree on year or release ids, and at least half the smaller one's
+    tracks pair up by title (and number, where a title repeats). The active
+    server's row is kept. Each paired track of the other folds into it: plays,
+    rules, wishes, edits and server mappings move, exactly as for a shared
+    file. The other row's file is the same file under another name, or a
+    listing of something no longer on disk, and goes; when it does resolve to
+    a second real file, that file stays as another copy of the kept track.
+    Tracks only the other server lists stay where they are.
+
+    Idempotent. ``commit`` is called after each artist that changed, so a big
+    library never holds the write lock for the whole pass.
+    """
+    from core.library2.mb_reconcile import _fold_duplicate
+    from core.library2.catalogue_duplicates import _move_references
+
+    if resolve is None:
+        from core.library2.paths import resolve_lib2_path
+        resolve = resolve_lib2_path
+    active = _active_server() or ""
+    stats = {"server_twins_folded": 0, "server_twin_copies_kept": 0,
+             "server_twin_albums_folded": 0}
+    artists = [int(r[0]) for r in conn.execute(
+        """SELECT primary_artist_id FROM lib2_albums
+            WHERE COALESCE(server_source, '') <> '' AND primary_artist_id IS NOT NULL
+            GROUP BY primary_artist_id HAVING COUNT(DISTINCT server_source) > 1""")]
+    cursor = conn.cursor()
+    for artist_id in artists:
+        if should_stop and should_stop():
+            break
+        groups: Dict[tuple, List[Dict[str, Any]]] = {}
+        for album in _twin_album_rows(conn, artist_id):
+            if album["server_source"] and album["track_rows"]:
+                groups.setdefault(
+                    (release_title_key(album["title"]), _bucket(album["album_type"])), []
+                ).append(album)
+        changed = False
+        for (title_key, _kind), members in groups.items():
+            if not title_key or len({a["server_source"] for a in members}) < 2:
+                continue
+            members.sort(key=lambda a: (a["server_source"] != active, -int(a["file_rows"] or 0),
+                                        int(a["id"])))
+            survivor = members[0]
+            keep_tracks: Optional[List[Dict[str, Any]]] = None
+            for twin in members[1:]:
+                if (twin["server_source"] == survivor["server_source"]
+                        or _years_disagree(survivor, twin)
+                        or _release_ids_disagree(survivor, twin)):
+                    # two releases of one name on one server are two releases
+                    # (#1299), and so are two that disagree about what they are
+                    continue
+                if keep_tracks is None:
+                    keep_tracks = _twin_tracks(conn, survivor["id"])
+                twin_tracks = _twin_tracks(conn, twin["id"])
+                owners = lambda tracks: {f["owner_profile_id"] for t in tracks for f in t["files"]}  # noqa: E731
+                if owners(keep_tracks) != owners(twin_tracks):
+                    continue        # another profile's own library is not a server twin
+                pairs = _pair_twin_tracks(keep_tracks, twin_tracks)
+                smaller = min(len(keep_tracks), len(twin_tracks))
+                if not pairs or len(pairs) * 2 < smaller:
+                    continue
+                for keep, dup in pairs:
+                    _fold_twin_track(conn, keep, dup, resolve, stats)
+                changed = True
+                if not conn.execute("SELECT 1 FROM lib2_tracks WHERE album_id=? LIMIT 1",
+                                    (twin["id"],)).fetchone():
+                    cursor.execute(
+                        "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
+                        "WHERE entity_type='album' AND entity_id=?", (survivor["id"], twin["id"]))
+                    _move_references(conn, "album", twin["id"], survivor["id"])
+                    _move_overrides(conn, "release_group", twin["id"], survivor["id"])
+                    _fold_duplicate(cursor, survivor, twin)
+                    stats["server_twin_albums_folded"] += 1
+        if changed and commit is not None:
+            commit()
+    if any(stats.values()):
+        logger.info("Server twins folded: %s", stats)
+    return stats
+
+
+def fold_fileless_twins(conn: Any, track_ids) -> int:
+    """A track that just lost its last file, and shares its album, title and
+    position with a track that still has one, is that track's leftover row
+    (#1985). Two copies of a song in one album are two track rows; removing
+    one copy left its row behind as a "missing" track, so an album with 12
+    songs read 12 of 24 and the artist's totals were off by every copy that
+    had ever been removed. The leftover goes: its plays and server mappings
+    move to the track that has the file, its removed-file records travel
+    along as history, and its wishes are withdrawn. A track with no such twin
+    is a missing track and stays. Does not commit."""
+    from core.library2.recording_links import normalize_title
+
+    live = "COALESCE(f.file_state, 'active') NOT IN ('deleted', 'missing_confirmed')"
+    cursor = conn.cursor()
+    folded = 0
+    for track_id in sorted({int(t) for t in track_ids or ()}):
+        row = conn.execute(
+            f"""SELECT t.id, t.album_id, t.title, t.track_number, COALESCE(t.disc_number, 1) AS disc,
+                       COALESCE(t.play_count, 0) AS plays, t.last_played,
+                       EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live}) AS has_file
+                  FROM lib2_tracks t WHERE t.id=?""", (track_id,)).fetchone()
+        if row is None or row["has_file"] or row["album_id"] is None or row["track_number"] is None:
+            continue
+        key = normalize_title(row["title"] or "")
+        twins = [t for t in conn.execute(
+            f"""SELECT t.id, t.title, COALESCE(t.play_count, 0) AS plays, t.last_played
+                  FROM lib2_tracks t
+                 WHERE t.album_id=? AND t.id<>? AND t.track_number=?
+                   AND COALESCE(t.disc_number, 1)=?
+                   AND EXISTS(SELECT 1 FROM lib2_track_files f WHERE f.track_id=t.id AND {live})""",
+            (row["album_id"], track_id, row["track_number"], row["disc"])).fetchall()
+            if normalize_title(t["title"] or "") == key]
+        if len(twins) != 1:
+            continue
+        keep = twins[0]
+        played = max((v for v in (row["last_played"], keep["last_played"]) if v), default=None)
+        cursor.execute("UPDATE lib2_tracks SET play_count=?, last_played=? WHERE id=?",
+                       (int(row["plays"]) + int(keep["plays"]), played, keep["id"]))
+        # the removed files stay on record, under the track that is left
+        cursor.execute("UPDATE lib2_track_files SET track_id=?, is_primary=0 WHERE track_id=?",
+                       (keep["id"], track_id))
+        cursor.execute(
+            "UPDATE OR IGNORE lib2_media_server_mappings SET entity_id=? "
+            "WHERE entity_type='track' AND entity_id=?", (keep["id"], track_id))
+        cursor.execute("DELETE FROM lib2_media_server_mappings "
+                       "WHERE entity_type='track' AND entity_id=?", (track_id,))
+        # a wish for the leftover is a wish for a song that is right there
+        try:
+            from core.library2.mirror_outbox import enqueue_tracks
+            profiles = {1} | {int(r[0]) for r in conn.execute(
+                """SELECT profile_id FROM lib2_wanted_tracks WHERE track_id=?
+                   UNION SELECT profile_id FROM lib2_monitor_rules
+                    WHERE entity_type='track' AND entity_id=?""",
+                (track_id, track_id)) if r[0] is not None}
+            for profile_id in sorted(profiles):
+                enqueue_tracks(conn, [track_id], False, profile_id=profile_id)
+        except Exception as exc:  # noqa: BLE001 - the fold stands without the un-mirror
+            logger.debug("un-mirror for a folded leftover track skipped: %s", exc)
+        try:
+            from core.library2.catalogue_identity import record_redirect
+            record_redirect(conn, "track", track_id, int(keep["id"]), {}, {"folded": "fileless_twin"})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("redirect for a folded leftover track skipped: %s", exc)
+        cursor.execute("DELETE FROM lib2_track_artists WHERE track_id=?", (track_id,))
+        _delete_placeholder_track(cursor, track_id)
+        folded += 1
+    if folded:
+        logger.info("Folded %d leftover track row(s) into the copy that kept its file", folded)
+    return folded
+
+
 def _move_overrides(conn: Any, entity_type: str, source_id: int, target_id: int) -> None:
     """a hand edit on the folded row moves to the kept one (the kept row's
     own edit of the same field wins)"""
@@ -797,6 +1073,8 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
 
         # One file, one track first: it is what empties a stale server's twin.
         stats.update(fold_shared_file_tracks(conn))
+        # then the same release listed by several servers under their own paths
+        stats.update(fold_server_twins(conn))
         # Merged artists first (their re-homed albums are twins that did not
         # exist a moment ago), then every other artist a twin scan finds — the
         # album pass is not a merge follow-up, it is its own repair.
@@ -818,4 +1096,4 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
     return stats
 
 
-__all__ = ["repair_duplicate_artists"]
+__all__ = ["fold_fileless_twins", "fold_server_twins", "repair_duplicate_artists"]

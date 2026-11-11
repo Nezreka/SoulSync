@@ -529,3 +529,304 @@ def test_a_finding_on_the_merged_twin_follows_the_survivor(repair_db):
     repair_duplicate_artists(legacy_db)
 
     assert conn.execute("SELECT entity_id FROM repair_findings").fetchone()[0] == f"lib2:{rich}"
+
+
+# ── #1985: the same release listed by several media servers ──────────────────
+
+def _server_album(conn, artist, title, server, tracks, *, path, year=None, plays=0, **cols):
+    """one server's listing of a release: an album row, its tracks and files."""
+    import uuid
+    key = uuid.uuid4().hex[:8]
+    album = _album(conn, artist, title, server_source=server, server_id=f"{server}-{key}",
+                   **({"year": year} if year else {}), **cols)
+    ids = []
+    for number, name in enumerate(tracks, start=1):
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, server_source, "
+            "server_id, play_count) VALUES(?,?,?,1,?,?,?)",
+            (album, name, number, server, f"{server}-{key}-{number}", plays)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
+                     (track, path.format(n=number, name=name)))
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source, "
+                     "server_id) VALUES('track', ?, ?, ?)", (track, server, f"{server}-{key}-{number}"))
+        ids.append(track)
+    conn.execute("INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source, "
+                 "server_id) VALUES('album', ?, ?, ?)", (album, server, f"{server}-{key}"))
+    conn.commit()
+    return album, ids
+
+
+_SONGS = ["Intro", "Second Song", "Third Song"]
+
+
+def _three_servers(conn, monkeypatch, artist_name="Three Servers"):
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, artist_name)
+    who = artist_name.replace(" ", "")
+    plex, plex_tracks = _server_album(
+        conn, artist, "Same Album", "plex", _SONGS,
+        path="/data/music/" + who + "/Same Album/{n:02d} - {name}.flac", plays=2)
+    jelly, _ = _server_album(conn, artist, "Same Album", "jellyfin", _SONGS,
+                             path="/media/" + who + "/Same Album/{n:02d} - {name}.flac", plays=5)
+    # navidrome reports paths under its own music folder, from an older layout
+    navi, _ = _server_album(conn, artist, "Same Album", "navidrome", _SONGS,
+                            path=who + "/Same Album/01-{n:02d} - {name}.flac")
+    return artist, plex, plex_tracks, jelly, navi
+
+
+def _titles(conn, album):
+    return [r[0] for r in conn.execute(
+        "SELECT title FROM lib2_tracks WHERE album_id=? ORDER BY track_number, id", (album,))]
+
+
+def test_one_release_listed_by_three_servers_is_one_album(repair_db, monkeypatch):
+    """an artist with 85 tracks showed 290 after the upgrade: each server's
+    listing of the same files, under its own paths, became its own tracks."""
+    from core.library2.dedup_repair import fold_server_twins
+    _legacy_db, conn = repair_db
+    artist, plex, plex_tracks, jelly, navi = _three_servers(conn, monkeypatch)
+
+    stats = fold_server_twins(conn, resolve=lambda path: None)
+
+    assert stats == {"server_twins_folded": 6, "server_twin_copies_kept": 0,
+                     "server_twin_albums_folded": 2}
+    albums = [r[0] for r in conn.execute(
+        "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (artist,))]
+    assert albums == [plex]
+    assert _titles(conn, plex) == _SONGS
+    # one file per track, the active server's
+    files = [r[0] for r in conn.execute(
+        "SELECT f.path FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id "
+        "WHERE t.album_id=? ORDER BY f.path", (plex,))]
+    assert files == [f"/data/music/ThreeServers/Same Album/{n:02d} - {name}.flac"
+                     for n, name in enumerate(_SONGS, start=1)]
+    # every server still knows the kept rows as its own
+    mapped = {r[0]: r[1] for r in conn.execute(
+        "SELECT server_source, COUNT(*) FROM lib2_media_server_mappings "
+        "WHERE entity_type='track' AND entity_id IN (?,?,?) GROUP BY 1", plex_tracks)}
+    assert mapped == {"plex": 3, "jellyfin": 3, "navidrome": 3}
+    assert {r[0] for r in conn.execute(
+        "SELECT server_source FROM lib2_media_server_mappings "
+        "WHERE entity_type='album' AND entity_id=?", (plex,))} == {"plex", "jellyfin", "navidrome"}
+    # two servers counted their own plays
+    assert conn.execute("SELECT play_count FROM lib2_tracks WHERE id=?",
+                        (plex_tracks[0],)).fetchone()[0] == 7
+    # nothing left to do
+    assert not any(fold_server_twins(conn, resolve=lambda path: None).values())
+
+
+def test_a_second_real_file_stays_as_another_copy(repair_db, monkeypatch, tmp_path):
+    from core.library2.dedup_repair import fold_server_twins
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Two Copies")
+    first, second = tmp_path / "flac" / "song.flac", tmp_path / "mp3" / "song.mp3"
+    for path in (first, second):
+        path.parent.mkdir()
+        path.write_bytes(b"x")
+    plex, (kept,) = _server_album(conn, artist, "Album", "plex", ["Song"], path=str(first))
+    _server_album(conn, artist, "Album", "jellyfin", ["Song"], path=str(second))
+
+    stats = fold_server_twins(conn, resolve=lambda path: path)
+
+    assert stats["server_twins_folded"] == 1 and stats["server_twin_copies_kept"] == 1
+    rows = conn.execute("SELECT path, is_primary FROM lib2_track_files WHERE track_id=? "
+                        "ORDER BY path", (kept,)).fetchall()
+    assert [r["path"] for r in rows] == sorted([str(first), str(second)])
+    assert sum(r["is_primary"] for r in rows) == 1
+
+
+def test_the_same_file_under_two_mounts_is_one_file(repair_db, monkeypatch, tmp_path):
+    from core.library2.dedup_repair import fold_server_twins
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "One File")
+    real = tmp_path / "song.flac"
+    real.write_bytes(b"x")
+    plex, (kept,) = _server_album(conn, artist, "Album", "plex", ["Song"], path="/data/song.flac")
+    _server_album(conn, artist, "Album", "jellyfin", ["Song"], path="/media/song.flac")
+
+    stats = fold_server_twins(conn, resolve=lambda path: str(real))
+
+    assert stats["server_twin_copies_kept"] == 0
+    assert [r[0] for r in conn.execute(
+        "SELECT path FROM lib2_track_files WHERE track_id=?", (kept,))] == ["/data/song.flac"]
+
+
+def test_two_releases_of_one_name_stay_two(repair_db, monkeypatch):
+    """#1299: same server, or a different year, or too little in common."""
+    from core.library2.dedup_repair import fold_server_twins
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Self Titled")
+    _server_album(conn, artist, "Same Server", "plex", _SONGS, path="/a/{n}.flac")
+    _server_album(conn, artist, "Same Server", "plex", _SONGS, path="/b/{n}.flac")
+    _server_album(conn, artist, "Peter Gabriel", "plex", _SONGS, path="/c/{n}.flac", year=1977)
+    _server_album(conn, artist, "Peter Gabriel", "jellyfin", _SONGS, path="/d/{n}.flac", year=1980)
+    _server_album(conn, artist, "Greatest Hits", "plex",
+                  ["One", "Two", "Three", "Four"], path="/e/{n}.flac")
+    _server_album(conn, artist, "Greatest Hits", "jellyfin",
+                  ["One", "Five", "Six", "Seven"], path="/f/{n}.flac")
+    _server_album(conn, artist, "A Single", "plex", ["A Single"], path="/g/{n}.flac",
+                  album_type="single")
+    _server_album(conn, artist, "A Single", "jellyfin", _SONGS, path="/h/{n}.flac")
+
+    assert not any(fold_server_twins(conn, resolve=lambda path: None).values())
+    assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE primary_artist_id=?",
+                        (artist,)).fetchone()[0] == 8
+
+
+def test_tracks_only_the_other_server_lists_stay_where_they_are(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_server_twins
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Bonus Track")
+    plex, _ = _server_album(conn, artist, "Album", "plex", _SONGS, path="/p/{n}.flac")
+    jelly, _ = _server_album(conn, artist, "Album", "jellyfin", [*_SONGS, "Bonus"],
+                             path="/j/{n}.flac")
+
+    stats = fold_server_twins(conn, resolve=lambda path: None)
+
+    assert stats["server_twins_folded"] == 3 and stats["server_twin_albums_folded"] == 0
+    assert _titles(conn, plex) == _SONGS and _titles(conn, jelly) == ["Bonus"]
+
+
+def test_a_repeated_title_pairs_by_its_number(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_server_twins
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Interludes")
+    songs = ["Interlude", "Song", "Interlude"]
+    plex, kept = _server_album(conn, artist, "Album", "plex", songs, path="/p/{n}.flac")
+    _server_album(conn, artist, "Album", "jellyfin", songs, path="/j/{n}.flac", plays=1)
+
+    fold_server_twins(conn, resolve=lambda path: None)
+
+    assert _titles(conn, plex) == songs
+    assert [r[0] for r in conn.execute(
+        "SELECT play_count FROM lib2_tracks WHERE album_id=? ORDER BY track_number", (plex,))] == [1, 1, 1]
+
+
+def test_another_profiles_own_library_is_not_a_server_twin(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_server_twins
+    _legacy_db, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Kim Has It Too")
+    _server_album(conn, artist, "Album", "plex", _SONGS, path="/house/{n}.flac")
+    kim, kim_tracks = _server_album(conn, artist, "Album", "jellyfin", _SONGS, path="/kim/{n}.flac")
+    conn.execute("UPDATE lib2_track_files SET owner_profile_id=7 WHERE track_id IN (?,?,?)",
+                 kim_tracks)
+    conn.commit()
+    assert not any(fold_server_twins(conn, resolve=lambda path: None).values())
+
+
+def test_the_fold_commits_artist_by_artist(repair_db, monkeypatch):
+    from core.library2.dedup_repair import fold_server_twins
+    legacy_db, conn = repair_db
+    _three_servers(conn, monkeypatch, "First")
+    _three_servers(conn, monkeypatch, "Second")
+    commits = []
+    fold_server_twins(conn, resolve=lambda path: None, commit=lambda: commits.append(1))
+    assert len(commits) == 2
+
+
+def test_the_repair_folds_server_twins(repair_db, monkeypatch):
+    legacy_db, conn = repair_db
+    artist, plex, *_rest = _three_servers(conn, monkeypatch, "Third")
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda path, **_k: None)
+    stats = repair_duplicate_artists(legacy_db)
+    assert stats["server_twins_folded"] == 6 and stats["server_twin_albums_folded"] == 2
+    assert conn.execute("SELECT COUNT(*) FROM lib2_albums WHERE primary_artist_id=?",
+                        (artist,)).fetchone()[0] == 1
+
+
+def test_every_artist_with_server_twins_is_folded_in_one_run(repair_db, monkeypatch):
+    legacy_db, conn = repair_db
+    kept = [_three_servers(conn, monkeypatch, name)[:2] for name in ("First", "Second", "Third")]
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda path, **_k: None)
+    stats = repair_duplicate_artists(legacy_db)
+    assert stats["server_twins_folded"] == 18 and stats["server_twin_albums_folded"] == 6
+    for artist, plex in kept:
+        assert [r[0] for r in conn.execute(
+            "SELECT id FROM lib2_albums WHERE primary_artist_id=?", (artist,))] == [plex]
+        assert _titles(conn, plex) == _SONGS
+
+
+# ── #1985: removing one copy of a song leaves no "missing" track behind ──────
+
+def _two_copies(conn, artist_name="Copies"):
+    artist = _artist(conn, artist_name)
+    album = _album(conn, artist, "Album")
+    ids = []
+    for folder, plays in (("old", 3), ("new", 4)):
+        track = conn.execute(
+            "INSERT INTO lib2_tracks(album_id, title, track_number, disc_number, play_count) "
+            "VALUES(?, 'Song', 1, 1, ?)", (album, plays)).lastrowid
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
+                     (track, f"/m/{artist_name}/{folder}/01 - Song.flac"))
+        conn.execute("INSERT INTO lib2_media_server_mappings(entity_type, entity_id, server_source, "
+                     "server_id) VALUES('track', ?, 'plex', ?)", (track, f"{artist_name}-{folder}"))
+        ids.append(track)
+    conn.commit()
+    return album, ids
+
+
+def test_a_removed_copys_row_folds_into_the_copy_that_is_left(repair_db):
+    """two copies of a song in one album are two rows. removing one left its
+    row as a missing track: 1 of 2, on an album with one song."""
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    album, (old, new) = _two_copies(conn)
+    conn.execute("UPDATE lib2_track_files SET file_state='deleted' WHERE track_id=?", (old,))
+
+    assert fold_fileless_twins(conn, [old]) == 1
+
+    assert [r[0] for r in conn.execute("SELECT id FROM lib2_tracks WHERE album_id=?", (album,))] == [new]
+    assert conn.execute("SELECT play_count FROM lib2_tracks WHERE id=?", (new,)).fetchone()[0] == 7
+    # the removed file stays on record; no mapping is left naming the gone row
+    assert {(r[0], r[1]) for r in conn.execute(
+        "SELECT path, file_state FROM lib2_track_files WHERE track_id=?", (new,))} == {
+        ("/m/Copies/old/01 - Song.flac", "deleted"), ("/m/Copies/new/01 - Song.flac", "active")}
+    assert conn.execute("SELECT COUNT(*) FROM lib2_media_server_mappings "
+                        "WHERE entity_type='track' AND entity_id=?", (old,)).fetchone()[0] == 0
+    assert fold_fileless_twins(conn, [old, new]) == 0
+
+
+def test_a_missing_track_with_no_twin_stays_missing(repair_db):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    artist = _artist(conn, "Real Gap")
+    album = _album(conn, artist, "Album")
+    first = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                         "VALUES(?, 'One', 1)", (album,)).lastrowid
+    second = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                          "VALUES(?, 'Two', 2)", (album,)).lastrowid
+    # same number, another song: a deluxe disc numbered from 1 again
+    other = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number) "
+                         "VALUES(?, 'Bonus', 1)", (album,)).lastrowid
+    for track in (second, other):
+        conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
+                     (track, f"/m/{track}.flac"))
+    conn.commit()
+    assert fold_fileless_twins(conn, [first]) == 0
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (album,)).fetchone()[0] == 3
+
+
+def test_a_track_that_still_has_a_file_is_never_folded(repair_db):
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    album, ids = _two_copies(conn, "Both Kept")
+    assert fold_fileless_twins(conn, ids) == 0
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (album,)).fetchone()[0] == 2
+
+
+def test_three_copies_with_two_left_keep_their_rows(repair_db):
+    """two rows still hold a file: which one the leftover belongs to is not
+    ours to guess."""
+    from core.library2.dedup_repair import fold_fileless_twins
+    _legacy_db, conn = repair_db
+    album, (old, new) = _two_copies(conn, "Three")
+    third = conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, disc_number) "
+                         "VALUES(?, 'Song', 1, 1)", (album,)).lastrowid
+    conn.commit()
+    assert fold_fileless_twins(conn, [third]) == 0

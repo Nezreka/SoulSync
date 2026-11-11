@@ -747,6 +747,40 @@ def _fold_shared_files_once(database: Any, conn: Any) -> Dict[str, int]:
     return stats
 
 
+def _fold_server_twins_once(database: Any, conn: Any, *,
+                            should_stop: Optional[Callable[[], bool]] = None) -> Dict[str, int]:
+    """#1985: the same release listed by several media servers, folded once
+    per finished import for installs that imported before the fold existed.
+    commits artist by artist; a stopped run is not marked and picks up on the
+    next start."""
+    state = get_state(database)
+    if state.get("status") != "done":
+        return {}
+    key = f"{state.get('finished_at') or ''}|server-twins"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
+                 "(import_finished_at TEXT PRIMARY KEY, "
+                 "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
+    if conn.execute(f"SELECT 1 FROM {_SHARED_FILES_MARKER} WHERE import_finished_at=?",
+                    (key,)).fetchone():
+        return {}
+    from core.library2.dedup_repair import fold_server_twins
+    stats = fold_server_twins(conn, commit=conn.commit, should_stop=should_stop)
+    if should_stop and should_stop():
+        conn.commit()
+        return stats
+    conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
+                 "VALUES(?, ?)", (key, int(stats.get("server_twins_folded") or 0)))
+    conn.commit()
+    if stats.get("server_twin_albums_folded"):
+        # wishlist un-mirrors the album folds queued
+        try:
+            from core.library2.mirror_outbox import drain
+            drain(database)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("post-fold outbox drain failed: %s", exc)
+    return stats
+
+
 def run_deferred_backfills(database: Any, *,
                            should_stop: Optional[Callable[[], bool]] = None,
                            batch_size: int = 500) -> Dict[str, Any]:
@@ -782,6 +816,9 @@ def run_deferred_backfills(database: Any, *,
             )
             # Installs migrated before one-file-one-track also converge here.
             stats["shared_files"] = _fold_shared_files_once(database, conn)
+            conn.commit()
+            stats["server_twins"] = _fold_server_twins_once(
+                database, conn, should_stop=should_stop)
             # guests an older twin merge dropped from the kept album, once
             # (review 5 W2-WE-1)
             try:

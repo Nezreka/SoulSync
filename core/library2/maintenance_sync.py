@@ -788,6 +788,16 @@ def sync_repair_change(
                     mirrored += mirror_projected_tracks_wishlist(
                         database, conn, sorted(track_ids), profile_id=profile_id)
 
+    if deleting and links["tracks"]:
+        # a removed copy's row is not a missing track (#1985)
+        try:
+            from core.library2.dedup_repair import fold_fileless_twins
+            with closing(database._get_connection()) as conn:
+                if fold_fileless_twins(conn, links["tracks"]):
+                    conn.commit()
+        except Exception as exc:  # noqa: BLE001 - the removal itself is done
+            logger.warning("leftover track rows not folded after a removal: %s", exc)
+
     with closing(database._get_connection()) as conn:
         events = _record_events(
             conn,

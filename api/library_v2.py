@@ -4705,6 +4705,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # whole queue first, so behind a backlog the delete hung
         from core.library2.mirror_outbox import drain
         drain(db, ids=outbox_ids)
+        # a removed copy's row is not a missing track (#1985)
+        try:
+            from core.library2.dedup_repair import fold_fileless_twins
+            with closing(db._get_connection()) as conn:
+                if fold_fileless_twins(conn, ids):
+                    conn.commit()
+        except Exception as exc:  # noqa: BLE001 - the removal itself is done
+            logger.warning("leftover track rows not folded after a removal: %s", exc)
 
     @_route(
         "/api/library/v2/<entity>/<int:eid>/file-remove",
