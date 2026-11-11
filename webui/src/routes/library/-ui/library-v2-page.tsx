@@ -11880,7 +11880,7 @@ export function TrackMetadataGapsCell({
     : !canWrite
       ? 'Click to inspect the file tags.'
       : checks?.edition === 'unknown'
-        ? 'Select the release in Re-identify before repairing track numbers.'
+        ? 'More than one edition of this release is on record, so track numbers can’t be repaired yet. Pick the release with Re-identify, in this track’s ⋯ menu.'
         : 'Click to repair the stored metadata findings and verify the file again.';
   return (
     <Tooltip.Root>

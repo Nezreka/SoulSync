@@ -246,6 +246,17 @@ export function useFindingFix({
   );
 }
 
+/** an error that tells you to use Re-identify, on a finding that names a
+ *  track: the modal can be opened from the finding itself */
+export function needsReidentify(finding: RepairFinding): boolean {
+  return (
+    finding.status === 'pending' &&
+    finding.entity_type === 'track' &&
+    finding.entity_id != null &&
+    /re-identify/i.test(finding.last_error || '')
+  );
+}
+
 /** The re-identify modal for a suspect_album_tag track finding. Applying it
  *  settles the finding, so it is dismissed. */
 export function ReidentifyFindingModal({
@@ -258,13 +269,15 @@ export function ReidentifyFindingModal({
   onClose: () => void;
 }) {
   const d = (finding.details as Record<string, any>) || {};
+  // a re-tag finding keeps its names on the library's side of the comparison
+  const ref = (d.validation?.reference as Record<string, any>) || {};
   return (
     <ReidentifyModal
       trackId={finding.entity_id}
-      trackTitle={String(d.track_title || finding.title || '')}
-      artistName={String(d.artist_name || '')}
-      albumTitle={String(d.album_title || '')}
-      imageUrl={String(d.album_thumb_url || '')}
+      trackTitle={String(d.track_title || ref.title || d.title || finding.title || '')}
+      artistName={String(d.artist_name || ref.artist_name || d.artist || '')}
+      albumTitle={String(d.album_title || ref.album_title || d.album || '')}
+      imageUrl={String(d.album_thumb_url || finding.album_thumb_url || '')}
       initialQuery={String(d.reidentify_query || '')}
       onApplied={onApplied}
       onClose={onClose}

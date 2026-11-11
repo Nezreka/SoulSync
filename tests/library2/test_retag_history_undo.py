@@ -117,3 +117,55 @@ def test_restore_removes_a_tag_that_was_empty_before(library):
     assert read_number_pair(audio, 'track') == (7, None)
     # a source id has no clean removal here, so it is named rather than guessed at
     assert result['kept_fields'] == ['spotify_track_id']
+
+
+# ── #2043: an unknown edition holds the numbers, not the whole fix ───────────
+
+def _retag_details(checks):
+    return {'validation': {'file_id': 1, 'track_id': 7, 'album_id': 1, 'source': 'scan',
+                           'checks': {**checks, 'edition': 'unknown'}}}
+
+
+def test_an_unknown_edition_still_writes_the_tags_that_do_not_depend_on_it(library):
+    """the fix refused outright ("Select the release edition in Re-identify
+    before writing track numbers") for a finding that also wanted the album
+    tag, and Re-identify was nowhere on the page it pointed at."""
+    db, path, config = library
+    audio = FLAC(path)
+    audio['genre'], audio['tracknumber'] = ['Krautrock'], ['3']
+    audio.save()
+    worker = _worker(db, config)
+    result = worker._fix_library_retag('track', 'lib2:7', str(path), _retag_details(
+        {'genre': 'mismatch', 'track_number': 'mismatch'}))
+    assert result['success'] is True, result
+    after = FLAC(path)
+    assert after['genre'] == ['Rock']
+    # the number is left exactly as it was, and the answer says so
+    assert after['tracknumber'] == ['3']
+    assert 'Re-identify' in result['message']
+    assert {f['key'] for f in result['changes'][0]['fields']} == {'genre'}
+
+
+def test_a_finding_about_nothing_but_the_numbers_waits_and_says_what_to_do(library):
+    from core.repair_worker import RETAG_NEEDS_EDITION
+    db, path, config = library
+    audio = FLAC(path)
+    audio['tracknumber'] = ['3']
+    audio.save()
+    result = _worker(db, config)._fix_library_retag('track', 'lib2:7', str(path), _retag_details(
+        {'track_number': 'mismatch', 'total_tracks': 'missing'}))
+    assert result == {'success': False, 'error': RETAG_NEEDS_EDITION}
+    assert 'Re-identify' in RETAG_NEEDS_EDITION
+    assert FLAC(path)['tracknumber'] == ['3']
+
+
+def test_a_known_edition_writes_the_numbers_as_before(library):
+    db, path, config = library
+    audio = FLAC(path)
+    audio['tracknumber'] = ['3']
+    audio.save()
+    details = _retag_details({'track_number': 'mismatch'})
+    details['validation']['checks']['edition'] = 'correct'
+    result = _worker(db, config)._fix_library_retag('track', 'lib2:7', str(path), details)
+    assert result['success'] is True, result
+    assert FLAC(path)['tracknumber'] == ['7']

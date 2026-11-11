@@ -2335,6 +2335,35 @@ describe('the detail renderer', () => {
     expect(undone).toHaveLength(1);
   });
 
+  it('an error that says to use Re-identify opens it from the finding itself', async () => {
+    routes({
+      [FINDINGS]: page([
+        finding({
+          id: 1,
+          finding_type: 'library_retag',
+          entity_type: 'track',
+          entity_id: 'lib2:7',
+          last_error:
+            'More than one edition of this release is on record. Pick the release this track is from with Re-identify, then apply again.',
+        }),
+        finding({
+          id: 2,
+          finding_type: 'library_retag',
+          entity_type: 'track',
+          entity_id: 'lib2:8',
+          last_error: 'No source had this track',
+        }),
+      ]),
+    });
+    await renderList();
+    await flush();
+    const cards = [...document.querySelectorAll('.repair-finding-card')] as HTMLElement[];
+    // the fix it names is right there, not on another page (#2043)
+    expect(within(cards[0]).getByRole('button', { name: 'Re-identify…' })).toBeTruthy();
+    // an error about something else gets no such button
+    expect(within(cards[1]).queryByRole('button', { name: 'Re-identify…' })).toBeNull();
+  });
+
   it('an open finding offers no undo', async () => {
     const detail = await openDetail({
       finding_type: 'library_retag',

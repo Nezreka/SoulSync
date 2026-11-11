@@ -688,6 +688,14 @@ def _retag_preview_rows(details: dict, tags: Optional[dict]) -> Optional[list]:
     return rows
 
 
+#: why a re-tag can't write track numbers yet. the Tools page offers
+#: Re-identify beside any error that names it, so keep the word in.
+RETAG_NEEDS_EDITION = (
+    "More than one edition of this release is on record, so the track number can't be "
+    "trusted yet. Pick the release this track is from with Re-identify, then apply again."
+)
+
+
 def attach_retag_preview(conn, items: List[dict]) -> None:
     """Give each open re-tag finding ``preview``: every tag Apply Tags would
     change, with the value in the file beside the value the library holds.
@@ -4756,9 +4764,22 @@ class RepairWorker:
             # the whole tag set (scan_finding_options)
             options = retag.scan_finding_options(details)
         selected = options.get('fields') if options else None
-        writes_numbers = selected is None or bool(set(selected) & {'track_number', 'disc_number', 'total_tracks', 'total_discs', 'track_count'})
+        numbers = {'track_number', 'disc_number', 'total_tracks', 'total_discs', 'track_count'}
+        writes_numbers = selected is None or bool(set(selected) & numbers)
+        numbers_held = False
         if writes_numbers and validation.get('checks', {}).get('edition') == 'unknown':
-            return {'success': False, 'error': 'Select the release edition in Re-identify before writing track numbers'}
+            # more than one edition of this release is on record and the track
+            # sits at a different number on each, so its number can't be
+            # written yet. that used to refuse the whole fix, album and artist
+            # tags included, and point at a Re-identify nobody could find
+            # (#2043). what doesn't depend on the edition is written; only a
+            # finding that is about nothing but the numbers has to wait
+            rest = [f for f in (selected or []) if f not in numbers]
+            if not rest:
+                return {'success': False, 'error': RETAG_NEEDS_EDITION}
+            options = {**options, 'fields': rest}
+            selected = rest
+            numbers_held = True
         release = details.get('_fix_action') == 'overwrite_manual'
         cover_enabled = (options is None or options['cover_art'] != 'skip') and (selected is None or 'cover_art' in selected)
 
@@ -4819,6 +4840,9 @@ class RepairWorker:
             message += f" (kept your {', '.join(kept)})"
         elif release and details.get('manual_fields'):
             message += f" (overwrote your {', '.join(details['manual_fields'])})"
+        if numbers_held:
+            message += ('. Track numbers were left as they are: pick this track\'s release with '
+                        'Re-identify and they can be written too')
         return {'success': True, 'action': 'applied_tags', 'message': message,
                 'changes': stats.get('changes') or []}
 

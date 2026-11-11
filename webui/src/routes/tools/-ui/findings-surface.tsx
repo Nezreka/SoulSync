@@ -88,6 +88,7 @@ import { FindingArt } from './finding-art';
 import { FindingDetail } from './finding-detail';
 import {
   ReidentifyFindingModal,
+  needsReidentify,
   TYPE_ACOUSTID,
   TYPE_BACKFILL,
   TYPE_DEAD,
@@ -1709,6 +1710,7 @@ export function FindingsSurface({
                   onDismiss={dismissOne}
                   onReopen={reopenOne}
                   onUndo={(target) => void undoOne(target)}
+                  onReidentify={setReidentifyingFinding}
                   onKeepDuplicate={(findingId, trackId) => void keepDuplicate(findingId, trackId)}
                   onApplyCoverArt={(findingId, target) => void applyCoverArt(findingId, target)}
                   onInspectRedownload={handleInspectRedownload}
@@ -2042,7 +2044,12 @@ export function FindingsSurface({
         <ReidentifyFindingModal
           finding={reidentifyingFinding}
           onApplied={async () => {
-            await dismissOne(reidentifyingFinding.id);
+            // a suspect-album finding is settled by the re-identify. a re-tag
+            // finding is not: the track is re-filed and the next scan closes
+            // it, and a dismiss would silence that file for good
+            if (reidentifyingFinding.finding_type !== TYPE_RETAG) {
+              await dismissOne(reidentifyingFinding.id);
+            }
           }}
           onClose={() => {
             setReidentifyingFinding(null);
@@ -2165,6 +2172,7 @@ function FindingCard({
   onKeepDuplicate,
   onApplyCoverArt,
   onUndo,
+  onReidentify,
   onInspectRedownload,
 }: {
   finding: RepairFinding;
@@ -2187,6 +2195,7 @@ function FindingCard({
   onKeepDuplicate: (findingId: number, trackId: string) => void;
   onApplyCoverArt: (findingId: number, target: 'album' | 'artist') => void;
   onUndo: (finding: RepairFinding) => void;
+  onReidentify: (finding: RepairFinding) => void;
   onInspectRedownload?: (finding: RepairFinding) => void;
 }) {
   const details = finding.details || {};
@@ -2336,6 +2345,17 @@ function FindingCard({
         <div className="repair-finding-error-banner" role="note">
           <span className="repair-finding-error-title">Last try failed</span>
           <span className="repair-finding-error-text">{finding.last_error}</span>
+          {/* an error that says "use Re-identify" opens it right here. it used
+              to send you to a menu on another page (#2043) */}
+          {needsReidentify(finding) ? (
+            <button
+              type="button"
+              className="repair-finding-btn undo"
+              onClick={() => onReidentify(finding)}
+            >
+              Re-identify…
+            </button>
+          ) : null}
         </div>
       ) : null}
       <div
