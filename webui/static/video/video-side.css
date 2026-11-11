@@ -4260,8 +4260,14 @@ body[data-side="video"] .settings-group[data-svc-side="music"].svc-side-active #
    and both edges get cut off (SeadogsBooty) */
 .vdl-ep-search { display: grid; grid-template-rows: 0fr; grid-template-columns: minmax(0, 1fr); overflow: hidden;
     transition: grid-template-rows var(--dur-slow) var(--ease-out); }
-.vdl-ep-search > * { min-height: 0; }
-.vdl-ep-srcs { display: flex; flex-direction: column; gap: 7px; padding: 3px 14px 12px 42px; }
+/* the row closes to 0fr, but only as far as its child will shrink. the
+   child's own top and bottom padding can't shrink, so a closed episode kept
+   15px of it with the first source's edge showing through (#2040). the space
+   is margin on what's inside now, and the child clips it */
+.vdl-ep-search > * { min-height: 0; overflow: hidden; }
+.vdl-ep-srcs { display: flex; flex-direction: column; gap: 7px; padding: 0 14px 0 42px; }
+.vdl-ep-srcs > :first-child { margin-top: 3px; }
+.vdl-ep-srcs > :last-child { margin-bottom: 12px; }
 .vdl-src--mini { padding: 8px 11px; border-radius: 0; animation: none; }
 .vdl-src--mini .vdl-src-icon { width: 30px; height: 30px; border-radius: 0; }
 .vdl-src--mini .vdl-src-emoji { font-size: 15px; }
