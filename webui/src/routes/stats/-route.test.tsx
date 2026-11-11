@@ -265,7 +265,7 @@ describe('stats route', () => {
   });
 
   it('plays an album from its cover, loading the tracks at click time', async () => {
-    const playTrackList = vi.fn(async () => {});
+    const playTrackList = vi.fn(async (..._args: unknown[]) => {});
     window.playTrackList = playTrackList as never;
     let fetched = 0;
     server.use(
