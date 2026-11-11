@@ -175,8 +175,11 @@ def fill_album_metadata_gaps(conn, album_id: int) -> Optional[str]:
     is known, gap fill never searches for a replacement release in another
     provider; only that edition's qualified IDs are eligible.
     """
+    from core.library2 import locks
     from core.library2.native_enrich import enrich_native_entity_for_service
 
+    if locks.blocks("album", album_id, "metadata", "Metadata gap fill", conn=conn):
+        return None
     ids = provider_adapters.album_refresh_source_ids(conn, album_id)
     for source in provider_adapters.configured_entity_source_order("album", ids):
         if ids and source not in ids:

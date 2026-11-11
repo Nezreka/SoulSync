@@ -545,6 +545,9 @@ class RepairJob(ABC):
     # exhaustive manifest so a newly registered job cannot silently omit it.
     data_basis: str = ''
     library_v2_effects: frozenset[str] = frozenset()
+    # #2046: what a reviewed and locked album means to this job. Assigned by
+    # the registry from JOB_LOCK_SCOPE, which every job has to be in.
+    lock_scope: str = 'report'
     default_enabled: bool = False
     default_interval_hours: int = 24
     default_settings: Dict[str, Any] = {}

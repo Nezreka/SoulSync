@@ -1776,7 +1776,9 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                             letter=(request.args.get("letter") or "all").lower(),
                                             source_filter=request.args.get("source", ""),
                                             quality_filter=quality if quality == "upgradable" else "",
-                                            include_upgradable="upgradable" in include)
+                                            include_upgradable="upgradable" in include,
+                                            # #2046: reviewed | unreviewed
+                                            review_filter=request.args.get("review", ""))
         for a in artists:
             _apply_artwork_urls(a, "artist")
         total_pages = (total + limit - 1) // limit if limit else 0
@@ -5205,6 +5207,184 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return _fail("Track not found", 404)
             history = scoped_history(conn, scope="track", entity_id=track_id, limit=limit)
         return jsonify({"success": True, "history": history})
+
+    # ── #2046: reviewed and locked ───────────────────────────────────────────
+
+    def _lock_state(conn, entity_type, entity_id):
+        """Everything the padlock's sheet shows for one album or artist."""
+        from core.library2 import locks
+
+        table = "lib2_albums" if entity_type == "album" else "lib2_artists"
+        columns = {str(r[1]) for r in conn.execute(f"PRAGMA table_info({table})")}
+        wanted = [c for c in ("art_locked", "genres_locked", "canonical_locked") if c in columns]
+        row = conn.execute(
+            f"SELECT id{''.join(', ' + c for c in wanted)} FROM {table} WHERE id=?",
+            (int(entity_id),)).fetchone()
+        if row is None:
+            return None
+        state = locks.get_lock(conn, entity_type, entity_id) or locks.unlocked_state(
+            entity_type, entity_id)
+        # the single-field locks that were here before the padlock, on the same sheet
+        state["field_locks"] = {
+            "artwork": bool(row["art_locked"]) if "art_locked" in wanted else False,
+            "genres": bool(row["genres_locked"]) if "genres_locked" in wanted else False,
+            "edition": bool(row["canonical_locked"]) if "canonical_locked" in wanted else False,
+        }
+        state["scope_options"] = [{"scope": scope, "label": locks.SCOPE_LABELS[scope]}
+                                  for scope in locks.SCOPES]
+        state["skips"] = locks.skips(conn, entity_type, entity_id) if state["locked"] else []
+        state["can_lock"] = _is_admin()
+        if entity_type == "artist":
+            state["review"] = locks.artist_review_counts(conn, entity_id)
+        return state
+
+    def _lock_changed():
+        """A lock or unlock changes what the enrichment queue may offer."""
+        try:
+            from core.library2.worker_queue import invalidate_pending_cache
+            invalidate_pending_cache()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("enrichment queue not refreshed after a lock change: %s", exc)
+
+    def _lock_route(entity_type, entity_id):
+        from core.library2 import locks
+
+        if request.method == "GET":
+            with closing(_conn()) as conn:
+                state = _lock_state(conn, entity_type, entity_id)
+            if state is None:
+                return _fail(f"{entity_type.title()} not found", 404)
+            return jsonify({"success": True, "lock": state})
+        if not _is_admin():
+            return _fail("Locking needs the admin profile", 403)
+        with closing(_conn()) as conn:
+            try:
+                if request.method == "DELETE":
+                    if conn.execute(
+                            f"SELECT 1 FROM lib2_{entity_type}s WHERE id=?",
+                            (int(entity_id),)).fetchone() is None:
+                        return _fail(f"{entity_type.title()} not found", 404)
+                    locks.clear_lock(conn, entity_type, entity_id)
+                else:
+                    body = request.get_json(silent=True) or {}
+                    scopes = body.get("scopes")
+                    if scopes is not None and not isinstance(scopes, list):
+                        return _fail("scopes must be a list")
+                    locks.set_lock(conn, entity_type, entity_id, scopes,
+                                   profile_id=_profile(),
+                                   review=body.get("review") is not False)
+                    if entity_type == "artist" and body.get("albums") is True:
+                        # "and all current albums": the ones with files, as they
+                        # stand today. a later release starts open
+                        album_ids = [r[0] for r in conn.execute(
+                            "SELECT al.id FROM lib2_albums al WHERE al.primary_artist_id=? "
+                            "AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f "
+                            "ON f.track_id=t.id WHERE t.album_id=al.id "
+                            "AND COALESCE(f.file_state,'active')='active')",
+                            (int(entity_id),))]
+                        locks.set_many(conn, "album", album_ids, scopes, profile_id=_profile())
+                conn.commit()
+            except locks.LockError as exc:
+                conn.rollback()
+                missing = "not found" in str(exc)
+                return _fail(str(exc), 404 if missing else 400)
+            state = _lock_state(conn, entity_type, entity_id)
+        _lock_changed()
+        return jsonify({"success": True, "lock": state})
+
+    @_route("/api/library/v2/albums/<int:album_id>/lock", methods=["GET", "PUT", "DELETE"])
+    def lib2_album_lock(album_id):
+        """The album's lock: read it, set it (``{"scopes": [...]}``, every
+        scope when left out; ``"review": false`` changes the switches without
+        counting as a new review), or remove it. Changing it is admin only."""
+        return _lock_route("album", album_id)
+
+    @_route("/api/library/v2/artists/<int:artist_id>/lock", methods=["GET", "PUT", "DELETE"])
+    def lib2_artist_lock(artist_id):
+        """The artist's lock. ``"albums": true`` on PUT also locks every album
+        of theirs that has files today."""
+        return _lock_route("artist", artist_id)
+
+    @_route("/api/library/v2/artists/<int:artist_id>/review")
+    def lib2_artist_review(artist_id):
+        """Which of an artist's albums are reviewed, and the next one that is not."""
+        from core.library2 import locks
+
+        with closing(_conn()) as conn:
+            if conn.execute("SELECT 1 FROM lib2_artists WHERE id=?",
+                            (artist_id,)).fetchone() is None:
+                return _fail("Artist not found", 404)
+            rows = conn.execute(
+                """SELECT al.id, lk.locked_at, lk.snapshot
+                     FROM lib2_albums al
+                     LEFT JOIN lib2_entity_locks lk
+                            ON lk.entity_type='album' AND lk.entity_id=al.id
+                    WHERE al.primary_artist_id=?
+                      AND EXISTS (SELECT 1 FROM lib2_tracks t JOIN lib2_track_files f
+                                   ON f.track_id=t.id WHERE t.album_id=al.id
+                                     AND COALESCE(f.file_state,'active')='active')
+                    ORDER BY COALESCE(al.release_date, CAST(al.year AS TEXT), ''), al.id""",
+                (artist_id,)).fetchall()
+            reviewed, changed, open_ids = [], [], []
+            for row in rows:
+                if row["locked_at"] is None:
+                    open_ids.append(int(row["id"]))
+                    continue
+                reviewed.append(int(row["id"]))
+                if row["snapshot"] and locks.album_fingerprint(conn, row["id"]) != row["snapshot"]:
+                    changed.append(int(row["id"]))
+        try:
+            after = int(request.args.get("after") or 0)
+        except (TypeError, ValueError):
+            after = 0
+        # the next one after the album being looked at, wrapping to the first
+        following = [album_id for album_id in open_ids if album_id != after]
+        if after in [int(r["id"]) for r in rows]:
+            order = [int(r["id"]) for r in rows]
+            later = [a for a in order[order.index(after) + 1:] if a in open_ids]
+            following = later + [a for a in following if a not in later]
+        return jsonify({
+            "success": True, "albums": len(rows), "reviewed": len(reviewed),
+            "reviewed_album_ids": reviewed, "changed_album_ids": changed,
+            "next_album_id": following[0] if following else None,
+        })
+
+    @_route("/api/library/v2/locks", methods=["GET", "POST"])
+    def lib2_locks():
+        """GET: every locked album and artist id (for marks on cards).
+        POST ``{"entity_type", "ids", "locked", "scopes"}``: lock or unlock a
+        selection. Admin only."""
+        from core.library2 import locks
+
+        if request.method == "GET":
+            with closing(_conn()) as conn:
+                held = locks.lock_map(conn)
+            return jsonify({
+                "success": True,
+                "albums": sorted(i for (kind, i) in held if kind == "album"),
+                "artists": sorted(i for (kind, i) in held if kind == "artist"),
+            })
+        if not _is_admin():
+            return _fail("Locking needs the admin profile", 403)
+        body = request.get_json(silent=True) or {}
+        entity_type = str(body.get("entity_type") or "album")
+        ids = body.get("ids")
+        if entity_type not in locks.ENTITY_TYPES:
+            return _fail("entity_type must be album or artist")
+        if not isinstance(ids, list) or not ids or len(ids) > 5000:
+            return _fail("ids must be a list of 1 to 5000 ids")
+        scopes = body.get("scopes")
+        with closing(_conn()) as conn:
+            try:
+                done = locks.set_many(conn, entity_type, ids, scopes,
+                                      locked=body.get("locked") is not False,
+                                      profile_id=_profile())
+                conn.commit()
+            except locks.LockError as exc:
+                conn.rollback()
+                return _fail(str(exc))
+        _lock_changed()
+        return jsonify({"success": True, "updated": done})
 
     @_route("/api/library/v2/albums/<int:album_id>/history")
     def lib2_album_history(album_id):

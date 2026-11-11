@@ -221,7 +221,10 @@ def active_file_subjects(
                 _display_subject_fields(subject, selected, album_subject=False)
             _compat_provider_fields(subject)
             subjects.append(subject)
-        return subjects
+        # #2046: a job that changes tags, art, files or the match never sees
+        # the files of an album locked against that
+        from core.library2.locks import drop_locked_subjects
+        return drop_locked_subjects(conn, subjects)
 
 
 def active_album_subjects(
@@ -318,7 +321,8 @@ def active_album_subjects(
                 _display_subject_fields(subject, selected, album_subject=True)
             _compat_provider_fields(subject)
             subjects.append(subject)
-        return subjects
+        from core.library2.locks import drop_locked_subjects
+        return drop_locked_subjects(conn, subjects)
 
 
 def subject_details(subject: Mapping[str, Any]) -> Dict[str, Any]:

@@ -103,6 +103,10 @@ def _json_ids(ids) -> str:
     return json.dumps([int(i) for i in ids])
 
 
+# #2046: what a bulk fix answers for a finding on something reviewed and locked
+LOCKED_FIX_MESSAGE = ('This {what} is locked, so a bulk fix left it alone. '
+                      'Fix it from the finding itself, or unlock it.')
+
 DESTRUCTIVE_FINDING_TYPES = frozenset({
     'orphan_file',            # default 'staging' MOVES the file; 'delete' removes it
     'dead_file',              # 'remove' drops the library row + file
@@ -699,6 +703,28 @@ RETAG_NEEDS_EDITION = (
     "More than one edition of this release is on record, so the track number can't be "
     "trusted yet. Pick the release this track is from with Re-identify, then apply again."
 )
+
+
+def attach_finding_locks(conn, items: List[dict]) -> None:
+    """#2046: mark each open finding on a reviewed and locked album or artist
+    with ``locked``, read live so it follows the lock, not the day the finding
+    was filed."""
+    try:
+        from core.library2 import locks
+        from core.repair_jobs import job_lock_scope
+
+        if not locks.lock_map(conn):
+            return
+        for item in items:
+            if item.get('status') != 'pending':
+                continue
+            held = locks.finding_lock(
+                conn, job_lock_scope(item.get('job_id')), item.get('entity_type'),
+                item.get('entity_id'), item.get('file_path'), item.get('details'))
+            if held:
+                item['locked'] = {'entity_type': held[0], 'entity_id': held[1]}
+    except Exception as e:
+        logger.debug("finding locks not attached: %s", e)
 
 
 def attach_retag_preview(conn, items: List[dict]) -> None:
@@ -1741,7 +1767,12 @@ class RepairWorker:
                 # every library -- explicitly, because the request-less default
                 # would be the shared one only.
                 from core.library_scope import library_scope
-                with library_scope((run_scope or {}).get('library')):
+                from core.library2 import locks
+                # #2046: a job is automation however it was started, and it
+                # says its name so a locked album can show what was kept away
+                with library_scope((run_scope or {}).get('library')), \
+                        locks.automation(), \
+                        locks.doing(job.display_name, scope=getattr(job, 'lock_scope', None)):
                     result = job.scan(context)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e, exc_info=True)
@@ -1968,6 +1999,31 @@ class RepairWorker:
         age_days = (datetime.now(timezone.utc) - dt).total_seconds() / 86400
         return age_days < RESOLVED_RECURRENCE_GRACE_DAYS
 
+    def _job_label(self, job_id: str) -> str:
+        job = (getattr(self, '_jobs', None) or {}).get(job_id)
+        return getattr(job, 'display_name', '') or str(job_id).replace('_', ' ').title()
+
+    def _finding_is_locked_away(self, conn, job_id, entity_type, entity_id,
+                                file_path, details) -> bool:
+        """True when the finding's job changes something its album or artist
+        has locked. Remembered, so the album can show what was kept away."""
+        try:
+            from core.library2 import locks
+            from core.repair_jobs import job_lock_scope
+
+            scope = job_lock_scope(job_id)
+            if scope not in locks.SCOPES:
+                return False
+            held = locks.finding_lock(conn, scope, entity_type, entity_id, file_path, details)
+            if not held:
+                return False
+            with locks.automation(), locks.doing(self._job_label(job_id)):
+                locks.blocks(held[0], held[1], held[2], self._job_label(job_id), conn=conn)
+            return True
+        except Exception as e:
+            logger.debug("lock check for a finding skipped: %s", e)
+            return False
+
     def _create_finding(self, job_id: str, finding_type: str, severity: str,
                         entity_type: str, entity_id: str, file_path: str,
                         title: str, description: str, details: dict = None,
@@ -2003,6 +2059,13 @@ class RepairWorker:
         try:
             conn = self.db._get_connection()
             cursor = conn.cursor()
+
+            # #2046: a job that would change something a person reviewed and
+            # locked files nothing about it. A job that reports damage still
+            # does; its fix then waits for a person (see fix_finding).
+            if self._finding_is_locked_away(conn, job_id, entity_type, entity_id,
+                                            file_path, details):
+                return False
 
             enriched_details = details or {}
             try:
@@ -2404,6 +2467,7 @@ class RepairWorker:
 
             attach_finding_art(conn, items)
             attach_retag_preview(conn, items)
+            attach_finding_locks(conn, items)
             return {'items': items, 'total': total, 'page': page, 'limit': limit}
 
         except Exception as e:
@@ -3321,6 +3385,26 @@ class RepairWorker:
             if conn:
                 conn.close()
 
+    def _locked_fix_refusal(self, job_id, entity_type, entity_id, file_path, details):
+        """The answer a bulk fix gets for a finding on a locked album or
+        artist, or None when nothing is locked."""
+        try:
+            from contextlib import closing
+            from core.library2 import locks
+            from core.repair_jobs import job_lock_scope
+
+            with closing(self.db._get_connection()) as conn:
+                held = locks.finding_lock(conn, job_lock_scope(job_id), entity_type,
+                                          entity_id, file_path, details)
+                if not held:
+                    return None
+                with locks.automation():
+                    locks.blocks(held[0], held[1], held[2], self._job_label(job_id), conn=conn)
+        except Exception as e:
+            logger.debug("lock check for a fix skipped: %s", e)
+            return None
+        return {'success': False, 'locked': True, 'error': LOCKED_FIX_MESSAGE.format(what=held[0])}
+
     def fix_finding(self, finding_id: int, fix_action: str = None, explicit: bool = False) -> dict:
         """Execute the appropriate fix action for a finding, then mark it resolved.
 
@@ -3401,8 +3485,20 @@ class RepairWorker:
             if finding_type == 'expired_download' and entity_type == 'track':
                 entity_type = 'download'
 
-            # Dispatch fix by finding type
-            result = self._execute_fix(finding_type, entity_type, entity_id, file_path, details)
+            # #2046: a bulk run never fixes something a person reviewed and
+            # locked. The finding stays open and says why; the same fix asked
+            # for on the finding itself goes through.
+            from core.library2 import locks
+            locked_result = None if explicit else self._locked_fix_refusal(
+                job_id, entity_type, entity_id, file_path, details)
+            if locked_result is not None:
+                result = locked_result
+            else:
+                with (locks.user_action() if explicit else locks.automation()), \
+                        locks.doing(self._job_label(job_id)):
+                    # Dispatch fix by finding type
+                    result = self._execute_fix(finding_type, entity_type, entity_id,
+                                               file_path, details)
             # what the fix changed stays on the row, not in the reply
             changes = result.pop('changes', None)
 

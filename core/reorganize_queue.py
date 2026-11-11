@@ -81,6 +81,10 @@ class QueueItem:
     # id, or None for "each library that holds files of it". Captured when the
     # item is queued, while the request (and an admin's pick) still exists.
     library: Any = None
+    # #2046: a person asked for this one album. the worker thread has no
+    # request of its own, so the item carries who it is working for; a locked
+    # album is only moved for a person.
+    by_user: bool = False
     status: str = 'queued'              # queued | running | done | failed | cancelled
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
@@ -105,6 +109,7 @@ class QueueItem:
             'artist_id': self.artist_id,
             'artist_name': self.artist_name,
             'library': self.library,
+            'by_user': self.by_user,
             'enqueued_at': self.enqueued_at,
             'started_at': self.started_at,
             'finished_at': self.finished_at,
@@ -181,6 +186,7 @@ class ReorganizeQueue:
 
             {'queued': True, 'queue_id': '...', 'position': N}
             {'queued': False, 'reason': 'already_queued', 'queue_id': '...'}
+            {'queued': False, 'reason': 'locked'}   # a job, a locked album
 
         Dedupe: if this album is already in `queued` or `running`
         status, returns the existing entry's queue_id rather than
@@ -188,6 +194,9 @@ class ReorganizeQueue:
         items don't block re-enqueue (user retried after a failure).
         """
         library = _library_for_new_item()
+        by_user = _acting_as_user()
+        if not by_user and _album_locked(album_id, record=True):
+            return {'queued': False, 'reason': 'locked'}
         with self._cond:
             for existing in self._items:
                 if (existing.album_id == album_id and _covers(existing.library, library)
@@ -206,6 +215,7 @@ class ReorganizeQueue:
                 artist_name=artist_name,
                 enqueued_at=time.time(),
                 library=library,
+                by_user=by_user,
             )
             self._items.append(item)
             self._persist(item)
@@ -240,9 +250,13 @@ class ReorganizeQueue:
         without doing the counting themselves. Used by the bulk
         Reorganize-All endpoint and any future maintenance jobs that
         enqueue at scale.
+
+        #2046: a bulk run is never "this one album": a reviewed and locked
+        album is left out whoever started it, and counted as ``locked``.
         """
         enqueued = 0
         already = 0
+        locked = 0
         seen_in_batch: set = set()
         library = _library_for_new_item()
         with self._cond:
@@ -256,6 +270,9 @@ class ReorganizeQueue:
                 album_id = str(raw['album_id'])
                 if album_id in blocked or album_id in seen_in_batch:
                     already += 1
+                    continue
+                if _album_locked(album_id):
+                    locked += 1
                     continue
                 seen_in_batch.add(album_id)
                 item = QueueItem(
@@ -276,7 +293,10 @@ class ReorganizeQueue:
             if enqueued:
                 self._ensure_worker()
                 self._cond.notify_all()
-        return {'enqueued': enqueued, 'already_queued': already, 'total': len(items)}
+        tally = {'enqueued': enqueued, 'already_queued': already, 'total': len(items)}
+        if locked:
+            tally['locked'] = locked
+        return tally
 
     def cancel(self, queue_id: str) -> dict:
         """Cancel a queued item. The currently-running item cannot be
@@ -403,6 +423,7 @@ class ReorganizeQueue:
                         artist_name=snap.get('artist_name') or '',
                         enqueued_at=float(snap.get('enqueued_at') or time.time()),
                         library=snap.get('library'),
+                        by_user=bool(snap.get('by_user')),
                     )
                 except (KeyError, TypeError, ValueError):
                     continue
@@ -485,7 +506,14 @@ class ReorganizeQueue:
                 runner = self._runner
                 if runner is None:
                     raise RuntimeError("Queue has no runner configured — call set_runner() at startup")
-                summary = runner(item)
+                if not item.by_user and _album_locked(item.album_id, record=True):
+                    # locked after it was queued: the lock wins
+                    summary = {'status': 'completed', 'moved': 0, 'skipped': 0, 'failed': 0,
+                               'errors': [{'error': 'Album is locked'}]}
+                else:
+                    from core.library2 import locks
+                    with (locks.user_action() if item.by_user else locks.automation()):
+                        summary = runner(item)
             except Exception as e:
                 logger.error(
                     f"[Queue] Runner raised for '{item.album_title}': {e}",
@@ -550,6 +578,27 @@ class ReorganizeQueue:
 
 _singleton: Optional[ReorganizeQueue] = None
 _singleton_lock = threading.Lock()
+
+
+def _acting_as_user() -> bool:
+    try:
+        from core.library2 import locks
+        return locks.acting_as_user()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _album_locked(album_id: Any, *, record: bool = False) -> bool:
+    """Whether the album's files are locked against a job (#2046).
+    ``record`` notes the attempt for the album's page."""
+    try:
+        from core.library2 import locks
+        if record:
+            with locks.automation():
+                return locks.blocks('album', int(album_id), 'files', 'Reorganize')
+        return locks.is_locked('album', int(album_id), 'files')
+    except Exception:  # noqa: BLE001 - a legacy id, no library: nothing is locked
+        return False
 
 
 def _covers(queued_library, library) -> bool:
