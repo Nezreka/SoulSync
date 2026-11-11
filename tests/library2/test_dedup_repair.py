@@ -830,3 +830,107 @@ def test_three_copies_with_two_left_keep_their_rows(repair_db):
                          "VALUES(?, 'Song', 1, 1)", (album,)).lastrowid
     conn.commit()
     assert fold_fileless_twins(conn, [third]) == 0
+
+
+# ── an artist two servers listed is one artist ───────────────────────────────
+
+def _ids(**ids):
+    return json.dumps(ids, sort_keys=True)
+
+
+def _twin_artists(conn, monkeypatch, *, theirs):
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    mine = _artist(conn, "Twin Artist", spotify_id="twin-sp", musicbrainz_id="twin-mb",
+                   external_ids=_ids(deezer="twin-dz", spotify="twin-sp", musicbrainz="twin-mb", tidal="111"),
+                   server_source="plex")
+    other = _artist(conn, "Twin Artist", external_ids=_ids(**theirs), server_source="navidrome")
+    conn.commit()
+    return mine, other
+
+
+def test_one_lesser_catalogue_disagreeing_does_not_keep_an_artist_in_two(repair_db, monkeypatch):
+    """tidal keeps two pages for bbno$. the navidrome row carried the other
+    one, so the two rows stayed apart and the artist page showed every release
+    twice: once owned, once as 0 of 14."""
+    database, conn = repair_db
+    mine, other = _twin_artists(conn, monkeypatch, theirs={
+        "deezer": "twin-dz", "spotify": "twin-sp", "musicbrainz": "twin-mb", "tidal": "999"})
+    owned, _ = _server_album(conn, mine, "Same Album", "plex", _SONGS,
+                             path="/data/music/Twin/Same Album/{n:02d} - {name}.flac")
+    shell = _album(conn, other, "Same Album")
+    for number, name in enumerate(_SONGS, start=1):
+        conn.execute("INSERT INTO lib2_tracks(album_id, title, track_number, disc_number) "
+                     "VALUES(?,?,?,1)", (shell, name, number))
+    conn.commit()
+    files = conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0]
+
+    stats = repair_duplicate_artists(database)
+
+    assert stats["artists_merged"] == 1 and stats["alias_linked"] == 0
+    assert [r[0] for r in conn.execute("SELECT id FROM lib2_artists WHERE name='Twin Artist'")] == [mine]
+    assert [r[0] for r in conn.execute("SELECT id FROM lib2_albums WHERE title='Same Album'")] == [owned]
+    assert _titles(conn, owned) == _SONGS
+    assert conn.execute("SELECT COUNT(*) FROM lib2_track_files").fetchone()[0] == files
+    # and nothing more to do the second time
+    again = repair_duplicate_artists(database)
+    assert not any(again.values()), again
+
+
+def test_a_strong_id_disagreeing_still_keeps_two_artists(repair_db, monkeypatch):
+    database, conn = repair_db
+    mine, other = _twin_artists(conn, monkeypatch, theirs={
+        "deezer": "twin-dz2", "spotify": "twin-sp", "musicbrainz": "twin-mb", "tidal": "111"})
+    stats = repair_duplicate_artists(database)
+    assert stats["artists_merged"] == 0 and stats["alias_linked"] == 1
+    assert conn.execute("SELECT canonical_artist_id FROM lib2_artists WHERE id=?",
+                        (other,)).fetchone()[0] == mine
+
+
+def test_one_strong_id_is_not_enough_to_overrule_a_disagreement(repair_db, monkeypatch):
+    database, conn = repair_db
+    _twin_artists(conn, monkeypatch, theirs={"spotify": "twin-sp", "tidal": "999"})
+    assert repair_duplicate_artists(database)["artists_merged"] == 0
+
+
+def test_an_id_a_row_collected_twice_agrees_with_either(repair_db, monkeypatch):
+    database, conn = repair_db
+    mine, _ = _twin_artists(conn, monkeypatch, theirs={
+        "deezer": "twin-dz", "musicbrainz": "twin-mb, twin-mb9", "tidal": "111"})
+    assert repair_duplicate_artists(database)["artists_merged"] == 1
+    assert [r[0] for r in conn.execute("SELECT id FROM lib2_artists WHERE name='Twin Artist'")] == [mine]
+
+
+def test_a_listing_with_no_files_and_no_twin_is_left_alone(repair_db, monkeypatch):
+    database, conn = repair_db
+    monkeypatch.setattr("core.library2.dedup_repair._active_server", lambda: "plex")
+    artist = _artist(conn, "Shell Only")
+    _server_album(conn, artist, "Owned One", "plex", _SONGS,
+                  path="/data/music/Shell/Owned One/{n:02d} - {name}.flac")
+    shell = _album(conn, artist, "Another One", with_track=True)
+    conn.commit()
+    repair_duplicate_artists(database)
+    assert conn.execute("SELECT COUNT(*) FROM lib2_tracks WHERE album_id=?", (shell,)).fetchone()[0] == 1
+
+
+def test_an_upgraded_library_gets_the_artist_merge_once(repair_db, monkeypatch):
+    from core.library2 import bootstrap
+    database, conn = repair_db
+    monkeypatch.setattr(bootstrap, "get_state",
+                        lambda _db: {"status": "done", "finished_at": "2026-11-01"})
+    mine, _ = _twin_artists(conn, monkeypatch, theirs={
+        "deezer": "twin-dz", "spotify": "twin-sp", "musicbrainz": "twin-mb", "tidal": "999"})
+    first = bootstrap._fold_artist_twins_once(database, conn)
+    assert first["artists_merged"] == 1
+    assert [r[0] for r in conn.execute("SELECT id FROM lib2_artists WHERE name='Twin Artist'")] == [mine]
+    # marked: a later start does not walk every artist again
+    assert bootstrap._fold_artist_twins_once(database, conn) == {}
+
+
+def test_the_artist_merge_waits_for_a_finished_import(repair_db, monkeypatch):
+    from core.library2 import bootstrap
+    database, conn = repair_db
+    monkeypatch.setattr(bootstrap, "get_state", lambda _db: {"status": "running"})
+    _twin_artists(conn, monkeypatch, theirs={
+        "deezer": "twin-dz", "spotify": "twin-sp", "musicbrainz": "twin-mb", "tidal": "999"})
+    assert bootstrap._fold_artist_twins_once(database, conn) == {}
+    assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE name='Twin Artist'").fetchone()[0] == 2

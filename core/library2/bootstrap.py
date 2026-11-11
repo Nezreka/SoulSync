@@ -781,6 +781,48 @@ def _fold_server_twins_once(database: Any, conn: Any, *,
     return stats
 
 
+def _fold_artist_twins_once(database: Any, conn: Any, *,
+                            should_stop: Optional[Callable[[], bool]] = None) -> Dict[str, int]:
+    """an artist two servers listed, kept as two rows because one lesser
+    catalogue id disagreed: every release showed twice on the artist page,
+    once owned and once as 0 of 14. merged once per finished import, then the
+    releases the merge brought together fold like any other server twin."""
+    state = get_state(database)
+    if state.get("status") != "done":
+        return {}
+    key = f"{state.get('finished_at') or ''}|artist-twins"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {_SHARED_FILES_MARKER} "
+                 "(import_finished_at TEXT PRIMARY KEY, "
+                 "applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, folded INTEGER)")
+    if conn.execute(f"SELECT 1 FROM {_SHARED_FILES_MARKER} WHERE import_finished_at=?",
+                    (key,)).fetchone():
+        return {}
+    from core.library2.dedup_repair import (
+        _fold_albums_within_artist, fold_server_twins, merge_artist_twins)
+    stats: Dict[str, int] = {"artists_merged": 0, "alias_linked": 0,
+                             "albums_folded": 0, "album_review": 0}
+    touched = merge_artist_twins(conn, stats)
+    conn.commit()
+    stats.update(fold_server_twins(conn, commit=conn.commit, should_stop=should_stop))
+    if should_stop and should_stop():
+        conn.commit()
+        return stats
+    cursor = conn.cursor()
+    for artist_id in sorted(touched):
+        _fold_albums_within_artist(conn, cursor, artist_id, stats)
+        conn.commit()
+    conn.execute(f"INSERT OR REPLACE INTO {_SHARED_FILES_MARKER}(import_finished_at, folded) "
+                 "VALUES(?, ?)", (key, int(stats.get("artists_merged") or 0)))
+    conn.commit()
+    if stats.get("server_twin_albums_folded") or stats.get("albums_folded"):
+        try:
+            from core.library2.mirror_outbox import drain
+            drain(database)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("post-merge outbox drain failed: %s", exc)
+    return stats
+
+
 def run_deferred_backfills(database: Any, *,
                            should_stop: Optional[Callable[[], bool]] = None,
                            batch_size: int = 500) -> Dict[str, Any]:
@@ -818,6 +860,8 @@ def run_deferred_backfills(database: Any, *,
             stats["shared_files"] = _fold_shared_files_once(database, conn)
             conn.commit()
             stats["server_twins"] = _fold_server_twins_once(
+                database, conn, should_stop=should_stop)
+            stats["artist_twins"] = _fold_artist_twins_once(
                 database, conn, should_stop=should_stop)
             # guests an older twin merge dropped from the kept album, once
             # (review 5 W2-WE-1)

@@ -174,14 +174,32 @@ def _stored_ids(row: Any) -> Dict[str, str]:
     return ids
 
 
+# the ids that name one artist on their own. a pair that agrees on two of
+# them is one artist even where a lesser catalogue lists the artist twice
+# (tidal keeps two pages for bbno$)
+_STRONG_ARTIST_SOURCES = frozenset({"musicbrainz", "spotify", "deezer"})
+
+
+def _id_values(value: str) -> frozenset:
+    """One stored id, or the several a row collected ("a, b")."""
+    return frozenset(part.strip() for part in str(value).split(",") if part.strip())
+
+
+def _pair_has_conflict(first: Dict[str, str], second: Dict[str, str]) -> bool:
+    agreed, disputed = set(), set()
+    for source, value in first.items():
+        if source not in second:
+            continue
+        (agreed if _id_values(value) & _id_values(second[source]) else disputed).add(source)
+    if not disputed:
+        return False
+    return bool(disputed & _STRONG_ARTIST_SOURCES) or len(agreed & _STRONG_ARTIST_SOURCES) < 2
+
+
 def _group_has_conflict(members: List[Any]) -> bool:
-    seen: Dict[str, str] = {}
-    for member in members:
-        for source, value in _stored_ids(member).items():
-            if source in seen and seen[source] != value:
-                return True
-            seen.setdefault(source, value)
-    return False
+    ids = [_stored_ids(member) for member in members]
+    return any(_pair_has_conflict(first, second)
+               for index, first in enumerate(ids) for second in ids[index + 1:])
 
 
 def _survivor_key(member: Any) -> tuple:
@@ -747,14 +765,27 @@ def fold_server_twins(conn: Any, *, resolve=None, commit=None, should_stop=None)
     artists = [int(r[0]) for r in conn.execute(
         """SELECT primary_artist_id FROM lib2_albums
             WHERE COALESCE(server_source, '') <> '' AND primary_artist_id IS NOT NULL
-            GROUP BY primary_artist_id HAVING COUNT(DISTINCT server_source) > 1""")]
+            GROUP BY primary_artist_id HAVING COUNT(DISTINCT server_source) > 1
+           UNION
+           SELECT al.primary_artist_id FROM lib2_albums al
+            WHERE al.origin = 'library' AND COALESCE(al.server_source, '') = ''
+              AND al.primary_artist_id IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM lib2_track_files tf
+                                JOIN lib2_tracks t ON t.id = tf.track_id
+                               WHERE t.album_id = al.id
+                                 AND COALESCE(tf.file_state, 'active') <> 'deleted')""")]
     cursor = conn.cursor()
     for artist_id in artists:
         if should_stop and should_stop():
             break
         groups: Dict[tuple, List[Dict[str, Any]]] = {}
         for album in _twin_album_rows(conn, artist_id):
-            if album["server_source"] and album["track_rows"]:
+            # a listing that kept its tracks and lost both its server and its
+            # files is what a server's copy looks like once its artist was
+            # merged or its files were folded away: a twin like any other
+            album["shell"] = (not album["server_source"] and album["origin"] == "library"
+                              and not album["file_rows"])
+            if album["track_rows"] and (album["server_source"] or album["shell"]):
                 groups.setdefault(
                     (release_title_key(album["title"]), _bucket(album["album_type"])), []
                 ).append(album)
@@ -762,8 +793,8 @@ def fold_server_twins(conn: Any, *, resolve=None, commit=None, should_stop=None)
         for (title_key, _kind), members in groups.items():
             if not title_key or len({a["server_source"] for a in members}) < 2:
                 continue
-            members.sort(key=lambda a: (a["server_source"] != active, -int(a["file_rows"] or 0),
-                                        int(a["id"])))
+            members.sort(key=lambda a: (a["shell"], a["server_source"] != active,
+                                        -int(a["file_rows"] or 0), int(a["id"])))
             survivor = members[0]
             keep_tracks: Optional[List[Dict[str, Any]]] = None
             for twin in members[1:]:
@@ -777,7 +808,7 @@ def fold_server_twins(conn: Any, *, resolve=None, commit=None, should_stop=None)
                     keep_tracks = _twin_tracks(conn, survivor["id"])
                 twin_tracks = _twin_tracks(conn, twin["id"])
                 owners = lambda tracks: {f["owner_profile_id"] for t in tracks for f in t["files"]}  # noqa: E731
-                if owners(keep_tracks) != owners(twin_tracks):
+                if not twin["shell"] and owners(keep_tracks) != owners(twin_tracks):
                     continue        # another profile's own library is not a server twin
                 pairs = _pair_twin_tracks(keep_tracks, twin_tracks)
                 smaller = min(len(keep_tracks), len(twin_tracks))
@@ -967,6 +998,99 @@ def _fold_albums_within_artist(conn: Any, cursor: Any, artist_id: int,
                 stats["album_review"] += cursor.rowcount
 
 
+def merge_artist_twins(conn: Any, stats: Dict[str, Any]) -> set:
+    """Fold artist rows that are one artist, by name and then by catalogue id;
+    alias-link the same-named ones that are not. Returns the kept artists that
+    took something in."""
+    cursor = conn.cursor()
+    rows = conn.execute(
+        "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
+        "image_url, canonical_artist_id "
+        "FROM lib2_artists").fetchall()
+    by_name: Dict[str, List[Any]] = {}
+    for row in rows:
+        key = normalize_name(row["name"])
+        if key:
+            by_name.setdefault(key, []).append(row)
+
+    touched_artists: set[int] = set()
+    for members in by_name.values():
+        if len(members) < 2:
+            continue
+        if _group_has_conflict(members):
+            members.sort(key=_survivor_key, reverse=True)
+            canonical = members[0]
+            from core.library2.artist_aliases import (
+                AliasLinkError, link_artist_alias)
+            for member in members[1:]:
+                if member["canonical_artist_id"] is not None:
+                    continue
+                try:
+                    link_artist_alias(conn, member["id"], canonical["id"])
+                    stats["alias_linked"] += 1
+                except AliasLinkError as link_error:
+                    logger.info(
+                        "Same-name conflict group %r: could not alias-link "
+                        "%s -> %s: %s", canonical["name"], member["id"],
+                        canonical["id"], link_error)
+            continue
+        members.sort(key=_survivor_key, reverse=True)
+        survivor = members[0]
+        for duplicate in members[1:]:
+            _merge_artist(cursor, survivor, duplicate)
+            stats["artists_merged"] += 1
+            logger.info(
+                "Merged duplicate artist %s into %s (%r)",
+                duplicate["id"], survivor["id"], survivor["name"])
+        touched_artists.add(int(survivor["id"]))
+
+    # A spelling/parser fragment can receive the exact same catalog id as
+    # the real artist during later enrichment while retaining a different
+    # normalized name. Name-only repair can never see that pair. Group a
+    # fresh post-merge snapshot by authoritative provider id and fold only
+    # conflict-free groups.
+    provider_rows = conn.execute(
+        "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
+        "image_url, canonical_artist_id "
+        "FROM lib2_artists"
+    ).fetchall()
+    by_provider_id: Dict[tuple[str, str], List[Any]] = {}
+    catalog_sources = {"spotify", "musicbrainz", "deezer", "tidal", "qobuz"}
+    for row in provider_rows:
+        for source, value in _stored_ids(row).items():
+            if source in catalog_sources and value:
+                by_provider_id.setdefault((source, value), []).append(row)
+
+    for (source, value), members in by_provider_id.items():
+        if len(members) < 2:
+            continue
+        active_members: List[Any] = []
+        for member in members:
+            current = conn.execute(
+                "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
+                "image_url, canonical_artist_id "
+                "FROM lib2_artists WHERE id=?",
+                (member["id"],),
+            ).fetchone()
+            if current is not None:
+                active_members.append(current)
+        if len(active_members) < 2 or _group_has_conflict(active_members):
+            continue
+        active_members.sort(key=_survivor_key, reverse=True)
+        survivor = active_members[0]
+        for duplicate in active_members[1:]:
+            _merge_artist(cursor, survivor, duplicate)
+            stats["artists_merged"] += 1
+            logger.info(
+                "Merged catalog-identity artist %s into %s "
+                "(%s=%s, %r -> %r)",
+                duplicate["id"], survivor["id"], source, value,
+                duplicate["name"], survivor["name"],
+            )
+        touched_artists.add(int(survivor["id"]))
+    return touched_artists
+
+
 def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
     """Fold artist twins by normalized name or shared catalog identity.
 
@@ -985,91 +1109,7 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
         # on one twin would otherwise read as a same-source conflict and
         # block the merge below.
         stats["namespaces_fixed"] = _sanitize_provider_namespaces(conn, cursor)
-        rows = conn.execute(
-            "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
-            "image_url, canonical_artist_id "
-            "FROM lib2_artists").fetchall()
-        by_name: Dict[str, List[Any]] = {}
-        for row in rows:
-            key = normalize_name(row["name"])
-            if key:
-                by_name.setdefault(key, []).append(row)
-
-        touched_artists: set[int] = set()
-        for members in by_name.values():
-            if len(members) < 2:
-                continue
-            if _group_has_conflict(members):
-                members.sort(key=_survivor_key, reverse=True)
-                canonical = members[0]
-                from core.library2.artist_aliases import (
-                    AliasLinkError, link_artist_alias)
-                for member in members[1:]:
-                    if member["canonical_artist_id"] is not None:
-                        continue
-                    try:
-                        link_artist_alias(conn, member["id"], canonical["id"])
-                        stats["alias_linked"] += 1
-                    except AliasLinkError as link_error:
-                        logger.info(
-                            "Same-name conflict group %r: could not alias-link "
-                            "%s -> %s: %s", canonical["name"], member["id"],
-                            canonical["id"], link_error)
-                continue
-            members.sort(key=_survivor_key, reverse=True)
-            survivor = members[0]
-            for duplicate in members[1:]:
-                _merge_artist(cursor, survivor, duplicate)
-                stats["artists_merged"] += 1
-                logger.info(
-                    "Merged duplicate artist %s into %s (%r)",
-                    duplicate["id"], survivor["id"], survivor["name"])
-            touched_artists.add(int(survivor["id"]))
-
-        # A spelling/parser fragment can receive the exact same catalog id as
-        # the real artist during later enrichment while retaining a different
-        # normalized name. Name-only repair can never see that pair. Group a
-        # fresh post-merge snapshot by authoritative provider id and fold only
-        # conflict-free groups.
-        provider_rows = conn.execute(
-            "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
-            "image_url, canonical_artist_id "
-            "FROM lib2_artists"
-        ).fetchall()
-        by_provider_id: Dict[tuple[str, str], List[Any]] = {}
-        catalog_sources = {"spotify", "musicbrainz", "deezer", "tidal", "qobuz"}
-        for row in provider_rows:
-            for source, value in _stored_ids(row).items():
-                if source in catalog_sources and value:
-                    by_provider_id.setdefault((source, value), []).append(row)
-
-        for (source, value), members in by_provider_id.items():
-            if len(members) < 2:
-                continue
-            active_members: List[Any] = []
-            for member in members:
-                current = conn.execute(
-                    "SELECT id, name, spotify_id, musicbrainz_id, external_ids, "
-                    "image_url, canonical_artist_id "
-                    "FROM lib2_artists WHERE id=?",
-                    (member["id"],),
-                ).fetchone()
-                if current is not None:
-                    active_members.append(current)
-            if len(active_members) < 2 or _group_has_conflict(active_members):
-                continue
-            active_members.sort(key=_survivor_key, reverse=True)
-            survivor = active_members[0]
-            for duplicate in active_members[1:]:
-                _merge_artist(cursor, survivor, duplicate)
-                stats["artists_merged"] += 1
-                logger.info(
-                    "Merged catalog-identity artist %s into %s "
-                    "(%s=%s, %r -> %r)",
-                    duplicate["id"], survivor["id"], source, value,
-                    duplicate["name"], survivor["name"],
-                )
-            touched_artists.add(int(survivor["id"]))
+        touched_artists = merge_artist_twins(conn, stats)
 
         # One file, one track first: it is what empties a stale server's twin.
         stats.update(fold_shared_file_tracks(conn))
@@ -1096,4 +1136,5 @@ def repair_duplicate_artists(database: Any) -> Dict[str, Any]:
     return stats
 
 
-__all__ = ["fold_fileless_twins", "fold_server_twins", "repair_duplicate_artists"]
+__all__ = ["fold_fileless_twins", "fold_server_twins", "merge_artist_twins",
+           "repair_duplicate_artists"]
