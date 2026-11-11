@@ -134,6 +134,21 @@ class TestGetQueueStatus:
 
         assert result == {"tracks": {}, "albums": {}}
 
+    def test_source_info_stored_as_json_text_still_reports(self):
+        """#2049: a wishlist download carries source_info as the json text its
+        row stores, and `.get` on it answered every poll of the page with a 500."""
+        download_tasks["t1"] = {
+            "status": "queued",
+            "track_info": {"source_info": '{"lib2_track_id": 10, "lib2_album_id": 5}'},
+        }
+        download_tasks["t2"] = {"status": "queued", "track_info": {"source_info": "wishlist"}}
+        download_tasks["t3"] = {"status": "queued", "track_info": "not a dict"}
+
+        result = get_queue_status([10], **_deps())
+
+        assert result["tracks"] == {10: {"status": "queued", "progress_pct": 0}}
+        assert result["albums"][5]["active"] == 1
+
     def test_malformed_album_id_does_not_break_other_queue_status(self):
         download_tasks["t1"] = {
             "status": "queued",

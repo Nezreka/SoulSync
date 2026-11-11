@@ -16,6 +16,7 @@ status.py``'s ``StatusDeps`` precedent): ``make_context_key`` and
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Dict, Iterable, Optional
 
 from core.runtime_state import (
@@ -40,6 +41,19 @@ _TASK_STATUS_BUCKET = {
 # Every bucket an album roll-up reports, so the key set is stable whether or
 # not a given album currently has a track in that state.
 _ALBUM_BUCKETS = ("queued", "searching", "downloading", "processing")
+
+
+def _as_dict(value: Any) -> Dict[str, Any]:
+    """A dict, the dict a json string holds, or nothing."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip().startswith("{"):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
 
 
 def _safe_int(value: Any) -> Optional[int]:
@@ -142,12 +156,14 @@ def get_queue_status(
     with tasks_lock:
         tasks_snapshot = list(download_tasks.values())
     for task in tasks_snapshot:
-        track_info = task.get("track_info") or {}
-        source_info = track_info.get("source_info") or {}
+        track_info = _as_dict(task.get("track_info"))
+        # a wishlist row hands source_info over as the json text it is stored
+        # as, and one such download took the whole artist page's poll down (#2049)
+        source_info = _as_dict(track_info.get("source_info"))
         # Bridge-dispatched downloads (Torrent/Usenet bundle-match, manual grab —
         # core.acquisition.main_pipeline_bridge) carry the Library-v2 identity as a top-level
         # "lib2_entity" dict, not "source_info" (review A7). Fall back to it so those get a badge too.
-        lib2_entity = track_info.get("lib2_entity") or {}
+        lib2_entity = _as_dict(track_info.get("lib2_entity"))
         raw_track_id = source_info.get("lib2_track_id")
         raw_album_id = source_info.get("lib2_album_id")
         if raw_track_id is None:
@@ -177,7 +193,8 @@ def get_queue_status(
     with matched_context_lock:
         contexts_snapshot = list(matched_downloads_context.items())
     for context_key, context in contexts_snapshot:
-        lib2_entity = context.get("lib2_entity") or {}
+        context = _as_dict(context)
+        lib2_entity = _as_dict(context.get("lib2_entity"))
         track_id = _safe_int(lib2_entity.get("track_id"))
         if track_id is None:
             continue
@@ -189,7 +206,7 @@ def get_queue_status(
         if context_key in processed_download_ids:
             continue
 
-        search_result = context.get("search_result") or {}
+        search_result = _as_dict(context.get("search_result"))
         live_info = _live_lookup(search_result.get("username"), search_result.get("filename"))
         bucket = "queued"
         progress_pct = 0
