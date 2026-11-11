@@ -312,6 +312,7 @@ A visual **WHEN → DO → THEN** builder shared by music and video.
   - Import listening history, run maintenance, clean up, back up.
   - Search & download, or run your own scripts.
 - **Then**: Discord, Telegram, Pushbullet, a webhook, a script, or a signal that chains into another automation, with per-step conditions and `{variables}`.
+- **One page to see it working**: the next 24 hours as a timeline, what needs attention (counted over the last day, not just the last run), the playlists that sync themselves, and an Activity view of what every automation did.
 - **Automation Hub**: install ready-made pipelines in one click, such as *Playlist Pipeline (All-in-One)*, *New Music Pipeline*, *Nightly Operations*, *Quality Assurance Pipeline* and *Full Hands-Free Pipeline*.
 
 ## Profiles & access

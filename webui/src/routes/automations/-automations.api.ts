@@ -3,7 +3,9 @@ import { queryOptions } from '@tanstack/react-query';
 import { apiClient, readJson } from '@/app/api-client';
 
 import type {
+  AutomationActivity,
   AutomationBlocks,
+  AutomationHistoryResponse,
   AutomationsListResponse,
   AutomationsMasterState,
   AutomationsProgressResponse,
@@ -46,6 +48,31 @@ export function automationsProgressQueryOptions() {
   return queryOptions({
     queryKey: [...AUTOMATIONS_QUERY_KEY, 'progress'] as const,
     queryFn: () => readJson<AutomationsProgressResponse>(apiClient.get('automations/progress')),
+  });
+}
+
+/**
+ * The last 24 hours by automation and the last week by day. Keyed by profile
+ * for the same reason the list is. Refetched on every visit: it is a clock.
+ */
+export function automationsActivityQueryOptions(profileId: number) {
+  return queryOptions({
+    queryKey: [...AUTOMATIONS_QUERY_KEY, 'activity', profileId] as const,
+    queryFn: () => readJson<AutomationActivity>(apiClient.get('automations/activity')),
+    refetchOnMount: 'always',
+    staleTime: 30_000,
+  });
+}
+
+/** The last few runs of one automation, for its opened row. */
+export function automationRunsQueryOptions(id: number, limit = 5) {
+  return queryOptions({
+    queryKey: [...AUTOMATIONS_QUERY_KEY, 'runs', id, limit] as const,
+    queryFn: () =>
+      readJson<AutomationHistoryResponse>(
+        apiClient.get(`automations/${id}/history`, { searchParams: { limit, offset: 0 } }),
+      ),
+    staleTime: 15_000,
   });
 }
 

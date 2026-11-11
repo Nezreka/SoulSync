@@ -1,5 +1,9 @@
 import { isTimerTrigger, parseServerTime } from './-automations.format';
-import { type Automation, type AutomationsListResponse } from './-automations.types';
+import {
+  type Automation,
+  type AutomationActivityRow,
+  type AutomationsListResponse,
+} from './-automations.types';
 
 /** `enabled` / `is_system` arrive as SQLite ints (0/1), not booleans. */
 function truthy(value: boolean | number | null | undefined): boolean {
@@ -184,8 +188,14 @@ export function collectionGroupName(key: string): string | null {
  * then the ungrouped remainder.
  */
 export function buildCollections(automations: Automation[]): CollectionDef[] {
+  // a system row can carry a group name too (the Tools jobs are filed under
+  // "Maintenance"). it lives in its system section, so it names no user group
   const names = [
-    ...new Set(automations.filter((a) => a.group_name).map((a) => a.group_name as string)),
+    ...new Set(
+      automations
+        .filter((a) => a.group_name && !truthy(a.is_system))
+        .map((a) => a.group_name as string),
+    ),
   ];
   names.sort();
   return [
@@ -386,6 +396,170 @@ export function filterAutomations(
       (!action || (a.action_type ?? '') === action)
     );
   });
+}
+
+/**
+ * The sections the library lists, top to bottom: the pipeline, the user's own
+ * groups, their unfiled automations, then housekeeping. A section with nothing
+ * in it is left out, except the unfiled one when the user has built nothing:
+ * that empty section is where the invitation to build one sits.
+ */
+export function librarySections(automations: Automation[]): CollectionDef[] {
+  const all = buildCollections(automations);
+  const pick = (key: string) => all.find((c) => c.key === key) as CollectionDef;
+  const groups = all.filter((c) => c.kind === 'group');
+  const ordered = [pick('operations'), ...groups, pick('ungrouped'), pick('maintenance')];
+  const hasOwn = automations.some((a) => !truthy(a.is_system));
+  return ordered.filter(
+    (c) =>
+      collectionAutomations(automations, c.key).length > 0 || (c.key === 'ungrouped' && !hasOwn),
+  );
+}
+
+/** Seconds between two runs of a timer automation, or null when it has no
+ *  fixed beat (weekly and monthly times, events). */
+export function cadenceSeconds(a: Automation): number | null {
+  const config = (a.trigger_config ?? {}) as Record<string, unknown>;
+  if (a.trigger_type === 'daily_time') return 86400;
+  if (a.trigger_type !== 'schedule') return null;
+  const n = Number(config.interval ?? 1);
+  const per = { minutes: 60, hours: 3600, days: 86400 }[String(config.unit ?? 'hours')];
+  return per && Number.isFinite(n) && n > 0 ? n * per : null;
+}
+
+export interface LaneDot {
+  automation: Automation;
+  /** minutes from now, 0 to the window's end */
+  minute: number;
+  /** vertical step so runs that land together do not hide each other */
+  step: number;
+}
+
+export interface ScheduleLane {
+  key: string;
+  label: string;
+  /** timer automations in this lane that are on */
+  count: number;
+  /** how many of them run more often than a dot can show */
+  frequent: number;
+  dots: LaneDot[];
+}
+
+/** Runs closer together than this are stepped apart. */
+const LANE_CROWD_MINUTES = 16;
+/** Anything running more often than this is a band, not a row of dots. */
+export const LANE_FREQUENT_SECONDS = 3 * 3600;
+const LANE_STEPS = [0, -1, 1, -2, 2];
+
+/**
+ * The next `hours` hours as lanes of runs: the pipeline, the user's own
+ * automations, housekeeping. Each run of a slower automation is a dot at its
+ * minute; the ones that run every hour or so are counted, not drawn, since
+ * forty dots in a row say nothing a line does not.
+ */
+export function scheduleLanes(
+  automations: Automation[],
+  paused: boolean,
+  now: number = Date.now(),
+  hours = 24,
+): ScheduleLane[] {
+  const window = hours * 60;
+  const armed = paused
+    ? []
+    : automations.filter(
+        (a) => truthy(a.enabled) && isTimerTrigger(a.trigger_type) && Boolean(a.next_run),
+      );
+  const own = armed.filter((a) => !truthy(a.is_system));
+  const ownGroups = [...new Set(own.map((a) => a.group_name || ''))];
+  const lanes: { key: string; label: string; members: Automation[] }[] = [
+    { key: 'operations', label: 'Operations', members: armed.filter(isOperationAutomation) },
+    {
+      key: 'own',
+      label: ownGroups.length === 1 && ownGroups[0] ? ownGroups[0] : 'Yours',
+      members: own,
+    },
+    {
+      key: 'maintenance',
+      label: 'Maintenance',
+      members: armed.filter((a) => truthy(a.is_system) && isMaintenanceAutomation(a)),
+    },
+  ];
+  return lanes
+    .filter((lane) => lane.members.length > 0)
+    .map((lane) => {
+      const dots: LaneDot[] = [];
+      let frequent = 0;
+      for (const a of lane.members) {
+        const every = cadenceSeconds(a);
+        if (every !== null && every < LANE_FREQUENT_SECONDS) {
+          frequent += 1;
+          continue;
+        }
+        const first = Math.max(0, (parseServerTime(a.next_run as string) - now) / 60000);
+        const stride = every === null ? Infinity : every / 60;
+        for (let minute = first; minute <= window; minute += stride) {
+          dots.push({ automation: a, minute, step: 0 });
+        }
+      }
+      dots.sort((x, y) => x.minute - y.minute);
+      let run = 0;
+      dots.forEach((dot, i) => {
+        run = i > 0 && dot.minute - dots[i - 1].minute < LANE_CROWD_MINUTES ? run + 1 : 0;
+        dot.step = LANE_STEPS[run % LANE_STEPS.length];
+      });
+      return { key: lane.key, label: lane.label, count: lane.members.length, frequent, dots };
+    });
+}
+
+export interface AttentionItem {
+  automation: Automation;
+  /** failed = its last run failed. flaky = it failed lately and has since
+   *  run clean. idle = on, and never ran */
+  kind: 'failed' | 'flaky' | 'idle';
+  text: string;
+}
+
+/**
+ * What wants a person, worst first.
+ *
+ * `last_error` only describes the LAST run, and one clean run clears it. An
+ * automation that fails twenty three times and then works once read as
+ * healthy, so the page said "All systems go" over a sync that had been broken
+ * all day. The last 24 hours of history are counted as well.
+ */
+export function attentionItems(
+  automations: Automation[],
+  recent: AutomationActivityRow[] = [],
+): AttentionItem[] {
+  const lately = new Map(recent.map((r) => [r.automation_id, r]));
+  const failed: AttentionItem[] = [];
+  const flaky: (AttentionItem & { count: number })[] = [];
+  const idle: AttentionItem[] = [];
+  for (const a of automations) {
+    const row = lately.get(a.id);
+    const tally =
+      row && row.failed > 0
+        ? `Failed ${row.failed} of its last ${row.runs} ${row.runs === 1 ? 'run' : 'runs'}`
+        : '';
+    if (a.last_error) {
+      failed.push({
+        automation: a,
+        kind: 'failed',
+        text: tally ? `${tally}. ${a.last_error}` : `Failed: ${a.last_error}`,
+      });
+    } else if (row && row.failed > 0) {
+      flaky.push({
+        automation: a,
+        kind: 'flaky',
+        text: row.last_error ? `${tally}. ${row.last_error}` : tally,
+        count: row.failed,
+      });
+    } else if (truthy(a.enabled) && !a.last_run) {
+      idle.push({ automation: a, kind: 'idle', text: 'On, and never ran' });
+    }
+  }
+  flaky.sort((x, y) => y.count - x.count);
+  return [...failed, ...flaky.map(({ count: _count, ...item }) => item), ...idle];
 }
 
 /** Distinct trigger/action types, sorted — the two dropdowns' option lists. */

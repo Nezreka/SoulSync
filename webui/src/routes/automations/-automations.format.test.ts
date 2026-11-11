@@ -4,12 +4,14 @@ import {
   automationMeta,
   automationOutcome,
   automationSchedule,
+  displayName,
   formatAction,
   formatInterval,
   formatTrigger,
   humanizeType,
   lastResultFacts,
   parseServerTime,
+  resultFigures,
   timeAgo,
   timeUntil,
 } from './-automations.format';
@@ -339,7 +341,7 @@ describe('automationOutcome — the handler stops speaking its own dialect', () 
         status: 'skipped',
         reason: 'Duplicate cleaner already running',
       }),
-    ).toEqual({ text: 'Skipped — Duplicate cleaner already running', kind: 'skipped' });
+    ).toEqual({ text: 'Skipped: Duplicate cleaner already running', kind: 'skipped' });
     expect(automationOutcome('anything', { status: 'skipped' })?.text).toBe('Skipped');
   });
 
@@ -347,7 +349,7 @@ describe('automationOutcome — the handler stops speaking its own dialect', () 
     // discover_playlist returns status:'started' — the real outcome lands later.
     expect(
       automationOutcome('discover_playlist', { status: 'started', playlist_count: '4' }),
-    ).toEqual({ text: 'Handed off — still working', kind: 'skipped' });
+    ).toEqual({ text: 'Handed off, still working', kind: 'skipped' });
   });
 
   it('falls back to the generic facts for an action with no sentence', () => {
@@ -445,5 +447,95 @@ describe('automationSchedule', () => {
         NOW,
       ).label,
     ).toBe('Next in 2h');
+  });
+});
+
+describe('formatInterval in whole days and weeks', () => {
+  it('says a day and a week as such, however the job stored them', () => {
+    // the Tools jobs store every cadence in hours
+    expect(formatInterval(24, 'hours')).toBe('Every day');
+    expect(formatInterval(48, 'hours')).toBe('Every 2 days');
+    expect(formatInterval(168, 'hours')).toBe('Every week');
+    expect(formatInterval(7, 'days')).toBe('Every week');
+    expect(formatInterval(14, 'days')).toBe('Every 2 weeks');
+  });
+
+  it('leaves the rest alone', () => {
+    expect(formatInterval(6, 'hours')).toBe('Every 6 hours');
+    expect(formatInterval(36, 'hours')).toBe('Every 36 hours');
+    expect(formatInterval(3, 'days')).toBe('Every 3 days');
+    expect(formatInterval(30, 'minutes')).toBe('Every 30 minutes');
+  });
+});
+
+describe('displayName', () => {
+  it('drops the prefixes the page already says with its sections', () => {
+    expect(displayName({ name: '[System] Dead File Cleaner' })).toBe('Dead File Cleaner');
+    expect(displayName({ name: 'Auto-Sync: Fresh House' })).toBe('Fresh House');
+    expect(displayName({ name: 'Auto-Scan Watchlist' })).toBe('Auto-Scan Watchlist');
+    // a name that is nothing but the prefix keeps it
+    expect(displayName({ name: '[System] ' })).toBe('[System] ');
+  });
+});
+
+describe('resultFigures', () => {
+  it('keeps the countable facts, read from numbers or digit strings', () => {
+    expect(
+      resultFigures({
+        status: 'completed',
+        artists_scanned: 68,
+        new_tracks_found: '10',
+        _manages_own_progress: true,
+        duration_seconds: 21,
+        size_mb: '10750.0',
+        backup_path: 'x.db',
+        zero: 0,
+      }),
+    ).toEqual([
+      { label: 'artists scanned', value: '68' },
+      { label: 'new tracks found', value: '10' },
+      { label: 'zero', value: '0' },
+    ]);
+  });
+
+  it('stops at the limit and survives a non-object', () => {
+    expect(resultFigures({ a: 1, b: 2, c: 3, d: 4 }, 2)).toHaveLength(2);
+    expect(resultFigures(null)).toEqual([]);
+    expect(resultFigures(['x'])).toEqual([]);
+  });
+});
+
+describe('the sentences added with the list redesign', () => {
+  it('says what a playlist sync did', () => {
+    const r = { status: 'completed', tracks_synced: '27', wishlist_queued: '1' };
+    expect(automationOutcome('playlist_pipeline', r)?.text).toBe(
+      'Synced 27 tracks, 1 sent to the wishlist',
+    );
+    expect(automationOutcome('personalized_pipeline', { tracks_synced: '40' })?.text).toBe(
+      'Synced 40 tracks',
+    );
+    expect(automationOutcome('playlist_pipeline', { tracks_synced: '0' })?.text).toBe(
+      'Already in sync',
+    );
+  });
+
+  it('says a maintenance job was queued, a backup saved, a cleanup done', () => {
+    expect(automationOutcome('run_repair_job', { queued: 1, jobs: 'x' })?.text).toBe(
+      'Queued the job',
+    );
+    expect(automationOutcome('backup_database', { size_mb: '10750.0' })?.text).toBe(
+      'Backup saved, 10.5 GB',
+    );
+    expect(automationOutcome('backup_database', { size_mb: '512' })?.text).toBe(
+      'Backup saved, 512 MB',
+    );
+    expect(automationOutcome('full_cleanup', { total_removed: '0' })?.text).toBe(
+      'Nothing to remove',
+    );
+    expect(automationOutcome('full_cleanup', { total_removed: '3' })?.text).toBe('Removed 3 items');
+  });
+
+  it('does not print a flag the handler set for itself', () => {
+    expect(lastResultFacts({ albums: 95, full_refresh: 'False' })?.full).toBe('albums: 95');
   });
 });

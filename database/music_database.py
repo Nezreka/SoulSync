@@ -22,6 +22,9 @@ from core.library2.sql_util import owned_sql as _owned_sql
 
 logger = get_logger("music_database")
 
+# how long a run stays in automation_run_history however often it runs
+AUTOMATION_HISTORY_DAYS = 7
+
 # A file row confirmed at a configured path. Missing/deleted rows remain as
 # history (ADR-03), but are not ownership evidence.
 # the most ids a fold_index match is put back through sql as; a needle that
@@ -1763,6 +1766,8 @@ class MusicDatabase:
                 )
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_arh_automation_id ON automation_run_history(automation_id)")
+            # the automations page's Activity view reads a window of days
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_arh_started_at ON automation_run_history(started_at)")
 
             # Playlist pipeline run history table
             cursor.execute("""
@@ -27719,7 +27724,12 @@ class MusicDatabase:
     def insert_automation_run_history(self, automation_id, started_at, finished_at,
                                        duration_seconds, status, summary=None,
                                        result_json=None, log_lines=None):
-        """Insert a run history entry and enforce 100-row retention cap per automation."""
+        """Insert a run history entry, then trim that automation's history.
+
+        Kept: its newest 100 runs, and every run from the last week. The cap
+        alone left a five minute automation with eight hours of history, so a
+        chart of the last few days showed it running less the further back
+        it looked."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -27729,15 +27739,19 @@ class MusicDatabase:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (automation_id, started_at, finished_at, duration_seconds,
                       status, summary, result_json, log_lines))
-                # Retention: keep only the newest 100 rows per automation
+                from datetime import timedelta
+                week_ago = (datetime.now(timezone.utc)
+                            - timedelta(days=AUTOMATION_HISTORY_DAYS)).isoformat()
                 cursor.execute("""
                     DELETE FROM automation_run_history
-                    WHERE automation_id = ? AND id NOT IN (
+                    WHERE automation_id = ?
+                      AND (started_at IS NULL OR started_at < ?)
+                      AND id NOT IN (
                         SELECT id FROM automation_run_history
                         WHERE automation_id = ?
                         ORDER BY id DESC LIMIT 100
                     )
-                """, (automation_id, automation_id))
+                """, (automation_id, week_ago, automation_id))
                 conn.commit()
                 return True
         except Exception as e:
@@ -27767,6 +27781,72 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting automation run history for {automation_id}: {e}")
             return {'history': [], 'total': 0}
+
+    def get_automation_activity(self, since, days_since):
+        """What every automation did lately, for the page's Activity view.
+
+        ``since`` and ``days_since`` are utc iso stamps, the way started_at is
+        stored. Returns ``(recent, days)``: one row per automation that ran
+        since ``since`` (runs, failed, skipped, average seconds, last start,
+        the newest failure's summary), and one row per automation, local day
+        and status since ``days_since``."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT automation_id, COUNT(*) AS runs,
+                           SUM(status = 'error') AS failed,
+                           SUM(status = 'skipped') AS skipped,
+                           AVG(duration_seconds) AS avg_seconds,
+                           MAX(started_at) AS last_started
+                    FROM automation_run_history
+                    WHERE started_at >= ?
+                    GROUP BY automation_id
+                """, (since,))
+                recent = {int(r[0]): {'automation_id': int(r[0]), 'runs': int(r[1] or 0),
+                                      'failed': int(r[2] or 0), 'skipped': int(r[3] or 0),
+                                      'avg_seconds': float(r[4] or 0), 'last_started': r[5],
+                                      'last_error': None, 'last_failed_at': None}
+                          for r in cursor.fetchall()}
+                failing = [aid for aid, row in recent.items() if row['failed']]
+                for aid in failing:
+                    cursor.execute("""
+                        SELECT summary, started_at FROM automation_run_history
+                        WHERE automation_id = ? AND status = 'error' AND started_at >= ?
+                        ORDER BY started_at DESC, id DESC LIMIT 1
+                    """, (aid, since))
+                    hit = cursor.fetchone()
+                    if hit:
+                        recent[aid]['last_error'], recent[aid]['last_failed_at'] = hit[0], hit[1]
+                cursor.execute("""
+                    SELECT automation_id, date(started_at, 'localtime') AS day, status, COUNT(*)
+                    FROM automation_run_history
+                    WHERE started_at >= ?
+                    GROUP BY automation_id, day, status
+                """, (days_since,))
+                days = [(int(r[0]), r[1], r[2], int(r[3])) for r in cursor.fetchall() if r[1]]
+                return list(recent.values()), days
+        except Exception as e:
+            logger.error(f"Error reading automation activity: {e}")
+            return [], []
+
+    def get_mirrored_playlist_art(self, playlist_ids):
+        """name and cover of each mirrored playlist id, for the automations
+        that sync one. ``{id: {name, image_url, cover_tiles}}``."""
+        ids = sorted({int(i) for i in playlist_ids or ()})
+        if not ids:
+            return {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, COALESCE(NULLIF(custom_name, ''), name), image_url, cover_tiles "
+                    f"FROM mirrored_playlists WHERE id IN ({','.join('?' for _ in ids)})", ids)
+                return {int(r[0]): {'id': int(r[0]), 'name': r[1], 'image_url': r[2] or '',
+                                    'cover_tiles': r[3] or ''} for r in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"Error reading playlist art for automations: {e}")
+            return {}
 
     def clear_automation_run_history(self, automation_id=None):
         """Clear run history for a specific automation or all automations."""

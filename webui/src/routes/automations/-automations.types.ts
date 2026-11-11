@@ -14,9 +14,9 @@ function searchString(value: unknown): string | undefined {
   return undefined;
 }
 
-// Which top-level view the page shows. The library is the browsable
-// collection grid; the overview is the glanceable status dashboard.
-export const automationsViews = ['overview', 'library'] as const;
+// Which top-level view the page shows: the overview answers "is it working",
+// the library is every automation, activity is what they did lately.
+export const automationsViews = ['overview', 'library', 'activity'] as const;
 export type AutomationsViewName = (typeof automationsViews)[number];
 
 /**
@@ -160,6 +160,64 @@ export interface Automation {
   profile_id?: number;
   created_at?: string | null;
   updated_at?: string | null;
+  /** The mirrored playlist a `playlist_pipeline` automation syncs, when it
+   *  still exists. Its cover stands in for the automation's icon. */
+  playlist?: AutomationPlaylist | null;
+}
+
+export interface AutomationPlaylist {
+  id: number;
+  name?: string | null;
+  image_url?: string | null;
+  /** json text or an array of up to four album covers */
+  cover_tiles?: string | string[] | null;
+}
+
+/** One automation's last 24 hours, from GET /api/automations/activity. */
+export interface AutomationActivityRow {
+  automation_id: number;
+  name: string;
+  action_type?: string | null;
+  runs: number;
+  failed: number;
+  skipped: number;
+  avg_seconds: number;
+  last_started?: string | null;
+  /** the newest failed run's own words */
+  last_error?: string | null;
+  last_failed_at?: string | null;
+}
+
+export interface AutomationActivityDay {
+  /** local calendar day, yyyy-mm-dd */
+  day: string;
+  completed: number;
+  failed: number;
+  skipped: number;
+}
+
+export interface AutomationActivity {
+  recent?: AutomationActivityRow[];
+  days?: AutomationActivityDay[];
+  totals?: { runs: number; failed: number; skipped: number };
+  window_hours?: number;
+  history_days?: number;
+  error?: string;
+}
+
+/** One stored run, from GET /api/automations/<id>/history. */
+export interface AutomationHistoryRun {
+  id: number;
+  started_at?: string | null;
+  duration_seconds?: number | null;
+  status?: string | null;
+  summary?: string | null;
+}
+
+export interface AutomationHistoryResponse {
+  history?: AutomationHistoryRun[];
+  total?: number;
+  error?: string;
 }
 
 /** GET /api/automations returns the bare array, or {error} on failure. */
