@@ -33,6 +33,8 @@ function bar(season: Record<string, unknown>, ctx: Ctx = {}): HTMLElement {
     var ytFilter = { q: ${JSON.stringify(ctx.q ?? '')}, state: 'all', duration: 'all' };
     window.VideoGrab = ${ctx.grab === false ? 'undefined' : '{}'};
     ${extractFunction('grabScope', SRC)}
+    var libData = null; var libSeasons = {}; var currentSource = 'library';
+    ${extractFunction('libSeasonFacts', SRC)}
   `;
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
   const build = new Function(

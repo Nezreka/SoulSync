@@ -453,14 +453,16 @@ On a show, each episode row shows **Missing** or **Upcoming** only when there's 
         },
         {
             id: 'vdet-library',
-            title: 'Your Library Tab',
+            title: 'Your Library on a Title',
             lede: 'Every copy you own of a title: where it lives, how good it is, and what you can do with it.',
             body: `
-A **movie** in your library is one page, with no tabs. Under the buttons in the hero, one line says what you have: your best copy's resolution, how many copies and how big, whether it meets the quality target of its profile, when it was added and what it is matched to, with **Quality and download settings** and **Fix match** at the end. **Needs attention** and **Files** follow, then the rest of the page.
+A title in your library is one page, with no tabs: what you own and what you can do with it are part of the page itself.
 
-A **show** still has two tabs, **Episodes** and **Your library**, and remembers the one you used last. Its summary says how many aired episodes you have, their size and their quality mix.
+Under the buttons in the hero, one line says what you have. For a **movie**: your best copy's resolution, how many copies and how big, whether it meets the quality target of its profile, when it was added and what it is matched to. For a **show**: how many aired episodes you have, their size, the quality mix, the target and the match. **Quality and download settings** and **Fix match** sit at the end of the line.
 
-**Needs attention** lists every problem with the title, each with its fix beside it. On a movie the section is not shown at all when there is nothing; on a show it says so. A download for a movie that is stuck or on its way is a row here too.
+**Needs attention** comes next, only when something is wrong. A movie's **Files** follow; a show's files are in its **Episodes** list.
+
+**Needs attention** lists every problem with the title, each with its fix beside it. The section is not shown at all when there is nothing. A download that is stuck or on its way is a row here too.
 
 | It says | The fix |
 |---------|---------|
@@ -471,7 +473,7 @@ A **show** still has two tabs, **Episodes** and **Your library**, and remembers 
 | *Not named by your template* | **Rename** or **Rename all**. |
 | *Not matched* | **Find the right title**. |
 
-**Files**: one card per copy, two side by side so copies can be compared, the best one first and outlined. The card leads with the resolution, the quality tag, size and runtime, then four facts: **Picture** (HDR or Dolby Vision, codec), **Sound** (format, Atmos, languages), **Subtitles** (how many, in the file or beside it, and which) and **Where** (drive and folder). Under those, the file name and whether it matches your [naming template](#vlib-manage), with **Rename** when it doesn't. The foot says when it was downloaded and from which indexer (hover for the release), or that there is no download on record. On a show, each episode shows its file as one line; click it to open the cards. The **⋯** menu on each file:
+**Files**: one card per copy, two side by side so copies can be compared, the best one first and outlined. The card leads with the resolution, the quality tag, size and runtime, then four facts: **Picture** (HDR or Dolby Vision, codec), **Sound** (format, Atmos, languages), **Subtitles** (how many, in the file or beside it, and which) and **Where** (drive and folder). Under those, the file name and whether it matches your [naming template](#vlib-manage), with **Rename** when it doesn't. The foot says when it was downloaded and from which indexer (hover for the release), or that there is no download on record. On a show, each episode's row carries its file as one line (resolution, source, HDR, audio, size, and a chip when it is below your target or has more than one copy); open the episode to see the cards above its guest stars. The **⋯** menu on each file:
 
 | Action | What it does |
 |--------|--------------|
@@ -487,13 +489,13 @@ A **show** still has two tabs, **Episodes** and **Your library**, and remembers 
 
 **Delete Show / Delete Movie** (admins, in the page's **More** menu) takes the whole title out of your library and stops it coming back. It unfollows it and clears its wishlist entries for every profile, cancels its downloads in progress, declines pending requests for it (the people who asked are told), closes its repair findings, hides it from Discover, moves its folder into the recycle bin as one entry (so it restores in one step), asks your media server to rescan, and forgets it. Torrents your client is still seeding are left alone; your seeding rules, or you, remove them. The first dialog lists exactly what will happen; the second asks you to type the title. A title with files outside your library folders is refused rather than deleted for good. Restoring the folder brings the files back, not the follow or the wishlist.
 
-For a **show**, the tab lists every season with its poster, what's owned, missing and upcoming, its size and resolution mix, and a **Monitored** switch. Open a season to see each episode with its still and its files. Tick episodes (or **Select all**) to act on several at once: **Look for upgrades**, **Rename to template** or **Delete**.
+For a **show**, the season you are looking at says what's there, its size and its resolution mix on one line, with **Grab**, **Manual search**, **Wishlist**, **Monitored** and **Clear failures** in its menu. Tick episodes (the box under an episode's number, shown when you point at a row) to act on several at once: a bar appears above the list with **Look for upgrades**, **Rename to template** and **Delete**.
 
 **Where it lives** lists the folders the show's files are in, each with its drive, file count and size. When a show is split, part of it forked off somewhere else, usually an upgrade that couldn't find the original. **Bring together…** asks which folder to keep and shows what would move before anything does: how many files, how much has to be copied because it sits on another drive, and the free space there. Files keep their names and land in that folder's season folders, subtitles go along, and nothing is overwritten. A copy to another drive only takes its real name once it is complete, so a move that is interrupted leaves the original where it was. The move runs in the background; you can close the window, come back to its progress, or stop it after the current file.
 
 **Match** shows the TMDB, IMDb and TVDB ids the title is matched to. **Fix match** searches TMDB (a title, a title and year, or a pasted TMDB id) and re-points the title. The ids are locked, so a library scan can't switch them back, and if your server named the title differently, SoulSync takes TMDB's name and year. **Use the server's match again** undoes it.
 
-Subtitle language overrides and the acquisition history for the title live under this tab too.
+Subtitle language overrides and the acquisition history for the title are further down the same page.
 `
         },
         {
@@ -509,7 +511,7 @@ SoulSync ingests per-episode and per-movie **watch state** from your server:
 
 **Whose watch state.** The scan reads watch state through the server's own account, so it is the server owner's. Each profile linked to its own Plex account (Connect with Plex, or a linked Plex Home user) gets its own: after every Plex scan SoulSync reads that account's watched and in-progress titles with its own token, and that profile's rail, Next Up, watched checks and library filters follow it. Its watched toggle marks the title played on its own Plex account. A profile with no linked account has no watch state, and no watched toggle. The admin with no linked account sees the server owner's.
 
-The **acquisition history** on the [Your library tab](#vdet-library) shows grabs, imports, and upgrades over time — useful for answering "when did this land, and from where?"
+The **acquisition history** at the bottom of the title's page ([your library on a title](#vdet-library)) shows grabs, imports, and upgrades over time — useful for answering "when did this land, and from where?"
 `
         },
         {
@@ -522,7 +524,7 @@ Edit any metadata field and **lock** it so enrichment never overwrites your chan
 > [!WARNING]
 > A re-match changes the title's identity and can update its name and art — but it does **not** silently wipe your locked fields. Locked means locked.
 
-A re-point from the **Matches** list (or **Fix match** on the [Your library tab](#vdet-library)) is locked too: the next scan keeps it even if your server still reports the old match.
+A re-point from the **Matches** list (or **Fix match** in the [library line](#vdet-library) of the title's page) is locked too: the next scan keeps it even if your server still reports the old match.
 
 On a TMDB page for something you own but SoulSync didn't recognise, **More → I have this** links it to your copy. An unmatched copy is re-identified as that title on the spot; a copy matched to a different title asks first.
 

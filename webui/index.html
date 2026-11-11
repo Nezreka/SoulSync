@@ -1561,6 +1561,8 @@
                                     <div class="vd-next-ep" data-vd-next-ep hidden></div>
                                     <p class="vd-overview" data-vd-overview></p>
                                     <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                    <!-- the library line: the React island portals it here on a library show -->
+                                    <div class="vd-libline" data-vd-libline></div>
                                     <div class="vd-kudos">
                                         <div class="vd-ratings" data-vd-ratings hidden></div>
                                         <div class="vd-awards" data-vd-awards hidden></div>
@@ -1587,25 +1589,15 @@
                             </div>
                         </div>
                         <div class="vd-body">
-                            <!-- Two tabs on a library title: the page as you know it, and Your library
-                                 (files, quality, match, monitoring) — a React island,
-                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
-                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
-                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Episodes</button>
-                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
-                            </div>
-                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
+                            <!-- the library island (React, webui/src/features/video-library): what needs
+                                 attention, and a movie's files. shown on a title you own -->
+                            <div class="vd-library-panel" data-vd-library-panel role="region" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->
                             <div class="vd-acq-section" data-vd-acq-section hidden>
                                 <h2 class="vd-section-h">Needs attention</h2>
                                 <div class="vd-acq" data-vd-acq></div>
-                            </div>
-                            <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
-                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
-                                <h2 class="vd-section-h">Subtitle languages</h2>
-                                <div class="vd-subcfg" data-vd-subcfg></div>
                             </div>
                             <div class="vd-ep-toolbar">
                                 <h2 class="vd-ep-heading">Episodes</h2>
@@ -1627,7 +1619,16 @@
                                 <span>Fetching the full episode list from TMDB&hellip; missing episodes will fill in
                                     shortly.</span>
                             </div>
+                            <!-- the bar for the episodes ticked in the list below (React) -->
+                            <div class="vd-libselect" data-vd-libselect></div>
                             <div class="vd-episodes" data-vd-episodes></div>
+                            <!-- where the show lives on disk (React) -->
+                            <div class="vd-libfoot" data-vd-libfoot></div>
+                            <!-- Subtitle language overrides (per show/movie) — video-subtitles.js. -->
+                            <div class="vd-subcfg-section vd-lib-extra" data-vd-subcfg-section hidden>
+                                <h2 class="vd-section-h">Subtitle languages</h2>
+                                <div class="vd-subcfg" data-vd-subcfg></div>
+                            </div>
                             <!-- YouTube channel playlists (channel source only) — video-detail.js. -->
                             <div class="vd-yt-pl-section" data-vd-yt-pl-section hidden>
                                 <h2 class="vd-section-h">Playlists</h2>
@@ -1726,14 +1727,9 @@
                             </div>
                         </div>
                         <div class="vd-body">
-                            <!-- Two tabs on a library title: the page as you know it, and Your library
-                                 (files, quality, match, monitoring) — a React island,
-                                 webui/src/features/video-library. Hidden on previews and YouTube. -->
-                            <div class="vd-tabs" data-vd-tabs role="tablist" aria-label="Page sections" hidden>
-                                <button class="vd-tab" type="button" role="tab" data-vd-tab="main" aria-selected="true">Overview</button>
-                                <button class="vd-tab" type="button" role="tab" data-vd-tab="library" aria-selected="false">Your library</button>
-                            </div>
-                            <div class="vd-library-panel" data-vd-library-panel role="tabpanel" aria-label="Your library" hidden></div>
+                            <!-- the library island (React, webui/src/features/video-library): what needs
+                                 attention, and a movie's files. shown on a title you own -->
+                            <div class="vd-library-panel" data-vd-library-panel role="region" aria-label="Your library" hidden></div>
                             <!-- Where acquisition stands RIGHT NOW. First thing in the
                                  body on purpose: it was below the whole episode list and
                                  the cast, next to the history block, where nobody found it. -->

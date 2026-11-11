@@ -294,7 +294,7 @@ describe('a page that cannot load', () => {
     const host = document.createElement('div');
     host.innerHTML =
       '<div class="vd-page"><h1 data-vd-title></h1><p data-vd-overview></p>' +
-      '<div data-vd-actions></div><div data-vd-tabs></div></div>';
+      '<div data-vd-actions></div><div data-vd-library-panel></div></div>';
     (globalThis as Record<string, unknown>).__host = host;
     const show = fn<(n: string, w: string, u?: string) => void>(
       'showLoadError',
@@ -311,7 +311,8 @@ describe('a page that cannot load', () => {
     expect(host.querySelector('[data-vd-overview]')?.textContent).toContain('private, deleted');
     expect(host.querySelector('[data-vd-act="retry-load"]')).not.toBeNull();
     expect(host.querySelector('a.vd-error-ext')?.getAttribute('href')).toContain('list=PL1');
-    expect((host.querySelector('[data-vd-tabs]') as HTMLElement).hidden).toBe(true);
+    // a page that could not load has no library parts to show
+    expect((host.querySelector('[data-vd-library-panel]') as HTMLElement).hidden).toBe(true);
   });
 
   it('the back pill never says "Back to Couldn\u2019t open this movie"', () => {

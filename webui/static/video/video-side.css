@@ -7467,42 +7467,14 @@ body[data-side="video"] #gsearch-aura {
    Detail page, Oct 2026 pass: one primary action, tabs, quieter rows.
    ════════════════════════════════════════════════════════════════════════════ */
 
-/* ── tabs: the page, and Your library (React, features/video-library) ── */
-.vd-tabs {
-    display: flex; gap: 4px; margin: 0 0 26px; padding: 4px; width: max-content; max-width: 100%;
-    border-radius: var(--radius-card); background: var(--white-a05); border: 1px solid var(--white-a08);
-}
-.vd-tabs[hidden] { display: none; }
-.vd-tab {
-    min-height: 38px; padding: 0 20px; border: 0; border-radius: var(--radius-control); cursor: pointer;
-    font: inherit; font-size: 14px; font-weight: 700; color: var(--white-a60); background: transparent;
-    transition: color var(--dur-fast), background var(--dur-fast);
-}
-.vd-tab:hover { color: var(--text-1); }
-.vd-tab--active, .vd-tab[aria-selected="true"] {
-    color: var(--text-1); background: rgba(var(--vd-accent-rgb), 0.28);
-    box-shadow: inset 0 0 0 1px rgba(var(--vd-accent-rgb), 0.45);
-}
-.vd-tab:focus-visible { outline: 2px solid rgba(var(--vd-accent-rgb), 0.8); outline-offset: 2px; }
-/* the tab names the list, so the list's own heading would say it twice */
-.vd-body--tabbed .vd-ep-heading { display: none; }
-.vd-body--tabbed .vd-ep-toolbar { justify-content: flex-end; }
-/* Your library: everything else on the page steps aside; the management
-   sections that used to sit in the main flow (subtitle languages, acquisition
-   history) come along, under the tab. */
-.vd-body--library { display: flex; flex-direction: column; }
-.vd-body.vd-body--library > :not(.vd-tabs):not(.vd-library-panel):not(.vd-lib-extra) { display: none; }
-.vd-body:not(.vd-body--library, .vd-body--one) > .vd-lib-extra { display: none; }
-/* one page (a library movie): the panel is part of the page, and the old
-   acquisition block is a row in its Needs attention list */
+/* ── one page: a title you own carries its library parts in the page ──
+   (React, features/video-library). the panel holds what needs attention and
+   a movie's files; the old acquisition block is a row in that list. */
+.vd-body:not(.vd-body--one) > .vd-lib-extra { display: none; }
 .vd-body--one > .vd-acq-section { display: none; }
 .vd-body--one > .vd-library-panel { margin-top: 28px; }
 .vd-body--one > .vd-subcfg-section { margin-top: 36px; }
 .vd-body--one > .vd-lib-extra .vd-section-h { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 12px; }
-.vd-body--library > .vd-tabs { order: 0; }
-.vd-body--library > .vd-library-panel { order: 1; }
-.vd-body--library > .vd-subcfg-section { order: 2; }
-.vd-body--library > .vd-history-section { order: 3; }
 .vd-library-panel[hidden] { display: none; }
 
 /* ── the hero's More menu: grouped, with links ── */
@@ -7549,30 +7521,27 @@ body[data-side="video"] #gsearch-aura {
 .vd-ep-badge--versions { color: var(--white-a70); background: var(--white-a05); border: 1px solid var(--white-a12); }
 /* the management sections that moved under Your library read like its own
    cards: same heading size, same card, the page accent on Save */
-.vd-body--library > .vd-lib-extra .vd-section-h { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 12px; }
-.vd-body--library > .vd-subcfg-section,
-.vd-body--library > .vd-history-section { margin-top: 28px; }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-card {
+.vd-body--one .vd-subcfg .vsub-card {
     max-width: none; padding: 18px 20px; border: 0; border-radius: var(--radius-xl);
     background: var(--white-a04); box-shadow: inset 0 0 0 1px var(--white-a08);
 }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-head { margin-bottom: 8px; }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-badge {
+.vd-body--one .vd-subcfg .vsub-head { margin-bottom: 8px; }
+.vd-body--one .vd-subcfg .vsub-badge {
     padding: 2px 9px; border: 0; border-radius: var(--radius-pill); background: var(--white-a08);
     font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--white-a75);
 }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-hint { font-size: 13px; color: var(--white-a50); }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-label { font-size: 12px; font-weight: 500; color: var(--white-a50); }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-input {
+.vd-body--one .vd-subcfg .vsub-hint { font-size: 13px; color: var(--white-a50); }
+.vd-body--one .vd-subcfg .vsub-label { font-size: 12px; font-weight: 500; color: var(--white-a50); }
+.vd-body--one .vd-subcfg .vsub-input {
     max-width: 360px; min-height: 40px; border: 0; border-radius: var(--radius-lg); background: var(--white-a08);
 }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-btn {
+.vd-body--one .vd-subcfg .vsub-btn {
     height: 32px; padding: 0 14px; border: 0; border-radius: var(--radius-pill);
     background: var(--white-a10); color: var(--text-1); font-size: 13px; font-weight: 600;
 }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-btn:hover { background: var(--white-a16); }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-btn--primary { background: rgba(var(--vd-accent-rgb), 0.9); color: var(--text-1); }
-:is(.vd-body--library, .vd-body--one) .vd-subcfg .vsub-btn--primary:hover { background: rgb(var(--vd-accent-rgb)); }
+.vd-body--one .vd-subcfg .vsub-btn:hover { background: var(--white-a16); }
+.vd-body--one .vd-subcfg .vsub-btn--primary { background: rgba(var(--vd-accent-rgb), 0.9); color: var(--text-1); }
+.vd-body--one .vd-subcfg .vsub-btn--primary:hover { background: rgb(var(--vd-accent-rgb)); }
 
 /* the synopsis opens in place when it ran past its three lines */
 .vd-overview.vd-overview--open { display: block; -webkit-line-clamp: unset; overflow: visible; }
@@ -8112,40 +8081,6 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vd-page .vd-viewall::after { content: ' ›'; }
 .vd-page .vd-viewall:hover { color: var(--text-1); background: none; }
 
-/* tabs: words and a line */
-.vd-page .vd-tabs {
-    display: flex;
-    gap: 30px;
-    width: 100%;
-    padding: 0;
-    margin: 6px 0 0;
-    background: none;
-    border: 0;
-    border-radius: 0;
-    box-shadow: inset 0 -1px 0 var(--vdp-line);
-}
-.vd-page .vd-tab {
-    height: auto;
-    padding: 0 0 14px;
-    background: none;
-    border: 0;
-    border-radius: 0;
-    font: inherit;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.005em;
-    color: var(--vdp-dim);
-    box-shadow: none;
-    transition: color 0.18s;
-}
-.vd-page .vd-tab:hover { color: var(--vdp-text); background: none; }
-.vd-page .vd-tab.vd-tab--active,
-.vd-page .vd-tab[aria-selected="true"] {
-    color: var(--text-1);
-    background: none;
-    box-shadow: inset 0 -2px 0 var(--text-1);
-}
-
 /* strips */
 .vd-page .vd-strip-btn {
     width: 40px;
@@ -8618,3 +8553,53 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vd-page .vd-review-more:hover,
 .vd-page .vd-detail-v button:hover { opacity: 1; text-decoration: none; }
 .vd-page .vd-review-rating { color: var(--vdp-text); font-weight: 600; }
+
+/* ── one page: the episode list carries each episode's file ──────────────── */
+/* the file as one quiet line on the row, a tick box to act on several, and
+   the cards (a React island of their own) when the row is opened */
+.vd-page .vd-ep-file {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+    margin-top: 10px; font-size: 13px; color: var(--white-a55);
+}
+.vd-page .vd-ep-file-res {
+    padding: 1px 8px; border-radius: var(--radius-sm); font-size: 12px; font-weight: 600;
+    color: var(--white-a75); background: var(--white-a08);
+}
+.vd-page .vd-ep-file-res[data-tone="uhd"] { color: var(--gold); background: rgba(var(--gold-rgb), 0.14); }
+.vd-page .vd-ep-file-res[data-tone="hd"] { color: var(--text-1); background: rgba(var(--vd-accent-rgb), 0.24); }
+.vd-page .vd-ep-file-res[data-tone="mid"] { color: var(--white-a90); background: var(--white-a16); }
+.vd-page .vd-ep-file-chip {
+    padding: 1px 8px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 500;
+    color: var(--white-a75); background: var(--white-a08);
+}
+.vd-page .vd-ep-file-chip--warn { color: var(--warning); background: rgba(var(--warning-rgb), 0.12); }
+.vd-page .vd-ep-pick { display: block; margin-top: 10px; line-height: 0; cursor: pointer; }
+.vd-page .vd-ep-pick input {
+    width: 18px; height: 18px; margin: 0; appearance: none; cursor: pointer;
+    display: inline-grid; place-items: center; border-radius: var(--radius-xs);
+    background: var(--white-a10); box-shadow: inset 0 0 0 1.5px var(--white-a25);
+    opacity: 0; transition: opacity var(--dur-base) ease, background var(--dur-base) ease;
+}
+/* the boxes stay out of the way until a row is hovered, focused or one is ticked */
+.vd-page .vd-ep:hover .vd-ep-pick input,
+.vd-page .vd-ep-pick input:focus-visible,
+.vd-page .vd-ep-pick input:checked,
+.vd-page .vd-episodes:has(.vd-ep-pick input:checked) .vd-ep-pick input { opacity: 1; }
+.vd-page .vd-ep-pick input:checked { background: rgb(var(--vd-accent-rgb)); box-shadow: none; }
+.vd-page .vd-ep-pick input:checked::after {
+    content: ''; width: 9px; height: 5px; margin-top: -2px;
+    border-left: 2px solid var(--text-1); border-bottom: 2px solid var(--text-1); transform: rotate(-45deg);
+}
+.vd-page .vd-ep-pick input:focus-visible { outline: 2px solid rgba(var(--vd-accent-rgb), 0.8); outline-offset: 2px; }
+@media (hover: none) { .vd-page .vd-ep-pick input { opacity: 1; } }
+.vd-page .vd-ep-files { padding: 4px 14px 0 82px; }
+.vd-page .vd-ep-files[hidden] { display: none; }
+.vd-page .vd-season-lib {
+    display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--white-a55);
+}
+.vd-page .vd-libselect { position: sticky; top: 8px; z-index: 5; }
+.vd-page .vd-libselect:empty, .vd-page .vd-libfoot:empty, .vd-page .vd-libline:empty { display: none; }
+.vd-page .vd-libselect > * { margin-bottom: 10px; }
+.vd-page .vd-libfoot { margin-top: 36px; }
+@media (max-width: 720px) { .vd-page .vd-ep-files { padding: 4px 0 0; } }

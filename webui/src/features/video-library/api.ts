@@ -301,14 +301,3 @@ export function releaseIdentity(kind: TitleKind, id: number): Promise<{ success:
     body: '{}',
   });
 }
-
-export function setSeasonMonitored(
-  showId: number,
-  season: number,
-  monitored: boolean,
-): Promise<{ success: boolean }> {
-  return send<{ success: boolean }>(`/api/video/detail/show/${showId}/season/${season}/monitor`, {
-    method: 'POST',
-    body: JSON.stringify({ monitored }),
-  });
-}

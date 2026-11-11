@@ -20,7 +20,6 @@ import { createPortal } from 'react-dom';
 import { ActionMenu, type ActionMenuItem } from '@/routes/artist-detail/-ui/action-menu';
 
 import type {
-  Identity,
   LibraryEpisode,
   LibraryFile,
   LibrarySeason,
@@ -40,7 +39,6 @@ import {
   fetchTitleLibrary,
   releaseIdentity,
   renameFile,
-  setSeasonMonitored,
   type WishEpisode,
   wishlistEpisodes,
   wishlistMovie,
@@ -53,13 +51,13 @@ import {
   dateLabel,
   driveLabel,
   formatBytes,
-  pad2,
   rangeLabel,
   resolutionTone,
   runtimeLabel,
   subtitleLabels,
 } from './format';
-import { ConsolidateDialog, CopiesDialog, ReassignDialog } from './library-dialogs';
+import { ConsolidateDialog, CopiesDialog } from './library-dialogs';
+import { invalidate, onInvalidate } from './library-store';
 import s from './video-library.module.css';
 
 /** the page's own flows, which the tab borrows instead of re-implementing. */
@@ -72,7 +70,24 @@ export interface VideoDetailBridge {
   openManage?: () => void;
   /** the title changed under the page (fixed match, deleted the last file). */
   reloadPage?: () => void;
+  /** the show's library data, for the page's own episode list to draw from */
+  onLibrary?: (data: ShowLibrary) => void;
+  /** the picked episodes were acted on: untick them */
+  clearSelection?: () => void;
 }
+
+/** where the page wants each part of the library island (video-detail.js) */
+export interface PageSlots {
+  /** the library line, in the hero */
+  hero?: HTMLElement | null;
+  /** the bar for the episodes picked in the page's list, above that list */
+  select?: HTMLElement | null;
+  /** where it lives, under the episode list */
+  foot?: HTMLElement | null;
+}
+
+/** the page's episode list says which episodes are ticked */
+export const SELECTION_EVENT = 'soulsync:video-ep-selection';
 
 declare global {
   interface Window {
@@ -80,7 +95,7 @@ declare global {
   }
 }
 
-function bridge(): VideoDetailBridge {
+export function bridge(): VideoDetailBridge {
   return window.SoulSyncVideoDetail ?? {};
 }
 
@@ -150,59 +165,6 @@ function MenuButton({ label, items }: { label: string; items: ActionMenuItem[] }
   );
 }
 
-function Bar({ value, max, label }: { value: number; max: number; label: string }) {
-  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
-  return (
-    <div className={s.bar} role="img" aria-label={label} title={label}>
-      <span className={s.barFill} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
-
-function ResMix({ mix }: { mix: { label: string; count: number }[] }) {
-  const total = mix.reduce((n, m) => n + m.count, 0);
-  if (!total) return null;
-  return (
-    <div className={s.mix}>
-      <div
-        className={s.mixBar}
-        role="img"
-        aria-label={mix.map((m) => `${m.count} ${m.label}`).join(', ')}
-      >
-        {mix.map((m) => (
-          <span
-            key={m.label}
-            className={s.mixSeg}
-            data-tone={resolutionTone(m.label)}
-            style={{ flexGrow: m.count }}
-          />
-        ))}
-      </div>
-      <div className={s.mixLegend}>
-        {mix.map((m) => (
-          <span key={m.label} className={s.mixKey}>
-            <span className={s.mixDot} data-tone={resolutionTone(m.label)} />
-            {m.label} <b>{m.count}</b>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/** a picture that steps aside for its placeholder when it won't load */
-function Art({ src, shape }: { src: string | null; shape: 'poster' | 'still' }) {
-  const [broken, setBroken] = useState(false);
-  useEffect(() => setBroken(false), [src]);
-  return (
-    <span className={s.art} data-shape={shape} aria-hidden="true">
-      {src && !broken ? (
-        <img src={src} alt="" loading="lazy" onError={() => setBroken(true)} />
-      ) : null}
-    </span>
-  );
-}
-
 async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text);
@@ -236,25 +198,9 @@ interface Issue {
   action?: { label: string; onClick: () => void; busy?: boolean };
 }
 
-function Attention({
-  issues,
-  quietWhenClear,
-}: {
-  issues: Issue[];
-  /** on the one-page layout a healthy title shows no section at all */
-  quietWhenClear?: boolean;
-}) {
-  if (!issues.length) {
-    if (quietWhenClear) return null;
-    return (
-      <p className={s.allGood}>
-        <span className={s.tick} aria-hidden="true">
-          ✓
-        </span>
-        Nothing here needs attention.
-      </p>
-    );
-  }
+function Attention({ issues }: { issues: Issue[] }) {
+  // a healthy title shows no section at all: the page is just the page
+  if (!issues.length) return null;
   return (
     <section className={s.attention} aria-label="Needs attention">
       <h3 className={s.sectionTitle}>
@@ -287,7 +233,7 @@ function Attention({
 
 /* ── one file ─────────────────────────────────────────────────────────────── */
 
-interface FileActions {
+export interface FileActions {
   canManage: boolean;
   recycle: boolean;
   onRename: (f: LibraryFile) => void;
@@ -534,17 +480,8 @@ function FileCard({
   );
 }
 
-/** "WEBDL-1080p · Dolby Vision · EAC3 5.1 Atmos · 5.7 GB": a file in one line */
-function fileLineText(f: LibraryFile): string {
-  const named =
-    f.quality && f.quality !== f.resolution_label ? f.quality : codecLabel(f.video_codec);
-  return [named, rangeLabel(f.dynamic_range), audioLabel(f), formatBytes(f.size_bytes)]
-    .filter(Boolean)
-    .join(' · ');
-}
-
 /** a title's or an episode's files, side by side */
-function FileCards({
+export function FileCards({
   files,
   actions,
   quiet,
@@ -574,80 +511,9 @@ function FileCards({
   );
 }
 
-/* ── the summary's side facts ─────────────────────────────────────────────── */
-
-function MatchLine({
-  identity,
-  canManage,
-  onFix,
-  onRelease,
-}: {
-  identity: Identity;
-  canManage: boolean;
-  onFix: () => void;
-  onRelease: () => void;
-}) {
-  const ids = [
-    identity.tmdb_id ? `TMDB ${identity.tmdb_id}` : null,
-    identity.imdb_id ? `IMDb ${identity.imdb_id}` : null,
-    identity.tvdb_id ? `TVDB ${identity.tvdb_id}` : null,
-  ].filter(Boolean);
-  const unmatched = !identity.tmdb_id;
-  return (
-    <div className={s.fact}>
-      <div className={s.factLabel}>Match</div>
-      <div className={s.factValue}>
-        {unmatched ? <Chip tone="warn">Not matched</Chip> : ids.join(' · ')}
-        {identity.fixed ? <Chip tone="ok">Fixed by you</Chip> : null}
-      </div>
-      {identity.fixed ? (
-        <p className={s.note}>Locked: scans keep this match even if your server says otherwise.</p>
-      ) : null}
-      {canManage ? (
-        <div className={s.factActions}>
-          <button type="button" className={s.linkBtn} onClick={onFix}>
-            {unmatched ? 'Find the right title' : 'Fix match'}
-          </button>
-          {identity.fixed ? (
-            <button type="button" className={s.linkBtn} onClick={onRelease}>
-              Use the server’s match again
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function TargetLine({
-  cutoff,
-  profile,
-  canManage,
-}: {
-  cutoff: string;
-  profile: string;
-  canManage: boolean;
-}) {
-  return (
-    <div className={s.fact}>
-      <div className={s.factLabel}>Quality target</div>
-      <div className={s.factValue}>
-        {cutoff} <span className={s.muted}>· {profile} profile</span>
-      </div>
-      {canManage && bridge().openManage ? (
-        <div className={s.factActions}>
-          <button type="button" className={s.linkBtn} onClick={() => bridge().openManage?.()}>
-            Quality and download settings
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 /* ── shared action handlers ───────────────────────────────────────────────── */
 
-function useFileActions(reload: () => void, kind: TitleKind) {
+export function useFileActions(reload: () => void, kind: TitleKind) {
   const onRename = useCallback(
     async (f: LibraryFile) => {
       const want = f.naming?.expected_name;
@@ -938,7 +804,7 @@ function MovieView({
     <div className={s.tab} data-layout="page">
       {heroSlot ? createPortal(line, heroSlot) : line}
 
-      <Attention issues={issues} quietWhenClear />
+      <Attention issues={issues} />
 
       <section>
         <div className={s.sectionHead}>
@@ -990,37 +856,6 @@ function MovieView({
 
 /* ── show ─────────────────────────────────────────────────────────────────── */
 
-function seasonMenu(season: LibrarySeason, canManage: boolean): ActionMenuItem[] {
-  const b = bridge();
-  const items: ActionMenuItem[] = [];
-  const n = season.season_number;
-  if (season.missing && b.grabSeason) {
-    items.push({
-      key: 'grab',
-      label: `Grab ${season.missing} missing`,
-      onSelect: () => b.grabSeason?.(n),
-    });
-  }
-  if (b.manualSearch) {
-    items.push({
-      key: 'search',
-      label: 'Manual search',
-      onSelect: () => b.manualSearch?.('season', n),
-    });
-  }
-  if (season.missing && b.wishlistSeason) {
-    items.push({ key: 'wish', label: 'Wishlist missing', onSelect: () => b.wishlistSeason?.(n) });
-  }
-  if (canManage && b.clearSeasonFailures) {
-    items.push({
-      key: 'retry',
-      label: 'Clear failures and search again',
-      onSelect: () => b.clearSeasonFailures?.(n),
-    });
-  }
-  return items;
-}
-
 function wishOf(showId: number, season: LibrarySeason, ep: LibraryEpisode): WishEpisode {
   return {
     season_number: season.season_number,
@@ -1035,425 +870,21 @@ function wishOf(showId: number, season: LibrarySeason, ep: LibraryEpisode): Wish
   };
 }
 
-function EpisodeRow({
-  ep,
-  season,
-  actions,
-  quiet,
-  selected,
-  onSelect,
-}: {
-  ep: LibraryEpisode;
-  season: number;
-  actions: Omit<FileActions, 'onSubtitles' | 'onUpgrade'>;
-  quiet: Quiet;
-  selected: boolean;
-  onSelect?: (ep: LibraryEpisode, on: boolean) => void;
-}) {
-  const label = `S${pad2(season)}E${pad2(ep.episode_number)}`;
-  const b = bridge();
-  const fileActions: FileActions = {
-    ...actions,
-    onSubtitles: b.subtitleSearch
-      ? () =>
-          b.subtitleSearch?.('episode', ep.id, ep.title || `Episode ${ep.episode_number}`, label)
-      : undefined,
-    onUpgrade: b.manualSearch
-      ? () => b.manualSearch?.('episode', season, ep.episode_number)
-      : undefined,
-  };
-  const [open, setOpen] = useState(false);
-  const lead = ep.files.find((f) => f.best) ?? ep.files[0];
-  const meta = [
-    ep.air_date ? dateLabel(ep.air_date) : '',
-    ep.runtime_minutes ? `${ep.runtime_minutes}m` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  return (
-    <li
-      className={s.ep}
-      data-ep-id={ep.id}
-      data-owned={ep.has_file ? 'yes' : 'no'}
-      data-selected={selected ? 'yes' : 'no'}
-    >
-      <div className={s.epHead}>
-        {onSelect && ep.files.length ? (
-          <input
-            type="checkbox"
-            className={s.check}
-            checked={selected}
-            aria-label={`Select ${label}`}
-            onChange={(e) => onSelect(ep, e.target.checked)}
-          />
-        ) : (
-          <span className={s.checkGap} aria-hidden="true" />
-        )}
-        <Art src={ep.has_still ? `/api/video/poster/episode/${ep.id}?w=240` : null} shape="still" />
-        <div className={s.epText}>
-          <div className={s.epTitleRow}>
-            <span className={s.epNum}>{pad2(ep.episode_number)}</span>
-            <span className={s.epTitle}>{ep.title || `Episode ${ep.episode_number}`}</span>
-            {ep.watched ? (
-              <span className={s.watched} title="Watched">
-                ✓
-              </span>
-            ) : null}
-          </div>
-          {meta ? <div className={s.epMeta}>{meta}</div> : null}
-          {lead ? (
-            // the file as one quiet line. the cards (every fact, every action)
-            // open under it: a season of ten open cards was a wall
-            <button
-              type="button"
-              className={s.fileLine}
-              aria-expanded={open}
-              aria-label={`${label} files`}
-              onClick={() => setOpen(!open)}
-            >
-              <ResBadge label={lead.resolution_label} />
-              <span className={s.fileLineText}>{fileLineText(lead)}</span>
-              {lead.below_cutoff && !quiet.below ? (
-                <Chip tone="warn">Below your target</Chip>
-              ) : null}
-              {ep.files.length > 1 ? <Chip>{ep.files.length} copies</Chip> : null}
-              {ep.files.some((f) => f.naming && !f.naming.conforms) ? (
-                <Chip tone="warn">Name differs</Chip>
-              ) : null}
-              <span className={s.fileLineChev} aria-hidden="true">
-                ›
-              </span>
-            </button>
-          ) : null}
-        </div>
-        {!ep.has_file ? (
-          ep.aired ? (
-            <div className={s.epState}>
-              <span className={s.missing}>Missing</span>
-              {b.manualSearch ? (
-                <button
-                  type="button"
-                  className={s.btn}
-                  onClick={() => b.manualSearch?.('episode', season, ep.episode_number)}
-                >
-                  Search
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <span className={s.muted}>
-              {ep.air_date ? `Airs ${dateLabel(ep.air_date)}` : 'Not aired yet'}
-            </span>
-          )
-        ) : null}
-      </div>
-      {open && ep.files.length ? (
-        <div className={s.epFiles}>
-          <FileCards files={ep.files} actions={fileActions} quiet={quiet} label={`${label} file`} />
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
-function SeasonRow({
-  season,
-  data,
-  open,
-  loading,
-  onToggle,
-  reload,
-  onReassign,
-  onUpgradeEpisodes,
-}: {
-  season: LibrarySeason;
-  data: ShowLibrary;
-  open: boolean;
-  loading: boolean;
-  onToggle: () => void;
-  reload: () => void;
-  onReassign: (f: LibraryFile, from: { season: number; episode: number }) => void;
-  onUpgradeEpisodes: (episodes: WishEpisode[]) => Promise<void>;
-}) {
-  const { onRename, onDelete } = useFileActions(reload, 'show');
-  const [monitored, setMonitored] = useState(season.monitored);
-  const [picked, setPicked] = useState<ReadonlySet<number>>(new Set());
-  const [working, setWorking] = useState(false);
-  useEffect(() => setMonitored(season.monitored), [season.monitored]);
-  useEffect(() => {
-    if (!open) setPicked(new Set());
-  }, [open]);
-  const toggleMonitor = async () => {
-    const next = !monitored;
-    setMonitored(next);
-    try {
-      await setSeasonMonitored(data.id, season.season_number, next);
-      toast(next ? `${season.title} monitored` : `${season.title} unmonitored`);
-    } catch (e) {
-      setMonitored(!next);
-      toast((e as Error).message || 'Couldn’t change monitoring', 'error');
-    }
-  };
-  const aired = season.owned + season.missing;
-  const files = season.episodes.flatMap((e) => e.files);
-  const ownedFiles = files.length;
-  const checked = files.filter((f) => f.reachable !== undefined);
-  const drifted = files.filter((f) => f.reachable && f.naming && !f.naming.conforms);
-  const quiet: Quiet = {
-    unreachable: checked.length > 0 && checked.every((f) => f.reachable === false),
-    below: ownedFiles > 0 && season.below_cutoff === ownedFiles,
-  };
-  const actions = {
-    canManage: data.can_manage,
-    recycle: data.recycle,
-    onRename,
-    onDelete: (f: LibraryFile) => {
-      const ep = season.episodes.find((e) => e.files.some((x) => x.id === f.id));
-      return onDelete(f, data.recycle, (ep?.files.length ?? 0) <= 1);
-    },
-    onReassign: (f: LibraryFile) => {
-      const ep = season.episodes.find((e) => e.files.some((x) => x.id === f.id));
-      if (ep) onReassign(f, { season: season.season_number, episode: ep.episode_number });
-    },
-  };
-
-  const owned = season.episodes.filter((e) => e.files.length);
-  const chosen = owned.filter((e) => picked.has(e.id));
-  const chosenFiles = chosen.flatMap((e) => e.files);
-  const select = (ep: LibraryEpisode, on: boolean) =>
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(ep.id);
-      else next.delete(ep.id);
-      return next;
-    });
-  const all = owned.length > 0 && chosen.length === owned.length;
-
-  const deleteChosen = async () => {
-    const reachable = chosenFiles.filter((f) => f.reachable !== false);
-    const ok = await confirm({
-      title: data.recycle
-        ? `Move ${plural(reachable.length, 'file')} to the recycle bin?`
-        : `Delete ${plural(reachable.length, 'file')} for good?`,
-      message:
-        `Every file of the ${plural(chosen.length, 'episode')} you picked ${data.recycle ? 'moves to the recycle bin, where it can be restored until it expires' : 'is deleted permanently. Recycling is turned off in your library settings'}. Those episodes will show as missing.` +
-        (reachable.length < chosenFiles.length
-          ? ` ${plural(chosenFiles.length - reachable.length, 'file')} only your media server can see ${chosenFiles.length - reachable.length === 1 ? 'is' : 'are'} left alone.`
-          : ''),
-      confirmText: data.recycle ? 'Move to recycle bin' : 'Delete',
-      destructive: true,
-    });
-    if (!ok) return;
-    setWorking(true);
-    try {
-      const res = await bulkFiles(
-        'delete',
-        reachable.map((f) => f.id),
-        'show',
-      );
-      toast(
-        res.failed
-          ? `Removed ${res.done}, ${res.failed} couldn’t be removed`
-          : `Removed ${plural(res.done, 'file')}`,
-        res.failed ? 'warning' : 'success',
-      );
-    } catch (e) {
-      toast((e as Error).message || 'Delete failed', 'error');
-    }
-    setWorking(false);
-    setPicked(new Set());
-    reload();
-    bridge().reloadPage?.();
-  };
-
-  const upgradeChosen = async () => {
-    setWorking(true);
-    await onUpgradeEpisodes(chosen.map((e) => wishOf(data.id, season, e)));
-    setWorking(false);
-    setPicked(new Set());
-  };
-
-  const bodyId = `vlt-season-${data.id}-${season.season_number}`;
-  const poster =
-    season.has_poster && season.id != null
-      ? `/api/video/poster/season/${season.id}?w=160`
-      : `/api/video/poster/show/${data.id}?w=160`;
-  return (
-    <li className={s.season} data-open={open ? 'yes' : 'no'} data-season={season.season_number}>
-      <div className={s.seasonHead}>
-        <button
-          type="button"
-          className={s.seasonToggle}
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={onToggle}
-        >
-          <Art src={poster} shape="poster" />
-          <span className={s.seasonText}>
-            <span className={s.seasonTitle}>{season.title}</span>
-            <span className={s.seasonSub}>
-              <span className={s.seasonCount}>
-                {season.owned}/{aired || season.total}
-              </span>
-              <span className={s.seasonSize}>{formatBytes(season.size_bytes) || '—'}</span>
-              {season.missing ? <span className={s.missing}>{season.missing} missing</span> : null}
-              {season.upcoming ? <span className={s.muted}>{season.upcoming} upcoming</span> : null}
-            </span>
-          </span>
-          <Bar
-            value={season.owned}
-            max={aired || season.total}
-            label={`${season.owned} of ${aired || season.total} aired episodes`}
-          />
-          <span className={s.seasonMix}>
-            {season.res_mix.map((m) => (
-              <span key={m.label} className={s.mixPill} data-tone={resolutionTone(m.label)}>
-                {m.label}
-                {season.res_mix.length > 1 ? ` ${m.count}` : ''}
-              </span>
-            ))}
-          </span>
-          <span className={s.chev} aria-hidden="true">
-            ›
-          </span>
-        </button>
-        {data.can_manage ? (
-          <label
-            className={s.switch}
-            title={
-              monitored
-                ? 'Monitored: missing episodes are hunted'
-                : 'Unmonitored: SoulSync leaves this season alone'
-            }
-          >
-            <input type="checkbox" checked={monitored} onChange={() => void toggleMonitor()} />
-            <span className={s.switchTrack} aria-hidden="true" />
-            <span className={s.switchLabel}>Monitored</span>
-          </label>
-        ) : null}
-        <MenuButton label={`${season.title} actions`} items={seasonMenu(season, data.can_manage)} />
-      </div>
-      {open ? (
-        <div className={s.seasonBody} id={bodyId}>
-          {loading ? <div className={s.loading}>Checking the files…</div> : null}
-          {quiet.unreachable ? (
-            <p className={s.note}>
-              These files are on a drive only your media server can see, so SoulSync shows what the
-              server reports and can’t rename or delete them from here.
-            </p>
-          ) : null}
-          {data.can_manage && drifted.length > 1 ? (
-            <p className={s.note}>
-              {drifted.length} files here don’t match your naming template.{' '}
-              <button
-                type="button"
-                className={s.linkBtn}
-                onClick={() => void renameMany(drifted, 'show', reload)}
-              >
-                Rename all
-              </button>
-            </p>
-          ) : null}
-          {season.below_cutoff ? (
-            <p className={s.note}>
-              {season.below_cutoff === ownedFiles
-                ? 'Every file here is'
-                : `${season.below_cutoff} of ${ownedFiles} files are`}{' '}
-              below your {data.quality.cutoff_label} target.
-            </p>
-          ) : null}
-          {data.can_manage && owned.length > 1 ? (
-            <div className={s.selectBar} data-active={chosen.length ? 'yes' : 'no'}>
-              <label className={s.selectAll}>
-                <input
-                  type="checkbox"
-                  className={s.check}
-                  checked={all}
-                  onChange={(e) =>
-                    setPicked(e.target.checked ? new Set(owned.map((x) => x.id)) : new Set())
-                  }
-                />
-                {chosen.length ? `${chosen.length} selected` : 'Select all'}
-              </label>
-              {chosen.length ? (
-                <div className={s.selectActions}>
-                  {data.identity.tmdb_id ? (
-                    <button
-                      type="button"
-                      className={s.btn}
-                      disabled={working}
-                      onClick={() => void upgradeChosen()}
-                    >
-                      Look for upgrades
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={s.btn}
-                    disabled={working || !chosenFiles.some((f) => f.naming && !f.naming.conforms)}
-                    onClick={() =>
-                      void renameMany(
-                        chosenFiles.filter((f) => f.reachable && f.naming && !f.naming.conforms),
-                        'show',
-                        reload,
-                      )
-                    }
-                  >
-                    Rename to template
-                  </button>
-                  <button
-                    type="button"
-                    className={s.btnDanger}
-                    disabled={working || !chosenFiles.some((f) => f.reachable !== false)}
-                    onClick={() => void deleteChosen()}
-                  >
-                    Delete
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <ol className={s.eps}>
-            {season.episodes.map((ep) => (
-              <EpisodeRow
-                key={ep.id}
-                ep={ep}
-                season={season.season_number}
-                actions={actions}
-                quiet={quiet}
-                selected={picked.has(ep.id)}
-                onSelect={data.can_manage && owned.length > 1 ? select : undefined}
-              />
-            ))}
-          </ol>
-        </div>
-      ) : null}
-    </li>
-  );
-}
-
 function ShowView({
   data,
   reload,
-  openSeason,
-  setOpenSeason,
-  loadingSeason,
+  page,
 }: {
   data: ShowLibrary;
   reload: () => void;
-  openSeason: number | null;
-  setOpenSeason: (n: number | null) => void;
-  loadingSeason: boolean;
+  /** where the page wants each part; without one it all renders in place */
+  page: PageSlots;
 }) {
   const { fixing, setFixing, onRelease } = useIdentity('show', data.id, reload);
   const [copies, setCopies] = useState(false);
   const [consolidating, setConsolidating] = useState(false);
   const [job, setJob] = useState<ConsolidateState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [reassign, setReassign] = useState<{
-    file: LibraryFile;
-    from: { season: number; episode: number };
-  } | null>(null);
   const sm = data.summary;
   const aired = sm.owned + sm.missing;
   const q = data.quality;
@@ -1511,8 +942,139 @@ function ShowView({
     setBusy(null);
   };
 
+  // the page's own episode list hands over what is ticked there, and the
+  // library data goes back so each of its rows can show its file
+  const [pickedIds, setPickedIds] = useState<number[]>([]);
+  useEffect(() => {
+    const onPick = (event: Event) => {
+      const detail = (event as CustomEvent<{ showId?: number; episodeIds?: number[] }>).detail;
+      if (detail?.showId === data.id) setPickedIds(detail.episodeIds ?? []);
+    };
+    document.addEventListener(SELECTION_EVENT, onPick);
+    return () => document.removeEventListener(SELECTION_EVENT, onPick);
+  }, [data.id]);
+  useEffect(() => {
+    bridge().onLibrary?.(data);
+  }, [data]);
+  const picked = useMemo(() => {
+    const want = new Set(pickedIds);
+    return data.seasons.flatMap((season) =>
+      season.episodes
+        .filter((ep) => want.has(ep.id) && ep.files.length)
+        .map((ep) => ({ season, ep })),
+    );
+  }, [data, pickedIds]);
+  const clearPicked = () => {
+    setPickedIds([]);
+    bridge().clearSelection?.();
+  };
+  const pickedFiles = picked.flatMap(({ ep }) => ep.files);
+  const upgradePicked = async () => {
+    setBusy('bulk');
+    await wish(
+      picked.map(({ season, ep }) => wishOf(data.id, season, ep)),
+      'A better copy replaces the file when it lands.',
+    );
+    setBusy(null);
+    clearPicked();
+  };
+  const renamePicked = async () => {
+    // the names were only checked for a season that was opened, so every file
+    // is offered and the server leaves the ones already named right alone
+    const ok = await confirm({
+      title: `Rename ${plural(pickedFiles.length, 'file')} to your template?`,
+      message:
+        'Each file is renamed where it sits, its subtitles and sidecars move with it, and nothing is overwritten. A file already named by your template, or one SoulSync can’t reach, is left as it is.',
+      confirmText: 'Rename',
+    });
+    if (!ok) return;
+    setBusy('bulk');
+    try {
+      const res = await bulkFiles(
+        'rename',
+        pickedFiles.map((f) => f.id),
+        'show',
+      );
+      toast(
+        res.failed
+          ? `Renamed ${res.done}, ${res.failed} couldn’t be renamed`
+          : res.done
+            ? `Renamed ${plural(res.done, 'file')}`
+            : 'Every file was already named by your template',
+        res.failed ? 'warning' : 'success',
+      );
+    } catch (e) {
+      toast((e as Error).message || 'Rename failed', 'error');
+    }
+    setBusy(null);
+    clearPicked();
+    reload();
+  };
+  const deletePicked = async () => {
+    const ok = await confirm({
+      title: data.recycle
+        ? `Move ${plural(pickedFiles.length, 'file')} to the recycle bin?`
+        : `Delete ${plural(pickedFiles.length, 'file')} for good?`,
+      message: `Every file of the ${plural(picked.length, 'episode')} you picked ${data.recycle ? 'moves to the recycle bin, where it can be restored until it expires' : 'is deleted permanently. Recycling is turned off in your library settings'}. Those episodes will show as missing. A file only your media server can see is left alone.`,
+      confirmText: data.recycle ? 'Move to recycle bin' : 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusy('bulk');
+    try {
+      const res = await bulkFiles(
+        'delete',
+        pickedFiles.map((f) => f.id),
+        'show',
+      );
+      toast(
+        res.failed
+          ? `Removed ${res.done}, ${res.failed} couldn’t be removed`
+          : `Removed ${plural(res.done, 'file')}`,
+        res.failed ? 'warning' : 'success',
+      );
+    } catch (e) {
+      toast((e as Error).message || 'Delete failed', 'error');
+    }
+    setBusy(null);
+    clearPicked();
+    reload();
+    bridge().reloadPage?.();
+  };
+
+  // grabs that are running or stuck (the page's old second block)
+  const [acq, setAcq] = useState<AcquisitionState | null>(null);
+  useEffect(() => {
+    let live = true;
+    fetchAcquisition('show', data.id)
+      .then((state) => live && setAcq(state))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [data]);
+  const stuck = acq?.counts?.failed ?? 0;
+  const moving = (acq?.counts?.queued ?? 0) + (acq?.counts?.downloading ?? 0);
+
   const extra = data.extra_copies;
   const issues: Issue[] = [];
+  if (stuck) {
+    issues.push({
+      key: 'stuck',
+      tone: 'warn',
+      title: `${plural(stuck, 'download')} stuck`,
+      detail:
+        'The last tries failed. A season’s menu has Clear failures, which searches every source again.',
+    });
+  }
+  if (moving) {
+    issues.push({
+      key: 'moving',
+      tone: 'info',
+      title: `${plural(moving, 'episode')} downloading now`,
+      detail: 'Each one shows its progress on its own row below.',
+    });
+  }
   if (!tmdb) {
     issues.push({
       key: 'match',
@@ -1590,123 +1152,101 @@ function ShowView({
     });
   }
 
-  return (
-    <div className={s.tab}>
-      <section className={s.summary} data-card="have">
-        <div className={s.summaryMain}>
-          <div className={s.bigNum}>
-            {sm.owned}
-            <span className={s.bigOf}> of {aired || sm.total}</span>
-          </div>
-          <div className={s.summaryText}>
-            <div className={s.headline}>
-              aired episodes · {formatBytes(sm.size_bytes) || 'no files'}
-            </div>
-            <div className={s.subline}>
-              {[
-                sm.missing ? `${sm.missing} missing` : 'Nothing missing',
-                sm.upcoming ? `${sm.upcoming} upcoming` : '',
-                sm.specials_owned ? `${sm.specials_owned} specials` : '',
-                sm.watched_episodes ? `${sm.watched_episodes} watched` : '',
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </div>
-          </div>
-        </div>
-        <div className={s.summarySide}>
-          <TargetLine
-            cutoff={q.cutoff_label}
-            profile={q.profile_name}
-            canManage={data.can_manage}
-          />
-          <MatchLine
-            identity={data.identity}
-            canManage={data.can_manage}
-            onFix={() => setFixing(true)}
-            onRelease={onRelease}
-          />
-        </div>
-        <div className={s.summaryBars}>
-          {/* a full bar says nothing the number didn't; it shows only a gap */}
-          {sm.missing ? (
-            <Bar
-              value={sm.owned}
-              max={aired || sm.total}
-              label={`${sm.owned} of ${aired || sm.total} aired episodes`}
-            />
-          ) : null}
-          <ResMix mix={sm.res_mix} />
-        </div>
-      </section>
-
-      <Attention issues={issues} />
-
+  const folders =
+    data.can_manage && sm.folders.length ? (
       <section>
         <h3 className={s.sectionTitle}>
-          Seasons <span className={s.count}>{data.seasons.length}</span>
+          Where it lives <span className={s.count}>{sm.folders.length}</span>
         </h3>
-        <ul className={s.seasons}>
-          {data.seasons.map((season) => (
-            <SeasonRow
-              key={season.season_number}
-              season={season}
-              data={data}
-              open={openSeason === season.season_number}
-              loading={loadingSeason && openSeason === season.season_number}
-              onToggle={() =>
-                setOpenSeason(openSeason === season.season_number ? null : season.season_number)
-              }
-              reload={reload}
-              onReassign={(file, from) => setReassign({ file, from })}
-              onUpgradeEpisodes={(episodes) =>
-                wish(episodes, 'A better copy replaces the file when it lands.')
-              }
-            />
+        <ul className={s.folders}>
+          {sm.folders.map((fo) => (
+            <li key={fo.path ?? ''} className={s.folder}>
+              <span className={s.folderIcon} aria-hidden="true" />
+              <div className={s.folderBody}>
+                <div className={s.folderName}>
+                  {driveLabel(fo.root) ? (
+                    <span className={s.drive}>{driveLabel(fo.root)}</span>
+                  ) : null}
+                  {fo.name || folderName(fo.path)}
+                  {fo.main && sm.folders.length > 1 ? <Chip tone="muted">Most files</Chip> : null}
+                </div>
+                <div className={s.path} title={fo.path ?? ''}>
+                  {fo.path}
+                </div>
+              </div>
+              <span className={s.folderCount}>
+                {plural(fo.files, 'file')}
+                {fo.size_bytes ? ` · ${formatBytes(fo.size_bytes)}` : ''}
+              </span>
+              {fo.path ? (
+                <button
+                  type="button"
+                  className={s.quietBtn}
+                  onClick={() => void copyText(fo.path ?? '')}
+                >
+                  Copy path
+                </button>
+              ) : null}
+            </li>
           ))}
         </ul>
       </section>
+    ) : null;
 
-      {data.can_manage && sm.folders.length ? (
-        <section>
-          <h3 className={s.sectionTitle}>
-            Where it lives <span className={s.count}>{sm.folders.length}</span>
-          </h3>
-          <ul className={s.folders}>
-            {sm.folders.map((fo) => (
-              <li key={fo.path ?? ''} className={s.folder}>
-                <span className={s.folderIcon} aria-hidden="true" />
-                <div className={s.folderBody}>
-                  <div className={s.folderName}>
-                    {driveLabel(fo.root) ? (
-                      <span className={s.drive}>{driveLabel(fo.root)}</span>
-                    ) : null}
-                    {fo.name || folderName(fo.path)}
-                    {fo.main && sm.folders.length > 1 ? <Chip tone="muted">Most files</Chip> : null}
-                  </div>
-                  <div className={s.path} title={fo.path ?? ''}>
-                    {fo.path}
-                  </div>
-                </div>
-                <span className={s.folderCount}>
-                  {plural(fo.files, 'file')}
-                  {fo.size_bytes ? ` · ${formatBytes(fo.size_bytes)}` : ''}
-                </span>
-                {fo.path ? (
-                  <button
-                    type="button"
-                    className={s.quietBtn}
-                    onClick={() => void copyText(fo.path ?? '')}
-                  >
-                    Copy path
-                  </button>
-                ) : null}
-              </li>
+  // the page's library line: what the summary card says, in one row, for the
+  // hero. the episode list is the page's own, so the season list is not drawn.
+  const line = (
+    <div className={s.libLine} data-card="have">
+      <span className={s.libCount}>
+        <b>{sm.owned}</b> of {aired || sm.total} aired episodes
+      </span>
+      <span className={s.libFact}>{formatBytes(sm.size_bytes) || 'no files'}</span>
+      {sm.res_mix.length ? (
+        <span className={s.libMix}>
+          <span
+            className={s.mixBar}
+            role="img"
+            aria-label={sm.res_mix.map((m) => `${m.count} ${m.label}`).join(', ')}
+          >
+            {sm.res_mix.map((m) => (
+              <span
+                key={m.label}
+                className={s.mixSeg}
+                data-tone={resolutionTone(m.label)}
+                style={{ flexGrow: m.count }}
+              />
             ))}
-          </ul>
-        </section>
+          </span>
+          {sm.res_mix.map((m) => `${m.label} ${m.count}`).join(' · ')}
+        </span>
       ) : null}
+      <span className={s.libDim}>
+        Target {q.cutoff_label} · {q.profile_name} profile
+      </span>
+      {!tmdb ? <Chip tone="warn">Not matched</Chip> : <span className={s.libDim}>TMDB {tmdb}</span>}
+      {data.identity.fixed ? <Chip tone="ok">Fixed by you</Chip> : null}
+      {data.can_manage ? (
+        <span className={s.libLinks}>
+          {bridge().openManage ? (
+            <button type="button" className={s.linkBtn} onClick={() => bridge().openManage?.()}>
+              Quality and download settings
+            </button>
+          ) : null}
+          <button type="button" className={s.linkBtn} onClick={() => setFixing(true)}>
+            {tmdb ? 'Fix match' : 'Find the right title'}
+          </button>
+          {data.identity.fixed ? (
+            <button type="button" className={s.linkBtn} onClick={onRelease}>
+              Use the server’s match again
+            </button>
+          ) : null}
+        </span>
+      ) : null}
+    </div>
+  );
 
+  const dialogs = (
+    <>
       {fixing ? (
         <FixMatchDialog
           kind="show"
@@ -1750,19 +1290,55 @@ function ShowView({
           }}
         />
       ) : null}
-      {reassign ? (
-        <ReassignDialog
-          show={data}
-          file={reassign.file}
-          from={reassign.from}
-          onClose={() => setReassign(null)}
-          onDone={() => {
-            setReassign(null);
-            reload();
-            bridge().reloadPage?.();
-          }}
-        />
-      ) : null}
+    </>
+  );
+
+  const selectBar = picked.length ? (
+    <div className={s.selectBar} data-active="yes">
+      <span className={s.selectAll}>
+        {plural(picked.length, 'episode')} selected
+        <button type="button" className={s.linkBtn} onClick={clearPicked}>
+          Clear
+        </button>
+      </span>
+      <div className={s.selectActions}>
+        {tmdb ? (
+          <button
+            type="button"
+            className={s.btn}
+            disabled={busy === 'bulk'}
+            onClick={() => void upgradePicked()}
+          >
+            Look for upgrades
+          </button>
+        ) : null}
+        <button
+          type="button"
+          className={s.btn}
+          disabled={busy === 'bulk'}
+          onClick={() => void renamePicked()}
+        >
+          Rename to template
+        </button>
+        <button
+          type="button"
+          className={s.btnDanger}
+          disabled={busy === 'bulk'}
+          onClick={() => void deletePicked()}
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <div className={s.tab} data-layout="page">
+      {page.hero ? createPortal(line, page.hero) : line}
+      <Attention issues={issues} />
+      {page.select && selectBar ? createPortal(selectBar, page.select) : selectBar}
+      {page.foot ? createPortal(folders, page.foot) : folders}
+      {dialogs}
     </div>
   );
 }
@@ -1773,52 +1349,49 @@ export function LibraryTab({
   kind,
   id,
   heroSlot,
+  slots,
 }: {
   kind: TitleKind;
   id: number;
   /** where the page wants the library line: an element in its hero */
   heroSlot?: HTMLElement | null;
+  /** the one-page layout: where the page wants each part (a show needs all three) */
+  slots?: PageSlots | null;
 }) {
   const [data, setData] = useState<TitleLibrary | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [openSeason, setOpenSeason] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
   const seq = useRef(0);
 
-  const load = useCallback(
-    (season: number | null) => {
-      const mine = ++seq.current;
-      setLoading(true);
-      fetchTitleLibrary(kind, id, kind === 'show' ? season : null)
-        .then((res) => {
-          if (mine !== seq.current) return;
-          setData(res);
-          setError(null);
-        })
-        .catch((e: Error) => {
-          if (mine !== seq.current) return;
-          setError(e.message || 'Couldn’t read this title’s files');
-        })
-        .finally(() => {
-          if (mine === seq.current) setLoading(false);
-        });
-    },
-    [kind, id],
-  );
+  // a show's episodes come back with their files from the database; the
+  // disk checks are asked per season by whichever episode is opened
+  const load = useCallback(() => {
+    const mine = ++seq.current;
+    fetchTitleLibrary(kind, id, null)
+      .then((res) => {
+        if (mine !== seq.current) return;
+        setData(res);
+        setError(null);
+      })
+      .catch((e: Error) => {
+        if (mine !== seq.current) return;
+        setError(e.message || 'Couldn’t read this title’s files');
+      });
+  }, [kind, id]);
 
   useEffect(() => {
     setData(null);
-    setOpenSeason(null);
-    load(null);
+    load();
   }, [load]);
 
-  const reload = useCallback(() => load(openSeason), [load, openSeason]);
-  const pickSeason = useCallback(
-    (n: number | null) => {
-      setOpenSeason(n);
-      if (n != null) load(n);
-    },
-    [load],
+  // a change made anywhere on the page (an episode's own cards are their own
+  // React root) reaches every reader through the store
+  const reload = useCallback(() => invalidate(kind, id), [kind, id]);
+  useEffect(
+    () =>
+      onInvalidate((changedKind, changedId) => {
+        if (changedKind === kind && changedId === id) load();
+      }),
+    [kind, id, load],
   );
 
   if (error && !data) {
@@ -1837,14 +1410,8 @@ export function LibraryTab({
       </div>
     );
   }
-  if (data.kind === 'movie') return <MovieView data={data} reload={reload} heroSlot={heroSlot} />;
-  return (
-    <ShowView
-      data={data}
-      reload={reload}
-      openSeason={openSeason}
-      setOpenSeason={pickSeason}
-      loadingSeason={loading}
-    />
-  );
+  if (data.kind === 'movie') {
+    return <MovieView data={data} reload={reload} heroSlot={slots?.hero ?? heroSlot} />;
+  }
+  return <ShowView data={data} reload={reload} page={slots ?? {}} />;
 }

@@ -1926,63 +1926,115 @@
         unmountLibraryTab();
     }
 
-    // ── tabs: the page as it was, and Your library ───────────────────────────
-    // A library movie/show gets two tabs, like an artist's Discography / Your
-    // library on the music side. The second is a React island
-    // (webui/src/features/video-library) mounted into [data-vd-library-panel];
-    // the subtitle-language and acquisition-history sections are management
-    // too, so they move into it (.vd-lib-extra, CSS). The tab you last used is
-    // remembered per kind.
-    var TAB_KEY = 'soulsync.vdTab.';
+    // ── the library island (React, webui/src/features/video-library) ─────────
     var _libMounted = null;
-    function tabbable() {
+    // A library title has no tabs any more. A movie is one thing, and a show's
+    // Episodes tab and Your library tab were the same list twice. The library
+    // line sits in the hero, what needs attention sits under it, a movie's
+    // files follow, and a show's episode list (this file) carries each
+    // episode's file itself: one line on the row, the cards when it is opened.
+    function onePage() {
         return !!(data && currentSource === 'library' && data.source !== 'youtube' &&
                   (data.kind === 'movie' || data.kind === 'show') && data.id != null);
     }
-    function savedTab(kind) {
-        try { return localStorage.getItem(TAB_KEY + kind) === 'library' ? 'library' : 'main'; }
-        catch (e) { return 'main'; }
+
+    // ── the library data the React island reads, for the episode list ──
+    // It hands the show's payload over (onLibrary) and the rows draw from it.
+    var libData = null, libEps = {}, libSeasons = {};
+    var epPicked = {};          // episode id -> true, the ticked rows
+    function setLibrary(d) {
+        if (!data || data.kind !== 'show' || !d || d.kind !== 'show' || d.id !== data.id) return;
+        libData = d; libEps = {}; libSeasons = {};
+        (d.seasons || []).forEach(function (s) {
+            libSeasons[s.season_number] = s;
+            (s.episodes || []).forEach(function (e) { libEps[e.id] = e; });
+        });
+        renderEpisodes();
     }
-    // A library MOVIE has no tabs any more: a movie is one thing, and a tab in
-    // front of its two files was a page split for nothing. Its library panel
-    // (what needs attention, its files) is part of the page, and the library
-    // line sits in the hero. Shows still have the two tabs until their episode
-    // list carries the files too.
-    function onePage() { return tabbable() && data.kind === 'movie'; }
+    function clearLibrary() {
+        libData = null; libEps = {}; libSeasons = {}; epPicked = {};
+        unmountEpisodeFiles();
+    }
+    function libEp(ep) {
+        return (libData && currentSource === 'library' && ep && ep.id != null) ? (libEps[ep.id] || null) : null;
+    }
+    function libBest(le) {
+        var files = (le && le.files) || [];
+        for (var i = 0; i < files.length; i++) if (files[i].best) return files[i];
+        return files[0] || null;
+    }
+    var _RES_TONE = { '4K': 'uhd', '1080p': 'hd', '720p': 'mid', 'SD': 'sd' };
+    function libRange(v) {
+        var r = String(v || '').trim();
+        if (!r || /^sdr$/i.test(r)) return '';
+        return /dolby|^dv$|dovi/i.test(r) ? 'Dolby Vision' : r.toUpperCase();
+    }
+    // "WEBDL-1080p · Dolby Vision · EAC3 5.1 Atmos · 5.7 GB": the file as one
+    // quiet line on the row, with a chip only when it says something
+    function libFileLine(le) {
+        var f = libBest(le);
+        if (!f) return '';
+        var named = (f.quality && f.quality !== f.resolution_label) ? f.quality : prettyCodec(f.video_codec);
+        var audio = [f.audio_codec ? String(f.audio_codec).toUpperCase() : '', channelsLabel(f.audio_channels),
+            f.atmos ? 'Atmos' : ''].filter(Boolean).join(' ');
+        var facts = [named, libRange(f.dynamic_range), audio, fmtBytes(f.size_bytes)].filter(Boolean).join(' · ');
+        var chips = '';
+        if (f.below_cutoff) chips += '<span class="vd-ep-file-chip vd-ep-file-chip--warn">Below your target</span>';
+        if (le.files.length > 1) chips += '<span class="vd-ep-file-chip">' + le.files.length + ' copies</span>';
+        return '<div class="vd-ep-file">' +
+            '<span class="vd-ep-file-res" data-tone="' + (_RES_TONE[f.resolution_label] || 'unknown') + '">' +
+                esc(f.resolution_label || '—') + '</span>' +
+            '<span class="vd-ep-file-facts">' + esc(facts) + '</span>' + chips + '</div>';
+    }
+    // an opened episode's file cards are a React root of their own
+    var epMounted = [];
+    function mountEpisodeFiles(slot, epId) {
+        if (!slot || !window.VideoLibraryTab || !window.VideoLibraryTab.mountEpisode || !data) return;
+        window.VideoLibraryTab.mountEpisode(slot, { showId: data.id, season: selectedSeason, episodeId: epId });
+        if (epMounted.indexOf(slot) < 0) epMounted.push(slot);
+    }
+    function unmountEpisodeFiles(slot) {
+        var list = slot ? [slot] : epMounted.slice();
+        list.forEach(function (el) {
+            if (window.VideoLibraryTab) window.VideoLibraryTab.unmount(el);
+            var i = epMounted.indexOf(el); if (i >= 0) epMounted.splice(i, 1);
+        });
+    }
+    function emitSelection() {
+        if (!data) return;
+        document.dispatchEvent(new CustomEvent('soulsync:video-ep-selection', { detail: {
+            showId: data.id, season: selectedSeason,
+            episodeIds: Object.keys(epPicked).map(Number) } }));
+    }
+    function clearSelection() {
+        epPicked = {};
+        var boxes = document.querySelectorAll('[data-vd-ep-check]');
+        for (var i = 0; i < boxes.length; i++) boxes[i].checked = false;
+        emitSelection();
+    }
+    // a season's size and quality mix, on the season's own line
+    function libSeasonFacts(season) {
+        var ls = libData && currentSource === 'library' ? libSeasons[season.season_number] : null;
+        if (!ls || !ls.size_bytes) return '';
+        return '<span class="vd-season-lib">' + esc(fmtBytes(ls.size_bytes)) +
+            (ls.res_mix || []).map(function (m) {
+                return '<span class="vd-ep-file-res" data-tone="' + (_RES_TONE[m.label] || 'unknown') + '">' +
+                    esc(m.label) + ((ls.res_mix.length > 1) ? ' ' + m.count : '') + '</span>';
+            }).join('') + '</span>';
+    }
+    // the name is from when this drew two tabs; it now turns the one-page
+    // library parts on for a title you own and off for a preview or a channel
     function renderTabs() {
-        var bar = q('[data-vd-tabs]'), body = q('.vd-body'), panel = q('[data-vd-library-panel]');
-        if (!bar || !body) return;
-        var one = onePage();
-        var on = tabbable() && !one;
-        bar.hidden = !on;
-        body.classList.toggle('vd-body--tabbed', on);
-        body.classList.toggle('vd-body--one', one);
-        if (one && panel) {
-            body.classList.remove('vd-body--library');
-            panel.hidden = false;
-            mountLibraryTab();
-            return;
-        }
-        setTab(on ? savedTab(data.kind) : 'main', true);
-    }
-    function setTab(tab, quiet) {
         var body = q('.vd-body'), panel = q('[data-vd-library-panel]');
         if (!body || !panel) return;
-        if (tab === 'library' && !tabbable()) tab = 'main';
-        body.classList.toggle('vd-body--library', tab === 'library');
-        var btns = body.querySelectorAll('[data-vd-tab]');
-        for (var i = 0; i < btns.length; i++) {
-            var sel = btns[i].getAttribute('data-vd-tab') === tab;
-            btns[i].setAttribute('aria-selected', sel ? 'true' : 'false');
-            btns[i].classList.toggle('vd-tab--active', sel);
-        }
-        panel.hidden = tab !== 'library';
-        if (!quiet && data) { try { localStorage.setItem(TAB_KEY + data.kind, tab); } catch (e) { /* private mode */ } }
-        if (tab === 'library') mountLibraryTab();
+        var one = onePage();
+        body.classList.toggle('vd-body--one', one);
+        panel.hidden = !one;
+        if (one) mountLibraryTab();
     }
     function mountLibraryTab() {
         var panel = q('[data-vd-library-panel]');
-        if (!panel || !tabbable()) return;
+        if (!panel || !onePage()) return;
         if (!window.VideoLibraryTab) {
             // main.tsx is a deferred module: on a cold deep link the page can get
             // here first. it announces itself when it lands.
@@ -1990,12 +2042,14 @@
             return;
         }
         window.VideoLibraryTab.mount(panel, { kind: data.kind, id: data.id,
-            heroSlot: onePage() ? q('[data-vd-libline]') : null });
+            slots: { hero: q('[data-vd-libline]'), select: q('[data-vd-libselect]'),
+                     foot: q('[data-vd-libfoot]') } });
         _libMounted = panel;
     }
     function unmountLibraryTab() {
         if (_libMounted && window.VideoLibraryTab) window.VideoLibraryTab.unmount(_libMounted);
         _libMounted = null;
+        clearLibrary();
     }
 
     function loadExtras(kind, id) {
@@ -2864,7 +2918,14 @@
         var meta = [];
         var rt = runtimeLabel(ep.runtime_minutes); if (rt) meta.push(rt);
         if (ep.air_date) meta.push(ep.air_date);
-        if (ep.owned && ep.resolution) meta.push(mediaRes(ep.resolution));
+        var le = libEp(ep);
+        var hasFiles = !!(le && le.files && le.files.length);
+        // the file line says the resolution (and the rest) once the library data is in
+        if (ep.owned && ep.resolution && !hasFiles) meta.push(mediaRes(ep.resolution));
+        var pick = (hasFiles && libData.can_manage)
+            ? '<label class="vd-ep-pick" title="Select this episode"><input type="checkbox" data-vd-ep-check="' + ep.id + '"' +
+                (epPicked[ep.id] ? ' checked' : '') + ' aria-label="Select episode ' + ep.episode_number + '"></label>'
+            : '';
         var stillSrc = (data && data.source === 'tmdb')
             ? (ep.still_url || '')
             : (ep.has_still ? '/api/video/poster/episode/' + ep.id : '');
@@ -2889,12 +2950,13 @@
             ? '<span class="vd-ep-new-chip" title="Recently added">New</span>'
             : '';
         return '<div class="vd-ep ' + owned + '" data-vd-ep-key="' + key + '">' +
-            '<div class="vd-ep-index">' + (ep.episode_number != null ? ep.episode_number : '') + '</div>' +
+            '<div class="vd-ep-index">' + (ep.episode_number != null ? ep.episode_number : '') + pick + '</div>' +
             '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span>' + prog + '</div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top">' + check + nextChip + newChip + '<span class="vd-ep-title">' +
             esc(ep.title || 'Episode ' + ep.episode_number) + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
-            (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
+            (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') +
+            (hasFiles ? libFileLine(le) : '') + '</div>' +
             // Owned episodes keep the badge AND the actions: the acquisition
             // stack treats owned rows as upgrade candidates (upgrade-until-
             // cutoff), so re-download / manual search / wishlist must not
@@ -2947,6 +3009,8 @@
                     '</div></span>' +
                   '</div>')) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
+            // the episode's file cards (React) open above the guest stars
+            (hasFiles ? '<div class="vd-ep-files" data-vd-ep-files="' + ep.id + '" hidden></div>' : '') +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '"' + episodeReportAttrs(ep) + ' hidden></div>';
     }
 
@@ -3034,6 +3098,12 @@
         if (!panel) return;
         panel.hidden = !panel.hidden;
         row.classList.toggle('vd-ep--open', !panel.hidden);
+        var files = row.nextElementSibling;
+        if (files && files.hasAttribute && files.hasAttribute('data-vd-ep-files')) {
+            files.hidden = panel.hidden;
+            if (panel.hidden) unmountEpisodeFiles(files);
+            else mountEpisodeFiles(files, parseInt(files.getAttribute('data-vd-ep-files'), 10));
+        }
         if (!panel.hidden && !panel.getAttribute('data-loaded')) {
             panel.setAttribute('data-loaded', '1');
             loadEpisodeExtra(key, panel);
@@ -3104,6 +3174,8 @@
         // The row above already prints this description and TMDB hands back the
         // same string, so printing it again just doubled the panel's height.
         var owner = panel.previousElementSibling;
+        // the file cards sit between the row and this panel
+        if (owner && owner.hasAttribute && owner.hasAttribute('data-vd-ep-files')) owner = owner.previousElementSibling;
         var rowDesc = '';
         if (owner && owner.classList && owner.classList.contains('vd-ep')) {
             var dEl = owner.querySelector('.vd-ep-desc');
@@ -3206,7 +3278,7 @@
             : (isYt ? '' : 'All ' + season.episodes.length + ' here');
         if (seasonManage && !monitored) status += (status ? ' · ' : '') + 'not monitored';
         return '<div class="vd-season-actions">' +
-            '<span class="vd-season-actions-count">' + status + '</span>' +
+            '<span class="vd-season-actions-count">' + status + '</span>' + libSeasonFacts(season) +
             (canAcquire ?
             '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-season-grab ' +
                 'title="' + (isYt ? 'Download every missing video ' + scope.what
@@ -3231,6 +3303,13 @@
             ? (ytFilter.q || ytFilter.state !== 'all' || ytFilter.duration !== 'all' ? 'No videos match these filters.' : 'No videos here.')
             : 'No ' + (missingOnly ? 'missing ' : '') + 'episodes here. 🎉';
         var seasonBar = seasonActionsHtml(season);
+        // the rows are about to be replaced, their cards with them. an episode
+        // that was open stays open: a rename inside its card re-reads the
+        // library and lands back here, and closing it under the user's hands
+        // read as the change having failed
+        var wasOpen = [], openRows = host.querySelectorAll('.vd-ep--open[data-vd-ep-key]');
+        for (var oi = 0; oi < openRows.length; oi++) wasOpen.push(openRows[oi].getAttribute('data-vd-ep-key'));
+        unmountEpisodeFiles();
         var grid = !!(data && data.source === 'youtube' && ytLayout() === 'grid');
         host.classList.toggle('vd-episodes--grid', grid);
         host.innerHTML = seasonBar +
@@ -3238,10 +3317,15 @@
                 ? (grid ? '<div class="vd-ytgrid">' + eps.map(ytVideoCard).join('') + '</div>' : eps.map(episodeRow).join(''))
                 : '<div class="vd-ep-empty">' + emptyMsg + '</div>');
         host.classList.remove('vd-ep-anim'); void host.offsetWidth; host.classList.add('vd-ep-anim');
+        wasOpen.forEach(function (k) {
+            var row = host.querySelector('[data-vd-ep-key="' + k + '"]');
+            if (row) toggleEpisode(row);
+        });
         applyDlStates();   // repaint any in-flight/finished grabs on the fresh rows
     }
 
     function selectSeason(n) {
+        if (n !== selectedSeason && Object.keys(epPicked).length) { epPicked = {}; emitSelection(); }
         selectedSeason = n; menuOpen = false;
         renderSeasonNav(); ensureSeasonEpisodes();
     }
@@ -3321,7 +3405,7 @@
                 (extUrl ? '<a class="vd-manage-btn vd-more-link vd-error-ext" href="' + esc(extUrl) + '" target="_blank" rel="noopener noreferrer">' +
                     '<span class="vd-manage-ic" aria-hidden="true">\u2197</span> Open on YouTube</a>' : '');
         }
-        var tabs = q('[data-vd-tabs]'); if (tabs) tabs.hidden = true;
+        var libPanel = q('[data-vd-library-panel]'); if (libPanel) libPanel.hidden = true;
     }
 
     function showLoading(on) { var l = q('[data-vd-loading]'); if (l) l.hidden = !on; }
@@ -4435,6 +4519,8 @@
             if (data && data.source === 'youtube') ytWishSeasonInline(seasonWish); else wishSeasonInline(seasonWish);
             return;
         }
+        // ticking an episode is not opening it
+        if (e.target.closest('.vd-ep-pick')) return;
         var epRow = e.target.closest('[data-vd-ep-key]');
         if (epRow && r.contains(epRow)) { toggleEpisode(epRow); return; }
         var seasonBtn = e.target.closest('[data-vd-season]');
@@ -4443,8 +4529,6 @@
         if (viewBtn && r.contains(viewBtn)) { setView(viewBtn.getAttribute('data-vd-view')); return; }
         var ssToggle = e.target.closest('[data-vd-ss-toggle]');
         if (ssToggle && r.contains(ssToggle)) { menuOpen = !menuOpen; renderSeasonNav(); return; }
-        var tabBtn = e.target.closest('[data-vd-tab]');
-        if (tabBtn && r.contains(tabBtn)) { setTab(tabBtn.getAttribute('data-vd-tab')); return; }
         var act = e.target.closest('[data-vd-act]');
         if (act && r.contains(act)) {
             var which = act.getAttribute('data-vd-act');
@@ -4467,9 +4551,9 @@
             else if (which === 'unlink') unlinkManualMatch();
             else if (which === 'delete-title') openDeleteTitleModal(act.getAttribute('data-vd-del-id'));
             else if (which === 'library-tab') {
-                setTab('library');
-                var bar = q('[data-vd-tabs]');
-                if (bar && bar.scrollIntoView) bar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                // the files and the match are on the page now: go to them
+                var lib = q('[data-vd-library-panel]');
+                if (lib && lib.scrollIntoView) lib.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
             else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'yt-settings' && data && window.VideoYoutube && VideoYoutube.openChannelSettings) {
@@ -4953,7 +5037,7 @@
         }
     }
 
-    // The Your library tab (React) borrows the page's own flows rather than
+    // The library island (React) borrows the page's own flows rather than
     // re-implementing them: manual search, season grabs, subtitle search, the
     // manage panel. Season actions point the page at that season first, so the
     // Episodes tab and the live download states agree with what was grabbed.
@@ -4982,6 +5066,8 @@
                 { defaultLang: window.VideoSubtitles.effectiveFirstLang(data.kind, data.id) });
         },
         openManage: function () { openManagePanel(); },
+        onLibrary: function (d) { setLibrary(d); },
+        clearSelection: function () { clearSelection(); },
         reloadPage: function () {
             if (!data) return;
             if (data.kind === 'movie') loadMovie(currentId, currentSource);
@@ -5000,6 +5086,13 @@
             var v = inp.value;
             if (ytSearchTimer) clearTimeout(ytSearchTimer);
             ytSearchTimer = setTimeout(function () { ytFilter.q = v; ytRegroup(true); }, 200);
+        });
+        document.addEventListener('change', function (e) {
+            var box = e.target && e.target.closest && e.target.closest('[data-vd-ep-check]');
+            if (!box) return;
+            var id = box.getAttribute('data-vd-ep-check');
+            if (box.checked) epPicked[id] = true; else delete epPicked[id];
+            emitSelection();
         });
         document.addEventListener('change', function (e) {
             var sel = e.target && e.target.closest && e.target.closest('[data-vd-yt-sort]');
