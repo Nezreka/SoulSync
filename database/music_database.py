@@ -210,7 +210,8 @@ _EXPORT_ARTIST_COLUMNS = (
 _EXPORT_ALBUM_COLUMNS = (
     'id', 'soul_id', 'soul_id_legacy', 'title', 'year', 'release_date', 'track_count',
     'record_type', 'label', 'genres', 'updated_at',
-    'musicbrainz_release_id', 'spotify_album_id', 'itunes_album_id',
+    'musicbrainz_release_id', 'musicbrainz_release_group_id',
+    'spotify_album_id', 'itunes_album_id',
     'deezer_id', 'discogs_id', 'amazon_id', 'tidal_id', 'qobuz_id',
     'audiodb_id', 'jiosaavn_id', 'bandcamp_url', 'upc',
     'canonical_source', 'canonical_album_id', 'canonical_score',
@@ -218,7 +219,7 @@ _EXPORT_ALBUM_COLUMNS = (
 )
 
 _EXPORT_TRACK_COLUMNS = (
-    'id', 'soul_id', 'soul_id_legacy', 'album_soul_id', 'album_soul_id_legacy', 'title', 'track_number', 'disc_number',
+    'id', 'soul_id', 'soul_id_legacy', 'album_soul_id', 'album_soul_id_legacy', 'album_real_soul_id', 'title', 'track_number', 'disc_number',
     'duration', 'bpm', 'explicit', 'year', 'isrc', 'updated_at',
     'musicbrainz_recording_id', 'spotify_track_id', 'itunes_track_id',
     'deezer_id', 'amazon_id', 'tidal_id', 'qobuz_id', 'audiodb_id',
@@ -279,6 +280,7 @@ _EXPORT_ALBUM_PROJECTION = (
     ('canonical_album_id', 't.canonical_album_id', 'canonical_album_id'),
     ('canonical_score', 't.canonical_score', 'canonical_score'),
     ('musicbrainz_release_id', 't.musicbrainz_id', 'musicbrainz_id'),
+    ('musicbrainz_release_group_id', 't.musicbrainz_release_group_id', 'musicbrainz_release_group_id'),
     ('spotify_album_id', 't.spotify_id', 'spotify_id'),
     ('itunes_album_id', _export_json_id('itunes'), 'external_ids'),
     ('deezer_id', _export_json_id('deezer'), 'external_ids'),
@@ -297,6 +299,13 @@ _EXPORT_TRACK_PROJECTION = (
     ('soul_id_legacy', 't.soul_id_legacy', 'soul_id_legacy'),
     ('album_soul_id', 't.album_soul_id', 'album_soul_id'),
     ('album_soul_id_legacy', 't.album_soul_id_legacy', 'album_soul_id_legacy'),
+    # The album's own soul_id (kind "album"), carried for the depot's
+    # §2.4 export bit: a track's exported year is its album's, so the
+    # mark lookup needs the id the album's marks are keyed by. This is
+    # NOT album_soul_id — that one is kind "album_track" (artist +
+    # album + title), minted per track. The serializer's allowlist
+    # keeps this off the wire, like id.
+    ('album_real_soul_id', 'al.soul_id', 'soul_id'),
     ('title', 't.title', 'title'),
     ('track_number', 't.track_number', 'track_number'),
     ('disc_number', 't.disc_number', 'disc_number'),
