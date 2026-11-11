@@ -292,6 +292,10 @@ def _blockers(conn, albums, refs):
             reasons.append("A file has a manually selected primary.")
         if al.get("canonical_locked") or al.get("art_locked"):
             reasons.append("A release has a manual pin or artwork selection.")
+        # #2046: merging rewrites which release the files belong to
+        from core.library2 import locks
+        if al.get("id") and locks.is_locked("album", al["id"], "match", conn=conn):
+            reasons.append("A release is reviewed and locked.")
     if (all(al.get("genres_locked") for al in albums)
             and _genre_set(albums[0].get("genres")) != _genre_set(albums[1].get("genres"))):
         reasons.append("Both releases have locked genres that differ.")

@@ -49,6 +49,8 @@ const libraryV2SearchObject = z.object({
     .catch(false),
   /** 'upgradable' (could be better; artists and songs) or 'lossless' (songs) */
   quality: z.enum(['', 'lossless', 'upgradable']).default('').catch(''),
+  /** #2046: artists whose albums are all reviewed and locked, or not yet */
+  review: z.enum(['', 'reviewed', 'unreviewed']).default('').catch(''),
   view: z.enum(['table', 'cards', 'discovery']).default('cards').catch('cards'),
   monitored: z.enum(LIBRARY_V2_MONITOR_FILTERS).default('all').catch('all'),
   page: z.coerce.number().int().positive().default(1).catch(1),

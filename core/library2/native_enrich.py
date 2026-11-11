@@ -341,6 +341,10 @@ def resolve_and_enrich_native_artist(
     "reason": "not_found"}`` when nothing resolved (the expected outcome for
     genuine collaboration names like "Ian Asher & Galantis").
     """
+    from core.library2 import locks
+    if locks.blocks("artist", artist_id, "match", "Artist matching", conn=conn):
+        # #2046: reviewed and locked, its ids and art stay as they are
+        return {"success": False, "attempted": False, "reason": "locked"}
     if resolver is None:
         resolver = default_artist_resolver
     if anchor_resolver is None:
@@ -495,6 +499,9 @@ def enrich_native_artist_artwork(
     asks the artwork engine for an image, writing it onto the row. No-op (returns
     False) when the row has no provider id or the engine finds nothing.
     """
+    from core.library2 import locks
+    if locks.blocks("artist", artist_id, "artwork", "Artist artwork", conn=conn):
+        return False
     row = conn.execute(
         "SELECT id, name, image_url, spotify_id, musicbrainz_id, external_ids "
         "FROM lib2_artists WHERE id=?",
@@ -536,8 +543,9 @@ def schedule_native_artist_artwork(database: Any, artist_id: int):
     """
     import threading
 
+    from core.library2 import locks
     thread = threading.Thread(
-        target=_run_native_artist_artwork,
+        target=locks.carry(_run_native_artist_artwork),
         args=(database, int(artist_id)),
         name="lib2-native-artist-artwork",
         daemon=True,
@@ -593,6 +601,9 @@ def _apply_descriptive_metadata(
     written on every enrich the provider's spelling replaced the file's ("Come
     Together" became "Come Together - Remastered 2009") and could flip between
     providers run to run."""
+    from core.library2 import locks
+    if locks.blocks_entity(entity_type, entity_id, "metadata", "Metadata refresh", conn=conn):
+        return None
 
     columns = {
         "artist": {
@@ -709,6 +720,11 @@ def enrich_native_entity_for_service(
     if canonical is None:
         raise ValueError(f"Unsupported entity type: {entity_type}")
     service = str(service or "").strip().lower()
+    from core.library2 import locks
+    if locks.blocks_entity(canonical, entity_id, "metadata",
+                           f"{service.title()} enrichment", conn=conn):
+        # #2046: reviewed and locked, so nothing is searched or written
+        return {"success": False, "error": "locked", "locked": True}
 
     if canonical == "artist":
         row = conn.execute(
@@ -1009,7 +1025,9 @@ def schedule_native_entity_enrich(
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("native entity enrich close failed: %s", exc)
 
-    thread = threading.Thread(target=_run, name="lib2-native-entity-enrich", daemon=True)
+    from core.library2 import locks
+    thread = threading.Thread(target=locks.carry(_run), name="lib2-native-entity-enrich",
+                              daemon=True)
     thread.start()
     return thread
 
@@ -2091,8 +2109,13 @@ def refresh_native_entity_metadata(conn, entity_type, entity_id, source_ids,
     ``fill_identity_only`` (see _apply_descriptive_metadata).
     """
     from dataclasses import asdict, replace
+    from core.library2 import locks
     from core.library2.provider_adapters import fetch_descriptive_metadata
     from core.library2.provider_writes import write_provider_enrichment
+    # #2046: a reviewed and locked row is not refreshed, and no provider is
+    # asked about it
+    if locks.blocks_entity(entity_type, entity_id, "metadata", "Metadata refresh", conn=conn):
+        return None
     conn.commit()  # provider caches may write through their own connection
     metadata = fetch_descriptive_metadata(entity_type, source_ids,
                                           source_order=tuple(source_ids))

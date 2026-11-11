@@ -868,8 +868,10 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
     changes = stats.setdefault('changes', []) if record_changes else None
     selected = set(file_ids) if file_ids is not None else None
     covers = {}
+    from core.library2 import locks
     with closing(database._get_connection()) as conn:
         rows = track_contexts(conn, track_ids, lyrics=policy['lyrics'] == 'fetch')
+        held = locks.lock_map(conn)
     for i, row in enumerate(rows):
         if progress:
             progress('retag', i, len(rows))
@@ -877,6 +879,12 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
         files = [f for f in files if f['id'] and (selected is None or f['id'] in selected)]
         if not files:
             stats['skipped'] += 1
+            continue
+        # #2046: a reviewed and locked album is not retagged by a job. counted
+        # apart so a run can say why it left these alone
+        if held and locks.blocks('album', row['album_id'], 'tags', 'Tag write', known=held):
+            stats['skipped'] += 1
+            stats['locked'] = stats.get('locked', 0) + 1
             continue
         try:
             # Reproject overrides for this track rather than trust an old finding.
@@ -907,7 +915,11 @@ def _write_policy_tags(database, track_ids, policy, *, file_ids=None,
                     legacy_diff = build_tag_diff(tags, data) if legacy else []
                     legacy_changed = bool(tags.get('error')) or any(item.get('changed') for item in legacy_diff)
                     cover = None
-                    if (policy['cover_art'] != 'skip' and
+                    # #2046: tags open, artwork locked: the tags are written,
+                    # the cover in the file stays the one that was reviewed
+                    art_open = not (held and locks.blocks(
+                        'album', row['album_id'], 'artwork', 'Cover embed', known=held))
+                    if (art_open and policy['cover_art'] != 'skip' and
                             ('fields' not in policy or 'cover_art' in policy['fields']) and
                             (policy['cover_art'] == 'replace' or not tags.get('has_cover_art')
                              or (legacy and (legacy_changed or index > 0)))):

@@ -184,6 +184,7 @@ type LibraryFilterSearch = {
   monitored: 'all' | 'monitored' | 'unmonitored';
   source: string;
   quality: '' | 'upgradable';
+  review: '' | 'reviewed' | 'unreviewed';
   page: number;
 };
 
@@ -223,7 +224,8 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
   const active =
     (search.monitored !== 'all' ? 1 : 0) +
     (search.source ? 1 : 0) +
-    (!albums && search.quality === 'upgradable' ? 1 : 0);
+    (!albums && search.quality === 'upgradable' ? 1 : 0) +
+    (!albums && search.review ? 1 : 0);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -296,6 +298,29 @@ export function LibraryFilterMenu({ albums = false }: { albums?: boolean }) {
               </button>
             </section>
           )}
+          {albums ? null : (
+            <section>
+              <h4>Reviewed</h4>
+              <div className={extras.segmented} role="group" aria-label="Filter by review">
+                {(
+                  [
+                    ['', 'All'],
+                    ['unreviewed', 'Not reviewed'],
+                    ['reviewed', 'Reviewed'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value || 'all'}
+                    type="button"
+                    aria-pressed={search.review === value}
+                    onClick={() => set({ review: value })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
           <section>
             <h4>Metadata match</h4>
             <select
@@ -353,6 +378,13 @@ export function LibraryActiveFilters({
   if (search.source) {
     chips.push({ key: 'source', label: sourceFilterLabel(search.source), clear: { source: '' } });
   }
+  if (!albums && search.review) {
+    chips.push({
+      key: 'review',
+      label: search.review === 'reviewed' ? 'Reviewed' : 'Not reviewed',
+      clear: { review: '' },
+    });
+  }
   if (chips.length === 0) return null;
   return (
     <div className={extras.chips}>
@@ -378,7 +410,7 @@ export function LibraryActiveFilters({
         <button
           type="button"
           className={extras.chipsClear}
-          onClick={() => set({ monitored: 'all', source: '', quality: '' })}
+          onClick={() => set({ monitored: 'all', source: '', quality: '', review: '' })}
         >
           Clear all
         </button>

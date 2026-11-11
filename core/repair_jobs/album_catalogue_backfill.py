@@ -53,7 +53,11 @@ class AlbumCatalogueBackfillJob(RepairJob):
 
         keys = hand_tagged_path_keys(context.db)
         with closing(context.db._get_connection()) as conn:
-            ids = pending_album_catalogues(conn)
+            # #2046: a reviewed album's tracklist is not completed for it
+            from core.library2 import locks
+            ids = [album_id for album_id in pending_album_catalogues(conn)
+                   if not locks.blocks('album', album_id, 'metadata',
+                                       'Album catalogue backfill', conn=conn)]
             if not keys:
                 return ids
             protected = {

@@ -35,6 +35,8 @@ from typing import Any, Callable, Dict, Optional
 
 from utils.logging_config import get_logger
 
+from core.library2.locks import DDL as _LOCK_DDL
+
 logger = get_logger("database.library2_schema")
 
 
@@ -417,6 +419,8 @@ _ALL_DDL = (
     LIB2_FILE_ORIGINS_DDL,
     LIB2_MANUAL_SKIPS_DDL,
     LIB2_MIRROR_OUTBOX_DDL,
+    # #2046: reviewed and locked albums / artists (core/library2/locks.py)
+    *_LOCK_DDL,
 )
 
 

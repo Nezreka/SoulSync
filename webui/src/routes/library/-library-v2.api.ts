@@ -99,6 +99,8 @@ export interface LibraryV2ListFilters {
   letter?: string;
   source?: string;
   quality?: string;
+  /** #2046: 'reviewed' | 'unreviewed' (artists) */
+  review?: string;
   /** ask for each artist card's "could be better" count */
   includeUpgradable?: boolean;
 }
@@ -107,6 +109,9 @@ function setListFilters(params: URLSearchParams, filters: LibraryV2ListFilters) 
   if (filters.letter && filters.letter !== 'all') params.set('letter', filters.letter);
   if (filters.source) params.set('source', filters.source);
   if (filters.quality === 'upgradable') params.set('quality', 'upgradable');
+  if (filters.review === 'reviewed' || filters.review === 'unreviewed') {
+    params.set('review', filters.review);
+  }
 }
 
 export async function fetchLibraryV2Artists(
@@ -2091,6 +2096,7 @@ export function libraryV2ArtistsQueryOptions(
     search.source ?? '',
     search.quality === 'upgradable' ? 'upgradable' : '',
     Boolean(search.includeUpgradable),
+    search.review ?? '',
   ];
   return queryOptions({
     queryKey,

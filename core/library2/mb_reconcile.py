@@ -442,7 +442,16 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
                 holder_counts.setdefault(
                     str(album[_RG_COLUMN]), []).append(_expected_count(album))
 
+        from core.library2 import locks
+
+        def _held(album: Dict[str, Any]) -> bool:
+            # #2046: a reviewed album keeps the release it is matched to
+            return locks.blocks("album", album["id"], "match", "Release group matching",
+                                conn=conn)
+
         def _assign(album: Dict[str, Any], rg_mbid: str) -> None:
+            if _held(album):
+                return
             cursor.execute(
                 f"UPDATE lib2_albums SET {_RG_COLUMN}=?, updated_at=CURRENT_TIMESTAMP "
                 f"WHERE id=? AND ({_RG_COLUMN} IS NULL OR {_RG_COLUMN}='')",
@@ -482,6 +491,8 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
             members.sort(key=_survivor_sort_key)
             survivor = members[0]
             for duplicate in members[1:]:
+                if _held(survivor) or _held(duplicate):
+                    continue
                 if (_is_pristine(cursor, duplicate)
                         and _counts_compatible(survivor, duplicate)):
                     _fold_duplicate(cursor, survivor, duplicate)

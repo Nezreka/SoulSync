@@ -283,7 +283,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
                  letter: str = "all", watchlist_filter: str = "all",
                  source_filter: str = "", quality_filter: str = "",
                  profile_id: int = 1,
-                 include_upgradable: bool = False) -> Tuple[List[Dict[str, Any]], int]:
+                 include_upgradable: bool = False,
+                 review_filter: str = "") -> Tuple[List[Dict[str, Any]], int]:
     """Library-v2 display adapter over the shared artist page reader.
 
     include_upgradable adds each card's "could be better" count, judged by
@@ -294,7 +295,8 @@ def list_artists(conn, *, search: str = "", sort: str = "name", monitored: str =
         conn, search=search, sort=sort, monitored=monitored, page=page,
         limit=limit, include_size=include_size, letter=letter,
         watchlist_filter=watchlist_filter, source_filter=source_filter,
-        quality_filter=quality_filter, profile_id=profile_id)
+        quality_filter=quality_filter, profile_id=profile_id,
+        review_filter=review_filter)
     projected = project_metadata_many(
         conn,
         entity_type="artist",

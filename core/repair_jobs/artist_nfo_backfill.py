@@ -71,6 +71,11 @@ class ArtistNfoBackfillJob(RepairJob):
             if context.update_progress:
                 context.update_progress(i + 1, total)
             result.scanned += 1
+            # #2046: a reviewed artist's folder gets no new file from a job
+            from core.library2 import locks
+            if locks.blocks('artist', artist_id, 'files', 'Artist NFO backfill'):
+                result.skipped += 1
+                continue
 
             try:
                 resolved = resolve_library_file_path(

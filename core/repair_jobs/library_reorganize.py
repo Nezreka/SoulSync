@@ -112,7 +112,11 @@ class LibraryReorganizeJob(RepairJob):
                     )
                     ORDER BY al.id"""
             ).fetchall()
-            albums = [dict(row) for row in rows]
+            # #2046: a reviewed and locked album is not previewed, reported
+            # or moved by this job
+            from core.library2 import locks
+            albums = [dict(row) for row in rows
+                      if not locks.blocks("album", row["id"], "files", "Reorganize", conn=conn)]
             if allowed is None:
                 return albums
             if not allowed:

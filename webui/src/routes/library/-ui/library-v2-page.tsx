@@ -262,6 +262,7 @@ import { QualityProfilePicker } from './quality-profile-modal';
 import { reassignSubject } from './reassign';
 import { AlbumReorganizeModal, ArtistRenamePreviewModal } from './reorganize-modal';
 import { RetagModal } from './retag-modal';
+import { ReviewLockButton } from './review-lock';
 import { StatusNotice } from './status-notice';
 import { LibraryToolDialog } from './tool-dialog';
 import { UnmatchedReviewModal } from './unmatched-review-modal';
@@ -4863,6 +4864,7 @@ function ArtistIndexView() {
       letter: search.letter,
       source: search.source,
       quality: search.quality,
+      review: search.review,
     }),
   );
 
@@ -5028,6 +5030,7 @@ function ArtistIndexView() {
                   letter: 'all',
                   source: '',
                   quality: '' as const,
+                  review: '' as const,
                   page: 1,
                 }),
               });
@@ -6177,6 +6180,19 @@ function AlbumDetailView({ albumId }: { albumId: number }) {
                 <h1 className={styles.title} title={album.title}>
                   {album.title}
                 </h1>
+                {/* #2046: reviewed and locked. only for what is on disk */}
+                {album.tracks_present > 0 ? (
+                  <ReviewLockButton
+                    entity="album"
+                    id={album.id}
+                    name={album.title}
+                    artistId={album.primary_artist?.id}
+                    variant="hero"
+                    onOpenAlbum={(next) =>
+                      void navigate({ search: (previous) => ({ ...previous, album: next }) })
+                    }
+                  />
+                ) : null}
                 <AlbumOverflowMenu
                   album={{
                     id: album.id,
@@ -8784,6 +8800,12 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   .map(([id, action]) => (
                     <Fragment key={id}>{action}</Fragment>
                   ))}
+                <ReviewLockButton
+                  entity="artist"
+                  id={artistId}
+                  name={artist.name}
+                  variant="toolbar"
+                />
                 <ArtistToolsMenu
                   onViewSettings={() => setShowViewSettings(true)}
                   artistId={artistId}
@@ -9567,6 +9589,17 @@ function AlbumBlock({
             tracksPresent={album.tracks_present}
           />
           <AlbumUpgradeButton albumId={album.id} albumTitle={album.title} />
+          {album.tracks_present > 0 ? (
+            <ReviewLockButton
+              entity="album"
+              id={album.id}
+              name={album.title}
+              artistId={artistId}
+              onOpenAlbum={(next) =>
+                void navigate({ search: (previous) => ({ ...previous, album: next }) })
+              }
+            />
+          ) : null}
           <IconActionButton
             icon="automatic"
             title="Automatic Search — search missing/upgradable tracks on this album"

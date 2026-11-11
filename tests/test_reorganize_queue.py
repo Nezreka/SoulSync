@@ -609,3 +609,101 @@ def test_a_backlog_saved_with_the_old_fields_still_restores():
         assert not {'source', 'metadata_source', 'rename_only'} & set(queued[0])
     finally:
         q.stop()
+
+
+# --- #2046: a reviewed and locked album is only moved for a person ---------
+
+@pytest.fixture
+def locked_albums(monkeypatch):
+    """albums '7' and '8' have their files locked."""
+    import core.reorganize_queue as module
+    monkeypatch.setattr(module, '_album_locked',
+                        lambda album_id, record=False: str(album_id) in ('7', '8'))
+    return module
+
+
+def test_a_job_cannot_queue_a_locked_album(queue, locked_albums):
+    record = []
+    queue.set_runner(_make_runner(record))
+    assert _enqueue(queue, album_id='7') == {'queued': False, 'reason': 'locked'}
+    assert _enqueue(queue, album_id='1')['queued'] is True
+    assert _wait_for(lambda: len(record) == 1)
+
+
+def test_a_person_can_reorganize_their_locked_album(queue, locked_albums, monkeypatch):
+    from core.library2 import locks
+    seen = []
+
+    def runner(item):
+        seen.append((item.album_id, item.by_user, locks.acting_as_user()))
+        return {'status': 'completed', 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': []}
+
+    queue.set_runner(runner)
+    with locks.user_action():
+        assert _enqueue(queue, album_id='7')['queued'] is True
+    _enqueue(queue, album_id='1')
+    assert _wait_for(lambda: len(seen) == 2)
+    # the worker thread acts for whoever queued the item
+    assert seen == [('7', True, True), ('1', False, False)]
+
+
+def test_a_bulk_run_leaves_locked_albums_out_whoever_starts_it(queue, locked_albums):
+    from core.library2 import locks
+    record = []
+    queue.set_runner(_make_runner(record))
+    items = [{'album_id': n, 'album_title': f'A{n}', 'artist_id': 1, 'artist_name': 'X'}
+             for n in (1, 7, 8, 9)]
+    with locks.user_action():
+        tally = queue.enqueue_many(items)
+    assert tally == {'enqueued': 2, 'already_queued': 0, 'locked': 2, 'total': 4}
+    assert _wait_for(lambda: len(record) == 2)
+
+
+def test_an_album_locked_while_it_waits_is_not_moved(queue, monkeypatch):
+    import core.reorganize_queue as module
+    state = {'locked': False}
+    monkeypatch.setattr(module, '_album_locked', lambda album_id, record=False: state['locked'])
+    gate = threading.Event()
+    record = []
+    queue.set_runner(_make_runner(record, block_event=gate))
+    _enqueue(queue, album_id='1')        # holds the worker
+    _enqueue(queue, album_id='2')        # waits behind it
+    assert _wait_for(lambda: len(record) == 1)
+    state['locked'] = True
+    gate.set()
+    assert _wait_for(lambda: len(queue._items) == 2 and all(
+        i.status in ('done', 'failed') for i in queue._items))
+    waited = next(i for i in queue._items if i.album_id == '2')
+    assert waited.moved == 0 and waited.error == 'Album is locked'
+    assert len(record) == 1
+
+
+def test_by_user_survives_a_restart(locked_albums):
+    snaps = {}
+
+    class Store:
+        def save(self, snapshot):
+            snaps[snapshot['queue_id']] = dict(snapshot)
+
+        def delete(self, queue_id):
+            snaps.pop(queue_id, None)
+
+        def delete_queued(self):
+            return 0
+
+        def load_pending(self):
+            return list(snaps.values())
+
+    from core.library2 import locks
+    first = ReorganizeQueue(store=Store())
+    gate = threading.Event()
+    first.set_runner(_make_runner([], block_event=gate))
+    with locks.user_action():
+        first.enqueue(album_id='7', album_title='A', artist_id='1', artist_name='X')
+    assert next(iter(snaps.values()))['by_user'] is True
+    second = ReorganizeQueue(store=Store())
+    assert second.restore() == 1
+    assert second._items[0].by_user is True
+    gate.set()
+    first.stop()
+    second.stop()

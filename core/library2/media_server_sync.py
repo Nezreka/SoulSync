@@ -78,6 +78,15 @@ def _genres_json(obj: Any) -> Optional[str]:
     return json.dumps(genres) if genres else None
 
 
+def _held(cursor, entity_type: str, entity_id: int) -> bool:
+    """#2046: a reviewed and locked row keeps its name, year, art and genres
+    when an import lands on it. It is still mapped to the server, like any
+    row a scan stamps."""
+    from core.library2 import locks
+    return locks.blocks(entity_type, entity_id, "metadata", "Import",
+                        conn=getattr(cursor, "connection", None))
+
+
 def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
                   image_url: Optional[str] = None,
                   genres_json: Optional[str] = None,
@@ -122,7 +131,7 @@ def upsert_artist(cursor, *, server_source: str, server_id: str, name: str,
             upsert_mapping(cursor, "artist", artist_id, server_source, server_id)
         return artist_id
     artist_id = int(row[0])
-    if not allow_create:
+    if not allow_create or _held(cursor, "artist", artist_id):
         upsert_mapping(cursor, "artist", artist_id, server_source, server_id)
         return artist_id
     image_set = (
@@ -260,7 +269,7 @@ def upsert_album(cursor, *, server_source: str, server_id: str, artist_id: int,
         ).lastrowid)
     else:
         album_id = int(row[0])
-        if not allow_create:
+        if not allow_create or _held(cursor, "album", album_id):
             cursor.execute(
                 "UPDATE lib2_albums SET track_count=COALESCE(?,track_count),"
                 "duration=COALESCE(?,duration),"

@@ -47,6 +47,17 @@ def _lock_guard(column: str, available: set) -> str:
     return ""
 
 
+def _locked(conn, entity: str, entity_id: int, service: str) -> bool:
+    """#2046: a reviewed and locked row takes nothing from a provider. the
+    queue already leaves it out; this is for a worker that got there another
+    way (a batch, a refresh, a stored match)."""
+    from core.library2 import locks
+    what = f"{service.title()} enrichment"
+    if entity == "track":
+        return locks.blocks_track(entity_id, "metadata", what, conn=conn)
+    return locks.blocks(entity, entity_id, "metadata", what, conn=conn)
+
+
 def _is_empty(value: Any) -> bool:
     if value is None:
         return True
@@ -116,6 +127,8 @@ def write_provider_enrichment(
     if not key:
         raise ValueError("service is required")
     entity_id = int(entity_id)
+    if _locked(conn, entity, entity_id, key):
+        return
 
     cleaned = _clean(payload or {})
     if cleaned:
@@ -212,6 +225,8 @@ def claim_provider_id(conn, *, entity_type: str, entity_id: int, service: str,
     if not value:
         return False
     entity_id = int(entity_id)
+    if _locked(conn, entity, entity_id, key):
+        return False
 
     # json_extract/json_set both raise on a malformed column, and a row whose
     # external_ids somehow is not JSON must be claimable, not fatal.

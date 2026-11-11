@@ -149,6 +149,82 @@ JOB_LIBRARY_V2_EFFECTS: dict[str, frozenset[str]] = {
     'unknown_artist_fixer': frozenset({'observe', 'metadata', 'tags', 'wanted'}),
 }
 
+# #2046: what a reviewed and locked album or artist means to each job. Every
+# job declares it, the same way it declares its effects above, so a new job
+# cannot ship without someone deciding whether a lock stops it.
+#   a scope   the job changes that part of an album. a lock on that scope
+#             keeps the job away: no finding, no fix.
+#   'report'  the job reports damage (a missing or broken file). a locked
+#             album is still reported; only a person can run the fix.
+#   'none'    the job has no album or artist it could change.
+JOB_LOCK_SCOPES = ('tags', 'artwork', 'metadata', 'files', 'match', 'upgrades',
+                   'report', 'none')
+JOB_LOCK_SCOPE: dict[str, str] = {
+    'acoustid_scanner': 'match',
+    'album_catalogue_backfill': 'metadata',
+    # missing tracks of a reviewed album are still wanted: a lock keeps what
+    # is there as it is, it does not stop the album being completed
+    'album_completeness': 'none',
+    'album_edition_review': 'match',
+    'album_release_year_repair': 'tags',
+    'album_tag_consistency': 'tags',
+    'artist_nfo_backfill': 'files',
+    'audio_corruption_detector': 'report',
+    'bpm_backfill': 'tags',
+    'cache_evictor': 'none',
+    'comma_artist_splitter': 'tags',
+    'dead_file_cleaner': 'report',
+    'empty_folder_cleaner': 'none',
+    'expired_download_cleaner': 'none',
+    'fake_lossless_detector': 'upgrades',
+    'genre_cleanup': 'metadata',
+    'genre_enrichment': 'metadata',
+    'library_reorganize': 'files',
+    'library_retag': 'tags',
+    'live_commentary_cleaner': 'files',
+    'lossy_converter': 'files',
+    'mbid_mismatch_detector': 'tags',
+    'metadata_gap_filler': 'metadata',
+    'missing_cover_art': 'artwork',
+    'missing_lyrics': 'tags',
+    'monitored_discography_refresh': 'none',
+    'monitoring_list_reconcile': 'none',
+    'native_duplicate_detector': 'files',
+    'native_enrichment_sweep': 'metadata',
+    'orphan_file_detector': 'none',
+    'path_drift_reconcile': 'report',
+    # re-measures bitrate and sample rate into the catalogue. nothing a person
+    # reviewed changes
+    'quality_info_backfill': 'none',
+    'quality_profile_audit': 'upgrades',
+    'replaygain_filler': 'tags',
+    'short_preview_track': 'report',
+    'skip_audit_cleanup': 'none',
+    'streamed_aac_repair': 'report',
+    'suspect_album_tag_detector': 'match',
+    'track_number_repair': 'tags',
+    'unknown_artist_fixer': 'match',
+    'untagged_downloads': 'tags',
+}
+# findings left by jobs that no longer run still have a fix
+RETIRED_JOB_LOCK_SCOPE: dict[str, str] = {
+    'quality_upgrade_scanner': 'upgrades',
+    'quality_upgrade': 'upgrades',
+    'quality_upgrade_scan': 'upgrades',
+    'discography_backfill': 'none',
+    'canonical_version_resolve': 'match',
+    'duplicate_detector': 'files',
+    'single_album_dedup': 'files',
+}
+
+
+def job_lock_scope(job_id) -> str:
+    """The lock scope of a job id, live or retired. A job nobody declared is
+    treated as a report: a locked album's findings then need a person."""
+    key = str(job_id or '')
+    return JOB_LOCK_SCOPE.get(key) or RETIRED_JOB_LOCK_SCOPE.get(key) or 'report'
+
+
 # Jobs deliberately retired after their function moved to a native Library-v2
 # engine (P2 consolidation). Listed explicitly so the worker can prune their
 # leftover pending findings deterministically — never inferred from "not in
@@ -241,8 +317,15 @@ def register_job(cls: type[RepairJob]) -> type[RepairJob]:
         raise ValueError(
             f"Repair job {cls.job_id!r} mixes the 'none' Library-v2 effect with mutations"
         )
+    lock_scope = JOB_LOCK_SCOPE.get(cls.job_id)
+    if lock_scope not in JOB_LOCK_SCOPES:
+        raise ValueError(
+            f"Repair job {cls.job_id!r} does not say what a locked album means to it "
+            f"(JOB_LOCK_SCOPE)"
+        )
     cls.data_basis = basis
     cls.library_v2_effects = effects
+    cls.lock_scope = lock_scope
     JOB_REGISTRY[cls.job_id] = cls
     return cls
 

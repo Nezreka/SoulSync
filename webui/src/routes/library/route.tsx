@@ -129,6 +129,7 @@ export const Route = createFileRoute('/library')({
     letter: search.letter,
     source: search.source,
     quality: search.quality,
+    review: search.review,
   }),
   loader: async ({ context, deps }) => {
     // Warm the feature-flag check + first page of artists; never block on a
