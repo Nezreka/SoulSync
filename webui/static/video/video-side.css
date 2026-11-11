@@ -803,9 +803,6 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-acq-note { margin-top: 8px; font-size: 11.5px; color: rgba(255,255,255,0.38); }
 
 /* An unmonitored season reads as switched-off, not as an error: it's a choice. */
-.vd-season-mon { opacity: 0.62; }
-.vd-season-mon--on { opacity: 1; }
-.vd-season-mon--on .discog-btn-icon { color: rgb(var(--vd-accent-text-rgb, var(--vd-accent-rgb))); }
 .vd-health-chip--fix { cursor: pointer; font: inherit; }
 .vd-health-chip--fix:hover {
     border-color: rgba(var(--warning-strong-rgb), 0.55); background: rgba(var(--warning-strong-rgb), 0.16);
@@ -8500,8 +8497,7 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vd-page .vd-pop-menu > a:hover { background: var(--white-a10); }
 
 .vd-page.vd-page.vd-page .vd-season-actions .discog-download-btn,
-.vd-page.vd-page.vd-page .vd-ep .vd-ep-getbtn,
-.vd-page.vd-page.vd-page .vd-season-mon {
+.vd-page.vd-page.vd-page .vd-ep .vd-ep-getbtn {
     height: 34px;
     min-height: 34px;
     padding: 0 14px;
@@ -8517,8 +8513,7 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
     letter-spacing: 0;
 }
 .vd-page.vd-page.vd-page .vd-season-actions .discog-download-btn:hover,
-.vd-page.vd-page.vd-page .vd-ep .vd-ep-getbtn:hover,
-.vd-page.vd-page.vd-page .vd-season-mon:hover { background: var(--white-a18); transform: none; }
+.vd-page.vd-page.vd-page .vd-ep .vd-ep-getbtn:hover { background: var(--white-a18); transform: none; }
 .vd-page .vd-season-actions .discog-download-btn .discog-btn-text { font-size: 13px; font-weight: 600; color: inherit; }
 .vd-page .vd-season-actions .discog-btn-shimmer { display: none; }
 .vd-page .vd-ep .vd-ep-getbtn { width: 34px; padding: 0; }
@@ -8603,3 +8598,33 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vd-page .vd-libselect > * { margin-bottom: 10px; }
 .vd-page .vd-libfoot { margin-top: 36px; }
 @media (max-width: 720px) { .vd-page .vd-ep-files { padding: 4px 0 0; } }
+
+/* the season's Monitored switch: on the bar, not in its menu */
+.vd-page .vd-season-switch {
+    display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 4px;
+    border: 0; background: none; cursor: pointer; font: inherit; font-size: 13px; font-weight: 500;
+    color: var(--white-a55);
+}
+.vd-page .vd-season-switch-track {
+    position: relative; width: 38px; height: 22px; border-radius: var(--radius-pill);
+    background: var(--white-a16); transition: background var(--dur-base) ease;
+}
+.vd-page .vd-season-switch-track::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    border-radius: var(--radius-circle); background: var(--text-1); transition: transform var(--dur-base) ease;
+}
+.vd-page .vd-season-switch--on { color: var(--text-1); }
+.vd-page .vd-season-switch--on .vd-season-switch-track { background: rgb(var(--vd-accent-rgb)); }
+.vd-page .vd-season-switch--on .vd-season-switch-track::after { transform: translateX(16px); }
+.vd-page .vd-season-switch:disabled { opacity: 0.5; cursor: default; }
+.vd-page .vd-season-switch:focus-visible { outline: 2px solid rgba(var(--vd-accent-rgb), 0.8); outline-offset: 2px; border-radius: var(--radius-pill); }
+
+/* Play / Resume on <server>: black with white text. the server's logo is
+   white lettering, and on the white primary button it could not be read */
+.vd-page.vd-page.vd-page .vd-actions > .vd-play-btn:first-child {
+    background: var(--bg-primary); color: var(--text-1);
+    box-shadow: inset 0 0 0 1px var(--white-a18);
+}
+.vd-page.vd-page.vd-page .vd-actions > .vd-play-btn:first-child:hover {
+    background: var(--bg-raised, var(--bg-primary)); box-shadow: inset 0 0 0 1px var(--white-a35);
+}

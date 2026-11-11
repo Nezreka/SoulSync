@@ -3264,19 +3264,22 @@
             '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" data-vd-season-wish ' +
                 'title="Add every missing ' + (isYt ? 'video ' : 'episode ') + scope.what + ' to the wishlist">' +
                 '<span class="discog-btn-icon">＋</span><span class="discog-btn-text">Wishlist ' + scope.word + '</span></button>' : '') +
-            (seasonManage ?
-            '<button class="discog-download-btn discog-btn-compact vd-season-mon' + (monitored ? ' vd-season-mon--on' : '') +
-                '" type="button" role="menuitem" data-vd-season-monitor="' + (monitored ? '0' : '1') + '" ' +
-                'title="' + (monitored ? 'Stop hunting this season' : 'Hunt missing episodes in this season again') + '">' +
-                '<span class="discog-btn-icon">' + (monitored ? '◉' : '○') + '</span>' +
-                '<span class="discog-btn-text">' + (monitored ? 'Monitored' : 'Unmonitored') + '</span></button>' : '') +
             (seasonManage && data.tmdb_id ?
             '<button class="discog-download-btn discog-btn-compact" type="button" role="menuitem" data-vd-season-clearfail ' +
                 'title="Clear retry backoff on this season\u2019s stalled wishlist rows and search every source again">' +
                 '<span class="discog-btn-icon">↺</span><span class="discog-btn-text">Clear failures</span></button>' : '');
         var status = canAcquire ? seasonMissing.length + ' missing'
             : (isYt ? '' : 'All ' + season.episodes.length + ' here');
-        if (seasonManage && !monitored) status += (status ? ' · ' : '') + 'not monitored';
+        // Monitoring is a switch on the bar, always in view. It was an item in
+        // the ⋯ menu, where nobody thought to look for it (Boulder, Nov 2026).
+        var monSwitch = seasonManage
+            ? '<button class="vd-season-switch' + (monitored ? ' vd-season-switch--on' : '') + '" type="button" role="switch" ' +
+                'aria-checked="' + (monitored ? 'true' : 'false') + '" data-vd-season-monitor="' + (monitored ? '0' : '1') + '" ' +
+                'title="' + (monitored ? 'Monitored: missing episodes are hunted. Click to stop hunting this season'
+                                       : 'Not monitored: SoulSync leaves this season alone. Click to hunt its missing episodes again') + '">' +
+                '<span class="vd-season-switch-track" aria-hidden="true"></span>' +
+                '<span class="vd-season-switch-label">Monitored</span></button>'
+            : '';
         return '<div class="vd-season-actions">' +
             '<span class="vd-season-actions-count">' + status + '</span>' + libSeasonFacts(season) +
             (canAcquire ?
@@ -3285,6 +3288,7 @@
                                   : 'Auto-search &amp; download every missing episode in this season') + '">' +
                 '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Grab ' + scope.word + '</span>' +
                 '<span class="discog-btn-shimmer"></span></button>' : '') +
+            monSwitch +
             (menu ? '<span class="vd-pop">' +
                 '<button class="vd-pop-btn" type="button" data-vd-pop aria-haspopup="menu" aria-expanded="false" ' +
                     'aria-label="More for this ' + (scope.word === 'all' ? 'playlist' : scope.word) + '" title="More">⋯</button>' +

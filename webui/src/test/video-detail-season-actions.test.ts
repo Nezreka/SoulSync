@@ -70,7 +70,8 @@ function partial(mon = 2) {
 
 /** every action the bar offers, visible or behind its ⋯ menu (not the toggle). */
 function buttons(host: HTMLElement): string[] {
-  return Array.from(host.querySelectorAll('button:not([data-vd-pop])')).map(
+  // the Monitored switch is not one of the action buttons; it has its own test
+  return Array.from(host.querySelectorAll('button:not([data-vd-pop]):not([role="switch"])')).map(
     (b) => b.querySelector('.discog-btn-text')?.textContent ?? '',
   );
 }
@@ -78,7 +79,9 @@ function buttons(host: HTMLElement): string[] {
 describe('the season action bar', () => {
   it('offers management on a season with nothing missing', () => {
     // This is the case the old bar dropped entirely.
-    expect(buttons(bar(complete()))).toEqual(['Monitored', 'Clear failures']);
+    expect(buttons(bar(complete()))).toEqual(['Clear failures']);
+    // monitoring is a switch on the bar itself, not something to go looking for
+    expect(bar(complete()).querySelector('.vd-season-actions > [role="switch"]')).not.toBeNull();
   });
 
   it('adds the acquisition actions when episodes are missing', () => {
@@ -86,7 +89,6 @@ describe('the season action bar', () => {
       'Grab season',
       'Manual search',
       'Wishlist season',
-      'Monitored',
       'Clear failures',
     ]);
     expect(bar(partial()).textContent).toContain('1 missing');
@@ -95,17 +97,21 @@ describe('the season action bar', () => {
   it('states which way the monitor toggle will flip', () => {
     const on = bar(complete(2)).querySelector('[data-vd-season-monitor]') as HTMLElement;
     expect(on.getAttribute('data-vd-season-monitor')).toBe('0'); // monitored -> turn off
-    expect(on.className).toContain('vd-season-mon--on');
+    expect(on.getAttribute('aria-checked')).toBe('true');
 
     const off = bar(complete(0)).querySelector('[data-vd-season-monitor]') as HTMLElement;
     expect(off.getAttribute('data-vd-season-monitor')).toBe('1'); // unmonitored -> turn on
-    expect(off.className).not.toContain('vd-season-mon--on');
-    expect(off.textContent).toContain('Unmonitored');
+    expect(off.getAttribute('aria-checked')).toBe('false');
+    // one label, and the switch says which way it is
+    expect(off.textContent).toBe('Monitored');
   });
 
   it('hides clear-failures when there is no tmdb id to retry against', () => {
     // The retry endpoint keys on tmdb_id; without one the button could only fail.
-    expect(buttons(bar(complete(), { tmdb_id: null }))).toEqual(['Monitored']);
+    expect(buttons(bar(complete(), { tmdb_id: null }))).toEqual([]);
+    expect(
+      bar(complete(), { tmdb_id: null }).querySelector('[data-vd-season-monitor]'),
+    ).not.toBeNull();
   });
 
   it('offers no management on a preview, which has no library row', () => {
@@ -142,7 +148,7 @@ describe('the season action bar', () => {
   });
 
   it('drops the grab buttons when the grab module never loaded', () => {
-    expect(buttons(bar(partial(), { grab: false }))).toEqual(['Monitored', 'Clear failures']);
+    expect(buttons(bar(partial(), { grab: false }))).toEqual(['Clear failures']);
   });
 
   it('shows only Grab on the bar and keeps the rest one click away', () => {
@@ -153,7 +159,9 @@ describe('the season action bar', () => {
     expect(visible).toEqual(['Grab season']);
     const menu = host.querySelector('[data-vd-pop-menu]') as HTMLElement;
     expect(menu.hidden).toBe(true);
-    expect(menu.querySelector('[data-vd-season-monitor]')).not.toBeNull();
+    // the monitor switch is beside Grab, in view, and not in the menu
+    expect(menu.querySelector('[data-vd-season-monitor]')).toBeNull();
+    expect(host.querySelector('.vd-season-actions > [data-vd-season-monitor]')).not.toBeNull();
     expect(host.querySelector('[data-vd-pop]')?.getAttribute('aria-haspopup')).toBe('menu');
   });
 });
