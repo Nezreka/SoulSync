@@ -486,6 +486,68 @@ describe('Library V2 artist detail — All Releases views', () => {
     await waitFor(() => expect(albumsStats()).toBe('0/4'), { timeout: 10_000 });
   }, 30_000);
 
+  it('#2050: other sources are worked out against what this page lists, and never repeat it', async () => {
+    let asked = '';
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            // known on MusicBrainz only: there was no "+ Other sources" at all
+            provider_ids: { musicbrainz: 'mb-1' },
+            albums: [
+              album({
+                id: 1,
+                title: 'Dummy',
+                year: 1994,
+                release_date: '1994-08-22',
+                provider_ids: { deezer: 'dz-dummy' },
+              }),
+            ],
+            singles: [album(OWNED_SINGLE)],
+          }),
+        }),
+      ),
+      http.get('/api/artist/mb-1/discography/gap-fill', ({ request }) => {
+        asked = new URL(request.url).search;
+        return HttpResponse.json({
+          success: true,
+          gaps: {
+            albums: [
+              // already on the page under another year form: not added again
+              { id: 'dz-x', name: 'Dummy', album_type: 'album', release_date: '1994' },
+              {
+                id: 'dz-b',
+                name: 'Third',
+                album_type: 'album',
+                release_date: '2008',
+                gap_source: 'deezer',
+              },
+            ],
+          },
+        });
+      }),
+    );
+    const { container } = renderArtist('/library?artist=1&header=rich&releases=all');
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Other sources/ }, { timeout: 10_000 }),
+    );
+    await screen.findByText('Third', undefined, { timeout: 10_000 });
+    // the page names its artist, so the server diffs against the catalogue
+    expect(asked).toContain('library_artist=1');
+    const names = [...container.querySelectorAll('.album-card-name')].map((n) => n.textContent);
+    expect(names.filter((n) => n === 'Dummy')).toHaveLength(1);
+    // every release you don't own says where it is listed, by its real name
+    const badges = [...container.querySelectorAll('.gapfill-source-badge')].map((b) => [
+      b.textContent,
+      b.getAttribute('title'),
+    ]);
+    expect(badges).toEqual([
+      ['Deezer', 'Listed on Deezer'],
+      ['Deezer', 'Only listed on Deezer: opens and downloads from there'],
+    ]);
+  }, 30_000);
+
   it('uses the existing rich header for immersive arrivals and keeps the artist tools on show', async () => {
     inLibrary();
     const { router } = renderArtist('/library?artist=1&view=discovery&immersive=true');

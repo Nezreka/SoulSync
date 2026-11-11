@@ -185,6 +185,7 @@ import {
 } from '../../artist-detail/-artist-detail.api';
 import { ensurePageOrigin, pushArtistOrigin } from '../../artist-detail/-artist-detail.back-label';
 import { announceWatchlistFollow } from '../../artist-detail/-artist-detail.enrich-match';
+import { gapSameRelease, gapSourceLabel } from '../../artist-detail/-artist-detail.gap-fill';
 import { syncResultMessage } from '../../artist-detail/-artist-detail.meta';
 import {
   checkWatchlistRequest,
@@ -6746,6 +6747,9 @@ interface DiscographyCard {
   monitored: boolean;
   /** #1067: set only on a "+ Other sources" card — the source that lists it. */
   gapSource?: string;
+  /** #2050: with "+ Other sources" on, a release you don't own says which
+   *  source lists it, so a page of mixed sources reads the same on every card */
+  listedOn?: string;
   title: string;
   albumType: string;
   year: string;
@@ -6893,9 +6897,16 @@ function ReleaseCardGrid({
             {card.gapSource ? (
               <div
                 className="gapfill-source-badge"
-                title={`Only listed on ${card.gapSource} — opens and downloads from there`}
+                title={`Only listed on ${gapSourceLabel(card.gapSource)}: opens and downloads from there`}
               >
-                {card.gapSource}
+                {gapSourceLabel(card.gapSource)}
+              </div>
+            ) : card.listedOn ? (
+              <div
+                className="gapfill-source-badge"
+                title={`Listed on ${gapSourceLabel(card.listedOn)}`}
+              >
+                {gapSourceLabel(card.listedOn)}
               </div>
             ) : null}
             {extras?.(card)}
@@ -7570,6 +7581,11 @@ function LegacyArtistHero({
   );
 }
 
+/** The source an unowned catalogue release is listed on, for its badge. */
+function listedSource(ids: Record<string, string> | undefined): string | undefined {
+  return ['spotify', 'deezer', 'itunes', 'musicbrainz'].find((source) => ids?.[source]);
+}
+
 /** #1067 "+ Other sources": releases only OTHER configured metadata sources
  *  list, appended to the normal sections with a source badge. Opt-in and
  *  lazy — it costs one provider round trip per extra source. */
@@ -7577,23 +7593,38 @@ function useOtherSources(input: {
   providerId: string | null;
   artistName: string;
   baseSource?: string | null;
+  /** the Library artist page names its artist: the releases are then worked
+   *  out against the catalogue the page lists, not a provider's live list */
+  libraryArtistId?: number | null;
+  /** what the page already shows. the last word on a duplicate (#2050): a
+   *  release on the page is never added again, whatever the server compared */
+  rendered?: ReadonlyArray<{ title?: string | null; year?: unknown; release_date?: unknown }>;
 }) {
   const [enabled, setEnabled] = useState(false);
   const query = useQuery({
-    queryKey: [...LIBRARY_V2_QUERY_KEY, 'gap-fill', input.providerId, input.artistName],
+    queryKey: [
+      ...LIBRARY_V2_QUERY_KEY,
+      'gap-fill',
+      input.providerId,
+      input.artistName,
+      input.libraryArtistId ?? null,
+    ],
     queryFn: () =>
       fetchArtistDiscographyGapFill({
         providerId: input.providerId ?? '',
         artistName: input.artistName,
         baseSource: input.baseSource,
+        libraryArtistId: input.libraryArtistId,
       }),
     enabled: enabled && Boolean(input.providerId) && Boolean(input.artistName),
     staleTime: 10 * 60_000,
   });
+  const rendered = input.rendered ?? [];
   const byBucket = (bucket: 'album' | 'ep' | 'single'): DiscographyCard[] =>
     enabled
       ? (query.data ?? [])
           .filter((r) => r._bucket === bucket)
+          .filter((r) => !rendered.some((shown) => gapSameRelease(r, shown)))
           .map((r) => ({ ...providerCard(r), gapSource: r.gap_source }))
       : [];
   return {
@@ -8390,9 +8421,22 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const artistQuery = useQuery(libraryV2ArtistQueryOptions(artistId));
   const toolbarStuck = useScrolledPast(heroSentinelRef, artistQuery.data?.id);
   const artistProviderIds = artistQuery.data?.provider_ids ?? {};
+  // any source the artist is known on can answer: an artist with only a
+  // MusicBrainz or iTunes id had no "+ Other sources" at all (#2050)
   const otherSources = useOtherSources({
-    providerId: artistProviderIds.spotify ?? artistProviderIds.deezer ?? null,
+    providerId:
+      artistProviderIds.spotify ??
+      artistProviderIds.deezer ??
+      artistProviderIds.itunes ??
+      artistProviderIds.musicbrainz ??
+      null,
     artistName: artistQuery.data?.name ?? '',
+    libraryArtistId: artistId,
+    rendered: [
+      ...(artistQuery.data?.albums ?? []),
+      ...(artistQuery.data?.eps ?? []),
+      ...(artistQuery.data?.singles ?? []),
+    ],
   });
   // the provider identity a "+ other sources" card opens and plays under
   const releaseCardArtist = {
@@ -8986,7 +9030,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                 ] as Array<[GroupLabel, LibraryV2AlbumSummary[]]>
               ).map(([title, entries]) => {
                 const cards = [
-                  ...entries.map(catalogueCard),
+                  ...entries.map((entry) => ({
+                    ...catalogueCard(entry),
+                    listedOn:
+                      otherSources.enabled && entry.tracks_present === 0
+                        ? listedSource(entry.provider_ids)
+                        : undefined,
+                  })),
                   ...readOnlyDiscography
                     .releasesFor(
                       ({ Albums: 'albums', EPs: 'eps', Singles: 'singles' } as const)[title],

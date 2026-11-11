@@ -65,6 +65,34 @@ def same_release(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
     return abs(ya - yb) <= 1
 
 
+def _track_count(card: Dict[str, Any]) -> Optional[int]:
+    for key in ("total_tracks", "track_count"):
+        try:
+            n = int(card.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if n > 0:
+            return n
+    return None
+
+
+# a single is this many tracks at most, an album this many at least. between
+# the two, a count says nothing about which release it is
+_SINGLE_MAX_TRACKS = 3
+_ALBUM_MIN_TRACKS = 6
+
+
+def clearly_not_the_same_size(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """A title-track single and its album share a title and a year. When both
+    sides say how many tracks they hold, a one to three track release is not a
+    six track one (#2050: an album another source lists was dropped as a
+    duplicate of the single the page already had). Unknown counts say nothing."""
+    ca, cb = _track_count(a), _track_count(b)
+    if ca is None or cb is None:
+        return False
+    return min(ca, cb) <= _SINGLE_MAX_TRACKS and max(ca, cb) >= _ALBUM_MIN_TRACKS
+
+
 def find_gap_releases(
     base_cards: Iterable[Dict[str, Any]],
     source_cards: Dict[str, List[Dict[str, Any]]],
@@ -105,22 +133,32 @@ def gap_fill_buckets(
     lists as an album must not reappear as a gap "single" just because
     another source filed it differently. Each gap lands in the bucket its
     OWN source assigned."""
-    all_base: List[Dict[str, Any]] = []
+    # (bucket, card): the bucket is only consulted to tell a single from the
+    # album named after it, never to keep two filings of one release apart
+    taken: List[tuple] = []
     for bucket in ("albums", "eps", "singles"):
-        all_base.extend(base.get(bucket) or [])
+        taken.extend((bucket, card) for card in base.get(bucket) or [])
+
+    def _held(bucket: str, card: Dict[str, Any]) -> bool:
+        for other_bucket, existing in taken:
+            if not same_release(card, existing):
+                continue
+            if other_bucket != bucket and clearly_not_the_same_size(card, existing):
+                continue
+            return True
+        return False
 
     out: Dict[str, List[Dict[str, Any]]] = {"albums": [], "eps": [], "singles": []}
-    taken = list(all_base)
     for source in source_order:
         source_disc = others.get(source) or {}
         for bucket in ("albums", "eps", "singles"):
             for card in source_disc.get(bucket) or []:
                 if not _title_of(card):
                     continue
-                if any(same_release(card, existing) for existing in taken):
+                if _held(bucket, card):
                     continue
                 gap = dict(card)
                 gap["gap_source"] = source
                 out[bucket].append(gap)
-                taken.append(gap)
+                taken.append((bucket, gap))
     return out

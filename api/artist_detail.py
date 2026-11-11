@@ -834,6 +834,53 @@ def _resolve_artist_source_ids(artist_id) -> dict:
     return artist_source_ids
 
 
+def _catalogue_release_cards(library_artist_id):
+    """What the Library artist page lists for this artist, as discography
+    buckets: every release filed under the artist or one of its alias rows.
+    None when the artist is not in the catalogue."""
+    try:
+        artist_pk = int(library_artist_id)
+    except (TypeError, ValueError):
+        return None
+    conn = get_database()._get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COALESCE(canonical_artist_id, id) FROM lib2_artists WHERE id = ?",
+                    (artist_pk,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        root = int(row[0])
+        cur.execute("SELECT id FROM lib2_artists WHERE id = ? OR canonical_artist_id = ?",
+                    (root, root))
+        group = [int(r[0]) for r in cur.fetchall()]
+        marks = ','.join('?' for _ in group)
+        cur.execute(
+            f"""SELECT al.id, al.title, al.album_type, al.year, al.release_date,
+                       COALESCE(al.expected_track_count, al.track_count, 0) AS tracks,
+                       al.explicit
+                  FROM lib2_albums al
+                 WHERE al.primary_artist_id IN ({marks})
+                    OR al.id IN (SELECT album_id FROM lib2_album_artists
+                                  WHERE artist_id IN ({marks}))""", group + group)
+        buckets = {'albums': [], 'eps': [], 'singles': []}
+        for r in cur.fetchall():
+            kind = str(r[2] or 'album').lower()
+            bucket = 'singles' if kind == 'single' else 'eps' if kind == 'ep' else 'albums'
+            buckets[bucket].append({
+                'id': f'lib2:{r[0]}', 'title': r[1] or '', 'name': r[1] or '',
+                'album_type': kind, 'year': r[3], 'release_date': r[4] or '',
+                'total_tracks': int(r[5] or 0), 'track_count': int(r[5] or 0),
+                'explicit': bool(r[6]) if r[6] is not None else None,
+            })
+        return buckets
+    except Exception as exc:  # noqa: BLE001 - falls back to the provider base
+        logger.debug("catalogue cards not read for gap-fill: %s", exc)
+        return None
+    finally:
+        conn.close()
+
+
 @bp.route('/api/artist/<artist_id>/discography/gap-fill', methods=['GET'])
 def get_artist_discography_gap_fill(artist_id):
     """Releases OTHER metadata sources know that the base source's
@@ -851,6 +898,18 @@ def get_artist_discography_gap_fill(artist_id):
         base_source = (request.args.get('base_source', '') or '').strip().lower()
 
         artist_source_ids = _resolve_artist_source_ids(artist_id)
+
+        # #2050: the Library artist page lists the CATALOGUE, not a provider's
+        # live discography. Diffing against a provider base skipped releases
+        # the page never had (the base source's own, which it was assumed to
+        # show) and added ones it already had (owned ones the base lacks). So
+        # that page names its artist, the base is what it lists, and every
+        # source with a verified id is asked, the catalogue's own included.
+        library_artist = (request.args.get('library_artist', '') or '').strip()
+        catalogue = _catalogue_release_cards(library_artist) if library_artist else None
+        if catalogue is not None:
+            artist_source_ids = (_resolve_artist_source_ids(f'lib2:{library_artist}')
+                                 or artist_source_ids)
 
         from core.metadata.discography_gapfill import gap_fill_buckets
         from core.metadata.lookup import MetadataLookupOptions
@@ -896,7 +955,9 @@ def get_artist_discography_gap_fill(artist_id):
             EDITION_PREFERENCE_ONE_STANDARD,
             EDITION_PREFERENCE_ONE_COMPLETE,
         )
-        if base_source:
+        if catalogue is not None:
+            base, resolved_base = catalogue, 'library'
+        elif base_source:
             base = _fetch(base_source, artist_source_ids.get(base_source) or artist_id,
                           name=artist_name, dedup_variants=base_dedup_variants)
             resolved_base = base_source

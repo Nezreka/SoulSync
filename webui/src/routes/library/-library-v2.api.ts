@@ -711,9 +711,12 @@ export async function fetchArtistDiscographyGapFill(input: {
   providerId: string;
   artistName: string;
   baseSource?: string | null;
+  /** the Library artist page: diff against the catalogue it lists (#2050) */
+  libraryArtistId?: number | null;
 }): Promise<Array<ProviderRelease & { gap_source?: string; _bucket: 'album' | 'ep' | 'single' }>> {
   const params = new URLSearchParams({ artist_name: input.artistName });
   if (input.baseSource) params.set('base_source', input.baseSource);
+  if (input.libraryArtistId) params.set('library_artist', String(input.libraryArtistId));
   const payload = await readJson<{
     success: boolean;
     gaps?: { albums?: ProviderRelease[]; eps?: ProviderRelease[]; singles?: ProviderRelease[] };
