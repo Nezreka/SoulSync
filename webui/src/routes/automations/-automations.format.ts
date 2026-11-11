@@ -56,7 +56,12 @@ export function lastResultFacts(lastResult: unknown): { shown: string; full: str
         k !== 'status' &&
         !k.startsWith('_') &&
         ((typeof v === 'number' && v !== 0) ||
-          (typeof v === 'string' && v.length <= 24 && v !== '' && v !== '0')),
+          // a flag ("full refresh: False") is the handler talking to itself
+          (typeof v === 'string' &&
+            v.length <= 24 &&
+            v !== '' &&
+            v !== '0' &&
+            !/^(true|false)$/i.test(v))),
     )
     .slice(0, 3)
     .map(([k, v]) => `${k.replace(/_/g, ' ')}: ${String(v).replace(/_/g, ' ')}`);
@@ -149,7 +154,32 @@ const ACTION_SENTENCES: Record<string, Sentence> = {
     if (!tracks && !artists) return null;
     return `Library now ${plural(artists, 'artist')}, ${plural(tracks, 'track')}`;
   },
+  // tracks_synced / sync_skipped / wishlist_queued
+  playlist_pipeline: (r) => syncSentence(r),
+  personalized_pipeline: (r) => syncSentence(r),
+  // queued
+  run_repair_job: (r) => (num(r.queued) ? 'Queued the job' : null),
+  // size_mb
+  backup_database: (r) => {
+    const mb = num(r.size_mb);
+    if (!mb) return null;
+    return mb >= 1024 ? `Backup saved, ${(mb / 1024).toFixed(1)} GB` : `Backup saved, ${mb} MB`;
+  },
+  // total_removed
+  full_cleanup: (r) => {
+    if (r.total_removed === undefined) return null;
+    const removed = num(r.total_removed);
+    return removed ? `Removed ${plural(removed, 'item')}` : 'Nothing to remove';
+  },
 };
+
+function syncSentence(r: Record<string, unknown>): string | null {
+  if (r.tracks_synced === undefined) return null;
+  const synced = num(r.tracks_synced);
+  const queued = num(r.wishlist_queued);
+  const base = synced ? `Synced ${plural(synced, 'track')}` : 'Already in sync';
+  return queued ? `${base}, ${queued} sent to the wishlist` : base;
+}
 
 export interface AutomationOutcome {
   text: string;
@@ -175,12 +205,12 @@ export function automationOutcome(
 
   if (status === 'skipped') {
     const why = String(result.reason ?? '').trim();
-    return { text: why ? `Skipped — ${why}` : 'Skipped', kind: 'skipped' };
+    return { text: why ? `Skipped: ${why}` : 'Skipped', kind: 'skipped' };
   }
   // 'started'/'running' mean the handler handed off to a worker and the real
   // outcome lands later; claiming a result would be a guess.
   if (status === 'started' || status === 'running') {
-    return { text: 'Handed off — still working', kind: 'skipped' };
+    return { text: 'Handed off, still working', kind: 'skipped' };
   }
 
   const sentence = ACTION_SENTENCES[actionType ?? '']?.(result);
@@ -246,10 +276,42 @@ export function formatInterval(
   interval: number | null | undefined,
   unit: string | null | undefined,
 ): string {
-  const n = Number(interval ?? 1);
-  const u = String(unit ?? 'hours');
+  let n = Number(interval ?? 1);
+  let u = String(unit ?? 'hours');
+  // the Tools jobs store every cadence in hours, so a weekly job read
+  // "Every 168 hours". whole days and whole weeks are said as such
+  if (u === 'hours' && n >= 24 && n % 24 === 0) {
+    n /= 24;
+    u = 'days';
+  }
+  if (u === 'days' && n >= 7 && n % 7 === 0) {
+    n /= 7;
+    u = 'weeks';
+  }
   const singular = u.endsWith('s') ? u.slice(0, -1) : u;
   return n === 1 ? `Every ${singular}` : `Every ${n} ${u}`;
+}
+
+/** The name as the page shows it: the row's group already says "system" and
+ *  "auto-sync", so the prefixes those rows carry are noise on every line. */
+export function displayName(a: Pick<Automation, 'name'>): string {
+  const name = String(a.name ?? '');
+  const bare = name.replace(/^\[System\]\s*/, '').replace(/^Auto-Sync:\s*/, '');
+  return bare || name;
+}
+
+/** Up to `max` countable facts from the last run, for an opened row. */
+export function resultFigures(lastResult: unknown, max = 3): { label: string; value: string }[] {
+  if (!lastResult || typeof lastResult !== 'object' || Array.isArray(lastResult)) return [];
+  const out: { label: string; value: string }[] = [];
+  for (const [key, raw] of Object.entries(lastResult as Record<string, unknown>)) {
+    if (key.startsWith('_') || key === 'status' || /duration|seconds|_mb$/.test(key)) continue;
+    const n = typeof raw === 'number' ? raw : /^\d+(\.\d+)?$/.test(String(raw)) ? Number(raw) : NaN;
+    if (!Number.isFinite(n)) continue;
+    out.push({ label: key.replace(/_/g, ' '), value: n.toLocaleString() });
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 /**

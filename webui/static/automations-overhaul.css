@@ -1,842 +1,1328 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   AUTOMATIONS — navigation overhaul (music React page)
+   AUTOMATIONS — the music React page
 
-   The page is now an app surface, not a scroll: a sidebar for navigation and
-   a main pane that shows one thing at a time (overview dashboard, one library
-   collection, or the guides). This file styles ONLY the new automx-* markup.
-   The card itself keeps its chassis from automations-redesign.css.
+   One calm column: a header with the master switch, four pills (Overview,
+   All automations, Activity, Guides), then a view that answers something
+   before it lists anything. This file styles ONLY the automx-* markup.
 
-   Loaded AFTER automations-redesign.css and wins by cascade where they meet
-   (the .automations-grid override). Every selector is scoped under .automx so
-   nothing leaks — the video page and every other surface are untouched.
+   Loaded AFTER automations-redesign.css. Every selector is scoped under
+   .automx so nothing leaks: the video page and the shared builder and hub
+   keep the styles they have.
 
-   Design language: quiet dark glass, one accent, generous whitespace, motion
-   that settles rather than announces. Same tokens as the wishlist premier
-   pass (--accent-rgb and friends).
+   Restraint is the design. One type scale (12 / 13 / 14 / 15 / 17 / 28), three
+   weights, every button the same 32px capsule, accent on one primary per view.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 .automx {
-  --automx-danger: 244, 63, 94;
+  --automx-panel: var(--white-a03);
+  --automx-panel-2: var(--white-a05);
+  --automx-line: var(--white-a08);
+  --automx-line-2: var(--white-a14);
+  --automx-fg: var(--text-1);
+  --automx-fg-2: var(--white-a65);
+  --automx-fg-3: var(--white-a45);
+  --automx-capsule: var(--white-a10);
+  --automx-danger: var(--danger-rgb);
+  --automx-ease: var(--ease-emphasized);
 }
 
-/* ── App frame ──────────────────────────────────────────────────────────── */
+/* ── Frame ──────────────────────────────────────────────────────────────── */
 .page-shell.automx {
-  display: flex;
-  align-items: stretch;
+  display: block;
   padding: 0;
-  overflow: hidden;
-  /* The app chrome is just the left nav; the shell's own 20px margin is the
-     only thing above and below, so this fills the viewport cleanly. */
   height: calc(100vh - 40px);
   min-height: 620px;
-}
-
-.automx-main {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
   overflow-x: hidden;
-  padding: 30px 36px 60px;
+  overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--white-a14) transparent;
 }
 
-/* A soft crossfade each time the view or collection changes. The page keys
-   the view container so React remounts it and the animation replays. */
+.automx .automx-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 32px 36px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  color: var(--automx-fg);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 @keyframes automx-view-in {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0.4; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
-.automx-view {
-  animation: automx-view-in 0.28s var(--ease-emphasized);
-  max-width: 1160px;
-  margin: 0 auto;
+@keyframes automx-grow {
+  from { transform: scaleY(0); }
+  to { transform: none; }
+}
+@keyframes automx-pulse {
+  50% { opacity: 0.45; }
 }
 
-/* ── Sidebar ────────────────────────────────────────────────────────────── */
-.automx-sidebar {
-  width: 278px;
-  flex-shrink: 0;
+.automx .automx-view {
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012));
-  border-right: 1px solid var(--line);
-  padding: 18px 14px 16px;
-  gap: 14px;
+  gap: 20px;
+  animation: automx-view-in 0.3s var(--automx-ease);
 }
-
-.automx-search {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-.automx-search-icon {
-  position: absolute;
-  left: 12px;
-  font-size: 15px;
-  color: var(--white-a40);
-  pointer-events: none;
-}
-.automx-search-input {
-  width: 100%;
-  background: rgba(0, 0, 0, 0.28);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  color: var(--text-1);
-  font-size: 13.5px;
-  font-family: inherit;
-  padding: 10px 32px 10px 34px;
-  transition: border-color var(--dur-base) ease, box-shadow var(--dur-base) ease;
-}
-.automx-search-input::placeholder { color: var(--white-a40); }
-.automx-search-input:focus {
-  outline: none;
-  border-color: rgba(var(--accent-rgb), 0.55);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
-}
-.automx-search-clear {
-  position: absolute;
-  right: 6px;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: var(--radius-circle);
-  background: var(--white-a08);
-  color: var(--white-a65);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.automx-search-clear:hover { background: var(--white-a16); color: #fff; }
-
-.automx-nav {
-  flex: 1;
-  overflow-y: auto;
+.automx .automx-overview,
+.automx .automx-activity,
+.automx .automx-library {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--white-a12) transparent;
+  gap: 20px;
 }
-.automx-nav-heading {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--white-a40);
-  padding: 16px 12px 6px;
-}
-.automx-nav-heading:first-child { padding-top: 2px; }
 
-.automx-nav-item {
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.automx .automx-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 12px;
-  border: 1px solid transparent;
-  border-radius: 11px;
-  background: none;
-  color: var(--white-a65);
-  font-size: 13.5px;
-  font-weight: 500;
-  font-family: inherit;
-  cursor: pointer;
-  text-align: left;
-  transition: background 0.16s ease, color 0.16s ease, border-color 0.16s ease,
-    box-shadow 0.16s ease;
+  gap: 16px;
 }
-.automx-nav-item:hover {
-  background: var(--white-a05);
-  color: var(--text-1);
-}
-.automx-nav-item.active {
-  background: rgba(var(--accent-rgb), 0.13);
-  border-color: rgba(var(--accent-rgb), 0.28);
-  color: #fff;
-  box-shadow: 0 2px 14px rgba(var(--accent-rgb), 0.12), inset 0 1px 0 var(--white-a06);
-}
-.automx-nav-icon {
-  width: 20px;
-  text-align: center;
-  font-size: 14px;
-  flex-shrink: 0;
-  opacity: 0.85;
-}
-.automx-nav-item.active .automx-nav-icon { opacity: 1; }
-.automx-nav-label {
-  flex: 1;
+.automx .automx-head-main {
+  flex: 1 1 260px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.automx-nav-count {
-  font-size: 11px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--white-a07);
-  color: var(--white-a40);
-  border: 1px solid var(--white-a06);
+.automx .automx-head h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
-.automx-nav-item.active .automx-nav-count {
-  background: rgba(var(--accent-rgb), 0.2);
-  color: rgb(var(--accent-light-rgb));
-  border-color: rgba(var(--accent-rgb), 0.3);
+.automx .automx-head-sub {
+  margin: 2px 0 0;
+  color: var(--automx-fg-2);
+  font-size: 14px;
 }
-.automx-nav-count.alert {
-  background: rgba(var(--automx-danger), 0.16);
-  color: rgb(253, 164, 175);
-  border-color: rgba(var(--automx-danger), 0.4);
-  box-shadow: 0 0 10px rgba(var(--automx-danger), 0.25);
+.automx .automx-head-sub i {
+  font-style: normal;
+  color: rgb(var(--accent-rgb));
 }
-.automx-nav-attention .automx-nav-label { color: rgb(253, 164, 175); }
-.automx-nav-attention.active .automx-nav-label { color: #fff; }
-
-.automx-health-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: var(--radius-circle);
-  flex-shrink: 0;
+.automx .automx-head-sub b {
+  font-weight: 500;
+  color: rgb(var(--warning-rgb));
 }
-.automx-health-dot.ok { background: rgb(var(--success-strong-rgb)); box-shadow: 0 0 6px rgba(var(--success-strong-rgb), 0.8); }
-.automx-health-dot.warn { background: rgb(var(--warning-strong-rgb)); box-shadow: 0 0 6px rgba(var(--warning-strong-rgb), 0.8); }
-.automx-health-dot.bad {
-  background: rgb(var(--automx-danger));
-  box-shadow: 0 0 8px rgba(var(--automx-danger), 0.9);
-  animation: automx-blink 1.6s ease-in-out infinite;
-}
-.automx-health-dot.none { display: none; }
-@keyframes automx-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-/* A group row mid-drag: the accent outline says "drop here". */
-.automx-nav-item.automx-drop-target {
-  background: rgba(var(--accent-rgb), 0.16);
-  border-color: rgba(var(--accent-rgb), 0.65);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.18), 0 2px 18px rgba(var(--accent-rgb), 0.25);
-  color: #fff;
-}
-
-/* ── Sidebar foot ───────────────────────────────────────────────────────── */
-.automx-sidebar-foot {
+.automx .automx-head-acts {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-}
-.automx-master {
-  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--line);
-  background: var(--white-a04);
-  color: var(--white-a40);
-  font-size: 12.5px;
-  font-weight: 600;
-  font-family: inherit;
+}
+
+/* ── Capsules: every button on the page ─────────────────────────────────── */
+.automx .automx-cap {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--automx-capsule);
+  color: var(--automx-fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
-  transition: all 0.22s ease;
+  transition: background var(--dur-base), color var(--dur-base);
 }
-.automx-master:hover { border-color: var(--white-a18); }
-.automx-master .automx-master-sw {
+.automx .automx-cap:hover {
+  background: var(--white-a16);
+}
+.automx .automx-cap:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.automx .automx-cap small {
+  font: 12px var(--font-mono);
+  opacity: 0.7;
+}
+.automx .automx-cap-primary {
+  background: rgb(var(--accent-rgb));
+  color: var(--black-a90);
+  font-weight: 600;
+}
+.automx .automx-cap-primary:hover {
+  background: rgb(var(--accent-light-rgb));
+}
+.automx .automx-cap-quiet {
+  background: transparent;
+  color: var(--automx-fg-2);
+}
+.automx .automx-cap-danger:hover {
+  background: rgba(var(--automx-danger), 0.18);
+  color: rgb(var(--automx-danger));
+}
+.automx .automx-cap:focus-visible,
+.automx .automx-icon-btn:focus-visible,
+.automx .automx-pill:focus-visible,
+.automx .automx-line:focus-visible,
+.automx .automx-dot:focus-visible,
+.automx .automx-pl:focus-visible,
+.automx .automx-sec-toggle:focus-visible,
+.automx .automx-tr:focus-visible,
+.automx .automx-block-edit:focus-visible {
+  outline: 2px solid rgb(var(--accent-rgb));
+  outline-offset: 2px;
+}
+
+.automx .automx-icon-btn {
   width: 32px;
-  height: 18px;
-  border-radius: var(--radius-pill);
-  position: relative;
-  background: var(--white-a14);
-  transition: background 0.22s ease;
-  flex-shrink: 0;
+  height: 32px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--automx-fg-2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background var(--dur-base), color var(--dur-base);
 }
-.automx-master .automx-master-sw::after {
+.automx .automx-icon-btn:hover {
+  background: var(--automx-capsule);
+  color: var(--automx-fg);
+}
+.automx .automx-icon-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+.automx .automx-chevron svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--dur-base);
+}
+.automx .automx-chevron[aria-expanded='false'] svg {
+  transform: rotate(-90deg);
+}
+
+/* the master switch, and the same switch on every row */
+.automx .automx-master-sw,
+.automx .automx-switch span {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--white-a16);
+  transition: background var(--dur-base);
+}
+.automx .automx-master-sw::after,
+.automx .automx-switch span::after {
   content: '';
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: var(--radius-circle);
-  background: #fff;
-  transition: transform 0.22s var(--ease-emphasized);
-  box-shadow: 0 1px 4px var(--black-a40);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-1);
+  transition: transform var(--dur-base) var(--automx-ease);
 }
-.automx-master.on { color: rgb(134, 239, 172); border-color: rgba(var(--success-strong-rgb), 0.35); }
-.automx-master.on .automx-master-sw { background: rgba(var(--success-strong-rgb), 0.55); }
-.automx-master.on .automx-master-sw::after { transform: translateX(14px); }
-.automx-master:disabled { opacity: 0.55; cursor: default; }
-
-.automx-new-btn {
-  border: none;
-  border-radius: var(--radius-control);
-  padding: 11px 14px;
-  font-size: 13.5px;
-  font-weight: 700;
-  font-family: inherit;
-  cursor: pointer;
-  color: #06110a;
+.automx .automx-master.on .automx-master-sw,
+.automx .automx-switch input:checked + span {
   background: rgb(var(--accent-rgb));
-  box-shadow: 0 2px 10px rgba(var(--accent-rgb), 0.22);
-  transition: filter 0.16s ease, box-shadow 0.16s ease;
 }
-.automx-new-btn:hover {
-  filter: brightness(1.07);
-  box-shadow: 0 3px 14px rgba(var(--accent-rgb), 0.3);
+.automx .automx-master.on .automx-master-sw::after,
+.automx .automx-switch input:checked + span::after {
+  transform: translateX(14px);
 }
-.automx-new-btn:active { filter: brightness(0.98); }
-.automx-new-btn-lg { font-size: 15px; padding: 13px 26px; }
-
-/* ── Overview ───────────────────────────────────────────────────────────── */
-.automx-overview {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-}
-
-/* The hero answers the page's real question — is automation working — in one
-   glance. The glow carries the verdict's colour; the mark carries its glyph. */
-.automx-hero {
-  position: relative;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  gap: 22px;
-  padding: 30px 34px;
-  border-radius: 22px;
-  border: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--white-a05), rgba(255, 255, 255, 0.018));
-  backdrop-filter: blur(14px);
-}
-.automx-hero-glow {
-  position: absolute;
-  inset: auto -80px -120px auto;
-  width: 380px;
-  height: 380px;
-  border-radius: var(--radius-circle);
-  filter: blur(90px);
-  pointer-events: none;
-  transition: background var(--dur-slowest) ease;
-}
-.automx-hero.ok .automx-hero-glow {
-  background: radial-gradient(circle, rgba(var(--success-strong-rgb), 0.22), transparent 65%);
-  animation: automx-breathe 5s ease-in-out infinite;
-}
-.automx-hero.warn .automx-hero-glow {
-  background: radial-gradient(circle, rgba(var(--warning-strong-rgb), 0.26), transparent 65%);
-  animation: automx-breathe 3.2s ease-in-out infinite;
-}
-.automx-hero.paused .automx-hero-glow {
-  background: radial-gradient(circle, rgba(148, 163, 184, 0.18), transparent 65%);
-}
-@keyframes automx-breathe {
-  0%, 100% { opacity: 0.75; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.08); }
-}
-.automx-hero-mark {
-  position: relative;
-  width: 60px;
-  height: 60px;
-  flex-shrink: 0;
-  border-radius: var(--radius-circle);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 26px;
-  background: var(--white-a06);
-  border: 1px solid var(--white-a14);
-  box-shadow: inset 0 1px 0 var(--white-a12);
-}
-.automx-hero.ok .automx-hero-mark {
-  color: rgb(134, 239, 172);
-  border-color: rgba(var(--success-strong-rgb), 0.45);
-  box-shadow: 0 0 26px rgba(var(--success-strong-rgb), 0.28), inset 0 1px 0 var(--white-a12);
-}
-.automx-hero.warn .automx-hero-mark {
-  color: rgb(253, 224, 171);
-  border-color: rgba(var(--warning-strong-rgb), 0.5);
-  box-shadow: 0 0 26px rgba(var(--warning-strong-rgb), 0.3), inset 0 1px 0 var(--white-a12);
-}
-.automx-hero-text { position: relative; flex: 1; min-width: 0; }
-.automx-hero-title {
-  font-size: 27px;
-  font-weight: 750;
-  letter-spacing: -0.015em;
-  color: var(--text-1);
-}
-.automx-hero-sub {
-  margin-top: 6px;
-  font-size: 14px;
-  color: var(--white-a65);
-}
-.automx-hero-actions { position: relative; flex-shrink: 0; }
-.automx-hero-btn {
-  border: 1px solid rgba(var(--accent-rgb), 0.35);
-  background: rgba(var(--accent-rgb), 0.1);
-  color: rgb(var(--accent-light-rgb));
-  border-radius: var(--radius-control);
-  padding: 10px 18px;
-  font-size: 13.5px;
-  font-weight: 650;
-  font-family: inherit;
+.automx .automx-switch {
+  display: inline-flex;
   cursor: pointer;
-  transition: background 0.16s ease, border-color 0.16s ease;
 }
-.automx-hero-btn:hover {
-  background: rgba(var(--accent-rgb), 0.18);
-  border-color: rgba(var(--accent-rgb), 0.5);
+.automx .automx-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
 }
-
-.automx-overview-grid {
-  display: grid;
-  grid-template-columns: 1.35fr 1fr;
-  gap: 22px;
-  align-items: start;
+.automx .automx-switch input:focus-visible + span {
+  outline: 2px solid rgb(var(--accent-rgb));
+  outline-offset: 2px;
 }
-
-.automx-panel {
-  border-radius: 20px;
-  border: 1px solid var(--line);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.038), rgba(255, 255, 255, 0.014));
-  padding: 20px 22px;
+.automx .automx-master-label {
   min-width: 0;
 }
-.automx-panel-head {
+.automx .automx-new-btn {
+  padding: 0 16px;
+}
+
+/* ── Pills ──────────────────────────────────────────────────────────────── */
+.automx .automx-pills {
+  position: relative;
+  align-self: flex-start;
+  max-width: 100%;
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--automx-line);
+  border-radius: 20px;
+  background: var(--automx-panel);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.automx .automx-pill {
+  position: relative;
+  height: 32px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  color: var(--automx-fg-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: color var(--dur-base);
+}
+.automx .automx-pill[aria-selected='true'] {
+  color: var(--automx-fg);
+}
+.automx .automx-pill small {
+  font: 12px var(--font-mono);
+  color: var(--automx-fg-3);
+}
+.automx .automx-pill-ink {
+  position: absolute;
+  top: 3px;
+  left: var(--automx-pill-x, 3px);
+  width: var(--automx-pill-w, 0);
+  height: 32px;
+  border-radius: 16px;
+  background: var(--automx-capsule);
+  transition: left 0.28s var(--automx-ease), width 0.28s var(--automx-ease);
+}
+
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+.automx .automx-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--automx-line);
+  border-radius: 16px;
+  background: var(--automx-panel);
+}
+.automx .automx-card-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 10px;
-  margin-bottom: 6px;
+  margin-bottom: 14px;
 }
-.automx-panel-title {
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text-1);
-}
-.automx-panel-sub {
-  font-size: 12px;
-  color: var(--white-a40);
-}
-.automx-panel-link {
-  margin-left: auto;
-  background: none;
-  border: none;
-  color: rgb(var(--accent-light-rgb));
-  font-size: 12.5px;
+.automx .automx-card-head h2 {
+  margin: 0;
+  font-size: 15px;
   font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  padding: 2px 4px;
 }
-.automx-panel-link:hover { text-decoration: underline; }
-.automx-panel-empty {
-  padding: 26px 10px;
-  text-align: center;
-  font-size: 13.5px;
-  color: var(--white-a40);
+.automx .automx-card-head span {
+  color: var(--automx-fg-3);
+  font-size: 13px;
 }
-.automx-panel-empty-good { color: rgba(134, 239, 172, 0.75); }
-
-/* The timeline: a rail with a dot per run, so "what happens when" reads as a
-   sequence rather than a stack of rows. */
-.automx-timeline {
-  position: relative;
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
+.automx .automx-card-head .automx-cap {
+  margin-left: auto;
 }
-.automx-timeline::before {
-  content: '';
-  position: absolute;
-  left: 5px;
-  top: 14px;
-  bottom: 14px;
-  width: 2px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.5), rgba(var(--accent-rgb), 0.06));
+.automx .automx-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 20px;
 }
-.automx-timeline-row {
-  position: relative;
+.automx .automx-none {
+  padding: 14px 0 4px;
+  color: var(--automx-fg-2);
+  font-size: 13px;
+}
+.automx .automx-none b {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--automx-fg);
+  font-size: 15px;
+  font-weight: 600;
+}
+.automx .automx-none-good b {
+  color: rgb(var(--accent-rgb));
+}
+.automx .automx-paused {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  padding: 9px 0 9px 22px;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid rgba(var(--warning-rgb), 0.3);
+  border-radius: 16px;
+  background: rgba(var(--warning-rgb), 0.07);
 }
-.automx-timeline-dot {
-  position: absolute;
-  left: 1px;
-  top: 50%;
-  width: 10px;
-  height: 10px;
-  margin-top: -5px;
-  border-radius: var(--radius-circle);
-  background: rgb(var(--accent-rgb));
-  box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.7);
-  border: 2px solid var(--black-a55);
-}
-.automx-time-chip {
-  flex-shrink: 0;
-  min-width: 74px;
-  text-align: center;
-  font-size: 12px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-  padding: 5px 10px;
-  border-radius: var(--radius-pill);
-  color: rgb(var(--accent-light-rgb));
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
-}
-
-/* Rows are buttons: the name is the affordance, and clicking it finds the
-   automation in the library. Everything stays one click from its details. */
-.automx-row-main {
-  flex: 1;
+.automx .automx-paused div {
+  flex: 1 1 280px;
   min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  background: none;
-  border: none;
-  padding: 4px 6px;
-  margin: 0 -6px;
-  border-radius: var(--radius-md);
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--dur-fast) ease;
-}
-.automx-row-main:hover { background: var(--white-a05); }
-.automx-row-icon { font-size: 14px; flex-shrink: 0; }
-.automx-row-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text-1);
-  /* Two lines before truncating — same rule as card names. */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  white-space: normal;
-  overflow: hidden;
-}
-.automx-row-sub {
-  font-size: 12px;
-  color: var(--white-a40);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-left: auto;
-  flex-shrink: 1;
-}
-
-.automx-attention-list,
-.automx-recent-list {
-  list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.automx-attention-row,
-.automx-recent-row {
+.automx .automx-paused b {
+  font-size: 15px;
+  font-weight: 600;
+}
+.automx .automx-paused span {
+  color: var(--automx-fg-2);
+  font-size: 13px;
+}
+
+/* ── The next 24 hours ──────────────────────────────────────────────────── */
+.automx .automx-lanes-scroll {
+  overflow-x: auto;
+}
+.automx .automx-lanes {
+  position: relative;
+  min-width: 640px;
+  padding-top: 22px;
+}
+.automx .automx-axis {
+  position: absolute;
+  inset: 0 0 0 140px;
+  pointer-events: none;
+}
+.automx .automx-axis-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+}
+.automx .automx-axis-tick i {
+  position: absolute;
+  top: 18px;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: var(--automx-line);
+}
+.automx .automx-axis-tick b {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font: 500 11px var(--font-mono);
+  color: var(--automx-fg-3);
+  white-space: nowrap;
+}
+.automx .automx-axis-tick:first-child b {
+  transform: none;
+  color: rgb(var(--accent-rgb));
+}
+.automx .automx-axis-tick:nth-last-child(2) b {
+  transform: translateX(-100%);
+}
+.automx .automx-nowline {
+  position: absolute;
+  top: 18px;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: rgb(var(--accent-rgb));
+  box-shadow: 0 0 12px rgb(var(--accent-rgb));
+  animation: automx-pulse 2.4s ease-in-out infinite;
+}
+.automx .automx-lane {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  align-items: center;
+  height: 56px;
+  border-top: 1px solid var(--automx-line);
+}
+.automx .automx-lane-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-right: 12px;
+  color: var(--automx-fg-2);
+  font-size: 13px;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.automx .automx-lane-name small {
+  font: 11px var(--font-mono);
+  color: var(--automx-fg-3);
+}
+.automx .automx-lane-track {
+  position: relative;
+  height: 100%;
+}
+.automx .automx-lane-band {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(90deg, var(--automx-line-2) 0 2px, transparent 2px 9px);
+}
+.automx .automx-dot {
+  position: absolute;
+  top: calc(50% + var(--automx-step, 0) * 7px);
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  padding: 0;
+  /* mobile.css gives every button a 44px touch floor; a dot is a mark */
+  min-width: 0;
+  min-height: 0;
+  border: 2px solid var(--bg-primary);
+  border-radius: 50%;
+  background: var(--white-a80);
+  cursor: pointer;
+  transition: transform var(--dur-base), background var(--dur-base);
+}
+.automx .automx-dot.soon {
+  background: rgb(var(--accent-rgb));
+}
+.automx .automx-dot:hover,
+.automx .automx-dot:focus-visible {
+  z-index: 1;
+  background: rgb(var(--accent-rgb));
+  transform: scale(1.5);
+}
+.automx .automx-lane-tip {
+  min-height: 20px;
+  margin-top: 10px;
+  color: var(--automx-fg-2);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.automx .automx-lane-tip b {
+  color: var(--automx-fg);
+  font-weight: 600;
+}
+
+/* ── Lines: the short lists on the overview ─────────────────────────────── */
+.automx .automx-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.automx .automx-list li {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
-  margin: 0 -8px;
-  border-radius: var(--radius-lg);
-  border: 1px solid transparent;
-  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
+  border-top: 1px solid var(--automx-line);
 }
-.automx-attention-row:hover,
-.automx-recent-row:hover {
-  background: rgba(255, 255, 255, 0.035);
-  border-color: var(--white-a06);
+.automx .automx-list li:first-child {
+  border-top: 0;
 }
-.automx-attention-row.failed {
-  background: rgba(var(--automx-danger), 0.07);
-  border-color: rgba(var(--automx-danger), 0.22);
+.automx .automx-line {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.automx-attention-row.failed:hover { background: rgba(var(--automx-danger), 0.11); }
-.automx-attention-row.failed .automx-row-sub {
-  color: rgb(253, 164, 175);
+.automx .automx-line:hover .automx-line-name {
+  color: rgb(var(--accent-light-rgb));
+}
+.automx .automx-tile {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 10px;
+  background: var(--automx-panel-2);
+  color: var(--automx-fg-2);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.automx .automx-tile-alert {
+  color: rgb(var(--automx-danger));
+  background: rgba(var(--automx-danger), 0.12);
+}
+.automx .automx-attn.idle .automx-tile-alert {
+  color: rgb(var(--warning-rgb));
+  background: rgba(var(--warning-rgb), 0.12);
+}
+.automx .automx-glyph {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.automx .automx-art-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.automx .automx-line-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.automx .automx-line-name,
+.automx .automx-line-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.automx .automx-line-name {
+  font-size: 14px;
+  font-weight: 500;
+  transition: color var(--dur-base);
+}
+.automx .automx-line-sub {
+  color: var(--automx-fg-2);
+  font-size: 13px;
+}
+.automx .automx-line-sub.bad {
+  color: rgb(var(--automx-danger));
+}
+.automx .automx-line-sub.automx-wrap {
   white-space: normal;
 }
-.automx-row-actions {
+.automx .automx-line-when {
+  font: 500 13px var(--font-mono);
+  white-space: nowrap;
+}
+.automx .automx-attn {
+  align-items: flex-start;
+}
+.automx .automx-attn .automx-line {
+  align-items: start;
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+.automx .automx-attn-acts {
   display: flex;
   gap: 4px;
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity var(--dur-fast) ease;
+  padding-top: 14px;
 }
-.automx-attention-row:hover .automx-row-actions,
-.automx-attention-row:focus-within .automx-row-actions {
+
+/* ── Playlists on a schedule ────────────────────────────────────────────── */
+.automx .automx-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 16px;
+}
+.automx .automx-pl {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.automx .automx-pl-art {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  display: grid;
+  background: linear-gradient(
+    150deg,
+    hsl(var(--automx-hue, 150) 34% 24%),
+    hsl(calc(var(--automx-hue, 150) + 40) 30% 11%)
+  );
+  transition: transform 0.25s var(--automx-ease);
+}
+.automx .automx-pl:hover .automx-pl-art {
+  transform: translateY(-3px);
+}
+.automx .automx-pl-art .automx-glyph {
+  place-self: center;
+  width: 30px;
+  height: 30px;
+  color: var(--white-a50);
+}
+.automx .automx-art-name {
+  align-self: start;
+  padding: 12px;
+  color: var(--white-a85);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
+}
+.automx .automx-pl-art em {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 3px 8px;
+  border-radius: 9px;
+  background: var(--black-a65);
+  backdrop-filter: blur(6px);
+  color: var(--text-1);
+  font: 500 11px var(--font-mono);
+}
+.automx .automx-shelf.plain .automx-pl-art {
+  aspect-ratio: 3 / 2;
+}
+
+/* ── All automations ────────────────────────────────────────────────────── */
+.automx .automx-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.automx .automx-lenses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-right: auto;
+}
+.automx .automx-lens[aria-pressed='true'] {
+  background: var(--text-1);
+  color: var(--bg-primary);
+}
+.automx .automx-lens.alert small {
+  color: rgb(var(--warning-rgb));
   opacity: 1;
 }
-.automx-mini-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--line);
-  background: var(--white-a05);
-  color: var(--white-a65);
-  font-size: 12px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--dur-fast) ease;
+.automx .automx-lens.alert[aria-pressed='true'] small {
+  color: inherit;
+  opacity: 0.7;
 }
-.automx-mini-btn:hover {
-  background: rgba(var(--accent-rgb), 0.16);
-  border-color: rgba(var(--accent-rgb), 0.4);
-  color: #fff;
-}
-.automx-recent-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-shrink: 0;
-}
-.automx-recent-result {
-  font-size: 12px;
-  color: var(--white-a65);
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.automx-recent-result.skipped { color: var(--white-a40); font-style: italic; }
-.automx-recent-when {
-  font-size: 12px;
-  color: var(--white-a40);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* ── Library ──────────────────────────────────────────────────────────── */
-.automx-library-head {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
-}
-.automx-library-icon {
-  width: 46px;
-  height: 46px;
-  flex-shrink: 0;
-  border-radius: var(--radius-card);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 21px;
-  background: rgba(var(--accent-rgb), 0.12);
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
-  box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.14), inset 0 1px 0 var(--white-a08);
-}
-.automx-library-titles { flex: 1; min-width: 0; }
-.automx-library-title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 750;
-  letter-spacing: -0.015em;
-  color: var(--text-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.automx-library-sub {
-  margin: 4px 0 0;
+.automx .automx-search,
+.automx .automx-select {
+  height: 32px;
+  border: 1px solid var(--automx-line);
+  border-radius: 16px;
+  background: var(--automx-panel);
+  color: var(--automx-fg);
+  font: inherit;
   font-size: 13px;
-  color: var(--white-a40);
+  padding: 0 14px;
 }
-.automx-library-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
+.automx .automx-search {
+  width: 220px;
+  max-width: 100%;
 }
-.automx-chip-btn {
-  border: 1px solid var(--line);
-  background: var(--white-a04);
-  color: var(--white-a65);
-  border-radius: var(--radius-control);
-  padding: 8px 13px;
-  font-size: 12.5px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: all 0.16s ease;
-  white-space: nowrap;
+.automx .automx-select {
+  max-width: 180px;
+  color-scheme: dark;
 }
-.automx-chip-btn:hover {
-  background: var(--white-a07);
-  color: var(--text-1);
-  border-color: var(--white-a18);
-}
-.automx-chip-danger:hover {
-  background: rgba(var(--automx-danger), 0.12);
-  border-color: rgba(var(--automx-danger), 0.4);
-  color: rgb(253, 164, 175);
-}
-.automx-rename-input {
-  font-size: 22px;
-  font-weight: 750;
-  letter-spacing: -0.015em;
-  font-family: inherit;
-  color: var(--text-1);
-  background: var(--black-a30);
-  border: 1px solid rgba(var(--accent-rgb), 0.5);
-  border-radius: var(--radius-control);
-  padding: 4px 10px;
-  width: 100%;
-  max-width: 420px;
-}
-.automx-rename-input:focus {
+.automx .automx-search:focus,
+.automx .automx-select:focus {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16);
+  border-color: rgba(var(--accent-rgb), 0.6);
+}
+.automx .automx-filter-count {
+  color: var(--automx-fg-3);
+  font: 12px var(--font-mono);
 }
 
-.automx-filter-bar {
+.automx .automx-sec {
+  border: 1px solid var(--automx-line);
+  border-radius: 16px;
+  background: var(--automx-panel);
+  overflow: hidden;
+  transition: border-color var(--dur-base), opacity var(--dur-base);
+}
+.automx .automx-sec.automx-drop-target {
+  border-color: rgb(var(--accent-rgb));
+  background: rgba(var(--accent-rgb), 0.06);
+}
+.automx .automx-sec.automx-drop-off {
+  opacity: 0.45;
+}
+.automx .automx-sec-head {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 8px 12px 8px 20px;
+  min-height: 52px;
+}
+.automx .automx-sec-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-wrap: wrap;
-  margin-bottom: 18px;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.automx-filter-search,
-.automx-filter-select {
-  background: rgba(0, 0, 0, 0.26);
-  border: 1px solid var(--line);
-  border-radius: 11px;
-  color: var(--text-1);
-  padding: 9px 13px;
+.automx .automx-sec-toggle h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.automx .automx-sec-note {
+  color: var(--automx-fg-3);
   font-size: 13px;
-  font-family: inherit;
-  transition: border-color var(--dur-base) ease, box-shadow var(--dur-base) ease;
 }
-.automx-filter-search { flex: 1; min-width: 200px; }
-.automx-filter-search::placeholder { color: var(--white-a40); }
-.automx-filter-search:focus,
-.automx-filter-select:focus {
-  outline: none;
-  border-color: rgba(var(--accent-rgb), 0.55);
-  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14);
+.automx .automx-sec-side {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
 }
-.automx-filter-count {
+.automx .automx-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(var(--accent-rgb), 0.6);
+  border-radius: 10px;
+  background: var(--black-a30);
+  color: var(--automx-fg);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+}
+.automx .automx-sec-body {
+  border-top: 1px solid var(--automx-line);
+}
+
+.automx .automx-chip {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  background: var(--automx-capsule);
+  color: var(--automx-fg-2);
   font-size: 12px;
-  color: var(--white-a40);
-  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+}
+.automx .automx-chip.bad {
+  background: rgba(var(--automx-danger), 0.14);
+  color: rgb(var(--automx-danger));
+}
+.automx .automx-chip.ok {
+  background: rgba(var(--accent-rgb), 0.14);
+  color: rgb(var(--accent-rgb));
 }
 
-/* The card grid, given room to breathe now that one collection shows at a
-   time: fluid columns instead of the old fixed pair. */
-.automx .automations-grid {
+/* one automation */
+.automx .automx-item {
+  position: relative;
+  border-top: 1px solid var(--automx-line);
+  transition: background var(--dur-base), opacity var(--dur-base);
+}
+.automx .automx-item:first-child {
+  border-top: 0;
+}
+.automx .automx-item.open {
+  background: var(--automx-panel-2);
+}
+.automx .automx-item.dragging {
+  opacity: 0.4;
+}
+.automx .automx-item[draggable='true'] .automx-row {
+  cursor: grab;
+}
+.automx .automx-edge {
+  position: absolute;
+  top: -1px;
+  left: 0;
+  height: 2px;
+  width: 0;
+  background: rgb(var(--accent-rgb));
+  transition: width 0.4s var(--automx-ease);
+}
+.automx .automx-edge.running {
+  box-shadow: 0 0 10px rgb(var(--accent-rgb));
+}
+.automx .automx-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  grid-template-columns: 40px minmax(0, 1.4fr) minmax(0, 1fr) 104px auto;
+  align-items: center;
   gap: 14px;
+  padding: 10px 12px 10px 20px;
+  cursor: pointer;
+}
+.automx .automx-row:hover {
+  background: var(--white-a03);
+}
+.automx .automx-row-text {
+  min-width: 0;
+}
+.automx .automx-row-name,
+.automx .automx-row-flow,
+.automx .automx-row-last {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.automx .automx-row-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+.automx .automx-row-flow,
+.automx .automx-row-last {
+  color: var(--automx-fg-2);
+  font-size: 13px;
+}
+.automx .automx-row-last.quiet {
+  color: var(--automx-fg-3);
+}
+.automx .automx-row-last.bad {
+  color: rgb(var(--automx-danger));
+}
+.automx .automx-row-last.run {
+  color: rgb(var(--accent-rgb));
+}
+.automx .automx-item.off .automx-row-name,
+.automx .automx-item.off .automx-tile {
+  opacity: 0.45;
+}
+.automx .automx-row-when {
+  text-align: right;
+  white-space: nowrap;
+}
+.automx .automx-next {
+  font: 500 13px var(--font-mono);
+}
+.automx .automx-next.off,
+.automx .automx-next.paused,
+.automx .automx-next.unscheduled,
+.automx .automx-next.listening {
+  color: var(--automx-fg-3);
+  font-family: inherit;
+}
+.automx .automx-next.running,
+.automx .automx-next.due {
+  color: rgb(var(--accent-rgb));
+  font-family: inherit;
+}
+.automx .automx-row-when small {
+  display: block;
+  color: var(--automx-fg-3);
+  font-size: 12px;
+}
+.automx .automx-row-acts {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.automx-guides {
-  max-width: 900px;
+/* an opened row */
+.automx .automx-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 16px 28px;
+  padding: 6px 20px 20px 74px;
+}
+.automx .automx-detail-main {
+  min-width: 0;
+}
+.automx .automx-flow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+}
+.automx .automx-then {
+  display: contents;
+}
+.automx .automx-arrow {
+  align-self: center;
+  color: var(--automx-fg-3);
+}
+.automx .automx-block {
+  min-width: 140px;
+  padding: 10px 14px;
+  border: 1px solid var(--automx-line-2);
+  border-radius: 12px;
+  background: var(--black-a20);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.automx .automx-block small {
+  color: var(--automx-fg-3);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.automx .automx-block b {
+  font-size: 14px;
+  font-weight: 500;
+}
+.automx .automx-block-edit {
+  border-style: dashed;
+  cursor: pointer;
+  transition: border-color var(--dur-base);
+}
+.automx .automx-block-edit:hover {
+  border-color: rgb(var(--accent-rgb));
+}
+.automx .automx-cadence-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.automx .automx-cadence-fields input,
+.automx .automx-cadence-fields select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--automx-line-2);
+  border-radius: 10px;
+  background: var(--black-a30);
+  color: var(--automx-fg);
+  font: inherit;
+  font-size: 13px;
+  color-scheme: dark;
+}
+.automx .automx-cadence-fields input[type='number'] {
+  width: 72px;
+}
+.automx .automx-detail-error {
+  margin: 14px 0 0;
+  color: rgb(var(--automx-danger));
+  font-size: 13px;
+}
+.automx .automx-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 28px;
+  margin-top: 16px;
+}
+.automx .automx-figures b {
+  display: block;
+  font: 600 20px var(--font-mono);
+  letter-spacing: -0.01em;
+}
+.automx .automx-figures span {
+  color: var(--automx-fg-3);
+  font-size: 12px;
+}
+.automx .automx-detail-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.automx .automx-runs h4 {
+  margin: 0 0 6px;
+  color: var(--automx-fg-3);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.automx .automx-runs-none {
+  margin: 0;
+  color: var(--automx-fg-3);
+  font-size: 13px;
+}
+.automx .automx-run {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--automx-line);
+  color: var(--automx-fg-2);
+  font-size: 13px;
+}
+.automx .automx-run:first-of-type {
+  border-top: 0;
+}
+.automx .automx-run-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+}
+.automx .automx-run-dot.error {
+  background: rgb(var(--automx-danger));
+}
+.automx .automx-run-dot.skipped {
+  background: var(--automx-fg-3);
+}
+.automx .automx-run-what {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.automx .automx-run-took,
+.automx .automx-run-when {
+  color: var(--automx-fg-3);
+  font: 12px var(--font-mono);
+}
+.automx .automx-log {
+  grid-column: 1 / -1;
 }
 
-/* ── Empty states ─────────────────────────────────────────────────────── */
-.automx-empty {
+.automx .automx-empty {
+  padding: 56px 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 8px;
   text-align: center;
-  gap: 12px;
-  padding: 70px 30px;
-  border-radius: 22px;
-  border: 1px dashed var(--white-a14);
-  background: rgba(255, 255, 255, 0.015);
 }
-.automx-empty-small { padding: 46px 24px; }
-.automx-empty-icon { font-size: 40px; opacity: 0.9; }
-.automx-empty-title {
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--text-1);
+.automx .automx-empty-small {
+  padding: 28px 20px;
 }
-.automx-empty-text {
-  font-size: 13.5px;
-  color: var(--white-a65);
-  max-width: 420px;
-  line-height: 1.55;
-}
-.automx-text-btn {
-  background: none;
-  border: none;
-  color: rgb(var(--accent-light-rgb));
-  font-size: 13.5px;
+.automx .automx-empty-title {
+  font-size: 17px;
   font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  padding: 6px 10px;
 }
-.automx-text-btn:hover { text-decoration: underline; }
+.automx .automx-empty-text {
+  max-width: 460px;
+  margin-bottom: 8px;
+  color: var(--automx-fg-2);
+  font-size: 13px;
+}
 
-/* ── Responsive ───────────────────────────────────────────────────────── */
-@media (max-width: 1100px) {
-  .automx-overview-grid { grid-template-columns: 1fr; }
+/* ── Activity ───────────────────────────────────────────────────────────── */
+.automx .automx-totals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-/* The sidebar collapses into a top bar at 1150px — just above the grid
-   breakpoint — so the 880–1100px band never squeezes content between the
-   app nav and a full-width sidebar (hero CTA and timeline meta clipped). */
-@media (max-width: 1150px) {
+.automx .automx-totals div {
+  min-width: 0;
+  padding: 0 20px;
+  border-left: 1px solid var(--automx-line);
+}
+.automx .automx-totals div:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+.automx .automx-totals b {
+  display: block;
+  font: 600 28px var(--font-mono);
+  letter-spacing: -0.02em;
+}
+.automx .automx-totals b.bad {
+  color: rgb(var(--automx-danger));
+}
+.automx .automx-totals span {
+  color: var(--automx-fg-3);
+  font-size: 13px;
+}
+.automx .automx-bars,
+.automx .automx-bar-labels {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.automx .automx-bars {
+  align-items: end;
+  height: 124px;
+  margin-top: 24px;
+}
+.automx .automx-bar-day {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+}
+.automx .automx-bar-day i {
+  display: block;
+  min-height: 1px;
+  border-radius: 3px;
+  transform-origin: bottom;
+  animation: automx-grow 0.6s var(--automx-ease) backwards;
+  animation-delay: calc(var(--automx-i, 0) * 30ms);
+}
+.automx .automx-bar-ok {
+  background: var(--white-a25);
+}
+.automx .automx-bar-bad {
+  background: rgb(var(--automx-danger));
+}
+.automx .automx-bar-skip {
+  background: var(--white-a09);
+}
+.automx .automx-bar-labels {
+  margin-top: 6px;
+  color: var(--automx-fg-3);
+  font: 11px var(--font-mono);
+  text-align: center;
+}
+.automx .automx-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+  color: var(--automx-fg-3);
+  font-size: 12px;
+}
+.automx .automx-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+.automx .automx-table-scroll {
+  overflow-x: auto;
+}
+.automx .automx-table {
+  min-width: 720px;
+  display: flex;
+  flex-direction: column;
+}
+.automx .automx-tr {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(200px, 1.4fr) 60px 170px minmax(200px, 2fr) 64px 84px;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 0;
+  border: 0;
+  border-top: 1px solid var(--automx-line);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.automx .automx-tr:hover .automx-td-name {
+  color: rgb(var(--accent-light-rgb));
+}
+.automx .automx-th {
+  padding-top: 0;
+  border-top: 0;
+  color: var(--automx-fg-3);
+  font-size: 12px;
+  cursor: default;
+}
+.automx .automx-td-name {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--dur-base);
+}
+.automx .automx-td-num {
+  color: var(--automx-fg-2);
+  font: 12px var(--font-mono);
+}
+.automx .automx-td-chips {
+  display: flex;
+  gap: 6px;
+}
+.automx .automx-td-what {
+  color: var(--automx-fg-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* the hub is shared with the video side and keeps its own look */
+.automx .automx-guides {
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .automx .automx-two,
+  .automx .automx-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .automx .automx-page {
+    padding: 24px 20px 72px;
+  }
+}
+
+@media (max-width: 768px) {
   .page-shell.automx {
-    flex-direction: column;
     height: auto;
     min-height: 0;
-    max-height: none;
+    overflow: visible;
   }
-  .automx-sidebar {
-    width: auto;
-    border-right: none;
-    border-bottom: 1px solid var(--line);
-    padding: 14px;
+  .automx .automx-page {
+    /* the shell's menu button sits over the top left corner */
+    padding: 60px 16px 72px;
   }
-  .automx-nav {
-    flex-direction: row;
-    overflow-x: auto;
-    overflow-y: hidden;
-    gap: 6px;
-    padding-bottom: 4px;
+  .automx .automx-attn {
+    flex-wrap: wrap;
   }
-  .automx-nav-heading { display: none; }
-  .automx-nav-item { width: auto; flex-shrink: 0; }
-  .automx-nav-overview { order: -1; }
-  .automx-sidebar-foot {
-    flex-direction: row;
-    border-top: none;
-    padding-top: 0;
+  .automx .automx-attn-acts {
+    flex: 1 1 100%;
+    padding: 0 0 12px 52px;
   }
-  .automx-sidebar-foot .automx-new-btn { flex: 1; }
-  .automx-main { overflow: visible; padding: 22px 18px 48px; }
-  .automx-hero { flex-direction: column; text-align: center; padding: 26px 22px; }
-  .automx-library-head { flex-wrap: wrap; }
+  .automx .automx-sec-head {
+    flex-wrap: wrap;
+    padding-left: 16px;
+  }
+  .automx .automx-sec-side:has(.automx-cap) {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+  .automx .automx-row {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    padding-left: 16px;
+  }
+  .automx .automx-row-last,
+  .automx .automx-row-when {
+    display: none;
+  }
+  .automx .automx-detail {
+    padding-left: 16px;
+  }
+  .automx .automx-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 16px;
+  }
+  .automx .automx-totals div:nth-child(3) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .automx .automx-search {
+    width: 100%;
+  }
+  .automx .automx-lenses {
+    margin-right: 0;
+  }
 }
 
-/* ── Motion preferences ───────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
-  .automx-view { animation: none; }
-  .automx-hero-glow { animation: none; }
-  .automx-health-dot.bad { animation: none; }
-  .automx-nav-item,
-  .automx-new-btn,
-  .automx-hero-btn,
-  .automx-mini-btn,
-  .automx-chip-btn,
-  .automx-master { transition: none; }
+  .automx .automx-view,
+  .automx .automx-nowline,
+  .automx .automx-bar-day i {
+    animation: none;
+  }
+  .automx .automx-pill-ink,
+  .automx .automx-edge,
+  .automx .automx-dot,
+  .automx .automx-pl-art {
+    transition: none;
+  }
 }

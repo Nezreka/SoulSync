@@ -38,6 +38,11 @@ SENTENCE_SOURCES = {
                                'space_freed_mb')),
     'refresh_mirrored': ('refresh_mirrored.py', ('refreshed', 'errors')),
     'start_database_update': ('database_update.py', ('artists', 'albums', 'tracks')),
+    'playlist_pipeline': ('../../playlists/pipeline.py', ('tracks_synced', 'wishlist_queued')),
+    'personalized_pipeline': ('personalized_pipeline.py', ('tracks_synced', 'wishlist_queued')),
+    'run_repair_job': ('run_repair.py', ('queued',)),
+    'backup_database': ('maintenance.py', ('size_mb',)),
+    'full_cleanup': ('download_cleanup.py', ('total_removed',)),
 }
 
 

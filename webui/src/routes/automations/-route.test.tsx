@@ -99,10 +99,8 @@ describe('automations route', () => {
     // The pre-overhaul verdict strip linked ?health=failing|never|off. The
     // fixture row never ran, so it belongs to the attention collection.
     renderRoute(['/automations?health=failing']);
-    const title = await screen.findByText('Needs attention', {
-      selector: '.automx-library-title',
-    });
-    expect(title).not.toBeNull();
+    const lens = await screen.findByRole('button', { name: /Needs attention/ });
+    expect(lens).toHaveAttribute('aria-pressed', 'true');
   });
 });
 
