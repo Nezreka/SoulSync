@@ -128,6 +128,19 @@ def _db_update_phase_callback(phase):
         db_update_state["last_progress_at"] = time.time()  # heartbeat for the stall watchdog
     _update_automation_progress(_db_update_automation_id, phase=phase)
 
+def _db_update_heartbeat():
+    """A scan's inner loops are turning (#2036). Only the clock moves: the
+    phase and the counts stay what the scan last said."""
+    with db_update_lock:
+        db_update_state["last_progress_at"] = time.time()
+
+
+# every DatabaseUpdateWorker beats into this, whoever built it
+import core.database_update_worker as _database_update_worker  # noqa: E402
+
+_database_update_worker.heartbeat_sink = _db_update_heartbeat
+
+
 def _db_update_artist_callback(artist_name, success, details, album_count, track_count):
     # a finished artist is progress, whatever else the worker reported
     with db_update_lock:

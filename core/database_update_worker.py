@@ -13,6 +13,11 @@ from core.settings import config_manager
 
 logger = get_logger("database_update_worker")
 
+# set by the api layer: bumps the stall watchdog's clock. every worker beats
+# into it (shared scan, own-library scans, the automation's run) without each
+# place that builds one having to wire it (#2036)
+heartbeat_sink = None
+
 
 # Fail-closed threshold for the mid-rescan fence below: when the
 # is_library_scanning() probe raises (scan state unknown) and more than this
@@ -166,6 +171,27 @@ class DatabaseUpdateWorker:
         """
         if getattr(self, '_trashed_skipped', 0):
             logger.info(f"Skipped {self._trashed_skipped} trashed {self.server_type} items")
+
+    def _beat(self) -> None:
+        """Tell the stall watchdog this scan is working (#2036).
+
+        Progress used to be reported once per artist. One artist with tens of
+        thousands of tracks (Various Artists on a big library), or an
+        incremental check walking hundreds of albums before it reports the
+        first artist, went past the watchdog's five minutes while busy, and
+        the scan was called stuck. The inner loops call this; it costs a clock
+        read, and passes at most one beat a second on."""
+        now = time.monotonic()
+        if now - getattr(self, '_last_beat', 0.0) < 1.0:
+            return
+        self._last_beat = now
+        sink = heartbeat_sink
+        if sink is not None:
+            try:
+                sink()
+            except Exception as e:
+                logger.debug("scan heartbeat sink failed: %s", e)
+        self._emit_signal('heartbeat')
 
     def _emit_signal(self, signal_name: str, *args):
         """Emit a signal through the callback registry."""
@@ -880,10 +906,15 @@ class DatabaseUpdateWorker:
             
             logger.info(f"Getting recently added and recently updated content from {self.server_type}...")
             
-            # For Jellyfin, we need to set up progress callback for potential cache population during incremental
+            # every client that reports its own progress, not only Jellyfin: the
+            # standalone client walks the whole music folder here, and with
+            # nobody listening a quick scan of a big library ran silent past
+            # the stall watchdog (#2036)
+            if hasattr(self.media_client, 'set_progress_callback'):
+                self.media_client.set_progress_callback(
+                    lambda msg: self._emit_signal('phase_changed', f"Incremental: {msg}"))
             if self.server_type == "jellyfin":
-                if hasattr(self.media_client, 'set_progress_callback'):
-                    self.media_client.set_progress_callback(lambda msg: self._emit_signal('phase_changed', f"Incremental: {msg}"))
+                pass
             elif self.server_type == "navidrome":
                 # Navidrome doesn't need cache preparation for incremental updates
                 logger.info("Navidrome incremental update: no caching needed")
@@ -959,6 +990,7 @@ class DatabaseUpdateWorker:
                         logger.debug(f"Checking {len(tracks)} tracks in album '{album_title}'")
                         
                         for track in tracks:
+                            self._beat()
                             total_tracks_checked += 1
                             try:
                                 # Handle both Plex (integer) and Jellyfin (string GUID) IDs
@@ -1106,6 +1138,7 @@ class DatabaseUpdateWorker:
                         total_tracks_checked += len(album_tracks)
 
                         for track in album_tracks:
+                            self._beat()
                             if not self.database.track_exists_by_server(track.ratingKey, self.server_type):
                                 album_has_new_tracks = True
                                 consecutive_complete_albums = 0  # Reset counter
@@ -1259,6 +1292,7 @@ class DatabaseUpdateWorker:
             # Extract unique artists from new tracks (FAST - no additional API calls needed)
             artists_to_process = []
             for track in new_tracks:
+                self._beat()
                 try:
                     # Track already has artist info from the API call
                     track_artist = track.artist()  # This will make an API call, but only for new tracks
@@ -1294,6 +1328,7 @@ class DatabaseUpdateWorker:
             albums_by_artist = {}
             
             for track in new_tracks:
+                self._beat()
                 try:
                     # Track already has album and artist IDs from API response
                     album_id = str(track._album_id) if track._album_id else "unknown"
@@ -1350,6 +1385,7 @@ class DatabaseUpdateWorker:
                                     
                                     # Process all tracks in this album
                                     for track in album_tracks:
+                                        self._beat()
                                         if self.should_stop:
                                             break
                                         if self._is_trashed(track):
@@ -1404,6 +1440,7 @@ class DatabaseUpdateWorker:
             
             changes_detected = 0
             for track in media_tracks:
+                self._beat()
                 try:
                     # Handle both Plex (integer) and Jellyfin (string GUID) IDs
                     track_id = str(track.ratingKey)
@@ -1866,6 +1903,7 @@ class DatabaseUpdateWorker:
                 album_batch = albums[i:i + batch_size]
 
                 for album in album_batch:
+                    self._beat()
                     if self.should_stop:
                         break
 
@@ -1892,6 +1930,7 @@ class DatabaseUpdateWorker:
                             # Batch insert tracks for better database performance
                             track_batch = []
                             for track in tracks:
+                                self._beat()
                                 if self.should_stop:
                                     break
                                 if self._is_trashed(track):
