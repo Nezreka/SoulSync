@@ -472,3 +472,259 @@ def test_rename_leaves_another_librarys_copy_where_it_is(tmp_path):
         paths = sorted(r[0] for r in conn.execute("SELECT path FROM lib2_track_files"))
     assert str(own / "01.flac") in paths
     assert str(shared.parent / "Jazz (1978)" / "01.flac") in paths
+
+
+# --- #2053: a stored id that names some other release, and compilations ---
+
+_EAGLES_BOOTLEG = {
+    'id': 'rel-bootleg', 'title': 'Eagles', 'date': '1996', 'status': 'Bootleg',
+    'release-group': {'id': 'rg-live', 'first-release-date': '1996',
+                      'secondary-types': ['Live']},
+    'media': [{'tracks': [{'title': 'Hotel California'}, {'title': 'Take It Easy'},
+                          {'title': 'Get Over It'}]}],
+}
+
+
+def _eagles_recordings(title, artist, limit=25):
+    def rel(rel_id, rg_id, types, status='Official'):
+        return {'id': rel_id, 'title': 'Eagles', 'status': status,
+                'release-group': {'id': rg_id, 'secondary-types': types}}
+    return [{'title': title, 'releases': [
+        rel('rel-comp', 'rg-comp', ['Compilation']),
+        rel('rel-1972', 'rg-1972', None),
+        rel('rel-comp2', 'rg-comp2', ['Compilation'], status=None),
+    ]}]
+
+
+def _eagles_client():
+    mb_client = MagicMock()
+    mb_client.get_release.return_value = _EAGLES_BOOTLEG
+    mb_client.search_recording.side_effect = _eagles_recordings
+    mb_client.get_release_group.side_effect = lambda rg_id, includes=None: {
+        'rg-1972': {'id': 'rg-1972', 'first-release-date': '1972-06-01'},
+        'rg-comp': {'id': 'rg-comp', 'first-release-date': '2005-03-15',
+                    'secondary-types': ['Compilation']},
+    }.get(rg_id)
+    return mb_client
+
+
+def test_a_stored_bootleg_id_does_not_date_the_studio_album():
+    # the eagles' 1972 album, three tracks held, carried the id of a 1996 live
+    # bootleg with the same name. one song in common is not the same album
+    res = resolve_canonical_album_year(
+        mb_client=_eagles_client(), album_title='Eagles', artist_name='Eagles',
+        musicbrainz_release_id='rel-bootleg',
+        track_titles=['Take It Easy', 'Witchy Woman', 'Peaceful Easy Feeling'],
+    )
+    assert res is not None
+    assert (res[0], res[3]) == ('1972', 'rg-1972')
+
+
+def test_the_studio_album_wins_even_when_a_compilation_shows_up_more_often():
+    # a search answer lists only some of a recording's releases. on one live
+    # call the first song came back on the compilation alone, which made the
+    # compilation the "clear winner" over the album the songs were written for
+    mb_client = _eagles_client()
+    mb_client.get_release.return_value = {
+        **_EAGLES_BOOTLEG,
+        'release-group': {**_EAGLES_BOOTLEG['release-group'], 'disambiguation': 'bootleg'},
+    }
+
+    def recordings(title, artist, limit=25):
+        comp = {'id': 'rel-comp', 'title': 'Eagles', 'status': 'Official',
+                'release-group': {'id': 'rg-comp', 'secondary-types': ['Compilation']}}
+        album = {'id': 'rel-1972', 'title': 'Eagles', 'status': 'Official',
+                 'release-group': {'id': 'rg-1972', 'secondary-types': None}}
+        return [{'title': title, 'releases': [comp] if title == 'Take It Easy' else [comp, album]}]
+    mb_client.search_recording.side_effect = recordings
+    res = resolve_canonical_album_year(
+        mb_client=mb_client, album_title='Eagles', artist_name='Eagles',
+        musicbrainz_release_id='rel-bootleg',
+        track_titles=['Take It Easy', 'Witchy Woman', 'Peaceful Easy Feeling'],
+    )
+    assert res is not None
+    assert (res[0], res[3]) == ('1972', 'rg-1972')
+
+
+def test_a_live_album_that_carries_the_tracks_keeps_its_own_year():
+    mb_client = _eagles_client()
+    res = resolve_canonical_album_year(
+        mb_client=mb_client, album_title='Eagles', artist_name='Eagles',
+        musicbrainz_release_id='rel-bootleg',
+        track_titles=['Hotel California', 'Take It Easy', 'Get Over It'],
+    )
+    assert res is not None and res[0] == '1996'
+    mb_client.search_recording.assert_not_called()
+
+
+def test_a_refuted_id_with_no_clear_studio_album_is_not_guessed():
+    mb_client = _eagles_client()
+    # two plain albums tie: nothing says which
+    mb_client.search_recording.side_effect = lambda title, artist, limit=25: [{
+        'title': title, 'releases': [
+            {'id': 'a', 'title': 'Eagles', 'status': 'Official', 'release-group': {'id': 'rg-a'}},
+            {'id': 'b', 'title': 'Eagles', 'status': 'Official', 'release-group': {'id': 'rg-b'}},
+        ]}]
+    # either would have a year to give, were one of them picked
+    mb_client.get_release_group.side_effect = lambda rg_id, includes=None: {
+        'id': rg_id, 'first-release-date': '1972-06-01'}
+    res = resolve_canonical_album_year(
+        mb_client=mb_client, album_title='Eagles', artist_name='Eagles',
+        musicbrainz_release_id='rel-bootleg',
+        track_titles=['Witchy Woman', 'Peaceful Easy Feeling'],
+    )
+    assert res is None
+
+
+def test_one_held_track_cannot_refute_a_stored_id():
+    res = resolve_canonical_album_year(
+        mb_client=_eagles_client(), album_title='Eagles', artist_name='Eagles',
+        musicbrainz_release_id='rel-bootleg', track_titles=['Witchy Woman'],
+    )
+    assert res is not None and res[0] == '1996'
+
+
+def test_song_title_drops_pressing_words_only():
+    from core.repair_jobs.album_release_year_repair import song_title
+    assert song_title('Hotel California - 2013 Remaster') == 'Hotel California'
+    assert song_title('Precious (Remastered)') == 'Precious'
+    assert song_title('Enjoy the Silence (Single Version)') == 'Enjoy the Silence'
+    assert song_title('Precious (Sasha Remix)') == 'Precious (Sasha Remix)'
+    assert song_title('Take It Easy (Live)') == 'Take It Easy (Live)'
+    assert song_title('Remastered') == 'Remastered'
+
+
+def test_track_original_dates_come_from_the_release_track_list():
+    from core.repair_jobs.album_release_year_repair import release_track_original_dates
+    mb_client = MagicMock()
+    mb_client.get_release.return_value = {'media': [
+        {'tracks': [
+            {'title': 'Precious', 'recording': {'first-release-date': '2005-09-30'}},
+            {'title': 'Just Can’t Get Enough', 'recording': {'first-release-date': '1981-09-07'}},
+            {'title': 'Martyr', 'recording': {'first-release-date': '2006-09'}},
+            {'title': 'No Date', 'recording': {}},
+            {'title': 'Twice', 'recording': {'first-release-date': '1984'}},
+            {'title': 'From The Future', 'recording': {'first-release-date': '2011'}},
+        ]},
+        {'tracks': [
+            {'title': 'Precious (Sasha remix)', 'recording': {'first-release-date': '2006-09'}},
+            {'title': 'Twice', 'recording': {'first-release-date': '1996'}},
+        ]},
+    ]}
+    memo = {}
+    dates = release_track_original_dates(mb_client, 'rel-best', memo, not_after='2006')
+    assert dates['precious'] == ('2005', '2005-09-30')
+    assert dates["just can't get enough"] == ('1981', '1981-09-07')
+    assert dates['martyr'] == ('2006', '2006-09')
+    assert dates['precious (sasha remix)'] == ('2006', '2006-09')
+    # no date, two different years for one title, newer than the album: no answer
+    assert 'no date' not in dates and 'twice' not in dates and 'from the future' not in dates
+    mb_client.get_release.assert_called_once_with('rel-best', includes=['recordings'])
+    # one lookup per album, however often it is asked
+    release_track_original_dates(mb_client, 'rel-best', memo, not_after='2006')
+    assert mb_client.get_release.call_count == 1
+    assert release_track_original_dates(mb_client, None, memo) == {}
+
+
+def _compilation_fixture(tmp_path, settings, tags2=None):
+    db = MusicDatabase(str(tmp_path / "test.db"))
+    album_dir = tmp_path / "Depeche Mode" / "2006 - The Best of Depeche Mode"
+    f1, f2, f3 = album_dir / "01.flac", album_dir / "02.flac", album_dir / "03.flac"
+    _make_flac(f1, {'DATE': '2006', 'ORIGINALDATE': '2006'})
+    _make_flac(f2, tags2 or {'DATE': '2006', 'ORIGINALDATE': '2006'})
+    _make_flac(f3, {'DATE': '2006', 'ORIGINALDATE': '1999'})
+    with db._get_connection() as conn:
+        album_id = lib2_seed.album(conn, 'Depeche Mode', 'The Best of Depeche Mode', year=2006)
+        lib2_seed.file_track(conn, 1, album_id, 'Precious', str(f1))
+        lib2_seed.file_track(conn, 2, album_id, 'Just Can\'t Get Enough', str(f2))
+        lib2_seed.file_track(conn, 3, album_id, 'Some Obscure B Side', str(f3))
+        conn.commit()
+
+    mb_client = MagicMock()
+    mb_client.search_release.return_value = [{
+        'id': 'rel-best', 'title': 'The Best of Depeche Mode',
+        'release-group': {'id': 'rg-best', 'first-release-date': '2006-11-13',
+                          'secondary-types': ['Compilation']},
+    }]
+    mb_client.get_release.return_value = {'id': 'rel-best', 'media': [{'tracks': [
+        {'title': 'Precious (Remastered)', 'recording': {'first-release-date': '2005-10-03'}},
+        {'title': 'Just Can’t Get Enough', 'recording': {'first-release-date': '1981-09-07'}},
+        {'title': 'Some Obscure B Side', 'recording': {}},
+    ]}]}
+
+    findings = []
+    ctx = JobContext(
+        db=db, transfer_folder=str(tmp_path),
+        config_manager=_MockConfig({'repair.jobs.album_release_year_repair.settings': settings}),
+        mb_client=mb_client,
+        create_finding=lambda **kw: findings.append(kw) or True,
+    )
+    return db, ctx, mb_client, findings, (f1, f2, f3), album_id
+
+
+def test_compilation_songs_are_left_alone_unless_asked(tmp_path):
+    _db, ctx, mb_client, findings, _files, _aid = _compilation_fixture(tmp_path, {'dry_run': True})
+    AlbumReleaseYearRepairJob().scan(ctx)
+    assert findings == []
+    mb_client.get_release.assert_not_called()
+
+
+def test_compilation_songs_get_the_year_they_first_came_out(tmp_path):
+    from mutagen.flac import FLAC
+    settings = {'dry_run': True, 'compilation_track_years': True}
+    db, ctx, _mb, findings, (f1, f2, f3), album_id = _compilation_fixture(tmp_path, settings)
+    AlbumReleaseYearRepairJob().scan(ctx)
+    assert len(findings) == 1
+    details = findings[0]['details']
+    assert details['canonical_year'] == '2006'
+    assert details['new_folder_name'] is None
+    by_title = {t['title']: t for t in details['tracks']}
+    assert by_title['Precious']['original_year'] == '2005'
+    assert by_title["Just Can't Get Enough"]['original_year'] == '1981'
+    assert by_title['Some Obscure B Side'].get('original_year') is None
+    assert by_title['Some Obscure B Side']['keep_original'] is True
+    assert '2 song(s) get the year they first came out (1981 to 2005)' in findings[0]['description']
+    assert 'Year 2006 is right' in findings[0]['description']
+
+    res = apply_album_year_fix(
+        db=db, album_id=str(album_id), canonical_year='2006', canonical_date='2006-11-13',
+        tracks=details['tracks'], transfer_folder=str(tmp_path),
+    )
+    assert res['success'] and res['errors'] == 0
+    a1, a2, a3 = FLAC(str(f1)), FLAC(str(f2)), FLAC(str(f3))
+    assert (a1['ORIGINALYEAR'], a1['ORIGINALDATE'], a1['DATE']) == (['2005'], ['2005-10-03'], ['2006-11-13'])
+    assert (a2['ORIGINALYEAR'], a2['DATE']) == (['1981'], ['2006-11-13'])
+    # nothing was found for it: the original date it had stays
+    assert a3['ORIGINALDATE'] == ['1999'] and a3['DATE'] == ['2006-11-13']
+    with db._get_connection() as conn:
+        assert conn.execute("SELECT year FROM lib2_albums WHERE id=?", (album_id,)).fetchone()[0] == 2006
+
+    # and the next scan has nothing left to say (no flip back to the album year)
+    findings.clear()
+    AlbumReleaseYearRepairJob().scan(ctx)
+    assert findings == []
+
+
+def test_a_same_year_finding_says_what_it_writes(tmp_path):
+    db = MusicDatabase(str(tmp_path / "test.db"))
+    f1 = tmp_path / "Queen" / "Jazz (1978)" / "01.flac"
+    _make_flac(f1, {'DATE': '1978'})
+    with db._get_connection() as conn:
+        album_id = lib2_seed.album(conn, 'Queen', 'Jazz', year=1978)
+        lib2_seed.file_track(conn, 1, album_id, 'Mustapha', str(f1))
+        conn.commit()
+    mb_client = MagicMock()
+    mb_client.search_release.return_value = [{
+        'id': 'rel-123', 'title': 'Jazz',
+        'release-group': {'id': 'rg-123', 'first-release-date': '1978-11-10'},
+    }]
+    findings = []
+    ctx = JobContext(
+        db=db, transfer_folder=str(tmp_path),
+        config_manager=_MockConfig({'repair.jobs.album_release_year_repair.settings': {'dry_run': True}}),
+        mb_client=mb_client, create_finding=lambda **kw: findings.append(kw) or True,
+    )
+    AlbumReleaseYearRepairJob().scan(ctx)
+    assert len(findings) == 1
+    assert 'Year 1978 is right; the files have no original date tag yet' in findings[0]['description']
+    assert '→' not in findings[0]['description']

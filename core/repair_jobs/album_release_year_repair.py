@@ -257,8 +257,17 @@ def write_release_year_tags(
     canonical_year: str,
     canonical_date: Optional[str] = None,
     update_date_tag: bool = True,
+    original_year: Optional[str] = None,
+    original_date: Optional[str] = None,
+    keep_original: bool = False,
 ) -> bool:
-    """Atomically write canonical original release year/date tags to an audio file."""
+    """Atomically write canonical original release year/date tags to an audio file.
+
+    ``original_year`` / ``original_date`` are the track's own first release,
+    for a song on a compilation (#2053): they go in the ORIGINAL tags while
+    DATE keeps the album's. ``keep_original`` leaves an original date the file
+    already has alone, for a track whose own year could not be found.
+    """
     if not file_path or not os.path.isfile(file_path):
         return False
 
@@ -273,18 +282,25 @@ def write_release_year_tags(
 
         full_date = canonical_date or canonical_year
         year_str = str(canonical_year)
+        orig_year = str(original_year) if original_year else year_str
+        orig_date = (original_date or orig_year) if original_year else full_date
+        write_original = True
+        if keep_original:
+            have = read_file_year_tags(file_path)
+            write_original = not (have.get('original_date') or have.get('original_year'))
 
         # ID3 tags
         if hasattr(audio, 'tags') and isinstance(audio.tags, symbols.ID3):
             from mutagen.id3 import TDOR, TDRC, TXXX, TYER
 
             # Original date frames
-            try:
-                audio.tags.setall('TDOR', [TDOR(encoding=3, text=[full_date])])
-            except Exception as e:
-                logger.debug("Failed setting TDOR frame: %s", e)
-            audio.tags.add(TXXX(encoding=3, desc='originaldate', text=[full_date]))
-            audio.tags.add(TXXX(encoding=3, desc='originalyear', text=[year_str]))
+            if write_original:
+                try:
+                    audio.tags.setall('TDOR', [TDOR(encoding=3, text=[orig_date])])
+                except Exception as e:
+                    logger.debug("Failed setting TDOR frame: %s", e)
+                audio.tags.add(TXXX(encoding=3, desc='originaldate', text=[orig_date]))
+                audio.tags.add(TXXX(encoding=3, desc='originalyear', text=[orig_year]))
 
             if update_date_tag:
                 try:
@@ -295,15 +311,17 @@ def write_release_year_tags(
 
         # MP4 tags
         elif hasattr(symbols, 'MP4') and isinstance(audio, symbols.MP4):
-            audio['----:com.apple.iTunes:originaldate'] = [symbols.MP4FreeForm(full_date.encode('utf-8'))]
-            audio['----:com.apple.iTunes:originalyear'] = [symbols.MP4FreeForm(year_str.encode('utf-8'))]
+            if write_original:
+                audio['----:com.apple.iTunes:originaldate'] = [symbols.MP4FreeForm(orig_date.encode('utf-8'))]
+                audio['----:com.apple.iTunes:originalyear'] = [symbols.MP4FreeForm(orig_year.encode('utf-8'))]
             if update_date_tag:
                 audio['\xa9day'] = [full_date]
 
         # Vorbis / FLAC / OGG tags
         elif hasattr(audio, '__setitem__'):
-            audio['ORIGINALDATE'] = [full_date]
-            audio['ORIGINALYEAR'] = [year_str]
+            if write_original:
+                audio['ORIGINALDATE'] = [orig_date]
+                audio['ORIGINALYEAR'] = [orig_year]
             if update_date_tag:
                 audio['DATE'] = [full_date]
                 audio['YEAR'] = [year_str]
@@ -453,9 +471,17 @@ def apply_album_year_fix(
         if not resolved or not os.path.isfile(resolved):
             continue
 
-        if write_release_year_tags(resolved, str(year_int), canonical_date, update_date_tag=update_date_tag):
+        own_year = extract_year(t.get('original_year'))
+        if write_release_year_tags(
+                resolved, str(year_int), canonical_date, update_date_tag=update_date_tag,
+                original_year=own_year, original_date=t.get('original_date') if own_year else None,
+                keep_original=bool(t.get('keep_original'))):
             result['fixed_files'] += 1
-            result['changes'].append(f"Retagged {os.path.basename(resolved)} with year {year_int}")
+            if own_year and own_year != str(year_int):
+                result['changes'].append(
+                    f"Retagged {os.path.basename(resolved)} with year {year_int}, first released {own_year}")
+            else:
+                result['changes'].append(f"Retagged {os.path.basename(resolved)} with year {year_int}")
         else:
             result['errors'] += 1
 
@@ -487,8 +513,83 @@ def apply_album_year_fix(
     return result
 
 
+def _fold_title(value: Any) -> str:
+    # musicbrainz writes the typographic apostrophe, files mostly do not
+    return str(value or '').replace('\u2019', "'").replace('\u2018', "'").strip().casefold()
+
+
 def _same_title(a: Any, b: Any) -> bool:
-    return str(a or '').strip().casefold() == str(b or '').strip().casefold()
+    return _fold_title(a) == _fold_title(b)
+
+
+_SAME_SONG_SUFFIX_RE = re.compile(
+    r'\s*(?:[-\u2013]\s*|[(\[])\s*(?:\d{4}\s+)?'
+    r'(?:digital(?:ly)?\s+)?(?:remaster(?:ed)?|mono|stereo|album version|single version)'
+    r'(?:\s+(?:version|\d{4}))?\s*[)\]]?\s*$',
+    re.IGNORECASE,
+)
+
+
+def song_title(title: Any) -> str:
+    """a track title without the words that only name a pressing of the same
+    song ("Hotel California - 2013 Remaster"). a remix or a live cut is its
+    own recording and keeps its words."""
+    text = str(title or '').strip()
+    cleaned = _SAME_SONG_SUFFIX_RE.sub('', text).strip()
+    return cleaned or text
+
+
+def release_track_original_dates(
+    mb_client: Any,
+    release_id: Optional[str],
+    memo: Optional[Dict[Any, Any]] = None,
+    not_after: Optional[str] = None,
+) -> Dict[str, Tuple[str, str]]:
+    """when each song on a release first came out: folded title -> (year, date).
+
+    a greatest hits album has one year and its songs have a dozen (#2053).
+    musicbrainz keeps the first release date of every recording, and the
+    release's own track list names the exact recordings on it, so one lookup
+    answers for the whole album. searching for a song by name instead was
+    tried against the live service and was wrong more often than right: it
+    returns the 25 best-ranked of a hit's hundreds of recordings, and the
+    earliest of those is rarely the original.
+
+    a title on the release twice with two different years (the song and its
+    re-recording) is left out: nothing here says which one a file is.
+    ``not_after`` is the album's own year. a song cannot be newer than the
+    collection it is on, so a later date is bad data and is dropped.
+    """
+    if mb_client is None or not release_id:
+        return {}
+    key = ('track_originals', release_id)
+    if memo is not None and key in memo:
+        release = memo[key]
+    else:
+        try:
+            release = mb_client.get_release(release_id, includes=['recordings'])
+        except Exception as e:
+            logger.debug("track list lookup for release %s failed: %s", release_id, e)
+            release = None
+        if memo is not None:
+            memo[key] = release
+    limit = extract_year(not_after)
+    found: Dict[str, Tuple[str, str]] = {}
+    clash: set = set()
+    for medium in ((release or {}).get('media') or []) if isinstance(release, dict) else []:
+        for track in (medium.get('tracks') or []) if isinstance(medium, dict) else []:
+            if not isinstance(track, dict):
+                continue
+            recording = track.get('recording') or {}
+            date = str(recording.get('first-release-date') or '')
+            year = extract_year(date[:4])
+            title = _fold_title(song_title(track.get('title') or recording.get('title')))
+            if not title or not year or (limit and int(year) > int(limit)):
+                continue
+            if title in found and found[title][0] != year:
+                clash.add(title)
+            found.setdefault(title, (year, date))
+    return {title: when for title, when in found.items() if title not in clash}
 
 
 def release_group_holding_tracks(
@@ -497,6 +598,7 @@ def release_group_holding_tracks(
     artist_name: str,
     track_titles: Optional[List[str]],
     max_titles: int = 2,
+    prefer_plain: bool = False,
 ) -> Optional[Tuple[str, Optional[str]]]:
     """the one release group, titled like the album, whose releases carry the
     library's tracks. (rg_mbid, a release mbid in it) or None when the tracks
@@ -504,9 +606,19 @@ def release_group_holding_tracks(
 
     weezer has eight albums called "Weezer". the title alone picked the red
     album (2008) for buddy holly, which is on the blue album (1994) (#1609).
+
+    ``prefer_plain`` is for an album whose stored id was just shown to be some
+    other release: every title is asked (a search answer lists only some of a
+    recording's releases, and which ones changes from call to call), and when
+    exactly one of the groups holding the tracks is a plain studio album with
+    an official release, it is the answer over any compilation, live set or
+    bootleg of the same name, however many of them there are.
     """
     hits: Dict[str, int] = {}
     a_release: Dict[str, Optional[str]] = {}
+    plain: set = set()
+    if prefer_plain:
+        max_titles = max(max_titles, 3)
     for title in [t for t in (track_titles or []) if t][:max_titles]:
         try:
             recordings = mb_client.search_recording(title, artist_name, limit=25)
@@ -526,13 +638,56 @@ def release_group_holding_tracks(
                 if rg_id:
                     groups.add(rg_id)
                     a_release.setdefault(rg_id, rel.get('id'))
+                    if (not (rel.get('release-group') or {}).get('secondary-types')
+                            and str(rel.get('status') or '').lower() == 'official'):
+                        plain.add(rg_id)
         for rg_id in groups:
             hits[rg_id] = hits.get(rg_id, 0) + 1
         ranked = sorted(hits.items(), key=lambda kv: -kv[1])
         # one clear winner, else let the next track break the tie
-        if ranked and (len(ranked) == 1 or ranked[0][1] > ranked[1][1]):
+        if not prefer_plain and ranked and (len(ranked) == 1 or ranked[0][1] > ranked[1][1]):
+            return ranked[0][0], a_release.get(ranked[0][0])
+    if prefer_plain and hits:
+        studio = [rg_id for rg_id in hits if rg_id in plain]
+        if len(studio) == 1:
+            return studio[0], a_release.get(studio[0])
+        ranked = sorted(hits.items(), key=lambda kv: -kv[1])
+        if len(ranked) == 1 or ranked[0][1] > ranked[1][1]:
             return ranked[0][0], a_release.get(ranked[0][0])
     return None
+
+
+def _release_track_titles(release: Any) -> List[str]:
+    return [
+        _fold_title(song_title(track.get('title') or (track.get('recording') or {}).get('title')))
+        for medium in ((release or {}).get('media') or []) if isinstance(medium, dict)
+        for track in (medium.get('tracks') or []) if isinstance(track, dict)
+    ]
+
+
+def stored_release_is_refuted(mb_client: Any, release_id: str,
+                              track_titles: Optional[List[str]]) -> bool:
+    """True when the release an album's stored id names does not carry the
+    album's tracks: fewer than half of them are on its track list.
+
+    a stored id can come from a title-only match. the eagles' first album
+    (1972), held as three tracks, carried the id of a 1996 live bootleg also
+    called "Eagles", and the job wanted the folder renamed to 1996 (#2053).
+    one song in common is what a live set and a studio album always share.
+    unknown (no track list, one track) is not refuted.
+    """
+    titles = {_fold_title(song_title(t)) for t in (track_titles or []) if t}
+    if len(titles) < 2:
+        return False
+    try:
+        release = mb_client.get_release(release_id, includes=['recordings'])
+    except Exception as e:
+        logger.debug("track list lookup for release %s failed: %s", release_id, e)
+        return False
+    on_release = set(_release_track_titles(release)) if isinstance(release, dict) else set()
+    if not on_release:
+        return False
+    return len(titles & on_release) * 2 < len(titles)
 
 
 def resolve_canonical_album_year(
@@ -573,6 +728,12 @@ def resolve_canonical_album_year(
             memo[memo_key] = val
         return val
 
+    def _note_group_types(rg):
+        """remember what kind of release group this is (album, compilation,
+        live) for the caller, who asks with `release_group_is_compilation`."""
+        if memo is not None and isinstance(rg, dict) and rg.get('id') and 'secondary-types' in rg:
+            memo[('rg_types', rg['id'])] = list(rg.get('secondary-types') or [])
+
     def _from_track_group(found):
         """the year of the release group the tracks are on."""
         rg_id, rel_id = found
@@ -581,19 +742,21 @@ def resolve_canonical_album_year(
         except Exception as e:
             logger.debug("release group %s lookup failed: %s", rg_id, e)
             return None
+        _note_group_types(rg)
         rg_date = rg.get('first-release-date')
         year = extract_year(rg_date)
         if not year:
             return None
         return (year, rg_date, rel_id, rg_id)
 
-    def _tracks_say_otherwise(rg_id):
+    def _tracks_say_otherwise(rg_id, prefer_plain=False):
         """a release group picked by title alone, checked against the tracks.
         a better answer when the tracks sit on a different same-titled album,
         else None."""
         if not track_titles:
             return None
-        found = release_group_holding_tracks(mb_client, album_title, artist_name, track_titles)
+        found = release_group_holding_tracks(
+            mb_client, album_title, artist_name, track_titles, prefer_plain=prefer_plain)
         if not found or found[0] == rg_id:
             return None
         return _from_track_group(found)
@@ -604,13 +767,29 @@ def resolve_canonical_album_year(
             rel = mb_client.get_release(musicbrainz_release_id, includes=['release-groups'])
             if rel:
                 rg = rel.get('release-group') or {}
+                _note_group_types(rg)
                 # a stored id can come from a title-only match too. a
                 # disambiguated group ("Red Album") means same-titled albums
                 # exist, so check the tracks really are on it
-                if rg.get('disambiguation') and prefer_original_year:
+                # a bootleg, a live set or a compilation is what a title-only
+                # match lands on when the studio album shares its name. its
+                # track list says whether this album is really it
+                odd_one = bool(rg.get('secondary-types')) or (
+                    str(rel.get('status') or 'official').lower() != 'official')
+                refuted = bool(
+                    odd_one and prefer_original_year and track_titles
+                    and stored_release_is_refuted(mb_client, musicbrainz_release_id, track_titles))
+                if rg.get('disambiguation') and prefer_original_year and not refuted:
                     better = _tracks_say_otherwise(rg.get('id'))
                     if better:
                         return _cache_and_return(better)
+                if refuted:
+                    found = release_group_holding_tracks(
+                        mb_client, album_title, artist_name, track_titles, prefer_plain=True)
+                    if found and found[0] != rg.get('id'):
+                        return _cache_and_return(_from_track_group(found))
+                    # the id is wrong and nothing says what is right: no guess
+                    return _cache_and_return(None)
                 rg_date = rg.get('first-release-date')
                 rel_date = rel.get('date')
                 chosen_date = (rg_date if prefer_original_year and rg_date else (rel_date or rg_date))
@@ -641,6 +820,7 @@ def resolve_canonical_album_year(
                         logger.debug("Failed fetching full release details for barcode hit: %s", e)
                 chosen_date = (rg_date if prefer_original_year and rg_date else (rel_date or rg_date))
                 year = extract_year(chosen_date)
+                _note_group_types(rg)
                 if year:
                     return _cache_and_return((year, chosen_date, best.get('id'), rg.get('id')))
         except Exception as e:
@@ -675,12 +855,32 @@ def resolve_canonical_album_year(
                         logger.debug("Failed fetching full release details for search hit: %s", e)
                 chosen_date = (rg_date if prefer_original_year and rg_date else (rel_date or rg_date))
                 year = extract_year(chosen_date)
+                _note_group_types(rg)
                 if year:
                     return _cache_and_return((year, chosen_date, best.get('id'), rg.get('id')))
         except Exception as e:
             logger.debug("MusicBrainz lookup by release search failed: %s", e)
 
     return _cache_and_return(None)
+
+
+def release_group_is_compilation(mb_client: Any, rg_mbid: Optional[str],
+                                 memo: Optional[Dict[Any, Any]] = None) -> bool:
+    """True when musicbrainz files this release group as a compilation."""
+    if not rg_mbid or mb_client is None:
+        return False
+    key = ('rg_types', rg_mbid)
+    if memo is None or key not in memo:
+        try:
+            rg = mb_client.get_release_group(rg_mbid) or {}
+        except Exception as e:
+            logger.debug("release group %s lookup failed: %s", rg_mbid, e)
+            return False
+        types = list(rg.get('secondary-types') or []) if isinstance(rg, dict) else []
+        if memo is None:
+            return any(str(t).lower() == 'compilation' for t in types)
+        memo[key] = types
+    return any(str(t).lower() == 'compilation' for t in (memo[key] or []))
 
 
 @register_job
@@ -704,7 +904,12 @@ class AlbumReleaseYearRepairJob(RepairJob):
         '- Dry Run: When enabled (default), reports proposed corrections without modifying files\n'
         '- Rename Folders: When enabled, updates parent folders that contain the old year\n'
         '- Update Date Tag: When enabled, writes canonical year to DATE/YEAR tags as well as ORIGINALDATE/ORIGINALYEAR\n'
-        '- Prefer Original Year: When enabled, prefers Release Group original release date over edition date'
+        '- Prefer Original Year: When enabled, prefers Release Group original release date over edition date\n'
+        '- Compilation Track Years: Off by default. When enabled, each song on a compilation or greatest hits '
+        'album gets the year it first came out in its ORIGINALDATE / ORIGINALYEAR tags (Precious on The Best of '
+        'Depeche Mode becomes 2005), read from the first release date MusicBrainz keeps for each recording on '
+        'the album. The album, its folder and the DATE tag keep the compilation\'s own year, so the album stays '
+        'one album. A song MusicBrainz has no date for is left as it is'
     )
     icon = 'repair-icon-consistency'
     default_enabled = False
@@ -714,6 +919,7 @@ class AlbumReleaseYearRepairJob(RepairJob):
         'rename_folders': True,
         'update_date_tag': True,
         'prefer_original_year': True,
+        'compilation_track_years': False,
     }
     auto_fix = True
     writes_library_files = True
@@ -737,6 +943,7 @@ class AlbumReleaseYearRepairJob(RepairJob):
         rename_folders = self._get_setting(context, 'rename_folders', True)
         update_date_tag = self._get_setting(context, 'update_date_tag', True)
         prefer_original_year = self._get_setting(context, 'prefer_original_year', True)
+        compilation_track_years = bool(self._get_setting(context, 'compilation_track_years', False))
 
         mb_client = context.mb_client
         if mb_client is None:
@@ -796,6 +1003,7 @@ class AlbumReleaseYearRepairJob(RepairJob):
 
                 # Resolve file paths on disk
                 resolved_paths = []
+                resolved_by_file: Dict[Any, str] = {}
                 for t in eligible_tracks:
                     res_p = resolve_library_file_path(
                         t['file_path'],
@@ -805,6 +1013,7 @@ class AlbumReleaseYearRepairJob(RepairJob):
                     )
                     if res_p and os.path.isfile(res_p):
                         resolved_paths.append(res_p)
+                        resolved_by_file[t['file_id']] = res_p
 
                 if not resolved_paths:
                     continue
@@ -855,18 +1064,62 @@ class AlbumReleaseYearRepairJob(RepairJob):
                     )
                 )
 
+                # A compilation's songs each have a year of their own (#2053).
+                # The album keeps its year; each file's ORIGINAL tags get the
+                # song's, so the album-wide check must not read them.
+                own_years: List[str] = []
+                tracks_to_retag = 0
+                per_track = bool(
+                    compilation_track_years
+                    and release_group_is_compilation(mb_client, rg_mbid, memo)
+                )
+                if per_track:
+                    originals = release_track_original_dates(
+                        mb_client, res_mbid, memo=memo, not_after=canonical_year)
+                    for t in eligible_tracks:
+                        res_p = resolved_by_file.get(t['file_id'])
+                        if not res_p:
+                            continue
+                        found = originals.get(_fold_title(song_title(t['title'])))
+                        have = read_file_year_tags(res_p)
+                        have_year = extract_year(have.get('original_date') or have.get('original_year'))
+                        if found:
+                            t['original_year'], t['original_date'] = found
+                            own_years.append(found[0])
+                            if have_year != found[0]:
+                                tracks_to_retag += 1
+                        else:
+                            # nothing found: an original date already there stays
+                            t['keep_original'] = True
+                            if not have_year:
+                                tracks_to_retag += 1
+                    file_year = (extract_year(tag_meta.get('date') or tag_meta.get('year'))
+                                 if update_date_tag else None)
+
                 # Check discrepancies
+                missing_original = bool(not tag_meta.get('original_date') and canonical_date)
                 year_discrepancy = bool(
                     (db_year and db_year != canonical_year)
                     or (file_year and file_year != canonical_year)
-                    or (not tag_meta.get('original_date') and canonical_date)
+                    or (tracks_to_retag if per_track else missing_original)
                 )
 
                 if not year_discrepancy and not needs_folder_rename:
                     continue
 
                 current_display_year = db_year or file_year or 'unknown'
-                desc_parts = [f"Current year: {current_display_year} → Canonical: {canonical_year}"]
+                if current_display_year == canonical_year:
+                    # nothing moves: say what is actually being written
+                    desc_parts = [f"Year {canonical_year} is right"]
+                    if not per_track and missing_original:
+                        desc_parts.append("the files have no original date tag yet")
+                else:
+                    desc_parts = [f"Current year: {current_display_year} → Canonical: {canonical_year}"]
+                if own_years:
+                    span = (min(own_years) if min(own_years) == max(own_years)
+                            else f"{min(own_years)} to {max(own_years)}")
+                    desc_parts.append(
+                        f"{len(own_years)} song(s) get the year they first came out ({span})")
                 if needs_folder_rename and new_folder_name:
                     desc_parts.append(f"Folder rename: '{folder_name}' → '{new_folder_name}'")
 
