@@ -589,6 +589,39 @@ export function autoSyncPersonalizedEntry(
   return { kind: k.kind, variant: k.variant || '' };
 }
 
+/**
+ * Which personalized playlists Auto-Sync already keeps on the server, and how
+ * often: `ssd_<kind>[_<variant>]` -> "every 8h".
+ *
+ * A personalized playlist scheduled from the board syncs straight from its
+ * generator. It never needs a mirror, so the Discovery tab (which only knew
+ * about mirrors) offered Import on a playlist that had been syncing for weeks.
+ */
+export function autoSyncPersonalizedCadences(
+  automations: readonly (AutomationRow | null | undefined)[] | null | undefined,
+): Map<string, string> {
+  const cadences = new Map<string, string>();
+  for (const auto of automations || []) {
+    if (!autoSyncEnabledFlag(auto)) continue;
+    const entry = autoSyncPersonalizedEntry(auto);
+    if (!entry) continue;
+    let label = 'on a schedule';
+    if (auto?.trigger_type === 'schedule') {
+      const hours = autoSyncHoursFromTrigger(
+        (auto.trigger_config || {}) as { interval?: number | string; unit?: string },
+      );
+      if (hours) label = autoSyncLaneCadence(hours).toLowerCase();
+    } else if (auto?.trigger_type === 'weekly_time') {
+      label = 'weekly';
+    } else if (auto?.trigger_type === 'daily_time') {
+      label = 'daily';
+    }
+    const id = autoSyncSsdId(entry);
+    if (!cadences.has(id)) cadences.set(id, label);
+  }
+  return cadences;
+}
+
 /** Map a personalized {kind, variant} to its board row id — real row first, then synthetic. */
 export function autoSyncRowIdForPersonalized(
   entry: { kind: string; variant: string } | null,
