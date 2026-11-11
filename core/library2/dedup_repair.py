@@ -993,16 +993,33 @@ def _fold_albums_within_artist(conn: Any, cursor: Any, artist_id: int,
             continue
         members.sort(key=_survivor_sort_key)
         survivor = members[0]
-        for duplicate in members[1:]:
+
+        def _takes(home: Dict[str, Any], duplicate: Dict[str, Any]) -> bool:
             # A title twin keeps the rule it always had. A pair that only ever
             # met through provider ids has to clear the id evidence first.
-            evidence = (_shares_title_key(survivor, duplicate)
-                        or _identity_supports_fold(survivor, duplicate))
-            if (evidence
-                    and _is_pristine(cursor, duplicate)
-                    and _counts_compatible(survivor, duplicate)
-                    and not _reviewed(conn, "album", survivor["id"], duplicate["id"])):
-                _fold_duplicate(cursor, survivor, duplicate)
+            evidence = (_shares_title_key(home, duplicate)
+                        or _identity_supports_fold(home, duplicate))
+            return bool(evidence
+                        and _counts_compatible(home, duplicate)
+                        and not _reviewed(conn, "album", home["id"], duplicate["id"]))
+
+        for duplicate in members[1:]:
+            # The survivor is asked first, then every other copy with files.
+            # An artist can own a release twice (a stray track of it filed in
+            # another folder is its own album on the server, "1/22"), and the
+            # provider's stub then has two rows it could be. Asking only the
+            # first left the stub standing beside the complete album, wanted,
+            # because the stray copy's track count was one off.
+            home = None
+            if _is_pristine(cursor, duplicate):
+                home = next(
+                    (member for member in members
+                     if member is not duplicate
+                     and (member is survivor or int(member.get("file_rows") or 0) > 0)
+                     and _takes(member, duplicate)),
+                    None)
+            if home is not None:
+                _fold_duplicate(cursor, home, duplicate)
                 stats["albums_folded"] += 1
             else:
                 cursor.execute(

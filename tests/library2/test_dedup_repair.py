@@ -963,3 +963,85 @@ def test_the_artist_merge_waits_for_a_finished_import(repair_db, monkeypatch):
         "deezer": "twin-dz", "spotify": "twin-sp", "musicbrainz": "twin-mb", "tidal": "999"})
     assert bootstrap._fold_artist_twins_once(database, conn) == {}
     assert conn.execute("SELECT COUNT(*) FROM lib2_artists WHERE name='Twin Artist'").fetchone()[0] == 2
+
+
+def _file(conn, album_id, title, number, path):
+    track_id = conn.execute(
+        "INSERT INTO lib2_tracks(album_id, title, track_number) VALUES(?,?,?)",
+        (album_id, title, number)).lastrowid
+    conn.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)", (track_id, path))
+    return track_id
+
+
+def test_a_provider_stub_folds_into_the_complete_copy_past_a_stray_one(repair_db):
+    # bbno$ on the live library: one track of the album filed in another
+    # folder was its own album on the server (1/22, by another catalogue's
+    # count), the real album sat beside it (21/21), and the provider's stub
+    # (0/21, wanted by the new-release rule) stood as a third card. the stub
+    # was only ever compared to the stray copy, whose count was one off
+    legacy_db, conn = repair_db
+    artist = _artist(conn, "bbno$")
+    group = "e9c40725-3fc7-4ae1-a112-4f0ca7a64a7b"
+    stray = _album(conn, artist, "bbno$", expected_track_count=22,
+                   musicbrainz_release_group_id=group)
+    _file(conn, stray, "bing bong", 2, "/m/bbno$ & VNLLA/01 - bing bong.flac")
+    full = _album(conn, artist, "bbno$", expected_track_count=21,
+                  musicbrainz_release_group_id=group,
+                  external_ids=json.dumps({"deezer": "810624501"}))
+    _file(conn, full, "bag TF up", 1, "/m/bbno$/01 - bag TF up.flac")
+    stub = _album(conn, artist, "bbno$", origin="discography", monitored=1,
+                  expected_track_count=21, musicbrainz_release_group_id=group,
+                  external_ids=json.dumps({"deezer": "810624501"}), with_track=True)
+    conn.execute(
+        "INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored, provenance) "
+        "VALUES('album', ?, 1, 1, 'new_release')", (stub,))
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["albums_folded"] == 1
+    left = [r["id"] for r in conn.execute(
+        "SELECT id FROM lib2_albums WHERE primary_artist_id=? ORDER BY id", (artist,))]
+    assert left == [stray, full]
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM lib2_tracks WHERE album_id=?", (stub,)).fetchone()["c"] == 0
+    # the two owned copies are still two: files are never merged by a guess
+    assert [r["album_id"] for r in conn.execute(
+        "SELECT t.album_id FROM lib2_track_files f JOIN lib2_tracks t ON t.id=f.track_id "
+        "WHERE t.album_id IN (?,?) ORDER BY t.album_id", (stray, full))] == [stray, full]
+
+
+def test_a_stub_someone_asked_for_is_not_folded_into_another_copy(repair_db):
+    legacy_db, conn = repair_db
+    artist = _artist(conn, "bbno$")
+    stray = _album(conn, artist, "bbno$", expected_track_count=22)
+    _file(conn, stray, "bing bong", 2, "/m/a/01.flac")
+    full = _album(conn, artist, "bbno$", expected_track_count=21)
+    _file(conn, full, "bag TF up", 1, "/m/b/01.flac")
+    stub = _album(conn, artist, "bbno$", origin="discography", monitored=1,
+                  expected_track_count=21)
+    conn.execute(
+        "INSERT INTO lib2_monitor_rules(entity_type, entity_id, profile_id, monitored, provenance) "
+        "VALUES('album', ?, 1, 1, 'user_explicit')", (stub,))
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["albums_folded"] == 0
+    assert conn.execute("SELECT 1 FROM lib2_albums WHERE id=?", (stub,)).fetchone()
+
+
+def test_a_stub_with_another_track_count_is_no_ones_twin(repair_db):
+    legacy_db, conn = repair_db
+    artist = _artist(conn, "bbno$")
+    stray = _album(conn, artist, "bbno$", expected_track_count=22)
+    _file(conn, stray, "bing bong", 2, "/m/a/01.flac")
+    full = _album(conn, artist, "bbno$", expected_track_count=21)
+    _file(conn, full, "bag TF up", 1, "/m/b/01.flac")
+    stub = _album(conn, artist, "bbno$", origin="discography", expected_track_count=30)
+    conn.commit()
+
+    stats = repair_duplicate_artists(legacy_db)
+
+    assert stats["albums_folded"] == 0
+    assert conn.execute("SELECT 1 FROM lib2_albums WHERE id=?", (stub,)).fetchone()
