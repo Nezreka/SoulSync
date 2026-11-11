@@ -856,7 +856,9 @@ class WikidataWorker(VideoBackfillWorker):
 
 class TmdbStreamingWorker(VideoBackfillWorker):
     """TMDB 'watch providers' → the primary streaming service a title is on, for
-    the Streaming overlay badge (and its logo pack via the resolver)."""
+    the Streaming overlay badge (and its logo pack via the resolver), plus how
+    many services carry it in the region (``streaming_count``): one service and
+    six are not the same answer to 'can we get this back if it goes'."""
     BASE = "https://api.themoviedb.org/3"
     requires_key = True
 
@@ -902,7 +904,11 @@ class TmdbStreamingWorker(VideoBackfillWorker):
         # the primary provider for the region, by TMDB's display priority
         best = sorted(flat, key=lambda p: p.get("display_priority", 999))[0]
         name = (best or {}).get("provider_name")
-        return {"streaming": name} if name else None
+        if not name:
+            return None
+        # distinct services, not rows: TMDB can list a provider more than once
+        count = len({p.get("provider_id") or p.get("provider_name") for p in flat if isinstance(p, dict)})
+        return {"streaming": name, "streaming_count": count}
 
     def record_ok(self, item, data):
         self.db.backfill_mark("streaming", item["kind"], item["id"], "ok", columns=data)

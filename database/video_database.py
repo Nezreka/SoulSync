@@ -238,7 +238,7 @@ _BACKFILL_COLS = {
     "tvmaze": {"tvmaze_rating"},
     "anilist": {"anilist_score"},
     "wikidata": {"wikidata_url"},
-    "streaming": {"streaming"},
+    "streaming": {"streaming", "streaming_count"},
     "mediastinger": {"mediastinger"},
     "awards": {"awards"},
 }
@@ -459,6 +459,8 @@ _COLUMN_MIGRATIONS = [
     # when the server added the movie (Plex addedAt / Jellyfin DateCreated);
     # added_at is when SoulSync first saw the row
     ("movies", "server_added_at", "TEXT"),
+    # how many services carry it in the region (1 = one exit, 0 = none: not_found)
+    ("movies", "streaming_count", "INTEGER"), ("shows", "streaming_count", "INTEGER"),
     # Mediastinger (TMDB keywords → after/during-credits scene) for its overlay badge
     ("movies", "mediastinger", "INTEGER"),
     ("movies", "mediastinger_status", "TEXT"), ("movies", "mediastinger_attempted", "TEXT"),
@@ -1290,7 +1292,26 @@ class VideoDatabase:
         # after the v49 step above that may have just rebuilt it
         conn.execute("DROP INDEX IF EXISTS idx_video_wishlist_movie")
 
+        # streaming_count is new: a title the streaming worker already found a
+        # service for has its name but no count, and the worker only visits a
+        # row once. send those back through the queue once; the name stays
+        # (backfill_mark never clobbers), only the count is filled. not_found
+        # rows already mean 0 and are left alone
+        if conn.execute("SELECT 1 FROM video_settings WHERE key = ?",
+                        (VideoDatabase._STREAMING_COUNT_MARKER,)).fetchone() is None:
+            requeued = 0
+            for tbl in ("movies", "shows"):
+                requeued += conn.execute(
+                    f"UPDATE {tbl} SET streaming_status = NULL "
+                    "WHERE streaming_status = 'ok' AND streaming_count IS NULL").rowcount
+            conn.execute("INSERT INTO video_settings (key, value) VALUES (?, '1') "
+                         "ON CONFLICT(key) DO UPDATE SET value = '1'",
+                         (VideoDatabase._STREAMING_COUNT_MARKER,))
+            if requeued:
+                logger.info("streaming: %d title(s) queued once to count their services", requeued)
+
     _SEASON_MONITOR_MARKER = "season_monitor_backfill_done"
+    _STREAMING_COUNT_MARKER = "streaming_count_backfill_done"
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
     def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:
@@ -2700,7 +2721,7 @@ class VideoDatabase:
         "network", "studio", "first_air_date", "last_air_date", "airs_time",
         "release_date", "runtime_minutes", "tmdb_collection_id", "tmdb_collection_name",
         "trakt_rating", "trakt_votes", "tvmaze_rating", "anilist_score",
-        "wikidata_url", "streaming", "mediastinger", "awards", "subtitle_langs",
+        "wikidata_url", "streaming", "streaming_count", "mediastinger", "awards", "subtitle_langs",
     }
 
     def item_matches(self, kind: str, item_id: int) -> list | None:

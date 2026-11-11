@@ -231,7 +231,83 @@ def test_streaming_fetch_picks_primary_flatrate_provider(db, monkeypatch):
             {"provider_name": "Netflix", "display_priority": 1},   # lower priority = primary
         ]}}})
     out = TmdbStreamingWorker(db).fetch({"kind": "movie", "tmdb_id": 438631})
-    assert out == {"streaming": "Netflix"}
+    assert out == {"streaming": "Netflix", "streaming_count": 2}
+
+
+def test_streaming_fetch_counts_distinct_services(db, monkeypatch):
+    # TMDB can list one service twice, and a plan tier is its own provider id
+    import core.video.enrichment.backfill as bf
+    db.set_setting("tmdb_api_key", "KEY")
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {
+        "results": {"US": {"flatrate": [
+            {"provider_id": 8, "provider_name": "Netflix", "display_priority": 1},
+            {"provider_id": 8, "provider_name": "Netflix", "display_priority": 1},
+            {"provider_id": 1796, "provider_name": "Netflix Standard with Ads", "display_priority": 2},
+            {"provider_id": 15, "provider_name": "Hulu", "display_priority": 3},
+        ]}}})
+    out = TmdbStreamingWorker(db).fetch({"kind": "show", "tmdb_id": 1399})
+    assert out == {"streaming": "Netflix", "streaming_count": 3}
+
+
+def test_streaming_worker_records_count(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    db.set_setting("tmdb_api_key", "KEY")
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1 WHERE id=?", (mid,)); c.commit()
+    w = TmdbStreamingWorker(db)
+    w.fetch = lambda item: {"streaming": "Max", "streaming_count": 4}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT streaming, streaming_count FROM movies WHERE id=?", (mid,)).fetchone()
+    assert r["streaming"] == "Max" and r["streaming_count"] == 4
+
+
+def _reopen(path, monkeypatch):
+    """a fresh VideoDatabase that runs startup again for this one path"""
+    import database.video_database as vdb
+    monkeypatch.setattr(vdb, "_initialized_paths", set())
+    return VideoDatabase(database_path=path)
+
+
+def test_streaming_count_requeues_found_titles_once(tmp_path, monkeypatch):
+    # a title found on a service before the count existed goes back through the
+    # queue once for its count, keeping its name; a title on no service
+    # (not_found, i.e. 0) is left alone
+    path = str(tmp_path / "video_library.db")
+    db = VideoDatabase(database_path=path)
+    found = db.upsert_movie("plex", {"server_id": "m1", "title": "Found"})
+    nowhere = db.upsert_movie("plex", {"server_id": "m2", "title": "Nowhere"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1, streaming='Hulu', streaming_status='ok' WHERE id=?", (found,))
+        c.execute("UPDATE movies SET tmdb_id=2, streaming_status='not_found' WHERE id=?", (nowhere,))
+        c.execute("DELETE FROM video_settings WHERE key = ?", (VideoDatabase._STREAMING_COUNT_MARKER,))
+        c.commit()
+    db = _reopen(path, monkeypatch)
+    with db.connect() as c:
+        rows = {r["id"]: r for r in c.execute("SELECT id, streaming, streaming_status FROM movies")}
+    assert rows[found]["streaming_status"] is None and rows[found]["streaming"] == "Hulu"
+    assert rows[nowhere]["streaming_status"] == "not_found"
+    assert db.backfill_next("streaming")["id"] == found
+    # once only: after the count lands, another start re-queues nothing
+    db.backfill_mark("streaming", "movie", found, "ok", columns={"streaming_count": 1})
+    db = _reopen(path, monkeypatch)
+    assert db.backfill_next("streaming") is None
+    with db.connect() as c:
+        r = c.execute("SELECT streaming, streaming_count FROM movies WHERE id=?", (found,)).fetchone()
+    assert r["streaming"] == "Hulu" and r["streaming_count"] == 1
+
+
+def test_rematch_clears_streaming_count(db):
+    # the count was the old title's, like the provider name beside it
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_id=1, streaming='Hulu', streaming_count=3, "
+                  "streaming_status='ok' WHERE id=?", (mid,)); c.commit()
+    assert db.rematch_item("movie", mid, "tmdb", 2) is True
+    with db.connect() as c:
+        r = c.execute("SELECT streaming, streaming_count, streaming_status FROM movies WHERE id=?",
+                      (mid,)).fetchone()
+    assert r["streaming"] is None and r["streaming_count"] is None and r["streaming_status"] is None
 
 
 def test_streaming_fetch_empty_when_no_providers(db, monkeypatch):
