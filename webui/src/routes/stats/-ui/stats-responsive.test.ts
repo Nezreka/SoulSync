@@ -41,60 +41,32 @@ describe('stats page responsiveness', () => {
     }
   });
 
-  it('adjusts bento grids and overview layout for tablet viewports', () => {
+  it('stacks the paired cards and the hero as the page narrows', () => {
     expect(statsCss).toMatch(
-      /@media \(max-width: 1200px\)[\s\S]*?\.statsActivityRow\s*\{[^}]*grid-template-columns:\s*1fr;/,
+      /@media \(max-width: 1200px\)[\s\S]*?\.two\s*\{[^}]*grid-template-columns:\s*1fr;/,
     );
     expect(statsCss).toMatch(
-      /@media \(max-width: 1200px\)[\s\S]*?\.statsTopShowcase\s*\{[^}]*grid-template-columns:\s*1fr;/,
+      /@media \(max-width: 860px\)[\s\S]*?\.hero\s*\{[^}]*grid-template-columns:\s*1fr;/,
     );
     expect(statsCss).toMatch(
-      /@media \(max-width: 1200px\)[\s\S]*?\.statsInsightsRow\s*\{[^}]*grid-template-columns:\s*1fr;/,
-    );
-
-    expect(statsCss).toMatch(
-      /@media \(max-width: 860px\)[\s\S]*?\.statsOverview\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*1fr\);/,
-    );
-    expect(statsCss).toMatch(
-      /@media \(max-width: 860px\)[\s\S]*?\.statsHealthGrid\s*\{[^}]*grid-template-columns:\s*1fr\s+1fr;/,
+      /@media \(max-width: 860px\)[\s\S]*?\.figures\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*1fr\);/,
     );
   });
 
-  it('optimizes mobile controls, full-width sync bar, and heatmap alignment', () => {
-    // Overview stacks to 1 column on mobile
+  it('fits the sync line, the heatmap and the lists to a phone', () => {
+    expect(statsCss).toMatch(/@media \(max-width: 580px\)[\s\S]*?\.sync\s*\{[^}]*width:\s*100%;/);
+    // Listening clock heatmap rows keep their 24 hour columns
     expect(statsCss).toMatch(
-      /@media \(max-width: 580px\)[\s\S]*?\.statsOverview\s*\{[^}]*grid-template-columns:\s*1fr;/,
+      /@media \(max-width: 580px\)[\s\S]*?\.clockRow\s*\{[^}]*grid-template-columns:\s*24px\s+repeat\(24,\s*1fr\);/,
     );
-
-    // Sync bar and controls adapt to full-width mobile container
-    expect(statsCss).toMatch(
-      /@media \(max-width: 580px\)[\s\S]*?\.statsSyncControls\s*\{[^}]*width:\s*100%;/,
-    );
-    expect(statsCss).toMatch(
-      /@media \(max-width: 580px\)[\s\S]*?\.historyImportControl\s*\{[^}]*width:\s*100%;/,
-    );
-
-    // Listening clock heatmap row and axis alignment
-    expect(statsCss).toMatch(
-      /@media \(max-width: 580px\)[\s\S]*?\.statsClockRow\s*\{[^}]*grid-template-columns:\s*24px\s+repeat\(24,\s*1fr\);/,
-    );
-    expect(statsCss).toMatch(
-      /@media \(max-width: 580px\)[\s\S]*?\.statsClockAxis\s*\{[^}]*grid-template-columns:\s*24px\s+repeat\(4,\s*1fr\);/,
-    );
-    expect(statsCss).toMatch(
-      /@media \(max-width: 580px\)[\s\S]*?\.statsClockAxisLabel\s*\{[^}]*font-size:\s*0\.6rem;/,
-    );
-
-    // Section cards reclaim padding for small screen space
-    expect(statsCss).toMatch(
-      /@media \(max-width: 580px\)[\s\S]*?\.statsSectionCard\s*\{[^}]*padding:\s*16px\s+12px;/,
-    );
+    // the page clears the shell's menu button
+    expect(statsCss).toMatch(/@media \(max-width: 580px\)[\s\S]*?\.page\s*\{[^}]*padding:\s*60px/);
   });
 
-  it('provides safe horizontal scrolling for top artist bubbles on mobile', () => {
-    expect(statsCss).toContain('overflow-x: auto;');
-    expect(statsCss).toContain('-webkit-overflow-scrolling: touch;');
-    expect(statsStyles.statsTopArtistsVisual).toBeDefined();
+  it('keeps a shelf to one row until it is opened', () => {
+    expect(statsCss).toMatch(/\.shelf\s*\{[^}]*grid-auto-rows:\s*0;[^}]*overflow:\s*hidden;/);
+    expect(statsCss).toMatch(/\.shelfAll\s*\{[^}]*grid-auto-rows:\s*auto;/);
+    expect(statsStyles.shelf).toBeDefined();
   });
 
   it('declares responsive breakpoints and safe navigation for the Year Story', () => {

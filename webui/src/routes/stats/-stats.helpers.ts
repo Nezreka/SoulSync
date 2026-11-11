@@ -91,6 +91,90 @@ export function getStatsRangeLabel(range: StatsRange): string {
   }
 }
 
+/** The range as the end of a sentence: "1,317 plays in the last 30 days". */
+export function statsRangePhrase(range: StatsRange): string {
+  switch (range) {
+    case '7d':
+      return 'in the last 7 days';
+    case '30d':
+      return 'in the last 30 days';
+    case '12m':
+      return 'in the last 12 months';
+    case 'all':
+      return 'all time';
+  }
+}
+
+const RANGE_DAYS: Partial<Record<StatsRange, number>> = { '7d': 7, '30d': 30 };
+
+export interface PeriodSentencePart {
+  text: string;
+  /** a figure the eye should land on */
+  strong?: boolean;
+}
+
+/**
+ * The period in one sentence, as parts so the figures can be weighted.
+ *
+ * Five tiles say how much. This says what kind of month it was: how wide the
+ * listening went, what it mostly was, when it mostly happened, and how many
+ * of the days had music in them. Every clause is left out when its number is
+ * missing rather than filled with a zero, and the days clause only exists for
+ * the ranges that are a count of days.
+ */
+export function periodSentence(
+  range: StatsRange,
+  overview: Partial<StatsOverview>,
+  extras: {
+    topGenre?: string | null;
+    peak?: { weekday: number | null; hour: number | null } | null;
+    activeDays?: number | null;
+  } = {},
+): PeriodSentencePart[] {
+  const tracks = overview.unique_tracks ?? 0;
+  const artists = overview.unique_artists ?? 0;
+  if (!tracks || !artists) return [];
+  const parts: PeriodSentencePart[] = [
+    { text: 'You played ' },
+    { text: `${tracks.toLocaleString('en-US')} ${tracks === 1 ? 'song' : 'songs'}`, strong: true },
+    { text: ' by ' },
+    {
+      text: `${artists.toLocaleString('en-US')} ${artists === 1 ? 'artist' : 'artists'}`,
+      strong: true,
+    },
+  ];
+  if (overview.total_time_ms) {
+    parts.push(
+      { text: ' for ' },
+      { text: formatListeningTime(overview.total_time_ms), strong: true },
+    );
+  }
+  parts.push({ text: '.' });
+  const tail: PeriodSentencePart[][] = [];
+  if (extras.topGenre) tail.push([{ text: 'mostly ' }, { text: extras.topGenre, strong: true }]);
+  const slot = formatPeakSlot(extras.peak?.weekday, extras.peak?.hour);
+  if (slot) {
+    const [day, hour] = slot.split(' ');
+    tail.push([{ text: 'most often on ' }, { text: `${day} around ${hour}`, strong: true }]);
+  }
+  const days = RANGE_DAYS[range];
+  if (days && extras.activeDays) {
+    tail.push([
+      { text: `${Math.min(extras.activeDays, days)} of the ${days} days`, strong: true },
+      { text: ' had music in them' },
+    ]);
+  }
+  tail.forEach((clause, index) => {
+    const lead = index === 0 ? ' ' : index === tail.length - 1 ? ', and ' : ', ';
+    const [first, ...rest] = clause;
+    const text =
+      index === 0 ? first.text.charAt(0).toUpperCase() + first.text.slice(1) : first.text;
+    parts.push({ text: lead }, { ...first, text }, ...rest);
+  });
+  if (tail.length) parts.push({ text: '.' });
+  return parts;
+}
+
 export function hasStatsData(overview: Partial<StatsOverview> | undefined): boolean {
   return (overview?.total_plays ?? 0) > 0;
 }

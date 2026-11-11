@@ -1,1422 +1,1025 @@
 /* =========================================================================
-   SoulSync Stats Page — Premier Apple / Meta Design System
-   Rich obsidian dark mode, radiant glassmorphic cards, luminous accents,
-   and executive 3-tier Bento architecture.
+   Stats page
+
+   One calm column capped at 1440: the period in a sentence and the artist it
+   belonged to, then when, who and what, then what is going unheard.
+
+   One type scale (12 / 13 / 14 / 15 / 20 / 28), three weights, every button a
+   32px capsule or a plain link, the accent kept for the data itself.
    ========================================================================= */
 
-.statsContainer {
-  margin: 18px;
-  padding: 24px 28px 36px;
-  overflow: hidden;
-  background:
-    radial-gradient(1100px 600px at 50% -10%, rgba(var(--accent-rgb), 0.09) 0%, transparent 70%),
-    radial-gradient(900px 500px at 85% 85%, rgba(139, 92, 246, 0.06) 0%, transparent 60%),
-    linear-gradient(180deg, rgba(16, 18, 24, 0.85) 0%, rgba(10, 12, 16, 0.95) 100%);
-  border-radius: 26px;
-  border: 1px solid var(--white-a08);
-  border-top: 1px solid var(--white-a14);
-  box-shadow:
-    0 24px 60px -12px var(--black-a65),
-    0 8px 24px -4px var(--black-a40),
-    inset 0 1px 0 var(--white-a10);
-  backdrop-filter: blur(28px);
-}
-
-/* =========================================================================
-   Header Primary Actions
-   ========================================================================= */
-
-.headerPrimaryActions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-/* VIP "Your Year" Button */
-.statsYearButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 18px;
-  border: 1px solid rgba(var(--accent-light-rgb), 0.45);
-  border-radius: var(--radius-pill);
-  background: linear-gradient(
-    135deg,
-    rgba(var(--accent-light-rgb), 0.18) 0%,
-    rgba(16, 185, 129, 0.1) 100%
-  );
-  color: #34d399;
-  font-family: inherit;
-  font-size: 0.84rem;
-  font-weight: 750;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.24s var(--ease-emphasized);
-  box-shadow:
-    0 0 20px rgba(var(--accent-light-rgb), 0.2),
-    inset 0 1px 0 var(--white-a20);
-}
-
-.statsYearButton:hover {
-  background: linear-gradient(135deg, var(--accent-light) 0%, #10b981 100%);
-  border-color: var(--accent-light);
-  color: #04160b;
-  transform: translateY(-1px) scale(1.03);
-  box-shadow:
-    0 6px 24px rgba(var(--accent-light-rgb), 0.45),
-    0 0 35px rgba(var(--accent-light-rgb), 0.3);
-}
-
-.statsYearButton:active {
-  transform: translateY(0) scale(0.98);
-}
-
-.yearSparkle {
-  font-size: 0.95rem;
-  animation: sparkleRotate 6s ease-in-out infinite alternate;
-}
-
-@keyframes sparkleRotate {
-  0% {
-    transform: scale(1) rotate(0deg);
-  }
-  100% {
-    transform: scale(1.2) rotate(20deg);
-  }
-}
-
-/* Segmented Tabs (Listening | Library) */
-.statsTabs {
-  display: inline-flex;
-  gap: 3px;
-  padding: 4px;
-  border-radius: var(--radius-lg);
-  background: var(--white-a05);
-  border: 1px solid var(--white-a07);
-  backdrop-filter: blur(12px);
-}
-
-.statsTab {
-  padding: 6px 16px;
-  border: 0;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--white-a60);
-  font-family: inherit;
-  font-size: 0.82rem;
-  font-weight: 650;
-  cursor: pointer;
-  transition: all var(--dur-quick) var(--ease-emphasized);
-}
-
-.statsTab:hover {
-  color: rgba(255, 255, 255, 0.95);
-  background: var(--white-a05);
-}
-
-.statsTabActive {
-  background: var(--white-a15) !important;
-  color: #fff !important;
-  box-shadow:
-    0 2px 8px var(--black-a35),
-    inset 0 1px 0 var(--white-a20);
-}
-
-/* Time Range Selector */
-.statsTimeRange {
-  display: flex;
-  gap: 3px;
-  padding: 4px;
-  border-radius: var(--radius-lg);
-  background: var(--white-a04);
-  border: 1px solid var(--white-a06);
-  backdrop-filter: blur(12px);
-}
-
-.statsRangeButton {
-  padding: 6px 15px;
-  border: none;
-  border-radius: 9px;
-  background: transparent;
-  color: var(--white-a55);
-  font-size: 0.8rem;
-  font-weight: 650;
-  cursor: pointer;
-  transition: all var(--dur-quick) ease;
-  font-family: inherit;
-}
-
-.statsRangeButton:hover {
-  color: var(--white-a90);
-  background: var(--white-a05);
-}
-
-.statsRangeButtonActive {
-  background: rgb(var(--accent-rgb)) !important;
-  color: #fff !important;
-  box-shadow:
-    0 2px 10px rgba(var(--accent-rgb), 0.4),
-    inset 0 1px 0 var(--white-a25);
-}
-
-/* =========================================================================
-   Dedicated Executive Data Sources & Sync Bar
-   ========================================================================= */
-
-.statsSyncBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin: 14px 0 24px;
-  padding: 10px 16px;
-  border-radius: var(--radius-xl);
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid var(--white-a06);
-  backdrop-filter: blur(20px);
-}
-
-.statsServerSync {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.statsServerSyncGroup {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.statsSyncStatusDot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-circle);
-  background: #34d399;
-  box-shadow: 0 0 8px rgba(52, 211, 153, 0.7);
-  flex-shrink: 0;
-}
-
-.statsLastSynced {
-  font-size: 0.78rem;
-  color: var(--white-a45);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 500;
-}
-
-.statsStandaloneNotice {
-  font-size: 0.76rem;
-  line-height: 1.35;
-  color: rgba(255, 255, 255, 0.42);
-}
-
-.statsSyncButton {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-control);
-  border: 1px solid var(--white-a10);
-  background: var(--white-a05);
-  color: var(--white-a70);
-  font-size: 15px;
-  cursor: pointer;
-  transition: all var(--dur-base) var(--ease-emphasized);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.statsSyncButton:hover {
-  background: rgba(var(--accent-rgb), 0.2);
-  color: #fff;
-  border-color: rgba(var(--accent-rgb), 0.5);
-  transform: scale(1.05);
-  box-shadow: 0 0 12px rgba(var(--accent-rgb), 0.3);
-}
-
-.statsSyncButtonSyncing {
-  pointer-events: none;
-  color: transparent;
-  position: relative;
-}
-
-.statsSyncButtonSyncing::after {
-  content: '';
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(var(--accent-rgb), 0.2);
-  border-top-color: rgb(var(--accent-rgb));
-  border-radius: var(--radius-circle);
-  animation: global(spin) 0.75s linear infinite;
-}
-
-.statsSyncControls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-/* History Import Control Tile (Last.fm & ListenBrainz) */
-.historyImportControl {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px 14px;
-  width: 270px;
-  max-width: 100%;
-  padding: 9px 13px;
-  border: 1px solid var(--white-a08);
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.035);
-  backdrop-filter: blur(14px);
-  transition: all var(--dur-base) ease;
-}
-
-.historyImportControl:hover {
-  border-color: var(--white-a14);
-  background: var(--white-a05);
-}
-
-.historyImportInfo {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.historyImportService {
-  color: rgba(255, 255, 255, 0.95);
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.historyImportAccount,
-.historyImportStatus {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.72rem;
-  color: var(--white-a45);
-}
-
-.historyImportStatus {
-  color: var(--white-a70);
-  font-weight: 550;
-}
-
-.historyImportButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 12px;
-  border-radius: 9px;
-  border: 1px solid var(--white-a12);
-  background: var(--white-a06);
-  color: var(--white-a90);
-  font: inherit;
-  font-size: 0.75rem;
-  font-weight: 650;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: all var(--dur-base) var(--ease-emphasized);
-}
-
-.historyImportButton:hover:not(:disabled) {
-  background: rgba(var(--accent-rgb), 0.18);
-  border-color: rgba(var(--accent-rgb), 0.5);
-  color: #fff;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.25);
-}
-
-.historyImportButton:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.historyImportProgress {
-  grid-column: 1 / -1;
-  width: 100%;
-  height: 4px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  overflow: hidden;
-  accent-color: rgb(var(--accent-rgb));
-}
-
-.historyImportProgress::-webkit-progress-bar {
-  background: var(--white-a08);
-}
-
-.historyImportProgress::-webkit-progress-value {
-  background: rgb(var(--accent-rgb));
-}
-
-/* =========================================================================
-   Executive Bento Overview Cards
-   ========================================================================= */
-
-.statsOverview {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.statsCard {
-  background: linear-gradient(145deg, rgba(24, 28, 36, 0.75) 0%, rgba(14, 16, 22, 0.85) 100%);
-  border: 1px solid var(--white-a07);
-  border-radius: var(--radius-sheet);
-  padding: 18px 20px 16px;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.28s var(--ease-emphasized);
-  box-shadow: 0 8px 28px var(--black-a35);
+.page {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 32px 36px 80px;
   display: flex;
   flex-direction: column;
-}
-
-.statsCard::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 10%;
-  right: 10%;
-  height: 1.5px;
-  background: linear-gradient(90deg, transparent, rgba(var(--accent-rgb), 0.6), transparent);
-}
-
-.statsCard:hover {
-  transform: translateY(-3px);
-  border-color: rgba(var(--accent-rgb), 0.3);
-  box-shadow:
-    0 14px 36px var(--black-a50),
-    0 0 20px rgba(var(--accent-rgb), 0.15);
-}
-
-.statsCardHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-}
-
-.statsCardLabel {
-  font-size: 0.74rem;
-  color: rgba(255, 255, 255, 0.48);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-weight: 700;
-}
-
-.statsCardIconWrap {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
-  background: rgba(var(--accent-rgb), 0.12);
-  color: rgb(var(--accent-rgb));
-}
-
-.statsCardValue {
-  font-size: 2.1rem;
-  font-weight: 800;
-  color: #fff;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-  font-variant-numeric: tabular-nums;
-  margin-bottom: 8px;
-}
-
-/* Comparison delta pill */
-.statsCardDelta {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 4px;
-  padding: 3px 9px;
-  border-radius: var(--radius-pill);
-  font-size: 0.72rem;
-  font-weight: 650;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-}
-
-.statsCardDelta_up {
-  background: rgba(var(--success-rgb), 0.12);
-  color: var(--success);
-  border: 1px solid rgba(var(--success-rgb), 0.25);
-}
-
-.statsCardDelta_down {
-  background: rgba(248, 113, 113, 0.12);
-  color: var(--danger-light);
-  border: 1px solid rgba(248, 113, 113, 0.25);
-}
-
-.statsCardDelta_flat {
-  background: var(--white-a05);
-  color: var(--white-a50);
-  border: 1px solid var(--white-a08);
-}
-
-.statsCardDeltaNew {
-  background: rgba(var(--accent-rgb), 0.14);
-  color: rgb(var(--accent-rgb));
-  border: 1px solid rgba(var(--accent-rgb), 0.3);
-}
-
-/* =========================================================================
-   Bento Grid Layout: 3 Logical Tiers
-   ========================================================================= */
-
-.statsMainGrid {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-}
-
-/* Section Card Base */
-.statsSectionCard {
-  background: linear-gradient(155deg, rgba(22, 26, 34, 0.65) 0%, rgba(14, 16, 22, 0.75) 100%);
-  border: 1px solid var(--white-a07);
-  border-radius: 20px;
-  padding: 22px;
-  backdrop-filter: blur(20px);
-  box-shadow: 0 10px 30px var(--black-a30);
-  transition: all var(--dur-moderate) ease;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.statsSectionCard:hover {
-  border-color: var(--white-a12);
-  box-shadow: 0 14px 40px var(--black-a40);
-}
-
-.statsSectionTitle {
-  font-size: 0.78rem;
-  font-weight: 750;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--white-a50);
-  margin-bottom: 18px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--white-a06);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-/* Tier 1: Activity Row (Activity Timeline + When You Listen) */
-.statsActivityRow {
-  display: grid;
-  grid-template-columns: 1.25fr 1fr;
   gap: 20px;
+  color: var(--text-1);
+  font-size: 14px;
+  line-height: 1.45;
 }
 
-.chartContainer {
-  position: relative;
-  height: 250px;
-  width: 100%;
+@keyframes statsViewIn {
+  from {
+    opacity: 0.4;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
-/* When You Listen (Clock & Rhythm) */
-.statsClock {
+@keyframes statsGrowY {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes statsGrowX {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: none;
+  }
+}
+
+.view {
   display: flex;
   flex-direction: column;
+  gap: 20px;
+  animation: statsViewIn 0.3s var(--ease-emphasized);
+}
+
+/* ── Header ─────────────────────────────────────────────────────────────── */
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 16px;
 }
 
-.statsClockContext {
+.headMain {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.headMain h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.headSub {
+  margin: 2px 0 0;
+  color: var(--white-a65);
+  font-size: 14px;
+}
+
+.headActs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--white-a50);
-  font-size: 0.78rem;
+  gap: 10px;
 }
 
-.statsClockContextLabel {
-  color: var(--white-a85);
-  font-weight: 700;
-}
-
-.statsClockContextRange {
-  margin-left: 5px;
-}
-
-.statsClockContext strong {
-  color: rgb(var(--accent-rgb));
-  font-size: 0.85rem;
-  font-weight: 750;
+.cap {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--white-a10);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
-}
-
-.statsClockGrid {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.statsClockRow {
-  display: grid;
-  grid-template-columns: 32px repeat(24, 1fr);
-  gap: 3.5px;
-  align-items: center;
-}
-
-.statsClockDay {
-  font-size: 0.68rem;
-  font-weight: 650;
-  color: var(--white-a45);
-  text-align: right;
-  padding-right: 4px;
-  text-transform: uppercase;
-}
-
-.statsClockCell {
-  aspect-ratio: 1;
-  min-height: 10px;
-  border-radius: 3px;
-  background: rgb(var(--accent-rgb));
-  border: none;
-  padding: 0;
-  transition:
-    transform var(--dur-fast) ease,
-    filter var(--dur-fast) ease;
-}
-
-.statsClockCell:disabled {
-  cursor: default;
-}
-
-.statsClockCellActive {
   cursor: pointer;
+  transition: background var(--dur-base);
 }
 
-.statsClockCellActive:hover {
-  transform: scale(1.4);
-  z-index: 2;
-  filter: brightness(1.25);
-  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.6);
+.cap:hover {
+  background: var(--white-a16);
 }
 
-.statsClockCellActive:focus-visible {
+.seg {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--white-a08);
+  border-radius: 20px;
+  background: var(--white-a03);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.seg[hidden] {
+  display: none;
+}
+
+.segButton {
+  height: 32px;
+  min-height: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 16px;
+  background: none;
+  color: var(--white-a65);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-base),
+    color var(--dur-base);
+}
+
+.segButton:hover {
+  color: var(--text-1);
+}
+
+.segButton[aria-pressed='true'],
+.segButton[aria-selected='true'] {
+  background: var(--white-a10);
+  color: var(--text-1);
+}
+
+.cap:focus-visible,
+.segButton:focus-visible,
+.linkButton:focus-visible,
+.iconButton:focus-visible,
+.tileButton:focus-visible,
+.tile:focus-visible,
+.heroArt:focus-visible,
+.bar:focus-visible,
+.clockCell:focus-visible {
   outline: 2px solid rgb(var(--accent-rgb));
   outline-offset: 2px;
 }
 
-.statsClockAxis {
-  display: grid;
-  grid-template-columns: 32px repeat(4, 1fr);
-  gap: 3.5px;
-  margin-top: 4px;
-}
-
-.statsClockAxisLabel {
-  font-size: 0.68rem;
-  color: rgba(255, 255, 255, 0.38);
-  font-weight: 550;
-}
-
-.statsClockEmpty {
-  padding: 32px 0;
-  text-align: center;
-  font-size: 0.9rem;
-  color: var(--white-a45);
-}
-
-/* Rhythm habit pulse widget */
-.statsRhythm {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 10px;
-  padding-top: 14px;
-  border-top: 1px solid var(--white-a06);
-}
-
-.statsRhythmItem {
+.subBar {
   display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 10px 12px;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid var(--white-a06);
-}
-
-.statsRhythmValue {
-  font-size: 1.15rem;
-  font-weight: 800;
-  color: #fff;
-  font-variant-numeric: tabular-nums;
-}
-
-.statsRhythmLabel {
-  font-size: 0.7rem;
-  color: var(--white-a45);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-}
-
-/* =========================================================================
-   Tier 2: Top Music Showcase (3 Columns: Artists, Albums, Tracks)
-   ========================================================================= */
-
-.statsTopShowcase {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-
-/* Top Artist Bubbles */
-.statsTopArtistsVisual {
-  margin-bottom: 16px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--white-a06);
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-}
-
-.statsTopArtistsVisual::-webkit-scrollbar {
-  display: none;
-}
-
-.statsArtistBubbles {
-  display: flex;
-  justify-content: space-around;
-  align-items: flex-end;
-  gap: 10px;
-  min-width: min-content;
-}
-
-.statsArtistBubble {
-  display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  flex: 1;
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  color: inherit;
-  text-decoration: none;
-  font: inherit;
-  transition: transform 0.22s var(--ease-emphasized);
+  justify-content: space-between;
+  gap: 12px 20px;
 }
 
-.statsArtistBubbleDisabled {
+.sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 22px;
+  color: var(--white-a45);
+  font-size: 13px;
+}
+
+.syncItem {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.syncItem b {
+  color: var(--white-a70);
+  font-weight: 500;
+}
+
+.syncDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+}
+
+.syncQuiet {
+  color: var(--white-a45);
+}
+
+.syncBad {
+  color: rgb(var(--danger-rgb));
+}
+
+.syncProgress {
+  width: 72px;
+  height: 4px;
+  accent-color: rgb(var(--accent-rgb));
+}
+
+.linkButton {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--white-a70);
+  font: inherit;
+  font-size: 13px;
+  text-decoration: underline;
+  text-decoration-color: var(--white-a20);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: color var(--dur-base);
+}
+
+.linkButton:hover {
+  color: var(--text-1);
+}
+
+.linkButton:disabled {
+  color: var(--white-a35);
+  text-decoration: none;
   cursor: default;
 }
 
-.statsArtistBubble:hover {
-  transform: translateY(-4px);
+.rows + .linkButton {
+  margin-top: 12px;
 }
 
-.statsBubbleImage {
-  border-radius: var(--radius-circle);
-  background-size: cover;
-  background-position: center;
-  background-color: var(--white-a08);
-  border: 2px solid rgba(var(--accent-rgb), 0.35);
-  box-shadow:
-    0 8px 24px var(--black-a40),
-    0 0 16px rgba(var(--accent-rgb), 0.2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: all 0.22s ease;
-}
-
-.statsArtistBubble:hover .statsBubbleImage {
-  border-color: rgb(var(--accent-rgb));
-  box-shadow:
-    0 10px 28px var(--black-a50),
-    0 0 24px rgba(var(--accent-rgb), 0.45);
-}
-
-.statsBubbleInitial {
-  font-size: 1.25rem;
-  font-weight: 800;
-  color: var(--white-a60);
-}
-
-.statsBubbleBarContainer {
-  width: 100%;
-  height: 3.5px;
-  background: var(--white-a07);
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-}
-
-.statsBubbleBar {
-  height: 100%;
-  background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.5));
-  border-radius: var(--radius-pill);
-}
-
-.statsBubbleName {
-  font-size: 0.76rem;
-  color: var(--white-a85);
-  font-weight: 600;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-
-.statsBubbleCount {
-  font-size: 0.7rem;
-  color: rgba(var(--accent-rgb), 0.9);
-  font-weight: 700;
-}
-
-/* Ranked Items (Artists, Albums, Tracks) */
-.statsRankedList,
-.statsRecentList {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 360px;
-  overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--white-a12) transparent;
-  padding-right: 4px;
-}
-
-.statsRankedItem,
-.statsRecentItem {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 10px;
-  border-radius: var(--radius-lg);
-  background: var(--white-a02);
-  border: 1px solid transparent;
-  transition: all var(--dur-base) ease;
-}
-
-.statsRankedItem:hover,
-.statsRecentItem:hover {
-  background: var(--white-a06);
-  border-color: var(--white-a08);
-  transform: translateX(2px);
-}
-
-.statsRankedNum {
-  font-size: 0.78rem;
-  font-weight: 800;
-  width: 22px;
-  height: 22px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--white-a40);
-}
-
-/* Gold, silver, bronze ranks */
-.statsRankedItem:nth-child(1) .statsRankedNum {
-  background: linear-gradient(135deg, var(--warning) 0%, #d97706 100%);
-  color: #000;
-  box-shadow: 0 0 10px rgba(var(--warning-rgb), 0.4);
-}
-
-.statsRankedItem:nth-child(2) .statsRankedNum {
-  background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
-  color: #000;
-}
-
-.statsRankedItem:nth-child(3) .statsRankedNum {
-  background: linear-gradient(135deg, #f97316 0%, #b45309 100%);
-  color: #000;
-}
-
-.statsRankedImage,
-.statsRankedImageFallback {
-  width: 42px;
-  height: 42px;
-  border-radius: var(--radius-md);
-  flex-shrink: 0;
-  background: var(--white-a06);
-  object-fit: cover;
-  box-shadow: 0 4px 12px var(--black-a30);
-}
-
-.statsRankedInfo {
-  flex: 1;
+/* ── Cards ──────────────────────────────────────────────────────────────── */
+.card {
   min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--white-a08);
+  border-radius: 16px;
+  background: var(--white-a03);
 }
 
-.statsRankedName {
-  font-size: 0.9rem;
-  color: rgba(255, 255, 255, 0.92);
-  font-weight: 650;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.cardHead {
   display: flex;
-  align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
-.statsRankedMeta {
-  font-size: 0.74rem;
+.cardHead h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cardHead span {
   color: var(--white-a45);
-  white-space: nowrap;
+  font-size: 13px;
+}
+
+.cardHead .linkButton {
+  margin-left: auto;
+}
+
+.two {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.none {
+  padding: 14px 0 4px;
+  color: var(--white-a65);
+  font-size: 13px;
+}
+
+/* ── The period, and who it belonged to ─────────────────────────────────── */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 340px) minmax(0, 1fr);
+  padding: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.statsRankedCount {
-  font-size: 0.8rem;
-  color: rgba(var(--accent-rgb), 0.95);
-  font-weight: 700;
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  padding: 3px 8px;
-  border-radius: var(--radius-sm);
-  background: rgba(var(--accent-rgb), 0.08);
-}
-
-.statsArtistLink {
+.heroArt {
+  position: relative;
+  display: block;
+  min-height: 300px;
+  background: var(--white-a05);
   color: inherit;
   text-decoration: none;
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  font: inherit;
-  transition: color var(--dur-fast) ease;
-}
-
-.statsArtistLink:hover {
-  color: rgb(var(--accent-rgb));
-}
-
-.statsSoulIdBadge {
-  width: 13px;
-  height: 13px;
-  opacity: 0.7;
-}
-
-/* Play button */
-.statsPlayButton {
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-circle);
-  border: none;
-  background: rgba(var(--accent-rgb), 0.18);
-  color: rgb(var(--accent-rgb));
-  font-size: 11px;
-  cursor: pointer;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all var(--dur-base) var(--ease-emphasized);
-  opacity: 0;
-  box-shadow: 0 4px 12px var(--black-a30);
-}
-
-.statsRankedItem:hover .statsPlayButton,
-.statsRecentItem:hover .statsPlayButton {
-  opacity: 1;
-}
-
-.statsPlayButton:hover {
-  background: rgb(var(--accent-rgb));
-  color: #fff;
-  transform: scale(1.15);
-  box-shadow: 0 0 16px rgba(var(--accent-rgb), 0.6);
-}
-
-.statsPlayButtonSmall {
-  width: 26px;
-  height: 26px;
-  font-size: 9px;
-}
-
-/* =========================================================================
-   Tier 3: Insights & Recents (Own vs Play, Genre Breakdown, Recents)
-   ========================================================================= */
-
-.statsInsightsRow {
-  display: grid;
-  grid-template-columns: 1.15fr 1fr 1.15fr;
-  gap: 20px;
-}
-
-/* Own vs Play */
-.statsOwnPlay {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.statsOwnPlayRow {
-  display: grid;
-  grid-template-columns: 90px 1fr 48px;
-  gap: 12px;
-  align-items: center;
-}
-
-.statsOwnPlayGenre {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--white-a80);
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.statsOwnPlayBars {
+.heroArt .artImg {
+  position: absolute;
+  inset: 0;
+  transition: transform 0.5s var(--ease-emphasized);
+}
+
+.heroArt:hover .artImg {
+  transform: scale(1.03);
+}
+
+.heroArt .artFallback {
+  position: absolute;
+  inset: 0;
+  font-size: 96px;
+}
+
+.heroShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, var(--black-a80), transparent 55%);
+}
+
+.heroCaption {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 18px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
-.statsOwnPlayOwned,
-.statsOwnPlayPlayed {
-  height: 7px;
-  border-radius: var(--radius-pill);
-  min-width: 3px;
-  transition: width var(--dur-slow) ease;
-}
-
-.statsOwnPlayOwned {
-  background: rgba(255, 255, 255, 0.28);
-}
-
-.statsOwnPlayPlayed {
-  background: rgb(var(--accent-rgb));
-  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.4);
-}
-
-.statsOwnPlayGap {
-  font-size: 0.8rem;
-  font-weight: 800;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-.statsOwnPlayGapUp {
-  color: var(--success);
-}
-
-.statsOwnPlayGapDown {
-  color: var(--danger-light);
-}
-
-.statsOwnPlayLegend {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
-  font-size: 0.74rem;
-  color: var(--white-a45);
-}
-
-.statsOwnPlayKeyOwned,
-.statsOwnPlayKeyPlayed {
-  width: 14px;
-  height: 6px;
-  border-radius: 3px;
-}
-
-.statsOwnPlayKeyOwned {
-  background: rgba(255, 255, 255, 0.28);
-}
-
-.statsOwnPlayKeyPlayed {
-  background: rgb(var(--accent-rgb));
-  margin-left: 10px;
-}
-
-.statsNeglected {
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--white-a06);
-}
-
-.statsNeglectedTitle {
-  font-size: 0.74rem;
-  font-weight: 750;
-  color: var(--white-a55);
+.heroCaption small {
+  color: var(--white-a70);
+  font-size: 12px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 8px;
 }
 
-.statsNeglectedRow {
-  display: grid;
-  grid-template-columns: 1fr auto 30px;
-  gap: 10px;
-  padding: 5px 0;
-  font-size: 0.8rem;
+.heroCaption b {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
 }
 
-.statsNeglectedName {
-  color: var(--white-a85);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 550;
+.heroCaption span {
+  color: var(--white-a80);
+  font-size: 13px;
 }
 
-.statsNeglectedArtist {
-  color: var(--white-a45);
-}
-
-.statsNeglectedCount {
-  color: var(--white-a35);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* Genre Breakdown */
-.statsGenreChartContainer {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.statsGenreChartWrap {
-  width: 180px;
-  height: 180px;
-  flex-shrink: 0;
-}
-
-.statsGenreLegend {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.heroBody {
   min-width: 0;
-}
-
-.statsGenreLegendItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.82rem;
-  color: var(--white-a75);
-}
-
-.statsGenreDot,
-.statsDbLegendDot {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-
-.statsGenrePct {
-  margin-left: auto;
-  color: var(--white-a45);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-/* Recently Played Live Feed */
-.statsRecentTitle {
-  flex: 1;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--white-a90);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.statsRecentArtist {
-  font-size: 0.78rem;
-  color: var(--white-a45);
-  flex-shrink: 0;
-}
-
-.statsRecentTime {
-  font-size: 0.74rem;
-  color: rgba(255, 255, 255, 0.32);
-  flex-shrink: 0;
-  min-width: 65px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
-/* =========================================================================
-   Library Tab (Operational Facts)
-   ========================================================================= */
-
-.statsLibraryGrid {
+  padding: 24px 28px;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 22px;
 }
 
-.statsFullWidth {
-  width: 100%;
+.heroSay {
+  max-width: 34em;
+  margin: 0;
+  color: var(--white-a65);
+  font-size: 20px;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
 }
 
-.statsHealthGrid {
+.heroSay b {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.figures {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
-.statsHealthItem {
-  text-align: center;
-  padding: 14px;
-  border-radius: var(--radius-card);
-  background: rgba(255, 255, 255, 0.025);
-  border: 1px solid var(--white-a05);
+.figuresFour {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.statsHealthItemWide {
-  text-align: left;
+.figure {
+  min-width: 0;
+  padding: 0 18px;
+  border-left: 1px solid var(--white-a08);
 }
 
-.statsHealthValue {
-  font-size: 1.8rem;
-  font-weight: 800;
-  color: #fff;
-  line-height: 1.15;
-  margin-bottom: 4px;
+.figure:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.figure b {
+  display: block;
+  font: 600 28px var(--font-mono);
   letter-spacing: -0.02em;
-}
-
-.statsHealthLabel {
-  font-size: 0.74rem;
-  color: var(--white-a45);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 700;
-}
-
-.statsFormatBar {
-  display: flex;
-  height: 28px;
-  border-radius: 9px;
-  overflow: hidden;
-  margin-top: 10px;
-  background: var(--white-a05);
-  box-shadow: inset 0 1px 3px var(--black-a40);
-}
-
-.statsFormatSegment {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #fff;
   white-space: nowrap;
-  min-width: 32px;
 }
 
-.statsEnrichment {
-  display: flex;
-  gap: 16px;
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--white-a05);
-  flex-wrap: wrap;
-}
-
-.statsEnrichItem {
-  flex: 1;
-  min-width: 140px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.statsEnrichName {
-  font-size: 0.76rem;
-  color: var(--white-a55);
-  min-width: 75px;
-  font-weight: 600;
-}
-
-.statsEnrichBar {
-  flex: 1;
-  height: 5px;
-  background: var(--white-a06);
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-}
-
-.statsEnrichFill {
-  height: 100%;
-  border-radius: var(--radius-pill);
-}
-
-.statsEnrichPct {
-  font-size: 0.76rem;
+.figure span {
+  display: block;
   color: var(--white-a45);
-  font-variant-numeric: tabular-nums;
-  min-width: 32px;
-  text-align: right;
+  font-size: 13px;
+}
+
+.figure em {
+  display: block;
+  margin-top: 2px;
+  color: var(--white-a45);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.figure .deltaUp {
+  color: rgb(var(--accent-rgb));
+}
+
+/* ── Listening activity ─────────────────────────────────────────────────── */
+.bars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 4px;
+  height: 170px;
+}
+
+.bar {
+  min-width: 0;
+  min-height: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px 3px 1px 1px;
+  background: var(--white-a20);
+  cursor: pointer;
+  transform-origin: bottom;
+  animation: statsGrowY 0.6s var(--ease-emphasized) backwards;
+  animation-delay: calc(var(--stats-i, 0) * 14ms);
+  transition: background var(--dur-base);
+}
+
+.bar:hover,
+.bar:focus-visible,
+.barPeak {
+  background: rgb(var(--accent-rgb));
+}
+
+.bar:disabled {
+  background: var(--white-a08);
+  cursor: default;
+}
+
+.barLabels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: var(--white-a45);
+  font: 11px var(--font-mono);
+}
+
+.readout {
+  min-height: 20px;
+  margin: 10px 0 0;
+  color: var(--white-a65);
+  font-size: 13px;
+}
+
+.readout b {
+  color: var(--text-1);
   font-weight: 600;
 }
 
-/* Disk usage */
-.statsDiskUsageWrap {
+/* ── When you listen ────────────────────────────────────────────────────── */
+.clock {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 3px;
 }
 
-.statsDiskTotalRow {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  flex-wrap: wrap;
+.clockRow {
+  display: grid;
+  grid-template-columns: 34px repeat(24, minmax(0, 1fr));
+  align-items: center;
+  gap: 3px;
 }
 
-.statsDiskTotalValue {
-  font-size: 2.2rem;
-  font-weight: 800;
-  color: rgb(var(--accent-rgb));
-  letter-spacing: -0.03em;
+.clockDay {
+  color: var(--white-a45);
+  font: 11px var(--font-mono);
 }
 
-.statsDiskTotalMeta {
-  font-size: 0.85rem;
-  color: var(--white-a55);
+.clockCell {
+  aspect-ratio: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: var(--white-a05);
+  cursor: default;
 }
 
-.statsDiskFormats {
+.clockCellActive {
+  background: rgb(var(--accent-rgb));
+  cursor: pointer;
+}
+
+.clockCellActive:hover {
+  outline: 1px solid var(--text-1);
+}
+
+.clockAxisLabel {
+  grid-column: span 6;
+  padding-top: 4px;
+  color: var(--white-a45);
+  font: 11px var(--font-mono);
+}
+
+.rhythm {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--white-a08);
+}
+
+.rhythmItem {
+  min-width: 0;
+  padding: 0 14px;
+  border-left: 1px solid var(--white-a08);
+}
+
+.rhythmItem:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.rhythmItem b {
+  display: block;
+  font: 600 20px var(--font-mono);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.rhythmItem span {
+  color: var(--white-a45);
+  font-size: 12px;
+}
+
+/* ── Shelves ────────────────────────────────────────────────────────────── */
+.shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  /* one row until asked for the rest */
+  grid-template-rows: auto;
+  grid-auto-rows: 0;
+  column-gap: 16px;
+  padding-top: 4px;
+  overflow: hidden;
+}
+
+.shelfAll {
+  grid-auto-rows: auto;
+  row-gap: 18px;
+}
+
+.tile {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  color: inherit;
+  text-decoration: none;
 }
 
-.statsDiskFormatRow {
-  display: grid;
-  grid-template-columns: 70px 1fr 90px;
-  align-items: center;
-  gap: 12px;
-  font-size: 0.82rem;
-}
-
-.statsDiskFormatName {
-  font-weight: 650;
-  color: var(--white-a85);
-  text-transform: uppercase;
-}
-
-.statsDiskFormatBar {
-  height: 8px;
-  background: var(--white-a06);
-  border-radius: var(--radius-pill);
-  overflow: hidden;
-}
-
-.statsDiskFormatFill {
-  height: 100%;
-  background: linear-gradient(90deg, rgb(var(--accent-rgb)) 0%, rgba(var(--accent-rgb), 0.6) 100%);
-  border-radius: var(--radius-pill);
-}
-
-.statsDiskFormatSize {
-  text-align: right;
-  color: var(--white-a50);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-/* Database storage */
-.statsDbStorageWrap {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-}
-
-.statsDbChartContainer {
-  position: relative;
-  width: 190px;
-  height: 190px;
-  flex-shrink: 0;
-  isolation: isolate;
-}
-
-.statsDbTotal {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.statsDbTotalValue {
-  font-size: 1.4rem;
-  font-weight: 800;
-  color: #fff;
+.tileCentered {
   text-align: center;
 }
 
-.statsDbTotalLabel {
-  font-size: 0.68rem;
-  color: var(--white-a45);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+.tileButton {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
 }
 
-.statsDbLegend {
-  flex: 1;
+.tileArt {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  background: var(--white-a05);
+  overflow: hidden;
+  transition: transform 0.25s var(--ease-emphasized);
+}
+
+.tileArtRound {
+  border-radius: 50%;
+}
+
+.tile:hover .tileArt {
+  transform: translateY(-3px);
+}
+
+.artImg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.artFallback {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(140deg, var(--white-a10), var(--white-a03));
+  color: var(--white-a45);
+  font-size: 28px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.rank {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--black-a65);
+  backdrop-filter: blur(6px);
+  color: var(--text-1);
+  font: 600 11px/22px var(--font-mono);
+  text-align: center;
+}
+
+.playBadge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgb(var(--accent-rgb));
+  color: var(--black-a90);
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity var(--dur-base),
+    transform var(--dur-base);
+}
+
+.playBadge svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.tile:hover .playBadge,
+.tileButton:focus-visible .playBadge {
+  opacity: 1;
+  transform: none;
+}
+
+.tileText {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  min-width: 0;
 }
 
-.statsDbLegendItem {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 0.82rem;
-  color: var(--white-a70);
-}
-
-.statsDbLegendName {
-  flex: 1;
-  min-width: 0;
+.tileName,
+.tileMeta {
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tileName {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.tileMeta {
+  color: var(--white-a65);
+  font-size: 13px;
+}
+
+.soulBadge {
+  width: 12px;
+  height: 12px;
+  margin-left: 5px;
+  vertical-align: -1px;
+  opacity: 0.8;
+}
+
+.meter {
+  display: block;
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 2px;
+  background: var(--white-a08);
+  overflow: hidden;
+}
+
+.meter i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: rgb(var(--accent-rgb));
+}
+
+.artistLink {
+  color: inherit;
+  text-decoration: none;
+  transition: color var(--dur-base);
+}
+
+.artistLink:hover {
+  color: rgb(var(--accent-light-rgb));
+}
+
+/* ── Lists ──────────────────────────────────────────────────────────────── */
+.rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 22px 44px minmax(0, 1fr) auto 32px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--white-a08);
+}
+
+.row:first-child {
+  border-top: 0;
+}
+
+.rowPlain {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.rowRecent {
+  grid-template-columns: minmax(0, 1fr) auto 32px;
+}
+
+.rowNum {
+  color: var(--white-a45);
+  font: 12px var(--font-mono);
+  text-align: right;
+}
+
+.rowArt {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: var(--white-a05);
+  overflow: hidden;
+}
+
+.rowArt .artFallback {
+  font-size: 16px;
+}
+
+.rowText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rowName,
+.rowMeta {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rowName {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.rowMeta {
+  color: var(--white-a65);
+  font-size: 13px;
+}
+
+.rowCount {
+  color: var(--white-a65);
+  font: 500 13px var(--font-mono);
   white-space: nowrap;
 }
 
-.statsDbLegendSize {
-  font-variant-numeric: tabular-nums;
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--white-a65);
+  cursor: pointer;
+  transition:
+    background var(--dur-base),
+    color var(--dur-base);
+}
+
+.iconButton:hover {
+  background: var(--white-a10);
+  color: var(--text-1);
+}
+
+.iconButton svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+/* ── Genres ─────────────────────────────────────────────────────────────── */
+.genreRow {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 0;
+}
+
+.genreName {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.genreBars {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.genreBars i {
+  display: block;
+  height: 6px;
+  min-width: 2px;
+  border-radius: 3px;
+  transform-origin: left;
+  animation: statsGrowX 0.6s var(--ease-emphasized) backwards;
+  animation-delay: calc(var(--stats-i, 0) * 30ms);
+}
+
+.genrePlayed {
+  background: rgb(var(--accent-rgb));
+}
+
+.genreOwned {
+  background: var(--white-a25);
+}
+
+.genreGap {
   color: var(--white-a45);
-  font-size: 0.78rem;
-  font-weight: 600;
+  font: 500 13px var(--font-mono);
+  text-align: right;
+}
+
+.genreGapUp {
+  color: rgb(var(--accent-rgb));
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 12px;
+  color: var(--white-a45);
+  font-size: 12px;
+}
+
+.legend i {
+  display: inline-block;
+  width: 14px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 3px;
+}
+
+.genreTop {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--white-a08);
+  color: var(--white-a65);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.genreTop b {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
+/* ── Library ────────────────────────────────────────────────────────────── */
+.formatBar {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.formatBar i {
+  display: block;
+  min-width: 3px;
+  background: var(--white-a20);
+}
+
+.formatBar i:first-child {
+  background: rgb(var(--accent-rgb));
+}
+
+.formatBar i:nth-child(2) {
+  background: var(--white-a45);
+}
+
+.formatLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 12px;
+  color: var(--white-a65);
+  font-size: 13px;
+}
+
+.formatLegend b {
+  margin-left: 6px;
+  color: var(--text-1);
+  font: 500 13px var(--font-mono);
+}
+
+.coverage {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px 28px;
+}
+
+.coverageRow {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.coverageRow > span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.coverageRow b {
+  color: var(--white-a65);
+  font: 500 13px var(--font-mono);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.track {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--white-a08);
+  overflow: hidden;
+}
+
+.track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: rgb(var(--accent-rgb));
+}
+
+.track .trackLow {
+  background: var(--white-a30);
+}
+
+.total {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 16px;
+}
+
+.total b {
+  font: 600 28px var(--font-mono);
+  letter-spacing: -0.02em;
+}
+
+.total span {
+  color: var(--white-a45);
+  font-size: 13px;
 }
 
 /* Empty / Loading States */
@@ -1654,184 +1257,106 @@
    ========================================================================= */
 
 @media (max-width: 1200px) {
-  .statsActivityRow {
+  .two {
     grid-template-columns: 1fr;
   }
 
-  .statsTopShowcase {
-    grid-template-columns: 1fr;
-  }
-
-  .statsInsightsRow {
-    grid-template-columns: 1fr;
+  .hero {
+    grid-template-columns: minmax(0, 280px) minmax(0, 1fr);
   }
 }
 
 @media (max-width: 860px) {
-  .statsContainer {
-    margin: 10px;
-    padding: 16px;
-    border-radius: var(--radius-sheet);
+  .page {
+    padding: 24px 20px 72px;
   }
 
-  .statsOverview {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .heroArt {
+    min-height: 220px;
+  }
+
+  .figures {
     grid-template-columns: repeat(2, 1fr);
+    row-gap: 16px;
   }
 
-  .statsHealthGrid {
-    grid-template-columns: 1fr 1fr;
+  .figure:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
   }
 
-  .statsGenreChartContainer,
-  .statsDbStorageWrap {
-    flex-direction: column;
-    align-items: center;
+  .rhythm {
+    grid-template-columns: repeat(2, 1fr);
+    row-gap: 14px;
   }
 
-  .statsGenreLegend,
-  .statsDbLegend {
-    width: 100%;
+  .rhythmItem:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
   }
 }
 
 @media (max-width: 580px) {
-  .statsContainer {
-    margin: 6px;
-    padding: 14px 10px;
-    border-radius: var(--radius-xl);
+  .page {
+    /* the shell's menu button sits over the top left corner */
+    padding: 60px 16px 72px;
   }
 
-  .statsSectionCard {
-    padding: 16px 12px;
-    border-radius: var(--radius-xl);
-  }
-
-  .headerPrimaryActions {
-    width: 100%;
-    gap: 8px;
-  }
-
-  .statsYearButton {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .statsTabs,
-  .statsTimeRange {
-    width: 100%;
-    display: flex;
-  }
-
-  .statsTab,
-  .statsRangeButton {
-    flex: 1;
-    text-align: center;
-    padding: 6px 4px;
-    font-size: 0.75rem;
-  }
-
-  .statsSyncBar {
+  .subBar {
+    align-items: flex-start;
     flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
   }
 
-  .statsServerSync {
-    justify-content: space-between;
+  .sync {
     width: 100%;
   }
 
-  .statsServerSyncGroup {
-    width: 100%;
-    justify-content: space-between;
+  .heroBody {
+    padding: 20px;
   }
 
-  .statsSyncControls {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
+  .heroSay {
+    font-size: 17px;
   }
 
-  .historyImportControl {
-    width: 100%;
-  }
-
-  .statsOverview {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
-  .statsCard {
-    padding: 14px 16px;
-  }
-
-  .statsCardValue {
-    font-size: 1.8rem;
-  }
-
-  .statsHealthGrid {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
-  .statsClockRow {
+  .clockRow {
     grid-template-columns: 24px repeat(24, 1fr);
-    gap: 1.5px;
+    gap: 2px;
   }
 
-  .statsClockAxis {
-    grid-template-columns: 24px repeat(4, 1fr);
-    gap: 1.5px;
+  .genreRow {
+    grid-template-columns: 92px minmax(0, 1fr) 52px;
   }
 
-  .statsClockAxisLabel {
-    font-size: 0.6rem;
+  .row {
+    grid-template-columns: 18px 40px minmax(0, 1fr) auto 32px;
+    gap: 10px;
   }
 
-  .statsClockDay {
-    font-size: 0.6rem;
-    padding-right: 2px;
+  .rowPlain {
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .statsSectionTitle {
-    font-size: 0.74rem;
-    margin-bottom: 14px;
-    padding-bottom: 10px;
+  .rowRecent {
+    grid-template-columns: minmax(0, 1fr) auto 32px;
   }
 
-  .statsRankedItem,
-  .statsRecentItem {
-    padding: 8px 8px;
-    gap: 8px;
+  .rowArt {
+    width: 40px;
+    height: 40px;
   }
 
-  .statsRankedName,
-  .statsRecentTitle {
-    font-size: 0.84rem;
+  .shelf {
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    column-gap: 12px;
   }
 
-  .statsRankedImage,
-  .statsRankedImageFallback {
-    width: 36px;
-    height: 36px;
-  }
-
-  .statsArtistBubbles {
-    gap: 6px;
-  }
-
-  .statsBubbleImage {
-    transform: scale(0.92);
-  }
-
-  .statsOwnPlayRow {
-    grid-template-columns: 75px 1fr 40px;
-    gap: 8px;
-  }
-
-  .statsDiskFormatRow {
-    grid-template-columns: 55px 1fr auto;
-    gap: 8px;
+  .coverageRow {
+    grid-template-columns: 88px minmax(0, 1fr) 56px;
   }
 
   .statsDetailBackdrop {
@@ -1871,36 +1396,28 @@
 }
 
 @media (max-width: 380px) {
-  .statsContainer {
-    margin: 4px;
-    padding: 12px 8px;
+  .page {
+    padding: 56px 12px 64px;
   }
 
-  .statsSectionCard {
-    padding: 14px 8px;
+  .figure b {
+    font-size: 24px;
   }
 
-  .statsCardValue {
-    font-size: 1.6rem;
+  .segButton {
+    padding: 0 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view,
+  .bar,
+  .genreBars i {
+    animation: none;
   }
 
-  .statsClockRow {
-    grid-template-columns: 20px repeat(24, 1fr);
-    gap: 1px;
-  }
-
-  .statsClockAxis {
-    grid-template-columns: 20px repeat(4, 1fr);
-    gap: 1px;
-  }
-
-  .statsClockDay {
-    font-size: 0.54rem;
-    padding-right: 1px;
-  }
-
-  .statsOwnPlayRow {
-    grid-template-columns: 62px 1fr 34px;
-    gap: 6px;
+  .tileArt,
+  .heroArt .artImg {
+    transition: none;
   }
 }

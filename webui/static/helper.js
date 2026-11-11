@@ -1574,7 +1574,7 @@ const HELPER_CONTENT = {
         description: 'Manually sync listening data from your media server. Pulls the latest play history, scrobbles, and library changes.',
     },
     '#stats-overview': {
-        title: 'Overview Cards',
+        title: 'The numbers',
         description: 'Key metrics at a glance: Total Plays, Listening Time, unique Artists, Albums, and Tracks played in the selected time range.',
     },
     '#stats-timeline-chart': {
@@ -1582,8 +1582,8 @@ const HELPER_CONTENT = {
         description: 'Chart showing your listening activity over time. Each bar represents plays in that time period. Helps visualize listening patterns and trends.',
     },
     '#stats-genre-chart': {
-        title: 'Genre Breakdown',
-        description: 'Pie/donut chart showing the genre distribution of your listening. Based on genre tags from your library\'s metadata enrichment.',
+        title: 'Most played genres',
+        description: 'The genres you played most in this range, under the bars comparing what you own with what you play. Based on genre tags from your library\'s metadata enrichment.',
     },
     '#stats-recent-plays': {
         title: 'Recently Played',
@@ -2422,7 +2422,7 @@ const HELPER_TOURS = {
 
             // Charts (left column)
             { page: 'stats', selector: '#stats-timeline-chart', title: 'Listening Activity', description: 'A timeline chart showing your listening pattern over time. Spot trends — are you listening more on weekends? Did you binge a new album last week?' },
-            { page: 'stats', selector: '#stats-genre-chart', title: 'Genre Breakdown', description: 'Pie chart showing which genres you listen to most. The legend shows exact percentages. Useful for understanding your taste profile.' },
+            { page: 'stats', selector: '#stats-genre-chart', title: 'Most played genres', description: 'The genres you listen to most, with exact percentages, under the bars comparing what you own with what you play.' },
             { page: 'stats', selector: '#stats-recent-plays', title: 'Recently Played', description: 'A live feed of your most recent plays with timestamps, artist, and album info.' },
 
             // Rankings (right column)

@@ -292,7 +292,7 @@ Stats and bands update in real time over WebSocket — no page refresh needed. F
             title: 'Stats in Depth',
             lede: 'Everything the Stats page measures — Listening analytics, Year in Listening, and Library health.',
             body: `
-The **Stats** page (title **"Listening Stats"**) has two tabs — **Listening** and **Library** — with the tab, range, and story kept in the URL (\`?tab=\`, \`?range=\`, \`?story=\`).
+The **Stats** page has two tabs, **Listening** and **Library**, with the tab, range, and story kept in the URL (\`?tab=\`, \`?range=\`, \`?story=\`).
 
 Listening data requires **Listening Stats** to be enabled in Settings → Library ("Enable listening stats collection from media server") — it polls play history from your active media server (Plex, Jellyfin, or Navidrome).
 
@@ -300,22 +300,22 @@ Listening data requires **Listening Stats** to be enabled in Settings → Librar
 
 - **Your Year** — opens the **Year in Listening** story (Listening tab only).
 - **Range picker** (Listening tab only) — **7 Days**, **30 Days**, **12 Months**, **All Time**.
-- **Sync now** (↻) — pulls the latest play history now; shows "Last synced: …" or "Not synced yet". (In standalone mode this is replaced by the note "Standalone mode: manual sync unavailable".)
-- **History import cards** — Last.fm and ListenBrainz cards appear for services you've configured, with status labels (**Checking settings…**, **Configure in Settings**, **Syncing…**, **Sync failed**, **Sync paused**, **Up to date**, **Ready to sync**), a **Sync now** / **Resume sync** / **Retry sync** button, a progress bar while syncing, and detail text like "Last synced … · next check in …".
+- **Sync now** — pulls the latest play history now; the line beside it reads "Last synced: …" or "Not synced yet". (In standalone mode this is replaced by the note "Standalone mode: manual sync unavailable".)
+- **Last.fm and ListenBrainz** — each service you've configured shows its account, a status (**Checking settings…**, **Configure in Settings**, **Syncing…**, **Sync failed**, **Sync paused**, **Up to date**, **Ready to sync**), a **Sync now** / **Resume sync** / **Retry sync** link, and a progress bar while syncing. Hover the status for detail like "Last synced … · next check in …".
 
 ## Listening tab
 
 Every section below follows the range picker:
 
-- **Overview tiles** — **Total Plays**, **Listening Time**, **Artists**, **Albums**, **Tracks**. Each tile shows a delta against the equivalent previous period ("↑ 12% vs previous 7 days"; no delta on All Time).
-- **When You Listen** — a 7×24 weekday×hour heatmap of your weekly pattern. Click any cell for a **Listening Details** modal of the plays in that slot. Beside it: your **peak slot** (e.g. "Fri 8pm"), **day(s) in a row**, **longest streak**, and **busiest day**.
-- **Listening Activity** — bar chart of plays over time; clicking a bar opens the Listening Details modal ("Showing latest N plays").
-- **Own vs Play** — per-genre bars comparing % of library owned vs % of plays, with the gap spelled out ("You play this more than you own it" / "You own this more than you play it"). Below: **Never played (N)** — up to 5 albums with artist + track count.
-- **Genre Breakdown** — donut chart of your top 10 genres with percentages.
-- **Recently Played** — latest plays with ▶ play buttons and relative times ("5m ago").
-- **Top Artists** — artwork bubbles sized by plays plus a ranked list (artwork, name linking to artist detail, SoulID badge when one exists, global listener counts, play counts).
-- **Top Albums** — ranked list with artwork, album name, linked artist, plays.
-- **Top Tracks** — ranked list with ▶ play button; playing resolves against your library first, falling back to streaming search.
+- **The period, in a sentence** — the page opens on your most played artist's photo (click it for their page) beside one sentence: how many songs by how many artists for how long, the genre you played most, when you listen most, and how many of the days had music in them. Under it, five figures: **plays**, **listening time**, **artists**, **albums**, **tracks**, each with its change against the equivalent previous period ("up 12% vs previous 7 days"; nothing on All Time).
+- **Listening activity** — plays over time as bars. Hover a bar for its day and count; click it for a **Listening Details** list of what you played ("Showing latest N plays").
+- **When you listen** — a 7×24 weekday×hour heatmap. Click any cell for the plays in that slot. Under it: your **peak slot** (e.g. "Fri 8pm"), **day(s) in a row**, **longest streak**, and **busiest day**.
+- **Top artists** — a shelf of portraits with plays, global listeners and a SoulID badge when one exists. An artist opens their page. **Show all** opens the rest.
+- **Top albums** — a shelf of covers. A cover plays the album when it is in your library. **Show all** opens the rest.
+- **Top tracks** — the top ten with covers and a play button (**Show all** for the rest); playing resolves against your library first, falling back to streaming search.
+- **What you own and what you play** — per genre, a bar for its share of your plays over a bar for its share of your library, with the gap in points ("You play this more than you own it" / "You own this more than you play it"). The line under it names the genres you played most.
+- **Recently played** — latest plays with play buttons and relative times ("5m ago").
+- **Never played** — the biggest albums you own and have not started, with artist and track count.
 
 No data yet? You'll see 📊 **"No Listening Data Yet"** — enable Listening Stats in Settings to start tracking.
 

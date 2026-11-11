@@ -1,22 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useRef, useState } from 'react';
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 
 import type { ShellBridge } from '@/platform/shell/bridge';
 
 import { DialogFrame } from '@/components/dialog';
-import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/primitives';
 import { useReactPageShell, useShellStatus } from '@/platform/shell/route-controllers';
 
@@ -32,6 +20,7 @@ import type {
   StatsListeningEventsFilter,
   StatsListeningEventTrack,
   StatsNeglectedAlbum,
+  StatsOverview,
   StatsOwnVsPlay,
   StatsRange,
   StatsRecentTrack,
@@ -66,39 +55,35 @@ import {
   formatRelativePlayedAt,
   formatTotalDuration,
   getStatsRangeLabel,
-  getTopArtistBubbles,
   groupDbStorageTables,
   hasStatsData,
   heatIntensity,
   isNewSincePrevious,
   parsePlayedAt,
-  STATS_DB_STORAGE_COLORS,
-  STATS_GENRE_COLORS,
+  periodSentence,
   statDelta,
+  statsRangePhrase,
   WEEKDAY_LABELS,
   visibleStatsEnrichmentServices,
 } from '../-stats.helpers';
 import { STATS_TAB_VALUES } from '../-stats.types';
+import { fetchAlbumPlayTracks } from '../-year.api';
 import { Route } from '../route';
 import styles from './stats-page.module.css';
 import { YearStory } from './year-story';
 
-const STATS_TOOLTIP_STYLE = {
-  background: 'rgba(12, 12, 12, 0.96)',
-  border: '1px solid rgba(255,255,255,0.08)',
-  borderRadius: 10,
-  color: '#fff',
-} as const;
-
-const STATS_TOOLTIP_WRAPPER_STYLE = {
-  zIndex: 3,
-} as const;
-
-const STATS_CHART_CURSOR = {
-  fill: 'rgba(var(--accent-rgb), 0.12)',
-} as const;
-
 const STATS_DETAIL_QUERY_KEY = ['stats-listening-events'] as const;
+
+/** How many of a shelf or list show before "Show all". */
+const TRACKS_SHOWN = 10;
+const RECENT_SHOWN = 8;
+const NEVER_SHOWN = 8;
+
+const PLAY_ICON = (
+  <svg viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M4 2.5v11l9-5.5z" />
+  </svg>
+);
 
 export function StatsPage() {
   const bridge = useReactPageShell('stats');
@@ -252,101 +237,107 @@ export function StatsPage() {
     });
   };
 
-  return (
-    <div id="stats-container" className={styles.statsContainer} data-testid="stats-page">
-      <PageHeader
-        icon={<img src="/static/trans2.png" alt="" />}
-        title="Listening Stats"
-        actions={
-          <div className={styles.headerPrimaryActions}>
-            {/* The story is a listening fact, so it does not belong on the
-                Library tab where nothing else is about the person. */}
-            {tab === 'listening' ? (
-              <button
-                type="button"
-                className={styles.statsYearButton}
-                onClick={openStory}
-                data-testid="stats-year-button"
-              >
-                <span className={styles.yearSparkle} aria-hidden="true">
-                  ✨
-                </span>
-                Your Year
-              </button>
-            ) : null}
-            <div className={styles.statsTabs} role="tablist" aria-label="Stats section">
-              {STATS_TAB_VALUES.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === option}
-                  className={`${styles.statsTab} ${tab === option ? styles.statsTabActive : ''}`}
-                  onClick={() => onTabChange(option)}
-                >
-                  {option === 'listening' ? 'Listening' : 'Library'}
-                </button>
-              ))}
-            </div>
-            {/* Library stats are not range-scoped — disk usage is what it is
-                today — so the picker is hidden rather than left inert. */}
-            <div
-              id="stats-time-range"
-              className={styles.statsTimeRange}
-              role="tablist"
-              aria-label="Listening stats range"
-              hidden={tab !== 'listening'}
-            >
-              {(['7d', '30d', '12m', 'all'] as const).map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className={`${styles.statsRangeButton} ${
-                    range === option ? styles.statsRangeButtonActive : ''
-                  }`}
-                  onClick={() => onRangeChange(option)}
-                >
-                  {getStatsRangeLabel(option)}
-                </button>
-              ))}
-            </div>
-          </div>
-        }
-      />
+  const topArtist = cachedStats?.top_artists?.[0];
+  const sentence = periodSentence(range, overview, {
+    topGenre: cachedStats?.genres?.[0]?.genre,
+    peak: cachedStats?.clock?.peak,
+    activeDays: cachedStats?.rhythm?.active_days,
+  });
+  const play = (track: { title: string; artist: string; album: string }) =>
+    playStatsTrack(bridge, track);
 
-      {/* Dedicated Executive Data Sources & Sync Bar */}
-      <div className={styles.statsSyncBar}>
-        <div className={styles.statsServerSync}>
+  return (
+    <div id="stats-container" className={styles.page} data-testid="stats-page">
+      <header className={styles.head}>
+        <div className={styles.headMain}>
+          <h1>Stats</h1>
+          <p className={styles.headSub}>
+            {tab === 'library'
+              ? 'What is in your library today'
+              : hasData
+                ? `${(overview.total_plays ?? 0).toLocaleString('en-US')} plays ${statsRangePhrase(range)}`
+                : 'Your listening, once there is some'}
+          </p>
+        </div>
+        <div className={styles.headActs}>
+          {/* The story is a listening fact, so it does not belong on the
+              Library tab where nothing else is about the person. */}
+          {tab === 'listening' ? (
+            <button
+              type="button"
+              className={styles.cap}
+              onClick={openStory}
+              data-testid="stats-year-button"
+            >
+              Your Year
+            </button>
+          ) : null}
+          {/* Library stats are not range-scoped: disk usage is what it is
+              today, so the picker is hidden rather than left inert. */}
+          <div
+            id="stats-time-range"
+            className={styles.seg}
+            role="group"
+            aria-label="Listening stats range"
+            hidden={tab !== 'listening'}
+          >
+            {(['7d', '30d', '12m', 'all'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={styles.segButton}
+                aria-pressed={range === option}
+                onClick={() => onRangeChange(option)}
+              >
+                {getStatsRangeLabel(option)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <div className={styles.subBar}>
+        <div className={styles.seg} role="tablist" aria-label="Stats section">
+          {STATS_TAB_VALUES.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="tab"
+              aria-selected={tab === option}
+              className={styles.segButton}
+              onClick={() => onTabChange(option)}
+            >
+              {option === 'listening' ? 'Listening' : 'Library'}
+            </button>
+          ))}
+        </div>
+
+        <div className={styles.sync}>
           {isStandalone ? (
             <span
-              className={styles.statsStandaloneNotice}
+              className={styles.syncItem}
               role="note"
               title="SoulSync standalone does not use an external media server, so manual listening stats sync is unavailable."
             >
               Standalone mode: manual sync unavailable
             </span>
           ) : (
-            <div className={styles.statsServerSyncGroup}>
-              <span className={styles.statsSyncStatusDot} aria-hidden="true" />
-              <span className={styles.statsLastSynced}>
-                {lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}
-              </span>
+            <span className={styles.syncItem}>
+              <span className={styles.syncDot} aria-hidden="true" />
+              <span>{lastSynced ? `Last synced: ${lastSynced}` : 'Not synced yet'}</span>
               <button
                 id="stats-sync-btn"
                 type="button"
-                className={`${styles.statsSyncButton} ${syncing ? styles.statsSyncButtonSyncing : ''}`}
+                className={styles.linkButton}
                 onClick={() => syncMutation.mutate()}
                 disabled={syncing}
                 aria-label="Sync listening stats"
                 title="Sync now"
               >
-                <span aria-hidden="true">↻</span>
+                {syncing ? 'Syncing…' : 'Sync now'}
               </button>
-            </div>
+            </span>
           )}
-        </div>
-
-        <div className={styles.statsSyncControls}>
           {isImportCardYours(lastfmImportQuery.data) ? (
             <LastfmImportControl
               status={lastfmImportQuery.data}
@@ -371,94 +362,92 @@ export function StatsPage() {
       ) : cachedStatsQuery.error ? (
         <SectionErrorState message={getErrorMessage(cachedStatsQuery.error)} />
       ) : tab === 'library' ? (
-        /* Operational facts. Deliberately NOT range-scoped — disk usage and
-           database size are what they are right now, so the range picker is
-           hidden on this tab rather than sitting there doing nothing. */
-        <div className={styles.statsLibraryGrid}>
-          <StatsSectionCard title="Library Health" fullWidth>
-            <StatsLibraryHealth health={cachedStats?.health ?? {}} />
-          </StatsSectionCard>
-
-          <StatsSectionCard title="Library Disk Usage" fullWidth>
-            <StatsDiskUsage payload={diskUsageQuery.data} error={diskUsageQuery.error} />
-          </StatsSectionCard>
-
-          <StatsSectionCard title="Database Storage" fullWidth>
-            <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
-          </StatsSectionCard>
+        /* Operational facts. Deliberately NOT range-scoped: disk usage and
+           database size are what they are right now. */
+        <div className={styles.view}>
+          <StatsLibraryHealth
+            health={cachedStats?.health ?? {}}
+            databaseBytes={dbStorageQuery.data?.total_file_size}
+          />
+          <div className={styles.two}>
+            <StatsSectionCard title="Library disk usage">
+              <StatsDiskUsage payload={diskUsageQuery.data} error={diskUsageQuery.error} />
+            </StatsSectionCard>
+            <StatsSectionCard title="Database storage">
+              <StatsDbStorage payload={dbStorageQuery.data} error={dbStorageQuery.error} />
+            </StatsSectionCard>
+          </div>
         </div>
       ) : hasData ? (
-        <>
-          <OverviewCards
-            overview={overview}
-            previous={cachedStats?.previous ?? null}
-            periodLabel={PREVIOUS_PERIOD_LABEL[range] ?? null}
-          />
-          <div className={styles.statsMainGrid}>
-            {/* Tier 1: Listening Activity & Habit Clock */}
-            <div className={styles.statsActivityRow}>
-              <StatsSectionCard title="Listening Activity">
-                <div id="stats-timeline-chart" className={styles.chartContainer}>
-                  <StatsActivityChart
-                    timeline={cachedStats?.timeline ?? []}
-                    onDateSelect={(date) => setListeningDetailFilter({ type: 'date', date })}
-                  />
-                </div>
-              </StatsSectionCard>
-              <StatsSectionCard title="When You Listen">
-                <StatsListeningClock
-                  clock={cachedStats?.clock}
-                  rangeLabel={getStatsRangeLabel(range)}
-                  rhythm={cachedStats?.rhythm}
-                  onCellSelect={(weekday, hour) =>
-                    setListeningDetailFilter({ type: 'weekday_hour', weekday, hour })
-                  }
-                />
-              </StatsSectionCard>
+        <div className={styles.view}>
+          <section className={`${styles.card} ${styles.hero}`} aria-label="This period">
+            <HeroArtist artist={topArtist} />
+            <div className={styles.heroBody}>
+              {sentence.length ? (
+                <p className={styles.heroSay}>
+                  {sentence.map((part, index) =>
+                    part.strong ? <b key={index}>{part.text}</b> : part.text,
+                  )}
+                </p>
+              ) : null}
+              <OverviewFigures
+                overview={overview}
+                previous={cachedStats?.previous ?? null}
+                periodLabel={PREVIOUS_PERIOD_LABEL[range] ?? null}
+              />
             </div>
+          </section>
 
-            {/* Tier 2: Top Music Showcase (3 Columns) */}
-            <div className={styles.statsTopShowcase}>
-              <StatsSectionCard title="Top Artists">
-                <TopArtistsVisual artists={cachedStats?.top_artists ?? []} />
-                <StatsRankedArtists artists={cachedStats?.top_artists ?? []} />
-              </StatsSectionCard>
-              <StatsSectionCard title="Top Albums">
-                <StatsRankedAlbums albums={cachedStats?.top_albums ?? []} />
-              </StatsSectionCard>
-              <StatsSectionCard title="Top Tracks">
-                <StatsRankedTracks
-                  tracks={cachedStats?.top_tracks ?? []}
-                  onPlay={(track) => playStatsTrack(bridge, track)}
-                />
-              </StatsSectionCard>
-            </div>
-
-            {/* Tier 3: Insights & Recents */}
-            <div className={styles.statsInsightsRow}>
-              <StatsSectionCard title="Own vs Play">
-                <StatsOwnVsPlayCard
-                  rows={cachedStats?.own_vs_play ?? []}
-                  neglected={cachedStats?.neglected ?? []}
-                />
-              </StatsSectionCard>
-              <StatsSectionCard title="Genre Breakdown">
-                <div className={styles.statsGenreChartContainer}>
-                  <div id="stats-genre-chart" className={styles.statsGenreChartWrap}>
-                    <StatsGenreChart genres={cachedStats?.genres ?? []} />
-                  </div>
-                  <StatsGenreLegend genres={cachedStats?.genres ?? []} />
-                </div>
-              </StatsSectionCard>
-              <StatsSectionCard title="Recently Played">
-                <StatsRecentPlays
-                  tracks={cachedStats?.recent ?? []}
-                  onPlay={(track) => playStatsTrack(bridge, track)}
-                />
-              </StatsSectionCard>
-            </div>
+          <div className={styles.two}>
+            <StatsSectionCard
+              title="Listening activity"
+              note="Plays over time. Click a bar to see what you played."
+            >
+              <StatsActivityChart
+                timeline={cachedStats?.timeline ?? []}
+                busiest={cachedStats?.rhythm?.busiest_day}
+                onDateSelect={(date) => setListeningDetailFilter({ type: 'date', date })}
+              />
+            </StatsSectionCard>
+            <StatsSectionCard title="When you listen" note="Hour by weekday">
+              <StatsListeningClock
+                clock={cachedStats?.clock}
+                rhythm={cachedStats?.rhythm}
+                onCellSelect={(weekday, hour) =>
+                  setListeningDetailFilter({ type: 'weekday_hour', weekday, hour })
+                }
+              />
+            </StatsSectionCard>
           </div>
-        </>
+
+          <StatsTopArtists artists={cachedStats?.top_artists ?? []} />
+          <StatsTopAlbums albums={cachedStats?.top_albums ?? []} />
+
+          <div className={styles.two}>
+            <StatsTopTracks tracks={cachedStats?.top_tracks ?? []} onPlay={play} />
+            <StatsSectionCard
+              title="What you own and what you play"
+              note="By genre, as a share of each"
+            >
+              <StatsOwnVsPlayCard
+                rows={cachedStats?.own_vs_play ?? []}
+                genres={cachedStats?.genres ?? []}
+              />
+            </StatsSectionCard>
+          </div>
+
+          <div className={styles.two}>
+            <StatsSectionCard title="Recently played">
+              <StatsRecentPlays tracks={cachedStats?.recent ?? []} onPlay={play} />
+            </StatsSectionCard>
+            <StatsSectionCard
+              title="Never played"
+              note="The biggest albums you own and have not started"
+            >
+              <StatsNeverPlayed albums={cachedStats?.neglected ?? []} />
+            </StatsSectionCard>
+          </div>
+        </div>
       ) : (
         <StatsEmptyState />
       )}
@@ -469,24 +458,16 @@ export function StatsPage() {
           loading={listeningDetailsQuery.isPending && !listeningDetailsQuery.data}
           error={listeningDetailsQuery.error}
           onClose={() => setListeningDetailFilter(null)}
-          onPlay={(track) => playStatsTrack(bridge, track)}
+          onPlay={play}
         />
       ) : null}
     </div>
   );
 }
 
-type OverviewShape = Partial<{
-  total_plays: number;
-  total_time_ms: number;
-  unique_artists: number;
-  unique_albums: number;
-  unique_tracks: number;
-}>;
-
 /**
- * What the delta is measured against, per range. 'all' is absent on purpose —
- * there is no period before everything, so its tiles carry no comparison.
+ * What the change is measured against, per range. 'all' is absent on purpose:
+ * there is no period before everything, so its figures carry no comparison.
  */
 const PREVIOUS_PERIOD_LABEL: Partial<Record<StatsRange, string>> = {
   '7d': 'vs previous 7 days',
@@ -576,41 +557,34 @@ function HistoryImportControl({
         : 'Uses your account from Settings. Sync once to enable hourly updates.';
 
   return (
-    <div
-      className={styles.historyImportControl}
-      role="group"
-      aria-label={`${service} history sync`}
-    >
-      <div className={styles.historyImportInfo}>
-        <span className={styles.historyImportService}>{service}</span>
-        <span className={styles.historyImportAccount} title="Manage this account in Settings">
-          {status?.username || 'Account from Settings'}
-        </span>
-        <span className={styles.historyImportStatus} role="status" title={detail}>
-          {label}
-        </span>
-      </div>
+    <span className={styles.syncItem} role="group" aria-label={`${service} history sync`}>
+      <b>{service}</b>
+      <span title="Manage this account in Settings">
+        {status?.username || 'Account from Settings'}
+      </span>
+      <span className={failed ? styles.syncBad : styles.syncQuiet} role="status" title={detail}>
+        {label}
+      </span>
       <button
         type="button"
-        className={styles.historyImportButton}
+        className={styles.linkButton}
         onClick={onRun}
         disabled={active || !configured || !status?.success}
         aria-label={`${active ? 'Syncing' : needsResume ? 'Resume' : failed ? 'Retry' : 'Sync'} ${service} history`}
         aria-busy={active}
         title={configured ? detail : `Configure ${service} in Settings`}
       >
-        <span aria-hidden="true">↻</span>
         {active ? 'Syncing…' : needsResume ? 'Resume sync' : failed ? 'Retry sync' : 'Sync now'}
       </button>
       {active || needsResume ? (
         <progress
-          className={styles.historyImportProgress}
+          className={styles.syncProgress}
           aria-label={`${service} sync progress`}
           max={100}
           value={progress ?? undefined}
         />
       ) : null}
-    </div>
+    </span>
   );
 }
 
@@ -629,133 +603,94 @@ function formatShortDuration(seconds: number): string {
   return rest ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
-function OverviewCards({
+/** A cover or portrait, or the name's first letter where there is none. */
+function Art({ src, name }: { src?: string | null; name: string }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (src && src !== failed) {
+    return (
+      <img
+        className={styles.artImg}
+        src={src}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(src)}
+      />
+    );
+  }
+  return (
+    <span className={styles.artFallback} aria-hidden="true">
+      {(name || '?').trim()[0] ?? '?'}
+    </span>
+  );
+}
+
+/** The period's most played artist, as the picture the page opens on. */
+function HeroArtist({ artist }: { artist: StatsArtistRow | undefined }) {
+  if (!artist) return null;
+  const body = (
+    <>
+      <Art src={artist.image_url} name={artist.name} />
+      <span className={styles.heroShade} aria-hidden="true" />
+      <span className={styles.heroCaption}>
+        <small>Most played artist</small>
+        <b>{artist.name}</b>
+        <span>
+          {formatCompactNumber(artist.play_count)} plays
+          {artist.global_listeners
+            ? ` · ${formatCompactNumber(artist.global_listeners)} listeners worldwide`
+            : ''}
+        </span>
+      </span>
+    </>
+  );
+  return artist.id != null ? (
+    <ArtistDetailLink
+      artistId={artist.id}
+      className={styles.heroArt}
+      aria-label={`Open artist detail for ${artist.name}`}
+      data-hero-artist=""
+    >
+      {body}
+    </ArtistDetailLink>
+  ) : (
+    <div className={styles.heroArt}>{body}</div>
+  );
+}
+
+function OverviewFigures({
   overview,
   periodLabel,
   previous,
 }: {
-  overview: OverviewShape;
+  overview: Partial<StatsOverview>;
   periodLabel: string | null;
-  previous: OverviewShape | null;
+  previous: Partial<StatsOverview> | null;
 }) {
-  const cards = [
-    {
-      key: 'total_plays',
-      label: 'Total Plays',
-      value: formatCompactNumber(overview.total_plays),
-      icon: (
-        <svg
-          viewBox="0 0 24 24"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polygon points="5 3 19 12 5 21 5 3" />
-        </svg>
-      ),
-    },
+  const figures = [
+    { key: 'total_plays', label: 'plays', value: formatCompactNumber(overview.total_plays) },
     {
       key: 'total_time_ms',
-      label: 'Listening Time',
+      label: 'listening time',
       value: formatListeningTime(overview.total_time_ms),
-      icon: (
-        <svg
-          viewBox="0 0 24 24"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-      ),
     },
     {
       key: 'unique_artists',
-      label: 'Artists',
+      label: 'artists',
       value: formatCompactNumber(overview.unique_artists),
-      icon: (
-        <svg
-          viewBox="0 0 24 24"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-          <line x1="12" x2="12" y1="19" y2="22" />
-        </svg>
-      ),
     },
-    {
-      key: 'unique_albums',
-      label: 'Albums',
-      value: formatCompactNumber(overview.unique_albums),
-      icon: (
-        <svg
-          viewBox="0 0 24 24"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      ),
-    },
-    {
-      key: 'unique_tracks',
-      label: 'Tracks',
-      value: formatCompactNumber(overview.unique_tracks),
-      icon: (
-        <svg
-          viewBox="0 0 24 24"
-          width="16"
-          height="16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M9 18V5l12-2v13" />
-          <circle cx="6" cy="18" r="3" />
-          <circle cx="18" cy="16" r="3" />
-        </svg>
-      ),
-    },
+    { key: 'unique_albums', label: 'albums', value: formatCompactNumber(overview.unique_albums) },
+    { key: 'unique_tracks', label: 'tracks', value: formatCompactNumber(overview.unique_tracks) },
   ] as const;
 
   return (
-    <div id="stats-overview" className={styles.statsOverview}>
-      {cards.map((card) => (
-        <div key={card.label} className={styles.statsCard}>
-          <div className={styles.statsCardHeader}>
-            <span className={styles.statsCardLabel}>{card.label}</span>
-            <span className={styles.statsCardIconWrap} aria-hidden="true">
-              {card.icon}
-            </span>
-          </div>
-          <div className={styles.statsCardValue}>{card.value}</div>
+    <div id="stats-overview" className={styles.figures}>
+      {figures.map((figure) => (
+        <div key={figure.key} className={styles.figure}>
+          <b>{figure.value}</b>
+          <span>{figure.label}</span>
           <StatsCardDelta
-            current={overview[card.key]}
-            previous={previous?.[card.key]}
+            current={overview[figure.key]}
+            previous={previous?.[figure.key]}
             periodLabel={periodLabel}
           />
         </div>
@@ -765,13 +700,13 @@ function OverviewCards({
 }
 
 /**
- * The change against the equivalent previous period.
+ * The change against the equivalent previous period, in words.
  *
  * Renders NOTHING rather than something misleading, in three cases: no
  * previous period at all (range 'all'), a previous period of zero (there is no
- * honest percentage for growth from nothing — that shows "new" instead), and a
- * partial payload. A stats page that invents "+∞%" is worse than one that says
- * less.
+ * honest percentage for growth from nothing, so that shows "new" instead), and
+ * a partial payload. Only growth takes the accent: a quieter month is not an
+ * error, and five red chips made it look like one.
  */
 function StatsCardDelta({
   current,
@@ -784,28 +719,21 @@ function StatsCardDelta({
 }) {
   if (!periodLabel) return null;
   if (isNewSincePrevious(current, previous)) {
-    return (
-      <div className={`${styles.statsCardDelta} ${styles.statsCardDeltaNew}`}>
-        new {periodLabel}
-      </div>
-    );
+    return <em className={styles.deltaUp}>new {periodLabel}</em>;
   }
   const delta = statDelta(current, previous);
   if (!delta) return null;
-  const arrow = delta.direction === 'up' ? '↑' : delta.direction === 'down' ? '↓' : '·';
+  if (delta.direction === 'flat') return <em>no change {periodLabel}</em>;
   return (
-    <div className={`${styles.statsCardDelta} ${styles[`statsCardDelta_${delta.direction}`]}`}>
-      {arrow} {delta.pct}% {periodLabel}
-    </div>
+    <em className={delta.direction === 'up' ? styles.deltaUp : undefined}>
+      {delta.direction} {delta.pct}% {periodLabel}
+    </em>
   );
 }
 
 /**
- * The shape of a listening week — plays by weekday x hour — plus the habit
+ * The shape of a listening week, plays by weekday and hour, plus the habit
  * numbers beside it.
- *
- * The page could say how MUCH you listened and never WHEN. This is the most
- * personal thing the data can show, and it is one GROUP BY.
  *
  * The grid arrives dense (7x24, zeros included) from the backend, so this
  * renders it directly: a UI that has to fill gaps is a UI where an empty hour
@@ -814,12 +742,10 @@ function StatsCardDelta({
 function StatsListeningClock({
   clock,
   onCellSelect,
-  rangeLabel,
   rhythm,
 }: {
   clock: StatsClock | undefined;
   onCellSelect: (weekday: number, hour: number) => void;
-  rangeLabel: string;
   rhythm: StatsRhythm | undefined;
 }) {
   const grid = clock?.grid;
@@ -827,30 +753,24 @@ function StatsListeningClock({
   const peakPlays = peak?.plays ?? 0;
 
   if (!grid || !clock?.total) {
-    return <div className={styles.statsClockEmpty}>No plays in this range yet.</div>;
+    return <div className={styles.none}>No plays in this range yet.</div>;
   }
 
   const peakSlot = formatPeakSlot(peak?.weekday, peak?.hour);
 
   return (
-    <div className={styles.statsClock}>
-      <div className={styles.statsClockContext}>
-        <div>
-          <span className={styles.statsClockContextLabel}>Weekly pattern</span>
-          <span className={styles.statsClockContextRange}>in {rangeLabel}</span>
-        </div>
-        <strong>{formatCompactNumber(clock.total)} plays</strong>
-      </div>
-      <div className={styles.statsClockGrid}>
+    <div>
+      <div className={styles.clock}>
         {grid.map((row, weekday) => (
-          <div key={weekday} className={styles.statsClockRow}>
-            <span className={styles.statsClockDay}>{WEEKDAY_LABELS[weekday]}</span>
+          <div key={weekday} className={styles.clockRow}>
+            <span className={styles.clockDay}>{WEEKDAY_LABELS[weekday]}</span>
             {row.map((plays, hour) => (
               <button
                 key={hour}
                 type="button"
-                className={`${styles.statsClockCell} ${plays > 0 ? styles.statsClockCellActive : ''}`}
-                style={{ opacity: heatIntensity(plays, peakPlays) }}
+                className={`${styles.clockCell} ${plays > 0 ? styles.clockCellActive : ''}`}
+                data-stats-mark=""
+                style={plays > 0 ? { opacity: heatIntensity(plays, peakPlays) } : undefined}
                 title={`${WEEKDAY_LABELS[weekday]} ${formatHourLabel(hour)} - ${plays} ${
                   plays === 1 ? 'play' : 'plays'
                 }`}
@@ -861,38 +781,36 @@ function StatsListeningClock({
             ))}
           </div>
         ))}
-        <div className={styles.statsClockAxis}>
-          <span className={styles.statsClockDay} />
+        <div className={styles.clockRow} aria-hidden="true">
+          <span className={styles.clockDay} />
           {[0, 6, 12, 18].map((h) => (
-            <span key={h} className={styles.statsClockAxisLabel}>
+            <span key={h} className={styles.clockAxisLabel}>
               {formatHourLabel(h)}
             </span>
           ))}
         </div>
       </div>
 
-      <div className={styles.statsRhythm}>
+      <div className={styles.rhythm}>
         {peakSlot ? (
-          <div className={styles.statsRhythmItem}>
-            <span className={styles.statsRhythmValue}>{peakSlot}</span>
-            <span className={styles.statsRhythmLabel}>peak slot</span>
+          <div className={styles.rhythmItem}>
+            <b>{peakSlot}</b>
+            <span>peak slot</span>
           </div>
         ) : null}
         {rhythm ? (
           <>
-            <div className={styles.statsRhythmItem}>
-              <span className={styles.statsRhythmValue}>{rhythm.current_streak}</span>
-              <span className={styles.statsRhythmLabel}>
-                day{rhythm.current_streak === 1 ? '' : 's'} in a row
-              </span>
+            <div className={styles.rhythmItem}>
+              <b>{rhythm.current_streak}</b>
+              <span>day{rhythm.current_streak === 1 ? '' : 's'} in a row</span>
             </div>
-            <div className={styles.statsRhythmItem}>
-              <span className={styles.statsRhythmValue}>{rhythm.longest_streak}</span>
-              <span className={styles.statsRhythmLabel}>longest streak</span>
+            <div className={styles.rhythmItem}>
+              <b>{rhythm.longest_streak}</b>
+              <span>longest streak</span>
             </div>
-            <div className={styles.statsRhythmItem}>
-              <span className={styles.statsRhythmValue}>{rhythm.busiest_day.plays}</span>
-              <span className={styles.statsRhythmLabel}>busiest day</span>
+            <div className={styles.rhythmItem}>
+              <b>{rhythm.busiest_day.plays}</b>
+              <span>busiest day</span>
             </div>
           </>
         ) : null}
@@ -908,88 +826,147 @@ function StatsListeningClock({
  * and Plex has no acquisition history, so nobody else can tell you that you
  * own 40% metal and play 12% of it.
  *
- * Sorted by the size of the DISAGREEMENT, not by size — the biggest genre is
- * something the user already knows.
+ * Sorted by the size of the DISAGREEMENT, not by size: the biggest genre is
+ * something the user already knows. What they play most is the line under it.
  */
 function StatsOwnVsPlayCard({
-  neglected,
+  genres,
   rows,
 }: {
-  neglected: StatsNeglectedAlbum[];
+  genres: Array<{ genre: string; play_count: number; percentage: number }>;
   rows: StatsOwnVsPlay[];
 }) {
-  if (!rows.length) {
-    return <div className={styles.statsClockEmpty}>Not enough tagged artists to compare yet.</div>;
-  }
+  const top = genres.slice(0, 6);
+  const widest = Math.max(1, ...rows.map((row) => Math.max(row.owned_pct, row.played_pct)));
+  const share = (pct: number) => `${Math.min(100, (pct / widest) * 100)}%`;
 
   return (
-    <div className={styles.statsOwnPlay}>
-      {rows.map((row) => (
-        <div key={row.genre} className={styles.statsOwnPlayRow}>
-          <span className={styles.statsOwnPlayGenre} title={row.genre}>
-            {row.genre}
-          </span>
-          <span className={styles.statsOwnPlayBars}>
-            <span
-              className={styles.statsOwnPlayOwned}
-              style={{ width: `${Math.min(row.owned_pct, 100)}%` }}
-              title={`${row.owned_pct}% of your library (${row.owned_tracks} tracks)`}
-            />
-            <span
-              className={styles.statsOwnPlayPlayed}
-              style={{ width: `${Math.min(row.played_pct, 100)}%` }}
-              title={`${row.played_pct}% of your plays (${row.plays})`}
-            />
-          </span>
-          <span
-            className={`${styles.statsOwnPlayGap} ${
-              row.gap >= 0 ? styles.statsOwnPlayGapUp : styles.statsOwnPlayGapDown
-            }`}
-            title={
-              row.gap >= 0
-                ? 'You play this more than you own it'
-                : 'You own this more than you play it'
-            }
-          >
-            {row.gap > 0 ? '+' : ''}
-            {row.gap}
-          </span>
-        </div>
-      ))}
-
-      <div className={styles.statsOwnPlayLegend}>
-        <span className={styles.statsOwnPlayKeyOwned} /> owned
-        <span className={styles.statsOwnPlayKeyPlayed} /> played
-      </div>
-
-      {neglected.length ? (
-        <div className={styles.statsNeglected}>
-          <div className={styles.statsNeglectedTitle}>Never played ({neglected.length})</div>
-          {neglected.slice(0, 5).map((album) => (
-            <div key={album.id} className={styles.statsNeglectedRow}>
-              <span className={styles.statsNeglectedName}>{album.name}</span>
-              <span className={styles.statsNeglectedArtist}>{album.artist}</span>
-              <span className={styles.statsNeglectedCount}>{album.tracks}</span>
+    <div>
+      {rows.length === 0 ? (
+        <div className={styles.none}>Not enough tagged artists to compare yet.</div>
+      ) : (
+        <>
+          {rows.map((row, index) => (
+            <div
+              key={row.genre}
+              className={styles.genreRow}
+              style={{ '--stats-i': index } as React.CSSProperties}
+            >
+              <span className={styles.genreName} title={row.genre}>
+                {row.genre}
+              </span>
+              <span className={styles.genreBars}>
+                <i
+                  className={styles.genrePlayed}
+                  style={{ width: share(row.played_pct) }}
+                  title={`${row.played_pct}% of your plays (${row.plays})`}
+                />
+                <i
+                  className={styles.genreOwned}
+                  style={{ width: share(row.owned_pct) }}
+                  title={`${row.owned_pct}% of your library (${row.owned_tracks} tracks)`}
+                />
+              </span>
+              <span
+                className={`${styles.genreGap} ${row.gap > 0 ? styles.genreGapUp : ''}`}
+                title={
+                  row.gap >= 0
+                    ? 'You play this more than you own it'
+                    : 'You own this more than you play it'
+                }
+              >
+                {row.gap > 0 ? '+' : ''}
+                {row.gap}
+              </span>
             </div>
           ))}
-        </div>
+          <div className={styles.legend}>
+            <span>
+              <i className={styles.genrePlayed} />
+              Share of your plays
+            </span>
+            <span>
+              <i className={styles.genreOwned} />
+              Share of your library
+            </span>
+            <span>The number is the gap, in points</span>
+          </div>
+        </>
+      )}
+      {top.length ? (
+        <p id="stats-genre-chart" className={styles.genreTop}>
+          Most played:{' '}
+          {top.map((genre, index) => (
+            <span key={genre.genre}>
+              {index ? ' · ' : ''}
+              <b>{genre.genre}</b> {genre.percentage}%
+            </span>
+          ))}
+        </p>
       ) : null}
     </div>
   );
 }
 
+function StatsNeverPlayed({ albums }: { albums: StatsNeglectedAlbum[] }) {
+  const [all, setAll] = useState(false);
+  if (!albums.length) return <div className={styles.none}>Nothing you own is unplayed.</div>;
+  const shown = all ? albums : albums.slice(0, NEVER_SHOWN);
+  return (
+    <div>
+      <div className={styles.rows}>
+        {shown.map((album) => (
+          <div key={album.id} className={`${styles.row} ${styles.rowPlain}`}>
+            <div className={styles.rowText}>
+              <span className={styles.rowName}>{album.name}</span>
+              <span className={styles.rowMeta}>{album.artist}</span>
+            </div>
+            <span className={styles.rowCount}>{album.tracks} tracks</span>
+          </div>
+        ))}
+      </div>
+      <ShowAll total={albums.length} shown={NEVER_SHOWN} all={all} onToggle={setAll} />
+    </div>
+  );
+}
+
+function ShowAll({
+  all,
+  onToggle,
+  shown,
+  total,
+}: {
+  all: boolean;
+  onToggle: (next: boolean) => void;
+  shown: number;
+  total: number;
+}) {
+  if (total <= shown) return null;
+  return (
+    <button type="button" className={styles.linkButton} onClick={() => onToggle(!all)}>
+      {all ? 'Show fewer' : `Show all ${total}`}
+    </button>
+  );
+}
+
 function StatsSectionCard({
+  action,
   children,
-  fullWidth = false,
+  note,
   title,
 }: {
+  action?: ReactNode;
   children: ReactNode;
-  fullWidth?: boolean;
+  note?: string;
   title: string;
 }) {
   return (
-    <section className={`${styles.statsSectionCard} ${fullWidth ? styles.statsFullWidth : ''}`}>
-      <div className={styles.statsSectionTitle}>{title}</div>
+    <section className={styles.card} aria-label={title}>
+      <div className={styles.cardHead}>
+        <h2>{title}</h2>
+        {note ? <span>{note}</span> : null}
+        {action}
+      </div>
       {children}
     </section>
   );
@@ -1011,166 +988,69 @@ export function statsDateLabel(value: string): string {
   return value;
 }
 
+/**
+ * Plays per day (or per month on the long ranges) as plain bars.
+ *
+ * Its own bars rather than a chart library's: a bar here is a button that
+ * opens what was played that day, and a real button gets a focus ring, a
+ * label and a keyboard for free.
+ */
 function StatsActivityChart({
+  busiest,
   onDateSelect,
   timeline,
 }: {
+  busiest?: { date: string | null; plays: number };
   onDateSelect: (date: string) => void;
   timeline: Array<{ date: string; plays: number }>;
 }) {
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      {/* left 0 and a 40px axis: at -10 / 30px a three-digit count lost its
-          first digit, so 180 and 135 read as 80 and 35 above 90 */}
-      <BarChart data={timeline} margin={{ top: 8, right: 6, bottom: 0, left: 0 }}>
-        <defs>
-          <linearGradient id="statsPlaysBarGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="rgb(var(--accent-rgb))" stopOpacity={0.9} />
-            <stop offset="100%" stopColor="rgb(var(--accent-rgb))" stopOpacity={0.35} />
-          </linearGradient>
-        </defs>
-        <CartesianGrid stroke="rgba(255,255,255,0.04)" vertical={false} />
-        <XAxis
-          dataKey="date"
-          tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={statsDateLabel}
-        />
-        <YAxis
-          tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-          allowDecimals={false}
-          width={40}
-        />
-        <Tooltip
-          labelFormatter={(label) => statsDateLabel(String(label))}
-          contentStyle={STATS_TOOLTIP_STYLE}
-          wrapperStyle={STATS_TOOLTIP_WRAPPER_STYLE}
-          cursor={STATS_CHART_CURSOR}
-        />
-        <Bar
-          dataKey="plays"
-          radius={[6, 6, 0, 0]}
-          fill="url(#statsPlaysBarGrad)"
-          stroke="rgba(var(--accent-rgb), 0.75)"
-          strokeWidth={1}
-          cursor="pointer"
-          onClick={(data: unknown) => {
-            const row = data as { date?: string; payload?: { date?: string; plays?: number } };
-            const date = row.payload?.date ?? row.date;
-            const plays = row.payload?.plays ?? 0;
-            if (date && plays > 0) onDateSelect(date);
-          }}
-        />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}
-
-function StatsGenreChart({
-  genres,
-}: {
-  genres: Array<{ genre: string; play_count: number; percentage: number }>;
-}) {
-  const topGenres = genres.slice(0, 10).map((genre, index) => ({
-    ...genre,
-    fill: STATS_GENRE_COLORS[index % STATS_GENRE_COLORS.length],
-  }));
-  return (
-    <ResponsiveContainer width={180} height={180}>
-      <PieChart>
-        <Pie
-          data={topGenres}
-          dataKey="play_count"
-          nameKey="genre"
-          innerRadius={52}
-          outerRadius={84}
-          paddingAngle={2}
-          stroke="transparent"
-        />
-        <Tooltip contentStyle={STATS_TOOLTIP_STYLE} wrapperStyle={STATS_TOOLTIP_WRAPPER_STYLE} />
-      </PieChart>
-    </ResponsiveContainer>
-  );
-}
-
-function StatsGenreLegend({
-  genres,
-}: {
-  genres: Array<{ genre: string; play_count: number; percentage: number }>;
-}) {
-  const topGenres = genres.slice(0, 10);
+  const [hover, setHover] = useState<{ date: string; plays: number } | null>(null);
+  if (!timeline.length) return <div className={styles.none}>Nothing to chart yet.</div>;
+  const peak = Math.max(1, ...timeline.map((point) => point.plays));
+  const shownPoint = hover ?? (busiest?.date ? { date: busiest.date, plays: busiest.plays } : null);
+  const middle = timeline[Math.floor(timeline.length / 2)];
 
   return (
-    <div className={styles.statsGenreLegend}>
-      {topGenres.map((genre, index) => (
-        <div key={genre.genre} className={styles.statsGenreLegendItem}>
-          <span
-            className={styles.statsGenreDot}
-            style={{ background: STATS_GENRE_COLORS[index % STATS_GENRE_COLORS.length] }}
+    <div id="stats-timeline-chart">
+      <div className={styles.bars}>
+        {timeline.map((point, index) => (
+          <button
+            key={point.date}
+            type="button"
+            className={`${styles.bar} ${point.plays === peak ? styles.barPeak : ''}`}
+            data-stats-mark=""
+            style={
+              {
+                height: `${Math.max(2, (point.plays / peak) * 100)}%`,
+                '--stats-i': index,
+              } as React.CSSProperties
+            }
+            aria-label={`${statsDateLabel(point.date)}: ${point.plays} plays`}
+            disabled={point.plays <= 0}
+            onMouseEnter={() => setHover(point)}
+            onMouseLeave={() => setHover(null)}
+            onFocus={() => setHover(point)}
+            onBlur={() => setHover(null)}
+            onClick={() => onDateSelect(point.date)}
           />
-          <span>{genre.genre}</span>
-          <span className={styles.statsGenrePct}>{genre.percentage}%</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TopArtistsVisual({ artists }: { artists: StatsArtistRow[] }) {
-  const topArtists = getTopArtistBubbles(artists);
-  if (topArtists.length === 0) return null;
-
-  return (
-    <div className={styles.statsTopArtistsVisual}>
-      <div className={styles.statsArtistBubbles}>
-        {topArtists.map(({ artist, percent, size }) => {
-          const isClickable = artist.id !== null && artist.id !== undefined;
-          const bubbleContent = (
-            <>
-              <div
-                className={styles.statsBubbleImage}
-                style={{
-                  width: size,
-                  height: size,
-                  backgroundImage: artist.image_url ? `url(${artist.image_url})` : undefined,
-                }}
-              >
-                {!artist.image_url ? (
-                  <span className={styles.statsBubbleInitial}>{artist.name[0] ?? '?'}</span>
-                ) : null}
-              </div>
-              <div className={styles.statsBubbleBarContainer}>
-                <div className={styles.statsBubbleBar} style={{ width: `${percent}%` }} />
-              </div>
-              <div className={styles.statsBubbleName}>{artist.name}</div>
-              <div className={styles.statsBubbleCount}>
-                {formatCompactNumber(artist.play_count)}
-              </div>
-            </>
-          );
-          return isClickable ? (
-            <ArtistDetailLink
-              key={`${artist.name}-${artist.id ?? 'unknown'}`}
-              artistId={artist.id}
-              className={styles.statsArtistBubble}
-              aria-label={`Open artist detail for ${artist.name}`}
-            >
-              {bubbleContent}
-            </ArtistDetailLink>
-          ) : (
-            <div
-              key={`${artist.name}-${artist.id ?? 'unknown'}`}
-              className={`${styles.statsArtistBubble} ${styles.statsArtistBubbleDisabled}`}
-              aria-disabled="true"
-            >
-              {bubbleContent}
-            </div>
-          );
-        })}
+        ))}
       </div>
+      <div className={styles.barLabels} aria-hidden="true">
+        <span>{statsDateLabel(timeline[0].date)}</span>
+        {timeline.length > 2 ? <span>{statsDateLabel(middle.date)}</span> : null}
+        <span>{statsDateLabel(timeline[timeline.length - 1].date)}</span>
+      </div>
+      <p className={styles.readout}>
+        {shownPoint ? (
+          <>
+            {hover ? '' : 'Busiest: '}
+            <b>{statsDateLabel(shownPoint.date)}</b>, {shownPoint.plays.toLocaleString('en-US')}{' '}
+            plays
+          </>
+        ) : (
+          ' '
+        )}
+      </p>
     </div>
   );
 }
@@ -1198,118 +1078,211 @@ function ArtistDetailLink({
   );
 }
 
-function StatsRankedArtists({ artists }: { artists: StatsArtistRow[] }) {
+/**
+ * The period's artists as a shelf of portraits. One row until asked for the
+ * rest: twenty five faces is a wall, and the first nine are the answer.
+ */
+function StatsTopArtists({ artists }: { artists: StatsArtistRow[] }) {
+  const [all, setAll] = useState(false);
+  const most = artists[0]?.play_count || 1;
   return (
-    <div id="stats-top-artists" className={styles.statsRankedList}>
+    <StatsSectionCard
+      title="Top artists"
+      note="An artist opens their page"
+      action={<ShelfToggle total={artists.length} all={all} onToggle={setAll} />}
+    >
       {artists.length === 0 ? <EmptyListState message="No data yet" /> : null}
-      {artists.map((artist, index) => (
-        <div key={`${artist.name}-${artist.id ?? index}`} className={styles.statsRankedItem}>
-          <span className={styles.statsRankedNum}>{index + 1}</span>
-          {artist.image_url ? (
-            <img className={styles.statsRankedImage} src={artist.image_url} alt="" />
+      <div id="stats-top-artists" className={`${styles.shelf} ${all ? styles.shelfAll : ''}`}>
+        {artists.map((artist, index) => {
+          const body = (
+            <>
+              <span className={`${styles.tileArt} ${styles.tileArtRound}`}>
+                <Art src={artist.image_url} name={artist.name} />
+              </span>
+              <span className={styles.tileText}>
+                <span className={styles.tileName}>
+                  {artist.name}
+                  {artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_') ? (
+                    <img src="/static/trans2.png" className={styles.soulBadge} alt="SoulID" />
+                  ) : null}
+                </span>
+                <span className={styles.tileMeta}>
+                  {formatCompactNumber(artist.play_count)} plays
+                  {artist.global_listeners
+                    ? ` · ${formatCompactNumber(artist.global_listeners)} listeners`
+                    : ''}
+                </span>
+                <span className={styles.meter}>
+                  <i style={{ width: `${Math.round((artist.play_count / most) * 100)}%` }} />
+                </span>
+              </span>
+            </>
+          );
+          const key = `${artist.name}-${artist.id ?? index}`;
+          return artist.id != null ? (
+            <ArtistDetailLink
+              key={key}
+              artistId={artist.id}
+              className={`${styles.tile} ${styles.tileCentered}`}
+              aria-label={`Open artist detail for ${artist.name}`}
+            >
+              {body}
+            </ArtistDetailLink>
           ) : (
-            <div className={styles.statsRankedImageFallback} />
-          )}
-          <div className={styles.statsRankedInfo}>
-            <div className={styles.statsRankedName}>
-              <ArtistDetailLink artistId={artist.id} className={styles.statsArtistLink}>
-                {artist.name}
-              </ArtistDetailLink>
-              {artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_') ? (
-                <img src="/static/trans2.png" className={styles.statsSoulIdBadge} alt="SoulID" />
-              ) : null}
+            <div key={key} className={`${styles.tile} ${styles.tileCentered}`} aria-disabled="true">
+              {body}
             </div>
-            <div className={styles.statsRankedMeta}>
-              {artist.global_listeners
-                ? `${formatCompactNumber(artist.global_listeners)} global listeners`
-                : ''}
-            </div>
-          </div>
-          <span className={styles.statsRankedCount}>
-            {formatCompactNumber(artist.play_count)} plays
-          </span>
-        </div>
-      ))}
-    </div>
+          );
+        })}
+      </div>
+    </StatsSectionCard>
   );
 }
 
-function StatsRankedAlbums({ albums }: { albums: StatsAlbumRow[] }) {
+function ShelfToggle({
+  all,
+  onToggle,
+  total,
+}: {
+  all: boolean;
+  onToggle: (next: boolean) => void;
+  total: number;
+}) {
+  // a shelf row holds about nine at full width; below that there is no "rest"
+  if (total <= 6) return null;
   return (
-    <div id="stats-top-albums" className={styles.statsRankedList}>
-      {albums.length === 0 ? <EmptyListState message="No data yet" /> : null}
-      {albums.map((album, index) => (
-        <div key={`${album.name}-${index}`} className={styles.statsRankedItem}>
-          <span className={styles.statsRankedNum}>{index + 1}</span>
-          {album.image_url ? (
-            <img className={styles.statsRankedImage} src={album.image_url} alt="" />
-          ) : (
-            <div className={styles.statsRankedImageFallback} />
-          )}
-          <div className={styles.statsRankedInfo}>
-            <div className={styles.statsRankedName}>{album.name}</div>
-            <div className={styles.statsRankedMeta}>
-              <ArtistDetailLink artistId={album.artist_id} className={styles.statsArtistLink}>
-                {album.artist || ''}
-              </ArtistDetailLink>
-            </div>
-          </div>
-          <span className={styles.statsRankedCount}>
-            {formatCompactNumber(album.play_count)} plays
-          </span>
-        </div>
-      ))}
-    </div>
+    <button type="button" className={styles.linkButton} onClick={() => onToggle(!all)}>
+      {all ? 'Show fewer' : `Show all ${total}`}
+    </button>
   );
 }
 
-function StatsRankedTracks({
+/**
+ * The period's albums as covers. A cover plays the album when the library
+ * has it: the tracks load at click time, since at most one gets played.
+ */
+function StatsTopAlbums({ albums }: { albums: StatsAlbumRow[] }) {
+  const [all, setAll] = useState(false);
+  const [loading, setLoading] = useState<string | number | null>(null);
+
+  const play = async (album: StatsAlbumRow) => {
+    if (album.id == null || loading !== null) return;
+    setLoading(album.id);
+    try {
+      const tracks = await fetchAlbumPlayTracks(album.id);
+      if (!tracks.length) {
+        window.showToast?.(`No owned tracks for ${album.name} yet`, 'info');
+        return;
+      }
+      await window.playTrackList?.(tracks, album.name);
+    } catch {
+      window.showToast?.('Could not play that album', 'error');
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  return (
+    <StatsSectionCard
+      title="Top albums"
+      note="A cover plays the album"
+      action={<ShelfToggle total={albums.length} all={all} onToggle={setAll} />}
+    >
+      {albums.length === 0 ? <EmptyListState message="No data yet" /> : null}
+      <div id="stats-top-albums" className={`${styles.shelf} ${all ? styles.shelfAll : ''}`}>
+        {albums.map((album, index) => {
+          const playable = album.id != null && album.id !== '';
+          const art = (
+            <span className={styles.tileArt}>
+              <Art src={album.image_url} name={album.name} />
+              <span className={styles.rank}>{index + 1}</span>
+              {playable ? (
+                <span className={styles.playBadge} aria-hidden="true">
+                  {loading === album.id ? '…' : PLAY_ICON}
+                </span>
+              ) : null}
+            </span>
+          );
+          return (
+            <div key={`${album.name}-${index}`} className={styles.tile}>
+              {playable ? (
+                <button
+                  type="button"
+                  className={styles.tileButton}
+                  title="Play"
+                  aria-label={`Play ${album.name}`}
+                  onClick={() => void play(album)}
+                >
+                  {art}
+                </button>
+              ) : (
+                art
+              )}
+              <span className={styles.tileText}>
+                <span className={styles.tileName}>{album.name}</span>
+                <span className={styles.tileMeta}>
+                  <ArtistDetailLink artistId={album.artist_id} className={styles.artistLink}>
+                    {album.artist || ''}
+                  </ArtistDetailLink>
+                  {` · ${formatCompactNumber(album.play_count)} plays`}
+                </span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </StatsSectionCard>
+  );
+}
+
+function StatsTopTracks({
   tracks,
   onPlay,
 }: {
   tracks: StatsTrackRow[];
   onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
 }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? tracks : tracks.slice(0, TRACKS_SHOWN);
   return (
-    <div id="stats-top-tracks" className={styles.statsRankedList}>
+    <StatsSectionCard title="Top tracks">
       {tracks.length === 0 ? <EmptyListState message="No data yet" /> : null}
-      {tracks.map((track, index) => (
-        <div key={`${track.name}-${index}`} className={styles.statsRankedItem}>
-          <span className={styles.statsRankedNum}>{index + 1}</span>
-          {track.image_url ? (
-            <img className={styles.statsRankedImage} src={track.image_url} alt="" />
-          ) : (
-            <div className={styles.statsRankedImageFallback} />
-          )}
-          <div className={styles.statsRankedInfo}>
-            <div className={styles.statsRankedName}>{track.name}</div>
-            <div className={styles.statsRankedMeta}>
-              <ArtistDetailLink artistId={track.artist_id} className={styles.statsArtistLink}>
-                {track.artist || ''}
-              </ArtistDetailLink>
-              {track.album ? ` · ${track.album}` : ''}
+      <div id="stats-top-tracks" className={styles.rows}>
+        {shown.map((track, index) => (
+          <div key={`${track.name}-${index}`} className={styles.row}>
+            <span className={styles.rowNum}>{index + 1}</span>
+            <span className={styles.rowArt}>
+              <Art src={track.image_url} name={track.name} />
+            </span>
+            <div className={styles.rowText}>
+              <span className={styles.rowName}>{track.name}</span>
+              <span className={styles.rowMeta}>
+                <ArtistDetailLink artistId={track.artist_id} className={styles.artistLink}>
+                  {track.artist || ''}
+                </ArtistDetailLink>
+                {track.album ? ` · ${track.album}` : ''}
+              </span>
             </div>
+            <span className={styles.rowCount}>{formatCompactNumber(track.play_count)} plays</span>
+            <button
+              type="button"
+              className={styles.iconButton}
+              onClick={() =>
+                void onPlay({
+                  title: track.name,
+                  artist: track.artist || '',
+                  album: track.album || '',
+                })
+              }
+              title="Play"
+            >
+              {PLAY_ICON}
+            </button>
           </div>
-          <button
-            type="button"
-            className={`${styles.statsPlayButton} ${styles.statsPlayButtonSmall}`}
-            onClick={() =>
-              void onPlay({
-                title: track.name,
-                artist: track.artist || '',
-                album: track.album || '',
-              })
-            }
-            title="Play"
-          >
-            ▶
-          </button>
-          <span className={styles.statsRankedCount}>
-            {formatCompactNumber(track.play_count)} plays
-          </span>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+      <ShowAll total={tracks.length} shown={TRACKS_SHOWN} all={all} onToggle={setAll} />
+    </StatsSectionCard>
   );
 }
 
@@ -1320,33 +1293,40 @@ function StatsRecentPlays({
   tracks: StatsRecentTrack[];
   onPlay: (track: { title: string; artist: string; album: string }) => Promise<void>;
 }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? tracks : tracks.slice(0, RECENT_SHOWN);
   return (
-    <div id="stats-recent-plays" className={styles.statsRecentList}>
-      {tracks.length === 0 ? <EmptyListState message="No recent plays" /> : null}
-      {tracks.map((track, index) => (
-        <div
-          key={`${track.title}-${track.artist ?? ''}-${track.album ?? ''}-${track.played_at ?? ''}-${index}`}
-          className={styles.statsRecentItem}
-        >
-          <button
-            type="button"
-            className={`${styles.statsPlayButton} ${styles.statsPlayButtonSmall}`}
-            onClick={() =>
-              void onPlay({
-                title: track.title,
-                artist: track.artist || '',
-                album: track.album || '',
-              })
-            }
-            title="Play"
+    <div>
+      <div id="stats-recent-plays" className={styles.rows}>
+        {tracks.length === 0 ? <EmptyListState message="No recent plays" /> : null}
+        {shown.map((track, index) => (
+          <div
+            key={`${track.title}-${track.artist ?? ''}-${track.album ?? ''}-${track.played_at ?? ''}-${index}`}
+            className={`${styles.row} ${styles.rowRecent}`}
           >
-            ▶
-          </button>
-          <span className={styles.statsRecentTitle}>{track.title}</span>
-          <span className={styles.statsRecentArtist}>{track.artist || ''}</span>
-          <span className={styles.statsRecentTime}>{formatRelativePlayedAt(track.played_at)}</span>
-        </div>
-      ))}
+            <div className={styles.rowText}>
+              <span className={styles.rowName}>{track.title}</span>
+              <span className={styles.rowMeta}>{track.artist || ''}</span>
+            </div>
+            <span className={styles.rowCount}>{formatRelativePlayedAt(track.played_at)}</span>
+            <button
+              type="button"
+              className={styles.iconButton}
+              onClick={() =>
+                void onPlay({
+                  title: track.title,
+                  artist: track.artist || '',
+                  album: track.album || '',
+                })
+              }
+              title="Play"
+            >
+              {PLAY_ICON}
+            </button>
+          </div>
+        ))}
+      </div>
+      <ShowAll total={tracks.length} shown={RECENT_SHOWN} all={all} onToggle={setAll} />
     </div>
   );
 }
@@ -1459,10 +1439,7 @@ function StatsListeningDetailModal({
                 <div className={styles.statsDetailTrackTitle}>{track.title}</div>
                 <div className={styles.statsDetailTrackMeta}>
                   {track.artist_db_id ? (
-                    <ArtistDetailLink
-                      artistId={track.artist_db_id}
-                      className={styles.statsArtistLink}
-                    >
+                    <ArtistDetailLink artistId={track.artist_db_id} className={styles.artistLink}>
                       {track.artist || 'Unknown artist'}
                     </ArtistDetailLink>
                   ) : (
@@ -1499,83 +1476,92 @@ function StatsListeningDetailModal({
   );
 }
 
-function StatsLibraryHealth({ health }: { health: StatsHealth }) {
+function StatsLibraryHealth({
+  databaseBytes,
+  health,
+}: {
+  databaseBytes?: number;
+  health: StatsHealth;
+}) {
   const shellStatus = useShellStatus();
   const jiosaavnEnabled = shellStatus?._experimental?.jiosaavn_enabled === true;
   const bandcampEnabled = shellStatus?._experimental?.bandcamp_enabled === true;
   const enrichmentServices = visibleStatsEnrichmentServices(jiosaavnEnabled, bandcampEnabled);
-  const totalTracks = health.total_tracks ?? 0;
-  const formatEntries = Object.entries(health.format_breakdown ?? {});
+  const formatEntries = Object.entries(health.format_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
   const formatTotal = formatEntries.reduce((sum, [, count]) => sum + count, 0) || 1;
-  const formatColors: Record<string, string> = {
-    FLAC: '#3b82f6',
-    MP3: '#f97316',
-    Opus: '#a855f7',
-    AAC: '#14b8a6',
-    OGG: '#eab308',
-    WAV: '#ec4899',
-    Other: '#555555',
-  };
+  const years = (health.total_duration_ms ?? 0) / 3_600_000 / 24 / 365;
 
   return (
-    <div id="stats-library-health">
-      <div className={styles.statsHealthGrid}>
-        <div className={`${styles.statsHealthItem} ${styles.statsHealthItemWide}`}>
-          <div className={styles.statsHealthLabel}>Format Breakdown</div>
-          <div className={styles.statsFormatBar}>
-            {formatEntries.map(([format, count]) => {
-              const percentage = ((count / formatTotal) * 100).toFixed(1);
-              return (
-                <div
-                  key={format}
-                  className={styles.statsFormatSegment}
-                  style={{
-                    flex: count,
-                    background: formatColors[format] || formatColors.Other,
-                  }}
-                  title={`${format}: ${count} tracks (${percentage}%)`}
-                >
-                  {Number(percentage) > 8 ? format : ''}
-                </div>
-              );
-            })}
+    <>
+      <section id="stats-library-health" className={styles.card} aria-label="Library health">
+        <div className={`${styles.figures} ${styles.figuresFour}`}>
+          <div className={styles.figure}>
+            <b>{formatCompactNumber(health.total_tracks ?? 0)}</b>
+            <span>tracks</span>
+          </div>
+          <div className={styles.figure}>
+            <b>{formatTotalDuration(health.total_duration_ms)}</b>
+            <span>of music</span>
+            {years >= 0.1 ? <em>{years.toFixed(1)} years end to end</em> : null}
+          </div>
+          <div className={styles.figure}>
+            <b>{health.unplayed_percentage || 0}%</b>
+            <span>never played</span>
+            <em>{formatCompactNumber(health.unplayed_count)} tracks</em>
+          </div>
+          <div className={styles.figure}>
+            <b>{databaseBytes ? formatBytes(databaseBytes) : '—'}</b>
+            <span>database</span>
           </div>
         </div>
-        <div className={styles.statsHealthItem}>
-          <div className={styles.statsHealthValue}>
-            {formatCompactNumber(health.unplayed_count)} ({health.unplayed_percentage || 0}%)
-          </div>
-          <div className={styles.statsHealthLabel}>Unplayed Tracks</div>
+      </section>
+
+      <StatsSectionCard title="Formats" note="By track count">
+        <div className={styles.formatBar}>
+          {formatEntries.map(([format, count]) => (
+            <i
+              key={format}
+              style={{ flex: count }}
+              title={`${format}: ${count} tracks (${((count / formatTotal) * 100).toFixed(1)}%)`}
+            />
+          ))}
         </div>
-        <div className={styles.statsHealthItem}>
-          <div className={styles.statsHealthValue}>
-            {formatTotalDuration(health.total_duration_ms)}
-          </div>
-          <div className={styles.statsHealthLabel}>Total Duration</div>
+        <div className={styles.formatLegend}>
+          {formatEntries.map(([format, count]) => (
+            <span key={format}>
+              {format}
+              <b>{count.toLocaleString('en-US')}</b>
+            </span>
+          ))}
         </div>
-        <div className={styles.statsHealthItem}>
-          <div className={styles.statsHealthValue}>{formatCompactNumber(totalTracks)}</div>
-          <div className={styles.statsHealthLabel}>Total Tracks</div>
-        </div>
-      </div>
-      <div id="stats-enrichment-coverage" className={styles.statsEnrichment}>
-        {enrichmentServices.map((service) => {
-          const percent = health.enrichment_coverage?.[service.key] || 0;
-          return (
-            <div key={service.key} className={styles.statsEnrichItem}>
-              <span className={styles.statsEnrichName}>{service.label}</span>
-              <div className={styles.statsEnrichBar}>
-                <div
-                  className={styles.statsEnrichFill}
-                  style={{ width: `${percent}%`, background: service.color }}
-                />
+      </StatsSectionCard>
+
+      <StatsSectionCard
+        title="Metadata coverage"
+        note="Share of your tracks each source has matched"
+      >
+        <div id="stats-enrichment-coverage" className={styles.coverage}>
+          {[...enrichmentServices]
+            .map((service) => ({
+              ...service,
+              percent: health.enrichment_coverage?.[service.key] || 0,
+            }))
+            .sort((a, b) => b.percent - a.percent)
+            .map((service) => (
+              <div key={service.key} className={styles.coverageRow}>
+                <span>{service.label}</span>
+                <span className={styles.track}>
+                  <i
+                    className={service.percent < 50 ? styles.trackLow : undefined}
+                    style={{ width: `${service.percent}%` }}
+                  />
+                </span>
+                <b>{service.percent}%</b>
               </div>
-              <span className={styles.statsEnrichPct}>{percent}%</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+            ))}
+        </div>
+      </StatsSectionCard>
+    </>
   );
 }
 
@@ -1597,12 +1583,10 @@ function StatsDiskUsage({
   const tracksWithoutSize = payload?.tracks_without_size || 0;
 
   return (
-    <div className={styles.statsDiskUsageWrap}>
-      <div className={styles.statsDiskTotalRow}>
-        <div className={styles.statsDiskTotalValue}>
-          {hasData ? formatBytes(payload?.total_bytes) : '—'}
-        </div>
-        <div className={styles.statsDiskTotalMeta}>
+    <div>
+      <div className={styles.total}>
+        <b>{hasData ? formatBytes(payload?.total_bytes) : '—'}</b>
+        <span>
           {hasData
             ? `${tracksWithSize.toLocaleString()} tracks measured${
                 tracksWithoutSize > 0
@@ -1616,21 +1600,18 @@ function StatsDiskUsage({
                 : tracksWithoutSize > 0
                   ? `Run a Deep Scan to populate (${tracksWithoutSize.toLocaleString()} tracks pending)`
                   : 'No tracks in library yet'}
-        </div>
+        </span>
       </div>
-      <div className={styles.statsDiskFormats}>
-        {formats.map(([format, bytes]) => {
-          const width = Math.max(2, Math.round((bytes / max) * 100));
-          return (
-            <div key={format} className={styles.statsDiskFormatRow}>
-              <span className={styles.statsDiskFormatName}>{format.toUpperCase()}</span>
-              <div className={styles.statsDiskFormatBar}>
-                <div className={styles.statsDiskFormatFill} style={{ width: `${width}%` }} />
-              </div>
-              <span className={styles.statsDiskFormatSize}>{formatBytes(bytes)}</span>
-            </div>
-          );
-        })}
+      <div className={styles.coverage}>
+        {formats.map(([format, bytes]) => (
+          <div key={format} className={styles.coverageRow}>
+            <span>{format.toUpperCase()}</span>
+            <span className={styles.track}>
+              <i style={{ width: `${Math.max(2, Math.round((bytes / max) * 100))}%` }} />
+            </span>
+            <b>{formatBytes(bytes)}</b>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1647,58 +1628,30 @@ function StatsDbStorage({
     return <SectionSubtleError message={getErrorMessage(error)} />;
   }
 
-  const tables = groupDbStorageTables(payload?.tables ?? []).map((table, index) => ({
-    ...table,
-    fill: STATS_DB_STORAGE_COLORS[index % STATS_DB_STORAGE_COLORS.length],
-  }));
+  const tables = groupDbStorageTables(payload?.tables ?? []);
   const method = payload?.method;
+  const max = Math.max(1, ...tables.map((table) => table.size));
 
   return (
-    <div className={styles.statsDbStorageWrap}>
-      <div id="stats-db-storage-chart" className={styles.statsDbChartContainer}>
-        <ResponsiveContainer width={180} height={180}>
-          <PieChart>
-            <Pie
-              data={tables}
-              dataKey="size"
-              nameKey="name"
-              innerRadius={52}
-              outerRadius={84}
-              paddingAngle={2}
-              stroke="transparent"
-            />
-            <Tooltip
-              contentStyle={STATS_TOOLTIP_STYLE}
-              wrapperStyle={STATS_TOOLTIP_WRAPPER_STYLE}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-        <div className={styles.statsDbTotal}>
-          <div className={styles.statsDbTotalValue}>
-            {formatDbStorageValue(payload?.total_file_size || 0, method)}
-          </div>
-          <div className={styles.statsDbTotalLabel}>
-            {payload?.refreshing && !tables.length
-              ? 'Measuring tables…'
-              : payload?.report_failed && !tables.length
-                ? 'Couldn’t measure tables'
-                : 'Total Size'}
-          </div>
-        </div>
+    <div id="stats-db-storage-chart">
+      <div className={styles.total}>
+        <b>{formatDbStorageValue(payload?.total_file_size || 0, method)}</b>
+        <span>
+          {payload?.refreshing && !tables.length
+            ? 'Measuring tables…'
+            : payload?.report_failed && !tables.length
+              ? 'Couldn’t measure tables'
+              : 'Total Size'}
+        </span>
       </div>
-      <div className={styles.statsDbLegend}>
-        {tables.map((table, index) => (
-          <div key={table.name} className={styles.statsDbLegendItem}>
-            <span
-              className={styles.statsDbLegendDot}
-              style={{
-                background: STATS_DB_STORAGE_COLORS[index % STATS_DB_STORAGE_COLORS.length],
-              }}
-            />
-            <span className={styles.statsDbLegendName}>{table.name}</span>
-            <span className={styles.statsDbLegendSize}>
-              {formatDbStorageValue(table.size, method)}
+      <div className={styles.coverage}>
+        {tables.map((table) => (
+          <div key={table.name} className={styles.coverageRow}>
+            <span title={table.name}>{table.name}</span>
+            <span className={styles.track}>
+              <i style={{ width: `${Math.max(2, Math.round((table.size / max) * 100))}%` }} />
             </span>
+            <b>{formatDbStorageValue(table.size, method)}</b>
           </div>
         ))}
       </div>

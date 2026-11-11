@@ -52,6 +52,8 @@ export interface StatsArtistRow {
 }
 
 export interface StatsAlbumRow {
+  /** the library album behind the row, when it resolved to one */
+  id?: string | number | null;
   name: string;
   artist?: string | null;
   artist_id?: string | number | null;
