@@ -34,12 +34,35 @@ DEFAULT_CATEGORY_NAMES = frozenset({
     'complete', 'completed', 'incoming', 'sabnzbd', 'nzbget', 'usenet',
 })
 
+# what a path template hangs on the artist's folder to tell namesakes apart:
+# "Nirvana (UK)", "$uicideboy$ (American hip-hop duo)", "Air [FR]"
+_NOTE_SUFFIX = re.compile(r'^(?:\s*(?:\([^()]*\)|\[[^\[\]]*\]|\{[^{}]*\}))+$')
+_UNSAFE = re.compile(r'[<>:"/\\|?*]')
+
+
+def _fold(name):
+    """a name as a folder would carry it: AC/DC is AC_DC on disk."""
+    return re.sub(r'\s+', ' ', _UNSAFE.sub('_', str(name or ''))).strip('. ').casefold()
+
+
+def is_same_artist_folder(folder, artist, same_as=()):
+    """True when the folder is this artist's own folder under another
+    spelling: the filesystem-safe name, a name the user's template renders,
+    or the name with a note in brackets after it (#2045)."""
+    folded = _fold(folder)
+    names = {_fold(name) for name in (artist, *same_as)} - {''}
+    if folded in names:
+        return True
+    own = _fold(artist)
+    return bool(own) and folded.startswith(own) and bool(_NOTE_SUFFIX.match(folded[len(own):]))
+
+
 _AUDIO_EXT = re.compile(r'\.(flac|mp3|m4a|aac|ogg|opus|wav|aiff?|ape|wma|alac|wv)$', re.I)
 _DISC_FOLDER = re.compile(r'^(cd|disc|disk)\s*\d+', re.I)
 
 
 def resolve_folder_artist(rel_path, identified_artist, enabled,
-                          category_names=DEFAULT_CATEGORY_NAMES):
+                          category_names=DEFAULT_CATEGORY_NAMES, same_as=()):
     """Return the folder-derived artist to use, or ``None`` to keep the
     already-identified artist.
 
@@ -55,6 +78,12 @@ def resolve_folder_artist(rel_path, identified_artist, enabled,
     with Artist/Album that's the same thing, but a client folder mounted deeper
     (qbittorrent/lidarr-done/Artist/Album) used to name the artist after the
     mount. category and container names are skipped on the way up.
+
+    ``same_as`` is every folder name the path templates give the identified
+    artist. a folder soulsync named itself is not a second opinion on who the
+    artist is: "$albumartist ($albumartistdisambiguation)" put "(American
+    hip-hop duo)" in the Album Artist tag of anything that came back through
+    staging (#2045).
     """
     if not enabled:
         return None
@@ -73,6 +102,6 @@ def resolve_folder_artist(rel_path, identified_artist, enabled,
         folder_artist = name
         break
 
-    if folder_artist and folder_artist.lower() != (identified_artist or '').lower():
+    if folder_artist and not is_same_artist_folder(folder_artist, identified_artist, same_as):
         return folder_artist
     return None

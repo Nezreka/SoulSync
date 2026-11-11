@@ -1144,6 +1144,45 @@ def get_file_path_from_template_raw(template: str, context: dict) -> tuple[str, 
     return "", sanitize_filename(full_path)
 
 
+_ARTIST_TOKEN_RE = re.compile(r"\$\{(?:album)?artist[a-z]*\}|\$(?:album)?artist[a-z]*")
+
+
+def artist_folder_names(artist_name: str) -> set:
+    """Every folder name the path templates give this artist.
+
+    auto-import reads the artist off the folder an album sits in. a folder the
+    template named ("Nirvana (UK)", "AC_DC") says nothing new about who the
+    artist is, so the import has to know its own handwriting (#2045)."""
+    name = str(artist_name or "").strip()
+    if not name:
+        return set()
+    names = {sanitize_filename(name)}
+    try:
+        templates = _get_config_manager().get("file_organization.templates", {}) or {}
+    except Exception:
+        templates = {}
+    seen = set()
+    for template in templates.values():
+        if not isinstance(template, str):
+            continue
+        for segment in template.replace("\\", "/").split("/")[:-1]:
+            # a folder made of nothing but the artist: tokens and fixed text
+            if segment in seen or not _ARTIST_TOKEN_RE.search(segment):
+                continue
+            seen.add(segment)
+            if "$" in _ARTIST_TOKEN_RE.sub("", segment):
+                continue
+            try:
+                folder, _file = get_file_path_from_template_raw(
+                    segment + "/x", {"artist": name, "albumartist": name})
+            except Exception as e:
+                logger.debug("artist folder render failed for %r: %s", segment, e)
+                continue
+            if folder:
+                names.add(folder)
+    return names
+
+
 _SINGLE_PATH_DEFAULTS = frozenset({
     "$albumartist/$albumartist - $title/$title",
     "$artist/$artist - $title/$title",

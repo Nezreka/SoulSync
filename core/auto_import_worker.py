@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.imports.folder_artist import resolve_folder_artist
+from core.imports.paths import artist_folder_names
 from core.imports.paths import config_root_path, docker_resolve_path
 from core.imports.pipeline import import_rejection_reason, kept_existing_library_file
 from utils.logging_config import get_logger
@@ -2150,7 +2151,9 @@ class AutoImportWorker:
             if self._config_manager.get('import.folder_artist_override', True):
                 staging_root = self._resolve_staging_path() or self.staging_path
                 rel_path = os.path.relpath(candidate.path, staging_root)
-                folder_artist = resolve_folder_artist(rel_path, artist_name, enabled=True)
+                folder_artist = resolve_folder_artist(
+                    rel_path, artist_name, enabled=True,
+                    same_as=artist_folder_names(artist_name))
                 if folder_artist:
                     logger.info(f"[Auto-Import] Parent folder artist '{folder_artist}' differs from tag artist '{artist_name}' — using folder artist")
                     artist_name = folder_artist
