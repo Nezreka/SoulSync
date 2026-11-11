@@ -1173,6 +1173,10 @@ def _process_metasync_depot_source(pp: dict, metadata: dict, cfg, runtime,
     from core import metasync_depot as depot
     from core.soulid_worker import generate_soul_id
 
+    if depot.is_idle(db, cfg.get):
+        # no node and nothing in the depot: most installs, and no work here
+        return
+
     album_title = metadata.get("album") or ""
     artist_sid = generate_soul_id("artist", artist_name) if artist_name else ""
     album_sid = (generate_soul_id("album", artist_name, album_title)

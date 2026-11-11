@@ -537,6 +537,7 @@ def store_record(db: Any, record: Any, now: Optional[datetime] = None) -> bool:
     subject's network candidates — the node no longer holds it."""
     if not isinstance(record, dict):
         return False
+    _idle_memo.pop(_memo_key(db), None)     # the depot is about to hold something
     subject = record.get("subject")
     kind = record.get("kind")
     if not isinstance(subject, str) or not subject.startswith("soul_"):
@@ -1009,6 +1010,7 @@ def record_mark(db: Any, kind: str, soul_id: str, field: str, value: Any,
     "database is locked"."""
     if kind not in PROMOTABLE_FIELDS or not soul_id:
         return
+    _marks_memo[_memo_key(db)] = (time.monotonic(), True)
     sql = """INSERT INTO metasync_network_marks
              (entity_kind, soul_id, field, value_key, via, marked_at)
              VALUES (?, ?, ?, ?, ?, ?)
@@ -1254,6 +1256,61 @@ def apply_update_push(db: Any, payload: Any,
 # ---------------------------------------------------------------------------
 # Node client — SoulSync -> node (the pairing that already exists for SIN)
 # ---------------------------------------------------------------------------
+
+# -- fast paths for an install that has never used the depot ------------------
+# Most installs have no MetaSync node. Without these the tagging consult
+# opened five connections per imported file to learn that an empty depot is
+# empty, and the export asked for marks once per row of a library that has
+# none. Both answers are remembered for a short while per database.
+IDLE_MEMO_SECONDS = 60
+_idle_memo: Dict[Any, Tuple[float, bool]] = {}
+_marks_memo: Dict[Any, Tuple[float, bool]] = {}
+
+
+def _memo_key(db: Any) -> Any:
+    return getattr(db, "database_path", None) or id(db)
+
+
+def is_idle(db: Any, config_get: Callable[..., Any]) -> bool:
+    """True when there is no node to ask and the depot holds nothing: the
+    tagging consult has no work. A configured node, or anything in the depot
+    (a node pushes with an api key, connected here or not), is not idle."""
+    node_url, local_key = _node_config(config_get)
+    if node_url and local_key:
+        return False
+    key = _memo_key(db)
+    hit = _idle_memo.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < IDLE_MEMO_SECONDS:
+        return hit[1]
+    ensure_schema(db)
+    with db._get_connection() as conn:
+        empty = conn.execute(
+            "SELECT 1 FROM metasync_depot_entries LIMIT 1").fetchone() is None
+    _idle_memo[key] = (now, empty)
+    return empty
+
+
+def has_marks(db: Any) -> bool:
+    """Whether any library value is marked as network-derived at all."""
+    key = _memo_key(db)
+    hit = _marks_memo.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < IDLE_MEMO_SECONDS:
+        return hit[1]
+    ensure_schema(db)
+    with db._get_connection() as conn:
+        found = conn.execute(
+            "SELECT 1 FROM metasync_network_marks LIMIT 1").fetchone() is not None
+    _marks_memo[key] = (now, found)
+    return found
+
+
+def _forget_fast_paths(db: Any) -> None:
+    key = _memo_key(db)
+    _idle_memo.pop(key, None)
+    _marks_memo.pop(key, None)
+
 
 class NodeUnreachable(RuntimeError):
     """The MetaSync node did not answer; the depot works without it."""

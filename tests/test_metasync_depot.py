@@ -2033,3 +2033,38 @@ def test_no_node_means_no_background_ask(db, monkeypatch):
     depot._bg_queue.clear()
     assert depot.ask_network_soon(db, lambda k, d=None: d, {"track": ["soul_x"]}) is False
     assert not depot._bg_queue
+
+
+# ── an install that has never used the depot pays nothing for it ──
+
+def test_an_empty_depot_with_no_node_is_idle_until_something_lands(db):
+    assert depot.is_idle(db, _Cfg().get) is True
+    # a node to ask is work to do, even with nothing stored yet
+    assert depot.is_idle(db, _Cfg({"metasync.node_url": "http://node",
+                                   "metasync.local_api_key": "k"}).get) is False
+    track_sid = generate_soul_id("track", "The Artist", "The Song")
+    depot.store_record(db, _record(track_sid, "track", {
+        "spotify_id": _field([_strong("sp_strong")])}), now=NOW)
+    # the memo does not outlive the first record
+    assert depot.is_idle(db, _Cfg().get) is False
+
+
+def test_the_tagging_consult_does_no_work_on_an_idle_install(db, monkeypatch):
+    from core.metadata.source import _process_metasync_depot_source
+
+    assert depot.is_idle(db, _Cfg().get) is True
+    touched = []
+    monkeypatch.setattr(depot, "get_fields", lambda *a, **k: touched.append("fields") or [])
+    monkeypatch.setattr(depot, "collect_subjects", lambda *a, **k: touched.append("collect"))
+    monkeypatch.setattr(depot, "ask_network_soon", lambda *a, **k: touched.append("ask"))
+    pp = _pp()
+    _process_metasync_depot_source(
+        pp, {"album": "The Album", "track_number": 1}, _Cfg(), None,
+        "The Song", "The Artist", context=None, db=db)
+    assert touched == [] and pp["id_tags"] == {} and not pp.get("_depot")
+
+
+def test_marks_are_only_looked_up_once_a_value_is_marked(db):
+    assert depot.has_marks(db) is False
+    depot.record_mark(db, "track", generate_soul_id("track", "A", "B"), "isrc", "USABC1234567")
+    assert depot.has_marks(db) is True

@@ -149,9 +149,12 @@ def register_routes(bp):
         # independent assertions. Computed from the library's current
         # values, so a mark whose value was replaced stops applying.
         from core import metasync_depot
+        # a library with no marked value at all (every install that never
+        # promoted anything) answers without a query per row
+        marked = metasync_depot.has_marks(db)
         for row, item in zip(rows, items, strict=True):
-            item["network_fields"] = metasync_depot.network_fields_for_export(
-                db, entity, row)
+            item["network_fields"] = (
+                metasync_depot.network_fields_for_export(db, entity, row) if marked else [])
         next_cursor = _encode_cursor(rows[-1].get("id")) if rows else ""
 
         return api_success({
