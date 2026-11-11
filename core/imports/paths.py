@@ -869,6 +869,8 @@ def _replace_template_variables(template: str, context: dict) -> str:
         # (a track on disc 2+ still shows even if total_discs wasn't populated).
         "disc": (str(_disc_number) if (_total_discs > 1 or _disc_number > 1) else ""),
         "discnum": (str(_disc_number) if (_total_discs > 1 or _disc_number > 1) else ""),
+        "discalways": f"{_disc_number:02d}",
+        "discnumalways": str(_disc_number),
         "year": str(clean_context.get("year", "")),
         "quality": clean_context.get("quality", ""),
         "disambiguation": clean_context.get("disambiguation", ""),
@@ -883,6 +885,14 @@ def _replace_template_variables(template: str, context: dict) -> str:
     }
     for var_name, val in bracket_map.items():
         result = result.replace("${" + var_name + "}", val)
+
+    # $discalways / $discnumalways: the disc number on EVERY album, one disc
+    # or five. $disc and $discnum drop out on a single-disc album (#981, so
+    # nobody gets "01-" stamped on every file), which is wrong for someone who
+    # wants every file named 01-06 the same way (#2044). both start with
+    # $disc, so they go first, here, before anything can eat that prefix.
+    result = result.replace("$discnumalways", str(_disc_number))
+    result = result.replace("$discalways", f"{_disc_number:02d}")
 
     result = result.replace("$disambiguation", clean_context.get("disambiguation", ""))
     result = result.replace("$label", clean_context.get("label", ""))

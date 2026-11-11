@@ -13980,6 +13980,8 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
         cleaned_folders = []
         for part in folder_parts:
             part = part.replace('$quality', '')
+            # the always-on pair starts with $disc: strip it whole first (#2044)
+            part = part.replace('$discnumalways', '').replace('$discalways', '')
             part = part.replace('$discnum', '')
             part = part.replace('$disc', '')
             part = re.sub(r'\s*\[\s*\]', '', part)
@@ -14269,6 +14271,8 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
         cleaned_folders = []
         for part in folder_parts:
             part = part.replace('$quality', '')
+            # the always-on pair starts with $disc: strip it whole first (#2044)
+            part = part.replace('$discnumalways', '').replace('$discalways', '')
             part = part.replace('$discnum', '')
             part = part.replace('$disc', '')
             part = re.sub(r'\s*\[\s*\]', '', part)   # empty []

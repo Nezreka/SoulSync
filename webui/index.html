@@ -6759,7 +6759,11 @@
                                                         <code>$album</code>,
                                                         <code>$albumtype</code>, <code>$title</code>,
                                                         <code>$track</code>, <code>$disc</code> (01),
-                                                        <code>$discnum</code> (1), <code>$cdnum</code> (CD01),
+                                                        <code>$discnum</code> (1), <code>$cdnum</code> (CD01):
+                                                        these three only appear on a multi-disc album, so a
+                                                        single-disc album isn't stamped 01- on every file.
+                                                        <code>$discalways</code> (01) and
+                                                        <code>$discnumalways</code> (1) appear on every album,
                                                         <code>$year</code>, <code>$quality</code> (filename only),
                                                         <code>$disambiguation</code> (the release's edition note, like
                                                         &ldquo;baby punk version&rdquo;; added to the album folder

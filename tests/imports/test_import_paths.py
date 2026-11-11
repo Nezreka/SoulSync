@@ -1284,3 +1284,52 @@ def test_artist_template_without_albumartist_uses_track_artist_letter():
         "$artistletter/$artist/$title", context
     )
     assert rendered == "D/Drake/Trance"
+
+
+# ── #2044: $discalways / $discnumalways, for the disc on every album ────────
+
+def _one_disc(template):
+    return import_paths.get_file_path_from_template_raw(template, {
+        "artist": "#1 Dads", "albumartist": "#1 Dads", "album": "About Face", "year": 2014,
+        "title": "For Randy Robinson and Cassidy", "track_number": 6,
+        "disc_number": 1, "total_discs": 1})
+
+
+def test_discalways_names_the_disc_on_a_single_disc_album(monkeypatch):
+    """#2044: someone naming every file 01-06 the same way got 06 on a
+    one-disc album, because $disc drops out there by design (#981). the
+    always-on pair is for them; $disc keeps its rule."""
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    assert _one_disc("$albumartist/$album/$discalways-$track - $title")[1] == (
+        "01-06 - For Randy Robinson and Cassidy")
+    assert _one_disc("$albumartist/$album/$discnumalways-$track - $title")[1] == (
+        "1-06 - For Randy Robinson and Cassidy")
+    assert _one_disc("$albumartist/$album/${discalways}x${discnumalways} $title")[1] == (
+        "01x1 For Randy Robinson and Cassidy")
+    # the old tokens still drop out on one disc
+    assert _one_disc("$albumartist/$album/$disc-$track - $title")[1] == (
+        "06 - For Randy Robinson and Cassidy")
+    assert _one_disc("$albumartist/$album/$discnum-$track - $title")[1] == (
+        "06 - For Randy Robinson and Cassidy")
+
+
+def test_discalways_is_the_real_disc_on_a_multi_disc_album_and_works_in_a_folder(monkeypatch):
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config({}))
+    folder, filename = import_paths.get_file_path_from_template_raw(
+        "$albumartist/$album/Disc $discnumalways/$discalways-$track - $title",
+        {"artist": "A", "albumartist": "A", "album": "B", "title": "Song",
+         "track_number": 7, "disc_number": 2, "total_discs": 3})
+    assert filename == "02-07 - Song"
+    assert folder.replace("\\", "/").endswith("B/Disc 2")
+    # one disc keeps the folder too: that is what "always" means
+    folder, _ = import_paths.get_file_path_from_template_raw(
+        "$albumartist/$album/Disc $discnumalways/$track - $title",
+        {"artist": "A", "albumartist": "A", "album": "B", "title": "Song",
+         "track_number": 7, "disc_number": 1, "total_discs": 1})
+    assert folder.replace("\\", "/").endswith("B/Disc 1")
+
+
+def test_a_template_with_discalways_places_the_disc_itself():
+    # so SoulSync adds no "Disc 2" folder of its own on top of it
+    assert import_paths.template_uses_disc_variable("$album/$discalways-$track")
+    assert import_paths.auto_disc_folder("$album/$discalways-$track", 2, 2, "Disc") == ""
