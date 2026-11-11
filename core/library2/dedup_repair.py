@@ -612,7 +612,7 @@ def _release_ids_disagree(a: Any, b: Any) -> bool:
 
 def _twin_album_rows(conn: Any, artist_id: int) -> List[Dict[str, Any]]:
     return [dict(r) for r in conn.execute(
-        """SELECT al.id, al.title, al.album_type, al.origin, al.monitored, al.year,
+        """SELECT al.id, al.title, al.album_type, al.origin, al.year,
                   al.release_date, al.expected_track_count, al.track_count,
                   al.spotify_id, al.musicbrainz_id, al.external_ids, al.soul_id,
                   COALESCE(al.server_source, '') AS server_source,
