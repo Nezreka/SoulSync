@@ -240,6 +240,7 @@ Some playlists change on their own: a weekly chart, a discovery mix, a Beatport 
 - If SoulSync can't tell (the play count is unknown, the playlist's track list is empty), the song is kept
 - The Settings row shows what it will do before you turn it on: how many downloaded songs have left, how many will be removed, and why the rest stay
 - It runs through the **Expired Download Cleaner** on the Tools page, which turns on with the first rotating playlist. **Dry run** is on by default, so removals show up as findings for you to approve. Turn dry run off there to have files deleted automatically
+- **Rotating keep played** in the cleaner's settings decides whether listening keeps a song. It is on by default. Turn it off and a song that left the playlist is removed however often you played it. Favourites, ratings and other playlists still keep it
 - **Rotating playlist wait** in the cleaner's settings is how long a song must be gone before it is removed. The default is one day, so a sync that came back short can't cost you files
 - Works on mirrored playlists and on **My Playlists**, where removing a song by hand counts as leaving. Request lists and Liked Songs can't be rotating
 - Use **Reconcile** or **Replace** sync mode with Rotating. **Append only** keeps every song in the server playlist, and a song in a server playlist is kept while curation signals are on

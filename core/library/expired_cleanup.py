@@ -192,6 +192,7 @@ def is_expired(
     playlist_retention: Optional[str],
     min_plays: int,
     now: datetime,
+    rotation_keeps_played: bool = True,
 ) -> bool:
     """True if this origin entry should be proposed for deletion.
 
@@ -200,7 +201,9 @@ def is_expired(
     ``protected`` (bool — still in an active mirror/watch), ``grandfathered``
     (bool — predates this database's lifetime, see below). ``rotated_out``
     (bool, optional) marks a download that left a rotating playlist: it skips
-    the retention window and nothing else."""
+    the retention window and nothing else, unless ``rotation_keeps_played``
+    is off (#2047): then having listened to it does not keep it either. A
+    favourite, a rating or another playlist still does."""
     if entry.get("protected"):
         return False
     if entry.get("curated"):
@@ -215,6 +218,11 @@ def is_expired(
         # A rebuild must leave the user's library safe, so anything predating
         # it is out of scope permanently.
         return False
+    if entry.get("rotated_out") and not rotation_keeps_played:
+        # a rotating playlist is there to be listened to. its owner asked for
+        # a play not to count as a reason to keep (#2047), so the play count,
+        # known or not, has no say here
+        return True
     play_count = entry.get("play_count")
     if play_count is None:
         # UNKNOWN, which is not the same as zero. The candidate query could
@@ -247,6 +255,7 @@ def select_expired(
     playlist_retention: Optional[str],
     min_plays: int = 2,
     now: Optional[datetime] = None,
+    rotation_keeps_played: bool = True,
 ) -> List[Dict[str, Any]]:
     """Return the subset of ``entries`` that are expired + safe to delete."""
     now = now or datetime.now(timezone.utc)
@@ -254,5 +263,6 @@ def select_expired(
         e for e in (entries or [])
         if is_expired(e, watchlist_retention=watchlist_retention,
                       playlist_retention=playlist_retention,
-                      min_plays=min_plays, now=now)
+                      min_plays=min_plays, now=now,
+                      rotation_keeps_played=rotation_keeps_played)
     ]

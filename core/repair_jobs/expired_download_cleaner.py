@@ -74,7 +74,12 @@ def _mirror_track_ids(track: dict) -> list:
     return ids
 
 
-def _deletion_rationale(entry, min_plays, curated_keys) -> str:
+def _rotation_keeps_played(settings) -> bool:
+    """does a play keep a song that left a rotating playlist? (#2047)"""
+    return bool((settings or {}).get('rotating_keep_played', True))
+
+
+def _deletion_rationale(entry, min_plays, curated_keys, keeps_played=True) -> str:
     """Why this download is being proposed for deletion, in the user's terms.
 
     A finding that says "past retention, not active, not replayed" when the job
@@ -86,7 +91,9 @@ def _deletion_rationale(entry, min_plays, curated_keys) -> str:
     plays = entry.get('play_count')
     bits = ['left its rotating playlist' if entry.get('rotated_out') else 'past retention',
             'not in an active playlist or watchlist']
-    if plays is None:
+    if entry.get('rotated_out') and not keeps_played:
+        bits.append('plays do not keep a rotating song')
+    elif plays is None:
         bits.append('play count unknown')
     else:
         bits.append(f'played {plays}x (keep at {min_plays})')
@@ -278,7 +285,9 @@ class ExpiredDownloadCleanerJob(RepairJob):
         'its downloads are cleaned up once the song leaves the playlist, '
         'without waiting for a retention window. A song that is still in any '
         'other playlist you mirror is kept, and so is anything played, '
-        'favourited or rated.\n\n'
+        'favourited or rated. Turn "Rotating: keep played songs" off and a '
+        'play no longer keeps a rotated song; a favourite, a rating or '
+        'another playlist still does.\n\n'
         'Dry run is ON by default: it only creates findings for you to review '
         'and delete — nothing is deleted automatically. Turn Dry run OFF for '
         'hands-off auto-cleanup.\n\n'
@@ -287,6 +296,8 @@ class ExpiredDownloadCleanerJob(RepairJob):
         '- Keep if played at least: play count that protects a track (default 2)\n'
         '- Use curation signals: keep anything favourited/rated/in a playlist\n'
         '- Curation min rating: stars that count as "keep this" (default 3)\n'
+        '- Rotating: keep played songs: ON (default) keeps a rotated song you '
+        'have played; OFF removes it however often it was played\n'
         '- Rotating playlist wait: how long a song must be gone from a rotating '
         'playlist before its download is removed (default 1 day)\n'
         '- Dry run: ON = findings only (default); OFF = delete automatically'
@@ -309,11 +320,14 @@ class ExpiredDownloadCleanerJob(RepairJob):
         # rotating playlists (#2039): one day covers a sync that came back
         # short, the next sync puts the tracks back before anything is removed
         'rotation_grace': '1d',
+        # #2047: off = listening to a rotating playlist's song does not keep it
+        'rotating_keep_played': True,
     }
     setting_options = {
         'watchlist_retention': RETENTION_OPTIONS,
         'playlist_retention': RETENTION_OPTIONS,
         'rotation_grace': ROTATION_GRACE_OPTIONS,
+        'rotating_keep_played': [True, False],
         'dry_run': [True, False],
         'use_curation_signals': [True, False],
         'curation_min_rating': [1, 2, 3, 4, 5],
@@ -772,8 +786,10 @@ class ExpiredDownloadCleanerJob(RepairJob):
         curated_keys, _stale = self._annotate(
             context, settings, candidates, playlist_membership, watched_names)
 
+        keeps_played = _rotation_keeps_played(settings)
         expired = select_expired(candidates, watchlist_retention=wl,
-                                 playlist_retention=pl, min_plays=min_plays)
+                                 playlist_retention=pl, min_plays=min_plays,
+                                 rotation_keeps_played=keeps_played)
         result.scanned = len(candidates)
         if context.update_progress:
             context.update_progress(0, len(expired))
@@ -820,7 +836,7 @@ class ExpiredDownloadCleanerJob(RepairJob):
                         # deleting someone's file.
                         description=(f'"{entry.get("title")}" by {entry.get("artist_name") or "Unknown"} '
                                      f'— via {entry.get("origin")} ({entry.get("origin_context") or "?"}), '
-                                     f'{_deletion_rationale(entry, min_plays, curated_keys)}.'),
+                                     f'{_deletion_rationale(entry, min_plays, curated_keys, keeps_played)}.'),
                         details={
                             'history_id': entry.get('id'),
                             'file_path': entry.get('file_path'),
@@ -868,7 +884,7 @@ def cleaner_state(config_manager) -> dict:
     """whether the cleaner will run at all, read the way the repair worker
     reads it: maintenance defaults on, this job defaults off."""
     state = {'cleaner_enabled': False, 'maintenance_enabled': True,
-             'dry_run': True, 'rotation_grace': '1d'}
+             'dry_run': True, 'rotation_grace': '1d', 'keep_played': True}
     if config_manager is None:
         return state
     try:
@@ -880,6 +896,7 @@ def cleaner_state(config_manager) -> dict:
         settings = settings if isinstance(settings, dict) else {}
         state['dry_run'] = bool(settings.get('dry_run', True))
         state['rotation_grace'] = str(settings.get('rotation_grace') or '1d')
+        state['keep_played'] = _rotation_keeps_played(settings)
     except Exception as e:
         logger.debug("cleaner state unreadable: %s", e)
     return state
@@ -936,7 +953,8 @@ def rotation_preview(db, config_manager, playlist: dict) -> dict:
         out['left'] += 1
         # the wait is the only thing time changes, so ask as if it had passed
         if is_expired(dict(c, rotated_out=True), watchlist_retention='off',
-                      playlist_retention='off', min_plays=min_plays, now=now):
+                      playlist_retention='off', min_plays=min_plays, now=now,
+                      rotation_keeps_played=_rotation_keeps_played(settings)):
             out['removing'] += 1
             if not c.get('rotated_out'):
                 out['waiting'] += 1
@@ -1007,5 +1025,6 @@ def _rotation_due_ids(db, config_manager) -> frozenset:
         min_plays = 2
     # retention off on purpose: only what rotation alone would remove
     due = select_expired(candidates, watchlist_retention='off',
-                         playlist_retention='off', min_plays=min_plays)
+                         playlist_retention='off', min_plays=min_plays,
+                         rotation_keeps_played=_rotation_keeps_played(settings))
     return frozenset(int(c['id']) for c in due if c.get('id') is not None)
