@@ -124,10 +124,13 @@ def test_a_finding_that_names_nothing_gets_no_poster():
 
 def test_findings_and_issue_types_carry_posters_over_http(client):
     c, db = client
-    for show_id in (5, 5, 6):
+    # a counter, not id(object()): a temporary's address is reused, so two
+    # findings could get the same entity id and fold into one (red nightly,
+    # Nov 12 2026: three rows came back instead of four)
+    for n, show_id in enumerate((5, 5, 6)):
         db.repair_create_finding("missing_episodes", finding_type="missing_episodes",
                                  title=f"Show {show_id}", entity_type="show",
-                                 entity_id=f"{show_id}:{id(object())}",
+                                 entity_id=f"{show_id}:{n}",
                                  details={"show_id": show_id})
     db.repair_create_finding("broken_files", finding_type="broken_file", title="Stub",
                              entity_type="file", entity_id="f1", details={})
