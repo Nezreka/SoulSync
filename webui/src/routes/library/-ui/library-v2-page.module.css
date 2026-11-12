@@ -1619,110 +1619,6 @@ button.statusWarn:disabled {
   color: rgb(52, 211, 153);
 }
 
-.artistSettingsSection {
-  padding: 16px 0;
-  border-bottom: 1px solid var(--white-a08);
-}
-
-.artistSettingsSection:first-of-type {
-  padding-top: 0;
-}
-
-.artistSettingsSection:last-child {
-  border-bottom: 0;
-}
-
-.artistSettingsSection h4 {
-  margin: 0 0 8px;
-  font-size: 14px;
-}
-
-.artistSettingsIdentity {
-  display: flex;
-  align-items: flex-start;
-  gap: 20px;
-  padding: 18px;
-  border: 1px solid var(--white-a10);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.artistSettingsPhoto {
-  width: 112px;
-  height: 112px;
-  flex: 0 0 112px;
-  border-radius: 50%;
-  object-fit: cover;
-  border: 3px solid rgba(var(--accent-rgb), 0.32);
-  box-shadow: 0 10px 28px var(--black-a35);
-}
-
-.artistSettingsIdentityBody {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.artistSettingsIdentityName {
-  font-size: 24px;
-  line-height: 1.15;
-}
-
-.artistSettingsGenres {
-  color: rgb(var(--accent-light-rgb));
-  font-size: 12px;
-}
-
-.artistSettingsProviderIds {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 3px;
-}
-
-.artistSettingsProviderIds :is(button, a) {
-  text-decoration: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 280px;
-  overflow: hidden;
-  border: 1px solid var(--white-a08);
-  border-radius: 6px;
-  padding: 2px 7px;
-  background: var(--white-a06);
-  color: var(--white-a55);
-  font-family: monospace;
-  font-size: 10px;
-  cursor: pointer;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.artistSettingsProviderIds :is(button, a):hover {
-  border-color: rgba(var(--accent-rgb), 0.35);
-  color: var(--white-a80);
-}
-
-.artistSettingsProviderIds :is(button, a) span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.artistSettingsProviderIds :is(button, a) small {
-  color: rgb(var(--accent-light-rgb));
-  font-family: inherit;
-}
-
-.artistSettingsReleaseContext {
-  min-width: 0;
-  margin-top: 5px;
-}
-
-.artistSettingsReleaseContext > span,
 .currentMatchReleases > span {
   display: block;
   margin-bottom: 5px;
@@ -1733,65 +1629,7 @@ button.statusWarn:disabled {
   text-transform: uppercase;
 }
 
-.artistSettingsToggle {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin: 14px 0;
-}
-
 /* a long explanation must not squeeze the checkbox into a sliver */
-.artistSettingsToggle input {
-  flex: 0 0 auto;
-  margin-top: 3px;
-}
-
-.artistSettingsToggle span {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.artistSettingsToggle small {
-  color: var(--white-a45);
-}
-
-.artistSettingsFieldset {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
-  gap: 9px 14px;
-  margin: 14px 0;
-  border: 1px solid var(--white-a08);
-  border-radius: 10px;
-  padding: 12px;
-}
-
-.artistSettingsFieldset legend {
-  padding: 0 5px;
-  color: var(--white-a60);
-  font-size: 12px;
-}
-
-.artistSettingsGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
-}
-
-.artistSettingsGrid label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--white-a60);
-  font-size: 12px;
-}
-
-.artistSettingsActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
 
 .inlineRetry {
   border: 1px solid rgba(239, 68, 68, 0.45);
@@ -3521,8 +3359,7 @@ button.statusWarn:disabled {
   }
 
   .currentMatchCard,
-  .matchResultRow,
-  .artistSettingsIdentity {
+  .matchResultRow {
     flex-wrap: wrap;
   }
 
@@ -3531,16 +3368,6 @@ button.statusWarn:disabled {
     width: 68px;
     height: 68px;
     flex-basis: 68px;
-  }
-
-  .artistSettingsPhoto {
-    width: 88px;
-    height: 88px;
-    flex-basis: 88px;
-  }
-
-  .artistSettingsIdentityBody {
-    flex-basis: calc(100% - 108px);
   }
 
   .matchResultRow > .btnPrimary,
@@ -4229,308 +4056,20 @@ button.statusWarn:disabled {
   white-space: nowrap;
 }
 
-.tableOptionsDialogBody {
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.tableOptionsLayout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-}
-
-.tableOptionsExtraGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-}
-
-.tableOptionsSection {
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  border: 1px solid var(--white-a08);
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.025);
-  padding: 7px 0;
-}
-
-.tableOptionsColumnGrid,
-.tableOptionsProviderGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(155px, 100%), 1fr));
-}
-
 /* A wrapping multi-column grid makes "move up/down" meaningless — index-1
  * can land in the previous row's last cell, nowhere near where it looks
  * like it moved. Reorderable lists get a single column so drag position
  * and array position always agree. */
-.tableOptionsColumnGridReorder {
-  grid-template-columns: 1fr;
-}
-
-.tableOptionsGroupLabel {
-  padding: 4px 14px;
-  font-size: 10.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--white-a40);
-}
-
-.tableOptionsItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  font-size: 13px;
-  color: var(--white-a85);
-  cursor: pointer;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.tableOptionsReset {
-  margin: 7px 14px 4px;
-  border: 1px solid var(--white-a12);
-  border-radius: 6px;
-  background: var(--white-a04);
-  color: rgba(255, 255, 255, 0.72);
-  padding: 5px 8px;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.tableOptionsReset:hover:not(:disabled) {
-  border-color: rgba(var(--accent-rgb), 0.5);
-  color: var(--text-1);
-}
-
-.tableOptionsReset:disabled {
-  cursor: default;
-  opacity: 0.35;
-}
-
-.tableOptionsItem:hover {
-  background: var(--white-a07);
-}
-
-.tableOptionsRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 14px;
-}
-
-.tableOptionsRow:hover {
-  background: var(--white-a07);
-}
-
-.tableOptionsRow .tableOptionsItem {
-  padding: 6px 0;
-  flex: 1;
-}
-
-.tableOptionsRow .tableOptionsItem:hover {
-  background: transparent;
-}
-
-.tableOptionsLocked {
-  margin-left: auto;
-  color: var(--white-a35);
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
-@media (max-width: 780px) {
-  .tableOptionsLayout,
-  .tableOptionsExtraGrid {
-    grid-template-columns: 1fr;
-  }
-}
 
 /* Track table options: the size of the other workspaces, the three sections
  * side by side so every setting is visible at once. */
-.tableOptionsWorkspace {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.tableOptionsWorkspace .tableOptionsExtraGrid {
-  display: contents;
-}
-
-.tableOptionsStack {
-  display: grid;
-  gap: 10px;
-  align-content: start;
-  min-width: 0;
-}
-
-.tableOptionsHint {
-  margin: 0 0 6px;
-  padding: 0 14px;
-  font-size: 12px;
-  color: var(--white-a50);
-}
-
-.tableOptionsExample {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--white-a35);
-}
-
-.tableOptionsChoices {
-  display: grid;
-  gap: 8px;
-  padding: 2px 14px 6px;
-}
-
-.tableOptionsChoice {
-  display: grid;
-  gap: 3px;
-  padding: 10px 12px;
-  border: 1px solid var(--white-a10);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.025);
-  cursor: pointer;
-}
-
-.tableOptionsChoice:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-}
-
-.tableOptionsChoice:focus-within {
-  outline: 2px solid rgba(var(--accent-rgb), 0.6);
-  outline-offset: 1px;
-}
-
-.tableOptionsChoiceActive,
-.tableOptionsChoiceActive:hover {
-  border-color: rgba(var(--accent-rgb), 0.65);
-  background: rgba(var(--accent-rgb), 0.1);
-}
 
 /* two choices side by side (the artist header's rich / compact) */
-.tableOptionsChoicePair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  padding: 2px 14px 8px;
-}
-
-.tableOptionsChoiceTitle {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--white-a90);
-}
-
-.tableOptionsChoiceActive .tableOptionsChoiceTitle {
-  color: rgb(var(--accent-rgb));
-}
-
-.tableOptionsChoiceText {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--white-a55);
-}
-
-@media (max-width: 780px) {
-  .tableOptionsWorkspace {
-    grid-template-columns: 1fr;
-  }
-}
-
-.tableOptionsReorder {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.reorderBtn {
-  border: none;
-  background: transparent;
-  color: var(--white-a35);
-  cursor: pointer;
-  padding: 0;
-  font-size: 9px;
-  line-height: 1;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  transition: all 0.12s ease;
-}
-
-.reorderBtn:hover:not(:disabled) {
-  background: var(--white-a10);
-  color: rgb(var(--accent-rgb));
-}
-
-.reorderBtn:disabled {
-  opacity: 0.15;
-  cursor: not-allowed;
-}
-
-.reorderHandle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 18px;
-  color: var(--white-a35);
-  font-size: 13px;
-  line-height: 1;
-  cursor: grab;
-}
-
-.reorderHandle:active {
-  cursor: grabbing;
-}
-
-.tableOptionsRowDraggable {
-  cursor: grab;
-}
-
-.tableOptionsRowDraggable:active {
-  cursor: grabbing;
-}
 
 /* the dragged row stays as the slot it will land in */
-.tableOptionsRowDragging,
-.tableOptionsRowDragging:hover {
-  background: rgba(var(--accent-rgb), 0.1);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55);
-  border-radius: 6px;
-}
-
-.tableOptionsRowDragging .tableOptionsItem {
-  opacity: 0.55;
-}
 
 /* the arrows are the keyboard's and the touch screen's way; with a mouse
  * the row is dragged, so they wait for the row's hover */
-@media (hover: hover) {
-  .tableOptionsRow .reorderBtn {
-    opacity: 0;
-  }
-
-  .tableOptionsRow:hover .reorderBtn,
-  .tableOptionsRow:focus-within .reorderBtn {
-    opacity: 1;
-  }
-
-  .tableOptionsRow:hover .reorderBtn:disabled,
-  .tableOptionsRow:focus-within .reorderBtn:disabled {
-    opacity: 0.15;
-  }
-}
 
 .bulkBar {
   display: flex;
@@ -4757,7 +4296,6 @@ textarea.searchInput {
 .trackTable input[type='checkbox'],
 .table input[type='checkbox'],
 .editRow input[type='checkbox'],
-.tableOptionsItem input[type='checkbox'],
 .stackedTrackControls input[type='checkbox'],
 .modal input[type='checkbox'] {
   appearance: none;
@@ -4782,7 +4320,6 @@ textarea.searchInput {
 .trackTable input[type='checkbox']:hover:not(:disabled),
 .table input[type='checkbox']:hover:not(:disabled),
 .editRow input[type='checkbox']:hover:not(:disabled),
-.tableOptionsItem input[type='checkbox']:hover:not(:disabled),
 .stackedTrackControls input[type='checkbox']:hover:not(:disabled),
 .modal input[type='checkbox']:hover:not(:disabled) {
   border-color: var(--white-a30);
@@ -4792,7 +4329,6 @@ textarea.searchInput {
 .trackTable input[type='checkbox']:checked,
 .table input[type='checkbox']:checked,
 .editRow input[type='checkbox']:checked,
-.tableOptionsItem input[type='checkbox']:checked,
 .stackedTrackControls input[type='checkbox']:checked,
 .modal input[type='checkbox']:checked {
   background: rgba(var(--accent-rgb), 0.7);
@@ -4802,7 +4338,6 @@ textarea.searchInput {
 .trackTable input[type='checkbox']:checked::after,
 .table input[type='checkbox']:checked::after,
 .editRow input[type='checkbox']:checked::after,
-.tableOptionsItem input[type='checkbox']:checked::after,
 .stackedTrackControls input[type='checkbox']:checked::after,
 .modal input[type='checkbox']:checked::after {
   content: '';
@@ -4819,7 +4354,6 @@ textarea.searchInput {
 .trackTable input[type='checkbox']:disabled,
 .table input[type='checkbox']:disabled,
 .editRow input[type='checkbox']:disabled,
-.tableOptionsItem input[type='checkbox']:disabled,
 .stackedTrackControls input[type='checkbox']:disabled,
 .modal input[type='checkbox']:disabled {
   opacity: 0.5;
@@ -6230,33 +5764,6 @@ textarea.searchInput {
     height: 360px;
   }
 }
-
-.artistSettingsPhoto {
-  width: 72px;
-  height: 72px;
-  flex-basis: 72px;
-  border-width: 2px;
-  box-shadow: none;
-}
-.artistSettingsIdentity {
-  padding: 14px;
-  gap: 14px;
-}
-.artistSettingsIdentityName {
-  font-size: 20px;
-}
-.artistSettingsIdentityBody > .muted {
-  font-size: 12px;
-  font-style: normal;
-}
-.artistSettingsReleaseContext .matchReleaseCard {
-  width: 58px;
-  flex-basis: 58px;
-}
-.artistSettingsReleaseContext .matchReleaseCover {
-  width: 58px;
-  height: 58px;
-}
 .fileTableSelectionLabel {
   display: none;
 }
@@ -6685,75 +6192,6 @@ textarea.searchInput {
 
 /* Artist Settings in the library tool workspace: settings on the left, who
    they are for (and the audiobook switch) beside them. */
-.artistSettingsLayout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  gap: 24px;
-  align-items: start;
-}
-
-.artistSettingsMain,
-.artistSettingsSide {
-  min-width: 0;
-}
-
-.artistSettingsSide {
-  position: sticky;
-  top: 0;
-}
-
-.artistSettingsSide .artistSettingsSection:first-child {
-  padding-top: 0;
-}
-
-.artistSettingsLayout .artistSettingsIdentity {
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-}
-
-.artistSettingsIdentityHead {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.artistSettingsLayout .artistSettingsPhoto {
-  width: 72px;
-  height: 72px;
-  flex: 0 0 72px;
-}
-
-.artistSettingsLayout .artistSettingsIdentityName {
-  font-size: 18px;
-}
-
-.artistSettingsLayout .artistSettingsSection h4 {
-  font-size: 15px;
-}
-
-.artistSettingsLayout .artistSettingsSection > .muted {
-  margin: 0 0 10px;
-  font-size: 12.5px;
-  font-style: normal;
-}
-
-.settingsPlain {
-  min-width: 0;
-  margin: 0;
-  border: 0;
-  padding: 0;
-}
-
-@media (max-width: 860px) {
-  .artistSettingsLayout {
-    grid-template-columns: 1fr;
-  }
-
-  .artistSettingsSide {
-    position: static;
-  }
-}
 
 /* Monitor All under the top tracks, styled as dev's list button */
 .topTracksMonitorAll:disabled {
@@ -8791,26 +8229,6 @@ textarea.searchInput {
 
 /* artist settings: the toggle, release types and selects had no size of their
    own and fell back to the browser's 16px, louder than everything around them */
-.artistSettingsToggle {
-  font-size: 13.5px;
-}
-
-.artistSettingsToggle strong {
-  font-weight: 600;
-}
-
-.artistSettingsToggle small {
-  font-size: 12px;
-}
-
-.artistSettingsFieldset .checkOption {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.82);
-}
-
-.artistSettingsGrid .select {
-  font-size: 13px;
-}
 
 /* one hero everywhere: what your library holds for the artist sits under the
    name, quieter than the play row and louder than the provider chips */

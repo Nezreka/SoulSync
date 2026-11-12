@@ -164,7 +164,9 @@ describe('Library V2 artist detail — All Releases views', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Tools' }));
     fireEvent.click(screen.getByRole('button', { name: 'View Settings…' }));
-    // the dialog is the whole View Settings: give it time under a loaded run
+    // the dialog is the whole View Settings: give it time under a loaded run.
+    // the artist page's part is behind its pill
+    fireEvent.click(await screen.findByRole('tab', { name: /Artist page/ }, { timeout: 5000 }));
     const history = await screen.findByRole('checkbox', { name: 'History' }, { timeout: 5000 });
     expect(history).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Refresh & Scan' })).toBeChecked();
