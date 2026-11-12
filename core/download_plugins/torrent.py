@@ -522,7 +522,7 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                     row['transferred'] = status.downloaded
                     row['speed'] = status.download_speed
                     row['size'] = status.size or row.get('size', 0)
-                    row['state'] = _adapter_state_to_display(status.state)
+                    row['state'] = _poll_display_state(status.state)
                     row['error'] = status.error
             if status.save_path:
                 last_save_path = status.save_path
@@ -1540,6 +1540,23 @@ def _adapter_state_to_display(state: str) -> str:
         'error':       'Completed, Errored',
     }
     return mapping.get(state, state.title())
+
+
+def _poll_display_state(state: str) -> str:
+    """What a poll of the client may write on the row.
+
+    A poll never announces completion. "Completed, Succeeded" is the download
+    monitor's cue to start post-processing, and that needs the row's
+    ``audio_files``, which only ``_finalize_download`` fills in. A torrent the
+    client already holds complete is adopted and reads "seeding" on the very
+    first poll: written straight through, the monitor picked the row up in the
+    gap before the files were collected, found none, and failed the track with
+    "No matching audio file found in torrent release", on every retry (#2064).
+    So a finished transfer stays in progress here until the finalizer, which
+    sets the files and the state together, says otherwise."""
+    if state in _COMPLETE_STATES:
+        return 'InProgress, Downloading'
+    return _adapter_state_to_display(state)
 
 
 def _row_to_status(row: Dict[str, Any]) -> DownloadStatus:
