@@ -345,7 +345,7 @@ export function AutoSyncWeeklyBoard({
   return (
     <>
       <AutoSyncBoardIntro
-        heading="Drag playlists onto a day"
+        heading="Drag a playlist onto the day it should sync"
         blurb="Each placement creates a weekly-time schedule. Click a card to edit time, additional days, or timezone."
       />
       <div className="auto-sync-body">

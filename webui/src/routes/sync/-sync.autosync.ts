@@ -53,6 +53,8 @@ export interface MirroredRow {
   quality_profile_id?: string | number | null;
   description?: string;
   name?: string;
+  /** The playlist's cover, as the mirrored row carries it. The manager's cards lead with it. */
+  image_url?: string | null;
   /** String or number on the wire, which is why every read parseInts it. */
   track_count?: number | string;
   kind?: string;

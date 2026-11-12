@@ -75024,3 +75024,781 @@ body.src-modal-open { overflow: hidden; }
     0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55); }
     100% { box-shadow: 0 0 0 10px rgba(var(--accent-rgb), 0); }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   AUTO-SYNC MANAGER, redrawn (Nov 2026)
+
+   Same modal, same four tabs, same drag and drop: this is how it looks,
+   not what it does. Every selector starts at .auto-sync-modal.asx, the
+   class the redrawn shell carries, so the rules above still describe the
+   structure and these only restyle it. The phone rework in mobile.css
+   loads later and keeps its say on small screens.
+
+   What changed for the eye: covers lead every card (the board was forty
+   names to read), actions are capsules and round buttons, not glyph boxes,
+   the tabs are one pill row, and the idle monitor is a line, not a panel.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+.auto-sync-modal.asx {
+    border-radius: 24px;
+    border: 1px solid var(--white-a08);
+    background: var(--bg-primary);
+    box-shadow: 0 30px 80px var(--black-a60);
+}
+
+/* ── header ── */
+.auto-sync-modal.asx .auto-sync-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px 22px;
+    padding: 22px 26px 16px;
+    border: 0;
+    background: none;
+}
+.auto-sync-modal.asx .auto-sync-header > div:first-child {
+    flex: 1 1 320px;
+    min-width: 0;
+}
+.auto-sync-modal.asx .auto-sync-header h3 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-header p {
+    margin: 3px 0 0;
+    font-size: 13px;
+    color: var(--text-2);
+}
+.auto-sync-modal.asx .auto-sync-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    background: none;
+}
+.auto-sync-modal.asx .auto-sync-summary > div {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    padding: 0;
+    border: 0;
+    background: none;
+}
+.auto-sync-modal.asx .auto-sync-summary span {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-summary > div::before,
+.auto-sync-modal.asx .auto-sync-summary > div::after,
+.auto-sync-modal.asx .auto-sync-summary small::after {
+    content: none;
+}
+.auto-sync-modal.asx .auto-sync-summary small {
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-2);
+}
+.auto-sync-modal.asx .auto-sync-summary-bad span,
+.auto-sync-modal.asx .auto-sync-summary-bad small {
+    color: var(--danger-light);
+}
+.auto-sync-modal.asx .auto-sync-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.auto-sync-modal.asx .auto-sync-refresh,
+.auto-sync-modal.asx .auto-sync-error-retry {
+    height: 34px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-1);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--dur-fast) ease;
+}
+.auto-sync-modal.asx .auto-sync-refresh:hover,
+.auto-sync-modal.asx .auto-sync-error-retry:hover {
+    background: var(--white-a16);
+}
+.auto-sync-modal.asx .auto-sync-close {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-circle);
+    background: var(--white-a08);
+    color: var(--text-2);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+.auto-sync-modal.asx .auto-sync-close:hover {
+    background: var(--white-a16);
+    color: var(--text-1);
+}
+
+/* ── the live monitor: one quiet line while nothing runs ── */
+.auto-sync-modal.asx .auto-sync-monitor {
+    margin: 0 26px;
+    padding: 10px 14px;
+    border: 1px solid var(--white-a06);
+    border-radius: 14px;
+    background: var(--white-a03);
+}
+.auto-sync-modal.asx .auto-sync-monitor--idle {
+    padding: 0;
+    border: 0;
+    background: none;
+}
+.auto-sync-modal.asx .auto-sync-monitor--idle .auto-sync-monitor-empty {
+    display: none;
+}
+.auto-sync-modal.asx .auto-sync-monitor-head > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+}
+.auto-sync-modal.asx .auto-sync-monitor-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+.auto-sync-modal.asx .auto-sync-monitor-kicker::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-circle);
+    background: var(--white-a30);
+}
+.auto-sync-modal.asx .auto-sync-monitor:not(.auto-sync-monitor--idle) .auto-sync-monitor-kicker::before {
+    background: var(--success);
+    animation: asx-pulse 1.8s ease-out infinite;
+}
+@keyframes asx-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(var(--success-rgb), 0.55); }
+    100% { box-shadow: 0 0 0 9px rgba(var(--success-rgb), 0); }
+}
+.auto-sync-modal.asx .auto-sync-monitor-head strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-monitor-head small {
+    font-size: 12.5px;
+    color: var(--text-3);
+}
+
+/* ── tabs: one pill row ── */
+.auto-sync-modal.asx .auto-sync-tabs {
+    display: inline-flex;
+    align-self: flex-start;
+    gap: 0;
+    max-width: calc(100% - 52px);
+    margin: 14px 26px 0;
+    padding: 3px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a05);
+    overflow-x: auto;
+}
+.auto-sync-modal.asx .auto-sync-tabs button {
+    flex: none;
+    height: 32px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-3);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+        background var(--dur-fast) ease,
+        color var(--dur-fast) ease;
+}
+.auto-sync-modal.asx .auto-sync-tabs button:hover {
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-tabs button.active {
+    background: var(--white-a16);
+    color: var(--text-1);
+    box-shadow: none;
+}
+.auto-sync-modal.asx .auto-sync-tabs button.active::after {
+    display: none;
+}
+
+/* ── the line that says what to do on this board ── */
+.auto-sync-modal.asx .auto-sync-board-intro,
+.auto-sync-modal.asx .auto-sync-history-intro {
+    padding: 16px 26px 12px;
+    border: 0;
+    background: none;
+}
+.auto-sync-modal.asx .auto-sync-board-intro strong,
+.auto-sync-modal.asx .auto-sync-history-intro strong {
+    display: block;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-board-intro span,
+.auto-sync-modal.asx .auto-sync-history-intro > div > span {
+    font-size: 13px;
+    color: var(--text-3);
+}
+
+/* ── the playlist list ── */
+.auto-sync-modal.asx .auto-sync-body {
+    gap: 0;
+    border-top: 1px solid var(--white-a06);
+}
+.auto-sync-modal.asx .auto-sync-sidebar {
+    padding: 16px 14px 16px 26px;
+    border-right: 1px solid var(--white-a06);
+    background: none;
+}
+.auto-sync-modal.asx .auto-sync-sidebar-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+.auto-sync-modal.asx .auto-sync-sidebar-search {
+    height: 36px;
+    padding: 0 14px;
+    border: 1px solid var(--white-a08);
+    border-radius: var(--radius-pill);
+    background: var(--white-a04);
+    color: var(--text-1);
+    font-size: 13px;
+}
+.auto-sync-modal.asx .auto-sync-sidebar-search:focus {
+    border-color: rgba(var(--accent-rgb), 0.5);
+    outline: none;
+}
+.auto-sync-modal.asx .auto-sync-source-group {
+    padding: 0;
+    border: 0;
+    background: none;
+}
+.auto-sync-modal.asx .auto-sync-source-group-head {
+    padding: 6px 2px;
+}
+.auto-sync-modal.asx .auto-sync-source-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--text-2);
+}
+.auto-sync-modal.asx .auto-sync-source-bulk-btn {
+    height: 24px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a08);
+    color: var(--text-2);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+    cursor: pointer;
+}
+.auto-sync-modal.asx .auto-sync-source-bulk-btn:hover {
+    background: var(--white-a16);
+    color: var(--text-1);
+}
+
+/* a cover on every card: the board is told apart by pictures now */
+.auto-sync-modal.asx .asx-cover {
+    flex: none;
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: 9px;
+    overflow: hidden;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.35), var(--white-a08));
+}
+.auto-sync-modal.asx .asx-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.auto-sync-modal.asx .asx-cover-glyph {
+    font-size: 16px;
+    font-weight: 800;
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-playlist {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 7px 8px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: none;
+    box-shadow: none;
+    cursor: grab;
+    transition:
+        background var(--dur-fast) ease,
+        border-color var(--dur-fast) ease;
+}
+.auto-sync-modal.asx .auto-sync-playlist::before {
+    display: none;
+}
+.auto-sync-modal.asx .auto-sync-playlist:hover {
+    background: var(--white-a06);
+    border-color: var(--white-a08);
+}
+.auto-sync-modal.asx .auto-sync-playlist:active {
+    cursor: grabbing;
+}
+.auto-sync-modal.asx .asx-playlist-text {
+    flex: 1;
+    min-width: 0;
+}
+.auto-sync-modal.asx .auto-sync-playlist-name {
+    padding: 0;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.auto-sync-modal.asx .auto-sync-playlist-meta {
+    padding: 0;
+    font-size: 12px;
+    color: var(--text-3);
+}
+/* one that is on a schedule says so in the accent */
+.auto-sync-modal.asx .auto-sync-playlist.unavailable {
+    cursor: default;
+    opacity: 0.55;
+}
+.auto-sync-modal.asx .auto-sync-playlist.scheduled .auto-sync-playlist-meta,
+.auto-sync-modal.asx .auto-sync-playlist.scheduled-elsewhere .auto-sync-playlist-meta {
+    color: rgb(var(--accent-light-rgb));
+}
+
+/* ── lanes ── */
+.auto-sync-modal.asx .auto-sync-lane.filled {
+    display: flex;
+    align-items: stretch;
+    gap: 18px;
+    padding: 16px 18px;
+    border: 1px solid var(--white-a06);
+    border-radius: 18px;
+    background: var(--white-a02);
+    box-shadow: none;
+}
+.auto-sync-modal.asx .auto-sync-lane.filled.drag-over,
+.auto-sync-modal.asx.is-dragging .auto-sync-lane.filled:hover {
+    border-color: rgba(var(--accent-rgb), 0.6);
+    background: rgba(var(--accent-rgb), 0.07);
+}
+.auto-sync-modal.asx .auto-sync-lane.filled .auto-sync-lane-badge {
+    position: relative;
+    flex: none;
+    width: 92px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 0 16px 0 0;
+    border: 0;
+    border-right: 1px solid var(--white-a06);
+    background: none;
+}
+.auto-sync-modal.asx .auto-sync-lane.filled .auto-sync-lane-badge b {
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-lane.filled .auto-sync-lane-badge span {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-3);
+}
+.auto-sync-modal.asx .auto-sync-lane.filled .auto-sync-lane-count {
+    position: static;
+    align-self: flex-start;
+    margin-top: 6px;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 7px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--accent-rgb), 0.18);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 11.5px;
+    font-weight: 700;
+    font-style: normal;
+}
+.auto-sync-modal.asx .auto-sync-lane.filled .auto-sync-lane-track {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 10px;
+    align-content: start;
+}
+/* an empty interval is a place to drop, drawn as one */
+.auto-sync-modal.asx .auto-sync-lane.empty {
+    border: 1px dashed var(--white-a16);
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-3);
+    transition:
+        border-color var(--dur-fast) ease,
+        color var(--dur-fast) ease,
+        background var(--dur-fast) ease;
+}
+.auto-sync-modal.asx.is-dragging .auto-sync-lane.empty,
+.auto-sync-modal.asx .auto-sync-lane.empty.drag-over {
+    border-color: rgba(var(--accent-rgb), 0.7);
+    background: rgba(var(--accent-rgb), 0.1);
+    color: var(--text-1);
+}
+
+/* ── a scheduled playlist ── */
+.auto-sync-modal.asx .auto-sync-scheduled-card {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    grid-template-areas:
+        'cover main more'
+        'cover acts acts';
+    gap: 8px 12px;
+    align-items: start;
+    padding: 12px;
+    border: 1px solid var(--white-a06);
+    border-radius: 14px;
+    background: var(--white-a04);
+    box-shadow: none;
+    cursor: grab;
+    transition:
+        border-color var(--dur-fast) ease,
+        transform var(--dur-fast) ease;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-card::before {
+    display: none;
+}
+.auto-sync-modal.asx .auto-sync-lane-track > .auto-sync-scheduled-card {
+    width: auto;
+    max-width: none;
+    min-width: 0;
+    margin: 0;
+    flex: none;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-card:hover {
+    border-color: var(--white-a16);
+}
+.auto-sync-modal.asx .auto-sync-scheduled-card.disabled {
+    opacity: 0.6;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-card.failing {
+    border-color: rgba(var(--danger-rgb), 0.5);
+}
+.auto-sync-modal.asx .auto-sync-scheduled-card.warning {
+    border-color: rgba(var(--warning-rgb), 0.45);
+}
+.auto-sync-modal.asx .auto-sync-scheduled-card > .asx-cover {
+    grid-area: cover;
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-main {
+    grid-area: main;
+    min-width: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-main > :not(.auto-sync-card-settings) {
+    display: block;
+    min-width: 0;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-meta {
+    font-size: 12px;
+    color: var(--text-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* the lane already says how often: the card says when it runs next */
+.auto-sync-modal.asx .auto-sync-lane .auto-sync-scheduled-timing > span {
+    display: none;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-timing {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin: 2px 0 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    color: var(--text-2);
+}
+.auto-sync-modal.asx .auto-sync-lane .auto-sync-scheduled-timing span + small::before {
+    content: none;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-timing small {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    color: rgb(var(--accent-light-rgb));
+}
+.auto-sync-modal.asx .auto-sync-scheduled-card .auto-sync-card-more {
+    grid-area: more;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-circle);
+    background: none;
+    color: var(--text-3);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+.auto-sync-modal.asx .auto-sync-card-more:hover,
+.auto-sync-modal.asx .auto-sync-card-more.open {
+    background: var(--white-a10);
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-scheduled-actions {
+    grid-area: acts;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0;
+    margin: 0;
+    border: 0;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-actions button {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-circle);
+    background: var(--white-a06);
+    color: var(--text-3);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-actions button:hover {
+    background: rgba(var(--danger-rgb), 0.18);
+    color: var(--danger-light);
+}
+.auto-sync-modal.asx .auto-sync-scheduled-actions button.run {
+    width: auto;
+    padding: 0 13px;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: rgb(var(--accent-light-rgb));
+    font-size: 12px;
+    font-weight: 700;
+}
+.auto-sync-modal.asx .auto-sync-scheduled-actions button.run:hover:not(:disabled) {
+    background: rgb(var(--accent-rgb));
+    color: var(--bg-primary);
+}
+.auto-sync-modal.asx .auto-sync-scheduled-actions button.run:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+/* ── run history: a list, not a wall of boxes ── */
+.auto-sync-modal.asx .auto-sync-history-list {
+    gap: 0;
+    padding: 0 26px 20px;
+}
+.auto-sync-modal.asx .auto-sync-history-list .auto-sync-history-entry {
+    padding: 0;
+    border: 0;
+    border-top: 1px solid var(--white-a06);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+}
+.auto-sync-modal.asx .auto-sync-history-row {
+    align-items: center;
+    gap: 14px;
+    padding: 12px 8px;
+    border-radius: 12px;
+    transition: background var(--dur-fast) ease;
+}
+.auto-sync-modal.asx .auto-sync-history-row:hover {
+    background: var(--white-a04);
+}
+.auto-sync-modal.asx .auto-sync-history-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-history-flow {
+    gap: 6px;
+    margin: 2px 0 4px;
+}
+.auto-sync-modal.asx .auto-sync-history-flow > span {
+    padding: 0;
+    border: 0;
+    background: none;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-3);
+}
+.auto-sync-modal.asx .auto-sync-history-flow .flow-arrow {
+    color: var(--white-a25);
+}
+.auto-sync-modal.asx .auto-sync-history-status {
+    padding: 2px 9px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.auto-sync-modal.asx .auto-sync-history-status.completed {
+    background: rgba(var(--success-rgb), 0.14);
+    color: var(--success);
+}
+.auto-sync-modal.asx .auto-sync-history-filters {
+    gap: 0;
+    padding: 3px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--white-a05);
+}
+.auto-sync-modal.asx .auto-sync-history-filter-btn {
+    height: 30px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-3);
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+}
+.auto-sync-modal.asx .auto-sync-history-filter-btn.active {
+    background: var(--white-a16);
+    color: var(--text-1);
+}
+.auto-sync-modal.asx .auto-sync-history-expand-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius-circle);
+    background: var(--white-a06);
+    color: var(--text-2);
+    cursor: pointer;
+}
+.auto-sync-modal.asx .auto-sync-history-expand-btn:hover {
+    background: var(--white-a16);
+    color: var(--text-1);
+}
+
+/* tablet and phone: a lane is a heading over its cards */
+@media (max-width: 768px) {
+    .auto-sync-modal.asx .auto-sync-header {
+        padding: 18px 16px 12px;
+    }
+    .auto-sync-modal.asx .auto-sync-monitor {
+        margin: 0 16px;
+    }
+    .auto-sync-modal.asx .auto-sync-tabs {
+        max-width: calc(100% - 32px);
+        margin: 12px 16px 0;
+    }
+    .auto-sync-modal.asx .auto-sync-board-intro,
+    .auto-sync-modal.asx .auto-sync-history-intro {
+        padding: 14px 16px 10px;
+    }
+    .auto-sync-modal.asx .auto-sync-lane.filled {
+        flex-direction: column;
+        gap: 12px;
+        padding: 14px;
+    }
+    .auto-sync-modal.asx .auto-sync-lane.filled .auto-sync-lane-badge {
+        width: auto;
+        flex-direction: row;
+        align-items: baseline;
+        justify-content: flex-start;
+        gap: 10px;
+        padding: 0 0 10px;
+        border-right: 0;
+        border-bottom: 1px solid var(--white-a06);
+    }
+    .auto-sync-modal.asx .auto-sync-lane.filled .auto-sync-lane-count {
+        margin: 0 0 0 auto;
+        align-self: center;
+    }
+    .auto-sync-modal.asx .auto-sync-lane.filled .auto-sync-lane-track {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    }
+    .auto-sync-modal.asx .auto-sync-history-list {
+        padding: 0 12px 16px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .auto-sync-modal.asx .auto-sync-monitor-kicker::before {
+        animation: none;
+    }
+}

@@ -150,6 +150,28 @@ export interface AutoSyncCardActions {
  * because that is one of the four things the two boards genuinely disagree
  * about; the rest is identical by the vanilla's own intent.
  */
+/**
+ * A playlist's cover on a manager card. The board was text only: forty cards
+ * told apart by reading every name. Decorative (the name is beside it), not
+ * draggable on its own so a drag takes the whole card, and a cover that fails
+ * to load falls back to the playlist's initial.
+ */
+export function AutoSyncCover({ playlist }: { playlist: MirroredRow }) {
+  const [failed, setFailed] = useState(false);
+  const src = playlist.image_url || '';
+  return (
+    <span className="asx-cover" aria-hidden="true">
+      {src && !failed ? (
+        <img src={src} alt="" loading="lazy" draggable={false} onError={() => setFailed(true)} />
+      ) : (
+        <span className="asx-cover-glyph">
+          {(playlist.name || '?').trim().charAt(0).toUpperCase()}
+        </span>
+      )}
+    </span>
+  );
+}
+
 export function AutoSyncScheduledCard({
   playlist,
   enabled,
@@ -190,6 +212,7 @@ export function AutoSyncScheduledCard({
       }}
       onClick={onCardClick}
     >
+      <AutoSyncCover playlist={playlist} />
       <div className="auto-sync-scheduled-main">
         <div className="auto-sync-scheduled-name">
           {health.level !== 'ok' ? (
@@ -307,11 +330,14 @@ function SidebarCard({
           }
         : {})}
     >
-      <div className="auto-sync-playlist-name" title={displayName || playlist.name || ''}>
-        {displayName || playlist.name}
-      </div>
-      <div className="auto-sync-playlist-meta">
-        {autoSyncTrackCountText(playlist)} &middot; {badge.assigned}
+      <AutoSyncCover playlist={playlist} />
+      <div className="asx-playlist-text">
+        <div className="auto-sync-playlist-name" title={displayName || playlist.name || ''}>
+          {displayName || playlist.name}
+        </div>
+        <div className="auto-sync-playlist-meta">
+          {autoSyncTrackCountText(playlist)} &middot; {badge.assigned}
+        </div>
       </div>
     </div>
   );
