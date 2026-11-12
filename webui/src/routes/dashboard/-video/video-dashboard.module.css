@@ -902,6 +902,58 @@ button.day:focus-visible {
   }
 }
 
+/* the same layout in the column beside the week, however wide the screen
+   makes that column: stacked counts are always a number beside its parts,
+   never a tall tile with the parts under it */
+@container video-board (min-width: 1180px) {
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 22px;
+    width: 100%;
+  }
+
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile + .tile {
+    border-top: 1px solid var(--white-a08);
+    border-left: 0;
+  }
+
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile {
+    padding-block: 14px;
+  }
+
+  /* a smaller hand of posters: the number is beside its parts here, and
+     the card should be no taller than the week next to it */
+  :global(#dashboard-page) .tiles[data-rail] .tile.tile.tile :global(.room-tile-art) {
+    --room-pic: 30px;
+    margin-bottom: 8px;
+  }
+
+  /* no posters yet: the slot gives its height back */
+  .tile :global(.room-tile-art):empty {
+    display: none;
+  }
+
+  .tileLead {
+    flex: 0 0 46%;
+  }
+
+  .split {
+    justify-content: center;
+    margin-top: 0;
+  }
+
+  .splitNote {
+    padding-left: 0;
+  }
+
+  .split {
+    max-width: 460px;
+  }
+}
+
 @media (max-width: 768px) {
   .studios {
     grid-template-columns: minmax(0, 1fr);

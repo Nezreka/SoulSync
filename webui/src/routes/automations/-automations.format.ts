@@ -204,6 +204,7 @@ const ACTION_SENTENCES: Record<string, Sentence> = {
   personalized_pipeline: (r) => syncSentence(r),
   // queued
   run_repair_job: (r) => (num(r.queued) ? 'Queued the job' : null),
+  video_run_repair_job: (r) => (num(r.queued) ? 'Queued the job' : null),
   // size_mb
   backup_database: (r) => {
     const mb = num(r.size_mb);

@@ -2119,6 +2119,8 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
 #dashboard-page.dash-room .dash-autom-lane {
     position: relative;
     height: 34px;
+    /* the hover card places itself in lane widths (cqw) */
+    container-type: inline-size;
 }
 #dashboard-page.dash-room .dash-autom-lane::before {
     content: '';
@@ -2139,6 +2141,14 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     border-radius: var(--radius-circle);
     background: rgb(var(--accent-rgb));
     outline: 3px solid var(--bg-primary);
+    border: 0;
+    padding: 0;
+    /* mobile.css gives every button a 38px floor: the point is a dot, and
+       the stop around it is the place to tap */
+    min-height: 0;
+    font: inherit;
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-out);
 }
 #dashboard-page.dash-room .dash-autom-mark--live {
     margin-left: 0;
@@ -2697,8 +2707,10 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
     #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations']:not(:last-child) {
         grid-column: span 8;
     }
+    /* beside Up next: its heading starts where that card's heading does */
     #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='studios'] {
         grid-column: span 4;
+        padding-top: 22px;
     }
 }
 
@@ -2751,6 +2763,157 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
     font-weight: 700;
     line-height: 18px;
     text-align: center;
+}
+/* ── a point on the line, and the card it opens ──
+   each point is a stop: hover or focus it and a card says what the run is,
+   when it fires, how often, and what its last run did. the card places
+   itself: centred on the point, held inside the line at either end */
+#dashboard-page.dash-room .dash-autom-stop {
+    position: absolute;
+    top: 0;
+    width: 0;
+    height: 22px;
+}
+/* a wider place to rest the pointer, and the way down to the card */
+#dashboard-page.dash-room .dash-autom-stop::after {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -14px;
+    width: 28px;
+    height: 34px;
+}
+#dashboard-page.dash-room .dash-autom-lane:hover,
+#dashboard-page.dash-room .dash-autom-lane:focus-within,
+#dashboard-page.dash-room .dash-autom-stop:hover,
+#dashboard-page.dash-room .dash-autom-stop:focus-within {
+    z-index: 20;
+}
+#dashboard-page.dash-room .dash-autom-stop:hover > .dash-autom-mark,
+#dashboard-page.dash-room .dash-autom-mark:focus-visible {
+    transform: scale(1.25);
+}
+#dashboard-page.dash-room .dash-autom-mark:focus-visible {
+    outline-color: var(--text-1);
+}
+#dashboard-page.dash-room .dash-autom-pop {
+    --pop-w: min(330px, 100cqw);
+    position: absolute;
+    top: calc(100% + 8px);
+    left: clamp(
+        calc(var(--at) * -1cqw),
+        calc(var(--pop-w) / -2),
+        calc((100 - var(--at)) * 1cqw - var(--pop-w))
+    );
+    width: var(--pop-w);
+    max-height: min(460px, 70vh);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px;
+    border: 1px solid var(--white-a14);
+    border-radius: var(--radius-xl);
+    background: var(--bg-raised);
+    box-shadow: 0 16px 40px var(--black-a40);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-5px);
+    transition:
+        opacity var(--dur-fast) ease,
+        transform var(--dur-quick) var(--ease-out),
+        visibility 0s linear var(--dur-quick);
+}
+#dashboard-page.dash-room .dash-autom-stop:hover > .dash-autom-pop,
+#dashboard-page.dash-room .dash-autom-stop:focus-within > .dash-autom-pop {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition-delay: 0s;
+}
+#dashboard-page.dash-room .dash-autom-pop-title {
+    padding: 6px 10px 4px;
+    color: var(--text-3);
+    font-size: 11.5px;
+}
+#dashboard-page.dash-room .dash-autom-pop-run {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    border: 0;
+    border-radius: var(--radius-lg);
+    background: none;
+    color: var(--text-2);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--dur-fast) ease;
+}
+#dashboard-page.dash-room .dash-autom-pop-run:hover,
+#dashboard-page.dash-room .dash-autom-pop-run:focus-visible {
+    background: var(--white-a06);
+}
+#dashboard-page.dash-room .dash-autom-pop-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+#dashboard-page.dash-room .dash-autom-pop-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-1);
+    font-size: 13.5px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-autom-pop-when {
+    flex: none;
+    padding: 2px 9px;
+    border-radius: var(--radius-pill);
+    background: rgba(var(--accent-rgb), 0.16);
+    color: var(--text-1);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+}
+#dashboard-page.dash-room .dash-autom-pop-when--live {
+    background: rgba(var(--success-rgb), 0.18);
+}
+#dashboard-page.dash-room .dash-autom-pop-facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 14px;
+}
+#dashboard-page.dash-room .dash-autom-pop-fact {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+#dashboard-page.dash-room .dash-autom-pop-fact i {
+    color: var(--text-3);
+    font-size: 11px;
+    font-style: normal;
+}
+#dashboard-page.dash-room .dash-autom-pop-fact b {
+    overflow: hidden;
+    color: var(--text-1);
+    font-size: 12.5px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#dashboard-page.dash-room .dash-autom-pop-said {
+    padding-top: 9px;
+    border-top: 1px solid var(--white-a08);
+    font-size: 12.5px;
+    line-height: 1.4;
+}
+#dashboard-page.dash-room .dash-autom-pop-said--bad {
+    color: var(--warning);
 }
 /* coming up beside just ran */
 #dashboard-page.dash-room .dash-autom-cols {
@@ -2828,6 +2991,13 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
    for both lists side by side (half a board, or one of four across) */
 #dashboard-page.dash-room .room-board > [data-card='automations'] {
     container: up-next / inline-size;
+    /* a point's card may hang below a short Up next: it is not cut off, and
+       the card it belongs to comes above its neighbours while it is open */
+    overflow: visible;
+}
+#dashboard-page.dash-room .room-board > [data-card='automations']:hover,
+#dashboard-page.dash-room .room-board > [data-card='automations']:focus-within {
+    z-index: 20;
 }
 @container up-next (max-width: 700px) {
     #dashboard-page.dash-room .dash-autom-cols {

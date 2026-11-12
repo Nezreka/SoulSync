@@ -297,6 +297,103 @@ function openAutomations(side: 'music' | 'video') {
   else void window.navigateToPage?.('automations');
 }
 
+function openHistory(row: AutomationCardRow) {
+  window.showAutomationHistory?.(Number(row.id), row.name, row.actionType);
+}
+
+/** "14:30" for a run's next fire, in the viewer's own clock. */
+function clockTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * What a point on the Up next line stands for, shown on hover or focus: each
+ * run with when it fires, how often, what its last run did and how many times
+ * it has run. A point that stands for several runs lists them all. Each run
+ * opens its history.
+ */
+function MarkCard({ stops }: { stops: readonly AutomationCardRow[] }) {
+  if (stops.length === 0) return null;
+  return (
+    <span className="dash-autom-pop" role="group" aria-label="Run details">
+      {stops.length > 1 ? (
+        <span className="dash-autom-pop-title">{stops.length} runs close together</span>
+      ) : null}
+      {stops.map((row) => (
+        <button
+          key={row.id}
+          type="button"
+          className="dash-autom-pop-run"
+          title="Run history"
+          onClick={() => openHistory(row)}
+        >
+          <span className="dash-autom-pop-head">
+            <span className="dash-autom-glyph" aria-hidden="true">
+              <Glyph
+                name={automationGlyph({
+                  action_type: row.actionType,
+                  trigger_type: 'schedule',
+                  owned_by: null,
+                })}
+              />
+            </span>
+            <span className="dash-autom-pop-name">{row.name}</span>
+            <span
+              className={
+                row.running
+                  ? 'dash-autom-pop-when dash-autom-pop-when--live'
+                  : 'dash-autom-pop-when'
+              }
+            >
+              {row.running
+                ? row.running.progress > 0
+                  ? `${row.running.progress}%`
+                  : 'running'
+                : row.nextRun}
+            </span>
+          </span>
+          <span className="dash-autom-pop-facts">
+            {row.running ? (
+              <span className="dash-autom-pop-fact">
+                <i>Now</i>
+                <b>{row.running.phase}</b>
+              </span>
+            ) : row.nextRunAt !== null ? (
+              <span className="dash-autom-pop-fact">
+                <i>{row.nextRunAt < Date.now() ? 'Was due' : 'Runs at'}</i>
+                <b>{clockTime(row.nextRunAt)}</b>
+              </span>
+            ) : null}
+            <span className="dash-autom-pop-fact">
+              <i>Schedule</i>
+              <b>{row.trigger}</b>
+            </span>
+            <span className="dash-autom-pop-fact">
+              <i>Last run</i>
+              <b>{row.lastRun ? row.lastRun.ago : 'Not yet'}</b>
+            </span>
+            <span className="dash-autom-pop-fact">
+              <i>Runs so far</i>
+              <b>{row.runCount.toLocaleString()}</b>
+            </span>
+          </span>
+          {row.lastRun ? (
+            <span
+              className={
+                row.lastRun.ok
+                  ? 'dash-autom-pop-said'
+                  : 'dash-autom-pop-said dash-autom-pop-said--bad'
+              }
+            >
+              {row.lastRun.said}
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </span>
+  );
+}
+
 export function AutomationsCard({
   compact = false,
   side = 'music',
@@ -318,6 +415,7 @@ export function AutomationsCard({
   const leadRow = lead ? allRows.find((row) => row.id === lead.id) : undefined;
   const ran = timeline && !showAll ? justRan(allRows) : [];
   const dueSoon = marks.reduce((n, mark) => n + mark.count, 0);
+  const rowsById = new Map(allRows.map((row) => [row.id, row]));
 
   return (
     <article className={compact ? 'dash-card dash-side-card' : 'dash-card'} data-card="automations">
@@ -352,23 +450,38 @@ export function AutomationsCard({
                 <b>{lead.name}</b> {leadRow.nextRun}
               </span>
             ) : null}
-            {marks.map((mark) => (
-              <i
-                key={mark.id}
-                className={[
-                  'dash-autom-mark',
-                  mark.running ? 'dash-autom-mark--live' : '',
-                  mark.count > 1 ? 'dash-autom-mark--many' : '',
-                  mark === lead ? 'dash-autom-mark--lead' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-                style={{ left: `${mark.at}%` }}
-                title={mark.names.join('\n')}
-              >
-                {mark.count > 1 ? mark.count : null}
-              </i>
-            ))}
+            {marks.map((mark) => {
+              const stops = mark.ids
+                .map((id) => rowsById.get(id))
+                .filter((row): row is AutomationCardRow => row !== undefined);
+              const only = stops.length === 1 ? stops[0] : null;
+              return (
+                <span
+                  key={mark.id}
+                  className="dash-autom-stop"
+                  style={{ left: `${mark.at}%`, ['--at' as string]: mark.at }}
+                >
+                  <button
+                    type="button"
+                    className={[
+                      'dash-autom-mark',
+                      mark.running ? 'dash-autom-mark--live' : '',
+                      mark.count > 1 ? 'dash-autom-mark--many' : '',
+                      mark === lead ? 'dash-autom-mark--lead' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    aria-label={
+                      only ? `${only.name}, details` : `${mark.count} runs close together, details`
+                    }
+                    onClick={() => (only ? openHistory(only) : undefined)}
+                  >
+                    {mark.count > 1 ? mark.count : null}
+                  </button>
+                  <MarkCard stops={stops} />
+                </span>
+              );
+            })}
             <span className="dash-autom-tick dash-autom-tick--start">now</span>
             <span className="dash-autom-tick dash-autom-tick--mid">30m</span>
             <span className="dash-autom-tick dash-autom-tick--end">1h</span>

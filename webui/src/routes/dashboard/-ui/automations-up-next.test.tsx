@@ -76,9 +76,16 @@ describe('Up next on the board (the timeline)', () => {
     // only the run inside the hour is on the line; three hours out is in the list
     const marks = view.container.querySelectorAll<HTMLElement>('.dash-autom-lane .dash-autom-mark');
     expect(marks).toHaveLength(1);
-    expect(marks[0].title).toBe('Clean Downloads');
-    expect(parseFloat(marks[0].style.left)).toBeGreaterThan(20);
-    expect(parseFloat(marks[0].style.left)).toBeLessThan(30);
+    const stop = marks[0].closest<HTMLElement>('.dash-autom-stop')!;
+    expect(parseFloat(stop.style.left)).toBeGreaterThan(20);
+    expect(parseFloat(stop.style.left)).toBeLessThan(30);
+    // the point carries a card that says what the run is
+    const card = stop.querySelector('.dash-autom-pop')!;
+    expect(card.querySelector('.dash-autom-pop-name')!.textContent).toBe('Clean Downloads');
+    expect(card.textContent).toContain('Runs at');
+    expect(card.textContent).toContain('Schedule');
+    expect(card.textContent).toContain('Last run');
+    expect(card.textContent).toContain('Runs so far');
     expect(
       Array.from(view.container.querySelectorAll('.dash-autom-tick')).map((t) => t.textContent),
     ).toEqual(['now', '30m', '1h']);

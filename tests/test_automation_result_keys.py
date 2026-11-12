@@ -41,6 +41,7 @@ SENTENCE_SOURCES = {
     'playlist_pipeline': ('../../playlists/pipeline.py', ('tracks_synced', 'wishlist_queued')),
     'personalized_pipeline': ('personalized_pipeline.py', ('tracks_synced', 'wishlist_queued')),
     'run_repair_job': ('run_repair.py', ('queued',)),
+    'video_run_repair_job': ('run_repair.py', ('queued',)),
     'backup_database': ('maintenance.py', ('size_mb',)),
     'full_cleanup': ('download_cleanup.py', ('total_removed',)),
     # the video side

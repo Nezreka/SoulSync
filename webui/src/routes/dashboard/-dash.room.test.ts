@@ -150,8 +150,8 @@ describe('upNextMarks: the line over Up next', () => {
       { '1': { status: 'running', phase: 'Working', progress: 40 } },
     );
     expect(upNextMarks(rows, NOW)).toEqual([
-      { id: 1, name: 'Job 1', at: 0, running: true, count: 1, names: ['Job 1'] },
-      { id: 2, name: 'Job 2', at: 0, running: false, count: 1, names: ['Job 2'] },
+      { id: 1, name: 'Job 1', at: 0, running: true, count: 1, names: ['Job 1'], ids: [1] },
+      { id: 2, name: 'Job 2', at: 0, running: false, count: 1, names: ['Job 2'], ids: [2] },
     ]);
   });
 });

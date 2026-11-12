@@ -139,6 +139,8 @@ export interface UpNextMark {
   count: number;
   /** every run in the mark, for its tooltip */
   names: string[];
+  /** the same runs by id, in the same order: the hover card looks each up */
+  ids: Array<number | string>;
 }
 
 /** Marks closer than this (percent of the line) are drawn as one. */
@@ -154,8 +156,9 @@ export function groupUpNextMarks(marks: readonly UpNextMark[]): UpNextMark[] {
     if (last && !last.running && !mark.running && mark.at - last.at <= UP_NEXT_MERGE_PCT) {
       last.count += 1;
       last.names.push(mark.name);
+      last.ids.push(mark.id);
     } else {
-      out.push({ ...mark, names: [...mark.names] });
+      out.push({ ...mark, names: [...mark.names], ids: [...mark.ids] });
     }
   }
   return out;
@@ -183,7 +186,15 @@ export function upNextMarks(
   const marks: UpNextMark[] = [];
   for (const row of rows) {
     if (row.running) {
-      marks.push({ id: row.id, name: row.name, at: 0, running: true, count: 1, names: [row.name] });
+      marks.push({
+        id: row.id,
+        name: row.name,
+        at: 0,
+        running: true,
+        count: 1,
+        names: [row.name],
+        ids: [row.id],
+      });
       continue;
     }
     if (!row.enabled || row.nextRunAt === null) continue;
@@ -196,6 +207,7 @@ export function upNextMarks(
       running: false,
       count: 1,
       names: [row.name],
+      ids: [row.id],
     });
   }
   return marks;

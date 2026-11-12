@@ -160,6 +160,7 @@ describe('the Up next line and Just ran', () => {
     running,
     count: 1,
     names: [`run ${id}`],
+    ids: [id],
   });
 
   it('draws runs that land together as one mark with a count', () => {
@@ -169,6 +170,7 @@ describe('the Up next line and Just ran', () => {
       [4, 1],
     ]);
     expect(grouped[0].names).toEqual(['run 1', 'run 2', 'run 3']);
+    expect(grouped[0].ids).toEqual([1, 2, 3]);
   });
 
   it('never folds a running mark into another', () => {
