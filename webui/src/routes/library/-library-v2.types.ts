@@ -694,6 +694,10 @@ export interface LibraryV2QualityProfile {
 }
 
 export interface LibraryV2ImportState {
+  /** False on an install created since the catalogue cutover: there is no
+   * older library to import, so the page offers no import (#2062). Absent
+   * from an older server, which reads as "may have one". */
+  has_legacy_source?: boolean;
   running: boolean;
   stage: string | null;
   current: number;

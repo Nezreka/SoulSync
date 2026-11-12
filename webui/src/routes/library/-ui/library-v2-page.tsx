@@ -14739,6 +14739,37 @@ export function LibraryEmptyState({ pollIntervalMs = 1000 }: { pollIntervalMs?: 
   const migrating = bootstrap?.status === 'running';
   const failed = bootstrap?.status === 'failed';
 
+  // #2062: a new install has no older library. "Import your existing library"
+  // sent those users into a migration with nothing to read, which failed and
+  // told them everything was paused. They get the two real ways in instead.
+  if (importQuery.data?.has_legacy_source === false && !migrating) {
+    return (
+      <div className={styles.emptyState}>
+        <h2>Your library is empty</h2>
+        <p>
+          Find music in Search and download it, or bring in files you already have from the Import
+          page. Both show up here.
+        </p>
+        <span className={styles.importWrap}>
+          <button
+            type="button"
+            className={styles.btnPrimary}
+            onClick={() => void window.navigateToPage?.('search')}
+          >
+            Open Search
+          </button>
+          <button
+            type="button"
+            className={styles.btnGhost}
+            onClick={() => void window.navigateToPage?.('import')}
+          >
+            Open Import
+          </button>
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.emptyState}>
       <h2>

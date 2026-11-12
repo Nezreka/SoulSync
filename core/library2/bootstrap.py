@@ -240,6 +240,48 @@ def legacy_user_state_waiting(database: Any) -> bool:
                    for table in ("wishlist_tracks", "watchlist_artists"))
 
 
+def legacy_source_present(database: Any) -> bool:
+    """Does this install have an older library to import at all?
+
+    An install created since the catalogue cutover has no ``artists`` /
+    ``albums`` / ``tracks`` tables, under either their own names or the names a
+    finished upgrade renames them to. There is nothing for the importer to
+    read there, and its column check fails on the first table (#2062).
+    """
+    from core.library2.source_snapshot import SOURCE_TABLES, source_table
+    with closing(database._get_connection()) as conn:
+        tables = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+    return any(source_table(tables, table) for table in SOURCE_TABLES)
+
+
+def settle_failed_without_source(database: Any) -> bool:
+    """Clear a failed upgrade on an install that never had one to run.
+
+    Pressing Import library on a fresh install used to start the legacy import,
+    which failed on the missing tables and left ``failed`` behind: the Library
+    page then said the upgrade had failed and everything was paused. Nothing
+    was (the migration gate reads the tables, not this row), but the row is
+    wrong and it is what the banner shows. True when a row was corrected.
+    """
+    if legacy_source_present(database):
+        return False
+    with closing(database._get_connection()) as conn:
+        try:
+            now = _now_iso()
+            cursor = conn.execute(
+                "UPDATE lib2_bootstrap_state SET status='waiting_for_source', "
+                "finished_at=?, owner_token=NULL, last_error=NULL "
+                "WHERE id=1 AND status='failed'", (now,))
+            conn.commit()
+        except sqlite3.OperationalError:  # never bootstrapped: nothing to correct
+            return False
+    if cursor.rowcount:
+        logger.info("Library bootstrap: cleared a failed upgrade on an install "
+                    "with no older library to import")
+    return cursor.rowcount > 0
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 

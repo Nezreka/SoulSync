@@ -6136,6 +6136,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # state offers, and would be told forever to send a flag that tile
             # cannot send. An empty catalogue has nothing stale to protect, so
             # it is never the case this guard is for.
+            # #2062: an install created since the cutover has no older library
+            # at all. The Library page's empty state used to offer this import
+            # anyway, the importer failed on the missing tables, and the failed
+            # row made the page say the upgrade had failed and everything was
+            # paused. Nothing to read is an answer, not an error: say so, and
+            # leave the persisted state alone (correcting it if an earlier
+            # build already wrote the failure).
+            if not lib2_bootstrap.legacy_source_present(get_database()):
+                lib2_bootstrap.settle_failed_without_source(get_database())
+                return jsonify({
+                    "success": False,
+                    "code": "nothing_to_import",
+                    "error": ("This install has no older SoulSync library to "
+                              "import. Add music from Search, or bring in files "
+                              "you already have from the Import page."),
+                }), 409
             if not (reset or force):
                 database = get_database()
                 state = lib2_bootstrap.get_state(database)
@@ -6370,11 +6386,22 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         # "bootstrap" is the persisted state (core/library2/bootstrap.py) — unlike
         # _import_state (this process, this click) it also reflects an automatic
         # background import that this request didn't itself trigger.
+        database = get_database()
+        # #2062: a fresh install has no older library, so the page offers no
+        # import there, and a failure an earlier build left behind is cleared
+        has_legacy = lib2_bootstrap.legacy_source_present(database)
+        bootstrap_state = lib2_bootstrap.get_state(database)
+        # only on the failure itself: this is polled every second, and the
+        # correction is a write
+        if not has_legacy and bootstrap_state.get("status") == "failed":
+            lib2_bootstrap.settle_failed_without_source(database)
+            bootstrap_state = lib2_bootstrap.get_state(database)
         return jsonify({
             "success": True,
+            "has_legacy_source": has_legacy,
             **_import_state,
             "artwork_cache": _artwork_cache_snapshot(),
-            "bootstrap": lib2_bootstrap.get_state(get_database()),
+            "bootstrap": bootstrap_state,
             "preparation": _preparation_snapshot(),
         })
 
