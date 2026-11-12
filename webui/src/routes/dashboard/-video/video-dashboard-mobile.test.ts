@@ -38,20 +38,28 @@ describe('the next up billboard on a phone', () => {
 
 describe('the count tiles on a phone', () => {
   const css = read('src/routes/dashboard/-video/video-dashboard.module.css');
-  const phone = mediaBlock(css, 460);
+  const premier = read('static/dashboard-premier.css');
 
-  it('sit side by side, beating the music rule that stacks them', () => {
-    // the music rule is #dashboard-page .dash-tiles.header-quick-nav (1,2,0).
-    // a selector that doesn't outrank it loses and the tiles stay one per row
-    expect(rule(phone, ':global(#dashboard-page) .tiles.tiles[data-rail]')).toMatch(
-      /grid-template-columns:\s*repeat\(auto-fit/,
+  it('are one over the other, each with its number beside what it is made of', () => {
+    // the card follows the room it is given (a container query), so the
+    // column beside the week and a phone get the same layout. the selector
+    // doubles .tile to outrank the music rule (#dashboard-page .dash-tiles
+    // .dash-tile.header-button)
+    const narrow = css.slice(css.indexOf('@container (max-width: 640px)'));
+    expect(rule(narrow, ':global(#dashboard-page) .tiles[data-rail] .tile.tile')).toMatch(
+      /flex-direction:\s*row/,
+    );
+    // and on a phone the card itself is a column (the file has several 768
+    // blocks, so this looks for the rule, not the first block)
+    expect(premier).toMatch(
+      /@media \(max-width: 768px\) \{\s*#dashboard-page\.dash-room\[data-media='video'\] \.room-board > \.dash-tiles\[data-rail='tiles'\] \{\s*flex-direction: column;/,
     );
   });
 
-  it('let a label wrap instead of cutting it', () => {
-    expect(rule(phone, ':global(#dashboard-page) .tiles[data-rail] .tileLabel.tileLabel')).toMatch(
-      /white-space:\s*normal/,
-    );
+  it('shows the week as two rows of days, with today filling the second', () => {
+    const phone = mediaBlock(css, 460);
+    expect(rule(phone, '.days')).toMatch(/repeat\(4,/);
+    expect(rule(phone, '.dayToday')).toMatch(/grid-column:\s*span 2/);
   });
 
   it('keeps the studio button on one line', () => {

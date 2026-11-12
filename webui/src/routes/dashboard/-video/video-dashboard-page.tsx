@@ -95,23 +95,29 @@ export function VideoDashboardPage({
       {/* The system as a board, the way the music dashboard has it: the week
           beside the counts, what runs next beside what is downloading. A card
           with nothing to say renders nothing and the grid closes up. */}
-      <section className="room-board" aria-label="Your system">
-        <WeekCard data={week.data} today={today} start={start} canDownload={canDownload} />
-        <CountTiles
-          watchlist={stats.data?.watchlist ?? null}
-          wishlist={stats.data?.wishlist ?? null}
-          issues={issues.data ?? 0}
-          findings={findings.data ?? 0}
-        />
-        {/* what is downloading right now is the news, so it comes first;
+      {/* the wrap is what the board measures itself against: the week takes
+          two thirds beside the counts once there is room for both */}
+      <div className="video-board-wrap">
+        <section className="room-board" aria-label="Your system">
+          <WeekCard data={week.data} today={today} start={start} canDownload={canDownload} />
+          <CountTiles
+            watchlist={stats.data?.watchlist ?? null}
+            wishlist={stats.data?.wishlist ?? null}
+            issues={issues.data ?? 0}
+            findings={findings.data ?? 0}
+          />
+          {/* what is downloading right now is the news, so it comes first;
             both take the whole row (see the video board rules in
             dashboard-premier.css) */}
-        <DownloadsBand />
-        <AutomationsCard compact timeline side="video" />
-      </section>
+          <DownloadsBand />
+          <AutomationsCard compact timeline side="video" />
+          {/* the two studios stand beside Up next, one over the other, once
+              the board is wide enough; under it before that */}
+          {isAdmin ? <StudiosBand recent={recent} /> : null}
+        </section>
+      </div>
       <div className="room-shelves">
         <RecentBand items={recent} />
-        {isAdmin ? <StudiosBand recent={recent} /> : null}
       </div>
       <footer className="dash-footer">
         <QuickSettings />

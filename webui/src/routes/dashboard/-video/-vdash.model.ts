@@ -363,6 +363,95 @@ export function weekSummary(eps: CalendarEpisode[] | null | undefined, today: st
   };
 }
 
+/** One day of the week card: what aired, and how much of it you have. */
+export interface WeekDay {
+  /** yyyy-mm-dd */
+  date: string;
+  /** "Fri", or "Today" */
+  label: string;
+  /** day of the month */
+  dayOfMonth: number;
+  today: boolean;
+  aired: number;
+  owned: number;
+  /** wanted, queued or downloading: on its way */
+  wanted: number;
+  /** missing, failed or unmatched: nothing is fetching it */
+  missing: number;
+  /** up to three shows that aired, one poster each (null = no art) */
+  posters: { key: string; title: string; src: string | null }[];
+  /** shows that aired beyond the posters shown */
+  more: number;
+}
+
+/** How many days the week card draws, today included. */
+export const WEEK_CARD_DAYS = 7;
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const ON_ITS_WAY = new Set<AcqState>(['wanted', 'queued', 'downloading']);
+const NOT_COMING = new Set<AcqState>(['missing', 'failed', 'unmatched']);
+
+/** a small poster for a show an episode belongs to */
+function showPoster(e: CalendarEpisode): string | null {
+  if (e.not_in_library) return e.poster_url || null;
+  if (e.show_has_poster && e.show_id != null)
+    return appURL(`/api/video/poster/show/${e.show_id}?w=185`);
+  return e.poster_url || null;
+}
+
+/** The first of the week card's days. */
+export function weekCardStart(today: string): string {
+  const [y, m, d] = today.split('-').map(Number);
+  const first = new Date(y, m - 1, d - (WEEK_CARD_DAYS - 1));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${first.getFullYear()}-${pad(first.getMonth() + 1)}-${pad(first.getDate())}`;
+}
+
+/**
+ * The last seven days, oldest first, today last. An episode counts on the day
+ * it aired; one that has not aired yet counts nowhere. A show is drawn once a
+ * day however many of its episodes aired.
+ */
+export function weekDays(eps: CalendarEpisode[] | null | undefined, today: string): WeekDay[] {
+  const [y, m, d] = today.split('-').map(Number);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const days: WeekDay[] = [];
+  for (let back = WEEK_CARD_DAYS - 1; back >= 0; back -= 1) {
+    const when = new Date(y, m - 1, d - back);
+    const date = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}`;
+    days.push({
+      date,
+      label: back === 0 ? 'Today' : DAY_NAMES[when.getDay()],
+      dayOfMonth: when.getDate(),
+      today: back === 0,
+      aired: 0,
+      owned: 0,
+      wanted: 0,
+      missing: 0,
+      posters: [],
+      more: 0,
+    });
+  }
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  const seen = new Map<string, Set<string>>();
+  for (const e of eps ?? []) {
+    const day = byDate.get(e.air_date);
+    if (!day || e.acq === 'unaired') continue;
+    day.aired += 1;
+    if (e.acq === 'owned') day.owned += 1;
+    else if (ON_ITS_WAY.has(e.acq)) day.wanted += 1;
+    else if (NOT_COMING.has(e.acq)) day.missing += 1;
+    const key = String(e.show_id ?? e.show_tmdb_id ?? e.show_title);
+    const shows = seen.get(day.date) ?? new Set<string>();
+    seen.set(day.date, shows);
+    if (shows.has(key)) continue;
+    shows.add(key);
+    if (day.posters.length < 3) day.posters.push({ key, title: e.show_title, src: showPoster(e) });
+    else day.more += 1;
+  }
+  return days;
+}
+
 export function weekLine(w: WeekSummary): string {
   if (!w.aired) return 'Nothing on your watchlist aired this past week.';
   if (w.owned >= w.aired) return `All ${w.aired} that aired are in your library.`;

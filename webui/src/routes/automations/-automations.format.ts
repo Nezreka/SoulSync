@@ -97,6 +97,51 @@ const plural = (n: number, one: string, many = `${one}s`) =>
 
 type Sentence = (r: Record<string, unknown>) => string | null;
 
+/** ", 6.4 GB freed" from a byte count, or nothing. */
+const freed = (bytes: unknown): string => {
+  const n = num(bytes);
+  if (n <= 0) return '';
+  const gb = n / 1024 ** 3;
+  return gb >= 1
+    ? `, ${gb.toFixed(1)} GB freed`
+    : `, ${Math.max(1, Math.round(n / 1024 ** 2))} MB freed`;
+};
+
+/** A video wishlist run: how many it looked for and how many it got. */
+const videoWishlistRun = (r: Record<string, unknown>, what: string): string => {
+  const searched = num(r.searched);
+  const grabbed = num(r.grabbed);
+  if (!searched) return `No ${what}s ready to search`;
+  return grabbed
+    ? `Searched ${plural(searched, what)}, grabbed ${grabbed}`
+    : `Searched ${plural(searched, what)}, nothing grabbed`;
+};
+
+/** A watchlist scan: who it checked and what it put on the wishlist. */
+const videoWatchlistScan = (
+  checked: number,
+  one: string,
+  many: string,
+  added: number,
+  what: string,
+  upcoming: number,
+): string => {
+  if (!checked) return `No ${many} followed`;
+  const parts = [`Checked ${plural(checked, one, many)}`];
+  parts.push(added ? `wishlisted ${plural(added, what)}` : 'nothing new');
+  if (upcoming) parts.push(`${upcoming} upcoming`);
+  return parts.join(', ');
+};
+
+/** A read of the media server: what it found, or that nothing changed. */
+const videoLibraryRead = (r: Record<string, unknown>): string => {
+  const parts: string[] = [];
+  if (num(r.movies)) parts.push(plural(num(r.movies), 'movie'));
+  if (num(r.shows)) parts.push(plural(num(r.shows), 'show'));
+  if (num(r.episodes)) parts.push(plural(num(r.episodes), 'episode'));
+  return parts.length ? `Read ${parts.join(', ')}` : 'Nothing new on the server';
+};
+
 const ACTION_SENTENCES: Record<string, Sentence> = {
   audiobook_scan_library: (r) => {
     if (typeof r.skipped === 'string') return r.skipped;
@@ -171,6 +216,120 @@ const ACTION_SENTENCES: Record<string, Sentence> = {
     const removed = num(r.total_removed);
     return removed ? `Removed ${plural(removed, 'item')}` : 'Nothing to remove';
   },
+  // ── the video side ──
+  // searched / grabbed
+  video_process_movie_wishlist: (r) => videoWishlistRun(r, 'movie'),
+  // searched / grabbed
+  video_process_episode_wishlist: (r) => videoWishlistRun(r, 'episode'),
+  // people / movies_added / upcoming
+  video_scan_watchlist_people: (r) =>
+    videoWatchlistScan(
+      num(r.people),
+      'person',
+      'people',
+      num(r.movies_added),
+      'movie',
+      num(r.upcoming),
+    ),
+  // studios / movies_added / upcoming
+  video_scan_watchlist_studios: (r) =>
+    videoWatchlistScan(
+      num(r.studios),
+      'studio',
+      'studios',
+      num(r.movies_added),
+      'movie',
+      num(r.upcoming),
+    ),
+  // channels / videos_added
+  video_scan_watchlist_channels: (r) =>
+    videoWatchlistScan(num(r.channels), 'channel', 'channels', num(r.videos_added), 'video', 0),
+  // playlists / videos_added
+  video_scan_watchlist_playlists: (r) =>
+    videoWatchlistScan(num(r.playlists), 'playlist', 'playlists', num(r.videos_added), 'video', 0),
+  // episodes_added / shows_pruned
+  video_add_airing_episodes: (r) => {
+    const added = num(r.episodes_added);
+    const pruned = num(r.shows_pruned);
+    const parts = [
+      added ? `Wishlisted ${plural(added, 'aired episode')}` : 'No new aired episodes',
+    ];
+    if (pruned) parts.push(`dropped ${plural(pruned, 'ended show')}`);
+    return parts.join(', ');
+  },
+  // refreshed / failed
+  video_refresh_airing_schedules: (r) => {
+    const refreshed = num(r.refreshed);
+    const failed = num(r.failed);
+    if (!refreshed && !failed) return 'No airing shows to refresh';
+    return failed
+      ? `Refreshed ${plural(refreshed, 'show schedule')}, ${failed} failed`
+      : `Refreshed ${plural(refreshed, 'show schedule')}`;
+  },
+  // scanned / skipped
+  video_scan_server: (r) => {
+    const scanned = Array.isArray(r.scanned) ? r.scanned.map(String) : [];
+    const skipped = Array.isArray(r.skipped) ? r.skipped.map(String) : [];
+    const lib = (kind: string) => (kind === 'movie' ? 'movies' : kind === 'show' ? 'TV' : kind);
+    if (!scanned.length) return 'The server already had everything';
+    const said = `Asked the server to scan ${scanned.map(lib).join(' and ')}`;
+    return skipped.length ? `${said}, ${skipped.map(lib).join(' and ')} already there` : said;
+  },
+  // movies / shows / episodes
+  video_update_database: (r) => videoLibraryRead(r),
+  // movies / shows / episodes
+  video_update_database_hourly: (r) => videoLibraryRead(r),
+  // movies / shows / episodes
+  video_deep_scan_movies: (r) => videoLibraryRead(r),
+  // movies / shows / episodes
+  video_deep_scan_tv: (r) => videoLibraryRead(r),
+  // applied / failed
+  video_apply_overlays: (r) => {
+    const applied = num(r.applied);
+    const failed = num(r.failed);
+    if (!applied && !failed) return 'Every poster already has its overlay';
+    return failed
+      ? `Updated ${plural(applied, 'poster')}, ${failed} failed`
+      : `Updated ${plural(applied, 'poster')}`;
+  },
+  // synced / failed / added / removed
+  video_sync_collections: (r) => {
+    const parts = [`Synced ${plural(num(r.synced), 'collection')}`];
+    if (num(r.added)) parts.push(`${plural(num(r.added), 'title')} added`);
+    if (num(r.removed)) parts.push(`${num(r.removed)} removed`);
+    if (num(r.failed)) parts.push(`${num(r.failed)} failed`);
+    return parts.join(', ');
+  },
+  // refreshed / failed
+  video_reenrich_stale: (r) => {
+    const refreshed = num(r.refreshed);
+    const failed = num(r.failed);
+    if (!refreshed && !failed) return 'Nothing stale to refresh';
+    return failed
+      ? `Refreshed ${plural(refreshed, 'title')}, ${failed} failed`
+      : `Refreshed ${plural(refreshed, 'title')}`;
+  },
+  // grabbed
+  video_rss_sync: (r) =>
+    num(r.grabbed) ? `Grabbed ${plural(num(r.grabbed), 'release')}` : 'Nothing new on the feeds',
+  // released
+  video_seeding_sweep: (r) =>
+    num(r.released)
+      ? `Removed ${plural(num(r.released), 'finished torrent')}`
+      : 'Nothing has finished seeding',
+  // removed / freed_bytes
+  video_purge_recycle_bin: (r) =>
+    num(r.removed)
+      ? `Deleted ${plural(num(r.removed), 'recycled file')}${freed(r.freed_bytes)}`
+      : 'The recycle bin had nothing old enough',
+  // deleted / freed_bytes
+  video_clean_youtube_episodes: (r) =>
+    num(r.deleted)
+      ? `Deleted ${plural(num(r.deleted), 'old episode')}${freed(r.freed_bytes)}`
+      : 'No episodes past their keep window',
+  // rows / matched
+  video_extto_fresh_refresh: (r) =>
+    `Read ${plural(num(r.rows), 'release')}, matched ${num(r.matched)} new`,
 };
 
 function syncSentence(r: Record<string, unknown>): string | null {

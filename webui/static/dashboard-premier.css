@@ -2437,7 +2437,7 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
     border-radius: 7px;
 }
 #dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .dash-tile {
-    justify-content: flex-end;
+    justify-content: flex-start;
     overflow: hidden;
 }
 /* three or four tiles share the card, so the posters are smaller than the
@@ -2645,4 +2645,230 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
 #dashboard-page.dash-room .orb-stage .header-actions > .video-enrich-container:hover,
 #dashboard-page.dash-room .orb-stage .header-actions > .video-enrich-container:focus-within {
     z-index: 20;
+}
+
+/* ═══════════════════════════════════════════════
+   THE BOARD'S CARDS, refined (Nov 12 2026)
+   This Week as seven days and the counts with what they are made of are the
+   video dashboard's (video-dashboard.module.css). Up next is shared by both
+   dashboards: the next run named on the line, close runs as one mark, and
+   what just ran beside what is coming.
+   ═══════════════════════════════════════════════ */
+
+/* ── the video board: the week across the row, or two thirds beside the counts ── */
+#dashboard-page.dash-room .video-board-wrap {
+    container: video-board / inline-size;
+    min-width: 0;
+}
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='week'],
+#dashboard-page.dash-room[data-media='video'] .room-board > .dash-tiles[data-rail='tiles'] {
+    grid-column: 1 / -1;
+}
+#dashboard-page.dash-room[data-media='video'] .room-board > .dash-tiles[data-rail='tiles'] {
+    flex-wrap: wrap;
+    align-content: stretch;
+}
+@container video-board (min-width: 1180px) {
+    #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='week'] {
+        grid-column: span 8;
+    }
+    /* beside the week the counts are a column: one over the other, the
+       issues and findings line at the foot */
+    #dashboard-page.dash-room[data-media='video'] .room-board > .dash-tiles[data-rail='tiles'] {
+        grid-column: span 4;
+        flex-direction: column;
+        flex-wrap: nowrap;
+    }
+}
+
+/* Make it yours sits on the board: no frame of its own, its two studios are
+   the cards */
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='studios'] {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    container: studios-band / inline-size;
+}
+@container video-board (min-width: 1180px) {
+    #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations']:not(:last-child) {
+        grid-column: span 8;
+    }
+    #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='studios'] {
+        grid-column: span 4;
+    }
+}
+
+/* ── up next ── */
+#dashboard-page.dash-room .dash-autom-count {
+    font-size: 12.5px;
+    color: var(--text-3);
+    white-space: nowrap;
+}
+/* the next run, named where it sits on the line */
+#dashboard-page.dash-room .dash-autom-lane:has(.dash-autom-flag) {
+    margin-top: 24px;
+}
+#dashboard-page.dash-room .dash-autom-flag {
+    position: absolute;
+    bottom: calc(100% - 1px);
+    max-width: 70%;
+    padding: 2px 9px;
+    border-radius: 7px;
+    background: rgba(var(--accent-rgb), 0.16);
+    color: var(--text-2);
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transform: translateX(-9px);
+}
+#dashboard-page.dash-room .dash-autom-flag--left {
+    transform: translateX(calc(-100% + 9px));
+}
+#dashboard-page.dash-room .dash-autom-flag b {
+    color: var(--text-1);
+    font-weight: 600;
+}
+#dashboard-page.dash-room .dash-autom-mark--lead {
+    box-shadow: 0 0 0 4px rgba(var(--accent-rgb), 0.22);
+}
+/* several runs landing together: one mark that says how many */
+#dashboard-page.dash-room .dash-autom-mark--many {
+    top: 1px;
+    width: auto;
+    min-width: 20px;
+    height: 18px;
+    margin-left: -10px;
+    padding: 0 5px;
+    border-radius: var(--radius-pill);
+    color: var(--bg-primary);
+    font-size: 10.5px;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 18px;
+    text-align: center;
+}
+/* coming up beside just ran */
+#dashboard-page.dash-room .dash-autom-cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 14px 34px;
+    align-items: start;
+}
+#dashboard-page.dash-room .dash-autom-col,
+#dashboard-page.dash-room .dash-autom-ran {
+    min-width: 0;
+}
+#dashboard-page.dash-room .dash-autom-col-title {
+    margin: 0 0 2px;
+    color: var(--text-3);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+/* with just ran beside it the list is one column, wherever the card sits */
+#dashboard-page.dash-room .room-board > [data-card='automations'] .dash-autom-cols .dash-autom-rows,
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations'] .dash-autom-cols .dash-autom-rows {
+    display: flex;
+}
+#dashboard-page.dash-room .dash-autom-glyph {
+    flex: none;
+    order: -1;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: var(--white-a06);
+    color: var(--text-2);
+}
+#dashboard-page.dash-room .dash-autom-glyph svg {
+    width: 16px;
+    height: 16px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+/* the countdown still leads the row, then the picture of the work */
+#dashboard-page.dash-room .dash-side-card[data-card='automations'] .dash-autom-glyph ~ .dash-autom-when {
+    order: -2;
+}
+#dashboard-page.dash-room .dash-autom-ran-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    margin: 0 -6px;
+    padding: 8px 6px;
+    border-radius: 12px;
+    cursor: pointer;
+}
+#dashboard-page.dash-room .dash-autom-ran-row:hover {
+    background: var(--white-a06);
+}
+#dashboard-page.dash-room .dash-autom-ran-when {
+    flex: none;
+    order: -2;
+    width: 70px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--success);
+}
+#dashboard-page.dash-room .dash-autom-ran-when--bad {
+    color: var(--warning);
+}
+/* the card measures itself: under 700px it has room for what is coming, not
+   for both lists side by side (half a board, or one of four across) */
+#dashboard-page.dash-room .room-board > [data-card='automations'] {
+    container: up-next / inline-size;
+}
+@container up-next (max-width: 700px) {
+    #dashboard-page.dash-room .dash-autom-cols {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .dash-autom-ran {
+        display: none;
+    }
+    #dashboard-page.dash-room .dash-autom-col-title {
+        display: none;
+    }
+}
+@media (max-width: 768px) {
+    #dashboard-page.dash-room[data-media='video'] .room-board > .dash-tiles[data-rail='tiles'] {
+        flex-direction: column;
+        flex-wrap: nowrap;
+    }
+    #dashboard-page.dash-room .dash-autom-cols {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .dash-autom-flag {
+        max-width: 92%;
+    }
+    /* a phone scrolls: just ran goes under what is coming, with its heading */
+    #dashboard-page.dash-room .dash-autom-ran,
+    #dashboard-page.dash-room .dash-autom-col-title {
+        display: block;
+    }
+    /* what a run did is the point of the row: let it take a second line */
+    #dashboard-page.dash-room .dash-autom-ran-row .dash-autom-meta {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        white-space: normal;
+    }
+    /* a phone has room for two thirds of a name on one line: give it two */
+    #dashboard-page.dash-room .dash-side-card[data-card='automations'] .dash-autom-name {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        white-space: normal;
+        line-height: 1.25;
+    }
 }

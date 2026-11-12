@@ -156,8 +156,13 @@ describe('the music dashboard skeleton', () => {
     expect(
       Array.from(page?.children ?? [])
         .map((child) => child.className.split(' ')[0])
-        .filter((name) => name.startsWith('room-') || name === 'dash-footer'),
-    ).toEqual(['room-top', 'room-board', 'room-shelves', 'dash-footer']);
+        .filter(
+          (name) =>
+            name.startsWith('room-') || name.startsWith('video-board') || name === 'dash-footer',
+        ),
+    ).toEqual(['room-top', 'video-board-wrap', 'room-shelves', 'dash-footer']);
+    // the wrap is what the board measures itself against
+    expect(page?.querySelector('.video-board-wrap > .room-board')).not.toBeNull();
     expect(page?.querySelector('.dash-side')).toBeNull();
     expect(page?.querySelector(':scope > footer.dash-footer')).not.toBeNull();
     expect(await screen.findByText('8,873')).toBeTruthy();

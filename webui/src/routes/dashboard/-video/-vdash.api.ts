@@ -63,22 +63,34 @@ function tilePoster(url: string): string {
   return url;
 }
 
-/** A few posters for the two count tiles: the newest shows on the watchlist
- * and the newest movies on the wishlist. Decoration, so a failed read is an
- * empty list and the tiles show their numbers alone. */
+/** What a count is made of: its posters and its parts. */
+export interface TileFacts {
+  posters: string[];
+  /** watchlist: show / person / studio. wishlist: movie / episode / show */
+  counts: Record<string, number>;
+}
+
+/** What the two count tiles are made of: the newest shows on the watchlist
+ * and the newest movies on the wishlist as posters, and how each total splits
+ * (both lists answer their counts with any page). Extra, so a failed read is
+ * an empty answer and the tiles show their numbers alone. */
 export function tilePostersQuery() {
-  const posters = async (path: string): Promise<string[]> => {
+  const posters = async (path: string): Promise<TileFacts> => {
     try {
-      const data = await readJson<{ items?: { poster_url?: string | null }[] }>(
-        apiClient.get(path, { searchParams: { sort: 'added', limit: 12 } }),
-      );
-      return (data.items ?? [])
-        .map((item) => item.poster_url)
-        .filter((url): url is string => typeof url === 'string' && url.length > 0)
-        .slice(0, 5)
-        .map(tilePoster);
+      const data = await readJson<{
+        items?: { poster_url?: string | null }[];
+        counts?: Record<string, number>;
+      }>(apiClient.get(path, { searchParams: { sort: 'added', limit: 12 } }));
+      return {
+        posters: (data.items ?? [])
+          .map((item) => item.poster_url)
+          .filter((url): url is string => typeof url === 'string' && url.length > 0)
+          .slice(0, 5)
+          .map(tilePoster),
+        counts: data.counts ?? {},
+      };
     } catch {
-      return [];
+      return { posters: [], counts: {} };
     }
   };
   return queryOptions({
