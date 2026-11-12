@@ -19,6 +19,8 @@ interface WeeklyDigestData {
   tracks_played: number;
   time_ms: number;
   top_artist: string | null;
+  /** the library's own picture of that artist, when it has one */
+  top_artist_image?: string | null;
   discoveries: number;
   streak_days: number;
   start_date: string;
@@ -44,6 +46,7 @@ function formatRange(start: string, end: string): string {
 
 export function WeeklyDigest() {
   const [digest, setDigest] = useState<WeeklyDigestData | null>(null);
+  const [artFailed, setArtFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,37 +81,20 @@ export function WeeklyDigest() {
         <span className="wd-kicker">This week</span>
         <span className="wd-range">{formatRange(digest.start_date, digest.end_date)}</span>
         <button type="button" className="wd-link" onClick={openStats}>
-          full stats →
+          Full stats
         </button>
       </div>
       <div className="wd-body">
-        <div className="wd-stats">
-          <div className="wd-stat">
-            <span className="wd-num">{formatHours(digest.time_ms)}</span>
-            <span className="wd-label">listened</span>
-          </div>
-          <div className="wd-stat">
-            <span className="wd-num">{digest.tracks_played}</span>
-            <span className="wd-label">tracks played</span>
-          </div>
-          {digest.top_artist && (
-            <div className="wd-stat">
-              <span className="wd-num">{digest.top_artist}</span>
-              <span className="wd-label">top artist</span>
-            </div>
-          )}
-          <div className="wd-stat">
-            <span className="wd-num">{digest.discoveries}</span>
-            <span className="wd-label">new discoveries</span>
-          </div>
-          <div className="wd-stat">
-            <span className="wd-num">{digest.streak_days}-day</span>
-            <span className="wd-label">streak</span>
-          </div>
+        <div className="wd-lead">
+          <span className="wd-num">{formatHours(digest.time_ms)}</span>
+          <span className="wd-label">
+            listened across {digest.tracks_played.toLocaleString()} track
+            {digest.tracks_played === 1 ? '' : 's'}
+          </span>
         </div>
         <div className="wd-chart" aria-hidden="true">
           {digest.daily.map((day) => (
-            <span className="wd-bar-col" key={day.date}>
+            <span className="wd-bar-col" key={day.date} title={`${day.hours}h`}>
               <span
                 className="wd-bar"
                 style={{ height: `${Math.round((day.hours / maxHours) * 100)}%` }}
@@ -117,6 +103,27 @@ export function WeeklyDigest() {
             </span>
           ))}
         </div>
+      </div>
+      <div className="wd-chips">
+        {digest.top_artist && (
+          <span className="wd-chip wd-chip--artist">
+            {digest.top_artist_image && !artFailed ? (
+              <img
+                src={digest.top_artist_image}
+                alt=""
+                loading="lazy"
+                onError={() => setArtFailed(true)}
+              />
+            ) : null}
+            <b>{digest.top_artist}</b>top artist
+          </span>
+        )}
+        <span className="wd-chip">
+          <b>{digest.discoveries}</b>new discover{digest.discoveries === 1 ? 'y' : 'ies'}
+        </span>
+        <span className="wd-chip">
+          <b>{digest.streak_days}-day</b>streak
+        </span>
       </div>
     </section>
   );

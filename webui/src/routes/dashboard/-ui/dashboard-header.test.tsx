@@ -22,6 +22,7 @@ import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useDashboardHeader } from '../-dash.header';
+import { publishHeroArt, publishTilePictures, resetDashRoom } from '../-dash.room';
 import { vanillaDashboardHtml } from './dash-artefact';
 import { DashboardHeaderView, QuickNavTiles } from './dashboard-header';
 
@@ -127,6 +128,60 @@ async function mountHeader() {
   });
   return view!;
 }
+
+describe('the listening room pieces', () => {
+  afterEach(() => act(() => resetDashRoom()));
+
+  it('the hero has no backdrop until a cover is known, then that cover', async () => {
+    const view = await mountHeader();
+    expect(view.container.querySelector('.room-backdrop')).toBeNull();
+    act(() => publishHeroArt('/art/geometry.jpg'));
+    const backdrop = view.container.querySelector<HTMLImageElement>('.dash-hero > .room-backdrop')!;
+    expect(backdrop.getAttribute('src')).toBe('/art/geometry.jpg');
+    // decoration only: nothing for a screen reader, and never a child of the orb stage
+    expect(backdrop.getAttribute('aria-hidden')).toBe('true');
+    expect(view.container.querySelector('.orb-stage .room-backdrop')).toBeNull();
+  });
+
+  it('each count tile shows a few of what it counts', async () => {
+    const view = await mountHeader();
+    const art = (id: string) =>
+      Array.from(view.container.querySelectorAll(`#${id} .room-tile-art img`)).map((img) =>
+        img.getAttribute('src'),
+      );
+    // the slots are there from the start, so the two tiles stay level
+    expect(view.container.querySelector('#watchlist-button .room-tile-art--faces')).not.toBeNull();
+    expect(view.container.querySelector('#wishlist-button .room-tile-art--sleeves')).not.toBeNull();
+    expect(art('watchlist-button')).toEqual([]);
+
+    act(() => {
+      publishTilePictures('faces', [
+        { name: 'Hotel Pools', image_url: 'https://cdn.example/hp.jpg' },
+        { name: 'Max Future', image_url: 'https://cdn.example/mf.jpg' },
+      ]);
+      publishTilePictures('sleeves', [{ name: 'pillows', image_url: 'https://cdn.example/p.jpg' }]);
+    });
+    expect(art('watchlist-button')).toEqual([
+      'https://cdn.example/hp.jpg',
+      'https://cdn.example/mf.jpg',
+    ]);
+    expect(art('wishlist-button')).toEqual(['https://cdn.example/p.jpg']);
+    // the count is the information: the pictures are hidden from readers
+    expect(
+      view.container.querySelector('#watchlist-button .room-tile-art')!.getAttribute('aria-hidden'),
+    ).toBe('true');
+  });
+
+  it('a picture that fails to load steps out of the way', async () => {
+    const view = await mountHeader();
+    act(() =>
+      publishTilePictures('faces', [{ name: 'Gone', image_url: 'https://cdn.example/404.jpg' }]),
+    );
+    const img = view.container.querySelector<HTMLImageElement>('#watchlist-button img')!;
+    fireEvent.error(img);
+    expect(img.hidden).toBe(true);
+  });
+});
 
 describe('the artefact differential', () => {
   it('renders the vanilla orb strip 1:1, on the stage', async () => {

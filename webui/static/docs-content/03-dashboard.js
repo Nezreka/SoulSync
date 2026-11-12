@@ -12,13 +12,13 @@ registerDocsSection({
 
 The dashboard is organized into bands that appear when they have something to show:
 
-- **Header** — library stats (artists, albums, tracks) and **worker orbs** showing enrichment status per service.
+- **Header** — your greeting, library stats (tracks, albums, artists), the library line with **Quick scan**, and the **worker orbs** showing enrichment status per service. It is lit by the cover of the last song you played (off under Reduce effects and Max performance).
 - **Alerts band** — the exception surface. It renders *nothing* while every core connection is healthy, and shouts only when a human is needed (a service disconnected, a scan failed, etc.).
 - **Active downloads** — appears full-width while anything is downloading, with live progress.
-- **Listen band** — **Library Radio** (an endless shuffle of your own collection) and **Your Mixes** (the doorway to Discover's daily mixes).
-- **Content rails** — what's new in your library: recently added albums, new releases from watched artists.
+- **Listen band** — first thing under the header: **Library Radio** (an endless shuffle of your own collection), **Flow**, and your mixes.
+- **The board** — four cards, two by two: **This week** (hours listened, the seven days, top artist, discoveries, streak), the **Watchlist and Wishlist** tiles, **Playlist sync**, and **Up next**.
+- **Content rails** — what's new in your library: recently added albums, new releases from watched artists. The newest card is larger.
 - **Listening history** — what you've been playing, once history exists.
-- **Sidebar** — the **Playlist sync** rail (your sync pipelines with live phases), a compact Automations card, and **quick navigation tiles** that jump straight to Watchlist and Wishlist, with live badges and the next watchlist scan countdown.
 - **Footer** — quick settings toggles.
 
 Stats update in real time over WebSocket — no page refresh needed.
@@ -127,15 +127,16 @@ Workers include smart rate limiting for all APIs. If Spotify returns a rate limi
         {
             id: 'dash-tools',
             title: 'Dashboard Sidebar',
-            lede: 'Live control cards for sync pipelines, automations, and quick navigation.',
+            lede: 'Live cards for your week, sync pipelines, automations, and quick navigation.',
             body: `
-## Sidebar cards
+## The board
 
-The dashboard sidebar holds three live cards, top to bottom:
+Under the listen band the dashboard holds four live cards:
 
-- **Playlist sync** — your sync pipelines with a health bar (percent of playlist tracks in your library), per-pipeline run controls, and a **Manage** link that opens the sync board.
-- **Up next** — a compact Automations card showing your next scheduled automations with run-now and toggle controls. The **Automations** link opens the full [Automations page](#auto-overview).
-- **Quick navigation tiles** — two tiles that jump straight to **Watchlist** (live watched-artist count plus a countdown to the next scan) and **Wishlist** (live queue count).
+- **This week** — hours listened across how many tracks, a bar for each of the last seven days, and your top artist (with their picture), new discoveries and streak. **Full stats** opens the Stats page.
+- **Watchlist and Wishlist** — two tiles that jump straight to **Watchlist** (live watched-artist count, a countdown to the next scan, and the faces of the artists you watched most recently) and **Wishlist** (live queue count and the sleeves of the songs wished for most recently).
+- **Playlist sync** — a ring for the share of playlist tracks in your library, with how many of how many. Sort by **Most missing**, **Last synced**, **Next run** or **Name**. Each row says what the playlist needs and when it syncs next; point at a row (or tap it) for **Listen**, **Sync**, and **Sync and download**. **Manage** opens the sync board.
+- **Up next** — a line of the next hour with a mark per automation due, then the next five with how long until each. Point at a row for pause and **Run**. The **Automations** link opens the full [Automations page](#auto-overview).
 
 The dashboard footer holds quick settings toggles.
 

@@ -34,7 +34,7 @@ describe('the page shell', () => {
     });
     const root = view.container.firstElementChild!;
     expect(root.id).toBe('dashboard-page');
-    expect(root.className).toBe('page-shell dashboard-container');
+    expect(root.className).toBe('page-shell dashboard-container dash-room');
 
     // the hero: greeting + library on the left, the orb stage on the right
     const hero = root.firstElementChild!;
@@ -49,11 +49,21 @@ describe('the page shell', () => {
       Array.from(root.querySelectorAll(`${sel} > [data-card]`)).map((card) =>
         card.getAttribute('data-card'),
       );
-    expect(cards('.dash-main')).toEqual(['active-downloads', 'listen']);
-    expect(cards('.dash-side')).toEqual(['sync', 'automations']);
-    // watchlist + wishlist are rail tiles, keeping the tour's ids
-    expect(root.querySelector('.dash-side #watchlist-button')).not.toBeNull();
-    expect(root.querySelector('.dash-side #wishlist-button')).not.toBeNull();
+    // what you came to play is the first thing under the hero
+    expect(cards('.room-top')).toEqual(['active-downloads', 'listen']);
+    // the system is a board, not a side column
+    expect(cards('.room-board')).toEqual(['sync', 'automations']);
+    expect(root.querySelector('.dash-side')).toBeNull();
+    expect(root.querySelector('.dash-layout')).toBeNull();
+    // the order down the page: hero, listening, the board, the shelves, the switches
+    expect(
+      Array.from(root.children)
+        .map((child) => child.className.split(' ')[0])
+        .filter((name) => name.startsWith('room-') || name === 'dash-footer'),
+    ).toEqual(['room-top', 'room-board', 'room-shelves', 'dash-footer']);
+    // watchlist + wishlist are tiles on the board, keeping the tour's ids
+    expect(root.querySelector('.room-board #watchlist-button')).not.toBeNull();
+    expect(root.querySelector('.room-board #wishlist-button')).not.toBeNull();
     // Boulder's quick switches: their own footer, not inside a card
     expect(root.querySelector('.dash-footer .dash-quick-settings')).not.toBeNull();
     expect(root.querySelector('[data-card="automations"] .dash-quick-settings')).toBeNull();
@@ -81,11 +91,11 @@ describe('the page shell', () => {
       view = render(<DashboardPage />);
     });
     delete window.SoulSyncFeatures;
-    const side = Array.from(view.container.querySelectorAll('.dash-side > [data-card]')).map(
+    const board = Array.from(view.container.querySelectorAll('.room-board > [data-card]')).map(
       (card) => card.getAttribute('data-card'),
     );
-    expect(side).toEqual([]);
+    expect(board).toEqual([]);
     // watchlist and wishlist are the core, they stay
-    expect(view.container.querySelector('.dash-side #watchlist-button')).not.toBeNull();
+    expect(view.container.querySelector('.room-board #watchlist-button')).not.toBeNull();
   });
 });

@@ -243,20 +243,46 @@ describe('the card with playlists', () => {
 
   it('the sort reorders the rows and is remembered', async () => {
     const view = await mount();
-    const select = view.container.querySelector<HTMLSelectElement>('.dash-side-sort select')!;
-    expect(select.value).toBe('missing');
+    // the four sorts are a row of pills, one pressed
+    const pressed = (v: ReturnType<typeof render>) =>
+      v.container.querySelector('.dash-sync-sort[aria-pressed="true"]')?.textContent;
+    const pill = (v: ReturnType<typeof render>, label: string) =>
+      Array.from(v.container.querySelectorAll<HTMLButtonElement>('.dash-sync-sort')).find(
+        (b) => b.textContent === label,
+      )!;
+    expect(
+      Array.from(view.container.querySelectorAll('.dash-sync-sort')).map((b) => b.textContent),
+    ).toEqual(['Most missing', 'Last synced', 'Next run', 'Name']);
+    expect(pressed(view)).toBe('Most missing');
 
-    fireEvent.change(select, { target: { value: 'recent' } });
+    fireEvent.click(pill(view, 'Last synced'));
     expect(names(view)).toEqual(['Zeta Mix', 'Alpha Mix']);
 
-    fireEvent.change(select, { target: { value: 'name' } });
+    fireEvent.click(pill(view, 'Name'));
     expect(names(view)).toEqual(['Alpha Mix', 'Zeta Mix']);
     cleanup();
 
     const again = await mount();
-    expect(again.container.querySelector<HTMLSelectElement>('.dash-side-sort select')!.value).toBe(
-      'name',
+    expect(pressed(again)).toBe('Name');
+  });
+
+  it('says how many of how many, and draws the share as a ring', async () => {
+    const view = await mount();
+    const ring = view.container.querySelector<HTMLElement>('.dash-sync-ring')!;
+    expect(ring.getAttribute('aria-valuenow')).toBe('70');
+    expect(ring.style.getPropertyValue('--pct')).toBe('70%');
+    expect(view.container.querySelector('.dash-sync-of')!.textContent).toBe(
+      '14 of 20playlist tracks are in your library, across 2 playlists',
     );
+  });
+
+  it('each row says what it needs under its name', async () => {
+    const view = await mount();
+    const subs = Array.from(view.container.querySelectorAll('.dash-sync-row')).map((row) => [
+      row.querySelector('.dash-sync-name')?.textContent,
+      row.querySelector('.dash-sync-sub')?.textContent,
+    ]);
+    expect(subs).toEqual([['Alpha Mix', '6 missing']]);
   });
 });
 

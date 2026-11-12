@@ -29,7 +29,7 @@ import type {
   AutomationProgressState,
 } from '../-dash.automations';
 
-import { automationCardRows } from '../-dash.automations';
+import { automationCardRows, upNextMarks } from '../-dash.automations';
 
 function useAutomationsCard(side: 'music' | 'video') {
   const [rows, setRows] = useState<AutomationApiRow[] | null>(null);
@@ -298,10 +298,19 @@ function openAutomations(side: 'music' | 'video') {
 export function AutomationsCard({
   compact = false,
   side = 'music',
-}: { compact?: boolean; side?: 'music' | 'video' } = {}) {
+  timeline = false,
+}: {
+  compact?: boolean;
+  side?: 'music' | 'video';
+  /** the music dashboard's Up next: a line of the next hour over the list,
+   *  and five rows where the narrow rail had room for three */
+  timeline?: boolean;
+} = {}) {
   const { loaded, view: allRows, busyId, runNow, toggle } = useAutomationsCard(side);
   const [showAll, setShowAll] = useState(false);
-  const view = compact && !showAll ? allRows.slice(0, 3) : allRows;
+  const shownCompact = timeline ? 5 : 3;
+  const view = compact && !showAll ? allRows.slice(0, shownCompact) : allRows;
+  const marks = timeline ? upNextMarks(allRows, Date.now()) : [];
 
   return (
     <article className={compact ? 'dash-card dash-side-card' : 'dash-card'} data-card="automations">
@@ -319,6 +328,23 @@ export function AutomationsCard({
         </button>
       </header>
       <div className="dash-card__body">
+        {timeline && loaded && allRows.length > 0 ? (
+          <div className="dash-autom-lane" aria-label="Automations due in the next hour">
+            {marks.map((mark) => (
+              <i
+                key={mark.id}
+                className={
+                  mark.running ? 'dash-autom-mark dash-autom-mark--live' : 'dash-autom-mark'
+                }
+                style={{ left: `${mark.at}%` }}
+                title={mark.name}
+              ></i>
+            ))}
+            <span className="dash-autom-tick dash-autom-tick--start">now</span>
+            <span className="dash-autom-tick dash-autom-tick--mid">30m</span>
+            <span className="dash-autom-tick dash-autom-tick--end">1h</span>
+          </div>
+        ) : null}
         <div className="dash-autom-rows">
           {!loaded ? null : view.length === 0 ? (
             <div className="autosync-empty">
@@ -441,7 +467,7 @@ export function AutomationsCard({
             ))
           )}
         </div>
-        {compact && allRows.length > 3 ? (
+        {compact && allRows.length > shownCompact ? (
           <button type="button" className="dash-side-more" onClick={() => setShowAll((v) => !v)}>
             {showAll ? 'Show less' : `See all ${allRows.length} automations`}
           </button>

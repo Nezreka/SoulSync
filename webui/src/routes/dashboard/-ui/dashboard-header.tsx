@@ -28,6 +28,7 @@ import type { HeaderPill, HeaderPillId } from '../-dash.header';
 import { useDashboardHeader } from '../-dash.header';
 import { countBusyWorkers, greetingForHour, heroNumbers } from '../-dash.hello';
 import { lastDbStats, subscribeDbStats } from '../-dash.library';
+import { loadTilePictures, type TilePicture, useHeroArt, useTilePictures } from '../-dash.room';
 
 interface OrbChrome {
   id: HeaderPillId;
@@ -637,6 +638,15 @@ function OrbStage({ header }: { header: DashboardHeaderState }) {
 
 type DashboardHeaderState = ReturnType<typeof useDashboardHeader>;
 
+/** The hero is lit by the last song played: its cover, blurred, behind the
+ *  greeting. Nothing until there is one, and the stylesheet drops it under
+ *  Reduce effects and Max performance. Decorative, so hidden from readers. */
+function HeroBackdrop() {
+  const art = useHeroArt();
+  if (!art) return null;
+  return <img className="room-backdrop" src={art} alt="" aria-hidden="true" />;
+}
+
 /** The hero. The page owns the header hook (its counts also feed the rail's
  * watchlist/wishlist tiles), so this is a view over that state. */
 export function DashboardHeaderView({
@@ -648,6 +658,7 @@ export function DashboardHeaderView({
 }) {
   return (
     <div className="dashboard-header dash-hero">
+      <HeroBackdrop />
       <div className="dashboard-header-sweep" aria-hidden="true">
         <span></span>
       </div>
@@ -663,6 +674,29 @@ export function DashboardHeader({ library }: { library?: ReactNode }) {
   return <DashboardHeaderView header={header} library={library} />;
 }
 
+/** A few of what a count tile counts: round faces for watched artists,
+ *  square sleeves for wished songs. Decorative: the count beside it is the
+ *  information. The slot stays when there are none, so the two tiles keep
+ *  the same height. */
+function TilePictures({ kind, pictures }: { kind: 'faces' | 'sleeves'; pictures: TilePicture[] }) {
+  return (
+    <span className={`room-tile-art room-tile-art--${kind}`} aria-hidden="true">
+      {pictures.map((picture, n) => (
+        <img
+          key={picture.image_url}
+          src={picture.image_url}
+          alt=""
+          loading="lazy"
+          style={{ '--n': n } as CSSProperties}
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
 /** Watchlist + wishlist, as two quiet count tiles in the rail. The ids,
  * handlers and badges are the old header quick-nav's (the tour anchors
  * #watchlist-button, the wishlist keeps init.js's in-flight fast path). */
@@ -675,6 +709,14 @@ export function QuickNavTiles({ header }: { header: DashboardHeaderState }) {
         ? 'header-button wishlist-button wishlist-inactive dash-tile'
         : 'header-button wishlist-button wishlist-active dash-tile';
 
+  const faces = useTilePictures('faces');
+  const sleeves = useTilePictures('sleeves');
+  // asked for on mount, and again when either count moves: a new watch or
+  // wish is a new picture
+  useEffect(() => {
+    void loadTilePictures();
+  }, [watchlist.count, wishlistCount]);
+
   return (
     <div className="header-quick-nav dash-tiles">
       <button
@@ -683,6 +725,7 @@ export function QuickNavTiles({ header }: { header: DashboardHeaderState }) {
         title={watchlist.title}
         onClick={() => void window.navigateToPage?.('watchlist')}
       >
+        <TilePictures kind="faces" pictures={faces} />
         <span
           className={watchlist.count > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'}
           id="watchlist-badge"
@@ -705,6 +748,7 @@ export function QuickNavTiles({ header }: { header: DashboardHeaderState }) {
           else void window.navigateToPage?.('wishlist');
         }}
       >
+        <TilePictures kind="sleeves" pictures={sleeves} />
         <span
           className={
             wishlistCount && wishlistCount > 0 ? 'hero-btn-badge has-items' : 'hero-btn-badge'

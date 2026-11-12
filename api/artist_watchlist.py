@@ -134,6 +134,25 @@ def get_watchlist_count():
         logger.error(f"Error getting watchlist count: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+@bp.route('/api/dashboard/tile-pictures', methods=['GET'])
+def get_dashboard_tile_pictures():
+    """A few of what the dashboard's two count tiles count: the newest watched
+    artists' pictures and the sleeves of the newest wishes. Its own request
+    because the counts mostly arrive over the socket. Read-only."""
+    try:
+        from core.dashboard_tiles import watched_faces, wished_sleeves
+        database = get_database()
+        profile_id = get_current_profile_id()
+        return jsonify({
+            "success": True,
+            "faces": watched_faces(database, profile_id),
+            "sleeves": wished_sleeves(database, profile_id),
+        })
+    except Exception as e:
+        logger.error(f"Error getting dashboard tile pictures: {e}")
+        return jsonify({"success": False, "faces": [], "sleeves": []}), 500
+
 @bp.route('/api/watchlist/recent-releases', methods=['GET'])
 def get_watchlist_recent_releases():
     """Newest releases across the whole watchlist, flat (the dashboard rail).

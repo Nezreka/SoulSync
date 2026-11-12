@@ -34,6 +34,39 @@ beforeEach(() => {
   window.navigateToPage = vi.fn();
 });
 
+describe('the week on the board', () => {
+  it('leads with the hours, across how many tracks', async () => {
+    serve(DIGEST);
+    const { container } = render(<WeeklyDigest />);
+    await waitFor(() => expect(banner()).toBeTruthy());
+    expect(container.querySelector('.wd-lead .wd-num')!.textContent).toBe('38h 24m');
+    expect(container.querySelector('.wd-lead .wd-label')!.textContent).toBe(
+      'listened across 214 tracks',
+    );
+    expect(
+      Array.from(container.querySelectorAll('.wd-chip')).map((chip) => chip.textContent),
+    ).toEqual(['Tame Impalatop artist', '9new discoveries', '12-daystreak']);
+  });
+
+  it("shows the top artist's picture when the library has one, and drops a broken one", async () => {
+    serve({ ...DIGEST, top_artist_image: '/api/library/v2/artwork/artist/7' });
+    const { container } = render(<WeeklyDigest />);
+    await waitFor(() => expect(banner()).toBeTruthy());
+    const picture = container.querySelector<HTMLImageElement>('.wd-chip--artist img')!;
+    expect(picture.getAttribute('src')).toBe('/api/library/v2/artwork/artist/7');
+    fireEvent.error(picture);
+    expect(container.querySelector('.wd-chip--artist img')).toBeNull();
+    expect(container.querySelector('.wd-chip--artist')!.textContent).toContain('Tame Impala');
+  });
+
+  it('has no picture slot when the payload names none', async () => {
+    serve(DIGEST);
+    const { container } = render(<WeeklyDigest />);
+    await waitFor(() => expect(banner()).toBeTruthy());
+    expect(container.querySelector('.wd-chip--artist img')).toBeNull();
+  });
+});
+
 describe('the weekly digest banner', () => {
   it('renders the stats and the 7-day chart when plays exist', async () => {
     serve(DIGEST);

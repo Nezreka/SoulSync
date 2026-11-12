@@ -839,6 +839,21 @@ def _listening_streak(cursor, scope: str, today: date) -> int:
         window *= 4
 
 
+def _library_artist_picture(cursor, name) -> Optional[str]:
+    """SoulSync's own artwork route for the library artist of that name, or
+    None. The route serves the cached picture, so nothing here is fetched."""
+    if not name:
+        return None
+    try:
+        cursor.execute(
+            "SELECT id FROM lib2_artists WHERE name = ? COLLATE NOCASE "
+            "AND COALESCE(image_url, '') <> '' LIMIT 1", (str(name),))
+        row = cursor.fetchone()
+    except Exception:  # noqa: BLE001 - no catalogue yet
+        return None
+    return f"/api/library/v2/artwork/artist/{int(row[0])}" if row else None
+
+
 def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
     """This-week listening digest for the dashboard banner.
 
@@ -912,6 +927,8 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
 
         today = date.today()
         streak = _listening_streak(cursor, scope, today)
+        # while the connection is open: asked after the close it found nothing
+        top_artist_image = _library_artist_picture(cursor, top_row[0] if top_row else None)
     finally:
         conn.close()
 
@@ -929,6 +946,8 @@ def get_weekly_digest(database, profile_id: Optional[int] = None) -> dict:
         'tracks_played': total_row[0] or 0,
         'time_ms': total_row[1] or 0,
         'top_artist': top_row[0] if top_row else None,
+        # the library's own picture of that artist, when it holds one
+        'top_artist_image': top_artist_image,
         'discoveries': discoveries,
         'streak_days': streak,
         'start_date': (today - timedelta(days=6)).isoformat(),

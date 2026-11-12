@@ -261,3 +261,30 @@ def test_no_digest_query_scans_listening_history(db, monkeypatch):
     for sql, plan in plans:
         assert not any(step.startswith('SCAN lh') or step.startswith('SCAN o') for step in plan), (sql, plan)
         assert not any(step == 'SCAN listening_history' for step in plan), (sql, plan)
+
+
+# --- the dashboard shows the top artist's picture ---------------------------
+
+
+def test_the_top_artist_comes_with_the_librarys_picture_of_them(db):
+    """looked up while the connection is still open: asked after the close
+    it silently found nothing, and the dashboard chip stayed bare"""
+    _seed_play(db, "Song", "WHO SHOT SCOTT", _at(1))
+    with db._get_connection() as conn:
+        artist_id = conn.execute(
+            "INSERT INTO lib2_artists(name, image_url) VALUES('Who Shot Scott', '/library/metadata/1/thumb')"
+        ).lastrowid
+        conn.commit()
+    out = queries.get_weekly_digest(db, profile_id=1)
+    assert out["top_artist"] == "WHO SHOT SCOTT"
+    assert out["top_artist_image"] == f"/api/library/v2/artwork/artist/{artist_id}"
+
+
+def test_no_picture_when_the_library_has_none_for_the_top_artist(db):
+    _seed_play(db, "Song", "Nobody Known", _at(1))
+    assert queries.get_weekly_digest(db, profile_id=1)["top_artist_image"] is None
+    # in the library, but with no picture of its own
+    with db._get_connection() as conn:
+        conn.execute("INSERT INTO lib2_artists(name) VALUES('Nobody Known')")
+        conn.commit()
+    assert queries.get_weekly_digest(db, profile_id=1)["top_artist_image"] is None

@@ -106,10 +106,53 @@ export interface AutomationCardRow {
   trigger: string;
   enabled: boolean;
   nextRun: string | null;
+  /** next_run as epoch ms, for the dashboard's timeline; null when it has none */
+  nextRunAt: number | null;
   lastRun: { ago: string; ok: boolean; error: string | null } | null;
   /** Live state from /api/automations/progress while a run is in flight. */
   running: { phase: string; progress: number } | null;
   runCount: number;
+}
+
+/** How far ahead the dashboard's Up next line looks. */
+export const UP_NEXT_WINDOW_MS = 60 * 60 * 1000;
+
+export interface UpNextMark {
+  id: number | string;
+  name: string;
+  /** 0-100 along the line */
+  at: number;
+  running: boolean;
+}
+
+/**
+ * The marks on the Up next line: one per automation running now or due
+ * inside the window, placed by how soon it runs. A run already under way
+ * sits at the start. Anything further out is not on the line, it is in the
+ * list under it.
+ */
+export function upNextMarks(
+  rows: readonly AutomationCardRow[],
+  nowMs: number,
+  windowMs: number = UP_NEXT_WINDOW_MS,
+): UpNextMark[] {
+  const marks: UpNextMark[] = [];
+  for (const row of rows) {
+    if (row.running) {
+      marks.push({ id: row.id, name: row.name, at: 0, running: true });
+      continue;
+    }
+    if (!row.enabled || row.nextRunAt === null) continue;
+    const ahead = row.nextRunAt - nowMs;
+    if (ahead > windowMs) continue;
+    marks.push({
+      id: row.id,
+      name: row.name,
+      at: Math.round((Math.max(0, ahead) / windowMs) * 1000) / 10,
+      running: false,
+    });
+  }
+  return marks;
 }
 
 export function automationCardRows(
@@ -144,6 +187,10 @@ export function automationCardRows(
             }
           : null,
       nextRun: enabled ? nextRunText(row.next_run, nowMs) : null,
+      nextRunAt:
+        enabled && row.next_run && Number.isFinite(parseDbUtc(String(row.next_run)))
+          ? parseDbUtc(String(row.next_run))
+          : null,
       lastRun: row.last_run
         ? {
             ago: relativeTime(

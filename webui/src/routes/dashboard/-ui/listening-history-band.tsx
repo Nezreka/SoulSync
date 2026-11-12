@@ -24,7 +24,7 @@
  * as siblings and it costs zero new card CSS.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import type { RecentPlay, RecentPlayRow } from '../-dash.listening';
 
@@ -32,6 +32,7 @@ import { addRecentPlayToPlaylist, queueRecentPlay } from '../-dash.card-actions'
 import { openArtistFromRail } from '../-dash.content';
 import { playsCaption, toRecentPlays } from '../-dash.listening';
 import { useLiveRefresh } from '../-dash.live-refresh';
+import { publishHeroArt } from '../-dash.room';
 import { playTrackByMetadata } from '../../../features/playback/play-track';
 import { getShellBridge } from '../../../platform/shell/bridge';
 import { RailCardActions } from './rail-card-actions';
@@ -62,6 +63,11 @@ export function ListeningHistoryBand() {
   // tab comes back — the missing half is why this read as "only updates if I
   // refresh the page".
   useLiveRefresh(load, { intervalMs: REFRESH_MS });
+
+  // the hero is lit by the newest cover here
+  useEffect(() => {
+    publishHeroArt(plays.find((play) => play.imageUrl)?.imageUrl ?? null);
+  }, [plays]);
 
   if (!plays.length) return null;
 
