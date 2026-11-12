@@ -5154,6 +5154,10 @@ body[data-side="video"] #gsearch-aura {
     color: rgb(var(--accent-rgb));
 }
 .vrf-chip--got { background: rgba(80,200,120,0.14); border-color: rgba(80,200,120,0.4); color: #6fdb96; }
+/* Shelf Life signal pills: red argues for cutting, green for keeping */
+.vrf-chip--sl-low { background: rgba(var(--danger-soft-rgb), 0.14); border-color: rgba(var(--danger-soft-rgb), 0.45); color: var(--danger-soft); }
+.vrf-chip--sl-mid { background: rgba(var(--gold-rgb), 0.14); border-color: rgba(var(--gold-rgb), 0.45); color: var(--gold); }
+.vrf-chip--sl-high { background: rgba(var(--success-rgb), 0.14); border-color: rgba(var(--success-rgb), 0.4); color: var(--success); }
 .vrf-show-overview {
     font-size: 12.5px; color: var(--white-a60); line-height: 1.55; margin: 8px 0 0;
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;

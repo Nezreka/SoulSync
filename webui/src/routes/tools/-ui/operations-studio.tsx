@@ -226,12 +226,13 @@ export const VIDEO_PILLARS: readonly StrategicPillar[] = [
     glow: '56, 189, 248',
     tagline: 'Broken files, extra copies, names and disk you could reclaim',
     description:
-      'Finds truncated or stub files, titles you own twice, file names that drift from your templates, watched movies taking up disk, and YouTube downloads whose file is gone.',
+      'Finds truncated or stub files, titles you own twice, file names that drift from your templates, watched movies taking up disk, the titles that have earned their space least, and YouTube downloads whose file is gone.',
     jobIds: [
       'broken_files',
       'duplicate_movies',
       'naming_conformance',
       'watched_cleanup',
+      'shelf_life',
       'youtube_ghosts',
     ],
     findingTypes: [
@@ -240,6 +241,7 @@ export const VIDEO_PILLARS: readonly StrategicPillar[] = [
       'duplicate_episode',
       'naming_mismatch',
       'watched_cleanup',
+      'shelf_life',
       'youtube_ghost',
       'youtube_mass_missing',
     ],

@@ -75,4 +75,34 @@ describe('finding prompts', () => {
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => expect(screen.getByTestId('result').textContent).toBe('false'));
   });
+
+  const typed = {
+    title: 'Delete Heat?',
+    message: 'The whole title is deleted.',
+    phrase: 'Heat',
+    confirmText: 'Delete Title',
+  };
+
+  it('type-to-confirm stays locked until the phrase is typed, then returns it', async () => {
+    render(<Harness open={(p) => p.promptTypeToConfirm(typed)} />);
+    fireEvent.click(screen.getByText('open'));
+    const input = document.getElementById('type-to-confirm-input') as HTMLInputElement;
+    const confirm = document.getElementById('type-to-confirm-confirm') as HTMLButtonElement;
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    expect(confirm.disabled).toBe(true);
+
+    fireEvent.change(input, { target: { value: 'heat' } }); // case matters, like Delete Title
+    expect(confirm.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: 'Heat ' } });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    await waitFor(() => expect(screen.getByTestId('result').textContent).toBe('Heat '));
+  });
+
+  it('type-to-confirm cancels to null', async () => {
+    render(<Harness open={(p) => p.promptTypeToConfirm(typed)} />);
+    fireEvent.click(screen.getByText('open'));
+    fireEvent.click(document.getElementById('type-to-confirm-cancel') as HTMLElement);
+    await waitFor(() => expect(screen.getByTestId('result').textContent).toBe('null'));
+  });
 });

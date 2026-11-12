@@ -67,3 +67,14 @@ def profile_names() -> Tuple[dict, Optional[str]]:
              for p in profiles if p.get("id") is not None}
     admins = sorted(int(p["id"]) for p in profiles if p.get("id") is not None and p.get("is_admin"))
     return names, (names.get(admins[0]) if admins else None)
+
+
+def admin_profile_ids() -> List[int]:
+    """ids of the admin profiles -- whose watching the server account's own
+    columns hold. empty when the profiles can't be read."""
+    try:
+        profiles = _db().get_all_profiles() or []
+    except Exception:   # noqa: BLE001
+        logger.debug("listing profiles failed", exc_info=True)
+        return []
+    return sorted(int(p["id"]) for p in profiles if p.get("id") is not None and p.get("is_admin"))

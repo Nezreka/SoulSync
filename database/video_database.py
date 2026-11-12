@@ -9390,6 +9390,242 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── Shelf Life (core/video/shelf_life.py, repair/shelf_life.py) ──────────
+    _SL_RATING_COLS = ("rating", "imdb_rating", "rt_rating", "metacritic", "anilist_score",
+                       "trakt_votes", "awards", "streaming_status", "streaming_count")
+
+    def shelf_life_movies(self, trust_after_days: int = 90) -> list:
+        """every owned movie with what Shelf Life scores it on: ratings,
+        streaming, runtime, when it came into the library, the owner's watch
+        state and the size of all its files.
+
+        the server's add date (Plex addedAt / Jellyfin DateCreated) often comes
+        from the file, and an *arr that stamps files with the release date makes
+        it the release date. so it only counts when it falls trust_after_days or
+        more after the release; otherwise it's the day SoulSync first saw the
+        movie (``added_from`` says which), so a title's time unwatched is never
+        overstated."""
+        cols = ", ".join("m." + c for c in self._SL_RATING_COLS)
+        trusted = ("(m.server_added_at IS NOT NULL AND m.release_date IS NOT NULL "
+                   "AND julianday(m.server_added_at) - julianday(m.release_date) >= ?)")
+        days = int(trust_after_days)
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT m.id, m.tmdb_id, m.title, m.year, "
+                f"CASE WHEN {trusted} THEN m.server_added_at ELSE m.added_at END AS added_at, "
+                f"CASE WHEN {trusted} THEN 'server' ELSE 'first_seen' END AS added_from, "
+                "m.runtime_minutes, "
+                "m.play_count, m.last_viewed_at, m.view_offset_ms, " + cols + ", "
+                "(SELECT COALESCE(SUM(f.size_bytes), 0) FROM media_files f WHERE f.movie_id = m.id) "
+                "AS size_bytes "
+                "FROM movies m WHERE m.has_file = 1", (days, days))]
+        finally:
+            conn.close()
+
+    def shelf_life_shows(self, trust_after_days: int = 90) -> list:
+        """every show with at least one owned episode, with ratings, streaming,
+        airing status, the owned episodes' size and runtime (an episode with no
+        runtime borrows the show's), and the owner's watch state over those
+        episodes: how many watched, plays, last watch, and the last watch of an
+        episode left part-way.
+
+        it came into the library with its earliest episode whose server add
+        date falls trust_after_days or more after that episode aired (an earlier
+        one may be the air date stamped on the file); with none, the day
+        SoulSync first saw the show (``added_from`` says which)."""
+        cols = ", ".join("s." + c for c in self._SL_RATING_COLS)
+        trusted = ("MIN(CASE WHEN e.added_at IS NOT NULL AND e.air_date IS NOT NULL "
+                   "AND julianday(e.added_at) - julianday(e.air_date) >= ? THEN e.added_at END)")
+        days = int(trust_after_days)
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT s.id, s.tmdb_id, s.title, s.year, s.status, s.series_type, "
+                f"COALESCE({trusted}, s.added_at) AS added_at, "
+                f"CASE WHEN {trusted} IS NULL THEN 'first_seen' ELSE 'server' END AS added_from, "
+                + cols + ", "
+                "COUNT(e.id) AS owned_episodes, "
+                "SUM(CASE WHEN COALESCE(e.play_count, 0) > 0 THEN 1 ELSE 0 END) AS watched_episodes, "
+                "COALESCE(SUM(e.play_count), 0) AS plays, "
+                "MAX(e.last_viewed_at) AS last_viewed_at, "
+                "MAX(CASE WHEN COALESCE(e.view_offset_ms, 0) > 0 THEN e.last_viewed_at END) "
+                "AS in_progress_at, "
+                "SUM(COALESCE(e.runtime_minutes, s.runtime_minutes)) AS runtime_minutes, "
+                "(SELECT COALESCE(SUM(f.size_bytes), 0) FROM media_files f "
+                " JOIN episodes e2 ON e2.id = f.episode_id WHERE e2.show_id = s.id) AS size_bytes "
+                "FROM shows s JOIN episodes e ON e.show_id = s.id AND e.has_file = 1 "
+                "GROUP BY s.id", (days, days))]
+        finally:
+            conn.close()
+
+    def shelf_life_show_watch_by_profile(self) -> dict:
+        """{show_id: {profile_id: {watched_episodes, plays, last_viewed_at,
+        in_progress_at}}} from each profile's own watch state, over owned
+        episodes only -- the show-side twin of repair_movie_watch_by_profile."""
+        conn = self._get_connection()
+        try:
+            out: dict = {}
+            for r in conn.execute(
+                    "SELECT e.show_id, w.profile_id, "
+                    "SUM(CASE WHEN w.play_count > 0 THEN 1 ELSE 0 END) AS watched_episodes, "
+                    "SUM(w.play_count) AS plays, MAX(w.last_viewed_at) AS last_viewed_at, "
+                    "MAX(CASE WHEN w.view_offset_ms > 0 THEN w.last_viewed_at END) AS in_progress_at "
+                    "FROM video_watch_state w JOIN episodes e ON e.id = w.item_id AND e.has_file = 1 "
+                    "WHERE w.kind = 'episode' GROUP BY e.show_id, w.profile_id"):
+                out.setdefault(r["show_id"], {})[r["profile_id"]] = {
+                    "watched_episodes": r["watched_episodes"] or 0, "plays": r["plays"] or 0,
+                    "last_viewed_at": r["last_viewed_at"], "in_progress_at": r["in_progress_at"]}
+            return out
+        finally:
+            conn.close()
+
+    def shelf_life_requests(self) -> dict:
+        """{(kind, tmdb_id): {profile_id, available_at}} -- the latest APPROVED
+        movie or show request per title."""
+        conn = self._get_connection()
+        try:
+            out: dict = {}
+            for r in conn.execute(
+                    "SELECT kind, tmdb_id, profile_id, available_at FROM video_requests "
+                    "WHERE status = 'approved' AND kind IN ('movie', 'show') AND tmdb_id > 0 "
+                    "ORDER BY COALESCE(resolved_at, created_at), id"):
+                out[(r["kind"], int(r["tmdb_id"]))] = {"profile_id": r["profile_id"],
+                                                        "available_at": r["available_at"]}
+            return out
+        finally:
+            conn.close()
+
+    def shelf_life_failed_grabs(self) -> dict:
+        """{(kind, media_source, media_id): count} of grabs that failed or failed
+        to import, from the download history. media_source is 'tmdb' (grabbed
+        from the TMDB page) or 'library' (NULL on older rows counts as library)."""
+        conn = self._get_connection()
+        try:
+            return {(r["kind"], r["src"], str(r["media_id"])): int(r["n"]) for r in conn.execute(
+                "SELECT kind, COALESCE(media_source, 'library') AS src, media_id, COUNT(*) AS n "
+                "FROM video_download_history WHERE outcome IN ('failed', 'import_failed') "
+                "AND media_id IS NOT NULL AND kind IN ('movie', 'show') "
+                "GROUP BY kind, src, media_id")}
+        finally:
+            conn.close()
+
+    def shelf_life_grab_history_ids(self) -> set:
+        """{(kind, media_source, media_id)} of every title with ANY grab in the
+        history -- a title never grabbed here has no grab data at all, which is
+        not the same as grabbing it first time."""
+        conn = self._get_connection()
+        try:
+            return {(r["kind"], r["src"], str(r["media_id"])) for r in conn.execute(
+                "SELECT DISTINCT kind, COALESCE(media_source, 'library') AS src, media_id "
+                "FROM video_download_history WHERE media_id IS NOT NULL AND kind IN ('movie', 'show')")}
+        finally:
+            conn.close()
+
+    def shelf_life_followed_airing(self, profile_ids) -> set:
+        """tmdb ids of shows still airing that someone follows: an explicit
+        follow, or the default follow an airing library show has for every
+        profile that hasn't muted it (the watchlist's own rule)."""
+        pids = sorted({int(p) for p in (profile_ids or [])}) or [1]
+        conn = self._get_connection()
+        try:
+            out = set()
+            for r in conn.execute(
+                    "SELECT s.tmdb_id, "
+                    "(SELECT COUNT(*) FROM video_watchlist w WHERE w.kind = 'show' "
+                    " AND w.tmdb_id = s.tmdb_id AND w.state = 'follow') AS follows, "
+                    "(SELECT COUNT(DISTINCT w.profile_id) FROM video_watchlist w WHERE w.kind = 'show' "
+                    " AND w.tmdb_id = s.tmdb_id AND w.state = 'mute' AND w.profile_id IN ("
+                    + ",".join("?" * len(pids)) + ")) AS mutes "
+                    "FROM shows s WHERE s.tmdb_id IS NOT NULL AND " + self._ACTIVE_SHOW_SQL.replace(
+                        "status", "s.status"), pids):
+                if r["follows"] or r["mutes"] < len(pids):
+                    out.add(int(r["tmdb_id"]))
+            return out
+        finally:
+            conn.close()
+
+    def shelf_life_pending_entities(self, finding_type: str) -> set:
+        """entity ids of PENDING findings of one type (e.g. 'm:12' for
+        watched_cleanup), so two jobs never flag the same title."""
+        conn = self._get_connection()
+        try:
+            return {r["entity_id"] for r in conn.execute(
+                "SELECT entity_id FROM video_repair_findings WHERE finding_type = ? "
+                "AND status = 'pending' AND entity_id IS NOT NULL", (finding_type,))}
+        finally:
+            conn.close()
+
+    def shelf_life_keeps(self) -> set:
+        """{(kind, tmdb_id)} an admin marked Keep."""
+        conn = self._get_connection()
+        try:
+            return {(r["kind"], int(r["tmdb_id"])) for r in conn.execute(
+                "SELECT kind, tmdb_id FROM video_shelf_life_keep")}
+        finally:
+            conn.close()
+
+    def shelf_life_set_keep(self, kind: str, tmdb_id, keep: bool, set_by=None) -> bool:
+        """mark (or unmark) a title Keep. False for a bad kind or no tmdb id."""
+        if kind not in ("movie", "show") or not tmdb_id:
+            return False
+        conn = self._get_connection()
+        try:
+            if keep:
+                conn.execute("INSERT INTO video_shelf_life_keep (kind, tmdb_id, set_by) VALUES (?, ?, ?) "
+                             "ON CONFLICT(kind, tmdb_id) DO UPDATE SET set_by = excluded.set_by, "
+                             "set_at = datetime('now')", (kind, int(tmdb_id), set_by))
+            else:
+                conn.execute("DELETE FROM video_shelf_life_keep WHERE kind = ? AND tmdb_id = ?",
+                             (kind, int(tmdb_id)))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def shelf_life_save(self, kind: str, results: list) -> int:
+        """replace a kind's stored scores with this run's: each result is
+        {item_id, score, gate, signals, reasons, size_bytes}. a title the run
+        didn't score (gone from the library) drops out. returns rows written."""
+        if kind not in ("movie", "show"):
+            return 0
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM video_shelf_life WHERE kind = ?", (kind,))
+            conn.executemany(
+                "INSERT INTO video_shelf_life (kind, item_id, score, gate, signals_json, reasons_json, "
+                "size_bytes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(kind, int(r["item_id"]), r.get("score"), r.get("gate"),
+                  json.dumps(r.get("signals") or {}), json.dumps(r.get("reasons") or []),
+                  r.get("size_bytes")) for r in results])
+            conn.commit()
+            return len(results)
+        finally:
+            conn.close()
+
+    def shelf_life_get(self, kind: str, item_ids) -> dict:
+        """{item_id: {score, gate, signals, reasons, size_bytes, scored_at}} for
+        the ids given; a title never scored is simply absent."""
+        ids = [int(i) for i in (item_ids or [])]
+        if kind not in ("movie", "show") or not ids:
+            return {}
+        conn = self._get_connection()
+        try:
+            out = {}
+            for i in range(0, len(ids), 500):
+                chunk = ids[i:i + 500]
+                for r in conn.execute(
+                        "SELECT item_id, score, gate, signals_json, reasons_json, size_bytes, scored_at "
+                        "FROM video_shelf_life WHERE kind = ? AND item_id IN (" + ",".join("?" * len(chunk)) + ")",
+                        [kind] + chunk):
+                    out[r["item_id"]] = {"score": r["score"], "gate": r["gate"],
+                                         "signals": json.loads(r["signals_json"] or "{}"),
+                                         "reasons": json.loads(r["reasons_json"] or "[]"),
+                                         "size_bytes": r["size_bytes"], "scored_at": r["scored_at"]}
+            return out
+        finally:
+            conn.close()
+
     def repair_mark_movie_fileless(self, movie_id) -> None:
         """After a cleanup fix recycled the movie's file: reflect reality now
         (has_file=0, file rows gone) instead of waiting for the weekly deep

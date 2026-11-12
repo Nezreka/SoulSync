@@ -84,6 +84,14 @@ const VTYPES: FindingTypeInfo[] = [
     confirm: 'Each file is renamed to its template name.',
   },
   {
+    type: 'shelf_life',
+    label: 'Shelf Life',
+    verb: 'Delete Title',
+    fixable: true,
+    destructive: true,
+    confirm: 'Delete Title runs on it.',
+  },
+  {
     type: 'youtube_ghost',
     label: 'YouTube Ghosts',
     verb: 'Mark Deleted',
@@ -326,6 +334,42 @@ describe('video findings', () => {
     expect(urls().some((url) => url.includes('/fix'))).toBe(false);
   });
 
+  const shelf = () =>
+    vfinding({
+      finding_type: 'shelf_life',
+      job_id: 'shelf_life',
+      title: 'Heat (1995): Shelf Life 21, 60.0 GB',
+      details: { kind: 'movie', item_id: 12, title: 'Heat', year: 1995, score: 21 },
+    });
+
+  it('a shelf life delete asks for the title typed, not a plain confirm', async () => {
+    renderVideoSurface([shelf()]);
+    await showList();
+    fireEvent.click(screen.getByText('Delete Title'));
+    await flush();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    const input = document.getElementById('type-to-confirm-input') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(urls().some((url) => url.includes('/fix'))).toBe(false);
+    fireEvent.change(input, { target: { value: 'Heat' } });
+    fireEvent.click(document.getElementById('type-to-confirm-confirm') as HTMLElement);
+    await flush();
+    const call = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes('/api/video/repair/findings/7/fix'),
+    );
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ fix_action: 'Heat' });
+  });
+
+  it('cancelling the typed title sends nothing', async () => {
+    renderVideoSurface([shelf()]);
+    await showList();
+    fireEvent.click(screen.getByText('Delete Title'));
+    await flush();
+    fireEvent.click(document.getElementById('type-to-confirm-cancel') as HTMLElement);
+    await flush();
+    expect(urls().some((url) => url.includes('/fix'))).toBe(false);
+  });
+
   it('a metadata-only video fix just goes', async () => {
     renderVideoSurface([
       vfinding({ id: 9, finding_type: 'stale_wishlist', job_id: 'wishlist_audit' }),
@@ -390,6 +434,42 @@ describe('video finding detail', () => {
     expect(screen.getByText('now: 720p')).not.toBeNull();
     expect(screen.getByText('cutoff: 1080p')).not.toBeNull();
     // no live fetch for an episode-only finding
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a shelf life finding shows its score, its reasons and every signal', () => {
+    render(
+      <VideoFindingDetail
+        finding={vfinding({
+          finding_type: 'shelf_life',
+          job_id: 'shelf_life',
+          details: {
+            kind: 'show',
+            item_id: 5,
+            title: 'Cops',
+            year: 1989,
+            score: 18,
+            size_bytes: 300 * 1024 ** 3,
+            reasons: [
+              { signal: 'watch', text: 'never watched in 900 days' },
+              { signal: 'size', text: 'no size or runtime data' },
+            ],
+            signals: { watch: 3.2, replaceability: 88, cultural: 51, size: null, requests: 66.6 },
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText('Shelf Life 18')).not.toBeNull();
+    expect(screen.getByText('never watched in 900 days')).not.toBeNull();
+    expect(screen.getByText('Watching: 3')).not.toBeNull();
+    expect(screen.getByText('Size for its runtime: no data')).not.toBeNull();
+    // coloured the way the score reads: red argues for cutting, green for keeping
+    expect(screen.getByText('Watching: 3').className).toContain('vrf-chip--sl-low');
+    expect(screen.getByText('Cultural value: 51').className).toContain('vrf-chip--sl-mid');
+    expect(screen.getByText('Hard to replace: 88').className).toContain('vrf-chip--sl-high');
+    expect(screen.getByText('Requests: 67').className).toContain('vrf-chip--sl-high');
+    expect(screen.getByText('Size for its runtime: no data').className).toBe('vrf-chip');
+    expect(screen.getByText('View show →')).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
