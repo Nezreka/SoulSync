@@ -1559,3 +1559,59 @@ def test_person_lookback_get_set(db):
     # not-followed person → None / False
     assert db.get_person_lookback(999999) is None
     assert db.set_person_lookback(999999, 3) is False
+
+
+# --- a file that is not a database must not stop the app ---------------------
+
+def test_an_unreadable_video_database_is_set_aside_and_a_new_one_started(tmp_path):
+    # a restart after a crash left /config/video_library.db unreadable and the
+    # whole app sat on "Preparing your library", for a library with no videos
+    path = tmp_path / "video_library.db"
+    path.write_bytes(b"this is not sqlite" * 200)
+    Path(str(path) + "-wal").write_bytes(b"stale wal")
+
+    db = VideoDatabase(str(path))
+
+    with db.connect() as conn:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "movies" in tables
+    # nothing was deleted: the unreadable file and its wal are kept, renamed
+    # and its stale wal is not left where the new database would replay it
+    left = Path(str(path) + "-wal")
+    assert not left.exists() or left.read_bytes() != b"stale wal"
+    kept = next(p for p in tmp_path.iterdir()
+                if ".unreadable-" in p.name and not p.name.endswith(("-wal", "-shm")))
+    assert kept.read_bytes().startswith(b"this is not sqlite")
+
+
+def test_a_healthy_video_database_is_never_set_aside(tmp_path):
+    path = tmp_path / "video_library.db"
+    first = VideoDatabase(str(path))
+    with first.connect() as conn:
+        conn.execute("INSERT INTO video_settings(key, value) VALUES('k', 'v')")
+        conn.commit()
+    from database import video_database as module
+    module._initialized_paths.clear()
+
+    again = VideoDatabase(str(path))
+
+    assert [p.name for p in tmp_path.iterdir() if ".unreadable-" in p.name] == []
+    with again.connect() as conn:
+        assert conn.execute("SELECT value FROM video_settings WHERE key='k'").fetchone()[0] == 'v'
+
+
+def test_a_locked_video_database_is_an_error_not_a_reset(tmp_path, monkeypatch):
+    # only "this is not a database" starts a new one. anything else (locked,
+    # no permission, disk full) must stay an error and leave the file alone
+    path = tmp_path / "video_library.db"
+    VideoDatabase(str(path))
+    from database import video_database as module
+    module._initialized_paths.clear()
+
+    def locked(self):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(VideoDatabase, "_get_connection", locked)
+
+    with pytest.raises(sqlite3.OperationalError):
+        VideoDatabase(str(path))
+    assert [p.name for p in tmp_path.iterdir() if ".unreadable-" in p.name] == []

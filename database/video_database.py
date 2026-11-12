@@ -757,10 +757,17 @@ class VideoDatabase:
     def _get_connection(self) -> sqlite3.Connection:
         """A fresh connection with the standard pragmas applied."""
         conn = sqlite3.connect(str(self.database_path), timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA busy_timeout = 30000")  # 30s
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 30000")  # 30s
+        except Exception:
+            # a file sqlite cannot read fails here, on the first pragma. the
+            # handle must not outlive the error: Windows will not rename a
+            # file something still holds open
+            conn.close()
+            raise
         return conn
 
     def connect(self) -> sqlite3.Connection:
@@ -770,6 +777,40 @@ class VideoDatabase:
         close happen automatically.
         """
         return self._get_connection()
+
+    def _open_or_set_aside(self) -> sqlite3.Connection:
+        """The first connection of a start. A file that is not a database is
+        moved aside and a new one is started in its place.
+
+        The video database opens while the server module loads, so a file
+        sqlite cannot read stopped the whole app on "Preparing your library",
+        music included, for someone who had never added a video. Nothing is
+        deleted: the unreadable file keeps its bytes under a new name, with
+        its -wal and -shm, and the log says where.
+        """
+        conn = None
+        try:
+            conn = self._get_connection()
+            conn.execute("PRAGMA schema_version").fetchone()
+            return conn
+        except sqlite3.DatabaseError as error:
+            message = str(error).lower()
+            if "not a database" not in message and "malformed" not in message:
+                raise
+            if conn is not None:
+                conn.close()
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            aside = self.database_path.with_name(f"{self.database_path.name}.unreadable-{stamp}")
+            for suffix in ("", "-wal", "-shm"):
+                source = Path(str(self.database_path) + suffix)
+                if source.exists():
+                    source.rename(Path(str(aside) + suffix))
+            logger.error(
+                "The video database at %s could not be read (%s). It was moved to %s and a new, "
+                "empty one was started so SoulSync can run. Music is not affected. To get the "
+                "video library back, restore a backup in Settings or put a good copy at the "
+                "original path and restart.", self.database_path, error, aside)
+            return self._get_connection()
 
     # ── init ────────────────────────────────────────────────────────────────
     def _initialize_once(self) -> None:
@@ -790,7 +831,7 @@ class VideoDatabase:
         except Exception:   # noqa: BLE001 - a restore hiccup must never block startup
             logger.exception("staged video restore failed; continuing with the current DB")
         schema = _SCHEMA_FILE.read_text(encoding="utf-8")
-        conn = self._get_connection()
+        conn = self._open_or_set_aside()
         try:
             prev_version = int(conn.execute("PRAGMA user_version").fetchone()[0])
             conn.executescript(schema)
