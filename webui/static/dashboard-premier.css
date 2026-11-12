@@ -1472,16 +1472,25 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 }
 
 /* ── the hero ── */
+/* No frame. The greeting sits on the page and the orbs have the right half
+   to themselves: a card around the two left the space between them reading
+   as an empty box. The stage is wide on purpose, worker-orbs.js stretches
+   the orbit to fill a wide stage. */
 #dashboard-page.dash-room .dashboard-header.dash-hero {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
-    gap: 28px;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 24px;
+    align-items: center;
     margin: 0;
-    padding: 26px 38px;
-    border: 1px solid var(--white-a08);
-    border-radius: 28px;
-    background:
-        radial-gradient(90% 130% at 100% 0%, rgba(var(--accent-rgb), 0.16), transparent 60%),
-        var(--white-a02);
+    padding: 10px 6px 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+}
+/* the old card's accent lines along its bottom edge */
+#dashboard-page.dash-room .dashboard-header.dash-hero .dashboard-header-sweep,
+#dashboard-page.dash-room .dashboard-header.dash-hero::after {
+    display: none;
 }
 /* The last cover you played, behind the greeting. It clips itself to the
    hero's corners, so the blur cannot spill and the hero stays overflow
@@ -1496,9 +1505,11 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     pointer-events: none;
     filter: blur(52px) saturate(1.5);
     opacity: 0.5;
-    clip-path: inset(0 round 28px);
-    -webkit-mask-image: linear-gradient(100deg, transparent 0%, var(--black-a40) 45%, var(--black-a90) 100%);
-    mask-image: linear-gradient(100deg, transparent 0%, var(--black-a40) 45%, var(--black-a90) 100%);
+    /* a pool of colour behind the orbs that is gone well before the edges
+       (a blurred image still ends in a hard line where its box does), so the
+       cover lights the right of the page without drawing a box round it */
+    -webkit-mask-image: radial-gradient(closest-side at 72% 50%, var(--black-a90) 0%, var(--black-a40) 45%, transparent 82%);
+    mask-image: radial-gradient(closest-side at 72% 50%, var(--black-a90) 0%, var(--black-a40) 45%, transparent 82%);
     animation: room-drift 40s ease-in-out infinite alternate;
 }
 @keyframes room-drift {
@@ -1514,8 +1525,16 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     gap: 8px clamp(18px, 2.4vw, 34px);
 }
 #dashboard-page.dash-room .orb-stage {
-    min-height: 220px;
+    min-height: 240px;
     padding: 18px 12px 34px;
+    /* the orbs' own light, for when no cover has been played yet */
+    background: radial-gradient(closest-side at 50% 46%, rgba(var(--accent-rgb), 0.14), transparent 100%);
+}
+/* "2 workers busy" sits under the nucleus it describes, not in a far corner */
+#dashboard-page.dash-room .orb-stage-caption {
+    left: 0;
+    right: 0;
+    justify-content: center;
 }
 /* Quick scan sits on the library line it acts on, not across the hero */
 #dashboard-page.dash-room .dash-hero-library .library-status-header {
@@ -2319,7 +2338,7 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
 @media (max-width: 768px) {
     #dashboard-page.dash-room .dashboard-header.dash-hero {
         grid-template-columns: minmax(0, 1fr);
-        padding: 18px 18px 20px;
+        padding: 0 4px;
         gap: 14px;
     }
     /* the workers sit in three tight rows of five (spacing pass, below) */
@@ -2455,14 +2474,12 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
    thousand pixels wide around three hundred pixels of content.
    ═══════════════════════════════════════════════ */
 
-/* ── the hero: the numbers sit beside the name once there is room ── */
+/* ── the hero's left side: date, greeting, name, numbers, library ── */
 #dashboard-page.dash-room .dash-hero-main {
     display: grid;
-    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
-    column-gap: clamp(32px, 5cqw, 88px);
-    row-gap: 16px;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 14px;
     align-content: center;
-    container: hero-main / inline-size;
 }
 #dashboard-page.dash-room .dash-hero-main > * {
     grid-column: 1 / -1;
@@ -2472,37 +2489,9 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
 #dashboard-page.dash-room .dash-hero-main > .dash-hero-eyebrow {
     justify-self: start;
 }
-@container hero-main (min-width: 980px) {
-    #dashboard-page.dash-room .dash-hero-main > .dash-hero-eyebrow,
-    #dashboard-page.dash-room .dash-hero-main > .hello-greeting {
-        grid-column: 1;
-    }
-    #dashboard-page.dash-room .dash-hero-main > .dash-hero-numbers {
-        grid-column: 2;
-        grid-row: 1 / span 2;
-        align-self: end;
-        margin: 0;
-    }
-}
-
-/* ── the shelves: side by side when the page can show a good run of each ── */
-#dashboard-page.dash-room .room-shelves-wrap {
-    container: room-shelves / inline-size;
-    min-width: 0;
-}
-@container room-shelves (min-width: 1500px) {
-    #dashboard-page.dash-room:not([data-media='video']) .room-shelves {
-        display: grid;
-        grid-auto-flow: column;
-        grid-auto-columns: minmax(0, 1fr);
-        gap: 36px;
-        align-items: start;
-    }
-    /* the bands span every column of the old page grid by default */
-    #dashboard-page.dash-room:not([data-media='video']) .room-shelves > * {
-        grid-column: auto;
-        min-width: 0;
-    }
+/* the three numbers are a quiet line under the name, not a second headline */
+#dashboard-page.dash-room .dash-hero-numbers .dash-hero-number-value {
+    font-size: 17px;
 }
 
 /* ── the board: all four across when each can have a column of its own ── */
@@ -2568,6 +2557,11 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
         background: none;
         box-shadow: none;
         gap: 16px;
+    }
+    /* stacked, the hero is tall and narrow and the cover's glow became a
+       streak down through the text. the workers keep their own light */
+    #dashboard-page.dash-room .dashboard-header.dash-hero > .room-backdrop {
+        display: none;
     }
     /* the workers as three tight rows of five, not a square a screen tall */
     #dashboard-page.dash-room .orb-stage .header-actions {
@@ -2640,4 +2634,15 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
         justify-content: flex-start;
         min-width: 0;
     }
+}
+
+/* The hovered worker comes to the front, tooltip and all. Each worker is its
+   own layer while the grid is shown (the reveal animation and the fade make
+   one), so a tooltip's own z-index only counted inside its worker, and the
+   workers after it in the grid were painted over it. */
+#dashboard-page.dash-room .orb-stage .header-actions > .enrich-worker:hover,
+#dashboard-page.dash-room .orb-stage .header-actions > .enrich-worker:focus-within,
+#dashboard-page.dash-room .orb-stage .header-actions > .video-enrich-container:hover,
+#dashboard-page.dash-room .orb-stage .header-actions > .video-enrich-container:focus-within {
+    z-index: 20;
 }

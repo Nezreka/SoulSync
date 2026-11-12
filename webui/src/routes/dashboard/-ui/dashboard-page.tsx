@@ -67,17 +67,10 @@ export function DashboardPage() {
             under the hero. */}
         <ListenBand />
       </div>
-      {/* The music comes first, top to bottom: the mixes, then what you
-          played and what just arrived. The system sits under it. The two
-          shelves share a row once the page is wide enough for both (the wrap
-          is what they measure against); one alone takes the row. */}
-      <div className="room-shelves-wrap">
-        <div className="room-shelves">
-          {/* What you've been playing. Renders nothing until history exists. */}
-          <ListeningHistoryBand />
-          {/* What's new in the library. Renders nothing until a feed has rows. */}
-          <ContentBand />
-        </div>
+      {/* The music comes first: the mixes, then what just arrived, the full
+          width of the page. Renders nothing until a feed has rows. */}
+      <div className="room-shelves">
+        <ContentBand />
       </div>
       {/* The system as a board: your week, what you watch and wish for,
           playlist sync, what runs next. Two by two, and all four in one row
@@ -91,6 +84,11 @@ export function DashboardPage() {
           {playlistsOn ? <SyncRail /> : null}
           {automationsOn ? <AutomationsCard compact timeline /> : null}
         </section>
+      </div>
+      {/* What you've been playing, last on the page: it is a look back, not
+          something to act on. Renders nothing until history exists. */}
+      <div className="room-shelves room-shelves--last">
+        <ListeningHistoryBand />
       </div>
       <footer className="dash-footer">
         <QuickSettings />

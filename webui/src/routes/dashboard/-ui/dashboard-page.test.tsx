@@ -55,15 +55,20 @@ describe('the page shell', () => {
     expect(cards('.room-board')).toEqual(['sync', 'automations']);
     expect(root.querySelector('.dash-side')).toBeNull();
     expect(root.querySelector('.dash-layout')).toBeNull();
-    // the order down the page: hero, the mixes, what you played and what
-    // arrived, then the system, then the switches. the two wraps are what the
-    // shelves and the board measure themselves against
+    // the order down the page: hero, the mixes, what just arrived, the
+    // system, what you played, then the switches. the wrap is what the board
+    // measures itself against
     expect(
       Array.from(root.children)
-        .map((child) => child.className.split(' ')[0])
+        .map((child) => child.className)
         .filter((name) => name.startsWith('room-') || name === 'dash-footer'),
-    ).toEqual(['room-top', 'room-shelves-wrap', 'room-board-wrap', 'dash-footer']);
-    expect(root.querySelector('.room-shelves-wrap > .room-shelves')).not.toBeNull();
+    ).toEqual([
+      'room-top',
+      'room-shelves',
+      'room-board-wrap',
+      'room-shelves room-shelves--last',
+      'dash-footer',
+    ]);
     expect(root.querySelector('.room-board-wrap > .room-board')).not.toBeNull();
     // watchlist + wishlist are tiles on the board, keeping the tour's ids
     expect(root.querySelector('.room-board #watchlist-button')).not.toBeNull();

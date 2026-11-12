@@ -829,6 +829,18 @@
     function updatePhysics(visible, w, h) {
         const cx = w * 0.5;
         const cy = h * 0.5;
+        // how far the orbit stretches sideways: 1 on a stage up to ~1.8 times
+        // as wide as tall, growing with the stage and capped at 2 so the far
+        // orbs stay in sight of the nucleus. the drift and the speed cap are
+        // stretched with it, so the wide orbit is the round one scaled, with
+        // the same lazy pace round the nucleus (measured: about 590px across
+        // on a 950px stage, 305px on a 380px one, as it always was)
+        const stretch = Math.max(1, Math.min(2, (w / Math.max(1, h)) * 0.55));
+        // on a stretched stage the pull home lets go near the nucleus, so the
+        // cluster rests spread out instead of huddled: asleep the drift slows
+        // to a crawl while the pull does not, and the orbs used to pack into
+        // a small ball in the middle of a wide, empty stage. 0 on a round one.
+        const restRadius = stretch > 1 ? h * 0.3 * Math.min(1, (stretch - 1) * 2) : 0;
 
         for (const orb of visible) {
             // The hub is a nucleus — it settles at canvas center and stays put
@@ -845,23 +857,28 @@
 
             // Active orbs drift faster
             const driftStrength = orb.active ? 0.04 : 0.02;
-            orb.vx += (Math.random() - 0.5) * driftStrength;
+            orb.vx += (Math.random() - 0.5) * driftStrength * stretch;
             orb.vy += (Math.random() - 0.5) * driftStrength;
 
-            // Subtle gravity toward center — keeps orbs loosely grouped
-            const gx = cx - orb.x;
+            // Subtle gravity toward center — keeps orbs loosely grouped.
+            // On a stage wider than it is tall the orbit is an ellipse, not a
+            // circle: the pull is worked out in a space squeezed sideways by
+            // `stretch` and applied back in real space, so the cluster fills
+            // a wide stage instead of sitting as a small ball in its middle.
+            // A stage near square has stretch 1 and behaves exactly as before.
+            const gx = (cx - orb.x) / stretch;
             const gy = cy - orb.y;
             const gDist = Math.sqrt(gx * gx + gy * gy);
             if (gDist > 1) {
-                const gStrength = 0.004;
-                orb.vx += (gx / gDist) * gStrength;
+                const gStrength = gDist > restRadius ? 0.004 : 0;
+                orb.vx += (gx / gDist) * gStrength * stretch;
                 orb.vy += (gy / gDist) * gStrength;
 
                 // Orbital rotation — a tangential nudge (perpendicular to the
                 // pull home) so the cluster slowly revolves around the nucleus
                 // like electrons round an atom. Stronger when the orb is active.
                 const tStrength = orb.active ? 0.008 : 0.005;
-                orb.vx += (-gy / gDist) * tStrength;
+                orb.vx += (-gy / gDist) * tStrength * stretch;
                 orb.vy += (gx / gDist) * tStrength;
             }
 
@@ -873,7 +890,8 @@
             // briefly lifts the cap so the jolt actually darts, then decays.
             orb.kick = (orb.kick || 0) * 0.94;
             const maxSpeed = (orb.active ? 0.8 : 0.5) * (1 + orb.kick * 2);
-            const speed = Math.sqrt(orb.vx * orb.vx + orb.vy * orb.vy);
+            const squeezedVx = orb.vx / stretch;
+            const speed = Math.sqrt(squeezedVx * squeezedVx + orb.vy * orb.vy);
             if (speed > maxSpeed) {
                 const scale = maxSpeed / speed;
                 orb.vx *= scale;
