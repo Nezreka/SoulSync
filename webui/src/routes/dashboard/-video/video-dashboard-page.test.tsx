@@ -142,14 +142,20 @@ afterEach(() => {
 });
 
 describe('the music dashboard skeleton', () => {
-  it('is #dashboard-page, so the music styling applies: hero, two columns, footer', async () => {
+  it('is #dashboard-page, so the music styling applies: hero, the room, footer', async () => {
     stub();
     const { container } = mount();
     const page = container.querySelector('#dashboard-page');
     expect(page?.getAttribute('data-media')).toBe('video');
     expect(page?.querySelector(':scope > .dashboard-header.dash-hero')).not.toBeNull();
-    expect(page?.querySelector(':scope > .dash-layout > .dash-main')).not.toBeNull();
-    expect(page?.querySelector(':scope > .dash-layout > aside.dash-side')).not.toBeNull();
+    // the same room as the music dashboard: what to watch, the board, the shelves
+    expect(page?.classList.contains('dash-room')).toBe(true);
+    expect(
+      Array.from(page?.children ?? [])
+        .map((child) => child.className.split(' ')[0])
+        .filter((name) => name.startsWith('room-') || name === 'dash-footer'),
+    ).toEqual(['room-top', 'room-board', 'room-shelves', 'dash-footer']);
+    expect(page?.querySelector('.dash-side')).toBeNull();
     expect(page?.querySelector(':scope > footer.dash-footer')).not.toBeNull();
     expect(await screen.findByText('8,873')).toBeTruthy();
     expect(screen.getByText('105.7K')).toBeTruthy();
@@ -281,8 +287,8 @@ describe('bands that vanish when empty', () => {
     });
     expect(band.querySelectorAll('.vdn-card')).toHaveLength(4);
     expect(within(band).getByText('and 4 more')).toBeTruthy();
-    // it lives in the rail, between this week and up next
-    expect(band.closest('.dash-side')).not.toBeNull();
+    // it is one of the board's cards
+    expect(band.closest('.room-board')).not.toBeNull();
     expect(within(band).queryByText('Done')).toBeNull();
   });
 

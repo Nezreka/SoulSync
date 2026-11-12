@@ -1564,6 +1564,27 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
 #dashboard-page.dash-room .room-board > [data-card='sync'] {
     grid-column: span 7;
 }
+/* the video dashboard's board: its week leads the first row, and its count
+   tiles (three or four of them, no pictures) share the rest evenly */
+#dashboard-page.dash-room .room-board > [data-card='week'] {
+    grid-column: span 7;
+}
+#dashboard-page.dash-room .room-board > .dash-tiles[data-rail='tiles'] {
+    width: auto;
+    max-width: none;
+    grid-template-columns: none;
+}
+#dashboard-page.dash-room .dash-tiles[data-rail='tiles'] .dash-tile {
+    max-width: none;
+    justify-content: center;
+}
+/* Up next alone on its row (nothing downloading): its list runs in two
+   columns so the row is used, not stretched */
+#dashboard-page.dash-room .room-board > [data-card='automations']:last-child:nth-child(odd) .dash-autom-rows {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+}
 /* a card alone on its row takes the row */
 #dashboard-page.dash-room .room-board > :only-child,
 #dashboard-page.dash-room .room-board > :last-child:nth-child(odd) {
@@ -2316,8 +2337,12 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
     }
     #dashboard-page.dash-room .room-board > *,
     #dashboard-page.dash-room .room-board > .weekly-digest,
+    #dashboard-page.dash-room .room-board > [data-card='week'],
     #dashboard-page.dash-room .room-board > [data-card='sync'] {
         grid-column: 1 / -1;
+    }
+    #dashboard-page.dash-room .room-board > [data-card='automations']:last-child:nth-child(odd) .dash-autom-rows {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
