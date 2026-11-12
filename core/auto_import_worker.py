@@ -2187,6 +2187,11 @@ class AutoImportWorker:
             int(m.get('track', {}).get('duration_ms', 0) or 0)
             for m in all_matches
         )
+        # #2068: $explicit. the album's flag over every matched track, so the
+        # folder is the same for all of them; each file reads its own track's.
+        from core.imports.paths import album_explicit_flag
+        album_explicit = album_explicit_flag(
+            album_data, [m.get('track') or {} for m in all_matches])
         # Ensure an active-import entry exists for this candidate.
         # Callers from `_process_one_candidate` already registered, but
         # tests invoke `_process_matches` directly without going
@@ -2356,6 +2361,7 @@ class AutoImportWorker:
                         'images': album_data.get('images', [{'url': image_url}] if image_url else []),
                         'artists': [{'name': artist_name, 'id': identification.get('artist_id') or ''}],
                         'album_type': album_data.get('album_type', 'album'),
+                        'explicit': album_explicit,
                         # Album total duration in ms (sum of every
                         # matched track). Read by side_effects to
                         # populate the album row's `duration` column —
@@ -2370,6 +2376,7 @@ class AutoImportWorker:
                         'track_number': track_number,
                         'disc_number': disc_number,
                         'duration_ms': track.get('duration_ms', 0),
+                        'explicit': track.get('explicit'),
                         'artists': track.get('artists', [{'name': artist_name}]),
                         'uri': track.get('uri', ''),
                         # Album-id back-reference + per-recording IDs so

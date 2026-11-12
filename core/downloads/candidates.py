@@ -749,7 +749,12 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
                     'total_discs': explicit_album.get('total_discs', 1),
                     'album_type': explicit_album.get('album_type', 'album'),
                     'album_type_locked': bool(explicit_album.get('album_type_locked')),
-                    'artists': explicit_album.get('artists', [{'name': spotify_artist_context.get('name', '')}])
+                    'artists': explicit_album.get('artists', [{'name': spotify_artist_context.get('name', '')}]),
+                    # #2068: the album's explicit flag, for $explicit in a folder.
+                    # the batch works it out over every track (_album_explicit)
+                    'explicit': (explicit_album.get('explicit')
+                                 if explicit_album.get('explicit') is not None
+                                 else track_info.get('_album_explicit')),
                 }
                 logger.info(f"[Explicit Context] Using real album data: '{spotify_album_context['name']}' ({spotify_album_context['album_type']}, {spotify_album_context['total_discs']} disc(s))")
             else:

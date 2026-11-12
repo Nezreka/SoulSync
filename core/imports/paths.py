@@ -699,6 +699,40 @@ def explicit_flag(value) -> Optional[bool]:
     return None
 
 
+def album_explicit_flag(album=None, tracks=()) -> Optional[bool]:
+    """Is the album explicit? Its own word first, else what its tracks say.
+
+    An album is explicit when any of its tracks is, and clean only when every
+    track is known to be. Most sources flag tracks and say nothing about the
+    album, so without this an album folder's $explicit had nothing to read
+    and always came out empty (#2068). None when nothing is known."""
+    own = explicit_flag((album or {}).get("explicit")) if isinstance(album, dict) else None
+    if own is not None:
+        return own
+    flags = [explicit_flag(t.get("explicit")) for t in tracks or () if isinstance(t, dict)]
+    if any(flag is True for flag in flags):
+        return True
+    if flags and all(flag is False for flag in flags):
+        return False
+    return None
+
+
+def resolve_album_explicit(album_context, track_info) -> Optional[bool]:
+    """The album's flag for a path: the album context's own, else the one the
+    batch or import stamped on the track (``_album_explicit``, worked out over
+    the whole album). Never the track's own flag: an explicit album has clean
+    tracks too, and reading theirs would file one album in two folders."""
+    track_info = track_info if isinstance(track_info, dict) else {}
+    for value in ((album_context or {}).get("explicit") if isinstance(album_context, dict) else None,
+                  (track_info.get("_explicit_album_context") or {}).get("explicit")
+                  if isinstance(track_info.get("_explicit_album_context"), dict) else None,
+                  track_info.get("_album_explicit")):
+        flag = explicit_flag(value)
+        if flag is not None:
+            return flag
+    return None
+
+
 # longest first: $contentratingfull starts with $contentrating
 _CONTENT_RATING_TOKENS = ("contentratingfull", "contentrating", "explicit")
 
@@ -1729,7 +1763,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
             "label": str((album_context or {}).get("label") or "").strip(),
             # #1860: $explicit / $contentrating
             "explicit": (track_info or {}).get("explicit"),
-            "album_explicit": (album_context or {}).get("explicit"),
+            "album_explicit": resolve_album_explicit(album_context, track_info),
             # #1859: who the album artist is, for $albumartistinfo and friends
             **_artist_identity(artist_context, source),
         }
@@ -1945,7 +1979,7 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         "track_disambiguation": str((track_info or {}).get("disambiguation") or "").strip(),
         # #1860: $explicit / $contentrating
         "explicit": (track_info or {}).get("explicit"),
-        "album_explicit": (_album_ctx or {}).get("explicit"),
+        "album_explicit": resolve_album_explicit(_album_ctx, track_info),
         **_artist_identity(artist_context, source),
     }
 
