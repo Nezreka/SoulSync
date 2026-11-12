@@ -2265,14 +2265,16 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     background: var(--white-a16);
     color: var(--text-1);
 }
-/* the newest card is larger: it is why you looked */
-#dashboard-page.dash-room .room-shelves .dash-rail > .dash-rail-card:first-child {
+/* the newest card is larger: it is why you looked. music only: its cards are
+   square covers. on the video shelves a larger first poster left the row
+   ragged, with a band of nothing under the other nine */
+#dashboard-page.dash-room:not([data-media='video']) .room-shelves .dash-rail > .dash-rail-card:first-child {
     width: 244px;
 }
-#dashboard-page.dash-room .room-shelves .dash-rail > .dash-rail-card:first-child .ya-card-img {
+#dashboard-page.dash-room:not([data-media='video']) .room-shelves .dash-rail > .dash-rail-card:first-child .ya-card-img {
     border-radius: 18px;
 }
-#dashboard-page.dash-room .room-shelves .dash-rail > .dash-rail-card:first-child .ya-card-name {
+#dashboard-page.dash-room:not([data-media='video']) .room-shelves .dash-rail > .dash-rail-card:first-child .ya-card-name {
     font-size: 17px;
 }
 #dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-img {
@@ -2399,4 +2401,63 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
     #dashboard-page.dash-room .dash-tile-sub::before {
         animation: none;
     }
+}
+
+/* ── the video dashboard's board ──
+   The week beside the counts, then what is downloading and what runs next,
+   each across the whole row. Side by side they left a sixth of the row empty
+   and stretched whichever card was shorter to the height of the other. */
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='downloads'],
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations'] {
+    grid-column: 1 / -1;
+}
+/* Up next runs in two columns whatever sits around it */
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations'] .dash-autom-rows {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 28px;
+}
+/* downloads sit side by side, a card wide each, at their own height */
+#dashboard-page.dash-room[data-media='video'] .room-board > [data-card='downloads'] .vdn-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+    gap: 10px;
+}
+/* posters, not record sleeves: taller than wide, and the tile makes room */
+#dashboard-page.dash-room .room-tile-art--posters {
+    min-height: calc(var(--room-pic) * 1.5 + 6px);
+}
+#dashboard-page.dash-room .room-tile-art--posters img {
+    height: calc(var(--room-pic) * 1.5);
+    border-radius: 7px;
+}
+#dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .dash-tile {
+    justify-content: flex-end;
+    overflow: hidden;
+}
+/* three or four tiles share the card, so the posters are smaller than the
+   music tiles' pictures and a long label takes a second line */
+#dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .room-tile-art {
+    --room-pic: clamp(24px, 6.4cqw, 46px);
+}
+#dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .hero-btn-label {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.25;
+}
+#dashboard-page.dash-room[data-media='video'] .dash-tiles[data-rail='tiles'] .hero-btn-badge {
+    font-size: clamp(30px, 9cqw, 52px);
+}
+
+@media (max-width: 768px) {
+    #dashboard-page.dash-room[data-media='video'] .room-board > [data-card='automations'] .dash-autom-rows {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .room-tile-art--posters {
+        display: none;
+    }
+}
+#dashboard-page.dash-room[data-media='video'] .room-shelves {
+    gap: 38px;
 }

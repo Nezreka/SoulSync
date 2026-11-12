@@ -95,9 +95,11 @@
   overflow: hidden;
   min-height: 210px;
   padding: 0;
-  border: 1px solid var(--white-a08);
+  border: 1px solid var(--white-a10);
   border-radius: var(--radius-xl);
-  background: var(--black-a30);
+  /* the same surface the board's cards sit on. black on a near-black page
+     made the two studios the one part of the dashboard you could miss */
+  background: var(--white-a03);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -120,8 +122,8 @@
   position: absolute;
   inset: 0;
   z-index: 0;
-  background: radial-gradient(110% 130% at 100% 0%, rgba(var(--studio-rgb), 0.22), transparent 62%);
-  opacity: 0.6;
+  background: radial-gradient(110% 130% at 100% 0%, rgba(var(--studio-rgb), 0.3), transparent 62%);
+  opacity: 0.85;
   transition: opacity var(--studio-dur) var(--studio-ease);
   content: '';
 }

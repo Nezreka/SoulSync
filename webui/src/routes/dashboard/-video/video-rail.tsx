@@ -4,8 +4,8 @@
  * count tiles.
  */
 
-import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { type CSSProperties, useState } from 'react';
 
 import { useFeatureOn } from '@/platform/features';
 
@@ -14,6 +14,7 @@ import type { CalendarPayload } from '../../calendar/-calendar.types';
 import { CALENDAR_QUERY_KEY, wishlistMissing } from '../../calendar/-calendar.api';
 import { timeAgo } from '../../calendar/-calendar.model';
 import { StatePill } from '../../calendar/-ui/state-pill';
+import { tilePostersQuery } from './-vdash.api';
 import { weekLine, weekSummary } from './-vdash.model';
 import { goVideo } from './video-bands';
 import styles from './video-dashboard.module.css';
@@ -141,13 +142,43 @@ export function CountTiles({
   issues: number;
   findings: number;
 }) {
-  const tile = (key: string, page: string, count: number, label: string, attention = false) => (
+  // what the two counts are counts OF: a hand of posters, as the music
+  // dashboard's tiles carry faces and sleeves
+  const posters = useQuery(tilePostersQuery()).data;
+  const art = (pictures: string[] | undefined) => (
+    <span
+      className="room-tile-art room-tile-art--sleeves room-tile-art--posters"
+      aria-hidden="true"
+    >
+      {(pictures ?? []).map((src, n) => (
+        <img
+          key={src}
+          src={src}
+          alt=""
+          loading="lazy"
+          style={{ '--n': n } as CSSProperties}
+          onError={(event) => {
+            event.currentTarget.hidden = true;
+          }}
+        />
+      ))}
+    </span>
+  );
+  const tile = (
+    key: string,
+    page: string,
+    count: number,
+    label: string,
+    attention = false,
+    pictures?: string[],
+  ) => (
     <button
       key={key}
       type="button"
       className={`header-button dash-tile ${styles.tile}${attention ? ` ${styles.tileAttention}` : ''}`}
       onClick={() => goVideo(page)}
     >
+      {art(pictures)}
       <span className={`hero-btn-badge ${styles.tileBadge}${count > 0 ? ' has-items' : ''}`}>
         {count}
       </span>
@@ -156,8 +187,22 @@ export function CountTiles({
   );
   return (
     <div className={`header-quick-nav dash-tiles ${styles.tiles}`} data-rail="tiles">
-      {tile('watchlist', 'video-watchlist', watchlist ?? 0, 'On your watchlist')}
-      {tile('wishlist', 'video-wishlist', wishlist ?? 0, 'On your wishlist')}
+      {tile(
+        'watchlist',
+        'video-watchlist',
+        watchlist ?? 0,
+        'On your watchlist',
+        false,
+        posters?.watchlist,
+      )}
+      {tile(
+        'wishlist',
+        'video-wishlist',
+        wishlist ?? 0,
+        'On your wishlist',
+        false,
+        posters?.wishlist,
+      )}
       {issues > 0
         ? tile('issues', 'video-issues', issues, issues === 1 ? 'Open issue' : 'Open issues', true)
         : null}

@@ -103,8 +103,11 @@ export function VideoDashboardPage({
           issues={issues.data ?? 0}
           findings={findings.data ?? 0}
         />
-        <AutomationsCard compact timeline side="video" />
+        {/* what is downloading right now is the news, so it comes first;
+            both take the whole row (see the video board rules in
+            dashboard-premier.css) */}
         <DownloadsBand />
+        <AutomationsCard compact timeline side="video" />
       </section>
       <div className="room-shelves">
         <RecentBand items={recent} />

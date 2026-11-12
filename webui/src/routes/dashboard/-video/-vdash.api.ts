@@ -56,6 +56,44 @@ export function downloadsQuery() {
   });
 }
 
+/** a small poster: the proxy takes ?w=, a tmdb url has its size in the path */
+function tilePoster(url: string): string {
+  if (url.includes('/api/video/poster/')) return `${url}${url.includes('?') ? '&' : '?'}w=185`;
+  if (url.includes('image.tmdb.org')) return url.replace(/\/t\/p\/[^/]+\//, '/t/p/w185/');
+  return url;
+}
+
+/** A few posters for the two count tiles: the newest shows on the watchlist
+ * and the newest movies on the wishlist. Decoration, so a failed read is an
+ * empty list and the tiles show their numbers alone. */
+export function tilePostersQuery() {
+  const posters = async (path: string): Promise<string[]> => {
+    try {
+      const data = await readJson<{ items?: { poster_url?: string | null }[] }>(
+        apiClient.get(path, { searchParams: { sort: 'added', limit: 12 } }),
+      );
+      return (data.items ?? [])
+        .map((item) => item.poster_url)
+        .filter((url): url is string => typeof url === 'string' && url.length > 0)
+        .slice(0, 5)
+        .map(tilePoster);
+    } catch {
+      return [];
+    }
+  };
+  return queryOptions({
+    queryKey: [...VDASH_KEY, 'tile-posters'] as const,
+    queryFn: async () => {
+      const [watchlist, wishlist] = await Promise.all([
+        posters('video/watchlist?kind=show'),
+        posters('video/wishlist?kind=movie'),
+      ]);
+      return { watchlist, wishlist };
+    },
+    staleTime: 60_000,
+  });
+}
+
 export function scanQuery() {
   return queryOptions({
     queryKey: [...VDASH_KEY, 'scan'] as const,
