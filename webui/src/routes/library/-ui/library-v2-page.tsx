@@ -281,6 +281,7 @@ import { ReviewLockButton } from './review-lock';
 import { StatusNotice } from './status-notice';
 import { LibraryToolDialog } from './tool-dialog';
 import { UnmatchedReviewModal } from './unmatched-review-modal';
+import { UseFileTagsModal } from './use-file-tags-modal';
 import { WatchAllModal } from './watch-all-modal';
 
 // not the route module: it imports this page, and the cycle only held while nothing
@@ -3135,6 +3136,7 @@ export function AlbumOverflowMenu({
   const [open, setOpen] = useState(false);
   const [showSubmenu, setShowSubmenu] = useState(false);
   const [showRetag, setShowRetag] = useState(false);
+  const [showUseFileTags, setShowUseFileTags] = useState(false);
   const [showReorganize, setShowReorganize] = useState(false);
   const [showReassign, setShowReassign] = useState(false);
   const [showArtPicker, setShowArtPicker] = useState(false);
@@ -3235,6 +3237,20 @@ export function AlbumOverflowMenu({
                 }}
               >
                 Preview Retag
+              </button>
+              {/* #2070: the other direction, the Library takes what the files say */}
+              <button
+                type="button"
+                className={styles.overflowMenuItem}
+                data-requires-write=""
+                disabled={!canTag}
+                onClick={() => {
+                  if (!canTag) return;
+                  setShowUseFileTags(true);
+                  setOpen(false);
+                }}
+              >
+                Use File Tags
               </button>
               <button
                 type="button"
@@ -3395,6 +3411,14 @@ export function AlbumOverflowMenu({
           id={album.id}
           title={album.title}
           onClose={() => setShowRetag(false)}
+        />
+      ) : null}
+      {showUseFileTags ? (
+        <UseFileTagsModal
+          entity="albums"
+          id={album.id}
+          title={album.title}
+          onClose={() => setShowUseFileTags(false)}
         />
       ) : null}
       {showReorganize ? (
@@ -6566,6 +6590,7 @@ function ArtistToolsMenu({
   artistId,
   artistName,
   onRetag,
+  onUseFileTags,
   onReorganizeAll,
   onMaintenance,
   onManualImport,
@@ -6581,6 +6606,8 @@ function ArtistToolsMenu({
   artistId: number;
   artistName: string;
   onRetag: () => void;
+  /** #2070: the Library takes what the artist's files say */
+  onUseFileTags: () => void;
   onReorganizeAll: () => void;
   onMaintenance: () => void;
   onManualImport: () => void;
@@ -6696,6 +6723,7 @@ function ArtistToolsMenu({
           <div className={styles.toolMenuHeading}>Files</div>
           {item('Manage Tracks', 'tracks', onManageTracks, false)}
           {item('Preview Retag', 'edit', onRetag)}
+          {item('Use File Tags', 'edit', onUseFileTags)}
           {item('Preview Rename / Organize', 'organize', onReorganizeAll)}
           {item('Manual Import', 'download', onManualImport)}
           {onServerSync ? item('Sync from media server', 'refresh', onServerSync) : null}
@@ -8588,6 +8616,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   // Album-scoped retag/delete now live inside each album's own
   // AlbumOverflowMenu (B1/B2) — this state is only for the artist-level
   // toolbar's own Preview Retag / Delete buttons.
+  const [useFileTagsTarget, setUseFileTagsTarget] = useState<{ id: number; title: string } | null>(
+    null,
+  );
   const [retagTarget, setRetagTarget] = useState<{
     entity: 'artists';
     id: number;
@@ -8973,6 +9004,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                   onRetag={() =>
                     setRetagTarget({ entity: 'artists', id: artistId, title: artist.name })
                   }
+                  onUseFileTags={() => setUseFileTagsTarget({ id: artistId, title: artist.name })}
                   onReorganizeAll={() => setShowReorganizeAll(true)}
                   onMaintenance={() => setShowMaintenance(true)}
                   onManualImport={() => void navigate({ to: '/import' })}
@@ -9318,6 +9350,14 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
               id={retagTarget.id}
               title={retagTarget.title}
               onClose={() => setRetagTarget(null)}
+            />
+          ) : null}
+          {useFileTagsTarget ? (
+            <UseFileTagsModal
+              entity="artists"
+              id={useFileTagsTarget.id}
+              title={useFileTagsTarget.title}
+              onClose={() => setUseFileTagsTarget(null)}
             />
           ) : null}
           {deleteTarget ? (

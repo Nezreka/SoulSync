@@ -5738,6 +5738,45 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "server_type": server_tag_sync.active_server_type(),
         })
 
+    # -- #2070: the other direction, the Library takes what the files say -----
+
+    def _tags_to_library_ids(entity, eid):
+        from core.library2 import retag
+        db = get_database()
+        with closing(db._get_connection()) as conn:
+            table = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}[entity]
+            if not conn.execute(f"SELECT 1 FROM {table} WHERE id=?", (eid,)).fetchone():
+                return db, None
+            if entity == "tracks":
+                return db, [int(eid)]
+            return db, (retag.album_track_ids(conn, eid) if entity == "albums"
+                        else retag.artist_track_ids(conn, eid))
+
+    @_route("/api/library/v2/<entity>/<int:eid>/use-file-tags")
+    def lib2_use_file_tags_preview(entity, eid):
+        """What using the files' own tags would change for a track, an album
+        or an artist: fields, album renames and moves. Changes nothing."""
+        if entity not in ("artists", "albums", "tracks"):
+            return _fail("Unsupported entity")
+        from core.library2 import tags_to_library
+        db, track_ids = _tags_to_library_ids(entity, eid)
+        if track_ids is None:
+            return _fail("Not found", 404)
+        return jsonify({"success": True, **tags_to_library.plan(db, track_ids)})
+
+    @_route("/api/library/v2/<entity>/<int:eid>/use-file-tags", methods=["POST"])
+    def lib2_use_file_tags_apply(entity, eid):
+        """Save what the files say as manual edits, and move the tracks whose
+        tag names another album. The plan is worked out again here."""
+        if entity not in ("artists", "albums", "tracks"):
+            return _fail("Unsupported entity")
+        from core.library2 import tags_to_library
+        db, track_ids = _tags_to_library_ids(entity, eid)
+        if track_ids is None:
+            return _fail("Not found", 404)
+        result = tags_to_library.apply(db, track_ids, profile_id=_profile())
+        return jsonify({"success": True, **result})
+
     @_route("/api/library/v2/tags/write", methods=["POST"])
     def lib2_write_tags():
         """Write lib2 metadata into the given tracks' file tags (background job).

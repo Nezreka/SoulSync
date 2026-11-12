@@ -5085,3 +5085,41 @@ def test_reset_rearms_the_one_time_upgrade_carries(api):
                         "legacy_issue_ids_v1", "legacy_genre_locks_v1"}
     assert not tables & {"_lib2_import_twins_merged_v2", "_lib2_legacy_credits_carried",
                          "_lib2_member_watchlists_carried"}
+
+
+# ── #2070: use the files' own tags ───────────────────────────────────────────
+
+def test_use_file_tags_previews_then_applies_over_http(api, monkeypatch):
+    client, db, ids = api
+    conn = db._get_connection()
+    conn.execute("INSERT INTO lib2_track_files(track_id, path, format) VALUES(?, '/m/tagged.flac', 'flac')",
+                 (ids["album_track"],))
+    conn.commit()
+    conn.close()
+    monkeypatch.setattr("core.library2.paths.resolve_lib2_path", lambda p: p)
+    monkeypatch.setattr("core.tag_writer.read_file_tags", lambda path: {
+        "title": "Tagged Title", "album": None, "year": "2016", "track_number": "9",
+        "disc_number": None, "genre": None})
+
+    preview = client.get(f"/api/library/v2/tracks/{ids['album_track']}/use-file-tags").get_json()
+
+    assert preview["success"] is True
+    changes = {c["field"]: c["file"] for c in preview["tracks"][0]["changes"]}
+    assert changes["title"] == "Tagged Title" and changes["track_number"] == 9
+    assert preview["counts"]["moves"] == 0
+
+    applied = client.post(f"/api/library/v2/tracks/{ids['album_track']}/use-file-tags").get_json()
+
+    assert applied["success"] is True and applied["tracks_changed"] == 1
+    from core.library2.metadata_overrides import get_field_overrides
+    conn = db._get_connection()
+    saved = get_field_overrides(conn, entity_type="track", entity_id=ids["album_track"])
+    conn.close()
+    assert saved["title"].value == "Tagged Title" and saved["track_number"].value == 9
+
+
+def test_use_file_tags_answers_404_for_something_that_is_not_there(api):
+    client, _db, _ids = api
+    assert client.get("/api/library/v2/albums/999999/use-file-tags").status_code == 404
+    assert client.post("/api/library/v2/artists/999999/use-file-tags").status_code == 404
+    assert client.get("/api/library/v2/playlists/1/use-file-tags").status_code in (400, 404)

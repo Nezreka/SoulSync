@@ -159,6 +159,14 @@ The retag operation writes title, artist, album artist, album, track number, dis
 
 From an artist or album page, **Write Tags** previews the same diff. With Plex or Jellyfin as your server, tick **Sync to Plex** / **Sync to Jellyfin** to push the new title, artist, album and year to Plex right away (Jellyfin gets a library scan). Navidrome reads tag changes on its own.
 
+**Use File Tags** goes the other way: the Library takes what your files say. It is for when you have fixed your tags by hand outside SoulSync. Open it from an album's menu or an artist's tools menu, next to Preview Retag. It reads the files and shows what would change before anything is saved:
+
+- **Album**: year, release date and genre, taken from what most of the album's files say.
+- **Track**: title, track number and disc number.
+- **Which album a track is on**: a track whose tag names another album moves to that album under the same artist, and the album is created if the Library does not have it. When every file of an album names the same other title, the album is renamed instead.
+
+Everything is saved as your own edits, so a metadata refresh does not put the old values back. An empty tag never blanks a value. Artist names are left alone, and the preview lists where a file's artist differs. Files stay where they are on disk; run Rename / Organize afterwards to refile them.
+
 ![Retag tool interface](dash-retag.jpg)
 
 > [!TIP]

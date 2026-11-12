@@ -1,0 +1,171 @@
+import { QueryClientProvider } from '@tanstack/react-query';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { HttpResponse, http, server } from '@/test/msw';
+import { createTestQueryClient } from '@/test/query-client';
+
+import { type UseFileTagsPlan, UseFileTagsModal, describeApplied } from './use-file-tags-modal';
+
+/**
+ * #2070: the Library takes what the files themselves say. The window always
+ * shows what would change before anything is saved.
+ */
+
+const PLAN: UseFileTagsPlan = {
+  success: true,
+  tracks: [
+    {
+      track_id: 1,
+      title: 'Pink',
+      album_title: 'The Very Best of Aerosmith',
+      changes: [{ field: 'track_number', label: 'Track #', library: 1, file: 7 }],
+      move: {
+        album_title: 'Nine Lives',
+        album_changes: [{ field: 'year', label: 'Year', library: null, file: 1997 }],
+      },
+      notes: [],
+    },
+    {
+      track_id: 2,
+      title: 'Dream On',
+      album_title: 'The Very Best of Aerosmith',
+      changes: [
+        { field: 'title', label: 'Title', library: 'Dream On', file: 'Dream On (Remaster)' },
+      ],
+      move: null,
+      notes: ["The file's album artist is Various Artists; the Library keeps Aerosmith."],
+    },
+  ],
+  albums: [
+    {
+      album_id: 9,
+      title: 'The Very Best of Aerosmith',
+      rename: null,
+      changes: [{ field: 'year', label: 'Year', library: 2022, file: 2005 }],
+    },
+  ],
+  counts: { tracks: 2, changed_tracks: 2, moves: 1, albums: 1, unreadable: 1 },
+};
+
+function mount(onClose = vi.fn()) {
+  const queryClient = createTestQueryClient();
+  render(
+    <QueryClientProvider client={queryClient}>
+      <UseFileTagsModal
+        entity="albums"
+        id={9}
+        title="The Very Best of Aerosmith"
+        onClose={onClose}
+      />
+    </QueryClientProvider>,
+  );
+  return onClose;
+}
+
+afterEach(() => {
+  delete window.showToast;
+});
+
+describe('UseFileTagsModal', () => {
+  it('shows the album change, the move and the track change before saving anything', async () => {
+    let posted = 0;
+    server.use(
+      http.get('/api/library/v2/albums/9/use-file-tags', () => HttpResponse.json(PLAN)),
+      http.post('/api/library/v2/albums/9/use-file-tags', () => {
+        posted += 1;
+        return HttpResponse.json({});
+      }),
+    );
+    mount();
+
+    expect(await screen.findByText('1 track moves to the album its tag names')).toBeInTheDocument();
+    expect(screen.getByText('Nine Lives')).toBeInTheDocument();
+    expect(screen.getByText('2005')).toBeInTheDocument();
+    expect(screen.getByText('Dream On (Remaster)')).toBeInTheDocument();
+    // what it will not touch is said, not hidden
+    expect(screen.getByText(/album artist is Various Artists/)).toBeInTheDocument();
+    expect(screen.getByText(/1 file could not be read/)).toBeInTheDocument();
+    expect(posted).toBe(0);
+  });
+
+  it('saves on the button, says what was done, and closes', async () => {
+    window.showToast = vi.fn();
+    server.use(
+      http.get('/api/library/v2/albums/9/use-file-tags', () => HttpResponse.json(PLAN)),
+      http.post('/api/library/v2/albums/9/use-file-tags', () =>
+        HttpResponse.json({
+          success: true,
+          tracks_changed: 1,
+          albums_changed: 1,
+          albums_renamed: 0,
+          moved: 1,
+          albums_created: 1,
+          failed: [],
+        }),
+      ),
+    );
+    const onClose = mount();
+
+    // the button is there while the files are still being read, but off
+    const button = await screen.findByRole('button', { name: 'Use these tags' });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+
+    await waitFor(() => expect(window.showToast).toHaveBeenCalled());
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(window.showToast).toHaveBeenCalledWith(
+      '1 album updated, 1 track updated, 1 track moved to another album',
+      'success',
+    );
+  });
+
+  it('says so when the Library already matches, and offers nothing to save', async () => {
+    server.use(
+      http.get('/api/library/v2/albums/9/use-file-tags', () =>
+        HttpResponse.json({
+          success: true,
+          tracks: [],
+          albums: [],
+          counts: { tracks: 3, changed_tracks: 0, moves: 0, albums: 0, unreadable: 0 },
+        }),
+      ),
+    );
+    mount();
+
+    expect(
+      await screen.findByText(/The Library already says what these files say/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use these tags' })).not.toBeInTheDocument();
+    // the header's close, and the footer's in place of Cancel
+    expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(2);
+  });
+});
+
+describe('describeApplied', () => {
+  it('reports a failed move beside what worked', () => {
+    expect(
+      describeApplied({
+        tracks_changed: 0,
+        albums_changed: 0,
+        albums_renamed: 1,
+        moved: 2,
+        albums_created: 0,
+        failed: [{ track_id: 1, title: 'x', error: 'no' }],
+      }),
+    ).toBe('1 album updated, 2 tracks moved to another album. 1 move failed');
+  });
+
+  it('says when there was nothing to do', () => {
+    expect(
+      describeApplied({
+        tracks_changed: 0,
+        albums_changed: 0,
+        albums_renamed: 0,
+        moved: 0,
+        albums_created: 0,
+        failed: [],
+      }),
+    ).toBe('Nothing needed changing');
+  });
+});
