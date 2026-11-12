@@ -8640,3 +8640,115 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
 .vd-page.vd-page.vd-page .vd-actions > .vd-play-btn:first-child:hover {
     background: var(--bg-raised, var(--bg-primary)); box-shadow: inset 0 0 0 1px var(--white-a35);
 }
+
+/* ═══════════════════════════════════════════════
+   WATCHLIST, redrawn (.vwlp-page.vwl2)
+   The same quiet language as the music watchlist: one pill row of tabs, chips
+   for what needs a look, and posters that only speak up for an exception (an
+   ended show, a gap in the episodes). Everything on the page is followed, so
+   the follow and get controls wait for a hover instead of sitting on all sixty
+   posters at once.
+   ═══════════════════════════════════════════════ */
+.vwlp-page.vwl2 { max-width: 1680px; margin: 0 auto; }
+.vwlp-page.vwl2 .vwlp-head { padding-top: 36px; overflow: visible; }
+.vwlp-page.vwl2 .vwlp-head-glow { display: none; }
+.vwlp-page.vwl2 .vwlp-head-row { align-items: flex-end; }
+.vwlp-page.vwl2 .vwlp-title { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+.vwlp-page.vwl2 .vwlp-sub { margin-top: 8px; font-weight: 500; color: var(--white-a55);
+    font-variant-numeric: tabular-nums; }
+
+/* tabs: one pill row */
+.vwlp-page.vwl2 .vwlp-tabs { gap: 2px; padding: 4px; border-radius: var(--radius-pill);
+    background: var(--white-a04); border: 1px solid var(--white-a08); }
+.vwlp-page.vwl2 .vwlp-tab { border: 0; background: none; box-shadow: none; padding: 8px 16px;
+    border-radius: var(--radius-pill); font-weight: 600; color: var(--white-a60); }
+.vwlp-page.vwl2 .vwlp-tab:hover { background: var(--white-a05); color: var(--text-primary); }
+.vwlp-page.vwl2 .vwlp-tab--on,
+.vwlp-page.vwl2 .vwlp-tab--on:hover { background: var(--white-a12); color: var(--text-primary); }
+.vwlp-page.vwl2 .vwlp-tab:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 2px; }
+.vwlp-page.vwl2 .vwlp-tab-n { background: none; padding: 0; min-width: 0; font-weight: 600;
+    color: var(--white-a40); font-variant-numeric: tabular-nums; }
+.vwlp-page.vwl2 .vwlp-tab--on .vwlp-tab-n { background: none; color: var(--white-a60); }
+
+/* toolbar: chips on the left, search and sort on the right */
+.vwlp-page.vwl2 .vwlp-toolbar { padding-top: 22px; gap: 10px; }
+.vwlp-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-right: auto; }
+.vwlp-chips[hidden] { display: none; }
+.vwlp-chip { height: 34px; padding: 0 14px; border-radius: var(--radius-pill); cursor: pointer;
+    border: 1px solid var(--white-a08); background: var(--white-a04); color: var(--white-a70);
+    font: inherit; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 7px;
+    transition: background var(--dur-quick) ease, color var(--dur-quick) ease, border-color var(--dur-quick) ease; }
+.vwlp-chip:hover { background: var(--white-a08); color: var(--text-primary); }
+.vwlp-chip:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.7); outline-offset: 2px; }
+.vwlp-chip small { font-size: 12px; font-weight: 600; opacity: 0.6; font-variant-numeric: tabular-nums; }
+.vwlp-chip--alert small { color: rgb(var(--warning-rgb)); opacity: 1; }
+.vwlp-chip--on, .vwlp-chip--on:hover { background: var(--text-primary); border-color: var(--text-primary);
+    color: var(--bg-primary); }
+.vwlp-chip--on small { color: inherit; opacity: 0.65; }
+.vwlp-page.vwl2 .vwlp-search { flex: 0 1 280px; min-width: 200px; height: 34px; border-radius: var(--radius-pill);
+    background: var(--white-a04); border-color: var(--white-a08); }
+.vwlp-page.vwl2 .vwlp-search-input { font-size: 13px; }
+.vwlp-page.vwl2 .vwlp-sort { height: 34px; border-radius: var(--radius-pill); font-size: 13px;
+    background-color: var(--white-a04); border-color: var(--white-a08); }
+.vwlp-page.vwl2 .vwlp-sort[hidden] { display: none; }
+.vwlp-page.vwl2 .vwlp-import-btn { height: 34px; padding: 0 14px; border-radius: var(--radius-pill);
+    background: var(--white-a04); border: 1px solid var(--white-a08); color: var(--white-a85);
+    font-size: 13px; font-weight: 600; box-shadow: none; }
+.vwlp-page.vwl2 .vwlp-import-btn:hover { background: var(--white-a08); color: var(--text-primary);
+    border-color: var(--white-a14); }
+
+/* cards */
+.vwlp-page.vwl2 .vwlp-body { padding-top: 22px; }
+.vwlp-page.vwl2 .vwlp-grid { grid-template-columns: repeat(auto-fill, minmax(164px, 1fr)); gap: 26px 18px; }
+.vwlp-page.vwl2 .vwlp-card:hover { transform: translateY(-3px); }
+.vwlp-page.vwl2 .vwlp-card:focus-visible { outline: none; }
+.vwlp-page.vwl2 .vwlp-card:focus-visible .vwlp-card-art { border-color: rgba(var(--accent-rgb), 0.8); }
+.vwlp-page.vwl2 .vwlp-card-art { box-shadow: 0 10px 26px var(--black-a40); }
+.vwlp-page.vwl2 .vwlp-card:hover .vwlp-card-art { border-color: var(--white-a30);
+    box-shadow: 0 18px 40px var(--black-a55); }
+.vwlp-page.vwl2 .vwlp-card-info { padding: 10px 2px 0; }
+.vwlp-page.vwl2 .vwlp-card-title { font-size: 13.5px; font-weight: 600; }
+.vwlp-page.vwl2 .vwlp-card-meta { font-size: 12px; font-weight: 500; color: var(--white-a45);
+    font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vwlp-page.vwl2 .vwlp-card-meta b { font-weight: 600; color: rgb(var(--warning-rgb)); }
+/* how much of what has aired is on disk: only drawn when something is missing */
+.vwlp-card-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; z-index: 2;
+    background: var(--black-a55); }
+.vwlp-card-bar i { display: block; height: 100%; background: rgb(var(--warning-rgb)); }
+.vwlp-page.vwl2 .vwlp-pill { background: var(--black-a65); color: var(--white-a80);
+    border-color: var(--white-a12); font-weight: 700; }
+
+/* everything here is followed: the controls wait for the pointer (touch keeps them) */
+@media (hover: hover) {
+    .vwlp-page.vwl2 .vwlp-card .vcard-ctrls,
+    .vwlp-page.vwl2 .vwlp-card .vwl-btn,
+    .vwlp-page.vwl2 .vwlp-card [data-vwlp-psettings],
+    .vwlp-page.vwl2 .vwlp-card .vwlp-studio-cog {
+        opacity: 0; transition: opacity var(--dur-quick) ease; }
+    .vwlp-page.vwl2 .vwlp-card:hover .vcard-ctrls,
+    .vwlp-page.vwl2 .vwlp-card:focus-within .vcard-ctrls,
+    .vwlp-page.vwl2 .vwlp-card:hover .vwl-btn,
+    .vwlp-page.vwl2 .vwlp-card:focus-within .vwl-btn,
+    .vwlp-page.vwl2 .vwlp-card:hover [data-vwlp-psettings],
+    .vwlp-page.vwl2 .vwlp-card:focus-within [data-vwlp-psettings],
+    .vwlp-page.vwl2 .vwlp-card:hover .vwlp-studio-cog,
+    .vwlp-page.vwl2 .vwlp-card:focus-within .vwlp-studio-cog { opacity: 1; }
+}
+
+.vwlp-page.vwl2 .vwlp-state { padding: 80px 20px; }
+.vwlp-page.vwl2 .vwlp-state-ic { display: none; }
+.vwlp-page.vwl2 .vwlp-state-title { font-size: 17px; font-weight: 600; margin-top: 0; }
+.vwlp-page.vwl2 .vwlp-page-btn { border-radius: var(--radius-pill); font-weight: 600; }
+
+@media (max-width: 900px) {
+    .vwlp-page.vwl2 .vwlp-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 20px 12px; }
+    .vwlp-page.vwl2 .vwlp-head-row { align-items: flex-start; flex-direction: column; }
+}
+@media (max-width: 640px) {
+    .vwlp-page.vwl2 .vwlp-title { font-size: 26px; }
+    .vwlp-page.vwl2 .vwlp-tabs { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .vwlp-page.vwl2 .vwlp-tab { flex: 1 0 auto; justify-content: center; padding: 8px 9px; gap: 5px;
+        font-size: 12.5px; }
+    .vwlp-page.vwl2 .vwlp-chips { margin-right: 0; flex: 1 1 100%; }
+    .vwlp-page.vwl2 .vwlp-search { flex: 1 1 150px; min-width: 0; }
+}

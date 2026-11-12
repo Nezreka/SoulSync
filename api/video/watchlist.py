@@ -55,7 +55,8 @@ def register_routes(bp):
                     kind, search=request.args.get("search", ""),
                     sort=request.args.get("sort", "default"),
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60),
-                    server_source=server, profile_id=_profile())
+                    server_source=server, profile_id=_profile(),
+                    show_filter=request.args.get("filter") or None)
                 from .kids import filter_tmdb_items, video_cap
                 cap = video_cap()
                 if cap is not None and kind == "show":

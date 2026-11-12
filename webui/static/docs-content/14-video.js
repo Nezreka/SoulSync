@@ -580,6 +580,22 @@ registerDocsSection({
 The video **Watchlist** is how you tell SoulSync "keep an eye on this." Follow an **actor**, **director**, or **studio** and their upcoming and newly-released titles are automatically added to your [Wishlist](#vwish-wanted) so the download pipeline can go find them.
 
 Follow from anywhere a follow button appears: [detail pages](#vdet-people), [studio pages](#vsearch-studios), or search results.
+
+## The Watchlist page
+
+Four tabs: **Shows**, **People**, **Studios** and **Channels** (YouTube channels and playlists), each with its count. The line under the title says what the tab holds; on Shows it says how many aired episodes are missing across how many shows.
+
+**Shows** holds every show you follow plus every airing show you own. The chips narrow it:
+
+- **Missing episodes**: shows in your library where an episode has aired, is monitored, and has no file.
+- **Up to date**: shows in your library with nothing aired missing.
+- **Not in library**: shows you follow that your library does not have yet.
+
+A poster only speaks up for an exception. A show with a gap gets a bar along the bottom of its poster and a line like **6 missing · 9 of 15** under its name; a show with nothing missing just shows its episode count. **Ended** and **Upcoming** shows carry a small label, airing ones do not, since nearly everything here is airing. Unaired and unmonitored episodes never count as missing.
+
+Sort by **A to Z**, **Recently added**, or **Most missing** (Shows only) to put the shows furthest behind first. The search box filters whichever tab you are on, Channels included.
+
+Hover a card for its controls: the eye unfollows, the download button opens Get, and people and studios have a cog for their back-catalog window. On a touch screen the controls are always shown.
 `
         },
         {

@@ -1350,13 +1350,13 @@
                      a tab switcher. Built by video/video-watchlist.js, styled by
                      .vwlp-* in video-side.css. -->
                 <section class="video-subpage" data-video-subpage="video-watchlist" hidden>
-                    <div class="vwlp-page">
+                    <div class="vwlp-page vwl2">
                         <div class="vwlp-head">
                             <div class="vwlp-head-glow" aria-hidden="true"></div>
                             <div class="vwlp-head-row">
                                 <div class="vwlp-head-titles">
                                     <h1 class="vwlp-title">Watchlist</h1>
-                                    <p class="vwlp-sub" data-vwlp-sub>Shows and people you follow</p>
+                                    <p class="vwlp-sub" data-vwlp-sub>Shows, people, studios and channels you follow</p>
                                 </div>
                                 <div class="vwlp-tabs" role="tablist">
                                     <button class="vwlp-tab vwlp-tab--on" type="button" role="tab" data-vwlp-tab="show">
@@ -1375,6 +1375,20 @@
                             </div>
                         </div>
                         <div class="vwlp-toolbar">
+                            <!-- shows only: which of them still lack an aired episode -->
+                            <div class="vwlp-chips" role="group" aria-label="Show" data-vwlp-chips>
+                                <button class="vwlp-chip vwlp-chip--on" type="button" data-vwlp-filter="all"
+                                    aria-pressed="true">All <small data-vwlp-facet="all">0</small></button>
+                                <button class="vwlp-chip vwlp-chip--alert" type="button" data-vwlp-filter="missing"
+                                    aria-pressed="false">Missing episodes <small
+                                        data-vwlp-facet="missing">0</small></button>
+                                <button class="vwlp-chip" type="button" data-vwlp-filter="complete"
+                                    aria-pressed="false">Up to date <small
+                                        data-vwlp-facet="complete">0</small></button>
+                                <button class="vwlp-chip" type="button" data-vwlp-filter="unowned"
+                                    aria-pressed="false">Not in library <small
+                                        data-vwlp-facet="unowned">0</small></button>
+                            </div>
                             <div class="vwlp-search">
                                 <svg class="vwlp-search-ic" width="16" height="16" viewBox="0 0 24 24" fill="none"
                                     stroke="currentColor" stroke-width="2">
@@ -1385,9 +1399,9 @@
                                     placeholder="Search watchlist&hellip;" autocomplete="off" spellcheck="false">
                             </div>
                             <select class="vwlp-sort" data-vwlp-sort aria-label="Sort">
-                                <option value="default">Default</option>
-                                <option value="title">A&ndash;Z</option>
+                                <option value="default">A&ndash;Z</option>
                                 <option value="added">Recently added</option>
+                                <option value="missing" data-vwlp-sort-shows>Most missing</option>
                             </select>
                             <button class="vwlp-import-btn" type="button" data-vwlp-import hidden
                                 title="Import a ytdl-sub / Kometa subscriptions file">

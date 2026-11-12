@@ -10073,23 +10073,60 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # The watchlist page's show chips. A show is `unowned` when it is not in
+    # the library at all, `missing` when it is and an aired, monitored episode
+    # has no file, `complete` otherwise (episode_count is already "what you
+    # have plus what you still want", see _SHOW_EPS_WANTED).
+    WATCHLIST_SHOW_FILTERS = ("missing", "complete", "unowned")
+
+    @staticmethod
+    def _watchlist_show_gap(item: dict) -> int:
+        """How many wanted episodes a followed show still lacks."""
+        return max(0, int(item.get("episode_count") or 0) - int(item.get("owned_count") or 0))
+
+    @classmethod
+    def _watchlist_show_state(cls, item: dict) -> str:
+        if item.get("library_id") is None:
+            return "unowned"
+        return "missing" if cls._watchlist_show_gap(item) else "complete"
+
     def query_watchlist(self, kind: str, *, search=None, sort="default", page=1, limit=60,
-                        server_source=None, profile_id: int = 1) -> dict:
+                        server_source=None, profile_id: int = 1, show_filter=None) -> dict:
         """One searched/sorted/paged slice of the effective watchlist for a kind —
         mirrors query_library's {items, pagination} shape so the page can paginate
         like the library. The effective list is bounded (follows + airing library
-        shows), so it's computed then filtered/sorted/sliced rather than via SQL."""
+        shows), so it's computed then filtered/sorted/sliced rather than via SQL.
+
+        Shows also answer ``facets``: how many are missing episodes, complete and
+        not in the library, over the whole list (not the search), for the page's
+        chips. ``show_filter`` narrows to one of WATCHLIST_SHOW_FILTERS; anything
+        else is every show."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(200, int(limit or 60)))
         except (TypeError, ValueError):
             page, limit = 1, 60
         items = self.list_watchlist(kind, server_source=server_source, profile_id=profile_id) if kind in ("show", "person", "studio") else []
+        facets = None
+        if kind == "show":
+            facets = {"all": len(items), "missing": 0, "complete": 0, "unowned": 0,
+                      "missing_episodes": 0}
+            for it in items:
+                facets[self._watchlist_show_state(it)] += 1
+                if it.get("library_id") is not None:
+                    facets["missing_episodes"] += self._watchlist_show_gap(it)
+            if show_filter in self.WATCHLIST_SHOW_FILTERS:
+                items = [it for it in items if self._watchlist_show_state(it) == show_filter]
         s = (search or "").strip().lower()
         if s:
             items = [it for it in items if s in (it.get("title") or "").lower()]
         if sort == "added":   # opt-in: explicit follows (have a date) newest-first
             items.sort(key=lambda it: (it.get("date_added") or ""), reverse=True)
+        elif sort == "missing" and kind == "show":
+            # the furthest behind first; ties (and everything complete) by name
+            items.sort(key=lambda it: (
+                -(self._watchlist_show_gap(it) if it.get("library_id") is not None else 0),
+                (it.get("sort_title") or it.get("title") or "").strip().lower()))
         else:   # "default" / "title": alphabetical by name — a manual follow is no more
                 # special than an auto-added airing show, so they sort together A–Z.
                 # .strip() guards against dirty titles (e.g. a leading space from the
@@ -10099,9 +10136,12 @@ class VideoDatabase:
         total_pages = max(1, (total + limit - 1) // limit)
         page = min(page, total_pages)
         start = (page - 1) * limit
-        return {"items": items[start:start + limit], "pagination": {
+        out = {"items": items[start:start + limit], "pagination": {
             "page": page, "total_pages": total_pages, "total_count": total,
             "has_prev": page > 1, "has_next": page < total_pages}}
+        if facets is not None:
+            out["facets"] = facets
+        return out
 
     # ── Wishlist (curated 'get this': movies + episodes) ──────────────────────
     # Atomic units are movies and episodes. Adding a whole show/season expands
