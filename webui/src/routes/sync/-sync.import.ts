@@ -81,76 +81,151 @@ export function importFileParseCsv(
   return { headers, rows };
 }
 
+export type M3uOrder = 'artist-title' | 'title-artist';
+
+/** Lower case, letters and digits only: how two spellings of a name compare. */
+function m3uFold(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/** Does `folded` name the thing `label` names? A file name is often cut
+ *  short, so a long shared start counts. */
+function m3uNames(folded: string, label: string): boolean {
+  const want = m3uFold(label);
+  if (want.length < 3 || folded.length < 3) return false;
+  return (
+    folded === want || (folded.length >= 12 && want.startsWith(folded)) || folded.includes(want)
+  );
+}
+
+/**
+ * Which side of an "A - B" line is the title, read off the path under it.
+ *
+ * Players disagree: most write "Artist - Title", iTunes writes
+ * "Title - Artist". Nothing in the line says which, but the path usually
+ * does (".../Artist/Album/03 Title.mp3"): the half the file is named after is
+ * the title, and the half its artist folder is named after is the artist.
+ * Each line that can tell casts a vote, and the file is read one way
+ * throughout. With no vote either way it is "Artist - Title", the common
+ * form and the one SoulSync's own export writes.
+ */
+export function importM3uDetectOrder(entries: readonly { meta: string; path: string }[]): M3uOrder {
+  let titleFirst = 0;
+  let artistFirst = 0;
+  for (const { meta, path } of entries) {
+    const first = meta.indexOf(' - ');
+    if (first === -1 || !path) continue;
+    const head = meta.slice(0, first).trim();
+    const tail = meta.slice(meta.lastIndexOf(' - ') + 3).trim();
+    if (!head || !tail || m3uFold(head) === m3uFold(tail)) continue;
+    const parts = path.split(/[\\/]/).filter(Boolean);
+    const stem = m3uFold(
+      (parts.pop() || '').replace(/\.[^.]+$/, '').replace(/^\d+[-.]?\d*[\s._-]+/, ''),
+    );
+    const artistFolder = m3uFold(parts.length >= 2 ? parts[parts.length - 2] : '');
+    const stemHead = m3uNames(stem, head);
+    const stemTail = m3uNames(stem, tail);
+    const folderHead = m3uNames(artistFolder, head);
+    const folderTail = m3uNames(artistFolder, tail);
+    // a file called "Artist - Title" names both halves and settles nothing
+    const saysTitleFirst = (stemHead && !stemTail ? 1 : 0) + (folderTail && !folderHead ? 1 : 0);
+    const saysArtistFirst = (stemTail && !stemHead ? 1 : 0) + (folderHead && !folderTail ? 1 : 0);
+    if (saysTitleFirst > saysArtistFirst) titleFirst++;
+    else if (saysArtistFirst > saysTitleFirst) artistFirst++;
+  }
+  return titleFirst > artistFirst ? 'title-artist' : 'artist-title';
+}
+
 /**
  * M3U/M3U8 parser (stats-automations.js 113-165). Handles simple and extended
  * forms; a pending #EXTINF is flushed even with no path line after it, because
  * SoulSync's own export replaces un-located paths with "# MISSING:" comments —
  * exactly the tracks a user imports to go match/download.
+ *
+ * `order` is how an #EXTINF "A - B" reads. Left out, it is worked out from the
+ * paths (`importM3uDetectOrder`); the one used is returned so the page can
+ * show it and let it be turned round.
  */
-export function importFileParseM3u(text: string | null | undefined): {
+export function importFileParseM3u(
+  text: string | null | undefined,
+  order?: M3uOrder,
+): {
   tracks: ImportTrack[];
   playlistName: string;
+  order: M3uOrder;
 } {
   const lines = (text || '').split(/\r?\n/);
-  const tracks: ImportTrack[] = [];
   let playlistName = '';
-  let pending: { duration_ms: number; artist: string; title: string } | null = null;
-
-  function splitArtistTitle(s: string): { artist: string; title: string } {
-    const i = s.indexOf(' - ');
-    return i !== -1
-      ? { artist: s.slice(0, i).trim(), title: s.slice(i + 3).trim() }
-      : { artist: '', title: s.trim() };
+  interface Entry {
+    duration_ms: number;
+    /** the #EXTINF text; '' when the entry is a bare path */
+    meta: string;
+    path: string;
   }
-  function pushTrack(artist: string, title: string, duration_ms: number): void {
-    if (!title && !artist) return;
-    tracks.push({
-      track_name: title || '',
-      artist_name: artist || '',
-      album_name: '',
-      duration_ms: duration_ms || 0,
-    });
-  }
-  function flushPending(): void {
-    if (pending) {
-      pushTrack(pending.artist, pending.title, pending.duration_ms);
-      pending = null;
-    }
-  }
+  const entries: Entry[] = [];
+  let pending: Entry | null = null;
 
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
     if (line.charAt(0) === '#') {
       if (/^#EXTINF:/i.test(line)) {
-        flushPending();
+        if (pending) entries.push(pending);
         const rest = line.slice(8);
         const comma = rest.indexOf(',');
         const secs = parseFloat(comma === -1 ? rest : rest.slice(0, comma));
-        const meta = comma === -1 ? '' : rest.slice(comma + 1).trim();
-        const { artist, title } = splitArtistTitle(meta);
         pending = {
           duration_ms: !isNaN(secs) && secs > 0 ? Math.round(secs * 1000) : 0,
-          artist,
-          title,
+          meta: comma === -1 ? '' : rest.slice(comma + 1).trim(),
+          path: '',
         };
       } else if (/^#PLAYLIST:/i.test(line)) {
         playlistName = line.slice(line.indexOf(':') + 1).trim();
       }
       continue;
     }
-    if (pending && (pending.title || pending.artist)) {
-      pushTrack(pending.artist, pending.title, pending.duration_ms);
-      pending = null;
-    } else {
-      pending = null;
-      const base = (line.split(/[\\/]/).pop() || line).replace(/\.[^.]+$/, '');
-      const { artist, title } = splitArtistTitle(base);
-      pushTrack(artist, title, 0);
-    }
+    if (pending && pending.meta) entries.push({ ...pending, path: line });
+    else entries.push({ duration_ms: 0, meta: '', path: line });
+    pending = null;
   }
-  flushPending();
-  return { tracks, playlistName };
+  if (pending) entries.push(pending);
+
+  const used = order ?? importM3uDetectOrder(entries);
+  const tracks: ImportTrack[] = [];
+  for (const entry of entries) {
+    let artist = '';
+    let title = '';
+    if (entry.meta) {
+      const first = entry.meta.indexOf(' - ');
+      if (first === -1) title = entry.meta;
+      else if (used === 'title-artist') {
+        // the artist is the last part: a title may carry a dash of its own
+        const last = entry.meta.lastIndexOf(' - ');
+        title = entry.meta.slice(0, last).trim();
+        artist = entry.meta.slice(last + 3).trim();
+      } else {
+        artist = entry.meta.slice(0, first).trim();
+        title = entry.meta.slice(first + 3).trim();
+      }
+    } else if (entry.path) {
+      // a bare path: its file name, which is "Artist - Title" when it has both
+      const base = (entry.path.split(/[\\/]/).pop() || entry.path).replace(/\.[^.]+$/, '');
+      const i = base.indexOf(' - ');
+      if (i === -1) title = base.trim();
+      else {
+        artist = base.slice(0, i).trim();
+        title = base.slice(i + 3).trim();
+      }
+    }
+    if (!title && !artist) continue;
+    tracks.push({
+      track_name: title,
+      artist_name: artist,
+      album_name: '',
+      duration_ms: entry.duration_ms,
+    });
+  }
+  return { tracks, playlistName, order: used };
 }
 
 export type ImportColumnRole = 'track_name' | 'artist_name' | 'album_name' | 'duration';

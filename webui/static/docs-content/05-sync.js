@@ -173,7 +173,7 @@ Opening a chart, top 10 or release list imports it into SoulSync and lands you o
 Import track lists from **CSV, TSV, M3U/M3U8, or plain text files**, or your playlists from a **NewPipe backup**. Drag and drop a file or click to browse. SoulSync parses the file, lets you preview and map columns, then creates a mirrored playlist for discovery and download.
 
 - **CSV/TSV** — auto-detects columns; map Artist, Title, and Album from dropdowns
-- **M3U/M3U8** — read automatically: artist, title, and duration come from \`#EXTINF\` lines (or the file name for simple playlists). Round-trips with SoulSync's own M3U export
+- **M3U/M3U8** — read automatically: artist, title, and duration come from \`#EXTINF\` lines (or the file name for simple playlists). Players disagree on the order of an \`#EXTINF\` line: most write Artist - Title, iTunes writes Title - Artist. SoulSync works out which from the file paths and shows it above the preview as **Lines read as**, where you can turn it round. Round-trips with SoulSync's own M3U export
 - **Text files** — one track per line; choose Artist–Title or Title–Artist order and separator (dash, tab, pipe, etc.)
 - **NewPipe backup** — the ZIP from NewPipe's *Settings → Backup and restore → Export* (or the \`newpipe.db\` inside it). Every local playlist is listed; tick the ones you want and each becomes its own mirrored playlist. Importing a newer backup later **updates** those mirrors instead of adding copies. Bookmarked YouTube playlists are only a link in the backup, so add those from the YouTube tab
 - Preview parsed tracks before importing

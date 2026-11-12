@@ -105,9 +105,74 @@ describe('importFileParseM3u', () => {
   ] as [string, string, ReturnType<typeof track>[]][])(
     'parses %j',
     (text, playlistName, tracks) => {
-      expect(importFileParseM3u(text)).toEqual({ playlistName, tracks });
+      expect(importFileParseM3u(text)).toEqual({ playlistName, tracks, order: 'artist-title' });
     },
   );
+});
+
+describe('an m3u that writes Title - Artist (iTunes)', () => {
+  // the reported file's shape: 191 of 194 songs "not in the library", every
+  // title searched as an artist
+  const ITUNES = [
+    '#EXTM3U',
+    '#EXTINF:468,Hyperbola (Original Mix) - Rishi K.',
+    'C:\\Users\\me\\Music\\iTunes\\iTunes Media\\Music\\Rishi K_\\Hyperbola\\01 Hyperbola (Original Mix).mp3',
+    '#EXTINF:402,Remember (Original Mix) - Charlotte de Witte',
+    '/Music/Compilations/A-Sides Vol.7/02 Remember (Original Mix).mp3',
+    '#EXTINF:392,Fuego (Julian Jeweil Remix) - Oliver Huntemann, Dubfire',
+    '/Music/Oliver Huntemann/Fuego/1-03 Fuego (Julian Jeweil Remix).mp3',
+  ].join('\r\n');
+
+  it('reads the title from the half the file is named after', () => {
+    const { tracks, order } = importFileParseM3u(ITUNES);
+    expect(order).toBe('title-artist');
+    expect(tracks).toEqual([
+      track('Hyperbola (Original Mix)', 'Rishi K.', 468000),
+      track('Remember (Original Mix)', 'Charlotte de Witte', 402000),
+      track('Fuego (Julian Jeweil Remix)', 'Oliver Huntemann, Dubfire', 392000),
+    ]);
+  });
+
+  it('keeps a dash inside the title: the artist is the last part', () => {
+    const text =
+      '#EXTINF:200,Song - Live - Band\n/Music/Band/Album/01 Song - Live.mp3\n' +
+      '#EXTINF:100,Other - Band\n/Music/Band/Album/02 Other.mp3';
+    expect(importFileParseM3u(text).tracks[0]).toEqual(track('Song - Live', 'Band', 200000));
+  });
+
+  it('an Artist - Title file stays as it is, by file name or by artist folder', () => {
+    expect(importFileParseM3u('#EXTINF:1,Adele - Hello\n/Music/Adele/25/01 Hello.flac').order).toBe(
+      'artist-title',
+    );
+    expect(importFileParseM3u('#EXTINF:1,Adele - Hello\n/Music/Adele/25/track01.flac').order).toBe(
+      'artist-title',
+    );
+  });
+
+  it('a file named "Artist - Title" settles nothing, so the common order stands', () => {
+    expect(importFileParseM3u('#EXTINF:1,Hello - Adele\n/flat/Adele - Hello.mp3').order).toBe(
+      'artist-title',
+    );
+  });
+
+  it('goes with the majority, and one odd line follows the rest', () => {
+    const text =
+      '#EXTINF:1,Hello - Adele\n/Music/Adele/25/01 Hello.mp3\n' +
+      '#EXTINF:1,Skyfall - Adele\n/Music/Adele/Skyfall/01 Skyfall.mp3\n' +
+      '#EXTINF:1,Stay - Rihanna\n/elsewhere/x.mp3';
+    const { tracks, order } = importFileParseM3u(text);
+    expect(order).toBe('title-artist');
+    expect(tracks[2]).toEqual(track('Stay', 'Rihanna', 1000));
+  });
+
+  it('reads it the way it is told to, whatever the paths say', () => {
+    expect(importFileParseM3u(ITUNES, 'artist-title').tracks[0]).toEqual(
+      track('Rishi K.', 'Hyperbola (Original Mix)', 468000),
+    );
+    expect(importFileParseM3u('#EXTINF:1,A - B', 'title-artist').tracks).toEqual([
+      track('A', 'B', 1000),
+    ]);
+  });
 });
 
 describe('importFileAutoMapColumns', () => {
