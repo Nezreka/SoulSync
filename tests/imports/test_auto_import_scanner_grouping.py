@@ -328,3 +328,39 @@ def test_untagged_files_at_the_root_stay_singles(worker, tmp_path):
     candidates = []
     worker._scan_directory(str(tmp_path), candidates, staging_root=str(tmp_path))
     assert [c.is_single for c in candidates] == [True, True]
+
+
+# ---------------------------------------------------------------------------
+# One album dropped straight into the staging root
+# ---------------------------------------------------------------------------
+
+
+def test_an_album_at_the_staging_root_is_named_by_its_tag_not_the_inbox(worker, tmp_path):
+    """A lone Blondie file in /app/Staging was listed as an album called
+    "Staging" and looked up as "Blondie Staging". The root is the inbox, not
+    a folder anyone named."""
+    staging = tmp_path / 'Staging'
+    staging.mkdir()
+    _write_flac(str(staging / 'atomic.flac'), album='Atomic/Atomix', track=1, title='Atomic')
+
+    candidates = []
+    worker._scan_directory(str(staging), candidates, staging_root=str(staging))
+
+    assert len(candidates) == 1
+    assert candidates[0].name == 'Atomic/Atomix'
+    # and the folder-name lookup, which would search for "Staging", is skipped
+    assert candidates[0].is_staging_root is True
+
+
+def test_an_album_in_its_own_folder_is_still_named_by_the_folder(worker, tmp_path):
+    """#1289: the folder the user named wins over the tag, inside staging."""
+    staging = tmp_path / 'Staging'
+    album = staging / 'Beatles'
+    album.mkdir(parents=True)
+    _write_flac(str(album / '01.flac'), album='Sgt. Pepper', track=1, title='One')
+
+    candidates = []
+    worker._scan_directory(str(staging), candidates, staging_root=str(staging))
+
+    assert [c.name for c in candidates] == ['Beatles']
+    assert candidates[0].is_staging_root is False

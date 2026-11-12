@@ -1194,12 +1194,18 @@ class AutoImportWorker:
             except Exception as exc:
                 logger.debug("display-name tag read failed for %s: %s", group_files[0], exc)
 
+            # A subfolder holding one album is named by the folder (#1289). The
+            # staging root is not a folder anyone named: a lone album's files
+            # dropped straight into it were listed as "Staging", and looked up
+            # as an album called Staging.
+            named_by_folder = len(groups) == 1 and not is_root
             candidates.append(FolderCandidate(
                 path=directory,
-                name=os.path.basename(directory) if len(groups) == 1 else str(display_name),
+                name=os.path.basename(directory) if named_by_folder else str(display_name),
                 audio_files=audio_files,
                 disc_structure=disc_structure if len(disc_structure) > 1 else {},
                 folder_hash=folder_hash,
+                is_staging_root=is_root,
             ))
 
         if untagged and not is_root:
