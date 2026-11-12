@@ -14,6 +14,8 @@ import {
   filterAutomations,
   filterOptions,
   forMusicSide,
+  forSide,
+  forVideoSide,
   librarySections,
   readAutomationsList,
   recentRuns,
@@ -51,6 +53,27 @@ describe('forMusicSide', () => {
 
   it('keeps rows with no owner — pre-migration rows predate the column', () => {
     expect(forMusicSide([auto({ id: 1, owned_by: null })]).map((a) => a.id)).toEqual([1]);
+  });
+});
+
+describe('forVideoSide', () => {
+  const rows = [
+    auto({ id: 1 }),
+    auto({ id: 2, owned_by: 'video', is_system: 1 }),
+    auto({ id: 3, owned_by: 'video' }),
+    auto({ id: 4, owned_by: 'auto_sync' }),
+    auto({ id: 5, owned_by: 'system:repair_job' }),
+  ];
+
+  it('keeps the rows the engine tags video, system and user-built', () => {
+    expect(forVideoSide(rows).map((a) => a.id)).toEqual([2, 3]);
+  });
+
+  it('forSide splits one list into the two sides with nothing shared', () => {
+    const music = forSide(rows, 'music').map((a) => a.id);
+    const video = forSide(rows, 'video').map((a) => a.id);
+    expect(music).toEqual([1, 4, 5]);
+    expect(video).toEqual([2, 3]);
   });
 });
 

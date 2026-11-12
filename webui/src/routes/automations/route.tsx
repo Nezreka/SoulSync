@@ -22,8 +22,10 @@ function isReactOwned(): boolean {
 
 export const Route = createFileRoute('/automations')({
   validateSearch: automationsSearchSchema,
-  beforeLoad: ({ context }) => {
-    guardPageAccess(context.shell.bridge, 'automations');
+  beforeLoad: ({ context, search }) => {
+    // the video side's automations ask for video-automations (and the video
+    // side), not the music page's permission. same as the video dashboard.
+    guardPageAccess(context.shell.bridge, 'automations', search.media ? '?media=video' : undefined);
   },
   loader: async ({ context }) => {
     if (!isReactOwned()) return;
@@ -52,5 +54,6 @@ function AutomationsRouteComponent() {
   if (!isReactOwned()) {
     return <LegacyRouteController pathname="/automations" />;
   }
-  return <AutomationsPage />;
+  const { media } = Route.useSearch();
+  return <AutomationsPage side={media === 'video' ? 'video' : 'music'} />;
 }

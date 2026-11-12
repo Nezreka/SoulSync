@@ -425,40 +425,6 @@
 }
 .automation-card .auto-progress-log:empty { display: none; }
 
-/* ── Empty state ────────────────────────────────────────────────────────── */
-.automations-empty {
-    text-align: center; padding: 70px 20px;
-}
-.automations-empty .automations-empty-icon {
-    width: 76px; height: 76px; margin: 0 auto 18px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 34px; border-radius: 24px;
-    background: radial-gradient(circle at 30% 25%, rgba(var(--accent-rgb), 0.25), rgba(var(--accent-rgb), 0.06));
-    border: 1px solid rgba(var(--accent-rgb), 0.25);
-    box-shadow: 0 0 40px -8px rgba(var(--accent-rgb), 0.35);
-}
-.automations-empty .automations-empty-title {
-    font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 7px;
-}
-.automations-empty .automations-empty-text {
-    font-size: 13px; color: var(--white-a45); margin-bottom: 22px;
-    max-width: 380px; margin-left: auto; margin-right: auto; line-height: 1.6;
-}
-
-/* "+ New Automation" — the page's primary action */
-.automations-list-view .auto-new-btn, .automations-empty .auto-new-btn {
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.9), rgba(var(--accent-rgb), 0.65));
-    border: 1px solid rgba(var(--accent-light-rgb), 0.4);
-    color: #fff; font-weight: 650; font-size: 13px; font-family: inherit;
-    padding: 10px 18px; border-radius: 11px; cursor: pointer;
-    box-shadow: 0 4px 18px -4px rgba(var(--accent-rgb), 0.5);
-    transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
-}
-.automations-list-view .auto-new-btn:hover, .automations-empty .auto-new-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 26px -4px rgba(var(--accent-rgb), 0.6);
-}
-
 /* ── Automation Hub (templates / recipes / guides) ──────────────────────── */
 .automations-section .auto-hub-tabs {
     display: flex; gap: 6px; padding: 4px 0 10px; flex-wrap: wrap;

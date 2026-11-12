@@ -22,7 +22,10 @@ export type AutomationGlyph =
   | 'broom'
   | 'headphones'
   | 'star'
-  | 'download';
+  | 'download'
+  | 'layers'
+  | 'calendar'
+  | 'feed';
 
 const PATHS: Record<AutomationGlyph, React.ReactNode> = {
   clock: (
@@ -39,7 +42,7 @@ const PATHS: Record<AutomationGlyph, React.ReactNode> = {
       <path d="M21 16.5V7l-2.5.8" />
     </>
   ),
-  wrench: <path d="M14.5 6.5a4 4 0 0 0 5 5L10 21l-3-3 9.5-9.500zM14.5 6.5 17 4" />,
+  wrench: <path d="M14.5 6.5a4 4 0 0 0 5 5L10 21l-3-3 9.5-9.5zM14.5 6.5 17 4" />,
   radar: (
     <>
       <circle cx="12" cy="12" r="8.5" />
@@ -61,8 +64,22 @@ const PATHS: Record<AutomationGlyph, React.ReactNode> = {
       <rect x="16.5" y="13.5" width="4" height="6" rx="1.5" />
     </>
   ),
-  star: <path d="m12 4 2.4 5 5.6.700-4.1 3.8 1.1 5.5-5-2.8-5 2.8 1.1-5.500L4 9.7 9.6 9z" />,
+  star: <path d="m12 4 2.4 5 5.6.700-4.1 3.8 1.1 5.5-5-2.8-5 2.8 1.1-5.5L4 9.7 9.6 9z" />,
   download: <path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14" />,
+  // artwork laid over artwork, and titles gathered into a set
+  layers: <path d="m12 4 8.5 4.5L12 13 3.5 8.5zM3.5 12.5 12 17l8.5-4.5M3.5 16.5 12 21l8.5-4.5" />,
+  calendar: (
+    <>
+      <rect x="4" y="5.5" width="16" height="14.5" rx="2.5" />
+      <path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" />
+    </>
+  ),
+  feed: (
+    <>
+      <circle cx="6" cy="18" r="1.5" />
+      <path d="M4.5 11.5a8 8 0 0 1 8 8M4.5 5a14.5 14.5 0 0 1 14.5 14.5" />
+    </>
+  ),
 };
 
 /** The glyph for an automation, by what it does and then by what starts it. */
@@ -71,6 +88,10 @@ export function automationGlyph(
 ): AutomationGlyph {
   const action = a.action_type ?? '';
   if (a.owned_by === 'auto_sync' || /playlist|mirrored/.test(action)) return 'playlist';
+  // the video side's own kinds of work, before the words they share with music
+  if (/overlay|collection/.test(action)) return 'layers';
+  if (/airing/.test(action)) return 'calendar';
+  if (/rss_sync|fresh_refresh|import_lists/.test(action)) return 'feed';
   if (/wishlist/.test(action)) return 'star';
   if (/listening/.test(action)) return 'headphones';
   if (/database|backup/.test(action)) return 'database';

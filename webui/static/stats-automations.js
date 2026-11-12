@@ -1809,9 +1809,9 @@ const _AUTO_CTX_VIDEO = {
     },
     blocksUrl: '/api/video/automations/blocks',
     ownedBy: 'video',
-    // Reloads the video automations list after a save (video-automations.js
-    // exposes this; falls back to a no-op if the video page isn't loaded).
-    onSaved: function () { return window._reloadVideoAutomations ? window._reloadVideoAutomations() : null; },
+    // The video list is the React automations page (/automations?media=video),
+    // which repaints itself on this event.
+    onSaved: function () { document.dispatchEvent(new CustomEvent('soulsync:automations-changed')); return null; },
 };
 let _autoBuilderCtx = _AUTO_CTX_MUSIC;
 
@@ -2877,7 +2877,7 @@ async function _bulkToggleGroup(groupName, currentlyAllEnabled) {
 // schedule stays alive) and event triggers are dropped. Individual enabled
 // switches are untouched, so un-pausing restores exactly what the user had.
 // Manual "Run now" still executes. Shared by the music page (side='music')
-// and the video automations page (side='video', video-automations.js).
+// and the video side (side='video'; its page is the React automations page now).
 async function renderAutomationsMasterToggle(host, side) {
     if (!host) return;
     let enabled = side !== 'video';   // optimistic defaults: music on, video off
@@ -3507,6 +3507,8 @@ async function deployHubGroup(groupId) {
     if (created > 0) {
         showToast(`Deployed "${group.name}" — ${created} automation${created > 1 ? 's' : ''} created${failed ? `, ${failed} failed` : ''}`, 'success');
         loadAutomations();
+        // the React automations page (both sides) repaints its own list on this
+        document.dispatchEvent(new CustomEvent('soulsync:automations-changed'));
     } else {
         showToast(`Failed to deploy "${group.name}"`, 'error');
     }

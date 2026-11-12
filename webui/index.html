@@ -1473,41 +1473,14 @@
                         </div>
                     </div>
                 </section>
-                <!-- Automations page — the SAME app-wide system automations as music
-                     (minus Refresh Beatport Cache + user/playlist ones). Reuses the
-                     music .automation-* card look; built by video/video-automations.js. -->
+                <!-- Automations: the page itself is the React /automations route on
+                     ?media=video (video-side.js hands off to it). What stays here is the
+                     shared vanilla builder: the React page shows this subpage for the
+                     length of an edit and takes the screen back when it closes. -->
                 <section class="video-subpage" data-video-subpage="video-automations" hidden>
-                    <!-- List view (swaps with the builder view below, exactly like the
-                         music page does inside #automations-page). -->
-                    <div class="automations-list-view" id="vauto-list-view">
-                        <div class="page-shell automations-container">
-                            <div class="dashboard-header">
-                                <div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                                <div class="header-text">
-                                    <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon"
-                                            alt=""><span>Automations</span></h2>
-                                    <p class="header-subtitle">Video tasks that keep your movie &amp; TV library fresh —
-                                        separate from the music side</p>
-                                </div>
-                                <div class="header-spacer"></div>
-                                <div class="header-actions">
-                                    <button class="auto-new-btn" onclick="showVideoAutomationBuilder()">+ New
-                                        Automation</button>
-                                </div>
-                            </div>
-                            <div class="automations-stats" data-vauto-stats></div>
-                            <div class="automations-list" data-vauto-list></div>
-                            <div class="automations-empty" data-vauto-empty style="display:none;">
-                                <div class="automations-empty-icon">&#9889;</div>
-                                <div class="automations-empty-title">No video automations yet</div>
-                                <div class="automations-empty-text">The video side has its own automations (library
-                                    scan, cleanup, wishlist…) — separate from the music ones. Create your first one.
-                                </div>
-                                <button class="auto-new-btn" onclick="showVideoAutomationBuilder()">+ New
-                                    Automation</button>
-                            </div>
-                        </div>
-                    </div>
+                    <!-- the builder swaps itself with this on open and close. the list it
+                         used to hold is the React page now, so it stays empty. -->
+                    <div class="automations-list-view" id="vauto-list-view"></div>
 
                     <!-- Builder view — mirrors the music builder markup with vauto- prefixed
                          ids so the SAME shared builder functions (showAutomationBuilder core,
@@ -12816,7 +12789,6 @@
          used by the detail page's inline acquisition buttons -->
     <script src="{{ url_for('static', filename='video/video-grab.js', v=static_v) }}"></script>
     <!-- Automations page (shared system automations, video view) -->
-    <script src="{{ url_for('static', filename='video/video-automations.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->

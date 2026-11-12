@@ -286,7 +286,8 @@ export function QuickSettings() {
 /** The engine's next moves. `compact` is the dashboard rail's "Up next": the
  *  next three with a "See all" for the rest, no quick-settings footer (that
  *  lives at the page bottom). */
-/** the automations page for a side: the video one is a vanilla video page */
+/** the automations page for a side: the video shell hands its own off to
+ *  /automations?media=video and keeps the sidebar on the video side */
 function openAutomations(side: 'music' | 'video') {
   if (side === 'video')
     document.dispatchEvent(

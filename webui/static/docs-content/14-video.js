@@ -970,6 +970,19 @@ registerDocsSection({
             body: `
 The video side surfaces the same **system automation engine** the music side uses: scheduled tasks and event-driven workflows, minus the music-only kinds (Beatport, user, playlist triggers). SoulSync seeds **28 system automations** for video — all enabled, all editable or deletable.
 
+## The page
+
+Video's Automations page is the same page the music side has, showing video's automations only. Four pills along the top:
+
+- **Overview**: the next 24 hours drawn as a lane of runs, what is up next, what needs attention, and what ran last with what each one did.
+- **All automations**: every video automation in sections (Operations, your own groups, My Automations, Maintenance). The chips above narrow it to Needs attention, Scheduled, Event-driven or Switched off, and the search box and the two filters narrow it further. Click a row to open it: when it runs, what it does, its last runs, and Run now, Edit and Run history. The switch on the row turns that one automation on or off.
+- **Activity**: the last 24 hours by automation with failures first, and the last week by day.
+- **Guides**: one-click pipelines, single recipes, tips and the block reference, all written for video.
+
+**Automations on** at the top right is the video side's master switch. It starts paused on a new install. While it is paused nothing runs on a schedule or an event, each automation keeps its own switch, and Run now still works. It does not touch the music side.
+
+**New automation** opens the builder with video's own triggers and actions. The **Auto-Update Overlays** row also has **Configure overlays**, which opens the same per-scope overlay settings the Overlay Studio uses.
+
 ## Seeded video system automations
 
 | Name | Schedule | What it does |

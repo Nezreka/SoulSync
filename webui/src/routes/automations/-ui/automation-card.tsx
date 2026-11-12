@@ -549,6 +549,20 @@ export function AutomationCard({
               <button type="button" className="automx-cap" onClick={() => on.onShowHistory?.(a)}>
                 Run history
               </button>
+              {/* which template each movie, show, season and episode gets is
+                  what this automation applies: the same editor the Overlay
+                  Studio opens */}
+              {a.action_type === 'video_apply_overlays' &&
+              window.VideoOverlayEditor?.openSettings ? (
+                <button
+                  type="button"
+                  className="automx-cap"
+                  title="Which template each movie, show, season and episode gets"
+                  onClick={() => window.VideoOverlayEditor?.openSettings?.()}
+                >
+                  Configure overlays
+                </button>
+              ) : null}
               {/* System automations are seeded and undeletable, so they have
                   no duplicate, group or delete. */}
               {isSystem ? null : (

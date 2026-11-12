@@ -1205,6 +1205,20 @@ const HELPER_CONTENT = {
         description: 'All your automations — system and custom. Each card shows the trigger → action → then flow, run status, and controls.',
         docsId: 'auto-overview'
     },
+    '.automx-new-btn': {
+        title: 'New Automation',
+        description: 'Open the visual builder to create a new automation. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN).',
+        docsId: 'auto-builder'
+    },
+    '.automx-master': {
+        title: 'Automations Master Switch',
+        description: 'Pauses every scheduled and event run on this side. Each automation keeps its own switch, and Run now still works while paused.',
+        docsId: 'auto-overview'
+    },
+    '.automx-search': {
+        title: 'Search Automations',
+        description: 'Filter the list by name, trigger or action.',
+    },
     '.auto-new-btn': {
         title: 'New Automation',
         description: 'Open the visual builder to create a new automation. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN).',
@@ -2345,17 +2359,20 @@ const HELPER_TOURS = {
         description: 'Create automated workflows with triggers and actions.',
         icon: '🤖',
         steps: [
-            // List view (visible on load)
-            { page: 'automations', selector: '#automations-list-view', title: 'Automations Overview', description: 'All your automations live here, organized into System (built-in), Custom groups, and My Automations. Each card shows its WHEN trigger, DO action, and THEN notifications.' },
-            { page: 'automations', selector: '#automations-stats', title: 'Stats Bar', description: 'Quick counts of total automations, how many are active, paused, and custom. Also shows system automations running background tasks like enrichment and watchlist scanning.' },
-            { page: 'automations', selector: '.auto-new-btn', title: 'Create New Automation', description: 'Opens the visual builder. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN). Triggers include schedules, events (download complete, new release), and signals from other automations.' },
+            // the page is React (webui/src/routes/automations): these anchor to
+            // what it renders. the old #automations-list-view / .auto-new-btn
+            // anchors pointed at markup that no longer exists.
+            { page: 'automations', selector: '.automx-pills', title: 'Four Places', description: 'Overview shows the next 24 hours, what is up next, what needs attention and what ran last. All automations is every one of them in sections. Activity is the last day and week of runs. Guides holds ready-made pipelines and recipes.' },
+            { page: 'automations', selector: '.automx-head-sub', title: 'At a Glance', description: 'How many automations are on, how many are off, when the next one runs, and how many need attention.' },
+            { page: 'automations', selector: '.automx-master', title: 'The Master Switch', description: 'Pauses every scheduled and event run on this side at once. Each automation keeps its own switch, and Run now still works while paused.' },
+            { page: 'automations', selector: '.automx-new-btn', title: 'Create New Automation', description: 'Opens the visual builder. Choose a trigger (WHEN), an action (DO), and optional notifications (THEN). Triggers include schedules, events (download complete, new release), and signals from other automations.' },
 
             // Builder (describe since it requires clicking)
-            { page: 'automations', selector: '.auto-new-btn', title: 'The Builder', description: 'The builder has a sidebar with draggable blocks and a canvas. Drag a WHEN block (e.g., "Every 6 hours"), a DO block (e.g., "Run Watchlist Scan"), and optionally a THEN block (e.g., "Send Discord notification").' },
-            { page: 'automations', selector: '.auto-new-btn', title: 'Signals & Chains', description: 'Advanced: automations can fire "signals" that trigger other automations, creating chains. Example: Watchlist scan → fires "new_release" signal → Download automation picks it up. Max chain depth is 5.' },
+            { page: 'automations', selector: '.automx-new-btn', title: 'The Builder', description: 'The builder has a sidebar with draggable blocks and a canvas. Drag a WHEN block (e.g., "Every 6 hours"), a DO block (e.g., "Run Watchlist Scan"), and optionally a THEN block (e.g., "Send Discord notification").' },
+            { page: 'automations', selector: '.automx-new-btn', title: 'Signals & Chains', description: 'Advanced: automations can fire "signals" that trigger other automations, creating chains. Example: Watchlist scan → fires "new_release" signal → Download automation picks it up. Max chain depth is 5.' },
 
-            // Hub section
-            { page: 'automations', selector: '#auto-section-hub', title: 'Automation Hub', description: 'Pre-built templates, pipeline recipes, quick-start guides, and reference docs. Browse Pipelines for ready-made multi-step workflows, or check Recipes for common automation patterns. Great starting point! 🎉' },
+            // the Guides pill (the hub lives behind it)
+            { page: 'automations', selector: '.automx-pills', title: 'Guides', description: 'The Guides pill holds pre-built pipelines, single recipes, quick-start guides and reference docs. Browse Pipelines for ready-made multi-step workflows, or Singles for common patterns. Great starting point! 🎉' },
         ]
     },
     'library': {

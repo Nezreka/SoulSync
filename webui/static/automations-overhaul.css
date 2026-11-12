@@ -723,12 +723,18 @@
   font-size: 13px;
   padding: 0 14px;
 }
+.automx .automx-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .automx .automx-search {
-  width: 220px;
+  width: 190px;
   max-width: 100%;
 }
 .automx .automx-select {
-  max-width: 180px;
+  max-width: 160px;
   color-scheme: dark;
 }
 .automx .automx-search:focus,
@@ -1294,6 +1300,14 @@
   .automx .automx-row-when {
     display: none;
   }
+  /* a phone has room for a third of a name on one line: give it two */
+  .automx .automx-row-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    line-height: 1.25;
+  }
   .automx .automx-detail {
     padding-left: 16px;
   }
@@ -1305,8 +1319,17 @@
     padding-left: 0;
     border-left: 0;
   }
+  .automx .automx-filters {
+    flex-wrap: wrap;
+    width: 100%;
+  }
   .automx .automx-search {
     width: 100%;
+  }
+  .automx .automx-select {
+    flex: 1 1 0;
+    max-width: none;
+    min-width: 0;
   }
   .automx .automx-lenses {
     margin-right: 0;

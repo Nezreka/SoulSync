@@ -3,6 +3,7 @@ import {
   type Automation,
   type AutomationActivityRow,
   type AutomationsListResponse,
+  type AutomationsSide,
 } from './-automations.types';
 
 /** `enabled` / `is_system` arrive as SQLite ints (0/1), not booleans. */
@@ -33,6 +34,16 @@ export function forMusicSide(automations: Automation[]): Automation[] {
   return automations.filter(
     (a) => a.owned_by !== 'video' && (!a.action_type || !a.action_type.startsWith('video_')),
   );
+}
+
+/** The video side's rows: the ones the engine tags `owned_by: 'video'`. */
+export function forVideoSide(automations: Automation[]): Automation[] {
+  return automations.filter((a) => a.owned_by === 'video');
+}
+
+/** One side's automations out of the shared list. */
+export function forSide(automations: Automation[], side: AutomationsSide): Automation[] {
+  return side === 'video' ? forVideoSide(automations) : forMusicSide(automations);
 }
 
 /**

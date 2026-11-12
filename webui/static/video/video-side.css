@@ -195,14 +195,20 @@ body[data-side="video"][data-video-page="video-downloads"] #webui-react-root,
 body[data-side="video"][data-video-page="video-wishlist"] #webui-react-root,
 body[data-side="video"][data-video-page="video-tools"] #webui-react-root,
 body[data-side="video"][data-video-page="video-calendar"] #webui-react-root,
-body[data-side="video"][data-video-page="video-dashboard"] #webui-react-root {
+body[data-side="video"][data-video-page="video-dashboard"] #webui-react-root,
+/* The automations page too (/automations?media=video). Its builder is still
+   the shared vanilla one, in this shell's own automations subpage: while it
+   is open the React page puts vauto-building on the body, and the screen
+   goes back to the video host until it closes. */
+body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #webui-react-root {
     display: block !important;
 }
 body[data-side="video"][data-video-page="video-downloads"] #video-page-host,
 body[data-side="video"][data-video-page="video-wishlist"] #video-page-host,
 body[data-side="video"][data-video-page="video-tools"] #video-page-host,
 body[data-side="video"][data-video-page="video-calendar"] #video-page-host,
-body[data-side="video"][data-video-page="video-dashboard"] #video-page-host {
+body[data-side="video"][data-video-page="video-dashboard"] #video-page-host,
+body[data-side="video"][data-video-page="video-automations"]:not(.vauto-building) #video-page-host {
     display: none !important;
 }
 /* Video-only additions inside the shared settings page (e.g. the Movies/TV

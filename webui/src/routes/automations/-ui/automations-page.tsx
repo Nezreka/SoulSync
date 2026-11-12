@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useProfile, useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { Automation, AutomationsSearch } from '../-automations.types';
+import type { Automation, AutomationsSearch, AutomationsSide } from '../-automations.types';
 
 import {
   AUTOMATIONS_QUERY_KEY,
@@ -36,7 +36,7 @@ import {
   collectionAutomations,
   filterAutomations,
   filterOptions,
-  forMusicSide,
+  forSide,
   librarySections,
   readAutomationsList,
   upcomingRuns,
@@ -54,8 +54,12 @@ import { AutomationsOverview } from './automations-overview';
 import { type DeleteGroupChoice, DeleteGroupDialog } from './delete-group-dialog';
 import { GroupDropdown } from './group-dropdown';
 
-export function AutomationsPage() {
-  useReactPageShell('automations');
+/**
+ * One page for both sides. `side` picks whose automations it shows and whose
+ * master switch it flips; the video side reaches it on /automations?media=video.
+ */
+export function AutomationsPage({ side = 'music' }: { side?: AutomationsSide }) {
+  useReactPageShell('automations', side === 'video' ? '?media=video' : undefined);
 
   const { profileId } = useProfile();
   const search = Route.useSearch();
@@ -65,7 +69,7 @@ export function AutomationsPage() {
   const listQuery = useQuery(automationsListQueryOptions(profileId));
   // What every automation did in the last day. The overview's Needs attention
   // reads it too: `last_error` alone forgets a failure after one clean run.
-  const activityQuery = useQuery(automationsActivityQueryOptions(profileId));
+  const activityQuery = useQuery(automationsActivityQueryOptions(profileId, side));
   const masterQuery = useQuery(automationsMasterQueryOptions());
   // Live run state, merged from the socket mirror. Not query-cached: it is a
   // stream of transient frames, not a resource with a canonical server copy.
@@ -76,16 +80,24 @@ export function AutomationsPage() {
   // did the same catch-up fetch right after painting.
   // Labels for trigger/action types the static maps do not cover. Cached
   // indefinitely — block definitions only change when the app ships new ones.
-  const blocksQuery = useQuery(automationBlocksQueryOptions());
+  const blocksQuery = useQuery(automationBlocksQueryOptions(side));
   const blockLabel = useMemo(() => blockLabelLookup(blocksQuery.data), [blocksQuery.data]);
 
   const progressSeed = useQuery(automationsProgressQueryOptions());
   const progress = useAutomationProgress(progressSeed.data);
-  // The builder stays in vanilla and is shared with the video page; this hands
-  // the shell over for the edit and takes it back on close.
-  const openBuilder = useVanillaBuilder(() => void refresh());
+  // The builder stays in vanilla and is shared by both sides; this hands the
+  // shell over for the edit and takes it back on close.
+  const openBuilder = useVanillaBuilder(() => void refresh(), side);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: AUTOMATIONS_QUERY_KEY });
+
+  // The Guides tab is vanilla markup, and deploying a pipeline from it creates
+  // rows behind this page's back. It says so with this event.
+  useEffect(() => {
+    const changed = () => void queryClient.invalidateQueries({ queryKey: AUTOMATIONS_QUERY_KEY });
+    document.addEventListener('soulsync:automations-changed', changed);
+    return () => document.removeEventListener('soulsync:automations-changed', changed);
+  }, [queryClient]);
   const fail = (error: Error) => window.showToast?.(`Error: ${error.message}`, 'error');
 
   const toggle = useMutation({
@@ -137,10 +149,10 @@ export function AutomationsPage() {
   });
 
   const master = useMutation({
-    mutationFn: (enabled: boolean) => setAutomationsMaster('music', enabled),
+    mutationFn: (enabled: boolean) => setAutomationsMaster(side, enabled),
     onSuccess: async (_v, enabled) => {
       window.showToast?.(
-        `Music automations ${enabled ? 'resumed' : 'paused'}`,
+        `${side === 'video' ? 'Video' : 'Music'} automations ${enabled ? 'resumed' : 'paused'}`,
         enabled ? 'success' : 'info',
       );
       await refresh();
@@ -203,8 +215,8 @@ export function AutomationsPage() {
 
   // Both sides share ONE endpoint; only owned_by separates them.
   const automations = useMemo(
-    () => forMusicSide(readAutomationsList(listQuery.data)),
-    [listQuery.data],
+    () => forSide(readAutomationsList(listQuery.data), side),
+    [listQuery.data, side],
   );
   const recent = useMemo(() => activityQuery.data?.recent ?? [], [activityQuery.data]);
 
@@ -327,7 +339,10 @@ export function AutomationsPage() {
   } | null>(null);
   const [deletingGroup, setDeletingGroup] = useState<{ name: string; count: number } | null>(null);
 
-  const masterOn = masterQuery.data?.music !== false;
+  // music runs unless someone paused it; video starts paused (most installs
+  // predate it), so it is on only once the engine says so
+  const masterOn =
+    side === 'video' ? masterQuery.data?.video === true : masterQuery.data?.music !== false;
 
   const idsInGroup = (name: string) =>
     collectionAutomations(automations, `group:${name}`).map((a) => a.id);

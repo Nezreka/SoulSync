@@ -35,10 +35,17 @@ function auto(over: Partial<Automation> & { id: number }): Automation {
 
 let requests: { url: string; method: string; body?: unknown }[] = [];
 
+/** the vanilla builders, held here because the page wraps the globals */
+let showBuilder = vi.fn();
+let showVideoBuilder = vi.fn();
+
 /** what /api/automations/activity answers; a test sets it before rendering */
 let activity: AutomationActivity = {};
 
-function stubFetch(rows: Automation[], master: { music: boolean } = { music: true }) {
+function stubFetch(
+  rows: Automation[],
+  master: { music: boolean; video?: boolean } = { music: true },
+) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -79,7 +86,11 @@ function stubFetch(rows: Automation[], master: { music: boolean } = { music: tru
   );
 }
 
-function renderPage(rows: Automation[], master?: { music: boolean }, entry = '/automations') {
+function renderPage(
+  rows: Automation[],
+  master?: { music: boolean; video?: boolean },
+  entry = '/automations',
+) {
   requests = [];
   stubFetch(rows, master);
   const queryClient = createTestQueryClient();
@@ -105,7 +116,10 @@ beforeEach(() => {
   window.SoulSyncWebShellBridge = createShellBridge();
   window.showToast = vi.fn();
   window.showConfirmDialog = vi.fn(async () => true);
-  window.showAutomationBuilder = vi.fn();
+  showBuilder = vi.fn();
+  showVideoBuilder = vi.fn();
+  window.showAutomationBuilder = showBuilder;
+  window.showVideoAutomationBuilder = showVideoBuilder;
   activity = {};
 });
 afterEach(() => {
@@ -730,11 +744,127 @@ describe('AutomationsPage handlers', () => {
     openRow(3);
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    expect(window.showAutomationBuilder).toHaveBeenCalled();
+    // the page wraps the global while it is mounted; the vanilla one still ran
+    expect(showBuilder).toHaveBeenCalledWith(3);
     fireEvent.click(screen.getByRole('button', { name: 'Duplicate' }));
     await waitFor(() => expect(sent('/automations/3/duplicate')).toHaveLength(1));
     fireEvent.click(screen.getByRole('button', { name: 'Run now' }));
     await waitFor(() => expect(sent('/automations/3/run')).toHaveLength(1));
     delete window.showAutomationHistory;
+  });
+});
+
+/**
+ * The video side is this same page on /automations?media=video: the rows the
+ * engine tags `owned_by: 'video'`, the video master switch, the video builder.
+ */
+describe('AutomationsPage on the video side', () => {
+  const VIDEO = '/automations?media=video&view=library&nav=all';
+  const rows = () => [
+    auto({ id: 1, name: 'Sync Spotify', action_type: 'sync_playlist' }),
+    auto({
+      id: 2,
+      name: 'Process Movie Wishlist',
+      is_system: 1,
+      owned_by: 'video',
+      action_type: 'video_process_movie_wishlist',
+    }),
+    auto({ id: 3, name: 'Weekend movies', owned_by: 'video', action_type: 'video_scan_library' }),
+    auto({
+      id: 4,
+      name: 'Apply Overlays',
+      is_system: 1,
+      owned_by: 'video',
+      action_type: 'video_apply_overlays',
+    }),
+  ];
+
+  it('shows the video rows only, system and user-built', async () => {
+    renderPage(rows(), { music: true, video: true }, VIDEO);
+    await screen.findByText('Weekend movies');
+    expect(rowNames().sort()).toEqual([
+      'Apply Overlays',
+      'Process Movie Wishlist',
+      'Weekend movies',
+    ]);
+    expect(screen.queryByText('Sync Spotify')).toBeNull();
+  });
+
+  it('the music page still hides them', async () => {
+    renderLibrary(rows());
+    await screen.findByText('Sync Spotify');
+    expect(rowNames()).toEqual(['Sync Spotify']);
+  });
+
+  it('asks the video permission, the video activity and the video block labels', async () => {
+    renderPage(rows(), { music: true, video: true }, VIDEO);
+    await screen.findByText('Weekend movies');
+    expect(window.SoulSyncWebShellBridge!.isPageAllowed).toHaveBeenCalledWith(
+      'automations',
+      '?media=video',
+    );
+    expect(sent('/api/automations/activity?side=video', 'GET').length).toBeGreaterThan(0);
+    expect(sent('/api/video/automations/blocks', 'GET').length).toBeGreaterThan(0);
+    expect(sent('/api/automations/blocks', 'GET')).toHaveLength(0);
+  });
+
+  it('reads and flips the video master switch, which starts paused', async () => {
+    renderPage(rows(), { music: true }, VIDEO);
+    await screen.findByText('Weekend movies');
+    const master = screen.getByRole('button', { name: 'Paused' });
+    expect(master.getAttribute('aria-pressed')).toBe('false');
+
+    fireEvent.click(master);
+    await waitFor(() => expect(sent('/automations/master')).toHaveLength(1));
+    expect(sent('/automations/master')[0].body).toEqual({ side: 'video', enabled: true });
+    await waitFor(() =>
+      expect(window.showToast).toHaveBeenCalledWith('Video automations resumed', 'success'),
+    );
+  });
+
+  it('opens the video builder, never the music one', async () => {
+    renderPage(rows(), { music: true, video: true }, VIDEO);
+    await screen.findByText('Weekend movies');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New automation' }));
+    expect(showVideoBuilder).toHaveBeenCalledWith(undefined);
+    openRow(3);
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(showVideoBuilder).toHaveBeenCalledWith(3);
+    expect(showBuilder).not.toHaveBeenCalled();
+    document.body.classList.remove('vauto-building');
+  });
+
+  it('keeps the side as you move between the pills', async () => {
+    renderPage(rows(), { music: true, video: true }, VIDEO);
+    await screen.findByText('Weekend movies');
+    fireEvent.click(pill(/Activity/));
+    await waitFor(() => expect(pill(/Activity/).getAttribute('aria-selected')).toBe('true'));
+    fireEvent.click(pill(/All automations/));
+    await screen.findByText('Weekend movies');
+    expect(screen.queryByText('Sync Spotify')).toBeNull();
+  });
+
+  it('offers the overlay settings on the overlay automation, and only there', async () => {
+    const openSettings = vi.fn();
+    window.VideoOverlayEditor = { openSettings };
+    renderPage(rows(), { music: true, video: true }, VIDEO);
+    await screen.findByText('Apply Overlays');
+
+    openRow(2);
+    expect(screen.queryByRole('button', { name: 'Configure overlays' })).toBeNull();
+    openRow(2);
+    openRow(4);
+    fireEvent.click(screen.getByRole('button', { name: 'Configure overlays' }));
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    delete window.VideoOverlayEditor;
+  });
+
+  it('repaints when the vanilla builder or a pipeline deploy says the list changed', async () => {
+    renderPage(rows(), { music: true, video: true }, VIDEO);
+    await screen.findByText('Weekend movies');
+    const before = sent('/api/automations', 'GET').length;
+    document.dispatchEvent(new CustomEvent('soulsync:automations-changed'));
+    await waitFor(() => expect(sent('/api/automations', 'GET').length).toBeGreaterThan(before));
   });
 });

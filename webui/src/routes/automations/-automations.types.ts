@@ -14,6 +14,12 @@ function searchString(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * Which side's automations the page shows. Music and video share one engine,
+ * one table and this one page; `owned_by` on the row says whose it is.
+ */
+export type AutomationsSide = 'music' | 'video';
+
 // Which top-level view the page shows: the overview answers "is it working",
 // the library is every automation, activity is what they did lately.
 export const automationsViews = ['overview', 'library', 'activity'] as const;
@@ -59,6 +65,10 @@ function searchView(value: unknown): AutomationsViewName {
 // only adds state that used to be thrown away.
 export const automationsSearchSchema = z
   .object({
+    /** 'video' is the video side's automations. absent = music. */
+    media: z
+      .preprocess((v) => (v === 'video' ? 'video' : undefined), z.literal('video').optional())
+      .catch(undefined),
     /** 'overview' = status dashboard, 'library' = the browsable collection grid. */
     view: z
       .preprocess((v) => searchView(v), z.enum(automationsViews))

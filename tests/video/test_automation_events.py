@@ -28,7 +28,7 @@ from database.video_database import VideoDatabase
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _REGISTRATION_SRC = (_ROOT / "core" / "automation" / "handlers" / "registration.py").read_text(encoding="utf-8")
 _ENGINE_SRC = (_ROOT / "core" / "automation_engine.py").read_text(encoding="utf-8")
-_VAUTO_JS = (_ROOT / "webui" / "static" / "video" / "video-automations.js").read_text(encoding="utf-8")
+_AUTO_HELPERS_TS = (_ROOT / "webui" / "src" / "routes" / "automations" / "-automations.helpers.ts").read_text(encoding="utf-8")
 _MUSIC_JS = (_ROOT / "webui" / "static" / "stats-automations.js").read_text(encoding="utf-8")
 
 _ids = itertools.count(1)
@@ -289,10 +289,10 @@ def test_run_repair_action_explicit_pick_overrides_the_toggle(monkeypatch):
 def test_video_page_renders_user_built_automations():
     """The old page rendered ONLY the System section — a user-built automation
     saved from the video builder vanished on reload."""
-    assert "data-vauto-user-section" in _VAUTO_JS
-    assert "'My Automations'" in _VAUTO_JS
-    assert "a.is_system" in _VAUTO_JS                # sys/user split, like music
-    assert "Custom</span>" in _VAUTO_JS or "Custom<" in _VAUTO_JS
+    # the page is the React automations page now: the video side keeps every
+    # row the engine tags video, system or user-built, and the same sections
+    # the music side gets (webui/src/routes/automations, tested with vitest)
+    assert "return automations.filter((a) => a.owned_by === 'video');" in _AUTO_HELPERS_TS
 
 
 def test_new_block_types_have_builder_icons():
@@ -310,8 +310,6 @@ def test_hub_is_side_aware_with_video_content():
     for getter in ("_hubGroups()", "_hubRecipes()", "_hubGuides()", "_hubTips()",
                    "_hubReference()"):
         assert getter in _MUSIC_JS, getter
-    assert "coming soon" not in _VAUTO_JS          # panes no longer emptied
-    assert "_HUB_EMPTY" not in _VAUTO_JS
     # deploys from the video page tag ownership; recipes open the video builder
     assert "if (_hubIsVideo()) payload.owned_by = 'video';" in _MUSIC_JS
     assert "_hubIsVideo() ? showVideoAutomationBuilder() : showAutomationBuilder()" in _MUSIC_JS

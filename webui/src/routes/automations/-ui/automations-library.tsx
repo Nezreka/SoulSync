@@ -251,49 +251,53 @@ export function AutomationsLibrary({
             </button>
           ))}
         </div>
-        <input
-          type="search"
-          className="automx-search"
-          placeholder="Search automations"
-          aria-label="Search automations"
-          value={search.q}
-          onChange={(e) => setSearch({ q: e.target.value })}
-        />
-        {lensTotal >= AUTO_FILTER_BAR_MIN ? (
-          <>
-            <select
-              className="automx-select"
-              aria-label="Filter by trigger"
-              value={search.trigger}
-              onChange={(e) => setSearch({ trigger: e.target.value })}
-            >
-              <option value="">All Triggers</option>
-              {filterOptions.triggers.map((t) => (
-                <option key={t} value={t}>
-                  {formatTrigger(t, {}, cardHandlers.blockLabel)}
-                </option>
-              ))}
-            </select>
-            <select
-              className="automx-select"
-              aria-label="Filter by action"
-              value={search.action}
-              onChange={(e) => setSearch({ action: e.target.value })}
-            >
-              <option value="">All Actions</option>
-              {filterOptions.actions.map((t) => (
-                <option key={t} value={t}>
-                  {formatAction(t, cardHandlers.blockLabel)}
-                </option>
-              ))}
-            </select>
-          </>
-        ) : null}
-        {filtering ? (
-          <span className="automx-filter-count">
-            {shown} of {lensTotal}
-          </span>
-        ) : null}
+        {/* one group, so a narrow bar moves the search and its two filters to
+            the next line together instead of orphaning the last one */}
+        <div className="automx-filters">
+          <input
+            type="search"
+            className="automx-search"
+            placeholder="Search automations"
+            aria-label="Search automations"
+            value={search.q}
+            onChange={(e) => setSearch({ q: e.target.value })}
+          />
+          {lensTotal >= AUTO_FILTER_BAR_MIN ? (
+            <>
+              <select
+                className="automx-select"
+                aria-label="Filter by trigger"
+                value={search.trigger}
+                onChange={(e) => setSearch({ trigger: e.target.value })}
+              >
+                <option value="">All Triggers</option>
+                {filterOptions.triggers.map((t) => (
+                  <option key={t} value={t}>
+                    {formatTrigger(t, {}, cardHandlers.blockLabel)}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="automx-select"
+                aria-label="Filter by action"
+                value={search.action}
+                onChange={(e) => setSearch({ action: e.target.value })}
+              >
+                <option value="">All Actions</option>
+                {filterOptions.actions.map((t) => (
+                  <option key={t} value={t}>
+                    {formatAction(t, cardHandlers.blockLabel)}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : null}
+          {filtering ? (
+            <span className="automx-filter-count">
+              {shown} of {lensTotal}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       {shown === 0 && filtering ? (
