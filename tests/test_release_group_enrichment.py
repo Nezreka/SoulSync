@@ -113,6 +113,18 @@ def test_an_album_with_a_release_id_gets_its_group_backfilled(db, worker):
     worker._process_item(item)
     worker.mb_service.mb_client.get_release.assert_called_once_with(REL, includes=["release-groups"])
     assert _album_row(db)["musicbrainz_release_group_id"] == RG
+    # #2055: the answer named the group but not its kind, so that is asked
+    # next, once, and then there is nothing left
+    follow_up = worker._get_next_item()
+    assert (follow_up["type"], follow_up["id"], follow_up["group_id"]) == ("album_types", album_id, RG)
+    assert worker._get_next_item() is None
+
+
+def test_a_group_lookup_that_says_its_kind_leaves_nothing_to_ask(db, worker):
+    _album(db, release_id=REL, status="matched")
+    worker.mb_service.mb_client.get_release.return_value = {
+        "id": REL, "release-group": {"id": RG, "secondary-types": ["Live"]}}
+    worker._process_item(worker._get_next_item())
     assert worker._get_next_item() is None
 
 

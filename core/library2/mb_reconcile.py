@@ -43,6 +43,8 @@ from typing import Any, Dict, List, Optional
 from utils.logging_config import get_logger
 
 from .importer import release_title_key
+from .release_group_types import group_types
+from .release_group_types import stamp as stamp_group_types
 
 logger = get_logger("library2.mb_reconcile")
 
@@ -391,7 +393,7 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
     that share a group. Returns stats; safe to re-run (idempotent)."""
     stats: Dict[str, Any] = {
         "assigned": 0, "merged": 0, "review": 0, "renamespaced": 0,
-        "release_groups": 0, "skipped": None,
+        "release_groups": 0, "typed": 0, "skipped": None,
     }
     with closing(database._get_connection()) as conn:
         conn.execute(LIB2_RELEASE_GROUP_REVIEW_DDL)
@@ -420,10 +422,14 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
         by_title: Dict[str, List[Dict[str, Any]]] = {}
         by_date: Dict[str, List[Dict[str, Any]]] = {}
         group_mbids = set()
+        types_by_group: Dict[str, List[str]] = {}
         for group in groups:
             if not group.get("id") or not group.get("title"):
                 continue
             group_mbids.add(str(group["id"]))
+            kinds = group_types(group)
+            if kinds is not None:
+                types_by_group[str(group["id"]).lower()] = kinds
             by_title.setdefault(release_title_key(group["title"]), []).append(group)
             date = _full_date(group.get("first-release-date"))
             if date:
@@ -509,6 +515,13 @@ def reconcile_artist_release_groups(database: Any, artist_id: int, *,
                            VALUES(?,?,?,?, 'shared_release_group_unmerged')""",
                         (artist_id, survivor["id"], duplicate["id"], rg_mbid))
                     stats["review"] += cursor.rowcount
+        # #2055: the browse already said what kind each group is (live,
+        # soundtrack, ...): keep it for the artist page's sections
+        for album in _album_rows(conn, artist_id):
+            rg_mbid = str(album[_RG_COLUMN] or "").lower()
+            if rg_mbid in types_by_group and stamp_group_types(
+                    cursor, album["id"], rg_mbid, types_by_group[rg_mbid]):
+                stats["typed"] += 1
         conn.commit()
     if stats["merged"]:
         # Deliver any wishlist un-mirrors the folds enqueued (best-effort;

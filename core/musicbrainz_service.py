@@ -2012,8 +2012,38 @@ class MusicBrainzService:
         """One MusicBrainz lookup: the release group a release belongs to.
         None when MusicBrainz has no answer (unknown release or an outage —
         the caller retries later either way)."""
+        return self.lookup_release_group_and_types(release_mbid)[0]
+
+    def lookup_release_group_and_types(self, release_mbid: str):
+        """The same lookup, with the group's secondary types (live,
+        soundtrack, ...) it answers in passing: ``(group id, types)``. Types
+        are None when the answer does not carry them."""
+        from core.library2.release_group_types import group_types
         data = self.mb_client.get_release(release_mbid, includes=['release-groups'])
-        return self.release_group_of(data)
+        group = data.get('release-group') if isinstance(data, dict) else None
+        return self.release_group_of(data), group_types(group)
+
+    def lookup_release_group_types(self, release_group_mbid: str):
+        """One lookup: a release group's secondary types, None when
+        MusicBrainz has no answer."""
+        from core.library2.release_group_types import group_types
+        return group_types(self.mb_client.get_release_group(release_group_mbid))
+
+    def update_album_release_group_types(self, album_id: int, release_group_mbid: str, types) -> None:
+        """Keep what kind of release the album's group is (#2055)."""
+        from core.library2.release_group_types import stamp
+        conn = None
+        try:
+            conn = self.db._get_connection()
+            if stamp(conn, album_id, release_group_mbid, types):
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error storing release group types for album {album_id}: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                conn.close()
 
     def update_album_release_group(self, album_id: int, release_group_mbid: Optional[str]):
         """Store an album's release group (None = looked up, no answer) and

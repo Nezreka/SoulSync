@@ -60,6 +60,14 @@ def _bucket(album_type: str) -> str:
     return "single" if (album_type or "").lower() in _SINGLE_TYPES else "release"
 
 
+def _stamp_release_types(cursor: Any, album_id: Any, release_group_id: Any, release: Any) -> None:
+    """A MusicBrainz listing says what kind each release is (live,
+    soundtrack, ...): keep it with the group, for the artist page (#2055)."""
+    from core.library2.release_group_types import stamp
+    kinds = [str(v).strip().lower() for v in (getattr(release, "secondary_types", None) or []) if v]
+    stamp(cursor, album_id, release_group_id, kinds)
+
+
 def _normalize_type(raw: Any) -> str:
     value = str(raw or "").strip().lower()
     if value in {"album", "single", "ep", "compilation", "live"}:
@@ -689,6 +697,9 @@ def _expand_artist_discography(
                 existing["external_ids"] = merged_external_ids
                 if release_group_id and not existing["musicbrainz_release_group_id"]:
                     existing["musicbrainz_release_group_id"] = release_group_id
+                if release_group_id and str(
+                        existing["musicbrainz_release_group_id"]).lower() == str(release_group_id).lower():
+                    _stamp_release_types(cursor, existing["id"], release_group_id, release)
                 if id_conflict:
                     from core.library2.editions import record_alternative_edition
                     record_alternative_edition(
@@ -723,6 +734,8 @@ def _expand_artist_discography(
             new_id = cursor.lastrowid
             from core.library2.release_kind import confirm_release_kind
             confirm_release_kind(cursor, new_id, album_type)
+            if release_group_id:
+                _stamp_release_types(cursor, new_id, release_group_id, release)
             seen_ids.add(new_id)
             if auto_monitor_release:
                 if not defer_auto_monitor:

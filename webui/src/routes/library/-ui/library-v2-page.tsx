@@ -210,7 +210,11 @@ import {
   applyMusicBrainzDeclutter,
   classifyReleaseContent,
   DEFAULT_DISCOGRAPHY_FILTERS,
-  liveToggleLabel,
+  BASE_SECTIONS,
+  DISCOGRAPHY_SECTIONS,
+  groupReleases,
+  SECTION_LABELS,
+  type DiscographySection,
   passesDiscographyFilters,
   type DiscographyFilterState,
   type DiscographyOwnership,
@@ -6992,16 +6996,22 @@ function DiscographySection({
   );
 }
 
-const CATEGORY_LABELS = {
-  albums: 'Albums',
-  eps: 'EPs',
-  singles: 'Singles',
-} as const;
 const CONTENT_LABELS = {
-  live: 'Live',
-  compilations: 'Compilations',
   featured: 'Featured',
 } as const;
+
+/** How a release card reads to the section sorter. */
+function describeCard(card: DiscographyCard) {
+  return { title: card.title, album_type: card.albumType };
+}
+
+/** The Show pills: Albums, EPs and Singles always, and each further kind the
+ *  artist has a release of (#2055). */
+function shownSections(counts: Readonly<Record<DiscographySection, number>>) {
+  return DISCOGRAPHY_SECTIONS.filter(
+    (section) => (BASE_SECTIONS as readonly string[]).includes(section) || counts[section] > 0,
+  );
+}
 const OWNERSHIP_LABELS = {
   all: 'All',
   owned: 'Owned',
@@ -7012,12 +7022,15 @@ const OWNERSHIP_LABELS = {
 function DiscographyFilterBar({
   state,
   onChange,
+  counts,
   otherSources,
   onToggleOtherSources,
   otherSourcesBusy,
 }: {
   state: DiscographyFilterState;
   onChange: (next: DiscographyFilterState) => void;
+  /** how many releases each section holds, before any filter */
+  counts: Readonly<Record<DiscographySection, number>>;
   /** #1067 "+ Other sources": omitted when there is no provider id to ask
    *  with, because the endpoint refuses to name-search on purpose. */
   otherSources?: boolean;
@@ -7028,11 +7041,13 @@ function DiscographyFilterBar({
     <div className="discography-filters">
       <div className="filter-group">
         <span className="filter-label">Show</span>
-        {(Object.keys(CATEGORY_LABELS) as (keyof typeof CATEGORY_LABELS)[]).map((key) => (
+        {shownSections(counts).map((key) => (
           <button
             key={key}
             type="button"
             className={`discography-filter-btn${state.categories[key] ? ' active' : ''}`}
+            aria-pressed={state.categories[key]}
+            data-section={key}
             onClick={() =>
               onChange({
                 ...state,
@@ -7043,7 +7058,12 @@ function DiscographyFilterBar({
               })
             }
           >
-            {CATEGORY_LABELS[key]}
+            {SECTION_LABELS[key]}
+            {counts[key] > 0 ? (
+              <span className="filter-count" aria-hidden="true">
+                {counts[key]}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
@@ -7062,7 +7082,7 @@ function DiscographyFilterBar({
               })
             }
           >
-            {key === 'live' ? liveToggleLabel(state) : CONTENT_LABELS[key]}
+            {CONTENT_LABELS[key]}
           </button>
         ))}
       </div>
@@ -7701,8 +7721,6 @@ export function useDiscographyFilters(source?: string | null) {
   return { filters, setFilters };
 }
 
-type GroupLabel = 'Albums' | 'EPs' | 'Singles';
-
 /** ldp-05: the rich hero for an artist that IS in the catalogue. Same layout
  *  as the discovery hero — that is the point, a user arriving from search
  *  must not be able to tell which of the two they are looking at. Bio and
@@ -8081,23 +8099,41 @@ function ProviderArtistView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search.discoverAlbum, artistName]);
 
-  const buckets = (['albums', 'eps', 'singles'] as const).map((bucket) => ({
+  // #2055: live records, soundtracks and the rest get sections of their own
+  const describeRelease = (release: ProviderRelease) => ({
+    title: release.title,
+    album_type: release.album_type,
+    secondary_types: release.secondary_types,
+  });
+  const releasesBySection = groupReleases(
+    {
+      albums: discography.releasesFor('albums'),
+      eps: discography.releasesFor('eps'),
+      singles: discography.releasesFor('singles'),
+    },
+    describeRelease,
+    Boolean(filters.musicbrainz),
+  );
+  const otherBySection = groupReleases(
+    {
+      albums: otherSources.byBucket('album'),
+      eps: otherSources.byBucket('ep'),
+      singles: otherSources.byBucket('single'),
+    },
+    describeCard,
+  );
+  const sectionCounts = Object.fromEntries(
+    DISCOGRAPHY_SECTIONS.map((s) => [s, releasesBySection[s].length + otherBySection[s].length]),
+  ) as Record<DiscographySection, number>;
+  const buckets = DISCOGRAPHY_SECTIONS.map((bucket) => ({
     bucket,
-    title: ({ albums: 'Albums', eps: 'EPs', singles: 'Singles' } as const)[bucket],
-    cards: discography
-      .releasesFor(bucket)
+    title: SECTION_LABELS[bucket],
+    others: otherBySection[bucket].filter((card) =>
+      passesDiscographyFilters(describeCard(card), filters, card.owned === true, bucket),
+    ),
+    cards: releasesBySection[bucket]
       .filter((release) =>
-        filters.categories[bucket]
-          ? passesDiscographyFilters(
-              {
-                title: release.title,
-                album_type: release.album_type,
-                secondary_types: release.secondary_types,
-              },
-              filters,
-              release.owned === true,
-            )
-          : false,
+        passesDiscographyFilters(describeRelease(release), filters, release.owned === true, bucket),
       )
       .map(providerCard),
   }));
@@ -8129,8 +8165,10 @@ function ProviderArtistView({
                 listeners={heroStats.data?.listeners ?? null}
                 playcount={heroStats.data?.playcount ?? null}
                 followers={heroStats.data?.followers ?? null}
-                sections={buckets.map(({ title, bucket }) => ({
-                  label: title,
+                // the collection card counts by release type, as the library
+                // artist's does: a live album is still one of the albums
+                sections={BASE_SECTIONS.map((bucket) => ({
+                  label: SECTION_LABELS[bucket],
                   owned: discography.releasesFor(bucket).filter((r) => r.owned).length,
                   // #2012: "+ Other sources" releases are on the page, so in the total
                   total:
@@ -8196,19 +8234,15 @@ function ProviderArtistView({
             <DiscographyFilterBar
               state={filters}
               onChange={setFilters}
+              counts={sectionCounts}
               otherSources={otherSources.enabled}
               otherSourcesBusy={otherSources.busy}
               onToggleOtherSources={otherSources.available ? otherSources.toggle : undefined}
             />
 
             <DiscographySections>
-              {buckets.map(({ bucket, title, cards }) => {
-                const all = [
-                  ...cards,
-                  ...otherSources.byBucket(
-                    ({ albums: 'album', eps: 'ep', singles: 'single' } as const)[bucket],
-                  ),
-                ];
+              {buckets.map(({ bucket, title, cards, others }) => {
+                const all = [...cards, ...others];
                 if (all.length === 0) return null;
                 return (
                   <DiscographySection
@@ -8629,21 +8663,57 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   /** ldp-04: the filter bar governs `All Releases` in BOTH render modes, so
    *  switching Table ↔ Legacy never silently changes which releases are on
    *  screen. `My Library` is untouched by it, exactly as specified. */
-  function releasesOf(
-    entries: LibraryV2AlbumSummary[],
-    category: 'albums' | 'eps' | 'singles',
-  ): LibraryV2AlbumSummary[] {
-    const base = visibleReleases(entries, releasesMode);
+  const describeAlbum = (album: LibraryV2AlbumSummary) => ({
+    title: album.title,
+    album_type: album.album_type,
+    release_types: album.release_types,
+  });
+  // #2055: live records, soundtracks and the rest get sections of their own,
+  // on both tabs and in both render modes
+  const artistReleases = artistQuery.data;
+  const albumsBySection = groupReleases(
+    {
+      albums: visibleReleases(artistReleases?.albums ?? [], releasesMode),
+      eps: visibleReleases(artistReleases?.eps ?? [], releasesMode),
+      singles: visibleReleases(artistReleases?.singles ?? [], releasesMode),
+    },
+    describeAlbum,
+  );
+  function releasesOf(category: DiscographySection): LibraryV2AlbumSummary[] {
+    const base = albumsBySection[category];
     if (releasesMode !== 'all') return base;
-    if (!filters.categories[category]) return [];
     return base.filter((album) =>
-      passesDiscographyFilters(
-        { title: album.title, album_type: album.album_type },
-        filters,
-        album.tracks_present > 0,
-      ),
+      passesDiscographyFilters(describeAlbum(album), filters, album.tracks_present > 0, category),
     );
   }
+  const describeProviderRelease = (release: ProviderRelease) => ({
+    title: release.title,
+    album_type: release.album_type,
+    secondary_types: release.secondary_types,
+  });
+  const readOnlyBySection = groupReleases(
+    {
+      albums: readOnlyDiscography.releasesFor('albums'),
+      eps: readOnlyDiscography.releasesFor('eps'),
+      singles: readOnlyDiscography.releasesFor('singles'),
+    },
+    describeProviderRelease,
+    Boolean(filters.musicbrainz),
+  );
+  const otherBySection = groupReleases(
+    {
+      albums: otherSources.byBucket('album'),
+      eps: otherSources.byBucket('ep'),
+      singles: otherSources.byBucket('single'),
+    },
+    describeCard,
+  );
+  const sectionCounts = Object.fromEntries(
+    DISCOGRAPHY_SECTIONS.map((s) => [
+      s,
+      albumsBySection[s].length + readOnlyBySection[s].length + otherBySection[s].length,
+    ]),
+  ) as Record<DiscographySection, number>;
 
   /** a release you have opens its own page; one you don't opens dev's
    *  Download Missing Tracks modal, the way the provider page did, from the
@@ -9060,6 +9130,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             <DiscographyFilterBar
               state={filters}
               onChange={setFilters}
+              counts={sectionCounts}
               otherSources={otherSources.enabled}
               otherSourcesBusy={otherSources.busy}
               onToggleOtherSources={otherSources.available ? otherSources.toggle : undefined}
@@ -9068,13 +9139,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
 
           {releasesMode === 'all' && !tableView ? (
             <DiscographySections>
-              {(
-                [
-                  ['Albums', releasesOf(artist.albums, 'albums')],
-                  ['EPs', releasesOf(artist.eps ?? [], 'eps')],
-                  ['Singles', releasesOf(artist.singles, 'singles')],
-                ] as Array<[GroupLabel, LibraryV2AlbumSummary[]]>
-              ).map(([title, entries]) => {
+              {DISCOGRAPHY_SECTIONS.map((section) => {
+                const title = SECTION_LABELS[section];
+                const entries = releasesOf(section);
                 const cards = [
                   ...entries.map((entry) => ({
                     ...catalogueCard(entry),
@@ -9083,21 +9150,29 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
                         ? listedSource(entry.provider_ids)
                         : undefined,
                   })),
-                  ...readOnlyDiscography
-                    .releasesFor(
-                      ({ Albums: 'albums', EPs: 'eps', Singles: 'singles' } as const)[title],
+                  ...readOnlyBySection[section]
+                    .filter((release) =>
+                      passesDiscographyFilters(
+                        describeProviderRelease(release),
+                        filters,
+                        release.owned === true,
+                        section,
+                      ),
                     )
                     .map(providerCard),
-                  ...otherSources.byBucket(
-                    ({ Albums: 'album', EPs: 'ep', Singles: 'single' } as const)[
-                      title as GroupLabel
-                    ],
+                  ...otherBySection[section].filter((card) =>
+                    passesDiscographyFilters(
+                      describeCard(card),
+                      filters,
+                      card.owned === true,
+                      section,
+                    ),
                   ),
                 ];
                 if (cards.length === 0) return null;
                 return (
                   <DiscographySection
-                    key={title}
+                    key={section}
                     title={title}
                     stats={
                       <>
@@ -9120,41 +9195,28 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </DiscographySections>
           ) : (
             <>
-              <AlbumGroup
-                title="Albums"
-                albums={releasesOf(artist.albums, 'albums')}
-                artistId={artistId}
-                artistName={artist.name}
-                scope="albums"
-                queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
-                queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
-                onAction={handleAction}
-              />
-              <AlbumGroup
-                title="EPs"
-                albums={releasesOf(artist.eps ?? [], 'eps')}
-                artistId={artistId}
-                artistName={artist.name}
-                scope="eps"
-                queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
-                queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
-                onAction={handleAction}
-              />
-              <AlbumGroup
-                title="Singles"
-                albums={releasesOf(artist.singles, 'singles')}
-                artistId={artistId}
-                artistName={artist.name}
-                scope="singles"
-                queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
-                queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
-                onAction={handleAction}
-              />
+              {DISCOGRAPHY_SECTIONS.map((section) => (
+                <AlbumGroup
+                  key={section}
+                  title={SECTION_LABELS[section]}
+                  albums={releasesOf(section)}
+                  artistId={artistId}
+                  artistName={artist.name}
+                  // a section that is not a release type of its own acts on
+                  // exactly the releases it lists (the route takes the ids)
+                  scope={
+                    section === 'albums' || section === 'eps' || section === 'singles'
+                      ? section
+                      : 'all'
+                  }
+                  queueStatusByAlbum={queueStatusQuery.data?.albums ?? {}}
+                  queueStatusTracks={queueStatusQuery.data?.tracks ?? {}}
+                  onAction={handleAction}
+                />
+              ))}
               <ReleasesEmptyState
                 hidden={
-                  releasesOf(artist.albums, 'albums').length > 0 ||
-                  releasesOf(artist.eps ?? [], 'eps').length > 0 ||
-                  releasesOf(artist.singles, 'singles').length > 0 ||
+                  DISCOGRAPHY_SECTIONS.some((section) => releasesOf(section).length > 0) ||
                   // only guest spots here, on disk or wanted: Appears On below lists them
                   (releasesMode !== 'all' && artistEyebrow(artist) === 'Featured in your library')
                 }
@@ -9430,7 +9492,7 @@ export function SectionBulkMonitorButton({
   albumIds,
 }: {
   artistId: number;
-  scope: 'albums' | 'eps' | 'singles';
+  scope: 'albums' | 'eps' | 'singles' | 'all';
   title: string;
   allMonitored: boolean;
   albumIds: number[];
@@ -9541,7 +9603,7 @@ function AlbumGroup({
   albums: LibraryV2AlbumSummary[];
   artistId: number;
   artistName: string;
-  scope: 'albums' | 'eps' | 'singles';
+  scope: 'albums' | 'eps' | 'singles' | 'all';
   queueStatusByAlbum: Record<number, LibraryV2QueueStatusAlbum>;
   queueStatusTracks: Record<number, LibraryV2QueueStatusEntry>;
   onAction: ActionHandler;

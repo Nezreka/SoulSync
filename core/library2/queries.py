@@ -1059,7 +1059,8 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                al.image_url, {monitored_sql("album", "al")} AS monitored, al.quality_profile_id,
                al.quality_profile_explicit, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id, al.musicbrainz_id,
-               al.musicbrainz_release_group_id,
+               al.musicbrainz_release_group_id, al.release_group_types,
+               al.secondary_types,
                al.external_ids, al.primary_artist_id,
                pa.quality_profile_id AS artist_quality_profile_id,
                pa.quality_profile_explicit AS artist_quality_profile_explicit,
@@ -1148,6 +1149,9 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             "spotify_id": r["spotify_id"],
             # the release card's "view on musicbrainz" link
             "musicbrainz_id": r["musicbrainz_id"],
+            # #2055: what kind of release it is (live, soundtrack, ...), None
+            # when nobody has said: the page then goes by the title
+            "release_types": _release_types(r),
             # a release you don't have opens dev's download modal from its
             # provider id, the way the provider page did
             "provider_ids": _album_provider_ids(r),
@@ -1242,6 +1246,21 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         "total_size_bytes": sum(e["total_size_bytes"] for e in albums + eps + singles),
         "user_overrides": artist_overrides,
     }
+
+
+def _release_types(row) -> Optional[List[str]]:
+    """What kind of release an album is (#2055): the types it was filed with
+    when it has any, else its MusicBrainz release group's. None is "nobody
+    has said", an empty list is a plain studio release."""
+    from core.library2.release_group_types import stored_types
+    try:
+        filed = json.loads(row["secondary_types"] or "[]")
+    except (TypeError, ValueError):
+        filed = []
+    filed = [str(v).strip().lower() for v in filed if v] if isinstance(filed, list) else []
+    if filed:
+        return filed
+    return stored_types(row["release_group_types"], row["musicbrainz_release_group_id"])
 
 
 def _album_provider_ids(row) -> Dict[str, str]:

@@ -272,6 +272,9 @@ export interface LibraryV2AlbumSummary {
   spotify_id: string | null;
   /** the release card's musicbrainz link. */
   musicbrainz_id?: string | null;
+  /** #2055: what kind of release it is ('live', 'soundtrack', ...). An array,
+   *  even an empty one, is known; null means nobody has said yet. */
+  release_types?: string[] | null;
   /** the release's ids by provider: a release you don't have opens the
    *  download modal from the one matching the artist's source */
   provider_ids?: Record<string, string>;

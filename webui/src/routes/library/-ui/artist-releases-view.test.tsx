@@ -668,6 +668,64 @@ describe('Library V2 artist detail — All Releases views', () => {
     expect(screen.getByText('Dummy')).toBeInTheDocument();
   });
 
+  it('gives a live record a section of its own, in cards and in the table (#2055)', async () => {
+    renderArtist('/library?artist=1&releases=all&releaseView=cards');
+    await waitFor(() =>
+      expect(document.querySelectorAll('.discography-section').length).toBeGreaterThan(0),
+    );
+    const sections = () =>
+      [...document.querySelectorAll('.discography-section')].map((section) => [
+        section.querySelector('h3')?.textContent,
+        section.querySelectorAll('.release-card').length,
+      ]);
+    await waitFor(() =>
+      expect(sections()).toEqual([
+        ['Albums', 1],
+        ['Live', 1],
+      ]),
+    );
+    // the pill is the section, with its count beside the name
+    const pill = screen.getByRole('button', { name: 'Live' });
+    expect(pill.querySelector('.filter-count')?.textContent).toBe('1');
+    // a kind this artist has nothing of gets no pill
+    expect(screen.queryByRole('button', { name: 'Soundtracks' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Table View' }));
+    await waitFor(() => expect(document.querySelector('.discography-section')).toBeNull());
+    const live = await screen.findByRole('heading', { name: /^Live/ });
+    expect(live.closest('section')?.textContent).toContain('Roseland NYC Live');
+    expect(
+      screen.getByRole('heading', { name: /^Albums/ }).closest('section')?.textContent,
+    ).not.toContain('Roseland NYC Live');
+  });
+
+  it('keeps a release known to be a studio album in Albums, whatever its title says', async () => {
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [
+              album({ id: 1, title: 'Dummy' }),
+              // its release group was looked up: no secondary types
+              album({ id: 2, title: 'Roseland NYC Live', release_types: [] }),
+              album({ id: 3, title: 'Plain Name', release_types: ['soundtrack'] }),
+            ],
+            album_count: 3,
+            discography_count: 3,
+          }),
+        }),
+      ),
+    );
+    renderArtist('/library?artist=1&releases=all&releaseView=table');
+    const albums = await screen.findByRole('heading', { name: /^Albums/ });
+    expect(albums.closest('section')?.textContent).toContain('Roseland NYC Live');
+    expect(screen.queryByRole('heading', { name: /^Live/ })).toBeNull();
+    expect(
+      screen.getByRole('heading', { name: /^Soundtracks/ }).closest('section')?.textContent,
+    ).toContain('Plain Name');
+  });
+
   it('uses single-click for inline expansion and double-click for album detail', async () => {
     server.use(
       http.get('/api/library/v2/albums/:id', ({ params }) => {

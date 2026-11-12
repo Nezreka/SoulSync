@@ -7011,6 +7011,15 @@ textarea.searchInput {
   box-shadow: none;
 }
 
+/* #2055: how many releases the section holds, beside its name */
+.detailView :global(.discography-filters .filter-count) {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
 /* ── discover view: cover first, caption below ─────────────────────────── */
 
 .detailView :global(.discography-sections) {

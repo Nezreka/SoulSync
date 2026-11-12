@@ -675,6 +675,11 @@ _ADDED_COLUMNS = (
     # belongs to (upstream 9c06ffd5b); paces its retries to retry_days.
     ("lib2_albums", "musicbrainz_release_group_attempted",
      "ALTER TABLE lib2_albums ADD COLUMN musicbrainz_release_group_attempted TIMESTAMP"),
+    # The release group's secondary types (Live, Soundtrack, ...) with the
+    # group they were read from, for the artist page's sections (#2055).
+    # Not secondary_types, which path templates read: see release_group_types.
+    ("lib2_albums", "release_group_types",
+     "ALTER TABLE lib2_albums ADD COLUMN release_group_types TEXT"),
     # The MusicBrainz recording comment ("acoustic", "live") that tells two
     # versions of a song apart (upstream 5170059ed / #1536). It belongs to one
     # recording: trg_lib2_tracks_recording_comment clears it whenever

@@ -40,7 +40,7 @@ The **padlock** on an album or an artist is for when you have gone through it an
 - **An artist's lock** covers the artist (photo, details, folder, match). Albums are locked one by one, so a new release still gets tagged; locking an artist offers **And all current albums**
 - Locking needs the admin profile. Everyone sees the padlock on what is locked
 
-Click any artist card to open their detail page: albums, EPs, and singles as cards with completion percentages. Filter by category, content type (live, compilations, featured), or status (owned, missing). **View on** buttons at the top link the artist on each matched external service.
+Click any artist card to open their detail page: albums, EPs, and singles as cards with completion percentages. Live records, compilations, soundtracks, remixes, demos and spoken word each get a section of their own under Albums, EPs and Singles, so the studio albums are not buried: the **Show** pills are those sections, each with its count, and a kind the artist has nothing of is not listed. A release is placed by its MusicBrainz release type when that is known (SoulSync looks it up in the background for every album it has matched), and by its title until then. Filter by section, featured releases, or status (owned, missing). **View on** buttons at the top link the artist on each matched external service.
 `
         },
         {
