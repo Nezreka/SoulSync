@@ -212,7 +212,7 @@ Open a playlist and the line under its title says where its tracks are: **in lib
 
 ## Server playlists
 
-The **Server** tab lists the playlists on your media server. Open one to compare it with the SoulSync playlist that syncs to it: matched, missing and extra tracks side by side, with Find & Add, swap, unmatch, reorder and M3U export.
+The **Server** tab lists the playlists on your media server. Open one to compare it with the SoulSync playlist that syncs to it: matched, missing and extra tracks side by side, with Find & Add, swap, unmatch, reorder and M3U export. When two source tracks match the same song in your library (a playlist that lists a song twice, or its album and single cuts), the server holds it once, so its count is lower than the source's with nothing missing: those rows are marked **Same song as #N**, and the **Same song** pill shows only them.
 
 On Plex, an admin also gets **Tag in Plex**: it adds a mood (the playlist's name, or one you type) to every song on the playlist, in Plex only, never in your files. Then make a Plex smart playlist on *Mood is <tag>* and add rules on top, like dropping songs rated under three stars and adding ones rated three and up.
 

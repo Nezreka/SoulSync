@@ -52383,6 +52383,20 @@ tr.tag-diff-same {
     border: 1px solid rgba(var(--success-rgb), 0.28);
 }
 
+/* #2059: this server track stands for more than one source track. Quiet, not
+   a warning: nothing is wrong, it only explains why the two counts differ. */
+.server-track-shared {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+    white-space: nowrap;
+    flex-shrink: 0;
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.12);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+}
+
 /* Confidence badge on matched tracks */
 .server-track-conf {
     font-size: 9px;

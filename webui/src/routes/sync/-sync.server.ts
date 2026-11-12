@@ -425,6 +425,55 @@ export function compareFilterLabel(filter: string, stats: CompareStats): string 
   return filter;
 }
 
+/**
+ * Source rows that are one song on the server (#2059): row index -> the source
+ * numbers of the other rows matched to the same server track.
+ *
+ * A playlist can carry a song twice (the album cut and the single, or simply
+ * the same entry again) and both match the one copy in the library. The
+ * server holds that track once, so 55 source tracks read as 54 on the server
+ * with nothing missing and nothing extra, and nothing said which two.
+ */
+export function sharedServerRows(tracks: readonly CompareTrack[]): Map<number, number[]> {
+  const rowsByServerId = new Map<string, number[]>();
+  tracks.forEach((track, index) => {
+    const id = track.server_track?.id;
+    if (track.match_status !== 'matched' || id == null || id === '') return;
+    const rows = rowsByServerId.get(String(id));
+    if (rows) rows.push(index);
+    else rowsByServerId.set(String(id), [index]);
+  });
+  const number = (index: number) => tracks[index].source_track?.position ?? index + 1;
+  const shared = new Map<number, number[]>();
+  for (const rows of rowsByServerId.values()) {
+    if (rows.length < 2) continue;
+    for (const row of rows) shared.set(row, rows.filter((other) => other !== row).map(number));
+  }
+  return shared;
+}
+
+/** The pill that shows only those rows. */
+export function compareSharedLabel(sharedRows: number): string {
+  return `Same song (${sharedRows})`;
+}
+
+/** The mark on a shared row: which other source tracks it stands for. */
+export function compareSharedMark(others: readonly number[]): string {
+  return `Same song as ${others.map((n) => `#${n}`).join(', ')}`;
+}
+
+/** Why the two columns' counts differ, for the footer. */
+export function compareSharedText(shared: ReadonlyMap<number, readonly number[]>): string {
+  if (shared.size === 0) return '';
+  let songs = 0;
+  for (const others of shared.values()) songs += 1 / (others.length + 1);
+  const onServer = Math.round(songs);
+  return (
+    `${shared.size} source tracks are ${onServer === 1 ? 'one song' : `${onServer} songs`} ` +
+    `on the server, so it holds ${shared.size - onServer} fewer`
+  );
+}
+
 /** The header meta line (301). */
 export function compareMetaText(data: CompareResponse): string {
   return (
