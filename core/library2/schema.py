@@ -680,6 +680,10 @@ _ADDED_COLUMNS = (
     # Not secondary_types, which path templates read: see release_group_types.
     ("lib2_albums", "release_group_types",
      "ALTER TABLE lib2_albums ADD COLUMN release_group_types TEXT"),
+    # The last automatic upgrade attempt for a track (#2060): when, how many
+    # in a row found nothing, and against which file. See upgrade_attempts.
+    ("lib2_tracks", "upgrade_attempt",
+     "ALTER TABLE lib2_tracks ADD COLUMN upgrade_attempt TEXT"),
     # The MusicBrainz recording comment ("acoustic", "live") that tells two
     # versions of a song apart (upstream 5170059ed / #1536). It belongs to one
     # recording: trg_lib2_tracks_recording_comment clears it whenever

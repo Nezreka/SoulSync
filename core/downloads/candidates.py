@@ -499,6 +499,9 @@ class CandidatesDeps:
     on_download_completed: Callable
 
 
+_UNSET_BASIS = object()
+
+
 def _note_start_failure(task_id, why):
     """Why a matched candidate didn't start, kept on the task (#1981): the row
     said "No specific failure reason was recorded" because nothing was. The
@@ -598,6 +601,8 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         # the quality and took it, for this one grab.
         quality_overridden = user_manual_pick and bool(task.get('_override_quality', False))
 
+    # what an upgrade has to beat, worked out once on the first candidate
+    upgrade_basis = _UNSET_BASIS
     # Endpoint fallback happens WITHIN each ranked release slot. A failed
     # fetch may use another indexer, without spending extra candidate slots.
     walk = []
@@ -666,6 +671,29 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None,
         except Exception as e:
             logger.debug("failed-blocklist check failed: %s", e)
         
+        # #2060: an upgrade only starts a download that can be better than the
+        # file it would replace. Fail-open: a check that cannot be made is not
+        # a refusal, the import still measures what arrives.
+        if server_upgrade_intent is not None and not user_manual_pick:
+            try:
+                from core.library2 import upgrade_attempts
+                if upgrade_basis is _UNSET_BASIS:
+                    _basis_conn = deps.get_database()._get_connection()
+                    try:
+                        upgrade_basis = upgrade_attempts.upgrade_basis(
+                            _basis_conn, server_upgrade_intent.track_id)
+                    finally:
+                        _basis_conn.close()
+                refusal = upgrade_attempts.candidate_refusal(
+                    upgrade_basis, candidate, streaming_sources=_STREAMING_USERNAMES)
+            except Exception as e:
+                logger.debug("upgrade candidate check failed: %s", e)
+                upgrade_basis, refusal = None, None
+            if refusal:
+                logger.info("[Modal Worker] Skipping %s for the upgrade: %s", source_key, refusal)
+                _note_start_failure(task_id, refusal)
+                continue
+
         evidence = getattr(candidate, 'soulseek_match_evidence', None)
         identity_note = f", title via {evidence.source}" if evidence else ''
         logger.info(

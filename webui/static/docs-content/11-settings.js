@@ -154,7 +154,17 @@ Quality profiles define which formats are acceptable for downloads, and when a f
 
 ![Quality profiles](dl-quality-profiles.jpg)
 
-Quality profiles are checked during downloads and auto-import. The Library evaluates monitored tracks against their upgrade cutoff and sends the ones with no file to the Wishlist through **Watchlist & Wishlist Reconcile**. A file below its profile (a 128 kbps fallback under a 320 kbps target, say) is shown as upgradable and is not downloaded again by itself, since asking the same source every hour only returns the same file: use **Enhance Quality** when you want a better copy. The **Quality Profile Audit** repair job flags library files below their profile for review; the old Quality Upgrade Finder is retired.
+Quality profiles are checked during downloads and auto-import. The Library evaluates monitored tracks against their upgrade cutoff and sends the ones with no file to the Wishlist through **Watchlist & Wishlist Reconcile**.
+
+**Automatic upgrades.** A file below its profile (a 128 kbps fallback under a 320 kbps target, say) is asked for again by the same job, with a memory so it cannot loop:
+
+- **A few at a time.** *Upgrades per run* on the job (default 5, hourly) is how many tracks are asked for each run; 0 turns automatic upgrades off. The rest wait their turn.
+- **A growing wait.** A track that found nothing better is not asked for again for *Upgrade retry days* (default 7), then twice that, up to 90 days. A new file starts the count over.
+- **A short stay.** An upgrade search that found nothing in 12 hours leaves the Wishlist until its next turn.
+- **Only a better copy is downloaded.** A candidate whose quality is known and no better than your file is skipped, and so is the streaming source that just delivered that file, which can only deliver it again. Whatever does arrive is measured against the profile before it replaces anything.
+- **A file that cannot be measured is left alone**, since nothing can be shown to be better than it.
+
+**Enhance Quality** asks for chosen tracks right away, without the wait. The **Quality Profile Audit** repair job flags library files below their profile for review; the old Quality Upgrade Finder is retired.
 `
         },
         {

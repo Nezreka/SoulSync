@@ -26,16 +26,24 @@ class MonitoringListReconcileJob(RepairJob):
         "monitoring wins; imported/default artist flags follow the Watchlist. "
         "No files are changed.\n\n"
         "This is the single writer that puts wanted tracks with no file back "
-        "into the Wishlist. A track you already have is never re-added here, "
-        "even when its file is below the quality profile: use Enhance Quality "
-        "to ask for a better copy. Refresh & Scan already reports what it changed "
-        "straight to it, so on a healthy install this job should mostly find "
-        "nothing to do: it is the safety net, not the mechanism."
+        "into the Wishlist. Refresh & Scan already reports what it changed "
+        "straight to it, so on a healthy install it should mostly find "
+        "nothing to do there.\n\n"
+        "It also asks for better copies of tracks you have below their quality "
+        "profile, a few each run (Upgrades per run, 0 turns it off). A track "
+        "that found nothing better waits before it is asked for again, and the "
+        "wait doubles each time, starting at Upgrade retry days. A search that "
+        "found nothing in 12 hours leaves the Wishlist until its next turn. "
+        "Enhance Quality asks for chosen tracks right away."
     )
     icon = "refresh-cw"
     default_enabled = True
     default_interval_hours = 1
-    default_settings = {"batch_size": 500, "keep_done": 500}
+    # upgrades_per_run: owned tracks below their quality profile asked for a
+    # better copy each run (0 turns automatic upgrades off);
+    # upgrade_retry_days: the first wait before a track is asked for again
+    default_settings = {"batch_size": 500, "keep_done": 500,
+                        "upgrades_per_run": 5, "upgrade_retry_days": 7}
     auto_fix = True
 
     def _settings(self, context: JobContext) -> dict:
@@ -48,10 +56,11 @@ class MonitoringListReconcileJob(RepairJob):
                 settings.update(configured)
         except Exception as exc:  # noqa: BLE001
             logger.debug("monitoring-list settings lookup failed: %s", exc)
-        for key, maximum in (("batch_size", 5000), ("keep_done", 10000)):
+        for key, minimum, maximum in (("batch_size", 1, 5000), ("keep_done", 0, 10000),
+                                      ("upgrades_per_run", 0, 500),
+                                      ("upgrade_retry_days", 1, 90)):
             try:
-                settings[key] = max(0 if key == "keep_done" else 1,
-                                    min(int(settings[key]), maximum))
+                settings[key] = max(minimum, min(int(settings[key]), maximum))
             except (TypeError, ValueError):
                 settings[key] = self.default_settings[key]
         return settings
@@ -119,6 +128,8 @@ class MonitoringListReconcileJob(RepairJob):
                     # transaction between chunks
                     should_stop=context.stop_or_paused,
                     progress=context.update_progress,
+                    upgrades_per_run=settings["upgrades_per_run"],
+                    upgrade_retry_days=settings["upgrade_retry_days"],
                 )
                 result.scanned += int(wishlist_stats["scanned"]) + int(wishlist_stats.get('intent_repaired', 0))
                 result.auto_fixed += int(wishlist_stats["mirrored"]) + int(wishlist_stats.get('intent_repaired', 0))
