@@ -4762,6 +4762,31 @@
                                                                 one to exclude.
                                                             </div>
                                                         </div>
+                                                        <!-- #2061: the pacing was always there (core/prowlarr_throttle.py),
+                                                             with no way to turn it down for a strict tracker -->
+                                                        <div class="form-group">
+                                                            <label>Seconds between searches:</label>
+                                                            <input type="number" id="prowlarr-search-min-gap" min="0"
+                                                                max="600" step="0.5" placeholder="2">
+                                                            <div class="setting-help-text">
+                                                                The shortest wait between two searches sent to Prowlarr,
+                                                                music and video together. Default 2. Raise it if a
+                                                                tracker answers 429 Too Many Requests or Prowlarr marks
+                                                                an indexer unhealthy: a tracker that asks for 11 seconds
+                                                                wants 12 or more here. 0 turns the wait off.
+                                                            </div>
+                                                        </div>
+                                                        <div class="form-group">
+                                                            <label>Searches per minute, at most:</label>
+                                                            <input type="number" id="prowlarr-max-searches-per-minute"
+                                                                min="0" max="600" step="1" placeholder="20">
+                                                            <div class="setting-help-text">
+                                                                A ceiling on top of the wait above, so a long wishlist
+                                                                run cannot keep up a fast pace for hours. Default 20.
+                                                                0 turns the ceiling off. A manual search waits its turn
+                                                                behind background searches.
+                                                            </div>
+                                                        </div>
                                                         <div class="form-group">
                                                             <label>Status:</label>
                                                             <div class="form-actions" style="margin-top: 4px;">

@@ -315,3 +315,21 @@ class TestInteractiveSearchesAreBounded:
             if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
                     and call.func.id == "prowlarr_search"):
                 assert not any(kw.arg == "max_wait_seconds" for kw in call.keywords)
+
+
+# ── #2061: the pacing has knobs in Settings ──────────────────────────────────
+# The throttle shipped with two settings and no way to change them. A user whose
+# trackers ask for 11 seconds between requests had nothing to turn.
+
+def test_the_pacing_settings_are_on_the_settings_page_and_saved():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "webui"
+    index = (root / "index.html").read_text(encoding="utf-8", errors="replace")
+    js = (root / "static" / "settings.js").read_text(encoding="utf-8")
+    assert 'id="prowlarr-search-min-gap"' in index
+    assert 'id="prowlarr-max-searches-per-minute"' in index
+    # loaded with ?? so a saved 0 (off) is not shown as the default
+    assert "settings.prowlarr?.search_min_gap_seconds ?? 2" in js
+    assert "settings.prowlarr?.max_searches_per_minute ?? 20" in js
+    assert "search_min_gap_seconds: _cfgFloat('prowlarr-search-min-gap', 2)" in js
+    assert "max_searches_per_minute: _cfgInt('prowlarr-max-searches-per-minute', 20)" in js

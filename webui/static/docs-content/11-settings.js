@@ -82,6 +82,8 @@ No media server at all: SoulSync itself is the player and library manager. Impor
 
 For **Usenet**, SoulSync downloads each NZB from Prowlarr itself and hands SABnzbd or NZBGet the file, the way Sonarr does. Their queue shows the release name straight away, never a "Trying to fetch NZB" entry or the Prowlarr link with your api key, and they don't need to reach Prowlarr. If the NZB can't be fetched, nothing is sent to the client and the grab fails with the reason (for example the indexer's HTTP error).
 
+**Pacing indexer searches.** Prowlarr passes every search straight to your indexers, so SoulSync spaces them out: 2 seconds between searches and at most 20 a minute by default, one budget for music and video together. Both are in the Prowlarr section as **Seconds between searches** and **Searches per minute, at most**. Raise the first if a tracker answers 429 Too Many Requests or Prowlarr marks an indexer unhealthy; a tracker that asks for 11 seconds between requests wants 12 or more. 0 turns either one off. A manual search waits its turn behind background searches.
+
 The chain editor lives on the Downloads tab: drag sources from **Available** into your **Download chain**. One source in the chain means "that source only"; two or more means hybrid. Any source can be configured on the Sources tab first — it doesn't need to be in the chain yet.
 
 ## Paths
