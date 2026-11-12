@@ -1073,7 +1073,7 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
                         " WHERE id=?", (file_id,))
                     set_file_state(conn, int(file_id), "active")
                     logger.info(
-                        "Library v2: reactivated file row %s for re-imported "
+                        "Library: reactivated file row %s for re-imported "
                         "path %s (was %s)",
                         file_id, file_path, existing["file_state"])
             else:
@@ -1167,11 +1167,11 @@ def link_download_into_library_v2(context: Dict[str, Any], *,
             _warm_new_artwork(db, conn, album_id)
             from core.library2.validation import refresh_imported_metadata
             context['_metadata_status'] = refresh_imported_metadata(db, [file_path, *(context.get('_companion_file_paths') or [])])
-            logger.info("Library v2 auto-linked download: %s → track %s (file %s)",
+            logger.info("Library auto-linked download: %s → track %s (file %s)",
                         os.path.basename(str(file_path)), track_id, file_id)
             return file_id
     except Exception as e:  # noqa: BLE001
-        logger.debug("library v2 autolink failed: %s", e)
+        logger.debug("library autolink failed: %s", e)
         if raise_on_error:
             raise
         return None

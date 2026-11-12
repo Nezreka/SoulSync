@@ -931,7 +931,7 @@ def _migrate_quality_profile_constraints(cursor: Any) -> None:
         "SELECT id FROM quality_profiles ORDER BY is_default DESC, id LIMIT 1"
     ).fetchone()
     if default_row is None:
-        raise RuntimeError("Library v2 requires at least one quality profile")
+        raise RuntimeError("The Library requires at least one quality profile")
     default_id = int(default_row[0])
     # the repoint below finds nothing once converged: the insert triggers
     # default new rows and a referenced profile can't be deleted
@@ -1141,7 +1141,7 @@ def _migrate_artist_monitored_default(cursor: Any) -> None:
             "ALTER TABLE lib2_artists RENAME COLUMN monitored_v2 TO monitored"
         )
         cursor.execute(f"RELEASE {savepoint}")
-        logger.info("Migrated Library-v2 artist monitored default from 1 to 0")
+        logger.info("Migrated Library artist monitored default from 1 to 0")
     except Exception:
         cursor.execute(f"ROLLBACK TO {savepoint}")
         cursor.execute(f"RELEASE {savepoint}")
@@ -1556,7 +1556,7 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         from core.library2.identity_history import ensure_external_id_history_schema
         backfilled = ensure_external_id_history_schema(cursor)
         if backfilled:
-            logger.info("Backfilled %d Library-v2 external identifier events", backfilled)
+            logger.info("Backfilled %d Library external identifier events", backfilled)
     except Exception as e:  # noqa: BLE001
         logger.error("external-id-history migration failed (will retry next start): %s", e)
     # Merge/move/link history (Roadmap 4): relationship triggers capture the
@@ -1565,7 +1565,7 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
         from core.library2.entity_history import ensure_entity_history_schema
         backfilled = ensure_entity_history_schema(cursor)
         if backfilled:
-            logger.info("Backfilled %d Library-v2 entity relationship events", backfilled)
+            logger.info("Backfilled %d Library entity relationship events", backfilled)
     except Exception as e:  # noqa: BLE001
         logger.error("entity-history migration failed (will retry next start): %s", e)
     # ADR-06 field-level user overrides stay separate from provider/import
@@ -1663,7 +1663,7 @@ def ensure_library_v2_schema(connection: Any, *, run_backfills: bool = True) -> 
     ensure_unmatched_match_schema(cursor)
     if run_backfills:
         run_library_v2_backfills(connection)
-    logger.debug("Library v2 schema ensured")
+    logger.debug("Library schema ensured")
 
 
 def run_library_v2_backfills(connection: Any, *, commit: bool = False,
@@ -1708,7 +1708,7 @@ def run_library_v2_backfills(connection: Any, *, commit: bool = False,
             filled = _backfill_artist_name_keys(cursor)
             stats["artist_name_keys"] = filled
             if filled:
-                logger.info("Backfilled %d Library-v2 artist name keys", filled)
+                logger.info("Backfilled %d Library artist name keys", filled)
             _commit()
         except Exception as e:  # noqa: BLE001
             logger.error("artist name_key backfill failed (will retry next start): %s", e)

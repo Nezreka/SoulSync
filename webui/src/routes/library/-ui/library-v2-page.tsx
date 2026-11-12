@@ -2365,7 +2365,7 @@ export function ArtistSettingsModal({
                       </select>
                     </label>
                     <label className={ls.field}>
-                      <span>Library-v2 discography rule</span>
+                      <span>Discography rule</span>
                       <select
                         className={styles.select}
                         disabled={!canWrite}
@@ -2391,7 +2391,7 @@ export function ArtistSettingsModal({
 
                 <SettingsGroup
                   title="Existing releases and tracks"
-                  hint="Change Wanted for what Library v2 already shows. Applies at once; the Watchlist and the quality profile stay as they are."
+                  hint="Change Wanted for what the Library already shows. Applies at once; the Watchlist and the quality profile stay as they are."
                 >
                   <div className={ls.chips}>
                     {(
@@ -2551,7 +2551,7 @@ function ArtistSettingsIdentity({
         />
       </SettingsGroup>
       {releases.length ? (
-        <SettingsGroup title="Release context in Library v2">
+        <SettingsGroup title="Releases in your Library">
           <div className={ls.context}>
             <MatchReleaseStrip
               albums={releases.slice(0, 4).map((album) => ({

@@ -311,11 +311,11 @@ def register_job(cls: type[RepairJob]) -> type[RepairJob]:
     effects = JOB_LIBRARY_V2_EFFECTS.get(cls.job_id)
     if not effects or not effects.issubset(LIBRARY_V2_EFFECTS):
         raise ValueError(
-            f"Repair job {cls.job_id!r} has no valid Library-v2 effects declaration"
+            f"Repair job {cls.job_id!r} has no valid Library effects declaration"
         )
     if 'none' in effects and len(effects) != 1:
         raise ValueError(
-            f"Repair job {cls.job_id!r} mixes the 'none' Library-v2 effect with mutations"
+            f"Repair job {cls.job_id!r} mixes the 'none' Library effect with mutations"
         )
     lock_scope = JOB_LOCK_SCOPE.get(cls.job_id)
     if lock_scope not in JOB_LOCK_SCOPES:

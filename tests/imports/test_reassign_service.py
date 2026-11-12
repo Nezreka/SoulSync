@@ -224,7 +224,7 @@ def test_preview_refuses_a_legacy_subject_with_a_reason(monkeypatch, db):
     preview = svc.preview_reassign(db, 'spotify', '7', 'AL9')
 
     assert preview['success'] is False
-    assert 'Library v2' in preview['error']
+    assert 'Library' in preview['error']
 
 
 def test_preview_refuses_an_unreadable_tracklist(monkeypatch, db):
@@ -262,7 +262,7 @@ def test_apply_refuses_a_legacy_subject(monkeypatch, db, tmp_path):
         staging_dir=str(tmp_path / 'staging'))
 
     assert result['success'] is False
-    assert 'Library v2' in result['error']
+    assert 'Library' in result['error']
     assert not (tmp_path / 'staging').exists(), 'staged files despite refusing'
 
 

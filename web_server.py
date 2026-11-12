@@ -394,7 +394,7 @@ def _hold_catalogue_jobs_during_upgrade():
         from core.library2.migration_gate import migration_required
         blocked = migration_required(get_database())
     except Exception as exc:  # fail closed: a half-known migration state is not writable
-        logger.warning("Could not verify Library v2 upgrade barrier: %s", exc)
+        logger.warning("Could not verify Library upgrade barrier: %s", exc)
         blocked = True
     if blocked:
         return jsonify({
@@ -6511,7 +6511,7 @@ def search_music():
     from core.library2.grab_context import resolve_lib2_grab_context
     _lib2_state, _lib2_ctx = resolve_lib2_grab_context(get_database(), data)
     if _lib2_state == 'invalid':
-        return jsonify({"error": "Unknown Library v2 entity for this search."}), 400
+        return jsonify({"error": "Unknown Library entity for this search."}), 400
     # A Library-v2 Interactive Search sends no text: it asks the sources what
     # an automatic download would ask, and every hit carries the verdict.
     queries = [query] if query else (
@@ -7385,7 +7385,7 @@ def start_download():
         _lib2_state, _lib2_ctx = resolve_lib2_grab_context(
             get_database(), raw_data)
         if _lib2_state == 'invalid':
-            return jsonify({"error": "Unknown Library v2 entity for this grab."}), 400
+            return jsonify({"error": "Unknown Library entity for this grab."}), 400
         from core.imports.upgrade_intent import (
             attach_upgrade_intent,
             issue_upgrade_intent,
@@ -7401,7 +7401,7 @@ def start_download():
                 "success": False,
                 "error": (
                     "Album results cannot be grabbed for a track-scoped "
-                    "Library v2 search. Select one track result instead."
+                    "Library search. Select one track result instead."
                 ),
             }), 400
 
@@ -20671,7 +20671,7 @@ def _autostart_library_v2_bootstrap_import():
         settled = reconcile_incomplete_deletes(get_database())
         if settled:
             logger.info(
-                "Library v2 delete journal: settled %d item(s) left by an "
+                "Library delete journal: settled %d item(s) left by an "
                 "interrupted delete", settled,
             )
     except Exception as e:
@@ -20689,7 +20689,7 @@ def _autostart_library_v2_bootstrap_import():
     try:
         lib2_bootstrap.run_deferred_backfills(get_database())
     except Exception as e:
-        logger.warning(f"Library v2 convergence pass failed (retries next start): {e}")
+        logger.warning(f"Library convergence pass failed (retries next start): {e}")
 
     # iss29-A06: the backoff must describe how long we have been waiting for
     # something to happen, not how many times we have looked.

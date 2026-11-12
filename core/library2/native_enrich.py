@@ -356,7 +356,7 @@ def resolve_and_enrich_native_artist(
         (int(artist_id),),
     ).fetchone()
     if row is None:
-        raise LookupError(f"Library v2 artist {artist_id} not found")
+        raise LookupError(f"Library artist {artist_id} not found")
 
     anchors = _artist_catalog_anchors(conn, int(artist_id))
     if anchors:
@@ -757,7 +757,7 @@ def enrich_native_entity_for_service(
         artist_name = str(row["artist_name"] or "") if row else ""
         album_title = str(row["album_title"] or "") if row else ""
     if row is None:
-        raise LookupError(f"Library v2 {canonical} {entity_id} not found")
+        raise LookupError(f"Library {canonical} {entity_id} not found")
 
     source_ids = _stored_source_ids(row)
     provider_id = source_ids.get(service)

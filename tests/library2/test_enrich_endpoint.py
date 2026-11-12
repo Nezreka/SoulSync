@@ -56,7 +56,7 @@ def api(tmp_path, monkeypatch):
         if native_conn.execute(
             f"SELECT 1 FROM {table} WHERE id=?", (entity_id,)
         ).fetchone() is None:
-            raise LookupError(f"Library v2 {entity_type} {entity_id} not found")
+            raise LookupError(f"Library {entity_type} {entity_id} not found")
         # Other Library-v2 tests may still be finishing a best-effort
         # background enrichment while this fixture is active. Record only the
         # synchronous Flask request under test, never that unrelated worker.

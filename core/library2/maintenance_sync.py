@@ -745,7 +745,7 @@ def sync_repair_change(
             for artist_id in links["artists"]:
                 artwork_invalidated += invalidate_artwork(database, "artist", artist_id)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Library-v2 artwork invalidation failed: %s", exc)
+            logger.warning("Library artwork invalidation failed: %s", exc)
 
     mirrored = 0
     # dd28-20: a job whose declared effects do not include 'wanted' can still

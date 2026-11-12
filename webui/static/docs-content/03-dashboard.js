@@ -262,7 +262,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Fix Unknown Artists | Finds tracks tagged "Unknown Artist", resolves the correct artist/album/track from file tags or the metadata API, then re-tags, moves the file to the correct folder, and updates the database |
 | Album Edition Review | Suggests the release edition that best matches the tracks you own |
 
-Library v2 handles catalogue identity and wanted quality upgrades directly. Quality Check is now **Quality Profile Audit** (a weekly Quality Check keeps its schedule there), the Quality Upgrade Finder is retired, and Single/Album Dedup lives on as the Duplicate Detector's album-first keeper. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Watchlist & Wishlist Reconcile**; there is no **Apply Quality Upgrades** automation action.
+The Library handles catalogue identity and wanted quality upgrades directly. Quality Check is now **Quality Profile Audit** (a weekly Quality Check keeps its schedule there), the Quality Upgrade Finder is retired, and Single/Album Dedup lives on as the Duplicate Detector's album-first keeper. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Watchlist & Wishlist Reconcile**; there is no **Apply Quality Upgrades** automation action.
 
 An upgrade from 3.6.1 merges each release your older media servers listed twice into one, once, right after the import (only pairs it can prove are the same release; your files and each server's link stay). Anything it can't prove waits in the Duplicate Detector.
 

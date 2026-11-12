@@ -188,7 +188,7 @@ def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> d
         return {
             'removed': 0,
             'file_deleted': False,
-            'error': f'Library-v2 delete preparation failed: {e}',
+            'error': f'Library delete preparation failed: {e}',
             'library_v2': None,
         }
     if raw_path:
@@ -229,7 +229,7 @@ def delete_origin_download(db, entry, config_manager, transfer_folder=None) -> d
                 result={'library_v2_file_deleted': True},
             )
         except Exception as e:  # preserve history row so the job can retry
-            error = f'Library-v2 delete synchronization failed: {e}'
+            error = f'Library delete synchronization failed: {e}'
     removed = 0
     if error is None:
         removed = db.delete_library_history_rows([entry['id']])

@@ -393,7 +393,7 @@ def get_artist_detail(artist_id):
         if not source_param:
             return jsonify({
                 "success": False,
-                "error": "source is required — the library view lives in Library V2",
+                "error": "source is required: an artist in your library opens on the Library page",
             }), 400
 
         from core.metadata.registry import experimental_source_rejected

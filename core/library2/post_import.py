@@ -86,7 +86,7 @@ def run_post_import_precache(database: Any, config_manager: Any, *,
             run()
             results[name] = "ok"
         except Exception as exc:  # noqa: BLE001 - presentation data, not the catalogue
-            logger.debug("Library v2 %s precache failed: %s", name, exc)
+            logger.debug("Library %s precache failed: %s", name, exc)
             results[name] = str(exc)
 
     def _tracklists() -> None:
@@ -197,7 +197,7 @@ def start_background_preparation(database: Any, config_manager: Any, *, full: bo
             return
         last[0] = now
         if total:
-            logger.info("Library v2 preparation: %s %s/%s (%d%%)", stage, f"{current:,}",
+            logger.info("Library preparation: %s %s/%s (%d%%)", stage, f"{current:,}",
                         f"{total:,}", int(current * 100 / total))
 
     def run():
@@ -211,14 +211,14 @@ def start_background_preparation(database: Any, config_manager: Any, *, full: bo
             else:
                 prepare_imported_artists(database, config_manager, progress=progress)
         except Exception as exc:  # noqa: BLE001 - best effort, the next start retries
-            logger.warning("Library v2 background preparation stopped: %s", exc)
+            logger.warning("Library background preparation stopped: %s", exc)
         finally:
             _preparation_state.update(active=False)
         if after is not None:
             try:
                 after()
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Library v2 post-preparation step failed: %s", exc)
+                logger.warning("Library post-preparation step failed: %s", exc)
 
     with _background_lock:
         if _background_thread is not None and _background_thread.is_alive():

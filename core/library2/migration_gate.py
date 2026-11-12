@@ -124,7 +124,7 @@ def migration_required(database: Any) -> bool:
             return any(conn.execute(f"SELECT 1 FROM {source} LIMIT 1").fetchone() is not None
                        for source in sources if source)
     except Exception as exc:  # half-known upgrade state must never admit writers
-        logger.warning("Could not verify Library v2 upgrade state: %s", exc)
+        logger.warning("Could not verify Library upgrade state: %s", exc)
         return True
 
 
@@ -136,7 +136,7 @@ def defer_or_start(worker: Any, database: Any) -> bool:
     with _deferred_lock:
         if worker not in _deferred_workers:
             _deferred_workers.append(worker)
-    logger.info("Library v2 upgrade pending — deferred %s", _worker_name(worker))
+    logger.info("Library upgrade pending — deferred %s", _worker_name(worker))
     return False
 
 
@@ -147,7 +147,7 @@ def defer_or_call(callback: Callable[[], Any], database: Any, label: str) -> boo
         return True
     with _deferred_lock:
         _deferred_callbacks.append((label, callback))
-    logger.info("Library v2 upgrade pending — deferred %s", label)
+    logger.info("Library upgrade pending — deferred %s", label)
     return False
 
 
@@ -201,7 +201,7 @@ def start_deferred_workers(database: Any) -> int:
         except Exception as exc:  # noqa: BLE001
             logger.error("could not start deferred %s: %s", label, exc, exc_info=True)
     if started:
-        logger.info("Library v2 upgrade complete — started %d deferred worker(s)", started)
+        logger.info("Library upgrade complete — started %d deferred worker(s)", started)
     return started
 
 
@@ -301,7 +301,7 @@ class MigrationPauseSupervisor:
                 continue
             self._paused_by_us.append(worker)
         if self._paused_by_us and not self._engine_paused:
-            logger.info("Library v2 migration active — paused %d enrichment worker(s)",
+            logger.info("Library migration active — paused %d enrichment worker(s)",
                         len(self._paused_by_us))
         if self._engine is not None and not self._engine_paused:
             try:
@@ -324,7 +324,7 @@ class MigrationPauseSupervisor:
                 logger.debug("could not resume the automation engine: %s", exc)
             self._engine_paused = False
         if resumed:
-            logger.info("Library v2 migration finished — resumed %d enrichment worker(s)",
+            logger.info("Library migration finished — resumed %d enrichment worker(s)",
                         resumed)
 
 

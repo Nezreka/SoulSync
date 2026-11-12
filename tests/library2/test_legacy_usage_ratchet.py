@@ -170,7 +170,7 @@ def _explain(kind, measured, baseline) -> str:
     listing = "\n".join(f"    {count:>4}  {path}" for count, path in worst)
     if current > expected:
         return (
-            f"Legacy {kind} grew from {expected} to {current}. Library v2 is "
+            f"Legacy {kind} grew from {expected} to {current}. The Library is "
             f"mid-migration (docs §32.3.1): new code reads and writes lib2_*, "
             f"not the legacy tables. Largest holders right now:\n{listing}"
         )

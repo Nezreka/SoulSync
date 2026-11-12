@@ -1326,7 +1326,7 @@ def precache_all_artwork(database, config_manager, *, progress=None) -> Dict[str
         logger.debug("artwork precache error: %s", e)
     if progress:
         progress("artwork", total, total)
-    logger.info("Library v2 artwork precache: %s", counts)
+    logger.info("Library artwork precache: %s", counts)
     return counts
 
 

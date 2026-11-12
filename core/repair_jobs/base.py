@@ -186,7 +186,7 @@ def build_artist_file_scope(db: Any, artist_id: int, artist_name: str = "") -> D
             "SELECT name FROM lib2_artists WHERE id=?", (artist_id,)
         ).fetchone()
         if artist is None:
-            raise ValueError("Library v2 artist not found")
+            raise ValueError("Library artist not found")
         from core.library2.artist_aliases import resolve_alias_group
         group = resolve_alias_group(conn, artist_id)
         marks = ",".join("?" for _ in group)

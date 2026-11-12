@@ -3453,10 +3453,10 @@ const WHATS_NEW = {
         { title: 'Rotating playlists', desc: 'Turn on Rotating in a playlist\'s Settings and a song it downloaded is removed once it leaves the playlist. Anything you played, favourited, rated or still have in another playlist is kept, and removals wait for your approval unless you turn dry run off (#2039).', page: 'sync' },
         { title: 'Discography uses the artist\'s profile', desc: 'Download Discography uses the quality profile on the artist\'s watchlist rules, with track, album and artist profiles in the library counting first (thanks Foxxify, #2022).', page: 'library' },
         { title: 'More', desc: 'Follow a YouTube channel without downloading its new uploads (thanks JuanVqz, #2008), per-artist cleanup checks in Library Health (thanks QT3496, #2004), M3U export for mirrored playlists (thanks TaunGadd), the quarantine badge and length check (thanks lozog, #2001), and empty Plex artist bios filled (thanks Eric-sson, #1993).' },
-        { title: 'Library v2, reviewed five times', desc: 'Everything Library v2 touched was reviewed end to end five times, and every finding was fixed with a test: the 3.6.1 upgrade brings everything over, household members and own libraries stay separate, tags, artwork, repair jobs and downloads behave, and album folders never land at the library root (thanks SeadogsBooty, #2023).', page: 'library' },
+        { title: 'The new Library, reviewed five times', desc: 'Everything the new Library touched was reviewed end to end five times, and every finding was fixed with a test: the 3.6.1 upgrade brings everything over, household members and own libraries stay separate, tags, artwork, repair jobs and downloads behave, and album folders never land at the library root (thanks SeadogsBooty, #2023).', page: 'library' },
         { title: 'Faster', desc: 'The library pages read their page off indexes, whole-library reports answer from their last result, the integrity report runs as a job, cache health opens in under a second, and startup skips scans it ran every time.' },
         { title: 'Fixes', desc: 'Release counts stay "X of all" (thanks QT3496, #2012), reorganize keeps the explicit flag (#2009), SoulSync shows up as one Navidrome player (thanks cremonies, #2005), liked music imports with cookies again (thanks jdfrye2, #2013), a scan is no longer flagged as stuck while an own library is still scanning (thanks QT3496, #2036), the Sources tab shows video and audiobook sources as in use (#2026), and video fixes from PapaBearDoes (#2015, #2017, #2018, #2019).' },
-        { title: 'Earlier versions', desc: '3.6.3 was a hot fix for the Library page on big libraries, and 3.6.2 brought Library v2, built by @nick2000713.' },
+        { title: 'Earlier versions', desc: '3.6.3 was a hot fix for the Library page on big libraries, and 3.6.2 brought the new Library, built by @nick2000713.' },
     ],
 };
 
@@ -3497,7 +3497,7 @@ const VERSION_MODAL_SECTIONS = [
             'Every profile can hide what it doesn\'t use, and the Playlists and Watchlist pages are redesigned.',
             'Rotating playlists: a song a playlist downloaded is removed once it leaves the playlist, unless you played it, favourited it or still have it in another playlist (#2039).',
             'Download Discography uses the artist\'s quality profile (thanks Foxxify, #2022), YouTube channels can be followed without downloading (thanks JuanVqz), and Library Health has per-artist checks (thanks QT3496).',
-            'Library v2 reviewed end to end five times, every finding fixed with a test, and the library pages, reports and startup much faster on big libraries.',
+            'The new Library reviewed end to end five times, every finding fixed with a test, and the library pages, reports and startup much faster on big libraries.',
         ],
     },
     {

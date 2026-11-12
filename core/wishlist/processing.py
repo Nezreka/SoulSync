@@ -455,7 +455,7 @@ def start_direct_track_download_batch(
         with runtime.tasks_lock:
             runtime.download_batches[batch_id] = make_wishlist_batch_row(
                 playlist_id="library_v2_search",
-                playlist_name="Library v2 Automatic Search",
+                playlist_name="Library Automatic Search",
                 track_count=0,
                 max_concurrent=runtime.get_batch_max_concurrent(),
                 profile_id=runtime.profile_id,
@@ -488,7 +488,7 @@ def _prepare_and_run_direct_track_batch(
         direct_tracks, duplicates = sanitize_and_dedupe_wishlist_tracks(tracks)
         if duplicates:
             runtime.logger.info(
-                f"[Library-v2 Search] Removed {duplicates} duplicate transient payload(s)"
+                f"[Library Search] Removed {duplicates} duplicate transient payload(s)"
             )
         for index, track in enumerate(direct_tracks):
             track['_original_index'] = index

@@ -165,7 +165,7 @@ def analyze_album_replaygain(
             stats["errors"].append({"track": path, "error": str(e)})
 
     logger.info(
-        "Library v2 ReplayGain album %s: %d analyzed, %d failed (album gain %s)",
+        "Library ReplayGain album %s: %d analyzed, %d failed (album gain %s)",
         album_id, stats["analyzed"], stats["failed"], album_gain_db,
     )
     return stats

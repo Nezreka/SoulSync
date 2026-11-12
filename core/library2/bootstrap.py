@@ -452,7 +452,7 @@ def reclaim_abandoned_claim(database: Any, *, process_started_at: float) -> bool
         released = cursor.rowcount > 0
         conn.commit()
         if released:
-            logger.info("Released a Library v2 migration claim left by a previous process")
+            logger.info("Released a Library migration claim left by a previous process")
         return released
     except sqlite3.OperationalError as exc:
         logger.debug("lib2 bootstrap reclaim skipped: %s", exc)
@@ -645,7 +645,7 @@ def _checkpoint_wal(database: Any, mode: Optional[str] = None) -> None:
     try:
         pages = checkpoint_wal(conn, mode or CHECKPOINT_TRUNCATE)
         if pages:
-            logger.info("Library v2 migration checkpointed %d WAL pages", pages)
+            logger.info("Library migration checkpointed %d WAL pages", pages)
     finally:
         conn.close()
 
@@ -842,7 +842,7 @@ def run_deferred_backfills(database: Any, *,
     from core.library2.schema import run_library_v2_backfills
     from core.library2.wal import PeriodicCheckpointer
 
-    ticker = _ProgressTicker("Library v2 convergence").start()
+    ticker = _ProgressTicker("Library convergence").start()
     conn = database._get_connection()
     # iss32-M02: on an interrupted migration these passes write as much as the
     # import itself, so the enrichment workers have to stand aside for them
@@ -895,7 +895,7 @@ def run_deferred_backfills(database: Any, *,
     stats["import_twins"] = merge_import_twins(database)["merged"]
     stats["scan_findings_closed"] = _settle_scan_findings_once(database, should_stop)
     if any(stats.values()):
-        logger.info("Library v2 convergence complete: %s", stats)
+        logger.info("Library convergence complete: %s", stats)
     # PASSIVE: this runs on every start. a TRUNCATE takes the write lock and
     # then waits for every reader to finish, and on a busy server that held up
     # every writer, and through the connection pool every request, for half
@@ -1011,19 +1011,19 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     if (not resume and not source_row_count(current_watermark)
             and not legacy_user_state_waiting(database)):
         mark_waiting_for_source(database, owner_token, watermark=current_watermark)
-        logger.info("Library v2 bootstrap: no legacy catalogue to import")
+        logger.info("Library bootstrap: no legacy catalogue to import")
         return {"skipped": "empty_source"}
 
     if resume:
-        logger.info("Library v2 bootstrap import resuming at %s row %s",
+        logger.info("Library bootstrap import resuming at %s row %s",
                     resume.stage, resume.rowid)
     else:
-        logger.info("Library v2 bootstrap import starting")
+        logger.info("Library bootstrap import starting")
     last_beat = {"t": 0.0}
     # iss32-M01: the log ticker sees EVERY progress call, including the ones
     # the heartbeat throttle below drops — throttling exists to spare the
     # database a write, not to keep the operator in the dark.
-    ticker = _ProgressTicker("Library v2 bootstrap import").start()
+    ticker = _ProgressTicker("Library bootstrap import").start()
 
     def _progress(stage, current, total, *, connection=None, rowid=None, run_id=None):
         ticker.update(stage, current, total)
@@ -1059,7 +1059,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
             stats = _import_legacy_library(database, profile_id=profile_id,
                                            progress=_progress, resume=resume)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Library v2 bootstrap import failed: %s", exc, exc_info=True)
+            logger.error("Library bootstrap import failed: %s", exc, exc_info=True)
             mark_failed(database, owner_token, str(exc))
             return {"success": False, "error": str(exc)}
 
@@ -1072,7 +1072,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
                 from core.maintenance.dedupe_source_ids import repair_imported_state
                 repair_imported_state(database)
             except Exception as exc:  # noqa: BLE001
-                logger.error("Library v2 post-import repair failed: %s", exc, exc_info=True)
+                logger.error("Library post-import repair failed: %s", exc, exc_info=True)
 
         if post_import is not None:
             try:
@@ -1082,7 +1082,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
                 if isinstance(exc, ArtistPreparationError):
                     mark_failed(database, owner_token, str(exc))
                     return {"success": False, "error": str(exc)}
-                logger.warning("Library v2 post-import precache failed: %s", exc)
+                logger.warning("Library post-import precache failed: %s", exc)
     finally:
         keepalive.stop()
         ticker.stop()
@@ -1099,7 +1099,7 @@ def run_bootstrap_if_needed(database: Any, config_get, *,
     # last legacy row immediately before the upgrade barrier took effect.
     if not mark_done(database, owner_token, watermark=current_watermark):
         return {"success": False, "error": "Bootstrap lease was lost before completion"}
-    logger.info("Library v2 bootstrap import completed: %s", stats)
+    logger.info("Library bootstrap import completed: %s", stats)
     # straight after the import: the 3.6.1 carries first (they find rows by
     # legacy id, and the twin merge deletes the duplicate rows holding some)
     carry_conn = database._get_connection()

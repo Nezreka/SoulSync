@@ -177,7 +177,7 @@ class DeadFileCleanerJob(RepairJob):
     display_name = "Dead File Cleaner"
     description = "Confirms indexed files that are no longer reachable"
     help_text = (
-        "Runs Library v2's storage-health-aware file scan. The first healthy "
+        "Runs the Library's storage-health-aware file scan. The first healthy "
         "miss is recorded as 'checking missing'; only a second consecutive "
         "healthy miss creates a review finding. An unavailable storage root "
         "never creates a destructive finding. Approve a finding to remove the "

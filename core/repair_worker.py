@@ -517,7 +517,7 @@ def _stale_legacy_subject(entity_id) -> Optional[Dict[str, Any]]:
     return {
         'success': False,
         'stale_subject': True,
-        'error': ('This finding predates Library v2 and can no longer be '
+        'error': ('This finding predates the Library and can no longer be '
                   'applied — re-run the job scan to raise it again'),
     }
 
@@ -1403,7 +1403,7 @@ class RepairWorker:
                 if cursor.rowcount:
                     logger.info(
                         "Pruned %d pending findings whose subject predates "
-                        "Library v2", cursor.rowcount)
+                        "the Library upgrade", cursor.rowcount)
                 conn.commit()
             finally:
                 conn.close()
@@ -1689,7 +1689,7 @@ class RepairWorker:
                     )
                 except Exception as e:
                     logger.error(
-                        "Library-v2 post-job sync failed for %s (%s %s): %s",
+                        "Library post-job sync failed for %s (%s %s): %s",
                         job_id, change.get('finding_type'),
                         change.get('entity_id'), e, exc_info=True,
                     )
@@ -2088,7 +2088,7 @@ class RepairWorker:
             except Exception as e:
                 # Finding creation remains fail-open: a bridge problem must not
                 # hide the repair issue itself.
-                logger.debug("Library-v2 finding annotation skipped: %s", e)
+                logger.debug("Library finding annotation skipped: %s", e)
 
             # what changes on its own (a rescan's size and bitrate, a provider
             # id enrichment adds, a provider's art url, a replaygain read) is
@@ -3526,7 +3526,7 @@ class RepairWorker:
                     )
                 except Exception as sync_error:
                     logger.error(
-                        "Finding %s applied but Library-v2 sync failed: %s",
+                        "Finding %s applied but Library sync failed: %s",
                         finding_id, sync_error, exc_info=True,
                     )
                     result['library_v2_sync'] = {
@@ -3540,7 +3540,7 @@ class RepairWorker:
                     # converged. Keep the finding as the durable retry anchor.
                     result['success'] = False
                     result['error'] = (
-                        'Repair applied, but Library V2 sync failed; finding '
+                        'Repair applied, but Library sync failed; finding '
                         'left pending for retry'
                     )
                     result['retryable'] = True
@@ -3554,7 +3554,7 @@ class RepairWorker:
                     if sync_state.get('converged') is False:
                         result['library_v2_converged'] = False
                         logger.warning(
-                            "Finding %s (%s/%s) applied without a Library-v2 "
+                            "Finding %s (%s/%s) applied without a Library "
                             "subject (%s) — catalogue snapshots not refreshed",
                             finding_id, job_id, finding_type,
                             sync_state.get('reason'),
@@ -3814,7 +3814,7 @@ class RepairWorker:
         re-running the scan, never by the worker guessing."""
         file_id = _lib2_id(entity_id)
         if file_id is None:
-            return {'success': False, 'error': 'Finding has no Library v2 file id'}
+            return {'success': False, 'error': 'Finding has no Library file id'}
         proposed = str((details or {}).get('proposed_path') or '').strip()
         if not proposed:
             return {'success': False,
@@ -3850,7 +3850,7 @@ class RepairWorker:
         native_id = _lib2_id(entity_id)
         if native_id is None:
             return _stale_legacy_subject(entity_id) or {
-                'success': False, 'error': 'Finding has no Library v2 entity id'}
+                'success': False, 'error': 'Finding has no Library entity id'}
         table = {'artist': 'lib2_artists', 'album': 'lib2_albums'}.get(entity_type)
         row_id, value = native_id, json.dumps(kept)
         if table is None:
@@ -3888,7 +3888,7 @@ class RepairWorker:
         native_id = _lib2_id(entity_id)
         if native_id is None:
             return _stale_legacy_subject(entity_id) or {
-                'success': False, 'error': 'Finding has no Library v2 entity id'}
+                'success': False, 'error': 'Finding has no Library entity id'}
         conn = None
         try:
             conn = self.db._get_connection(); cur = conn.cursor()
@@ -3937,7 +3937,7 @@ class RepairWorker:
                 and not details.get('library_v2_native')
                 and not (details.get('library_v2') or {}).get('track_ids')):
             return _stale_legacy_subject(entity_id) or {
-                'success': False, 'error': 'Finding has no Library v2 subject'}
+                'success': False, 'error': 'Finding has no Library subject'}
 
         parts = details.get('split_artists')
         combined = details.get('combined_name') or details.get('artist_name')
@@ -4469,7 +4469,7 @@ class RepairWorker:
         """Approve a native review-mode monitor-new-items release."""
         album_id = details.get('lib2_album_id') or _lib2_id(entity_id)
         if album_id is None:
-            return {'success': False, 'error': 'Not a Library-v2 album finding'}
+            return {'success': False, 'error': 'Not a Library album finding'}
         try:
             from core.library2 import ADMIN_PROFILE_ID
             from core.library2.discography import approve_release
@@ -4495,7 +4495,7 @@ class RepairWorker:
             return {'success': True, 'action': 'ignored', 'message': 'Review the file or profile; no replacement queued'}
         tid = _lib2_id(entity_id)
         if tid is None:
-            return {'success': False, 'error': 'Not a Library-v2 track finding'}
+            return {'success': False, 'error': 'Not a Library track finding'}
         from core.library_scope import library_scope
         from core.library2.quality_eval import effective_track_profile, probe_profile_file, quality_issue
         from core.library2.track_files import primary_file_row
@@ -4584,7 +4584,7 @@ class RepairWorker:
         'automatic' mode."""
         native_track_id = _lib2_id(entity_id)
         if native_track_id is None:
-            return {'success': False, 'error': 'Not a Library-v2 track finding'}
+            return {'success': False, 'error': 'Not a Library track finding'}
         conn = None
         try:
             from core.library2 import ADMIN_PROFILE_ID
@@ -4667,7 +4667,7 @@ class RepairWorker:
         native_track_id = _lib2_id(entity_id)
         row = self._load_lib2_redownload_row(native_track_id)
         if not row:
-            return {'success': False, 'error': 'Track not found in Library v2'}
+            return {'success': False, 'error': 'Track not found in the Library'}
         title = row.get('title') or details.get('title') or 'Unknown'
         # dd28-32: 'remove' means "drop this dead FILE reference", but the
         # repair_intent below unmonitors the whole TRACK with user
@@ -4889,7 +4889,7 @@ class RepairWorker:
         native_track_id = _lib2_id(entity_id)
         if native_track_id is None:
             return {'success': False,
-                    'error': 'No Library v2 track associated with this finding'}
+                    'error': 'No Library track associated with this finding'}
         if file_path:
             from core.library2.paths import missing_path_root_is_healthy
             resolved, _ = self._resolve_finding_path(entity_id, file_path)
@@ -5107,7 +5107,7 @@ class RepairWorker:
         native_track_id = _lib2_id(entity_id)
         row = self._load_lib2_redownload_row(native_track_id)
         if not row:
-            return {'success': False, 'error': 'Track not found in Library v2'}
+            return {'success': False, 'error': 'Track not found in the Library'}
         removed = self._remove_native_repair_file(file_path, details, reason='short_preview_track')
         if not removed.get('success'):
             return removed
@@ -5144,7 +5144,7 @@ class RepairWorker:
         native_track_id = _lib2_id(entity_id)
         row = self._load_lib2_redownload_row(native_track_id)
         if not row:
-            return {'success': False, 'error': 'Track not found in Library v2'}
+            return {'success': False, 'error': 'Track not found in the Library'}
         removed = self._remove_native_repair_file(
             file_path, details, reason='corrupt_audio', quarantine=True)
         if not removed.get('success'):
@@ -5221,7 +5221,7 @@ class RepairWorker:
         track_id = int(file_row['track_id'])
         row = self._load_lib2_redownload_row(track_id)
         if not row:
-            return {'success': False, 'error': 'Track not found in Library v2'}
+            return {'success': False, 'error': 'Track not found in the Library'}
         # The catalogue path, not the scan's resolved one: the journal files
         # the move under the album that owns this path.
         removed = self._remove_native_repair_file(
@@ -5491,7 +5491,7 @@ class RepairWorker:
                 )
                 track = conn.execute('SELECT album_id FROM lib2_tracks WHERE id=?', (native_track_id,)).fetchone()
                 if track is None:
-                    return {'success': False, 'error': 'Library-v2 track no longer exists'}
+                    return {'success': False, 'error': 'Library track no longer exists'}
                 editions, membership = _edition_tracklists(conn, track['album_id'])
                 group = [] if editions else _complete_group_tracklist(conn, track['album_id'])
                 tracks = _api_tracks_for_subject({'track_id': native_track_id}, group, editions, membership)
@@ -5632,7 +5632,7 @@ class RepairWorker:
                     cursor = conn.execute('UPDATE lib2_tracks SET track_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
                                           (int(correct_num), native_track_id))
                     if not cursor.rowcount:
-                        return {'success': False, 'error': 'Library-v2 track no longer exists'}
+                        return {'success': False, 'error': 'Library track no longer exists'}
                     conn.commit()
                 finally:
                     conn.close()
@@ -6437,7 +6437,7 @@ class RepairWorker:
                 (*native_updates.values(), native_track_id),
             )
             if not updated.rowcount:
-                return {'success': False, 'error': 'Library-v2 track no longer exists'}
+                return {'success': False, 'error': 'Library track no longer exists'}
             conn.commit()
         finally:
             if conn:
@@ -6481,7 +6481,7 @@ class RepairWorker:
             return {
                 'success': True,
                 'action': 'removed_content',
-                'message': f'{type_label} album removed from Library v2 ({deleted} file(s) deleted)',
+                'message': f'{type_label} album removed from the Library ({deleted} file(s) deleted)',
                 'library_v2_file_deleted': True,
                 'repair_intent': 'remove',
             }
@@ -6492,7 +6492,7 @@ class RepairWorker:
             'success': True,
             'action': 'removed_content',
             'message': (
-                f'{type_label} track removed from Library v2'
+                f'{type_label} track removed from the Library'
                 + (' (file deleted)' if removed.get('deleted_file') else '')
             ),
             'library_v2_file_deleted': True,
@@ -6695,7 +6695,7 @@ class RepairWorker:
             conn.commit()
         except Exception as exc:
             conn.rollback()
-            return {'success': False, 'error': f'Library-v2 re-home failed: {exc}'}
+            return {'success': False, 'error': f'Library re-home failed: {exc}'}
         finally:
             conn.close()
         # dd28-20: re-homing the file leaves the ORIGINAL (expected) track
@@ -7426,7 +7426,7 @@ class RepairWorker:
                             return {
                                 'success': False,
                                 'error': (
-                                    f'Converted to {quality_label}, but Library v2 could '
+                                    f'Converted to {quality_label}, but the Library could '
                                     f'not be updated — original kept: {e}'
                                 ),
                             }

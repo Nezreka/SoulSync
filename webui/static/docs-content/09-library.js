@@ -46,9 +46,9 @@ Click any artist card to open their detail page: albums, EPs, and singles as car
         {
             id: 'lib-enhanced',
             title: 'Library Management',
-            lede: 'Manage catalogue metadata and physical file versions in Library v2.',
+            lede: 'Manage catalogue metadata and physical file versions in the Library.',
             body: `
-The Library route opens **Library v2** directly. Management actions are part of that page; there is no separate Enhanced toggle.
+Management actions are part of the Library page; there is no separate Enhanced toggle.
 
 Catalogue tracks and their physical files are managed separately. **File versions** shows the copies held for a track, and **Recording duplicates** reviews linked single/album recordings. Removal actions preview the selected catalogue entries and file paths before applying changes. Available actions depend on your profile permissions and selected library.
 `
@@ -58,7 +58,7 @@ Catalogue tracks and their physical files are managed separately. **File version
             title: 'Service Matching',
             lede: 'Link your artists, albums, and tracks to external services for richer metadata.',
             body: `
-Library v2 exposes provider links and matching actions on catalogue entities. The available services depend on the entity and its stored provider IDs.
+The Library exposes provider links and matching actions on catalogue entities. The available services depend on the entity and its stored provider IDs.
 
 - Click any chip to **manually search and link** the correct external ID when automatic matching gets it wrong
 - **Paste a link or an ID** instead of a name when several artists share one (eleven called "1905"): open the right one on that service, copy its address, and paste it. Works for Spotify, MusicBrainz, Deezer, iTunes/Apple Music, Discogs, Tidal, Qobuz, Amazon, AudioDB, JioSaavn, Last.fm and Bandcamp links, and Genius IDs. A paste that doesn't resolve falls back to a normal search
@@ -115,7 +115,7 @@ From any album card showing missing tracks, click **Download Missing** to open a
             title: 'Remove Entries and Files',
             lede: 'Remove tracks from the database only, or from disk as well — with a deliberate choice each time.',
             body: `
-Library v2 previews the affected entries and file paths before removal:
+The Library previews the affected entries and file paths before removal:
 
 - **Remove from library database only** — removes the selected library records and keeps the physical files on disk.
 - **Permanently delete files** — removes the corresponding records and disk files after explicit confirmation. Paths outside configured Music Library Paths, or on unavailable storage, are blocked.

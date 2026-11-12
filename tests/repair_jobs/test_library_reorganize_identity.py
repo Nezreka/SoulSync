@@ -227,7 +227,7 @@ def test_another_bridge_rejection_is_still_an_error(reorg_db, monkeypatch):
     import core.library2.reorganize_bridge as bridge
 
     def _refused(db, config_manager, album_id, mode='api'):
-        raise bridge.ReorganizeBridgeError("Library v2 is busy", status=409)
+        raise bridge.ReorganizeBridgeError("The Library is busy", status=409)
     monkeypatch.setattr(bridge, 'preview_album_reorganize', _refused)
 
     assert LibraryReorganizeJob().scan(_ctx(reorg_db, [])).errors == 1

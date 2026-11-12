@@ -213,7 +213,7 @@ def build_runner(
                 )
         except Exception as lib2_err:
             logger.debug(
-                "[Reorganize] Library-v2 path sync skipped for %s: %s",
+                "[Reorganize] Library path sync skipped for %s: %s",
                 track_id, lib2_err,
             )
 

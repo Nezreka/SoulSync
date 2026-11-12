@@ -235,7 +235,7 @@ def test_payload_album_carries_images(imported_conn):
 
     payload = track_wishlist_payload(conn, track_id)
     images = payload["album"]["images"]
-    assert images, "a Library-v2 wishlist payload must never be image-less"
+    assert images, "a Library wishlist payload must never be image-less"
     assert images[0]["url"] == f"/api/library/v2/artwork/album/{album_id}"
 
 

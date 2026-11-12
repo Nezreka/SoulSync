@@ -86,7 +86,7 @@ def _pipeline_context(
 ) -> Dict[str, Any]:
     track_id = int(match.get("track_id") or 0)
     if track_id <= 0:
-        raise ValueError("matched bundle entry has no Library-v2 track id")
+        raise ValueError("matched bundle entry has no Library track id")
     row = conn.execute(
         """SELECT t.id AS track_id, t.title, t.track_number, t.disc_number,
                   t.duration, t.spotify_id AS track_spotify_id,
@@ -106,7 +106,7 @@ def _pipeline_context(
         (record.request_id, track_id),
     ).fetchone()
     if row is None:
-        raise ValueError("matched Library-v2 track or acquisition request disappeared")
+        raise ValueError("matched Library track or acquisition request disappeared")
     data = dict(row)
     # the TRACK's performers, in credit order (what the wishlist mirror
     # sends): the album's primary artist tagged every song of a compilation
@@ -341,7 +341,7 @@ def _pipeline_published(
         return row is not None
     except Exception as exc:  # noqa: BLE001 - never let the check invent success
         logger.warning(
-            "Could not confirm Library v2 registration before completing an "
+            "Could not confirm Library registration before completing an "
             "acquisition import: %s", redact_sensitive_text(exc))
         return False
     finally:

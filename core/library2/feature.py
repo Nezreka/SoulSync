@@ -54,11 +54,11 @@ def library_v2_enabled(
             if not coerce_bool(configured, True):
                 logger.warning(
                     "features.library_v2=false is deprecated and ignored: "
-                    "Library v2 is the native catalogue and repair engine"
+                    "The Library is the native catalogue and repair engine"
                 )
                 _warned_deprecated_disable = True
         except Exception as exc:  # noqa: BLE001 - config read cannot disable catalogue
-            logger.debug("Library v2 legacy feature-key read skipped: %s", exc)
+            logger.debug("Library legacy feature-key read skipped: %s", exc)
     return True
 
 

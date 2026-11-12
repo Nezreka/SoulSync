@@ -124,7 +124,7 @@ def test_fix_re_resolves_native_track_profile_at_apply_time(tmp_path, monkeypatc
     monkeypatch.setattr(
         "core.quality.selection.load_profile_by_id",
         lambda _profile_id: (_ for _ in ()).throw(
-            AssertionError("native findings must use the live Library-v2 cascade")
+            AssertionError("native findings must use the live Library cascade")
         ),
     )
     worker = _worker(tmp_path)

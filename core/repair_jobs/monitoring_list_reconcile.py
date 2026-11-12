@@ -22,7 +22,7 @@ class MonitoringListReconcileJob(RepairJob):
         "Retries pending Watchlist/Wishlist mirror operations, reconciles "
         "artist monitoring with the Watchlist, and reasserts monitored missing "
         "or upgrade-eligible tracks into the Wishlist. Existing external Wishlist "
-        "entries first restore their concrete track monitoring. Explicit Library-v2 "
+        "entries first restore their concrete track monitoring. Explicit Library "
         "monitoring wins; imported/default artist flags follow the Watchlist. "
         "No files are changed.\n\n"
         "This is the single writer that puts wanted tracks into the Wishlist — "

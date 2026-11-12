@@ -227,7 +227,7 @@ def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -
             with _artwork_cache_lock:
                 _artwork_cache_state["stats"] = stats
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Library v2 background artwork cache failed: %s", exc)
+            logger.warning("Library background artwork cache failed: %s", exc)
             with _artwork_cache_lock:
                 _artwork_cache_state["error"] = str(exc)
         finally:
@@ -240,7 +240,7 @@ def _start_artwork_cache(get_database: Callable[[], Any], config_manager: Any) -
     try:
         threading.Thread(target=carrying_scope(_run), name="lib2-artwork-cache", daemon=True).start()
     except Exception as exc:  # noqa: BLE001 - optional presentation worker
-        logger.warning("Could not start Library v2 artwork cache worker: %s", exc)
+        logger.warning("Could not start Library artwork cache worker: %s", exc)
         with _artwork_cache_lock:
             _artwork_cache_state.update(
                 running=False,
@@ -324,7 +324,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         try:
             return bool(profile_page_allowed_getter("library"))
         except Exception as exc:  # noqa: BLE001 - fail closed on auth lookup errors
-            logger.warning("Library v2 profile permission lookup failed: %s", exc)
+            logger.warning("Library profile permission lookup failed: %s", exc)
             return False
 
     def _guard():
@@ -356,7 +356,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 return _named_row_hidden()
             if request.endpoint == "lib2_update_ui_preferences" and _own_preferences_only():
                 return None
-            return _fail("Library v2 changes require the admin profile", 403)
+            return _fail("Library changes require the admin profile", 403)
         # E-06: for a profile, another library's row does not exist -- its
         # page, its tags, its history alike
         return _named_row_hidden()
@@ -543,7 +543,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return int(profile_id_getter()) if profile_id_getter else 1
         except Exception as exc:  # noqa: BLE001
             # G03-7: an unreadable profile is nobody, never the admin
-            logger.warning("Library v2: could not read the calling profile: %s", exc)
+            logger.warning("Library: could not read the calling profile: %s", exc)
             return 0
 
     def _intent_profile() -> int:
@@ -3061,7 +3061,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             # HTML 500, which the client renders as an unexplained "API error"
             # for an operation that is simply worth retrying.
             conn.rollback()
-            logger.warning("Library v2 album art apply hit a locked database: %s", exc)
+            logger.warning("Library album art apply hit a locked database: %s", exc)
             return _fail("The database is busy right now — try again in a moment.", 503)
         finally:
             conn.close()
@@ -3104,14 +3104,14 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                                 options={'fields': ['cover_art'], 'cover_art': 'replace'})
                             _job_registry.update(job_id, result=stats)
                         except Exception as e:  # noqa: BLE001
-                            logger.error("Library v2 cover-embed retag failed: %s", e, exc_info=True)
+                            logger.error("Library cover-embed retag failed: %s", e, exc_info=True)
                             _job_registry.update(job_id, error=str(e))
                         finally:
                             _job_registry.finish(job_id)
 
                     threading.Thread(target=carrying_scope(_run), name="lib2-cover-embed", daemon=True).start()
         except Exception as e:  # noqa: BLE001
-            logger.error("Library v2 cover-embed scheduling failed: %s", e, exc_info=True)
+            logger.error("Library cover-embed scheduling failed: %s", e, exc_info=True)
             embed_error = str(e)
 
         payload = {
@@ -3229,7 +3229,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except sqlite3.OperationalError as exc:
             # dd28-03: see the matching handler on the album art route.
             conn.rollback()
-            logger.warning("Library v2 artist art apply hit a locked database: %s", exc)
+            logger.warning("Library artist art apply hit a locked database: %s", exc)
             return _fail("The database is busy right now — try again in a moment.", 503)
         finally:
             conn.close()
@@ -3935,7 +3935,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     "truncated": report.get("truncated"),
                 })
             except Exception as exc:  # noqa: BLE001
-                logger.error("Library-v2 integrity report failed: %s", exc)
+                logger.error("Library integrity report failed: %s", exc)
                 with _integrity_lock:
                     _integrity_state["error"] = (job_id, str(exc))
                 _job_registry.update(job_id, error=str(exc))
@@ -5836,7 +5836,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                         db, [t for t in track_ids if t not in failed])
                 _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
-                logger.error("Library v2 retag failed: %s", e, exc_info=True)
+                logger.error("Library retag failed: %s", e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))
             finally:
                 _job_registry.finish(job_id)
@@ -5934,7 +5934,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 stats["enriched_from"] = enriched_from
                 _job_registry.update(job_id, result=stats)
             except Exception as e:  # noqa: BLE001
-                logger.error("Library v2 fill-tag-gaps failed: %s", e, exc_info=True)
+                logger.error("Library fill-tag-gaps failed: %s", e, exc_info=True)
                 _job_registry.update(job_id, error=str(e))
             finally:
                 _job_registry.finish(job_id)
@@ -6032,7 +6032,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
-                    "Library v2 refresh failed (%s %s): %s",
+                    "Library refresh failed (%s %s): %s",
                     entity, eid, exc, exc_info=True,
                 )
                 _job_registry.update(job_id, error=str(exc))
@@ -6233,10 +6233,10 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     try:
                         lib2_bootstrap.run_deferred_backfills(get_database())
                     except Exception as conv_err:  # noqa: BLE001 - retries next start
-                        logger.warning("Library v2 convergence after import failed: %s", conv_err)
+                        logger.warning("Library convergence after import failed: %s", conv_err)
                 threading.Thread(target=_converge, name="lib2-converge", daemon=True).start()
             except Exception as e:  # noqa: BLE001
-                logger.error("Library v2 import failed: %s", e, exc_info=True)
+                logger.error("Library import failed: %s", e, exc_info=True)
                 _import_state.update(error=str(e), stage="failed")
                 try:
                     lib2_bootstrap.mark_failed(get_database(), bootstrap_owner, str(e))
@@ -6346,7 +6346,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as exc:  # noqa: BLE001
             conn.rollback()
             lib2_bootstrap.mark_failed(get_database(), owner_token, str(exc))
-            logger.error("Library v2 reset failed: %s", exc, exc_info=True)
+            logger.error("Library reset failed: %s", exc, exc_info=True)
             return _fail(str(exc), 500)
         finally:
             conn.execute("PRAGMA foreign_keys=ON")
@@ -6355,12 +6355,12 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         _reset_artwork_cache_state()
         _import_state.update(running=False, stage=None, current=0, total=0,
                              stats=None, error=None, finished_at=None)
-        logger.warning("Library v2 catalogue reset: %s", cleared or "already empty")
+        logger.warning("Library catalogue reset: %s", cleared or "already empty")
         return jsonify({
             "success": True,
             "cleared": cleared,
             "message": (
-                "Library v2 is empty and the automatic migration is re-armed. "
+                "The Library is empty and the automatic migration is re-armed. "
                 "Restart the server to watch it run."
             ),
         })
@@ -6382,7 +6382,7 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         from core.library2.post_import import preparation_state
         return preparation_state()
 
-    logger.info("Library v2 routes registered (/api/library/v2/*)")
+    logger.info("Library routes registered (/api/library/v2/*)")
 
 
 __all__ = ["register_library_v2_routes", "start_artwork_precache"]

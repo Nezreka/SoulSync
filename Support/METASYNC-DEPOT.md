@@ -76,7 +76,7 @@ depot-to-library write** — the depot never updates a library
 record itself. A direct library-write promotion existed in an
 earlier build of this step, aimed at the pre-v2 library tables;
 it was removed in this update rather than ported blind. A
-library-v2 port (through the catalogue's own provider-ID write
+library port (through the catalogue's own provider-ID write
 path) comes when something actually needs to promote outside
 tagging.
 

@@ -196,7 +196,7 @@ def _build_db_artists(query: str, deps: SearchDeps) -> list[dict]:
                 'image_is_native': True,
             })
     except Exception as exc:  # a database without the v2 tables yet
-        logger.debug("Library-v2 artist search unavailable: %s", exc)
+        logger.debug("Library artist search unavailable: %s", exc)
     finally:
         if conn is not None:
             conn.close()

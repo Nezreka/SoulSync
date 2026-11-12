@@ -129,7 +129,7 @@ def target_tracks(source: str, album_id: str) -> List[Dict[str, Any]]:
 
 
 LEGACY_SUBJECT_ERROR = (
-    "That album is not a Library v2 album — reassign needs a lib2:<id> subject"
+    "That album is not a Library album — reassign needs a lib2:<id> subject"
 )
 
 
@@ -166,7 +166,7 @@ def local_album_tracks(database, album_id: Any) -> List[Dict[str, Any]]:
     """
     native_id = lib2_album_id(album_id)
     if native_id is None:
-        logger.warning("reassign refused non-Library-v2 album subject %r", album_id)
+        logger.warning("reassign refused non-Library album subject %r", album_id)
         return []
     conn = None
     try:

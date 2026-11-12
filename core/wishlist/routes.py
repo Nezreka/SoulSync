@@ -573,7 +573,7 @@ def _enrich_wishlist_images(
                         stored_image_url=stored_covers.get(album_id),
                     )
             except Exception as exc:  # noqa: BLE001
-                logger.debug("Could not backfill Library-v2 wishlist covers: %s", exc)
+                logger.debug("Could not backfill Library wishlist covers: %s", exc)
 
             artist_id_by_track = (
                 _lib2_artist_ids_for_tracks(conn, sorted(set(lib2_track_ids)))

@@ -546,7 +546,7 @@ def _descriptor_lib2_track_ids(
             matched.add(int(candidates[0]["id"]))
         elif len(candidates) > 1:
             logger.warning(
-                "Wishlist removal identity %r matched %d Library-v2 tracks; "
+                "Wishlist removal identity %r matched %d Library tracks; "
                 "skipping ambiguous provider fallback", raw_key, len(candidates),
             )
     return sorted(matched)
@@ -1235,7 +1235,7 @@ def reconcile_track_wishlist(
         else:
             prune = []
             logger.info(
-                "wishlist reconcile (profile %s): pruning skipped, a Library v2 "
+                "wishlist reconcile (profile %s): pruning skipped, a Library "
                 "bootstrap is running and the wanted projection is incomplete",
                 profile_id,
             )
@@ -1403,7 +1403,7 @@ def carry_member_watchlists(conn: Any) -> Dict[str, int]:
         conn.execute(f"CREATE TABLE {_MEMBER_WATCHLISTS_MARKER} (applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         conn.commit()
         if stats["artists"]:
-            logger.info("household watchlists carried into Library v2: %s", stats)
+            logger.info("household watchlists carried into the Library: %s", stats)
     except Exception as exc:  # noqa: BLE001 - a watch badge is never a blocker
         logger.warning("household watchlists not carried: %s", exc)
         try:

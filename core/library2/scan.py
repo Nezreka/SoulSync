@@ -357,7 +357,7 @@ def rescan_files(
             logger.error("releasing externally deleted tracks failed: %s",
                          exc, exc_info=True)
     logger.info(
-        "Library v2 file rescan: %(scanned)d probed, %(updated)d updated, "
+        "Library file rescan: %(scanned)d probed, %(updated)d updated, "
         "%(missing)d paths absent, %(path_repointed)d repointed, "
         "%(missing_confirmed)d confirmed missing, %(recovered)d recovered",
         stats,
@@ -593,7 +593,7 @@ def _observe_missing(database, rows, *, stats, manual: bool, ambiguous,
     if mass:
         stats["mass_missing_deferred"] = len(rows)
         logger.warning(
-            "Library v2 scan: %d of %d files unreachable at once - treating it as "
+            "Library scan: %d of %d files unreachable at once - treating it as "
             "a storage outage, no file is marked missing", len(rows),
             stats["scanned"] + len(rows))
     pending: list = []
@@ -678,7 +678,7 @@ def release_externally_deleted(database, file_ids: List[int]) -> int:
             released += len(track_ids)
         conn.commit()
     if released:
-        logger.info("Library v2 scan: %d track(s) deleted outside SoulSync "
+        logger.info("Library scan: %d track(s) deleted outside SoulSync "
                     "will not be downloaded again", released)
     return released
 

@@ -890,7 +890,7 @@ def approve_release(db, config_manager, album_id: int, *, profile_id: int = 1) -
             (profile == ADMIN_PROFILE_ID, int(album_id)),
         )
         if cursor.rowcount == 0:
-            raise LookupError("Library-v2 album no longer exists")
+            raise LookupError("Library album no longer exists")
         if profile != ADMIN_PROFILE_ID:
             from core.library2.monitor_rules import PROVENANCE_USER, record_rule
             record_rule(conn, "album", int(album_id), True, PROVENANCE_USER, profile_id=profile)

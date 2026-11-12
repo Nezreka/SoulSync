@@ -507,7 +507,7 @@ def retire_replaced_files(
         if set_file_state(conn, file_id, "deleted"):
             retired += 1
             logger.info(
-                "Library v2: retired replaced file row %s (%s) for track %s",
+                "Library: retired replaced file row %s (%s) for track %s",
                 file_id, stored, track_id,
             )
     return retired

@@ -2213,7 +2213,7 @@ class MusicDatabase:
                 ensure_library_v2_schema(conn, run_backfills=False)
                 self._record_migration(cursor, 'library_v2_schema')
             except Exception as lib2_err:
-                logger.error(f"Library v2 schema init failed: {lib2_err}")
+                logger.error(f"Library schema init failed: {lib2_err}")
                 raise
 
             # Durable acquisition root + persistent external-client correlation
@@ -2869,7 +2869,7 @@ class MusicDatabase:
                         "(SELECT id FROM temp.lib2_reset_failed WHERE NOT carrier)",
                         (f"lib2_{entity_type}", service))
                 except sqlite3.OperationalError as exc:  # older databases may not have provenance yet
-                    logger.debug("could not clear Library-v2 match provenance: %s", exc)
+                    logger.debug("could not clear Library match provenance: %s", exc)
             # still not_found: a pair the worker settled since the read stays
             cursor.execute(
                 "DELETE FROM lib2_provider_attempts WHERE entity_type=? AND service=? "
