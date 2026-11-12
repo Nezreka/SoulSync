@@ -8941,3 +8941,42 @@ a.vd-rt:hover { transform: translateY(-1px); border-color: var(--white-a35); }
     .vsr-page.vsr2 .vsr-searchbar { height: 46px; border-radius: var(--radius-pill); }
     .vsr-page.vsr2 .vsr-grid { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 16px 10px; }
 }
+
+/* ═══════════════════════════════════════════════
+   DISCOVER, redrawn (.vdsc-page.vdsc2)
+   The page keeps its shape (the hero, the genre tiles, the rails). What
+   changes is the voice: lighter headings, posters that stand on their own
+   instead of each in a box, and a label only on what you already own.
+   ═══════════════════════════════════════════════ */
+.vdsc-page.vdsc2 .vdsc-bar-title { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+.vdsc-page.vdsc2 .vdsc-bar-sub { font-size: 14px; font-weight: 500; color: var(--white-a55); }
+.vdsc-page.vdsc2 .vdsc-btn { border-radius: var(--radius-pill); font-weight: 600; }
+.vdsc-page.vdsc2 .vdsc-group-head h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; }
+.vdsc-page.vdsc2 .vdsc-group-head p { font-weight: 500; color: var(--white-a45); }
+.vdsc-page.vdsc2 .vdsc-shelf-title { font-size: 16px; font-weight: 600; letter-spacing: 0; }
+.vdsc-page.vdsc2 .vdsc-tile-name { font-weight: 700; }
+.vdsc-page.vdsc2 .vdsc-grid-title,
+.vdsc-page.vdsc2 .vdsc-ig-title,
+.vdsc-page.vdsc2 .vdsc-empty-title { font-weight: 700; }
+.vdsc-page.vdsc2 .vdsc-story-title { font-weight: 700; }
+.vdsc-page.vdsc2 .vdsc-hero-title { font-weight: 700; }
+
+/* rail and grid posters: no box around each, the poster is the card */
+.vdsc-page.vdsc2 .vdsc-rail .vsr-card,
+.vdsc-page.vdsc2 .vsr-grid .vsr-card { padding: 0; background: none; border: 0; border-radius: 0;
+    box-shadow: none; }
+.vdsc-page.vdsc2 .vsr-poster { background: var(--white-a04); border-color: var(--white-a07);
+    box-shadow: 0 10px 26px var(--black-a40); }
+.vdsc-page.vdsc2 .vsr-card:hover .vsr-poster { border-color: var(--white-a30);
+    box-shadow: 0 18px 40px var(--black-a55); }
+.vdsc-page.vdsc2 .vsr-name { font-size: 13.5px; font-weight: 600; }
+.vdsc-page.vdsc2 .vsr-sub { font-weight: 500; color: var(--white-a45); }
+.vdsc-page.vdsc2 .vsr-ribbon { top: 8px; left: 8px; padding: 3px 8px; font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.02em; text-transform: none; box-shadow: none; }
+.vdsc-page.vdsc2 .vsr-ribbon--owned { background: var(--black-a65); color: rgb(var(--accent-light-rgb));
+    border: 1px solid rgba(var(--accent-rgb), 0.45); }
+.vdsc-page.vdsc2 .vsr-ribbon--preview { display: none; }
+.vdsc-page.vdsc2 .vsr-rating { top: 8px; right: 8px; font-size: 11px; font-weight: 600;
+    background: var(--black-a65); }
+.vdsc-page.vdsc2 .vsr-new { font-weight: 700; }
+.vdsc-page.vdsc2 .vdsc-stories:not(.hidden) { margin-bottom: 26px; }
