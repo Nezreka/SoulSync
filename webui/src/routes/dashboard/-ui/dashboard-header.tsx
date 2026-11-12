@@ -559,7 +559,11 @@ function HeroIntro({ library }: { library?: ReactNode }) {
           {profileName ? (
             <>
               <span className="hello-greet-lead">{lead}, </span>
-              <span className="hello-greet-name">
+              {/* --name-len sizes the name to fit a phone on one line */}
+              <span
+                className="hello-greet-name"
+                style={{ '--name-len': profileName.length + (question ? 1 : 0) } as CSSProperties}
+              >
                 {profileName}
                 {question ? '?' : null}
               </span>

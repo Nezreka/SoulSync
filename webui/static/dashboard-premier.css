@@ -1476,7 +1476,7 @@ body.max-performance #dashboard-page .listen-hero-play::after {
     grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
     gap: 28px;
     margin: 0;
-    padding: 30px 38px;
+    padding: 26px 38px;
     border: 1px solid var(--white-a08);
     border-radius: 28px;
     background:
@@ -1507,9 +1507,6 @@ body.max-performance #dashboard-page .listen-hero-play::after {
 body.reduce-effects #dashboard-page.dash-room .room-backdrop,
 body.max-performance #dashboard-page.dash-room .room-backdrop {
     display: none;
-}
-#dashboard-page.dash-room .dash-hero-main {
-    gap: 16px;
 }
 #dashboard-page.dash-room .dash-hero-numbers {
     display: flex;
@@ -2265,18 +2262,8 @@ body.max-performance #dashboard-page.dash-room .room-backdrop {
     background: var(--white-a16);
     color: var(--text-1);
 }
-/* the newest card is larger: it is why you looked. music only: its cards are
-   square covers. on the video shelves a larger first poster left the row
-   ragged, with a band of nothing under the other nine */
-#dashboard-page.dash-room:not([data-media='video']) .room-shelves .dash-rail > .dash-rail-card:first-child {
-    width: 244px;
-}
-#dashboard-page.dash-room:not([data-media='video']) .room-shelves .dash-rail > .dash-rail-card:first-child .ya-card-img {
-    border-radius: 18px;
-}
-#dashboard-page.dash-room:not([data-media='video']) .room-shelves .dash-rail > .dash-rail-card:first-child .ya-card-name {
-    font-size: 17px;
-}
+/* every card on a shelf is the same size. the first one used to be larger,
+   which left the row ragged and a band of nothing under the other eight */
 #dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-img {
     transition:
         transform var(--dur-base) var(--ease-standard),
@@ -2332,10 +2319,12 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
 @media (max-width: 768px) {
     #dashboard-page.dash-room .dashboard-header.dash-hero {
         grid-template-columns: minmax(0, 1fr);
-        padding: 26px 24px;
+        padding: 18px 18px 20px;
+        gap: 14px;
     }
+    /* the workers sit in three tight rows of five (spacing pass, below) */
     #dashboard-page.dash-room .orb-stage {
-        min-height: 180px;
+        min-height: 0;
     }
     #dashboard-page.dash-room .room-board > *,
     #dashboard-page.dash-room .room-board > .weekly-digest,
@@ -2384,9 +2373,6 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
     }
     #dashboard-page.dash-room .dash-side-card[data-card='automations'] .dash-autom-when {
         width: 58px;
-    }
-    #dashboard-page.dash-room .room-shelves .dash-rail > .dash-rail-card:first-child {
-        width: 196px;
     }
 }
 
@@ -2460,4 +2446,198 @@ body.max-performance #dashboard-page.dash-room .dash-tile-sub::before {
 }
 #dashboard-page.dash-room[data-media='video'] .room-shelves {
     gap: 38px;
+}
+
+/* ═══════════════════════════════════════════════
+   THE LISTENING ROOM, spacing pass (Nov 12 2026)
+   Nothing new on the page: the same sections, given the room they need and
+   no more. On a wide screen the four system cards were two by two, each a
+   thousand pixels wide around three hundred pixels of content.
+   ═══════════════════════════════════════════════ */
+
+/* ── the hero: the numbers sit beside the name once there is room ── */
+#dashboard-page.dash-room .dash-hero-main {
+    display: grid;
+    grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+    column-gap: clamp(32px, 5cqw, 88px);
+    row-gap: 16px;
+    align-content: center;
+    container: hero-main / inline-size;
+}
+#dashboard-page.dash-room .dash-hero-main > * {
+    grid-column: 1 / -1;
+    min-width: 0;
+}
+/* the date is a chip, not a bar: a grid child stretches unless told not to */
+#dashboard-page.dash-room .dash-hero-main > .dash-hero-eyebrow {
+    justify-self: start;
+}
+@container hero-main (min-width: 980px) {
+    #dashboard-page.dash-room .dash-hero-main > .dash-hero-eyebrow,
+    #dashboard-page.dash-room .dash-hero-main > .hello-greeting {
+        grid-column: 1;
+    }
+    #dashboard-page.dash-room .dash-hero-main > .dash-hero-numbers {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        align-self: end;
+        margin: 0;
+    }
+}
+
+/* ── the shelves: side by side when the page can show a good run of each ── */
+#dashboard-page.dash-room .room-shelves-wrap {
+    container: room-shelves / inline-size;
+    min-width: 0;
+}
+@container room-shelves (min-width: 1500px) {
+    #dashboard-page.dash-room:not([data-media='video']) .room-shelves {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
+        gap: 36px;
+        align-items: start;
+    }
+    /* the bands span every column of the old page grid by default */
+    #dashboard-page.dash-room:not([data-media='video']) .room-shelves > * {
+        grid-column: auto;
+        min-width: 0;
+    }
+}
+
+/* ── the board: all four across when each can have a column of its own ── */
+#dashboard-page.dash-room .room-board-wrap {
+    container: room-board / inline-size;
+    min-width: 0;
+}
+@container room-board (min-width: 1500px) {
+    #dashboard-page.dash-room .room-board {
+        grid-template-columns: none;
+        grid-auto-flow: column;
+        grid-auto-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .room-board > *,
+    #dashboard-page.dash-room .room-board > .weekly-digest,
+    #dashboard-page.dash-room .room-board > [data-card='sync'],
+    #dashboard-page.dash-room .room-board > :only-child,
+    #dashboard-page.dash-room .room-board > :last-child:nth-child(odd) {
+        grid-column: auto;
+    }
+    /* a column is narrow: the week's number over its chart, the chart the
+       width of the card */
+    #dashboard-page.dash-room .room-board .wd-body {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    #dashboard-page.dash-room .room-board .wd-chart {
+        justify-self: stretch;
+        max-width: none;
+        height: 132px;
+    }
+    #dashboard-page.dash-room .room-board > .weekly-digest .wd-chips {
+        margin-top: 0;
+    }
+    /* the two counts one over the other, each a row: pictures left, number right */
+    #dashboard-page.dash-room .room-board > .dash-tiles {
+        flex-direction: column;
+    }
+    #dashboard-page.dash-room .room-board > .dash-tiles .dash-tile + .dash-tile {
+        border-left: 0;
+        border-top: 1px solid var(--white-a08);
+    }
+    #dashboard-page.dash-room .room-board > [data-card='automations']:last-child:nth-child(odd) .dash-autom-rows {
+        display: block;
+    }
+}
+
+/* ── a phone: the name on one line, whatever its length ── */
+@media (max-width: 768px) {
+    #dashboard-page.dash-room .hello-greet-name {
+        font-size: min(42px, calc((100vw - 92px) / (var(--name-len, 12) * 0.6)));
+        white-space: nowrap;
+        text-wrap: nowrap;
+    }
+    #dashboard-page.dash-room .dash-hero-main {
+        row-gap: 10px;
+    }
+    /* one frame, not two: the shell already insets the page, so the page's
+       own border and padding only narrowed everything by another 26px */
+    #dashboard-page.dash-room {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        box-shadow: none;
+        gap: 16px;
+    }
+    /* the workers as three tight rows of five, not a square a screen tall */
+    #dashboard-page.dash-room .orb-stage .header-actions {
+        display: grid;
+        grid-template-columns: repeat(5, 40px);
+        justify-content: space-between;
+        gap: 10px 0;
+        width: 100%;
+        height: auto;
+    }
+    #dashboard-page.dash-room .orb-stage .header-actions .enrich-worker,
+    #dashboard-page.dash-room .orb-stage .header-actions .enrich-worker-btn {
+        width: 40px;
+        height: 40px;
+    }
+    #dashboard-page.dash-room .orb-stage .header-actions .em-manage-btn {
+        grid-column: 1 / -1;
+        justify-self: stretch;
+        justify-content: center;
+        margin-top: 4px;
+    }
+    /* shelves: the caption's lines sit together under the cover */
+    #dashboard-page.dash-room .room-shelves {
+        gap: 22px;
+    }
+    #dashboard-page.dash-room .room-shelves > .dash-card {
+        padding-top: 0;
+        padding-bottom: 0;
+    }
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-img {
+        margin-bottom: 8px;
+    }
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .dash-rail-caption,
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-info {
+        gap: 1px;
+        margin: 0;
+        padding: 0;
+        min-height: 0;
+    }
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .dash-rail-caption > *,
+    #dashboard-page.dash-room .room-shelves .dash-rail-card .ya-card-info > * {
+        margin: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        min-height: 0;
+        line-height: 1.3;
+    }
+    /* four sort pills share the row instead of the last one running off it */
+    #dashboard-page.dash-room .dash-sync-sortbar {
+        display: flex;
+    }
+    #dashboard-page.dash-room .dash-sync-sort {
+        flex: 1 1 0;
+        min-width: 0;
+        padding: 0 4px;
+        font-size: 12px;
+        white-space: nowrap;
+    }
+    /* quick settings: a label, then the switches two by two */
+    #dashboard-page.dash-room .dash-quick-settings {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+    #dashboard-page.dash-room .dash-quick-settings-label,
+    #dashboard-page.dash-room .dash-qs-accent {
+        grid-column: 1 / -1;
+    }
+    #dashboard-page.dash-room .dash-qs-toggle {
+        justify-content: flex-start;
+        min-width: 0;
+    }
 }

@@ -67,20 +67,30 @@ export function DashboardPage() {
             under the hero. */}
         <ListenBand />
       </div>
-      {/* The system as a board, two by two: your week beside what you watch
-          and wish for, playlist sync beside what runs next. Each card renders
+      {/* The music comes first, top to bottom: the mixes, then what you
+          played and what just arrived. The system sits under it. The two
+          shelves share a row once the page is wide enough for both (the wrap
+          is what they measure against); one alone takes the row. */}
+      <div className="room-shelves-wrap">
+        <div className="room-shelves">
+          {/* What you've been playing. Renders nothing until history exists. */}
+          <ListeningHistoryBand />
+          {/* What's new in the library. Renders nothing until a feed has rows. */}
+          <ContentBand />
+        </div>
+      </div>
+      {/* The system as a board: your week, what you watch and wish for,
+          playlist sync, what runs next. Two by two, and all four in one row
+          once the page is wide enough to give each its own column (the
+          wrap is what the board measures itself against). Each card renders
           nothing when its part is off or empty, and the grid closes up. */}
-      <section className="room-board" aria-label="Your system">
-        {statsOn ? <WeeklyDigest /> : null}
-        <QuickNavTiles header={header} />
-        {playlistsOn ? <SyncRail /> : null}
-        {automationsOn ? <AutomationsCard compact timeline /> : null}
-      </section>
-      <div className="room-shelves">
-        {/* What's new in the library. Renders nothing until a feed has rows. */}
-        <ContentBand />
-        {/* What you've been playing. Renders nothing until history exists. */}
-        <ListeningHistoryBand />
+      <div className="room-board-wrap">
+        <section className="room-board" aria-label="Your system">
+          {statsOn ? <WeeklyDigest /> : null}
+          <QuickNavTiles header={header} />
+          {playlistsOn ? <SyncRail /> : null}
+          {automationsOn ? <AutomationsCard compact timeline /> : null}
+        </section>
       </div>
       <footer className="dash-footer">
         <QuickSettings />
