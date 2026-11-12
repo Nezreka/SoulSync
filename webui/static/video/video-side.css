@@ -675,6 +675,36 @@ body[data-side="video"] .dashboard-header-sweep {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
     margin: 0 0 14px; max-width: 780px;
 }
+/* Shelf Life on the detail page (admins only): score or gate, reasons, Keep */
+.vd-shelf {
+    margin: 0 0 14px; max-width: 780px; padding: 10px 12px; border-radius: var(--radius-md);
+    background: var(--black-a45); border: 1px solid var(--white-a12); backdrop-filter: blur(8px);
+    color: var(--white-a75); font-size: 13px;
+}
+.vd-shelf-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.vd-shelf-label { font-weight: 700; color: var(--text-bright); }
+.vd-shelf-chip {
+    display: inline-flex; align-items: center; min-height: 22px; padding: 1px 9px; border-radius: var(--radius-pill);
+    font-weight: 800; border: 1px solid var(--white-a18); background: var(--black-a70);
+}
+.vd-shelf-chip--low { color: var(--danger-soft); border-color: rgba(var(--danger-soft-rgb), 0.5); }
+.vd-shelf-chip--mid { color: var(--gold); border-color: rgba(var(--gold-rgb), 0.45); }
+.vd-shelf-chip--ok { color: var(--success); border-color: rgba(var(--success-strong-rgb), 0.4); }
+.vd-shelf-chip--gate { font-weight: 600; }
+.vd-shelf-flag { color: var(--danger-soft); }
+.vd-shelf-when { color: var(--white-a50); font-size: 12px; }
+.vd-shelf-keep {
+    margin-left: auto; padding: 4px 14px; border-radius: var(--radius-pill); cursor: pointer; font: inherit;
+    font-weight: 600; color: rgb(var(--success-strong-rgb)); background: rgba(var(--success-strong-rgb), 0.16);
+    border: 1px solid rgba(var(--success-strong-rgb), 0.35);
+}
+.vd-shelf-keep:hover { background: rgba(var(--success-strong-rgb), 0.26); }
+.vd-shelf-keep--on { color: var(--bg-primary); background: rgb(var(--success-strong-rgb)); border-color: rgb(var(--success-strong-rgb)); }
+.vd-shelf-keep--on:hover { background: rgba(var(--success-strong-rgb), 0.85); }
+.vd-shelf-keep:disabled { opacity: 0.5; cursor: default; }
+.vd-shelf-note { margin-top: 6px; color: var(--white-a60); }
+.vd-shelf-reasons { margin: 6px 0 0; padding-left: 18px; }
+.vd-shelf-reasons li { margin: 2px 0; }
 .vd-health-chip {
     display: inline-flex; align-items: center; gap: 7px; min-height: 28px; max-width: 100%;
     padding: 5px 10px; border-radius: var(--radius-md);

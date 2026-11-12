@@ -235,6 +235,19 @@ export function fetchShelfLifePlan(options: {
   return sendJson('/api/video/repair/shelf-life/plan', 'POST', body);
 }
 
+/** mark a flagged title Keep: its finding leaves the open list and the job never
+ * flags it while it is kept */
+export function keepShelfLifeTitle(
+  kind: string,
+  itemId: number,
+): Promise<{ success?: boolean; error?: string }> {
+  return sendJson(
+    `/api/video/repair/shelf-life/${encodeURIComponent(kind)}/${encodeURIComponent(String(itemId))}/keep`,
+    'POST',
+    { keep: true },
+  );
+}
+
 /** what has to be typed to delete ``count`` titles at once (the server's
  *  batch_phrase; it checks it again). */
 export function shelfLifePhrase(count: number): string {

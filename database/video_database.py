@@ -9587,6 +9587,18 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def shelf_life_title(self, kind: str, item_id) -> dict | None:
+        """{id, tmdb_id, title, year} of one library movie or show, or None."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return None
+        conn = self._get_connection()
+        try:
+            r = conn.execute(f"SELECT id, tmdb_id, title, year FROM {table} WHERE id = ?", (int(item_id),)).fetchone()
+            return dict(r) if r else None
+        finally:
+            conn.close()
+
     def shelf_life_set_keep(self, kind: str, tmdb_id, keep: bool, set_by=None) -> bool:
         """mark (or unmark) a title Keep. False for a bad kind or no tmdb id."""
         if kind not in ("movie", "show") or not tmdb_id:

@@ -329,6 +329,35 @@ def register_routes(bp):
                                        fix_actions=actions)
         return jsonify(res), (200 if res.get("started") or res.get("already_running") else 400)
 
+    @bp.route("/repair/shelf-life/<kind>/<int:item_id>", methods=["GET"])
+    def video_repair_shelf_life_title(kind, item_id):
+        """one title's Shelf Life for its detail page: score or gate, reasons,
+        when it was scored, and Keep."""
+        from core.video.repair import shelf_life
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "kind must be movie or show"}), 400
+        view = shelf_life.title_view(get_video_db(), kind, item_id)
+        if view is None:
+            return jsonify({"error": "not in the library"}), 404
+        return jsonify({"success": True, **view})
+
+    @bp.route("/repair/shelf-life/<kind>/<int:item_id>/keep", methods=["POST"])
+    def video_repair_shelf_life_keep(kind, item_id):
+        """mark a title Keep (``{"keep": true}``) or take it off."""
+        from core.video.repair import shelf_life
+        from . import get_video_db
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "kind must be movie or show"}), 400
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body.get("keep"), bool):
+            return jsonify({"error": "keep must be true or false"}), 400
+        res = shelf_life.set_title_keep(get_video_db(), kind, item_id, body["keep"],
+                                        set_by=shelf_life._resolver_id())
+        if res is None:
+            return jsonify({"error": "not in the library"}), 404
+        return jsonify(res), (200 if res.get("success") else 400)
+
     @bp.route("/repair/bulk-fix/status", methods=["GET"])
     def video_repair_bulk_fix_status():
         return jsonify(_worker().get_bulk_fix_status())

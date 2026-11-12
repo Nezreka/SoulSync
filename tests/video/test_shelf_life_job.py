@@ -551,3 +551,96 @@ def test_the_shelf_life_routes_are_admin_only(tmp_path):
         assert videoapi._video_db.repair_get_finding(fid)["status"] == "pending"
     finally:
         videoapi._video_db = None
+
+
+# ── the detail page: one title's Shelf Life, and Keep ─────────────────────────
+
+def test_title_view_before_and_after_a_run(db, worker):
+    from core.video.repair.shelf_life import title_view
+    mid = _movie(db, "Low", tmdb=7, imdb=5.0, streaming="ok", count=5)
+    before = title_view(db, "movie", mid)
+    assert before["scored"] is False and before["keep"] is False and before["can_keep"] is True
+    assert before["threshold"] == 30
+    _run(worker)
+    after = title_view(db, "movie", mid)
+    assert after["scored"] is True and after["score"] < 30 and after["gate"] is None
+    assert after["reasons"] and all({"signal", "text"} <= set(r) for r in after["reasons"])
+    assert after["scored_at"]
+    assert title_view(db, "movie", 99999) is None
+
+
+def test_keep_retires_the_open_finding_at_once_and_unkeep_lets_it_back(db, worker):
+    from core.video.repair.shelf_life import set_title_keep, title_view
+    mid = _movie(db, "Low", tmdb=7, imdb=5.0, streaming="ok", count=5)
+    other = _movie(db, "Other", tmdb=8, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    assert sorted(f["entity_id"] for f in _pending(db)) == sorted(["m:%d" % mid, "m:%d" % other])
+    res = set_title_keep(db, "movie", mid, True, set_by=1)
+    assert res["success"] and res["keep"] is True
+    assert [f["entity_id"] for f in _pending(db)] == ["m:%d" % other]     # only its own finding goes
+    _run(worker)
+    assert title_view(db, "movie", mid)["gate"] == "keep"
+    assert [f["entity_id"] for f in _pending(db)] == ["m:%d" % other]
+    set_title_keep(db, "movie", mid, False)
+    _run(worker)
+    # retired by Keep, not dismissed by hand, so it comes back
+    assert sorted(f["entity_id"] for f in _pending(db)) == sorted(["m:%d" % mid, "m:%d" % other])
+
+
+def test_keep_needs_a_tmdb_match(db):
+    from core.video.repair.shelf_life import set_title_keep, title_view
+    mid = _movie(db, "Unmatched", tmdb=None)
+    assert title_view(db, "movie", mid)["can_keep"] is False
+    res = set_title_keep(db, "movie", mid, True)
+    assert res["success"] is False and "TMDB" in res["error"]
+    assert set_title_keep(db, "movie", 99999, True) is None
+
+
+def test_a_kept_title_is_never_deleted_even_from_an_old_finding(db, worker, monkeypatch):
+    from core.video import delete_title
+    calls = []
+    monkeypatch.setattr(delete_title, "run", lambda *a, **k: calls.append(a) or {"success": True})
+    mid = _movie(db, "Low", tmdb=7, imdb=5.0, streaming="ok", count=5)
+    _run(worker)
+    fid = _pending(db)[0]["id"]
+    db.shelf_life_set_keep("movie", 7, True)        # kept behind the finding's back
+    res = worker.fix_finding(fid, fix_action="Low")
+    assert not res.get("success") and "Keep" in (res.get("error") or "") and calls == []
+    assert mid
+
+
+def test_detail_routes(client):
+    c, db, _ = client
+    mid = _movie(db, "Low", tmdb=7)
+    r = c.get("/api/video/repair/shelf-life/movie/%d" % mid)
+    assert r.status_code == 200 and r.get_json()["scored"] is False
+    assert c.get("/api/video/repair/shelf-life/film/%d" % mid).status_code == 400
+    assert c.get("/api/video/repair/shelf-life/movie/99999").status_code == 404
+    k = c.post("/api/video/repair/shelf-life/movie/%d/keep" % mid, json={"keep": True})
+    assert k.status_code == 200 and k.get_json()["keep"] is True
+    assert ("movie", 7) in db.shelf_life_keeps()
+    assert c.post("/api/video/repair/shelf-life/movie/%d/keep" % mid, json={"keep": "yes"}).status_code == 400
+    assert c.post("/api/video/repair/shelf-life/movie/%d/keep" % mid, json={"keep": False}).get_json()["keep"] is False
+    assert db.shelf_life_keeps() == set()
+
+
+def test_the_detail_routes_are_admin_only(tmp_path):
+    from flask import Flask, g
+    import api.video as videoapi
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "member.db"))
+    app = Flask(__name__)
+
+    @app.before_request
+    def _member():
+        g.is_admin = False
+        g.profile_id = 2
+
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    c = app.test_client()
+    try:
+        mid = _movie(videoapi._video_db, "Low", tmdb=7)
+        assert c.get("/api/video/repair/shelf-life/movie/%d" % mid).status_code == 403
+        assert c.post("/api/video/repair/shelf-life/movie/%d/keep" % mid, json={"keep": True}).status_code == 403
+        assert videoapi._video_db.shelf_life_keeps() == set()
+    finally:
+        videoapi._video_db = None

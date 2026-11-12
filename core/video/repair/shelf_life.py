@@ -258,6 +258,45 @@ def batch_delete_actions(db, ids, phrase: str):
     return {i: pending[i]["details"].get("title") or "" for i in wanted}, None
 
 
+def title_view(db, kind: str, item_id) -> dict | None:
+    """what a title's detail page shows an admin: its stored score or gate,
+    the reasons, when it was scored, the line it is judged against, and
+    whether it is marked Keep. None when there is no such title."""
+    title = db.shelf_life_title(kind, item_id)
+    if not title:
+        return None
+    from core.video.repair.worker import get_video_repair_worker
+    cfg = get_video_repair_worker().job_config("shelf_life") or {}
+    threshold = _int_setting(cfg.get("settings") or {}, "threshold", sl.DEFAULT_THRESHOLD)
+    stored = db.shelf_life_get(kind, [title["id"]]).get(title["id"])
+    tmdb = title.get("tmdb_id")
+    out = {"kind": kind, "item_id": title["id"], "scored": bool(stored), "threshold": threshold,
+           "enabled": bool(cfg.get("enabled")),
+           "keep": bool(tmdb and (kind, int(tmdb)) in db.shelf_life_keeps()), "can_keep": bool(tmdb)}
+    if stored:
+        out.update({"score": stored["score"], "gate": stored["gate"],
+                    "gate_text": sl.GATE_TEXT.get(stored["gate"]) if stored["gate"] else None,
+                    "reasons": stored["reasons"], "scored_at": stored["scored_at"]})
+    return out
+
+
+def set_title_keep(db, kind: str, item_id, keep: bool, set_by=None) -> dict | None:
+    """mark a title Keep, or take it off. Keep is held by TMDB id, so it
+    survives a rescan or a re-add. a Kept title's open finding is retired at
+    once, the way the next run would retire it, so no cleanup started before
+    then can take it; taking Keep off lets the next run flag it again."""
+    title = db.shelf_life_title(kind, item_id)
+    if not title:
+        return None
+    if not title.get("tmdb_id") or not db.shelf_life_set_keep(kind, title["tmdb_id"], keep, set_by=set_by):
+        return {"success": False, "error": "This title has no TMDB match yet, so it can't be kept."}
+    if keep:
+        mine = ("m:%d" if kind == "movie" else "s:%d") % title["id"]
+        others = [f["entity_id"] for f in _pending_findings(db) if f.get("entity_id") != mine]
+        db.repair_dismiss_absent("shelf_life", FINDING_TYPE, others)
+    return {"success": True, **title_view(db, kind, item_id)}
+
+
 def _resolver_id() -> int:
     """the admin approving, when there's a request to read it from."""
     try:
@@ -406,6 +445,9 @@ class ShelfLifeJob(VideoRepairJob):
         kind, item_id = d.get("kind"), d.get("item_id")
         if kind not in ("movie", "show") or not item_id:
             return {"success": False, "error": "finding has no title to delete"}
+        tmdb = d.get("tmdb_id")
+        if tmdb and (kind, int(tmdb)) in context.db.shelf_life_keeps():
+            return {"success": False, "error": "This title is marked Keep. Nothing was deleted."}
         typed = fix_action if isinstance(fix_action, str) else ""
         if not typed.strip():
             return {"success": False, "error": "Type the title to confirm. Nothing was deleted."}

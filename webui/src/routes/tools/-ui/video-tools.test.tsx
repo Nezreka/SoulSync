@@ -370,6 +370,25 @@ describe('video findings', () => {
     expect(urls().some((url) => url.includes('/fix'))).toBe(false);
   });
 
+  it('a shelf life row keeps the title instead of deleting it', async () => {
+    renderVideoSurface([shelf()]);
+    await showList();
+    fireEvent.click(screen.getByRole('button', { name: /^Keep Heat/ }));
+    await flush();
+    const call = fetchMock.mock.calls.find(([url]) =>
+      String(url).includes('/api/video/repair/shelf-life/movie/12/keep'),
+    );
+    expect(call).toBeDefined();
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({ keep: true });
+    expect(urls().some((url) => url.includes('/fix'))).toBe(false);
+  });
+
+  it('only shelf life rows offer keep', async () => {
+    renderVideoSurface([vfinding({ id: 8, title: 'Ronin — 720p' })]);
+    await showList();
+    expect(screen.queryByRole('button', { name: /^Keep / })).toBeNull();
+  });
+
   const shelfPlan = {
     items: [
       {

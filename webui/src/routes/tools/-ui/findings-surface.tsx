@@ -95,7 +95,7 @@ import {
   tallySummary,
 } from '../-tools.keep-best-bulk';
 import { useToolsMedia } from '../-tools.media';
-import { shelfLifePhrase, startShelfLifeDelete } from '../-video-tools.api';
+import { keepShelfLifeTitle, shelfLifePhrase, startShelfLifeDelete } from '../-video-tools.api';
 import { RedownloadModal } from '../../artist-detail/-ui/redownload-modal';
 import { AlbumInspectionTray, groupIdentity } from './album-inspection-tray';
 import { FindingArt } from './finding-art';
@@ -728,6 +728,32 @@ export function FindingsSurface({
       refreshAll();
     },
     [offerUndo, refreshAll],
+  );
+
+  // Shelf Life's Keep: the title is kept for good (by TMDB id), its finding
+  // leaves the open list, and the job never flags it while it is kept
+  const keepShelfLife = useCallback(
+    async (finding: RepairFinding) => {
+      const details = finding.details || {};
+      const kind = typeof details.kind === 'string' ? details.kind : '';
+      const itemId = Number(details.item_id);
+      if (!kind || !Number.isFinite(itemId)) return;
+      let result: { success?: boolean; error?: string };
+      try {
+        result = await keepShelfLifeTitle(kind, itemId);
+      } catch (error) {
+        toast(`Could not keep it: ${(error as Error).message}`, 'error');
+        return;
+      }
+      if (!result.success) {
+        toast(result.error || 'Could not keep it', 'error');
+        return;
+      }
+      const name = typeof details.title === 'string' ? details.title : finding.title;
+      toast(`Kept "${name}". Shelf Life won't flag it while it's kept.`, 'success');
+      refreshAll();
+    },
+    [refreshAll],
   );
 
   const runUndo = useCallback(async () => {
@@ -1823,6 +1849,7 @@ export function FindingsSurface({
                   jobLabel={jobLabel}
                   onFix={fixOne}
                   onDismiss={dismissOne}
+                  onKeep={keepShelfLife}
                   onReopen={reopenOne}
                   onUndo={(target) => void undoOne(target)}
                   onReidentify={setReidentifyingFinding}
@@ -2296,6 +2323,7 @@ function FindingCard({
   jobLabel,
   onFix,
   onDismiss,
+  onKeep,
   onReopen,
   onKeepDuplicate,
   onApplyCoverArt,
@@ -2320,6 +2348,8 @@ function FindingCard({
   jobLabel: (jobId: string) => string;
   onFix: (finding: RepairFinding, override?: string) => Promise<void>;
   onDismiss: (id: number) => Promise<void>;
+  /** Shelf Life only: keep the title instead of deleting it */
+  onKeep?: (finding: RepairFinding) => Promise<void>;
   onReopen: (id: number) => Promise<void>;
   onKeepDuplicate: (findingId: number, trackId: string, message?: string) => void;
   onApplyCoverArt: (findingId: number, target: CoverApplyTarget) => void;
@@ -2400,6 +2430,17 @@ function FindingCard({
         <div className="repair-finding-actions" onClick={(event) => event.stopPropagation()}>
           {finding.status === 'pending' ? (
             <>
+              {video && finding.finding_type === 'shelf_life' && onKeep ? (
+                <button
+                  className="repair-finding-btn keep"
+                  type="button"
+                  title="Keep it. Shelf Life won't flag it again while it's kept"
+                  aria-label={`Keep ${finding.title}`}
+                  onClick={() => void onKeep(finding)}
+                >
+                  Keep
+                </button>
+              ) : null}
               {fixLabel ? (
                 <button
                   className={`repair-finding-btn fix${info?.destructive ? ' destructive' : ''}`}
