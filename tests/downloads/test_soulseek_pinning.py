@@ -1323,6 +1323,84 @@ def test_search_with_no_responses_still_stops_at_terminal_state():
     assert counts['responses'] < 30
 
 
+def _run_search_against(fake_request, query='Artist Song'):
+    client = _search_ready_client()
+    with patch('core.soulseek_client.config_manager.get', side_effect=_search_config_get), \
+         patch.object(client, '_wait_for_rate_limit', new=AsyncMock()), \
+         patch.object(client, '_make_request', side_effect=fake_request), \
+         patch('core.soulseek_client.asyncio', _instant_sleep_asyncio()):
+        return _run_async(client.search(query, timeout=30))
+
+
+def test_a_search_that_ends_between_the_two_reads_keeps_its_results():
+    # #2065: slskd files a search's responses as it completes. Every poll read
+    # them (nothing yet), then read the state; a search that completed between
+    # those two reads was left with its results on slskd and none in hand, so
+    # the window said "0 results" after the whole timeout.
+    state = {'done': False}
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST':
+            return {'id': 'search-1'}
+        if endpoint.endswith('/responses'):
+            if not state['done']:
+                return []
+            return [{'username': 'peer', 'files': [{'filename': 'Artist - Song.flac', 'size': 10}]}]
+        if endpoint == 'searches/search-1':
+            state['done'] = True          # it finished right after the read above
+            return {'state': 'Completed, TimedOut', 'responseCount': 1, 'fileCount': 1}
+        raise AssertionError(endpoint)
+
+    tracks, _ = _run_search_against(fake_request)
+
+    assert [t.filename for t in tracks] == ['Artist - Song.flac']
+
+
+def test_responses_that_lag_the_finished_state_are_waited_for():
+    # the state says 250 responses; they become readable two reads later
+    reads = {'after_done': 0, 'done': False}
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST':
+            return {'id': 'search-1'}
+        if endpoint.endswith('/responses'):
+            if not reads['done']:
+                return []
+            reads['after_done'] += 1
+            if reads['after_done'] < 3:
+                return []
+            return [{'username': 'peer', 'files': [{'filename': 'Artist - Song.flac', 'size': 10}]}]
+        if endpoint == 'searches/search-1':
+            reads['done'] = True
+            return {'state': 'Completed, ResponseLimitReached', 'responseCount': 250}
+        raise AssertionError(endpoint)
+
+    tracks, _ = _run_search_against(fake_request)
+
+    assert len(tracks) == 1 and reads['after_done'] == 3
+
+
+def test_a_finished_search_with_nothing_is_read_once_more_and_no_longer():
+    reads = {'responses': 0, 'state': 0}
+
+    async def fake_request(method, endpoint, **kwargs):
+        if method == 'POST':
+            return {'id': 'search-1'}
+        if endpoint.endswith('/responses'):
+            reads['responses'] += 1
+            return []
+        if endpoint == 'searches/search-1':
+            reads['state'] += 1
+            return {'state': 'Completed, TimedOut', 'responseCount': 0}
+        raise AssertionError(endpoint)
+
+    tracks, _ = _run_search_against(fake_request, 'Nothing Here')
+
+    assert tracks == [] and reads['state'] == 1
+    # the polls up to the state read, and one last look after it
+    assert reads['responses'] == 17
+
+
 def test_search_keeps_polling_an_active_search_through_a_quiet_period():
     client = _search_ready_client()
     counts = {'responses': 0}
