@@ -552,8 +552,19 @@ def _credited_in_title(expected_artists, candidate_artist, candidate_title) -> b
         for artist in wanted)
 
 
+# "(Electronic) Some Artist", "(Rock) [LP] [24/96] Other Band": bracket groups
+# some indexers put in front of the artist (#2063).
+_LEADING_RELEASE_TAG = re.compile(r'^\s*[\[\(][^\]\)]*[\]\)]\s*')
+
+
 def _release_artist_matches(expected_artists, candidate_artist):
-    """Require a whole artist credit, rather than a name inside another band."""
+    """Require a whole artist credit, rather than a name inside another band.
+
+    Some indexers lead a release title with the genre and media tags, and the
+    title parser keeps them in the artist ("(Electronic) Some Artist"). The
+    name as given is tried first, so an act whose name really starts with a
+    bracket ("(hed) p.e.") still matches as itself; then the groups come off
+    one at a time, so "(Nu Metal) (hed) p.e." is still tried as "(hed) p.e."."""
     from difflib import SequenceMatcher
     from core.matching.artist_aliases import artist_names_match
 
@@ -562,8 +573,20 @@ def _release_artist_matches(expected_artists, candidate_artist):
         found = matching_engine.normalize_string(actual).removeprefix('the ')
         return SequenceMatcher(None, wanted, found).ratio() if wanted and found else 0.0
 
-    return any(artist_names_match(artist, candidate_artist, threshold=0.80,
-                                 similarity=similarity)[0] for artist in expected_artists if artist)
+    def matches(name):
+        return any(artist_names_match(artist, name, threshold=0.80,
+                                      similarity=similarity)[0] for artist in expected_artists if artist)
+
+    if matches(candidate_artist):
+        return True
+    name = (candidate_artist or '').strip()
+    while True:
+        untagged = _LEADING_RELEASE_TAG.sub('', name, count=1).strip()
+        if not untagged or untagged == name:
+            return False
+        if matches(untagged):
+            return True
+        name = untagged
 
 
 def _score_streaming_candidates(results, spotify_track, why=None):

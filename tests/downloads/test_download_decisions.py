@@ -196,6 +196,33 @@ def test_artist_mismatch_torrent(env):
     assert 'Hope Sandoval Tribute Band' in d.detail
 
 
+@pytest.mark.parametrize('artist', [
+    '(Dream Pop) Mazzy Star',
+    '(Rock) [LP] [24/96] Mazzy Star',
+    '[FLAC] Mazzy Star',
+])
+def test_a_genre_or_media_tag_before_the_artist_is_not_a_mismatch(env, artist):
+    # #2063: some indexers lead the title with the genre and media tags, and
+    # the title parser keeps them in the artist. every such release was refused.
+    tor = _row(username='torrent', filename='t||1', artist=artist, duration=None)
+    d = _decision_for(evaluate_candidates([tor], WANT, 'q'), tor)
+    assert d.code != 'artist_mismatch', d.detail
+
+
+def test_leading_tags_do_not_vouch_for_another_act(env):
+    tor = _row(username='torrent', filename='t||1', artist='(Dream Pop) Hope Sandoval Tribute Band',
+               duration=None)
+    d = _decision_for(evaluate_candidates([tor], WANT, 'q'), tor)
+    assert d.code == 'artist_mismatch'
+
+
+def test_an_act_whose_name_starts_with_a_bracket_matches_as_itself(env):
+    # the name as given is tried first: stripping "(hed)" would leave "p.e."
+    assert validation._release_artist_matches(['(hed) p.e.'], '(hed) p.e.')
+    assert validation._release_artist_matches(['(hed) p.e.'], '(Nu Metal) (hed) p.e.')
+    assert not validation._release_artist_matches(['Mazzy Star'], '(Mazzy Star) Someone Else')
+
+
 def test_artist_mismatch_soulseek_path(env, monkeypatch):
     # Isolate the path gate: an engine that scores every row as a match, so
     # the only thing left to reject a path without the artist in it is the gate.
