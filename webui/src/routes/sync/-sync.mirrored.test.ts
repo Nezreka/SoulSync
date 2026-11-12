@@ -142,6 +142,18 @@ describe('mirroredPhaseLine — the unified renderer', () => {
     });
   });
 
+  it('a playlist identified before this session shows the count the row holds', () => {
+    const identified = { ...row, track_count: 1583, discovered_count: 1583 };
+    expect(mirroredPhaseLine('discovered', {}, identified)?.text).toBe('Discovered 1583/1583');
+    expect(mirroredPhaseLine('discovered', { spotifyMatches: 0 }, identified)?.text).toBe(
+      'Discovered 1583/1583',
+    );
+    // a run this session watched still reports its own count
+    expect(mirroredPhaseLine('discovered', { spotifyMatches: 40 }, identified)?.text).toBe(
+      'Discovered 40/1583',
+    );
+  });
+
   it('the counters default to 0 when the state lacks them (549/557/560)', () => {
     // hydrateMirroredDiscoveryStates (988-1010) writes no pipeline_* keys, so
     // a pipeline_running phase over a hydrated state hits this default.

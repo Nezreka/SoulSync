@@ -289,7 +289,9 @@ if os.path.exists(config_path):
             config_manager._load_config()
         logger.info("Web server configuration loaded successfully.")
 else:
-    logger.warning(f"config.json not found at {config_path}. Using default settings.")
+    # settings live in the database now. the file is only read when someone
+    # still has one, so its absence is the normal case, not a warning
+    logger.debug(f"No config.json at {config_path}: settings are read from the database.")
 # Correctly point to the 'webui' directory for templates and static files
 app = Flask(
     __name__,

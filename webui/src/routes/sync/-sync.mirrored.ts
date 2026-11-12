@@ -339,8 +339,12 @@ export function mirroredPhaseLine(
     case 'discovered':
       // The track_count fallback is renderMirroredCard's (561), not the
       // live writer's — see the unification note above.
+      // The live state only knows a count while this session watched the
+      // discovery run. A playlist identified earlier (or one whose tracks came
+      // with ids, like a Deezer mirror) has its count on the row: without it a
+      // fully identified playlist of 1,583 read "Discovered 0/1583".
       return {
-        text: `Discovered ${state?.spotifyMatches ?? 0}/${state?.spotifyTotal || row.track_count || 0}`,
+        text: `Discovered ${state?.spotifyMatches || row.discovered_count || 0}/${state?.spotifyTotal || row.track_count || 0}`,
         color: '#22c55e',
       };
     case 'syncing':
