@@ -659,6 +659,11 @@ class ConfigManager:
             },
             "tidal_download": {
                 "quality": "lossless",  # Options: "low", "high", "lossless", "hires"
+                # #2069: seconds between two download requests (search or
+                # manifest). Downloads are one at a time already; this spaces
+                # the requests one track makes as it steps down the quality
+                # chain. 0 turns it off.
+                "min_request_gap_seconds": 1.0,
                 "session": {
                     "token_type": "",
                     "access_token": "",
