@@ -133,6 +133,7 @@ import {
 } from '../-library-v2.api';
 import { useLibraryChanged, useMaintenanceChanged } from '../-library-v2.live';
 import { albumQueueRows, artistQueueRows, playlistTrack, queueableRows } from '../-library-v2.play';
+import { copiesNote, releaseLeads, withoutShadowEntries } from '../-library-v2.releases';
 import { getServiceUrl } from '../-library-v2.service-links';
 import {
   fetchSongsToPlay,
@@ -6342,11 +6343,12 @@ function visibleReleases(
   entries: LibraryV2AlbumSummary[],
   mode: 'library' | 'all',
 ): LibraryV2AlbumSummary[] {
-  if (mode === 'all') return entries;
+  // Discovery is the discography: a release held twice is one release
+  if (mode === 'all') return releaseLeads(entries);
   // Guide §5: "My Library" is `origin='library' OR monitored`. A wanted TRACK
   // counts as much as a monitored release — bookmarking one top track used to
   // write a wishlist row the user could then not find anywhere in the library.
-  return entries.filter(
+  return withoutShadowEntries(entries).filter(
     (e) => e.origin !== 'discography' || e.monitored || (e.monitored_tracks ?? 0) > 0,
   );
 }
@@ -6763,6 +6765,8 @@ interface DiscographyCard {
   totalTracks: number;
   releaseDate?: string | null;
   musicbrainzId?: string | null;
+  /** "2 copies": the release is in the library more than once */
+  copies?: string;
 }
 
 function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
@@ -6782,6 +6786,7 @@ function catalogueCard(album: LibraryV2AlbumSummary): DiscographyCard {
     ownedTracks: album.tracks_present,
     totalTracks: album.track_count,
     musicbrainzId: album.musicbrainz_id ?? null,
+    copies: copiesNote(album),
   };
 }
 
@@ -6892,7 +6897,18 @@ function ReleaseCardGrid({
                 {card.title}
                 {card.explicit ? <span className="explicit-badge">E</span> : null}
               </div>
-              {card.year ? <div className="album-card-year">{card.year}</div> : null}
+              {card.year || card.copies ? (
+                <div
+                  className="album-card-year"
+                  title={
+                    card.copies
+                      ? `You have this release as ${card.copies}. My Library shows each one.`
+                      : undefined
+                  }
+                >
+                  {[card.year, card.copies].filter(Boolean).join(' · ')}
+                </div>
+              ) : null}
             </div>
             {card.gapSource ? (
               <div
@@ -7693,11 +7709,15 @@ function CatalogueArtistHero({
   // Only Spotify and Deezer expose a popularity ranking at all; for anything
   // else the sidebar falls through to Last.fm by name, exactly like legacy.
   const source = providerIds.spotify ? 'spotify' : providerIds.deezer ? 'deezer' : '';
-  const countOwned = (label: string, entries: LibraryV2AlbumSummary[], extra = 0) => ({
-    label,
-    owned: entries.filter((e) => e.tracks_present > 0).length,
-    total: entries.length + extra,
-  });
+  // releases, not rows: an album held twice is one album owned
+  const countOwned = (label: string, rows: LibraryV2AlbumSummary[], extra = 0) => {
+    const entries = releaseLeads(rows);
+    return {
+      label,
+      owned: entries.filter((e) => e.tracks_present > 0).length,
+      total: entries.length + extra,
+    };
+  };
   return (
     <LegacyArtistHero
       name={artist.name}
@@ -8713,7 +8733,7 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
       </span>
       <span className={styles.detailLabel}>
         <SvgIcon name="tracks" />
-        {artist.albums.length + (artist.eps?.length ?? 0) + artist.singles.length} releases
+        {releaseLeads([...artist.albums, ...(artist.eps ?? []), ...artist.singles]).length} releases
       </span>
       {artist.total_size_bytes > 0 ? (
         <span className={styles.detailLabel}>

@@ -1059,6 +1059,7 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
                al.image_url, {monitored_sql("album", "al")} AS monitored, al.quality_profile_id,
                al.quality_profile_explicit, al.track_count,
                al.expected_track_count, al.origin, al.spotify_id, al.musicbrainz_id,
+               al.musicbrainz_release_group_id,
                al.external_ids, al.primary_artist_id,
                pa.quality_profile_id AS artist_quality_profile_id,
                pa.quality_profile_explicit AS artist_quality_profile_explicit,
@@ -1177,6 +1178,12 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
         else:
             albums.append(entry)
 
+    # a release held as two rows (a stray track filed as its own album, a
+    # provider entry beside the owned copy) is one release on the page
+    from core.library2.release_display import stamp_display_groups
+    stamp_display_groups(albums + eps + singles,
+                         {int(r["id"]): r for r in album_rows})
+
     def _in_library(entries):
         return sum(1 for e in entries
                    if e["origin"] == "library" or e["monitored"] or e["monitored_tracks"])
@@ -1223,7 +1230,10 @@ def get_artist(conn, artist_id: int) -> Optional[Dict[str, Any]]:
             (canonical_id,)).fetchone() is not None,
         "album_count": _in_library(albums) + _in_library(eps),
         "single_count": _in_library(singles),
-        "discography_count": sum(1 for e in albums + eps + singles if e["origin"] == "discography"),
+        # a provider entry standing behind an owned copy is not a release to discover
+        "discography_count": sum(
+            1 for e in albums + eps + singles
+            if e["origin"] == "discography" and e["release_lead_id"] == e["id"]),
         # when the provider discography was last walked: the page re-checks a
         # stale one for new releases on open
         "discography_synced_at": a["discography_synced_at"] if "discography_synced_at" in a.keys() else None,

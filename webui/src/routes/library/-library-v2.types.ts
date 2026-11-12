@@ -286,6 +286,11 @@ export interface LibraryV2AlbumSummary {
   /** I8: sum of each present track's primary file size, in bytes. */
   total_size_bytes: number;
   user_overrides: Record<string, unknown>;
+  /** the row that stands for this release on the artist page: itself, unless
+   *  the catalogue holds the release more than once (see -library-v2.releases) */
+  release_lead_id?: number;
+  /** how many rows of this release have files */
+  release_copies?: number;
 }
 
 export interface LibraryV2ArtistDetail {

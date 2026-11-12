@@ -780,6 +780,44 @@ describe('Library V2 artist detail — All Releases views', () => {
   /** "Missing" is monitored+absent now (§44/LV2-CNT-01) — so a release the
    *  user unmonitored down to nothing can reach 0 present AND 0 missing at
    *  once. That is not completion; it means nothing was ever asked for. */
+  it('a release held three ways is one card in Discovery, and every owned copy in My Library', async () => {
+    // bbno$ on the live library: a stray track filed as its own album, the
+    // complete album, and the provider's entry for it
+    const same = { title: 'bbno$', release_lead_id: 12, release_copies: 2 };
+    server.use(
+      http.get('/api/library/v2/artists/1', () =>
+        HttpResponse.json({
+          success: true,
+          artist: portishead({
+            albums: [
+              album({ id: 11, ...same, origin: 'library', track_count: 22, tracks_present: 1 }),
+              album({ id: 12, ...same, origin: 'library', track_count: 21, tracks_present: 21 }),
+              album({ id: 13, ...same, monitored: true, track_count: 21 }),
+              album({ id: 14, title: 'recess', release_lead_id: 14, release_copies: 0 }),
+            ],
+          }),
+        }),
+      ),
+    );
+
+    const view = renderArtist('/library?artist=1&releases=all&releaseView=cards');
+    await screen.findByText('recess');
+    const names = () =>
+      [...document.querySelectorAll('.album-card-name')].map((n) => n.textContent ?? '');
+    expect(names().filter((n) => n.startsWith('bbno$'))).toHaveLength(1);
+    expect(screen.getByText('21/21')).toBeInTheDocument();
+    expect(screen.queryByText('1/22')).toBeNull();
+    expect(screen.queryByText('0/21')).toBeNull();
+    expect(screen.getByText('2001 · 2 copies')).toBeInTheDocument();
+    view.unmount();
+
+    renderArtist('/library?artist=1');
+    await screen.findByText('21/21');
+    // what is on disk: both copies, and not the entry standing behind them
+    expect(screen.getByText('1/22')).toBeInTheDocument();
+    expect(screen.queryByText('0/21')).toBeNull();
+  });
+
   it('does not call an empty, nothing-wanted release "complete"', async () => {
     server.use(
       http.get('/api/library/v2/artists/1', () =>
