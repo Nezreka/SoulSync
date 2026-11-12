@@ -370,6 +370,177 @@ describe('video findings', () => {
     expect(urls().some((url) => url.includes('/fix'))).toBe(false);
   });
 
+  const shelfPlan = {
+    items: [
+      {
+        id: 8,
+        kind: 'movie',
+        item_id: 2,
+        title: 'Cats',
+        year: 2019,
+        score: 9,
+        size_bytes: 30 * 1024 ** 3,
+      },
+      {
+        id: 7,
+        kind: 'movie',
+        item_id: 1,
+        title: 'Heat',
+        year: 1995,
+        score: 21,
+        size_bytes: 10 * 1024 ** 3,
+      },
+    ],
+    total_bytes: 40 * 1024 ** 3,
+    target_bytes: null,
+    short_bytes: 0,
+    candidates: 2,
+    recycling: true,
+    keep_days: 7,
+    phrase: 'delete 2 titles',
+  };
+
+  function renderShelfLifeInbox(plan: unknown = shelfPlan) {
+    setToolsMedia('video');
+    routes({
+      '/api/video/repair/finding-types': { types: VTYPES },
+      '/api/video/repair/findings/groups': {
+        groups: [
+          {
+            finding_type: 'shelf_life',
+            pending: 2,
+            resolved: 0,
+            dismissed: 0,
+            total: 2,
+            severity_max: 'info',
+            job_ids: ['shelf_life'],
+          },
+        ],
+      },
+      '/api/video/repair/findings/counts': { pending: 2, total: 2 },
+      '/api/video/repair/shelf-life/plan': plan,
+      '/api/video/repair/shelf-life/delete': { started: true, total: 2 },
+      '/api/video/repair/bulk-fix/status': { running: false },
+    });
+    return render(
+      <ToolsMediaContext.Provider value="video">
+        <FindingsSurface jobs={VJOBS} runs={[]} trackCount={100000} onStatusChanged={vi.fn()} />
+      </ToolsMediaContext.Provider>,
+    );
+  }
+
+  it('shelf life fix-all opens the picker, then one typed phrase deletes the batch', async () => {
+    renderShelfLifeInbox();
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    expect(await screen.findByText(/Cats/)).not.toBeNull();
+    expect(document.getElementById('shelf-life-total')?.textContent).toContain('2 titles');
+    expect(confirmSpy).not.toHaveBeenCalled();
+    fireEvent.click(document.getElementById('shelf-life-delete') as HTMLElement);
+    await flush();
+    const input = document.getElementById('type-to-confirm-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'delete 2 titles' } });
+    fireEvent.click(document.getElementById('type-to-confirm-confirm') as HTMLElement);
+    await flush();
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/shelf-life/delete'));
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({
+      ids: [8, 7],
+      phrase: 'delete 2 titles',
+    });
+  });
+
+  it('a title ticked off leaves the batch and changes the phrase', async () => {
+    renderShelfLifeInbox();
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    const boxes = await screen.findAllByRole('checkbox');
+    fireEvent.click(boxes[1]); // Heat
+    expect(document.getElementById('shelf-life-total')?.textContent).toContain('1 title');
+    fireEvent.click(document.getElementById('shelf-life-delete') as HTMLElement);
+    await flush();
+    expect(screen.getByText('delete 1 title')).not.toBeNull();
+    fireEvent.change(document.getElementById('type-to-confirm-input') as HTMLElement, {
+      target: { value: 'delete 1 title' },
+    });
+    fireEvent.click(document.getElementById('type-to-confirm-confirm') as HTMLElement);
+    await flush();
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/shelf-life/delete'));
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({
+      ids: [8],
+      phrase: 'delete 1 title',
+    });
+  });
+
+  it('a GB target re-plans, and a target out of reach says how short it falls', async () => {
+    renderShelfLifeInbox({
+      ...shelfPlan,
+      target_bytes: 500 * 1024 ** 3,
+      short_bytes: 460 * 1024 ** 3,
+    });
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    fireEvent.change(document.getElementById('shelf-life-target') as HTMLElement, {
+      target: { value: '500' },
+    });
+    fireEvent.click(document.getElementById('shelf-life-plan') as HTMLElement);
+    await flush();
+    const plans = fetchMock.mock.calls.filter(([url]) => String(url).includes('/shelf-life/plan'));
+    expect(JSON.parse((plans.at(-1)?.[1] as RequestInit).body as string)).toEqual({
+      target_gb: 500,
+    });
+    expect(document.getElementById('shelf-life-short')?.textContent).toContain('short of');
+  });
+
+  it('cancelling the picker deletes nothing', async () => {
+    renderShelfLifeInbox();
+    await flush();
+    await flush();
+    fireEvent.click(await screen.findByText('Free up space…'));
+    await flush();
+    fireEvent.click(document.getElementById('shelf-life-cancel') as HTMLElement);
+    await flush();
+    expect(urls().some((url) => url.includes('/shelf-life/delete'))).toBe(false);
+  });
+
+  it('picking shelf life findings in the list opens the picker on just those', async () => {
+    renderVideoSurface([shelf()]);
+    routes({
+      '/api/video/repair/finding-types': { types: VTYPES },
+      '/api/video/repair/findings/groups': { groups: [] },
+      '/api/video/repair/findings/counts': { pending: 1, total: 1 },
+      '/api/video/repair/findings?': { items: [shelf()], total: 1, page: 0 },
+      '/api/video/repair/shelf-life/plan': { ...shelfPlan, items: [shelfPlan.items[1]] },
+    });
+    await showList();
+    fireEvent.click(screen.getByLabelText(/Select Heat/));
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+    const plans = fetchMock.mock.calls.filter(([url]) => String(url).includes('/shelf-life/plan'));
+    expect(JSON.parse((plans.at(-1)?.[1] as RequestInit).body as string)).toEqual({ ids: [7] });
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(urls().some((url) => url.includes('/findings/bulk-fix'))).toBe(false);
+  });
+
+  it('shelf life findings are never fixed alongside other types', async () => {
+    const other = vfinding({ id: 8, title: 'Ronin — 720p' });
+    renderVideoSurface([shelf(), other]);
+    await showList();
+    fireEvent.click(screen.getByLabelText(/Select Heat/));
+    fireEvent.click(screen.getByLabelText(/Select Ronin/));
+    fireEvent.click(screen.getByText('Fix Selected'));
+    await flush();
+    expect(
+      urls().some((url) => url.includes('/shelf-life') || url.includes('/findings/bulk-fix')),
+    ).toBe(false);
+    expect(document.getElementById('shelf-life-items')).toBeNull();
+  });
+
   it('a metadata-only video fix just goes', async () => {
     renderVideoSurface([
       vfinding({ id: 9, finding_type: 'stale_wishlist', job_id: 'wishlist_audit' }),

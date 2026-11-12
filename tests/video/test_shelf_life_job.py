@@ -401,3 +401,153 @@ def test_a_finding_names_its_title_the_way_the_findings_page_reads_posters(db, w
     f = _pending(db)[0]
     assert f["details"]["library_id"] == mid
     assert finding_poster(f) == "/api/video/poster/movie/%d" % mid
+
+
+# ── batch approve + the free-X-GB planner ────────────────────────────────────
+def _flag(db, title, *, score, size_gb, item_id):
+    """a pending Shelf Life finding; returns its id (create_finding returns a bool)"""
+    assert db.repair_create_finding(
+        "shelf_life", "shelf_life", title="%s: Shelf Life %d" % (title, score), entity_type="movie",
+        entity_id="m:%d" % item_id,
+        details={"kind": "movie", "item_id": item_id, "title": title, "score": score,
+                 "size_bytes": size_gb * GB})
+    items = db.repair_get_findings(job_id="shelf_life", limit=500)["items"]
+    return next(f["id"] for f in items if f["entity_id"] == "m:%d" % item_id)
+
+
+def test_batch_phrase():
+    from core.video.repair.shelf_life import batch_phrase
+    assert batch_phrase(1) == "delete 1 title" and batch_phrase(14) == "delete 14 titles"
+
+
+def test_plan_picks_lowest_first_until_the_target(db):
+    from core.video.repair.shelf_life import plan_cleanup
+    a = _flag(db, "A", score=25, size_gb=40, item_id=1)
+    b = _flag(db, "B", score=10, size_gb=10, item_id=2)
+    c = _flag(db, "C", score=10, size_gb=30, item_id=3)    # same score, bigger: first
+    _flag(db, "D", score=29, size_gb=50, item_id=4)
+    plan = plan_cleanup(db, target_bytes=60 * GB)
+    assert [x["id"] for x in plan["items"]] == [c, b, a]
+    assert plan["total_bytes"] == 80 * GB and plan["short_bytes"] == 0
+    assert plan["phrase"] == "delete 3 titles" and plan["candidates"] == 4
+    assert plan["recycling"] is True and plan["keep_days"] == 7
+
+
+def test_plan_says_how_short_and_never_reaches_past_the_candidates(db):
+    from core.video.repair.shelf_life import plan_cleanup
+    _flag(db, "A", score=25, size_gb=40, item_id=1)
+    plan = plan_cleanup(db, target_bytes=500 * GB)
+    assert plan["total_bytes"] == 40 * GB and plan["short_bytes"] == 460 * GB
+    assert len(plan["items"]) == 1
+
+
+def test_plan_of_chosen_ids_and_of_everything(db):
+    from core.video.repair.shelf_life import plan_cleanup
+    a = _flag(db, "A", score=25, size_gb=40, item_id=1)
+    b = _flag(db, "B", score=10, size_gb=10, item_id=2)
+    assert [x["id"] for x in plan_cleanup(db, ids=[a])["items"]] == [a]
+    assert [x["id"] for x in plan_cleanup(db)["items"]] == [b, a]
+
+
+def test_batch_needs_the_exact_phrase_and_open_findings(db):
+    from core.video.repair.shelf_life import batch_delete_actions
+    a = _flag(db, "A", score=25, size_gb=40, item_id=1)
+    b = _flag(db, "B", score=10, size_gb=10, item_id=2)
+    actions, err = batch_delete_actions(db, [a, b], "delete 2 titles")
+    assert err is None and actions == {a: "A", b: "B"}
+    for phrase in ("delete 1 title", "Delete 2 titles", "", None):
+        actions, err = batch_delete_actions(db, [a, b], phrase)
+        assert actions is None and "delete 2 titles" in err
+    db.repair_bulk_update_findings([b], "dismissed")
+    actions, err = batch_delete_actions(db, [a, b], "delete 2 titles")
+    assert actions is None and "aren't open" in err
+    assert batch_delete_actions(db, [], "delete 0 titles")[1] == "Nothing selected."
+
+
+def test_a_watched_cleanup_finding_cannot_ride_a_shelf_life_batch(db):
+    from core.video.repair.shelf_life import batch_delete_actions
+    db.repair_create_finding("watched_cleanup", "watched_cleanup", title="W", entity_type="movie",
+                             entity_id="m:9", details={"movie_id": 9, "title": "W"})
+    wc = db.repair_get_findings(job_id="watched_cleanup", limit=5)["items"][0]["id"]
+    actions, err = batch_delete_actions(db, [wc], "delete 1 title")
+    assert actions is None and "aren't open Shelf Life" in err
+
+
+@pytest.fixture()
+def client(tmp_path):
+    from flask import Flask
+    import api.video as videoapi
+    import core.video.repair.worker as worker_mod
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "api.db"))
+    worker_mod._worker = None
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    try:
+        yield app.test_client(), videoapi._video_db, worker_mod
+    finally:
+        w = worker_mod._worker
+        if w:
+            w.stop()
+        worker_mod._worker = None
+        videoapi._video_db = None
+
+
+def test_plan_route(client):
+    c, db, _ = client
+    _flag(db, "A", score=25, size_gb=40, item_id=1)
+    r = c.post("/api/video/repair/shelf-life/plan", json={"target_gb": 10})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["target_bytes"] == 10 * GB and len(body["items"]) == 1
+    assert c.post("/api/video/repair/shelf-life/plan", json={"target_gb": "lots"}).status_code == 400
+    assert c.post("/api/video/repair/shelf-life/plan", json={"target_gb": 0}).status_code == 400
+    assert c.post("/api/video/repair/shelf-life/plan", json={"ids": "1"}).status_code == 400
+
+
+def test_delete_route_runs_each_title_with_its_own_name(client, monkeypatch):
+    import time
+    from core.video import delete_title
+    c, db, worker_mod = client
+    calls = []
+
+    def _run_delete(db_, kind, item_id, **kw):
+        calls.append((item_id, kw["typed_title"]))
+        return {"success": True}
+    monkeypatch.setattr(delete_title, "run", _run_delete)
+    a = _flag(db, "A", score=25, size_gb=40, item_id=1)
+    b = _flag(db, "B", score=10, size_gb=10, item_id=2)
+    bad = c.post("/api/video/repair/shelf-life/delete", json={"ids": [a, b], "phrase": "delete 1 title"})
+    assert bad.status_code == 400 and bad.get_json()["started"] is False and calls == []
+    ok = c.post("/api/video/repair/shelf-life/delete", json={"ids": [a, b], "phrase": "delete 2 titles"})
+    assert ok.status_code == 200 and ok.get_json()["started"] is True
+    w = worker_mod.get_video_repair_worker()
+    for _ in range(100):
+        if not w.get_bulk_fix_status().get("running"):
+            break
+        time.sleep(0.05)
+    assert sorted(calls) == [(1, "A"), (2, "B")]
+    assert w.get_bulk_fix_status()["fixed"] == 2
+
+
+def test_the_shelf_life_routes_are_admin_only(tmp_path):
+    from flask import Flask, g
+    import api.video as videoapi
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "member.db"))
+    app = Flask(__name__)
+
+    @app.before_request
+    def _member():
+        g.is_admin = False
+        g.profile_id = 2
+        g.can_download = True
+
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    c = app.test_client()
+    try:
+        fid = _flag(videoapi._video_db, "A", score=25, size_gb=40, item_id=1)
+        assert c.post("/api/video/repair/shelf-life/plan", json={}).status_code == 403
+        assert c.post("/api/video/repair/shelf-life/delete",
+                      json={"ids": [fid], "phrase": "delete 1 title"}).status_code == 403
+        assert videoapi._video_db.repair_get_finding(fid)["status"] == "pending"
+    finally:
+        videoapi._video_db = None

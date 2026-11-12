@@ -199,6 +199,57 @@ export function applyRenames(): Promise<{
   return sendJson('/api/video/organization/rename/apply', 'POST', {});
 }
 
+// ── Shelf Life cleanup ───────────────────────────────────────────────────────
+
+export interface ShelfLifePlanItem {
+  id: number;
+  kind: 'movie' | 'show';
+  item_id: number;
+  title: string;
+  year?: number | null;
+  score: number | null;
+  size_bytes: number;
+}
+
+export interface ShelfLifePlan {
+  items: ShelfLifePlanItem[];
+  total_bytes: number;
+  target_bytes: number | null;
+  short_bytes: number;
+  candidates: number;
+  recycling: boolean;
+  keep_days: number;
+  phrase: string;
+  error?: string;
+}
+
+/** the titles a cleanup would delete: lowest Shelf Life first up to
+ *  ``targetGb``, or exactly ``ids``, or every open finding. */
+export function fetchShelfLifePlan(options: {
+  targetGb?: number | null;
+  ids?: number[];
+}): Promise<ShelfLifePlan> {
+  const body: Record<string, unknown> = {};
+  if (options.targetGb != null) body.target_gb = options.targetGb;
+  if (options.ids) body.ids = options.ids;
+  return sendJson('/api/video/repair/shelf-life/plan', 'POST', body);
+}
+
+/** what has to be typed to delete ``count`` titles at once (the server's
+ *  batch_phrase; it checks it again). */
+export function shelfLifePhrase(count: number): string {
+  return `delete ${count} title${count === 1 ? '' : 's'}`;
+}
+
+/** delete a batch in the background, each title through Delete Title.
+ *  progress is the ordinary bulk-fix run. */
+export function startShelfLifeDelete(
+  ids: number[],
+  phrase: string,
+): Promise<{ started?: boolean; already_running?: boolean; total?: number; error?: string }> {
+  return sendJson('/api/video/repair/shelf-life/delete', 'POST', { ids, phrase });
+}
+
 // ── formatting ───────────────────────────────────────────────────────────────
 
 /** bytes -> "1.2 TB" / "340.0 GB" / "12.5 MB", the vanilla card's units. */

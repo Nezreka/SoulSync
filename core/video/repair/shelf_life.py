@@ -195,6 +195,69 @@ def gather(db, settings: dict, now: datetime | None = None) -> dict:
     return out
 
 
+def batch_phrase(count: int) -> str:
+    """what an admin types to delete a batch of titles at once."""
+    return "delete %d title%s" % (count, "" if count == 1 else "s")
+
+
+def _pending_findings(db) -> list:
+    return [f for f in (db.repair_get_findings(job_id="shelf_life", status="pending", finding_type=FINDING_TYPE,
+                                               limit=100000).get("items") or [])
+            if (f.get("details") or {}).get("item_id")]
+
+
+def plan_cleanup(db, target_bytes=None, ids=None) -> dict:
+    """the titles a cleanup would delete, lowest Shelf Life first (the bigger
+    one first on a tie). with ``target_bytes`` it stops once the total reaches
+    it; only titles already below the line are ever picked, so a target the
+    candidates can't reach says how short it falls instead of reaching higher.
+    with ``ids`` it plans exactly those findings. sizes go to the recycle bin
+    and come back as free space once the bin's retention clears them."""
+    from core.video import organization
+    pending = _pending_findings(db)
+    if ids is not None:
+        wanted = {int(i) for i in ids}
+        pending = [f for f in pending if f["id"] in wanted]
+    pending.sort(key=lambda f: ((f["details"].get("score") if f["details"].get("score") is not None else 100),
+                                -(f["details"].get("size_bytes") or 0), f["id"]))
+    target = int(target_bytes) if target_bytes else None
+    picked, total = [], 0
+    for f in pending:
+        if target is not None and total >= target:
+            break
+        d = f["details"]
+        picked.append({"id": f["id"], "kind": d.get("kind"), "item_id": d.get("item_id"),
+                       "title": d.get("title"), "year": d.get("year"), "score": d.get("score"),
+                       "size_bytes": int(d.get("size_bytes") or 0)})
+        total += int(d.get("size_bytes") or 0)
+    settings = organization.load(db)
+    return {"items": picked, "total_bytes": total, "target_bytes": target,
+            "short_bytes": max(0, target - total) if target is not None else 0,
+            "candidates": len(pending),
+            "recycling": bool(settings.get("recycle_deletes", True)),
+            "keep_days": int(settings.get("recycle_keep_days") or 7),
+            "phrase": batch_phrase(len(picked))}
+
+
+def batch_delete_actions(db, ids, phrase: str):
+    """check a batch delete before it starts. returns ({finding id: typed
+    title}, None) for the run, or (None, error). every id must be a pending
+    Shelf Life finding, and the phrase must name exactly how many there are."""
+    pending = {f["id"]: f for f in _pending_findings(db)}
+    try:
+        wanted = sorted({int(i) for i in (ids or [])})
+    except (TypeError, ValueError):
+        return None, "bad finding ids"
+    if not wanted:
+        return None, "Nothing selected."
+    missing = [i for i in wanted if i not in pending]
+    if missing:
+        return None, "%d of these aren't open Shelf Life findings any more. Refresh and try again." % len(missing)
+    if (phrase or "").strip() != batch_phrase(len(wanted)):
+        return None, "Type '%s' to confirm. Nothing was deleted." % batch_phrase(len(wanted))
+    return {i: pending[i]["details"].get("title") or "" for i in wanted}, None
+
+
 def _resolver_id() -> int:
     """the admin approving, when there's a request to read it from."""
     try:
