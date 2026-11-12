@@ -1152,9 +1152,11 @@ def reconcile_track_wishlist(
     Recomputes the full projection, then mirrors two sets through the same
     outbox path the toggles use:
 
-    * every currently-``wanted`` track — re-adds any wanted+missing track whose
-      Wishlist entry was downloaded/cleared/aged away (the reported gap: a
-      monitored missing track that never re-enters the Wishlist);
+    * every currently-``wanted`` track with no file — re-adds any wanted+missing
+      track whose Wishlist entry was downloaded/cleared/aged away (the reported
+      gap: a monitored missing track that never re-enters the Wishlist). A
+      track that has a file is never re-added here, however far below its
+      quality target the file is (#2060);
     * every existing lib2 track currently in the Wishlist that is no longer
       wanted — prunes stale entries (the "und umgekehrt" half).
 
@@ -1171,9 +1173,7 @@ def reconcile_track_wishlist(
     Wishlist row costs a search, a wrongly pruned one costs the download.
     """
     from core.library2.wanted import recompute_wanted, wanted_track_ids
-    from core.library2.wishlist_mirror import (
-        mirror_projected_tracks_wishlist, upgrade_candidate_track_ids,
-    )
+    from core.library2.wishlist_mirror import mirror_projected_tracks_wishlist
 
     stats = {"scanned": 0, "wanted": 0, "wishlisted": 0,
              "added": 0, "pruned": 0, "refreshed": 0, "mirrored": 0, 'intent_repaired': 0, 'intent_failed': 0}
@@ -1258,12 +1258,20 @@ def reconcile_track_wishlist(
         # A wanted track that has its file and is no upgrade candidate is
         # simply owned; mirroring it only to learn that cost ~66 s per hourly
         # run on a 200k-track library.
-        # Profile edits change which copy of a multi-file track is primary,
-        # and the upgrade verdict below reads the primary.
+        # Profile edits change which copy of a multi-file track is primary.
         from core.library2.track_files import rank_files_by_profile
         rank_files_by_profile(conn)
-        queueable = _tracks_without_file(conn, wanted) | set(
-            upgrade_candidate_track_ids(conn, profile_id=profile_id))
+        # #2060: only a track with NO file is put back by this pass. It used
+        # to re-add every owned track below its quality target as well, and
+        # the wishlist's own "already in your library" sweep took each one
+        # straight out again before it was ever tried: with a source that can
+        # only deliver below the target (a 128k fallback under a 320k
+        # profile), every song just downloaded came back on the Wishlist each
+        # hour, was removed, and came back the hour after. No upgrade ever
+        # came of it. An upgrade is asked for with Enhance Quality, which
+        # names the tracks; a wish for one that is already queued is still
+        # refreshed below.
+        queueable = _tracks_without_file(conn, wanted)
         adds = [t for t in wanted if t not in wishlisted_set and t in queueable]
         refresh = [t for t in wanted if t in wishlisted_set and t in changed_set]
         stats["added"] = len(adds)

@@ -154,7 +154,7 @@ Quality profiles define which formats are acceptable for downloads, and when a f
 
 ![Quality profiles](dl-quality-profiles.jpg)
 
-Quality profiles are checked during downloads and auto-import. The Library evaluates monitored tracks against their upgrade cutoff and sends missing or upgrade-eligible tracks to the Wishlist through **Watchlist & Wishlist Reconcile**. The **Quality Profile Audit** repair job flags library files below their profile for review; the old Quality Upgrade Finder is retired.
+Quality profiles are checked during downloads and auto-import. The Library evaluates monitored tracks against their upgrade cutoff and sends the ones with no file to the Wishlist through **Watchlist & Wishlist Reconcile**. A file below its profile (a 128 kbps fallback under a 320 kbps target, say) is shown as upgradable and is not downloaded again by itself, since asking the same source every hour only returns the same file: use **Enhance Quality** when you want a better copy. The **Quality Profile Audit** repair job flags library files below their profile for review; the old Quality Upgrade Finder is retired.
 `
         },
         {

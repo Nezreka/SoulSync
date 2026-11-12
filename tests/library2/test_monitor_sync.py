@@ -1064,3 +1064,38 @@ def test_a_wishlist_removal_never_reads_the_whole_catalogue(imported_conn):
     flat = [" ".join(q.split()) for q in seen]
     whole = [q for q in flat if "FROM lib2_tracks t JOIN lib2_albums" in q and "WHERE" not in q.upper()]
     assert whole == []
+
+
+# --- #2060: a song you already have is not put back every hour ---------------
+
+
+def test_reconcile_never_readds_an_owned_track_below_its_quality_target(imported_conn):
+    """a 128k fallback under a 320k profile: the file is an upgrade candidate
+    for good, and the hourly pass put every such song back on the wishlist,
+    where the already-owned sweep removed it again, hour after hour"""
+    from core.library2.wishlist_mirror import upgrade_candidate_track_ids
+    conn = imported_conn
+    profile_id = conn.execute(
+        "INSERT INTO quality_profiles(name, ranked_targets, upgrade_policy, fallback_enabled) "
+        "VALUES('MP3 320', '[{\"label\":\"MP3 320\",\"format\":\"mp3\",\"min_bitrate\":320}]', 'acceptable', 1)"
+    ).lastrowid
+    artist = _add_artist(conn, "Real McCoy", spotify_id="rm-a")
+    owned = _add_track(conn, artist, "Another Night", monitored=1,
+                       with_file=True, spotify_id="owned-128")
+    missing = _add_track(conn, artist, "Run Away", monitored=1,
+                         with_file=False, spotify_id="missing-sp")
+    conn.execute("UPDATE lib2_track_files SET format='mp3', bitrate=128 WHERE track_id=?", (owned,))
+    conn.execute(
+        "UPDATE lib2_tracks SET quality_profile_id=?, quality_profile_explicit=1 "
+        "WHERE id IN (?, ?)", (profile_id, owned, missing))
+    recompute_wanted(conn, track_ids=[owned, missing])
+    conn.commit()
+    # the premise: the profile does still count the 128k file as upgradable
+    assert owned in upgrade_candidate_track_ids(conn, profile_id=1)
+
+    db = _FakeDB(conn.execute("PRAGMA database_list").fetchone()[2])
+    stats = reconcile_track_wishlist(db, profile_id=1)
+
+    assert "owned-128" not in db.added
+    assert "missing-sp" in db.added   # the one with no file still comes back
+    assert stats["added"] == 1

@@ -21,13 +21,14 @@ class MonitoringListReconcileJob(RepairJob):
     help_text = (
         "Retries pending Watchlist/Wishlist mirror operations, reconciles "
         "artist monitoring with the Watchlist, and reasserts monitored missing "
-        "or upgrade-eligible tracks into the Wishlist. Existing external Wishlist "
+        "tracks into the Wishlist. Existing external Wishlist "
         "entries first restore their concrete track monitoring. Explicit Library "
         "monitoring wins; imported/default artist flags follow the Watchlist. "
         "No files are changed.\n\n"
-        "This is the single writer that puts wanted tracks into the Wishlist — "
-        "both genuinely missing files and files below their quality profile's "
-        "upgrade cutoff. Refresh & Scan already reports what it changed "
+        "This is the single writer that puts wanted tracks with no file back "
+        "into the Wishlist. A track you already have is never re-added here, "
+        "even when its file is below the quality profile: use Enhance Quality "
+        "to ask for a better copy. Refresh & Scan already reports what it changed "
         "straight to it, so on a healthy install this job should mostly find "
         "nothing to do: it is the safety net, not the mechanism."
     )

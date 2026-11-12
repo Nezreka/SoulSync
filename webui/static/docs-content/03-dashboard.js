@@ -243,7 +243,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Cache Maintenance | Cleans expired metadata cache entries |
 | Corrupt File Detector | Decode-tests every library FLAC (\`flac -t\`, falling back to ffmpeg) and flags physically damaged files — the only cure is a fresh download |
 | Comma Artist Splitter | Finds dummy artists that are really several artists joined by separators ("Camellia, Toby Fox") and splits their tags — verifies against metadata APIs first so real separator-named acts like "Tyler, The Creator" are never split |
-| Watchlist & Wishlist Reconcile | Reconciles monitored artists with the Watchlist and missing or upgrade-eligible tracks with the Wishlist |
+| Watchlist & Wishlist Reconcile | Reconciles monitored artists with the Watchlist and monitored tracks that have no file with the Wishlist |
 | Empty Folder Cleaner | Finds truly-empty folders (or folders holding only OS junk like .DS_Store) in the library root — never touches a folder containing audio or cover art |
 | Expired Download Cleaner | Proposes deleting watchlist/playlist-sourced downloads past their per-origin retention window; always keeps actively-mirrored playlists, watched artists, and tracks you've played more than once (optional auto-delete). Also cleans up after **Rotating** playlists: a song the playlist downloaded goes once it has left the playlist, with no retention window |
 | Genre Tag Cleanup | Re-applies the strict genre whitelist to genres stored before it was enabled — one finding per artist/album with off-whitelist genres |
@@ -262,7 +262,7 @@ The background repair worker runs automated jobs on configurable schedules, incl
 | Fix Unknown Artists | Finds tracks tagged "Unknown Artist", resolves the correct artist/album/track from file tags or the metadata API, then re-tags, moves the file to the correct folder, and updates the database |
 | Album Edition Review | Suggests the release edition that best matches the tracks you own |
 
-The Library handles catalogue identity and wanted quality upgrades directly. Quality Check is now **Quality Profile Audit** (a weekly Quality Check keeps its schedule there), the Quality Upgrade Finder is retired, and Single/Album Dedup lives on as the Duplicate Detector's album-first keeper. Missing and upgrade-eligible monitored tracks reach the Wishlist through **Watchlist & Wishlist Reconcile**; there is no **Apply Quality Upgrades** automation action.
+The Library handles catalogue identity and wanted quality upgrades directly. Quality Check is now **Quality Profile Audit** (a weekly Quality Check keeps its schedule there), the Quality Upgrade Finder is retired, and Single/Album Dedup lives on as the Duplicate Detector's album-first keeper. Monitored tracks with no file reach the Wishlist through **Watchlist & Wishlist Reconcile**. A track you already have is never put back there by itself, even when its file is below the quality profile: ask for a better copy with **Enhance Quality**. There is no **Apply Quality Upgrades** automation action.
 
 An upgrade from 3.6.1 merges each release your older media servers listed twice into one, once, right after the import (only pairs it can prove are the same release; your files and each server's link stay). Anything it can't prove waits in the Duplicate Detector.
 
