@@ -41,12 +41,14 @@ def test_off_by_default_leaves_the_client_default():
     a = _adapter(False)
     a._add_torrent_sync(_MAGNET, "soulsync", None)
     assert "stopped" not in a._sent[0] and "paused" not in a._sent[0]
+    assert "stopCondition" not in a._sent[0]
 
 
 def test_on_asks_qbittorrent_to_start_a_magnet():
     a = _adapter(True)
     a._add_torrent_sync(_MAGNET, "soulsync", None)
     assert a._sent[0]["stopped"] == "false" and a._sent[0]["paused"] == "false"
+    assert a._sent[0]["stopCondition"] == "None"
 
 
 def test_on_asks_qbittorrent_to_start_a_torrent_file(monkeypatch):
@@ -55,6 +57,7 @@ def test_on_asks_qbittorrent_to_start_a_torrent_file(monkeypatch):
     a = _adapter(True)
     a._add_torrent_file_sync(b"d4:infod4:name1:xee", "soulsync", None)
     assert a._sent[0]["stopped"] == "false" and a._sent[0]["paused"] == "false"
+    assert a._sent[0]["stopCondition"] == "None"
 
 
 def test_the_setting_is_read_from_config(monkeypatch):

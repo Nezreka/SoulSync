@@ -114,10 +114,13 @@ class QBittorrentAdapter:
 
     def _apply_start_flags(self, data: dict) -> None:
         """With torrent_client.start_torrents on, ask qBittorrent to start the
-        torrent: ``stopped`` is the 5.x add parameter, ``paused`` the 4.x one."""
+        torrent: ``stopped`` is the 5.x add parameter, ``paused`` the 4.x one.
+        ``stopCondition=None`` overrides a global "stop when metadata received"
+        condition, which would otherwise stop a magnet right after it starts."""
         if getattr(self, '_start_torrents', False):
             data['stopped'] = 'false'
             data['paused'] = 'false'
+            data['stopCondition'] = 'None'
 
     def is_configured(self) -> bool:
         # qBittorrent allows no-auth setups (LAN), so credentials are
